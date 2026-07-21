@@ -12,12 +12,9 @@ import Alert from '@mui/material/Alert';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import TextField from '@mui/material/TextField';
-import Radio from '@mui/material/Radio';
-import RadioGroup from '@mui/material/RadioGroup';
-import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import FormLabel from '@mui/material/FormLabel';
 import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob, type QuoteLineConversion } from '@/utils/quotesAccess';
@@ -179,31 +176,30 @@ export default function ConvertToJobModal({
     };
   }, [lineItems, convertedPartIds]);
 
-  // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
-  // multi-quantity parts start empty so the user must pick deliberately.
+  // part_id → the "base" line item this part converts from. Every part has one
+  // (defaults to the lowest-quantity line). For a price-options part its quoted
+  // quantities are quick-pick chips that set this base + the qty; whatever the
+  // base line is, the price re-resolves from its (shared) tier snapshot at the
+  // ordered quantity, so any base yields the same price.
   const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
   // part_id → include this part in THIS job. A quote is converted in one or more
   // passes (one job per customer PO), so the user checks the subset this PO
   // covers; unchecked parts stay on the quote for a later job. Defaults to all-in
   // (the common case: one PO for the whole quote is a single click).
   const [includedByPart, setIncludedByPart] = useState<Record<string, boolean>>({});
-  // part_id → the ORDERED quantity for this job (editable string). Defaults to
-  // the quoted quantity; the customer can order fewer/more (partial acceptance).
-  // Only single-quantity parts expose the field — a price-options part picks a
-  // presented quantity via its radios.
+  // part_id → the ORDERED quantity for this job (editable string). Every part
+  // gets an editable field (defaults to the quoted / lowest-break quantity); the
+  // customer can order any quantity (partial acceptance / a qty between breaks),
+  // and the price follows the tier at that quantity.
   const [qtyByPart, setQtyByPart] = useState<Record<string, string>>({});
   // part_id → opt into the tier price re-resolved at the ordered quantity (vs
-  // keeping the agreed price). Mirrors updateJobPartQuantity's useNewTierPrice.
+  // keeping the agreed price). Applies only to FIRM (single-tier) parts, which
+  // have one committed price; price-options parts always price at the tier.
   const [useTierByPart, setUseTierByPart] = useState<Record<string, boolean>>({});
   const includedGroups = partGroups.filter((g) => includedByPart[g.part_id]);
   const anyIncluded = includedGroups.length > 0;
-  // Every INCLUDED part must resolve to one quantity (single-qty auto-picks; a
-  // price-options part needs a deliberate choice).
-  const allIncludedChosen = includedGroups.every((g) => !!selectedByPart[g.part_id]);
-  // Every INCLUDED single-quantity part must have a valid (>0) ordered quantity.
-  const allQtysValid = includedGroups.every(
-    (g) => g.items.length > 1 || parseQty(qtyByPart[g.part_id]) !== null,
-  );
+  // Every INCLUDED part must have a valid (>0) ordered quantity.
+  const allQtysValid = includedGroups.every((g) => parseQty(qtyByPart[g.part_id]) !== null);
 
   // Reset the form each time the modal opens (house convention: onEnter,
   // not a reset useEffect, which would trip set-state-in-effect).
@@ -219,10 +215,10 @@ export default function ConvertToJobModal({
     const initialQty: Record<string, string> = {};
     for (const g of partGroups) {
       initialInc[g.part_id] = true; // default: this PO covers the whole quote
-      if (g.items.length === 1) {
-        initialSel[g.part_id] = g.items[0].id;
-        initialQty[g.part_id] = String(g.items[0].quantity); // default = quoted qty
-      }
+      // Base = the lowest-quantity line; qty defaults to its quantity.
+      const base = [...g.items].sort((a, b) => a.quantity - b.quantity)[0];
+      initialSel[g.part_id] = base.id;
+      initialQty[g.part_id] = String(base.quantity);
     }
     setSelectedByPart(initialSel);
     setIncludedByPart(initialInc);
@@ -263,15 +259,21 @@ export default function ConvertToJobModal({
       const selectedLineItemIds = includedGroups
         .map((g) => selectedByPart[g.part_id])
         .filter((id): id is string => !!id);
-      // Per-line quantity/reprice overrides for single-quantity parts whose
-      // ordered qty (or tier opt-in) differs from the quote. Price-options parts
-      // convert at their selected presented quantity (no override).
+      // Per-part quantity + reprice override, keyed by the base line. A firm
+      // (single-tier) part keeps its committed price unless the user opts into the
+      // tier reprice; a price-options part always prices at the tier for the
+      // ordered quantity (useTierPrice = true), which is what its quoted breaks
+      // are.
       const lineOverrides: Record<string, { quantity: number; useTierPrice?: boolean }> = {};
       for (const g of includedGroups) {
-        if (g.items.length !== 1) continue;
+        const baseId = selectedByPart[g.part_id];
         const q = parseQty(qtyByPart[g.part_id]);
-        if (q === null) continue;
-        lineOverrides[g.items[0].id] = { quantity: q, useTierPrice: !!useTierByPart[g.part_id] };
+        if (!baseId || q === null) continue;
+        const isMultiTier = g.items.length > 1;
+        lineOverrides[baseId] = {
+          quantity: q,
+          useTierPrice: isMultiTier ? true : !!useTierByPart[g.part_id],
+        };
       }
       const result = await convertQuoteToJob(quote.id, {
         dueDate: dueDateInput,
@@ -408,109 +410,124 @@ export default function ConvertToJobModal({
                       sx={{ mt: -0.5 }}
                       inputProps={{ 'aria-label': `Include ${group.part_name}` }}
                     />
-                    {group.items.length === 1 ? (
-                      (() => {
-                        const line = group.items[0];
-                        const orderedQty = parseQty(qtyByPart[group.part_id]);
-                        const useTier = !!useTierByPart[group.part_id];
-                        const priced =
-                          orderedQty !== null
-                            ? priceLineAtQty(line, orderedQty, useTier)
-                            : {
-                                unitPrice: null,
-                                total: null,
-                                tierPrice: null,
-                                crossesBreak: false,
-                              };
-                        const qtyChanged = orderedQty !== null && orderedQty !== line.quantity;
-                        return (
-                          <Box sx={{ flex: 1 }}>
-                            <Typography variant="body2" fontWeight={600}>
-                              {group.part_name}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                              <TextField
-                                size="small"
-                                label="Order qty"
-                                value={qtyByPart[group.part_id] ?? ''}
-                                onChange={(e) =>
-                                  setQtyByPart((prev) => ({
-                                    ...prev,
-                                    [group.part_id]: e.target.value,
-                                  }))
-                                }
-                                disabled={!included}
-                                inputMode="decimal"
-                                error={included && orderedQty === null}
-                                sx={{ width: 110 }}
-                                slotProps={{ inputLabel: { shrink: true } }}
-                              />
-                              <Typography variant="body2" color="text.secondary">
-                                {group.unit} @ {formatCurrency(priced.unitPrice)} ={' '}
-                                {formatCurrency(priced.total)}
-                              </Typography>
-                            </Box>
-                            {qtyChanged && (
-                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-                                Quoted {line.quantity} {group.unit}
-                                {priced.crossesBreak ? '' : ' — price kept from the quote'}
-                              </Typography>
-                            )}
-                            {included && priced.crossesBreak && (
-                              <FormControlLabel
-                                sx={{ mt: 0.25 }}
-                                control={
-                                  <Checkbox
+                    {(() => {
+                      const isMultiTier = group.items.length > 1;
+                      const sortedItems = [...group.items].sort((a, b) => a.quantity - b.quantity);
+                      const baseLine =
+                        group.items.find((li) => li.id === selectedByPart[group.part_id]) ??
+                        sortedItems[0];
+                      const orderedQty = parseQty(qtyByPart[group.part_id]);
+                      // Firm part: keep the committed price unless the user opts into the
+                      // tier. Price-options part: always price at the tier for the qty —
+                      // that's what its quoted breaks are.
+                      const useTier = isMultiTier ? true : !!useTierByPart[group.part_id];
+                      const priced =
+                        orderedQty !== null
+                          ? priceLineAtQty(baseLine, orderedQty, useTier)
+                          : { unitPrice: null, total: null, tierPrice: null, crossesBreak: false };
+                      const qtyChanged = orderedQty !== null && orderedQty !== baseLine.quantity;
+                      return (
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" fontWeight={600}>
+                            {group.part_name}
+                          </Typography>
+
+                          {/* Price-options: the quoted breaks as one-tap chips that set
+                              the ordered qty. The editable field below still accepts any
+                              quantity (priced at the tier that applies). */}
+                          {isMultiTier && (
+                            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+                              {sortedItems.map((li) => {
+                                const active = orderedQty === li.quantity;
+                                return (
+                                  <Chip
+                                    key={li.id}
                                     size="small"
-                                    checked={useTier}
-                                    onChange={(e) =>
-                                      setUseTierByPart((prev) => ({
-                                        ...prev,
-                                        [group.part_id]: e.target.checked,
-                                      }))
+                                    label={`${li.quantity} ${group.unit} · ${formatCurrency(li.unit_price)}`}
+                                    color={active ? 'primary' : 'default'}
+                                    variant={active ? 'filled' : 'outlined'}
+                                    onClick={
+                                      included
+                                        ? () => {
+                                            setSelectedByPart((prev) => ({
+                                              ...prev,
+                                              [group.part_id]: li.id,
+                                            }));
+                                            setQtyByPart((prev) => ({
+                                              ...prev,
+                                              [group.part_id]: String(li.quantity),
+                                            }));
+                                          }
+                                        : undefined
                                     }
                                   />
-                                }
-                                label={
-                                  <Typography variant="caption" color="text.secondary">
-                                    Reprice to the qty-{orderedQty} tier (
-                                    {formatCurrency(priced.tierPrice)}/{group.unit})
-                                  </Typography>
-                                }
-                              />
-                            )}
+                                );
+                              })}
+                            </Box>
+                          )}
+
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                            <TextField
+                              size="small"
+                              label="Order qty"
+                              value={qtyByPart[group.part_id] ?? ''}
+                              onChange={(e) =>
+                                setQtyByPart((prev) => ({
+                                  ...prev,
+                                  [group.part_id]: e.target.value,
+                                }))
+                              }
+                              disabled={!included}
+                              inputMode="decimal"
+                              error={included && orderedQty === null}
+                              sx={{ width: 110 }}
+                              slotProps={{ inputLabel: { shrink: true } }}
+                            />
+                            <Typography variant="body2" color="text.secondary">
+                              {group.unit} @ {formatCurrency(priced.unitPrice)} ={' '}
+                              {formatCurrency(priced.total)}
+                            </Typography>
                           </Box>
-                        );
-                      })()
-                    ) : (
-                      <FormControl disabled={!included}>
-                        <FormLabel sx={{ fontWeight: 600, color: 'text.primary' }}>
-                          {group.part_name} — choose quantity
-                        </FormLabel>
-                        <RadioGroup
-                          value={selectedByPart[group.part_id] ?? ''}
-                          onChange={(e) =>
-                            setSelectedByPart((prev) => ({
-                              ...prev,
-                              [group.part_id]: e.target.value,
-                            }))
-                          }
-                        >
-                          {[...group.items]
-                            .sort((a, b) => a.quantity - b.quantity)
-                            .map((li) => (
-                              <FormControlLabel
-                                key={li.id}
-                                value={li.id}
-                                control={<Radio size="small" />}
-                                label={`${li.quantity} ${group.unit} @ ${formatCurrency(
-                                  li.unit_price,
-                                )} = ${formatCurrency(li.total_price ?? li.unit_price * li.quantity)}`}
-                              />
-                            ))}
-                        </RadioGroup>
-                      </FormControl>
-                    )}
+
+                          {/* Firm part only: note the committed qty + reprice opt-in on a
+                              break crossing. Price-options parts always price at the tier,
+                              so there's no keep-vs-reprice choice. */}
+                          {!isMultiTier && qtyChanged && (
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: 'block', mt: 0.25 }}
+                            >
+                              Quoted {baseLine.quantity} {group.unit}
+                              {priced.crossesBreak ? '' : ' — price kept from the quote'}
+                            </Typography>
+                          )}
+                          {!isMultiTier && included && priced.crossesBreak && (
+                            <FormControlLabel
+                              sx={{ mt: 0.25 }}
+                              control={
+                                <Checkbox
+                                  size="small"
+                                  checked={!!useTierByPart[group.part_id]}
+                                  onChange={(e) =>
+                                    setUseTierByPart((prev) => ({
+                                      ...prev,
+                                      [group.part_id]: e.target.checked,
+                                    }))
+                                  }
+                                />
+                              }
+                              label={
+                                <Typography variant="caption" color="text.secondary">
+                                  Reprice to the qty-{orderedQty} tier (
+                                  {formatCurrency(priced.tierPrice)}/{group.unit})
+                                </Typography>
+                              }
+                            />
+                          )}
+                        </Box>
+                      );
+                    })()}
                   </Box>
                 );
               })}
@@ -588,7 +605,6 @@ export default function ConvertToJobModal({
               nothingToConvert ||
               !anyIncluded ||
               !dueDateValid ||
-              !allIncludedChosen ||
               !allQtysValid ||
               !poValid
             }

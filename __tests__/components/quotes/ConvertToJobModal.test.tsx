@@ -218,6 +218,75 @@ describe('ConvertToJobModal — reprice opt-in only on a real price-break crossi
   });
 });
 
+describe('ConvertToJobModal — price-options part (quick-pick breaks + editable qty)', () => {
+  it('quoted breaks are one-tap chips; any qty converts at the tier price (useTierPrice)', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    const snapshot = {
+      tiers: [
+        { id: 't1', quantity: 1, unit_price: 127.12, markup_percent: 45 },
+        { id: 't2', quantity: 80, unit_price: 119.79, markup_percent: 40 },
+      ],
+      resolved_tier_id: 't1',
+      resolved_quantity: 7,
+      captured_at: '2026-01-01T00:00:00Z',
+    };
+    const mkLine = (id: string, qty: number, price: number) => ({
+      id,
+      sequence: qty,
+      part_id: 'p1',
+      quantity: qty,
+      unit_price: price,
+      total_price: price * qty,
+      is_quote_override: false,
+      basis_unknown: false,
+      pricing_basis_snapshot: snapshot,
+      parts: { part_name: 'ASM-GEARBOX', primary_unit: null },
+    });
+    const optionsQuote = {
+      ...quote(),
+      line_items: [mkLine('li7', 7, 127.12), mkLine('li80', 80, 119.79)],
+    } as unknown as QuoteWithRelations;
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={optionsQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Defaults to the lowest break (7); the editable field is pre-filled.
+    const qty = screen.getByLabelText(/order qty/i) as HTMLInputElement;
+    await waitFor(() => expect(qty.value).toBe('7'));
+
+    // Tap the 80-break chip → sets qty to 80 and that line as the base.
+    await userEvent.click(screen.getByText(/80 ea/i));
+    expect(qty.value).toBe('80');
+
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({
+          selectedLineItemIds: ['li80'],
+          lineOverrides: { li80: { quantity: 80, useTierPrice: true } },
+        }),
+      ),
+    );
+  });
+});
+
 describe('ConvertToJobModal — no premature error on the empty due date', () => {
   it('does not show a red "required" error on the untouched due date; Create stays disabled', async () => {
     const base = { open: true, onClose: vi.fn(), onConverted: vi.fn(), quote: quote() };

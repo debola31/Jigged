@@ -270,19 +270,21 @@ Email action on the detail page.)
 
 Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. Each remaining part has a **checkbox** deciding whether it goes on *this* job/PO. **All boxes start checked** — so the common case (one PO for the whole quote) is a single click — but the user can uncheck parts to leave them on the quote for a later job under a different PO.
 
-**Partial-quantity acceptance.** A single-quantity part shows an **editable Order qty field** (pre-filled with the quoted quantity). The customer can accept a *different* quantity than quoted — quote 15, order 5 — and the job records the ordered figure while the quote line stays frozen. By **default the agreed unit price is kept** (frozen-pricing philosophy); if the new quantity crosses a break in the line's frozen tier snapshot, a **"Reprice to the qty-N tier ($X)"** opt-in appears — the same keep-vs-reprice choice `updateJobPartQuantity` offers post-conversion, so at-conversion and on-job edits behave identically (shared `resolveJobPartUnitPrice`). A part with several quantities (a price-options quote) instead renders a radio group — one radio per quoted quantity — so the salesperson picks the accepted quantity (disabled while its box is unchecked):
+**Quantity — one editable field for every part.** Every selected part shows an **editable Order qty field** (pre-filled with the quoted / lowest-break quantity), so the customer can order any quantity — including one *between* the quoted breaks (partial acceptance: quote 15, order 5). The job records the ordered figure; the quote line stays frozen. Pricing follows the part's kind:
+
+- **Firm part (single quoted quantity):** it has one committed price, so the agreed unit price is **kept by default** (frozen-pricing philosophy). If the ordered quantity crosses a break in the line's frozen tier snapshot, a **"Reprice to the qty-N tier ($X)"** opt-in appears — the same keep-vs-reprice choice `updateJobPartQuantity` offers post-conversion (shared `resolveJobPartUnitPrice`), so at-conversion and on-job edits behave identically.
+- **Price-options part (several quoted quantities):** the quoted breaks render as **one-tap quick-pick chips** (`7 ea · $127.12` / `80 ea · $119.79`) that fill the qty field; the editable field also accepts any in-between quantity, and the price **always resolves to the tier that applies at the ordered quantity** (there's no single committed price to keep — that's what a price-options quote *is*). This matches CPQ / B2B-commerce practice (order any quantity, price follows the break table) and the proven cart-quantity UX of quick-picks + a free field.
 
 ```
-☑ Holder — choose quantity
-    ◯ 5 ea @ $20.00 = $100.00
-    ◯ 15 ea @ $18.00 = $270.00
-    ◉ 25 ea @ $16.00 = $400.00
+☑ Holder                              ← price-options: quoted breaks are quick-picks
+    [7 ea · $127.12] [80 ea · $119.79]   (tap to fill) 
+    Order qty [ 50 ]  ea @ $127.12 = $6,356.00   (any qty; priced at the tier)
 
-☑ Clamp
-    [ 5 ] ea @ $9.00 = $45.00     (Order qty editable; quoted 100)
+☑ Clamp                               ← firm: editable qty, price kept from quote
+    Order qty [ 5 ]   ea @ $9.00 = $45.00   (quoted 100 — price kept)
 
-☐ Bracket                         (unchecked — stays on the quote for the next PO)
-    40 ea @ $3.00 = $120.00
+☐ Bracket                             (unchecked — stays on the quote for the next PO)
+    Order qty [ 40 ]  ea @ $3.00 = $120.00
 ```
 
 The header shows "Parts on this job: {checked} of {remaining}". This is the user journey for **multiple jobs per quote**: check the parts covered by the first PO, adjust each ordered quantity → set that PO# + due date → **Create** the job; the quote then shows **Create Another Job**, and reopening the modal offers whatever is still unchecked/unconverted for the next PO.
@@ -556,6 +558,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Each remaining part has an include checkbox (checked by default); unchecking it leaves the part on the quote for a later PO, and only checked parts convert — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'per-part selection (multiple jobs/POs per quote)' > 'converts only the checked parts, leaving the rest for a later PO'`*.
 - [ ] A single-quantity part's Order qty is editable (partial acceptance); ordering fewer than quoted passes a quantity override and the job records the ordered figure — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'partial quantity acceptance' > 'lets you order fewer than quoted (10 → 5) and passes the quantity override'`*.
+- [ ] A price-options part shows its quoted breaks as one-tap chips and an editable Order qty field; any quantity converts at the tier price for that quantity (`useTierPrice = true`) — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'price-options part (quick-pick breaks + editable qty)' > 'quoted breaks are one-tap chips; any qty converts at the tier price (useTierPrice)'`*.
 
 - [ ] Convert button stays disabled until every multi-quantity part has a quantity selected — *(automation-pending)*
 

@@ -148,7 +148,7 @@ Each job knows which line item it came from. To list every job spawned from a qu
 
 - Jobs column shows links to every job spawned from the quote (one per converted line item)
 
-- Search box (searches quote number)
+- Search box (matches quote number, customer name, and part name/description — client-side)
 
 - Filter dropdown: Status (All / Active / Expired)
 
@@ -526,7 +526,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Can view paginated list of quotes — *(automation-pending)*
 
-- [ ] Can search quotes by number — *(automation-pending)*
+- [ ] Can search quotes by number, customer, or part (name/description) — *(automation-pending)*
 
 - [ ] Can filter by status (active / expired) — *(automation-pending)*
 
@@ -677,7 +677,7 @@ While creating a quote, users can create new entities without leaving the form:
 
 ## Search and Filter
 
-**Search:** Full-text search on quote number (toolbar input)
+**Search:** the toolbar input matches on **quote number, customer name, and any line item's part** (name or description) — mirroring the jobs list. It filters **client-side** over the already-loaded rows (the list query joins `customers` and `line_items.parts`), so it's instant and needs no DB round-trip or RPC. Placeholder: `Quote #, customer, part…`.
 
 **Filters:**
 

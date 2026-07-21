@@ -57,7 +57,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 | preferred_vendor_id | UUID (FK) | No | Default vendor for a bought part's procurement cost |
 | is_location_tracked | Boolean | Yes | Whether stock is tracked per QR-addressable location (default false) |
 | created_at | Timestamp | Yes | Auto-generated |
-| updated_at | Timestamp | Yes | Auto-updated on changes |
+| updated_at | Timestamp | Yes | Auto-updated on changes — **including edits to the part's satellite data** (routing, pricing tiers, BOM, procurement tiers), which bump it via AFTER triggers (`touch_parts_updated_at_on_satellite_writes` migration). Before that, editing a routing/pricing/BOM left `updated_at` stale, so recency-sort missed the parts people actually worked on. |
 
 **Unique Constraint:** `(company_id, part_name)` — part names must be unique within a company. This is the identity key the CSV importer upserts on (`ON CONFLICT (company_id, part_name)`), so re-importing the same export updates parts in place rather than duplicating them.
 
@@ -128,6 +128,8 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 - AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
 
+- **Default sort is most-recently-updated first** (the Updated column, descending) — users care about the parts they just worked on, not the alphabetical top. Alphabetical is one click away on the Part Name header. Sorting is server-side for the real columns (`part_name`, `source`, `updated_at`). This pairs with the `updated_at` accuracy fix below, so a part whose routing/pricing/BOM was just edited rises to the top.
+
 - Search box (searches part name and description)
 
 - **Source** filter (All / Made / Bought) and **Completeness** filter (All / Complete / Incomplete), both applied client-side
@@ -186,7 +188,7 @@ Cost breakdown and pricing are a **single card** (`PartPricing`) — there are n
 - Cost summary rows: **run labor / unit**, **setup (one-time)** (amortized across tier qty), **materials / unit**. (There are no per-operation / per-material tables and no `@ qty 1` / `@ qty 10` preview rows.)
 - Surfaces routing warnings (`empty_operation`, `missing_labor_rate`, `missing_material_cost`) inline — a missing-material warning links to the offending BOM child — so data quality issues catch the salesperson's eye before quoting.
 
-The tier table (`part_pricing_tiers`) is a single, always-editable list of quantity-break tiers — editable rows with Qty, Base / unit (derived, read-only), Markup %, Unit price, and a delete icon; header **Add tier** button. A **new part opens with one unfilled pricing row** (Min qty 1, Markup blank) for the user to fill in — nothing is auto-applied on create, and the part stays not-priceable until a tier carries a markup %.
+The tier table (`part_pricing_tiers`) is a single, always-editable list of quantity-break tiers — editable rows with Qty, Base / unit (derived, read-only), Markup %, Unit price, and a delete icon; header **Add tier** button. **This table is identical for made and bought parts** — bought parts show the same Base / unit + Unit price columns, with the base cost coming from the part's procurement tiers (via `getComputedPartCost`, the same engine made parts use) rather than the routing/BOM. (Bought parts previously hid those two columns on the theory that cost depended on "which vendor wins"; since PR #567 collapsed procurement to deterministic part-level tiers, the final unit-price-after-markup is well-defined and is now shown.) A **new part opens with one unfilled pricing row** (Min qty 1, Markup blank) for the user to fill in — nothing is auto-applied on create, and the part stays not-priceable until a tier carries a markup %.
 
 Editing model — markup % is the source of truth:
 

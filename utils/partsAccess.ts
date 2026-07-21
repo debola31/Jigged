@@ -578,6 +578,12 @@ export interface PartSelectOption {
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
+  /**
+   * Present on rows loaded from the DB (used to order pickers most-recently-
+   * updated first). Optional because callers occasionally synthesize a
+   * PartSelectOption for a locally-known part that has no loaded row.
+   */
+  updated_at?: string;
 }
 
 const PART_SELECT_COLUMNS = `
@@ -588,6 +594,7 @@ const PART_SELECT_COLUMNS = `
   source,
   primary_unit,
   quantity,
+  updated_at,
   routings(id)
 `;
 
@@ -602,6 +609,7 @@ function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
     source: p.source as 'made' | 'bought',
     primary_unit: p.primary_unit as string | null,
     quantity: Number(p.quantity ?? 0),
+    updated_at: p.updated_at as string,
   };
 }
 
@@ -646,9 +654,10 @@ export async function getPartsForSelect(
 /**
  * Server-side search variant of `getPartsForSelect` for autocomplete pickers
  * over very large parts tables. Returns at most `limit` rows matching `query`
- * (ILIKE on part_name + description). When `query` is empty, returns the
- * first `limit` parts alphabetically — gives the dropdown something to show
- * on focus without hydrating every row.
+ * (ILIKE on part_name + description), **ordered most-recently-updated first**
+ * (part_name as the tiebreak). When `query` is empty, returns the `limit` most
+ * recently updated parts — so on focus the picker shows the parts the user is
+ * actively working on, not the alphabetical top.
  *
  * Callers should debounce input changes (e.g. 300ms) so we don't fire one
  * request per keystroke.
@@ -661,11 +670,15 @@ export async function searchPartsForSelect(
 ): Promise<PartSelectOption[]> {
   const supabase = getSupabase();
 
+  // Order by most-recently-updated so the picker surfaces the parts the user is
+  // actively working on first (routing/pricing/BOM edits bump parts.updated_at
+  // via DB triggers). part_name is a stable secondary tiebreak.
   let q = supabase
     .from('parts')
     .select(PART_SELECT_COLUMNS)
     .eq('company_id', companyId)
     .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
     .order('part_name', { ascending: true })
     .limit(limit);
 

@@ -131,7 +131,28 @@ import {
   convertQuoteToJob,
   detectQuoteLineDrift,
   repriceQuoteDriftedLinesToCurrent,
+  nextQuoteJobNumber,
 } from '@/utils/quotesAccess';
+
+describe('nextQuoteJobNumber — quote-indexed job numbers', () => {
+  it('uses the mirror when no job off the quote exists yet', () => {
+    expect(nextQuoteJobNumber('Q-0019', [])).toBe('J-0019');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0020', 'J-0007'])).toBe('J-0019');
+  });
+
+  it('suffixes later jobs off the same quote (J-0019 → J-0019-2 → J-0019-3)', () => {
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019'])).toBe('J-0019-2');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-0019-2'])).toBe('J-0019-3');
+    // Fills a gap left by an archived suffix.
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-0019-3'])).toBe('J-0019-2');
+  });
+
+  it('does not collide with a different quote sharing a number prefix', () => {
+    // J-00190 (from Q-00190) must not be treated as a J-0019 suffix.
+    expect(nextQuoteJobNumber('Q-0019', ['J-00190'])).toBe('J-0019');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-00190'])).toBe('J-0019-2');
+  });
+});
 
 describe('quotesAccess utilities', () => {
   beforeEach(() => {

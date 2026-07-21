@@ -227,11 +227,18 @@ export default function QuoteDetailPage() {
   );
 
   // Conversion state: which lines are already on a job, plus a job→PO lookup for
-  // the banner. A quote may still have lines left to convert even after its first
+  // the banner. A quote may still have PARTS left to convert even after its first
   // job (one job per customer PO), so the Convert action follows the remaining
-  // lines — not the binary converted_at lock.
+  // parts — not the binary converted_at lock.
   const convertedByLine = new Map(conversions.map((c) => [c.line_item_id, c]));
-  const hasUnconvertedLines = lineItems.some((li) => !convertedByLine.has(li.id));
+  // A part is "handled" when ANY of its line items is on a live job — a
+  // price-options part converts one of its quantity lines and the OTHER quantity
+  // options aren't pending work. Match the Convert-to-Job modal, which groups by
+  // part, so the banner and the modal never disagree.
+  const partIdsWithConversion = new Set(
+    lineItems.filter((li) => convertedByLine.has(li.id)).map((li) => li.part_id),
+  );
+  const hasUnconvertedParts = lineItems.some((li) => !partIdsWithConversion.has(li.part_id));
   const someConverted = convertedByLine.size > 0;
   // Distinct live jobs off this quote (deduped by job_id), each with its PO.
   const jobsFromConversions = Array.from(
@@ -356,7 +363,7 @@ export default function QuoteDetailPage() {
             buttons (not a hidden icon menu) read better for the shop-floor tablet /
             older-user audience. */}
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          {hasUnconvertedLines && (
+          {hasUnconvertedParts && (
             <Button
               variant="contained"
               color="primary"
@@ -464,8 +471,8 @@ export default function QuoteDetailPage() {
           archived jobs excluded), each shown with its customer PO. A quote can be
           converted in several passes, so it may still have lines left to convert. */}
       {someConverted && (
-        <Alert severity={hasUnconvertedLines ? 'info' : 'success'} sx={{ mb: 3 }}>
-          {hasUnconvertedLines ? 'Jobs created from this quote:' : 'This quote is fully on jobs:'}{' '}
+        <Alert severity={hasUnconvertedParts ? 'info' : 'success'} sx={{ mb: 3 }}>
+          {hasUnconvertedParts ? 'Jobs created from this quote:' : 'This quote is fully on jobs:'}{' '}
           {jobsFromConversions.map((j, i) => (
             <span key={j.id}>
               {i > 0 && ', '}
@@ -480,7 +487,7 @@ export default function QuoteDetailPage() {
             </span>
           ))}
           {quote.converted_at ? ` — first on ${formatDate(quote.converted_at)}` : ''}
-          {hasUnconvertedLines && (
+          {hasUnconvertedParts && (
             <Typography variant="body2" sx={{ mt: 0.5 }}>
               Some parts on this quote aren&apos;t on a job yet — use{' '}
               <strong>Create Another Job</strong> to add them under a new PO.

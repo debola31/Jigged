@@ -72,7 +72,7 @@ Overdue surfaces as:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | id | UUID | Yes | Primary key |
-| job_number | Text | Yes | First job off a quote mirrors it (`Q-0141` → `J-0141`); a **later PO on the same quote** draws a fresh `J-N` from the shared order counter. Set explicitly by `convertQuoteToJob` / `createJobFromPurchaseOrder`. No manual creation, no auto-numbering trigger |
+| job_number | Text | Yes | Every job off a quote keeps the quote's index: first mirrors it (`Q-0141` → `J-0141`), each **later PO on the same quote** gets a suffix (`J-0141-2`, `J-0141-3`, …). A direct-PO job (no quote) draws a fresh `J-N` from the shared order counter. Set explicitly by `convertQuoteToJob` / `createJobFromPurchaseOrder`. No manual creation, no auto-numbering trigger |
 | quote_id | UUID (FK) | No | Source quote when the job came from one; **null** for jobs created directly from a PO. **Many jobs may share one `quote_id`** — a quote is converted in one or more passes, one job (one customer PO) per pass |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | production_status | Text | Yes | `not_started` / `in_progress` / `completed` / `cancelled` — DERIVED from `job_parts.production_status` via `compute_job_production_status()` and the sync triggers; never written directly by the dashboard |

@@ -343,21 +343,15 @@ export default function ConvertToJobModal({
           )}
 
           {isFirstConversion ? (
-            <Typography variant="body1" gutterBottom>
+            <Typography variant="body1">
               Convert <strong>{quote.quote_number}</strong> to{' '}
               <strong>{expectedJobNumber}</strong>
             </Typography>
           ) : (
-            <Typography variant="body1" gutterBottom>
+            <Typography variant="body1">
               Create another job from <strong>{quote.quote_number}</strong>
             </Typography>
           )}
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Customer: {quote.customers?.name || '—'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Parts on this job: {includedGroups.length} of {partGroups.length}
-          </Typography>
 
           {convertedGroups.length > 0 && (
             <Box sx={{ mt: 1 }}>

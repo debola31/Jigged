@@ -50,6 +50,26 @@ function nullIfBlank(s: string | null | undefined): string | null {
 }
 
 /**
+ * The next job number for a job created off `quoteNumber`, given the company's
+ * existing job numbers. EVERY job off a quote keeps the quote's index: the first
+ * is the mirror (Q-0141 → J-0141); each later PO on the same quote gets a numeric
+ * suffix (J-0141-2, J-0141-3, …) so all its jobs stay grouped under one number.
+ * `existingJobNumbers` should include archived jobs — the (company_id, job_number)
+ * uniqueness constraint counts them, so a since-archived mirror still bumps to a
+ * suffix. Pure so it's unit-tested without the DB.
+ */
+export function nextQuoteJobNumber(quoteNumber: string, existingJobNumbers: string[]): string {
+  const mirror = quoteNumber.replace(/^Q-/, 'J-');
+  const esc = mirror.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${esc}(?:-\\d+)?$`);
+  const taken = new Set(existingJobNumbers.filter((n) => re.test(n)));
+  if (!taken.has(mirror)) return mirror;
+  let suffix = 2;
+  while (taken.has(`${mirror}-${suffix}`)) suffix += 1;
+  return `${mirror}-${suffix}`;
+}
+
+/**
  * A quote stays editable until it's converted to a job — converting is the
  * only hard lock, because the job then becomes the live document. "Expired" is
  * a soft state, not a lock: editing an expired quote is allowed, and when the
@@ -1264,37 +1284,25 @@ export async function convertQuoteToJob(
     throw new Error('A due date is required to create the job.');
   }
 
-  // Job number: the first job off a quote keeps the familiar mirror
-  // (Q-0141 → J-0141). A later PO on the same quote — or the rare case where the
-  // mirror is already held by a since-archived job — draws a fresh J-N from the
-  // shared atomic order counter, which can never collide. Uniqueness is
-  // (company_id, job_number) and counts archived rows too, so we probe without a
-  // deleted_at filter.
+  // Job number: EVERY job off a quote keeps the quote's index (mirror J-0141,
+  // then J-0141-2, J-0141-3, … per later PO) — see nextQuoteJobNumber. Uniqueness
+  // is (company_id, job_number) and counts archived rows, so we fetch every job
+  // matching the mirror prefix (including archived) and let the helper pick the
+  // next free slot.
   const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
-  const { data: mirrorHolder, error: mirrorErr } = await supabase
+  const { data: existingJobs, error: existingJobsErr } = await supabase
     .from('jobs')
-    .select('id')
+    .select('job_number')
     .eq('company_id', quote.company_id)
-    .eq('job_number', mirrorNumber)
-    .limit(1)
-    .maybeSingle();
-  if (mirrorErr) {
-    console.error('Error checking job number availability:', mirrorErr);
-    throw mirrorErr;
+    .like('job_number', `${mirrorNumber}%`);
+  if (existingJobsErr) {
+    console.error('Error checking job numbers:', existingJobsErr);
+    throw existingJobsErr;
   }
-  let jobNumber: string;
-  if (mirrorHolder) {
-    const { data: generated, error: numErr } = await supabase.rpc('generate_direct_job_number', {
-      company_uuid: quote.company_id,
-    });
-    if (numErr || !generated) {
-      console.error('Error generating job number:', numErr);
-      throw numErr || new Error('Could not generate a job number.');
-    }
-    jobNumber = generated as string;
-  } else {
-    jobNumber = mirrorNumber;
-  }
+  const jobNumber = nextQuoteJobNumber(
+    quote.quote_number,
+    ((existingJobs ?? []) as Array<{ job_number: string }>).map((r) => r.job_number),
+  );
 
   const { data: job, error: jobError } = await supabase
     .from('jobs')

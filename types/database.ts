@@ -1001,6 +1001,73 @@ export type Database = {
           },
         ]
       }
+      job_operation_completions: {
+        Row: {
+          company_id: string
+          completed_at: string
+          completed_by: string | null
+          created_at: string
+          id: string
+          job_operation_id: string
+          job_part_id: string
+          note: string | null
+          quantity_good: number
+          updated_at: string
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          company_id: string
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          job_operation_id: string
+          job_part_id: string
+          note?: string | null
+          quantity_good: number
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          job_operation_id?: string
+          job_part_id?: string
+          note?: string | null
+          quantity_good?: number
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_op_completions_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_completions_job_part_fk"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_completions_operation_fk"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_operations: {
         Row: {
           completed_at: string | null
@@ -2927,11 +2994,19 @@ export type Database = {
         Args: { p_job_id: string }
         Returns: string
       }
+      compute_job_operation_status: {
+        Args: { p_job_operation_id: string }
+        Returns: string
+      }
       compute_job_part_fulfillment_status: {
         Args: { p_job_part_id: string }
         Returns: string
       }
       compute_job_part_invoicing_status: {
+        Args: { p_job_part_id: string }
+        Returns: string
+      }
+      compute_job_part_production_status: {
         Args: { p_job_part_id: string }
         Returns: string
       }

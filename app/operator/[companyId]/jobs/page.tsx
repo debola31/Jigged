@@ -179,6 +179,11 @@ function OperatorJobsPageContent() {
           {row.operation_name && (
             <Typography variant="body1" sx={{ mb: 1 }}>
               Op: {row.operation_name}
+              {(row.current_op_qty_good ?? 0) > 0 && (
+                <Typography component="span" variant="body2" color="text.secondary">
+                  {' '}— {row.current_op_qty_good} of {row.part_quantity} good
+                </Typography>
+              )}
             </Typography>
           )}
 

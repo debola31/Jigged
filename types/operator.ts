@@ -43,6 +43,13 @@ export interface OperatorJob {
   operations_total: number;
   operations_completed: number;
   /**
+   * Good pieces recorded (non-void) against the CURRENT operation on this part.
+   * Drives the "N of order-qty good" partial-progress label on the ready card.
+   * 0 when the operation hasn't been started. Defaults to 0 on lists that don't
+   * compute it (the completed list).
+   */
+  current_op_qty_good?: number;
+  /**
    * When this row's operation was completed (job_operations.completed_at).
    * Only set on rows from the "Completed" list (getCompletedOperatorJobs /
    * getAllStationsCompletedOperatorJobs); undefined on the ready list.

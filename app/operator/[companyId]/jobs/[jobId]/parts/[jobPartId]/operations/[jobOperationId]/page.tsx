@@ -11,6 +11,7 @@ import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
+import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -20,6 +21,14 @@ import {
   completeOperation,
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
+import {
+  createOperationCompletion,
+  getOperationCompletionSummaries,
+} from '@/utils/operationCompletionsAccess';
+import {
+  operationCompletionConsequence,
+  completionConsequenceCaption,
+} from '@/components/operations/operationMath';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
@@ -57,6 +66,10 @@ export default function OperatorOperationActionPage() {
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Good-quantity the operator is about to record. Blank until the summary loads,
+  // then defaults to the remaining balance (dialled down for a partial).
+  const [qtyInput, setQtyInput] = useState('');
+  const [qtyDirty, setQtyDirty] = useState(false);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -84,10 +97,63 @@ export default function OperatorOperationActionPage() {
     },
   );
 
-  // Completion is a direct, single-tap action — no confirmation. We stay on the
-  // page and re-load into the completed state so a mistaken completion can be
-  // undone immediately.
-  const handleComplete = async () => {
+  // Good/remaining for THIS op (partial-completion progress). Separate load so a
+  // completion re-reads the counts without refetching the whole detail graph.
+  const { data: summary, reload: loadSummary } = useLoad(
+    () =>
+      getOperationCompletionSummaries(jobPartId).then(
+        (rows) => rows.find((r) => r.job_operation_id === jobOperationId) ?? null,
+      ),
+    [jobPartId, jobOperationId],
+  );
+
+  const target = summary?.target ?? job?.part_quantity ?? 0;
+  const qtyGood = summary?.qty_good ?? 0;
+  const remaining = summary?.qty_remaining ?? Math.max(0, target - qtyGood);
+
+  // Default the input to the remaining balance once the summary loads, until the
+  // operator edits it (so the number states its own outcome, like the shipment
+  // form's prefill). Reset the dirty flag after a successful record.
+  useEffect(() => {
+    if (!qtyDirty && summary) setQtyInput(remaining > 0 ? String(remaining) : '');
+  }, [summary, remaining, qtyDirty]);
+
+  const reloadAll = async () => {
+    await Promise.all([loadJob(), loadSummary()]);
+  };
+
+  // Record a specific good quantity. Over-completion is allowed (warned, not
+  // blocked) — the only floor is > 0.
+  const handleRecord = async () => {
+    if (!currentOperatorId) {
+      setError('Operator not found. Please log in again.');
+      return;
+    }
+    const qty = Number(qtyInput);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setError('Enter how many good pieces you finished.');
+      return;
+    }
+    setActionLoading(true);
+    setError(null);
+    try {
+      await createOperationCompletion({
+        companyId,
+        jobOperationId,
+        jobPartId,
+        quantityGood: qty,
+      });
+      setQtyDirty(false);
+      await reloadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record completion');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // One-tap "finish the rest" — records the whole remaining balance.
+  const handleCompleteAll = async () => {
     if (!currentOperatorId) {
       setError('Operator not found. Please log in again.');
       return;
@@ -96,7 +162,8 @@ export default function OperatorOperationActionPage() {
     setError(null);
     try {
       await completeOperation(jobOperationId);
-      await loadJob();
+      setQtyDirty(false);
+      await reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete operation');
     } finally {
@@ -109,7 +176,8 @@ export default function OperatorOperationActionPage() {
     setError(null);
     try {
       await revertOperationCompletion(jobOperationId);
-      await loadJob();
+      setQtyDirty(false);
+      await reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to undo completion');
     } finally {
@@ -118,6 +186,7 @@ export default function OperatorOperationActionPage() {
   };
 
   const isCompleted = job?.operation_status === 'completed';
+  const consequence = operationCompletionConsequence(qtyInput, remaining);
 
   // Wait for BOTH the job fetch and the station context's one-time init before
   // deciding what to render — otherwise the "no station" branch can flash for an
@@ -271,7 +340,7 @@ export default function OperatorOperationActionPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}>
             <CheckCircleIcon color="success" />
             <Box component="span" sx={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: '1.05rem' }}>
-              This step is complete
+              This step is complete{target > 0 ? ` — ${qtyGood} of ${target} good` : ''}
             </Box>
             {actionLoading ? (
               <CircularProgress size={18} />
@@ -283,11 +352,10 @@ export default function OperatorOperationActionPage() {
           </Box>
         </Button>
       ) : (
-        // Not completed. A station mismatch (this step's work center ≠ the
-        // operator's selected station) only WARNS — completion doesn't need or
-        // record the station (completeOperation keys off the operation id), so
-        // the action stays a plain MARK COMPLETE and we don't silently switch
-        // their station. They change it from the header if they've actually moved.
+        // Not completed. Operators record how many GOOD pieces they finished —
+        // the field defaults to the remaining balance (states its own outcome)
+        // and a partial leaves the rest outstanding. A station mismatch only
+        // WARNS (completion keys off the operation id, not the station).
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {stationMismatch && (
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
@@ -298,18 +366,82 @@ export default function OperatorOperationActionPage() {
               </Typography>
             </Box>
           )}
+
+          {qtyGood > 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
+              {qtyGood} of {target} good so far · {remaining} remaining
+            </Typography>
+          )}
+
+          <TextField
+            label="Good pieces finished"
+            type="number"
+            value={qtyInput}
+            onChange={(e) => {
+              setQtyDirty(true);
+              setQtyInput(e.target.value);
+            }}
+            inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Good pieces finished' }}
+            fullWidth
+            size="medium"
+            error={consequence.kind === 'over'}
+            helperText={
+              consequence.kind === 'none'
+                ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
+                : completionConsequenceCaption(consequence)
+            }
+            FormHelperTextProps={{
+              sx: {
+                color:
+                  consequence.kind === 'over'
+                    ? 'error.main'
+                    : consequence.kind === 'partial'
+                      ? 'warning.main'
+                      : consequence.kind === 'full'
+                        ? 'success.main'
+                        : 'text.secondary',
+              },
+            }}
+          />
+
           <Button
             fullWidth
             variant="contained"
             size="large"
             color="primary"
             startIcon={<CheckCircleIcon />}
-            onClick={handleComplete}
-            disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+            onClick={handleRecord}
+            disabled={actionLoading || !(Number(qtyInput) > 0)}
+            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
           >
-            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
+            {actionLoading ? <CircularProgress size={24} /> : 'RECORD COMPLETION'}
           </Button>
+
+          {remaining > 0 && (
+            <Button
+              fullWidth
+              variant="text"
+              onClick={handleCompleteAll}
+              disabled={actionLoading}
+              sx={{ minHeight: 44 }}
+            >
+              Complete all remaining ({remaining})
+            </Button>
+          )}
+
+          {qtyGood > 0 && (
+            <Button
+              fullWidth
+              variant="text"
+              color="inherit"
+              startIcon={<UndoIcon fontSize="small" />}
+              onClick={handleRevert}
+              disabled={actionLoading}
+              sx={{ minHeight: 44, opacity: 0.8 }}
+            >
+              Undo all ({qtyGood})
+            </Button>
+          )}
         </Box>
       )}
 

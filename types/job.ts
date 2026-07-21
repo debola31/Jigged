@@ -423,6 +423,11 @@ export const OPERATION_STATUS_CONFIG: Record<
  */
 export interface CompleteOperationData {
   notes?: string;
+  /**
+   * Good quantity to record for a partial completion. Omitted → complete the
+   * whole remaining balance (the one-click default). Over-completion is allowed.
+   */
+  quantityGood?: number;
 }
 
 /**

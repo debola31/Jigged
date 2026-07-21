@@ -1047,6 +1047,8 @@ export interface ConvertToJobOptions {
    * their quoted quantity + price.
    */
   lineOverrides?: Record<string, { quantity: number; useTierPrice?: boolean }>;
+  /** Mark the new job "Hot" (rush) at conversion. Visibility only. Defaults to false. */
+  hot?: boolean;
 }
 
 export interface ConvertToJobResult {
@@ -1313,6 +1315,7 @@ export async function convertQuoteToJob(
       job_number: jobNumber,
       production_status: 'not_started',
       fulfillment_status: 'unshipped',
+      is_hot: options.hot ?? false,
       due_date: dueDate,
       customer_po_number: customerPoNumber,
       // Carry the quote's billing/shipping address + contact onto the job so

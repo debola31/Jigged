@@ -63,6 +63,41 @@ describe('getAllStationsOperatorJobs', () => {
     expect(result).toEqual([]);
   });
 
+  it('carries is_hot onto each row and preserves the RPC hot-first order', async () => {
+    // The RPC orders hot jobs first (ORDER BY is_hot DESC); buildOperatorJobs is
+    // a 1:1 map that preserves that order, and must surface is_hot so the station
+    // card can badge the row.
+    const readyRow = (over: Record<string, unknown>) => ({
+      job_id: 'j-x',
+      job_part_id: 'jp-x',
+      job_operation_id: 'op-x',
+      operation_name: 'Mill',
+      op_status: 'pending',
+      job_number: 'J-100',
+      part_id: 'p-x',
+      part_name: 'Widget',
+      part_description: null,
+      part_quantity: 5,
+      is_hot: false,
+      ...over,
+    });
+    mockSupabase.rpc.mockResolvedValueOnce({
+      data: [
+        readyRow({ job_id: 'j-hot', job_part_id: 'jp-hot', job_operation_id: 'op-hot', job_number: 'J-HOT', is_hot: true }),
+        readyRow({ job_id: 'j-cold', job_part_id: 'jp-cold', job_operation_id: 'op-cold', job_number: 'J-COLD', is_hot: false }),
+      ],
+      error: null,
+    });
+
+    const result = await getAllStationsOperatorJobs('c1', [{ id: 'wc1', name: 'Lathe' }]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].job_number).toBe('J-HOT');
+    expect(result[0].is_hot).toBe(true);
+    expect(result[1].job_number).toBe('J-COLD');
+    expect(result[1].is_hot).toBe(false);
+  });
+
   it('throws (surfaces the error) when the readiness RPC fails, instead of returning []', async () => {
     // Regression guard: a swallowed RPC error used to read as "no work" to
     // operators (the jobs.status column bug). It must propagate so the jobs

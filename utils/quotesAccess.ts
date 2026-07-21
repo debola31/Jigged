@@ -1211,12 +1211,29 @@ export async function convertQuoteToJob(
     throw new Error('Customer PO is required to convert a quote to a job.');
   }
 
-  // Pre-flight: every part must have a routing. Fail fast before writing anything.
+  // Pre-flight: only MADE parts need a routing. Bought parts are purchased, not
+  // manufactured — they have no routing and convert to a job_part with no
+  // operations (production-complete on creation), ready to ship + invoice. Fail
+  // fast (before any write) only if a MADE part is missing its routing.
   const partIds = Array.from(new Set(lineItemsToConvert.map((li) => li.part_id)));
+  const { data: partRows, error: partsErr } = await supabase
+    .from('parts')
+    .select('id, source')
+    .in('id', partIds);
+  if (partsErr) {
+    console.error('Error fetching part sources:', partsErr);
+    throw partsErr;
+  }
+  const sourceByPart = new Map(
+    ((partRows ?? []) as Array<{ id: string; source: string }>).map((p) => [p.id, p.source]),
+  );
+  const isBoughtPart = (partId: string) => sourceByPart.get(partId) === 'bought';
+  const madePartIds = partIds.filter((pid) => !isBoughtPart(pid));
+
   const { data: routings, error: routingsErr } = await supabase
     .from('routings')
     .select('id, part_id')
-    .in('part_id', partIds);
+    .in('part_id', madePartIds);
   if (routingsErr) {
     console.error('Error fetching routings:', routingsErr);
     throw routingsErr;
@@ -1225,10 +1242,10 @@ export async function convertQuoteToJob(
   for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
     routingByPart.set(r.part_id, r.id);
   }
-  const missingRoutingPartIds = partIds.filter((pid) => !routingByPart.has(pid));
+  const missingRoutingPartIds = madePartIds.filter((pid) => !routingByPart.has(pid));
   if (missingRoutingPartIds.length > 0) {
     throw new Error(
-      `No routing defined for ${missingRoutingPartIds.length} part${
+      `No routing defined for ${missingRoutingPartIds.length} made part${
         missingRoutingPartIds.length === 1 ? '' : 's'
       } on this quote. Create routings before converting.`,
     );
@@ -1307,11 +1324,13 @@ export async function convertQuoteToJob(
   }
 
   const partsCreated: ConvertToJobResult['job']['parts'] = [];
+  const jobPartNowIso = new Date().toISOString();
 
   let sequence = 10;
   for (const li of lineItemsToConvert) {
+    const isBought = isBoughtPart(li.part_id);
     const routingId = routingByPart.get(li.part_id);
-    if (!routingId) {
+    if (!isBought && !routingId) {
       // Should be impossible after the pre-flight, but guard anyway.
       throw new Error(`Routing for part ${li.part_id} disappeared mid-conversion.`);
     }
@@ -1368,8 +1387,13 @@ export async function convertQuoteToJob(
         // backfill in 20260621162024_add_job_part_pricing.sql.
         unit_price: orderedUnitPrice,
         total_price: orderedTotal,
-        production_status: 'not_started',
+        // A bought part is purchased, not manufactured — no operations to run, so
+        // its production is complete on creation (ready to ship + invoice). Made
+        // parts start not_started and advance as operators complete the cloned
+        // routing operations.
+        production_status: isBought ? 'completed' : 'not_started',
         fulfillment_status: 'unshipped',
+        ...(isBought ? { started_at: jobPartNowIso, completed_at: jobPartNowIso } : {}),
       })
       .select('id, part_id')
       .single();
@@ -1388,13 +1412,18 @@ export async function convertQuoteToJob(
       throw jpErr;
     }
 
-    const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
-      p_job_part_id: jobPart.id,
-      p_routing_id: routingId,
-    });
-    if (rpcErr) {
-      console.error('Failed to copy operations from routing:', rpcErr);
-      throw new Error('Job created but failed to copy operations from routing.');
+    // Made parts clone their routing into job_operations + job_materials. Bought
+    // parts have no routing, so there's nothing to clone — the job_part stands
+    // alone (production-complete, ready to ship).
+    if (!isBought && routingId) {
+      const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+        p_job_part_id: jobPart.id,
+        p_routing_id: routingId,
+      });
+      if (rpcErr) {
+        console.error('Failed to copy operations from routing:', rpcErr);
+        throw new Error('Job created but failed to copy operations from routing.');
+      }
     }
 
     partsCreated.push({

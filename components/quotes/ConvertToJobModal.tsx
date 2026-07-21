@@ -384,8 +384,8 @@ export default function ConvertToJobModal({
 
           <Typography variant="body2" sx={{ mb: 2 }}>
             Select the parts this PO covers — one job is created with a work cell per
-            selected part, and each part&apos;s routing is cloned into its own operations +
-            materials list.
+            selected part. Made parts clone their routing into operations + materials;
+            bought parts are purchased (no operations) and go straight to shipping.
             {partGroups.length > 1 &&
               ' Leave parts unchecked to put them on a separate job under a later PO.'}
           </Typography>

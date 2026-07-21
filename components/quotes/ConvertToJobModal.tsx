@@ -17,6 +17,7 @@ import RadioGroup from '@mui/material/RadioGroup';
 import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FormLabel from '@mui/material/FormLabel';
+import Checkbox from '@mui/material/Checkbox';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob, type QuoteLineConversion } from '@/utils/quotesAccess';
@@ -141,7 +142,16 @@ export default function ConvertToJobModal({
   // part_id → chosen line_item_id. Single-quantity parts are auto-selected;
   // multi-quantity parts start empty so the user must pick deliberately.
   const [selectedByPart, setSelectedByPart] = useState<Record<string, string>>({});
-  const allPartsChosen = partGroups.every((g) => !!selectedByPart[g.part_id]);
+  // part_id → include this part in THIS job. A quote is converted in one or more
+  // passes (one job per customer PO), so the user checks the subset this PO
+  // covers; unchecked parts stay on the quote for a later job. Defaults to all-in
+  // (the common case: one PO for the whole quote is a single click).
+  const [includedByPart, setIncludedByPart] = useState<Record<string, boolean>>({});
+  const includedGroups = partGroups.filter((g) => includedByPart[g.part_id]);
+  const anyIncluded = includedGroups.length > 0;
+  // Every INCLUDED part must resolve to one quantity (single-qty auto-picks; a
+  // price-options part needs a deliberate choice).
+  const allIncludedChosen = includedGroups.every((g) => !!selectedByPart[g.part_id]);
 
   // Reset the form each time the modal opens (house convention: onEnter,
   // not a reset useEffect, which would trip set-state-in-effect).
@@ -152,11 +162,14 @@ export default function ConvertToJobModal({
     setAttachmentWarning(null);
     setConvertedJobId(null);
     setError(null);
-    const initial: Record<string, string> = {};
+    const initialSel: Record<string, string> = {};
+    const initialInc: Record<string, boolean> = {};
     for (const g of partGroups) {
-      if (g.items.length === 1) initial[g.part_id] = g.items[0].id;
+      initialInc[g.part_id] = true; // default: this PO covers the whole quote
+      if (g.items.length === 1) initialSel[g.part_id] = g.items[0].id;
     }
-    setSelectedByPart(initial);
+    setSelectedByPart(initialSel);
+    setIncludedByPart(initialInc);
   };
 
   // Due date is mandatory and may not be in the past — a job created today
@@ -189,7 +202,7 @@ export default function ConvertToJobModal({
     setLoading(true);
     setError(null);
     try {
-      const selectedLineItemIds = partGroups
+      const selectedLineItemIds = includedGroups
         .map((g) => selectedByPart[g.part_id])
         .filter((id): id is string => !!id);
       const result = await convertQuoteToJob(quote.id, {
@@ -272,7 +285,7 @@ export default function ConvertToJobModal({
             Customer: {quote.customers?.name || '—'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Parts on this job: {partGroups.length}
+            Parts on this job: {includedGroups.length} of {partGroups.length}
           </Typography>
 
           {convertedGroups.length > 0 && (
@@ -301,57 +314,77 @@ export default function ConvertToJobModal({
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="body2" sx={{ mb: 2 }}>
-            One job will be created with one work cell per part. Each part&apos;s routing will be
-            cloned into its own operations + materials list.
+            Select the parts this PO covers — one job is created with a work cell per
+            selected part, and each part&apos;s routing is cloned into its own operations +
+            materials list.
+            {partGroups.length > 1 &&
+              ' Leave parts unchecked to put them on a separate job under a later PO.'}
           </Typography>
 
           {partGroups.length > 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 1 }}>
-              {partGroups.map((group) =>
-                group.items.length === 1 ? (
-                  <Box key={group.part_id}>
-                    <Typography variant="body2" fontWeight={600}>
-                      {group.part_name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {group.items[0].quantity} {group.unit} @{' '}
-                      {formatCurrency(group.items[0].unit_price)} ={' '}
-                      {formatCurrency(
-                        group.items[0].total_price ??
-                          group.items[0].unit_price * group.items[0].quantity,
-                      )}
-                    </Typography>
+              {partGroups.map((group) => {
+                const included = !!includedByPart[group.part_id];
+                const toggle = (checked: boolean) =>
+                  setIncludedByPart((prev) => ({ ...prev, [group.part_id]: checked }));
+                return (
+                  <Box
+                    key={group.part_id}
+                    sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}
+                  >
+                    <Checkbox
+                      size="small"
+                      checked={included}
+                      onChange={(e) => toggle(e.target.checked)}
+                      sx={{ mt: -0.5 }}
+                      inputProps={{ 'aria-label': `Include ${group.part_name}` }}
+                    />
+                    {group.items.length === 1 ? (
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>
+                          {group.part_name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {group.items[0].quantity} {group.unit} @{' '}
+                          {formatCurrency(group.items[0].unit_price)} ={' '}
+                          {formatCurrency(
+                            group.items[0].total_price ??
+                              group.items[0].unit_price * group.items[0].quantity,
+                          )}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <FormControl disabled={!included}>
+                        <FormLabel sx={{ fontWeight: 600, color: 'text.primary' }}>
+                          {group.part_name} — choose quantity
+                        </FormLabel>
+                        <RadioGroup
+                          value={selectedByPart[group.part_id] ?? ''}
+                          onChange={(e) =>
+                            setSelectedByPart((prev) => ({
+                              ...prev,
+                              [group.part_id]: e.target.value,
+                            }))
+                          }
+                        >
+                          {[...group.items]
+                            .sort((a, b) => a.quantity - b.quantity)
+                            .map((li) => (
+                              <FormControlLabel
+                                key={li.id}
+                                value={li.id}
+                                control={<Radio size="small" />}
+                                label={`${li.quantity} ${group.unit} @ ${formatCurrency(
+                                  li.unit_price,
+                                )} = ${formatCurrency(li.total_price ?? li.unit_price * li.quantity)}`}
+                              />
+                            ))}
+                        </RadioGroup>
+                      </FormControl>
+                    )}
                   </Box>
-                ) : (
-                  <FormControl key={group.part_id}>
-                    <FormLabel sx={{ fontWeight: 600, color: 'text.primary' }}>
-                      {group.part_name} — choose quantity
-                    </FormLabel>
-                    <RadioGroup
-                      value={selectedByPart[group.part_id] ?? ''}
-                      onChange={(e) =>
-                        setSelectedByPart((prev) => ({
-                          ...prev,
-                          [group.part_id]: e.target.value,
-                        }))
-                      }
-                    >
-                      {[...group.items]
-                        .sort((a, b) => a.quantity - b.quantity)
-                        .map((li) => (
-                          <FormControlLabel
-                            key={li.id}
-                            value={li.id}
-                            control={<Radio size="small" />}
-                            label={`${li.quantity} ${group.unit} @ ${formatCurrency(
-                              li.unit_price,
-                            )} = ${formatCurrency(li.total_price ?? li.unit_price * li.quantity)}`}
-                          />
-                        ))}
-                    </RadioGroup>
-                  </FormControl>
-                ),
-              )}
+                );
+              })}
             </Box>
           )}
 
@@ -424,8 +457,9 @@ export default function ConvertToJobModal({
               loading ||
               lineItems.length === 0 ||
               nothingToConvert ||
+              !anyIncluded ||
               !dueDateValid ||
-              !allPartsChosen ||
+              !allIncludedChosen ||
               !poValid
             }
             startIcon={loading ? <CircularProgress size={20} /> : null}

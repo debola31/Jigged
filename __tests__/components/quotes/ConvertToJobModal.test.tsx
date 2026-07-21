@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -63,6 +63,70 @@ describe('ConvertToJobModal — reopen resets the Customer PO field', () => {
     rerender(wrap(<ConvertToJobModal {...base} open />));
 
     await waitFor(() => expect(poField().value).toBe(''));
+  });
+});
+
+describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)', () => {
+  it('converts only the checked parts, leaving the rest for a later PO', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    const twoPartQuote = {
+      ...quote(),
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 10,
+          unit_price: 5,
+          total_price: 50,
+          parts: { part_name: 'Bracket', primary_unit: null },
+        },
+        {
+          id: 'li2',
+          sequence: 2,
+          part_id: 'p2',
+          quantity: 4,
+          unit_price: 20,
+          total_price: 80,
+          parts: { part_name: 'Housing', primary_unit: null },
+        },
+      ],
+    } as unknown as QuoteWithRelations;
+
+    const onConverted = vi.fn();
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={onConverted}
+          quote={twoPartQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Both parts start checked (one PO for the whole quote is the default).
+    // Uncheck Housing to leave it for a separate PO.
+    await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
+
+    // Fill the two required fields.
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({ selectedLineItemIds: ['li1'], customerPoNumber: 'PO-1' }),
+      ),
+    );
+    expect(onConverted).toHaveBeenCalledWith('job1');
   });
 });
 

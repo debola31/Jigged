@@ -268,17 +268,22 @@ Email action on the detail page.)
 
 **Modal Content:**
 
-Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. The modal groups the remaining line items by part. A part with a single quantity is shown as a fixed line and auto-included. A part with several quantities (a price-options quote) renders a radio group — one radio per quoted quantity — so the salesperson picks the accepted quantity:
+Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. Each remaining part has a **checkbox** deciding whether it goes on *this* job/PO. **All boxes start checked** — so the common case (one PO for the whole quote) is a single click — but the user can uncheck parts to leave them on the quote for a later job under a different PO. A part with several quantities (a price-options quote) renders a radio group — one radio per quoted quantity — so the salesperson also picks the accepted quantity (disabled while its box is unchecked):
 
 ```
-Holder — choose quantity
-  ◯ 5 ea @ $20.00 = $100.00
-  ◯ 15 ea @ $18.00 = $270.00
-  ◉ 25 ea @ $16.00 = $400.00
+☑ Holder — choose quantity
+    ◯ 5 ea @ $20.00 = $100.00
+    ◯ 15 ea @ $18.00 = $270.00
+    ◉ 25 ea @ $16.00 = $400.00
 
-Clamp
-  100 ea @ $9.00 = $900.00     (single quantity — auto-included)
+☑ Clamp
+    100 ea @ $9.00 = $900.00     (single quantity)
+
+☐ Bracket                         (unchecked — stays on the quote for the next PO)
+    40 ea @ $3.00 = $120.00
 ```
+
+The header shows "Parts on this job: {checked} of {remaining}". This is the user journey for **multiple jobs per quote**: check the parts covered by the first PO → set that PO# + due date → **Create** the job; the quote then shows **Create Another Job**, and reopening the modal offers whatever is still unchecked/unconverted for the next PO.
 
 Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **required Due date** — a not-in-the-past date picker that starts **empty** (no prefill; the user types the job's due date, which is no longer derived from lead time) — and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it. An **optional PO PDF** can also be attached; it uploads to the new job after conversion (see [Jobs](jobs.md) → Attachments) and is non-fatal if the upload fails.
 
@@ -287,7 +292,7 @@ Multi-quantity parts start with **no** radio selected; the user must pick delibe
 - Create Job → calls `convertQuoteToJob(quoteId, { dueDate, customerPoNumber, selectedLineItemIds })`, where `selectedLineItemIds` is the one chosen line per remaining part. Conversion creates **one job** (with this pass's PO) with one `job_part` per selected line, clones each part's routing via the `create_job_part_operations_from_routing` RPC, sets `quote.converted_at` on the first pass, and redirects to the new job. Any lines left unconverted stay available for a later pass under a different PO. The quote stays intact as the record of all options offered.
 - Cancel → closes the modal without changes.
 
-The Create button stays disabled until **every** multi-quantity part has a quantity selected, the due date is valid, **and a Customer PO is entered**. A `MissingFieldsNotice` above the button lists whatever is still blocking conversion. `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
+The Create button stays disabled until **at least one part is checked**, every *checked* multi-quantity part has a quantity selected, the due date is valid, **and a Customer PO is entered**. A `MissingFieldsNotice` above the button lists whatever is still blocking conversion. `convertQuoteToJob` also hard-rejects any set that resolves to more than one line for a part ("This is a price-options quote. Pick a single quantity per part before converting."), so a malformed job can never be created via the API.
 
 > **Invoicing moved to Jobs.** Creating / viewing a QuickBooks invoice is no longer on the quote page — invoicing is **job-keyed** and lives on the job detail page. The quote shows only the "Converted to J-NNNN →" link. See [Jobs](jobs.md) and [Architecture](../architecture.md).
 
@@ -547,7 +552,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 - [ ] Modal groups the quote's lines by part; a multi-quantity part shows a radio per quoted quantity — *(automation-pending)*
 
-- [ ] A single-quantity part is auto-included (no radio to pick) — *(automation-pending)*
+- [ ] Each remaining part has an include checkbox (checked by default); unchecking it leaves the part on the quote for a later PO, and only checked parts convert — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'per-part selection (multiple jobs/POs per quote)' > 'converts only the checked parts, leaving the rest for a later PO'`*.
 
 - [ ] Convert button stays disabled until every multi-quantity part has a quantity selected — *(automation-pending)*
 

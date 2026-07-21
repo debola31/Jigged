@@ -384,11 +384,6 @@ export default function ConvertToJobModal({
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Choose the parts and quantities this PO covers.
-            {partGroups.length > 1 && ' Unchecked parts stay on the quote for a later PO.'}
-          </Typography>
-
           {partGroups.length > 0 && (
             <Box sx={{ display: 'flex', flexDirection: 'column' }}>
               {partGroups.map((group, gi) => {
@@ -419,7 +414,9 @@ export default function ConvertToJobModal({
                       borderColor: 'divider',
                     }}
                   >
-                    {/* Part header: checkbox centered on the name. */}
+                    {/* Part header: checkbox + name, with the price-options breaks as
+                        one-tap chips inline to the right of the name (wrapping below the
+                        name when they're too long for the row). */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Checkbox
                         size="small"
@@ -427,19 +424,23 @@ export default function ConvertToJobModal({
                         checked={included}
                         onChange={(e) => toggle(e.target.checked)}
                         inputProps={{ 'aria-label': `Include ${group.part_name}` }}
-                        sx={{ p: 0.5 }}
+                        sx={{ p: 0.5, alignSelf: 'flex-start', mt: 0.25 }}
                       />
-                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                        {group.part_name}
-                      </Typography>
-                    </Box>
-
-                    {/* Quantity + price, indented under the name; dimmed when excluded. */}
-                    <Box sx={{ pl: 4.5, mt: 1, opacity: included ? 1 : 0.45 }}>
-                      {/* Price-options: quoted breaks as one-tap chips that fill the qty. */}
-                      {isMultiTier && (
-                        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.25 }}>
-                          {sortedItems.map((li) => {
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          flexWrap: 'wrap',
+                          minWidth: 0,
+                          opacity: included ? 1 : 0.45,
+                        }}
+                      >
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          {group.part_name}
+                        </Typography>
+                        {isMultiTier &&
+                          sortedItems.map((li) => {
                             const active = orderedQty === li.quantity;
                             return (
                               <Chip
@@ -465,9 +466,11 @@ export default function ConvertToJobModal({
                               />
                             );
                           })}
-                        </Box>
-                      )}
+                      </Box>
+                    </Box>
 
+                    {/* Quantity + price, indented under the name; dimmed when excluded. */}
+                    <Box sx={{ pl: 4.5, mt: 1.25, opacity: included ? 1 : 0.45 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                         <TextField
                           size="small"

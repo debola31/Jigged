@@ -150,7 +150,22 @@ export default function PartAutocomplete({
         };
         const isCreate = isCreateNewOption(option);
         return (
-          <Box component="li" {...rest} key={key as React.Key} sx={{ minWidth: 0 }}>
+          <Box
+            component="li"
+            {...rest}
+            key={key as React.Key}
+            // MUI styles the option <li> as display:flex (row), which runs the
+            // part name straight into its description ("ASM-GEARBOXGearbox…").
+            // Stack them so the name sits above its description as a clear label
+            // + subtext.
+            sx={{
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: 0.25,
+            }}
+          >
             <Typography
               variant="body2"
               sx={{ fontWeight: 500, color: isCreate ? 'primary.main' : undefined }}

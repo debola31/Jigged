@@ -327,7 +327,6 @@ export default function QuotesPage() {
             title={jobs.map((j) => j.job_number).join(', ')}
             sx={{
               display: 'flex',
-              gap: 0.5,
               alignItems: 'center',
               overflow: 'hidden',
               whiteSpace: 'nowrap',
@@ -336,11 +335,6 @@ export default function QuotesPage() {
           >
             {jobs.map((j, i) => (
               <Fragment key={j.id}>
-                {i > 0 && (
-                  <Box component="span" sx={{ color: 'text.secondary' }}>
-                    ,
-                  </Box>
-                )}
                 <MuiLink
                   component={Link}
                   href={`/dashboard/${companyId}/jobs/${j.id}`}
@@ -349,6 +343,11 @@ export default function QuotesPage() {
                 >
                   {j.job_number}
                 </MuiLink>
+                {i < jobs.length - 1 && (
+                  <Box component="span" sx={{ color: 'text.secondary', mr: 0.5 }}>
+                    ,
+                  </Box>
+                )}
               </Fragment>
             ))}
           </Box>

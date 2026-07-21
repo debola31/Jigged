@@ -384,150 +384,152 @@ export default function ConvertToJobModal({
 
           <Divider sx={{ my: 2 }} />
 
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Select the parts this PO covers — one job is created with a work cell per
-            selected part. Made parts clone their routing into operations + materials;
-            bought parts are purchased (no operations) and go straight to shipping.
-            {partGroups.length > 1 &&
-              ' Leave parts unchecked to put them on a separate job under a later PO.'}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Choose the parts and quantities this PO covers.
+            {partGroups.length > 1 && ' Unchecked parts stay on the quote for a later PO.'}
           </Typography>
 
           {partGroups.length > 0 && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 1 }}>
-              {partGroups.map((group) => {
+            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+              {partGroups.map((group, gi) => {
                 const included = !!includedByPart[group.part_id];
                 const toggle = (checked: boolean) =>
                   setIncludedByPart((prev) => ({ ...prev, [group.part_id]: checked }));
+                const isMultiTier = group.items.length > 1;
+                const sortedItems = [...group.items].sort((a, b) => a.quantity - b.quantity);
+                const baseLine =
+                  group.items.find((li) => li.id === selectedByPart[group.part_id]) ??
+                  sortedItems[0];
+                const orderedQty = parseQty(qtyByPart[group.part_id]);
+                // Firm part: keep the committed price unless the user opts into the
+                // tier. Price-options part: always price at the tier for the qty —
+                // that's what its quoted breaks are.
+                const useTier = isMultiTier ? true : !!useTierByPart[group.part_id];
+                const priced =
+                  orderedQty !== null
+                    ? priceLineAtQty(baseLine, orderedQty, useTier)
+                    : { unitPrice: null, total: null, tierPrice: null, crossesBreak: false };
+                const qtyChanged = orderedQty !== null && orderedQty !== baseLine.quantity;
                 return (
                   <Box
                     key={group.part_id}
-                    sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}
+                    sx={{
+                      py: 1.5,
+                      borderTop: gi === 0 ? 'none' : '1px solid',
+                      borderColor: 'divider',
+                    }}
                   >
-                    <Checkbox
-                      size="small"
-                      checked={included}
-                      onChange={(e) => toggle(e.target.checked)}
-                      sx={{ mt: -0.5 }}
-                      inputProps={{ 'aria-label': `Include ${group.part_name}` }}
-                    />
-                    {(() => {
-                      const isMultiTier = group.items.length > 1;
-                      const sortedItems = [...group.items].sort((a, b) => a.quantity - b.quantity);
-                      const baseLine =
-                        group.items.find((li) => li.id === selectedByPart[group.part_id]) ??
-                        sortedItems[0];
-                      const orderedQty = parseQty(qtyByPart[group.part_id]);
-                      // Firm part: keep the committed price unless the user opts into the
-                      // tier. Price-options part: always price at the tier for the qty —
-                      // that's what its quoted breaks are.
-                      const useTier = isMultiTier ? true : !!useTierByPart[group.part_id];
-                      const priced =
-                        orderedQty !== null
-                          ? priceLineAtQty(baseLine, orderedQty, useTier)
-                          : { unitPrice: null, total: null, tierPrice: null, crossesBreak: false };
-                      const qtyChanged = orderedQty !== null && orderedQty !== baseLine.quantity;
-                      return (
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" fontWeight={600}>
-                            {group.part_name}
-                          </Typography>
+                    {/* Part header: checkbox centered on the name. */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Checkbox
+                        size="small"
+                        edge="start"
+                        checked={included}
+                        onChange={(e) => toggle(e.target.checked)}
+                        inputProps={{ 'aria-label': `Include ${group.part_name}` }}
+                        sx={{ p: 0.5 }}
+                      />
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                        {group.part_name}
+                      </Typography>
+                    </Box>
 
-                          {/* Price-options: the quoted breaks as one-tap chips that set
-                              the ordered qty. The editable field below still accepts any
-                              quantity (priced at the tier that applies). */}
-                          {isMultiTier && (
-                            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
-                              {sortedItems.map((li) => {
-                                const active = orderedQty === li.quantity;
-                                return (
-                                  <Chip
-                                    key={li.id}
-                                    size="small"
-                                    label={`${li.quantity} ${group.unit} · ${formatCurrency(li.unit_price)}`}
-                                    color={active ? 'primary' : 'default'}
-                                    variant={active ? 'filled' : 'outlined'}
-                                    onClick={
-                                      included
-                                        ? () => {
-                                            setSelectedByPart((prev) => ({
-                                              ...prev,
-                                              [group.part_id]: li.id,
-                                            }));
-                                            setQtyByPart((prev) => ({
-                                              ...prev,
-                                              [group.part_id]: String(li.quantity),
-                                            }));
-                                          }
-                                        : undefined
-                                    }
-                                  />
-                                );
-                              })}
-                            </Box>
-                          )}
+                    {/* Quantity + price, indented under the name; dimmed when excluded. */}
+                    <Box sx={{ pl: 4.5, mt: 1, opacity: included ? 1 : 0.45 }}>
+                      {/* Price-options: quoted breaks as one-tap chips that fill the qty. */}
+                      {isMultiTier && (
+                        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1.25 }}>
+                          {sortedItems.map((li) => {
+                            const active = orderedQty === li.quantity;
+                            return (
+                              <Chip
+                                key={li.id}
+                                size="small"
+                                label={`${li.quantity} ${group.unit} · ${formatCurrency(li.unit_price)}`}
+                                color={active ? 'primary' : 'default'}
+                                variant={active ? 'filled' : 'outlined'}
+                                onClick={
+                                  included
+                                    ? () => {
+                                        setSelectedByPart((prev) => ({
+                                          ...prev,
+                                          [group.part_id]: li.id,
+                                        }));
+                                        setQtyByPart((prev) => ({
+                                          ...prev,
+                                          [group.part_id]: String(li.quantity),
+                                        }));
+                                      }
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
+                        </Box>
+                      )}
 
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                            <TextField
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <TextField
+                          size="small"
+                          label="Order qty"
+                          value={qtyByPart[group.part_id] ?? ''}
+                          onChange={(e) =>
+                            setQtyByPart((prev) => ({
+                              ...prev,
+                              [group.part_id]: e.target.value,
+                            }))
+                          }
+                          disabled={!included}
+                          inputMode="decimal"
+                          error={included && orderedQty === null}
+                          sx={{ width: 104 }}
+                          slotProps={{ inputLabel: { shrink: true } }}
+                        />
+                        <Typography variant="body2" color="text.secondary">
+                          {group.unit} @ {formatCurrency(priced.unitPrice)} ={' '}
+                          <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                            {formatCurrency(priced.total)}
+                          </Box>
+                        </Typography>
+                      </Box>
+
+                      {/* Firm part only: committed-qty note + reprice opt-in on a break
+                          crossing. Price-options parts always price at the tier. */}
+                      {!isMultiTier && qtyChanged && (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ display: 'block', mt: 0.75 }}
+                        >
+                          Quoted {baseLine.quantity} {group.unit}
+                          {priced.crossesBreak ? '' : ' — price kept from the quote'}
+                        </Typography>
+                      )}
+                      {!isMultiTier && included && priced.crossesBreak && (
+                        <FormControlLabel
+                          sx={{ mt: 0.25, ml: 0 }}
+                          control={
+                            <Checkbox
                               size="small"
-                              label="Order qty"
-                              value={qtyByPart[group.part_id] ?? ''}
+                              checked={!!useTierByPart[group.part_id]}
                               onChange={(e) =>
-                                setQtyByPart((prev) => ({
+                                setUseTierByPart((prev) => ({
                                   ...prev,
-                                  [group.part_id]: e.target.value,
+                                  [group.part_id]: e.target.checked,
                                 }))
                               }
-                              disabled={!included}
-                              inputMode="decimal"
-                              error={included && orderedQty === null}
-                              sx={{ width: 110 }}
-                              slotProps={{ inputLabel: { shrink: true } }}
+                              sx={{ p: 0.5 }}
                             />
-                            <Typography variant="body2" color="text.secondary">
-                              {group.unit} @ {formatCurrency(priced.unitPrice)} ={' '}
-                              {formatCurrency(priced.total)}
+                          }
+                          label={
+                            <Typography variant="caption" color="text.secondary">
+                              Reprice to the qty-{orderedQty} tier (
+                              {formatCurrency(priced.tierPrice)}/{group.unit})
                             </Typography>
-                          </Box>
-
-                          {/* Firm part only: note the committed qty + reprice opt-in on a
-                              break crossing. Price-options parts always price at the tier,
-                              so there's no keep-vs-reprice choice. */}
-                          {!isMultiTier && qtyChanged && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{ display: 'block', mt: 0.25 }}
-                            >
-                              Quoted {baseLine.quantity} {group.unit}
-                              {priced.crossesBreak ? '' : ' — price kept from the quote'}
-                            </Typography>
-                          )}
-                          {!isMultiTier && included && priced.crossesBreak && (
-                            <FormControlLabel
-                              sx={{ mt: 0.25 }}
-                              control={
-                                <Checkbox
-                                  size="small"
-                                  checked={!!useTierByPart[group.part_id]}
-                                  onChange={(e) =>
-                                    setUseTierByPart((prev) => ({
-                                      ...prev,
-                                      [group.part_id]: e.target.checked,
-                                    }))
-                                  }
-                                />
-                              }
-                              label={
-                                <Typography variant="caption" color="text.secondary">
-                                  Reprice to the qty-{orderedQty} tier (
-                                  {formatCurrency(priced.tierPrice)}/{group.unit})
-                                </Typography>
-                              }
-                            />
-                          )}
-                        </Box>
-                      );
-                    })()}
+                          }
+                        />
+                      )}
+                    </Box>
                   </Box>
                 );
               })}

@@ -18,6 +18,7 @@ const { mockQueryBuilder, mockSupabase, mockStorageHelpers } = vi.hoisted(() => 
     'or',
     'in',
     'is',
+    'not',
     'lt',
     'order',
     'range',
@@ -130,7 +131,28 @@ import {
   convertQuoteToJob,
   detectQuoteLineDrift,
   repriceQuoteDriftedLinesToCurrent,
+  nextQuoteJobNumber,
 } from '@/utils/quotesAccess';
+
+describe('nextQuoteJobNumber — quote-indexed job numbers', () => {
+  it('uses the mirror when no job off the quote exists yet', () => {
+    expect(nextQuoteJobNumber('Q-0019', [])).toBe('J-0019');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0020', 'J-0007'])).toBe('J-0019');
+  });
+
+  it('suffixes later jobs off the same quote (J-0019 → J-0019-2 → J-0019-3)', () => {
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019'])).toBe('J-0019-2');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-0019-2'])).toBe('J-0019-3');
+    // Fills a gap left by an archived suffix.
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-0019-3'])).toBe('J-0019-2');
+  });
+
+  it('does not collide with a different quote sharing a number prefix', () => {
+    // J-00190 (from Q-00190) must not be treated as a J-0019 suffix.
+    expect(nextQuoteJobNumber('Q-0019', ['J-00190'])).toBe('J-0019');
+    expect(nextQuoteJobNumber('Q-0019', ['J-0019', 'J-00190'])).toBe('J-0019-2');
+  });
+});
 
 describe('quotesAccess utilities', () => {
   beforeEach(() => {
@@ -650,34 +672,72 @@ describe('quotesAccess utilities', () => {
 
   // ============== Convert to Job Tests ==============
 
-  // convertQuoteToJob produces ONE job that owns one job_part per
-  // quote_line_item. The "only approved quotes can convert" gate was removed
-  // in April 2026; only the already-converted and missing-line-items guards
-  // remain at the validation layer. The happy-path test that mocks the full
-  // RPC chain (job insert + create_job_part_operations_from_routing) is
-  // sub-PR 3f territory.
+  // convertQuoteToJob produces a job that owns one job_part per converted
+  // quote_line_item. A quote can be converted in SEVERAL passes (one job per
+  // customer PO), so converted_at no longer blocks — instead each line can only
+  // be converted once (a line already on a live job is skipped). The remaining
+  // validation-layer guards: missing line items, every line already converted,
+  // price-options-without-a-selection, and the required customer PO. The
+  // happy-path test that mocks the full RPC chain (job insert +
+  // create_job_part_operations_from_routing) is sub-PR 3f territory.
   describe('convertQuoteToJob (validation paths)', () => {
-    it('rejects already-converted quotes', async () => {
-      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-        ...mockQueryBuilder,
-        select: vi.fn().mockReturnValue({
-          ...mockQueryBuilder,
-          eq: vi.fn().mockReturnValue({
+    it('rejects when every line item is already on a job', async () => {
+      // A previously-converted quote whose only line is already on a live job:
+      // getQuoteConversionState returns it, so there is nothing left to convert.
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+        if (table === 'job_parts') {
+          return {
             ...mockQueryBuilder,
-            single: vi.fn().mockReturnValue({
-              data: {
-                ...mockQuote,
-                converted_at: '2026-04-16T10:00:00Z',
-                line_items: [],
-              },
-              error: null,
+            select: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              eq: vi.fn().mockReturnValue({
+                ...mockQueryBuilder,
+                neq: vi.fn().mockReturnValue({
+                  ...mockQueryBuilder,
+                  not: vi.fn().mockResolvedValue({
+                    data: [
+                      {
+                        source_quote_line_item_id: 'li-1',
+                        quantity: 5,
+                        production_status: 'not_started',
+                        jobs: {
+                          id: 'job-1',
+                          job_number: 'J-0001',
+                          customer_po_number: 'PO-1',
+                          quote_id: 'quote-1',
+                        },
+                      },
+                    ],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          ...mockQueryBuilder,
+          select: vi.fn().mockReturnValue({
+            ...mockQueryBuilder,
+            eq: vi.fn().mockReturnValue({
+              ...mockQueryBuilder,
+              single: vi.fn().mockReturnValue({
+                data: {
+                  ...mockQuote,
+                  converted_at: '2026-04-16T10:00:00Z',
+                  line_items: [
+                    { id: 'li-1', part_id: 'part-A', sequence: 10, quantity: 5, unit_price: 20, total_price: 100 },
+                  ],
+                },
+                error: null,
+              }),
             }),
           }),
-        }),
-      }));
+        };
+      });
 
-      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-1' })).rejects.toThrow(
-        'This quote has already been converted to a job',
+      await expect(convertQuoteToJob('quote-1', { customerPoNumber: 'PO-2' })).rejects.toThrow(
+        'Every line item on this quote is already on a job',
       );
     });
 

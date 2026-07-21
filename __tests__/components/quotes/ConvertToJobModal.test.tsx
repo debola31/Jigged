@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -63,6 +63,227 @@ describe('ConvertToJobModal — reopen resets the Customer PO field', () => {
     rerender(wrap(<ConvertToJobModal {...base} open />));
 
     await waitFor(() => expect(poField().value).toBe(''));
+  });
+});
+
+describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)', () => {
+  it('converts only the checked parts, leaving the rest for a later PO', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    const twoPartQuote = {
+      ...quote(),
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 10,
+          unit_price: 5,
+          total_price: 50,
+          parts: { part_name: 'Bracket', primary_unit: null },
+        },
+        {
+          id: 'li2',
+          sequence: 2,
+          part_id: 'p2',
+          quantity: 4,
+          unit_price: 20,
+          total_price: 80,
+          parts: { part_name: 'Housing', primary_unit: null },
+        },
+      ],
+    } as unknown as QuoteWithRelations;
+
+    const onConverted = vi.fn();
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={onConverted}
+          quote={twoPartQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Both parts start checked (one PO for the whole quote is the default).
+    // Uncheck Housing to leave it for a separate PO.
+    await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
+
+    // Fill the two required fields.
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({ selectedLineItemIds: ['li1'], customerPoNumber: 'PO-1' }),
+      ),
+    );
+    expect(onConverted).toHaveBeenCalledWith('job1');
+  });
+});
+
+describe('ConvertToJobModal — partial quantity acceptance', () => {
+  it('lets you order fewer than quoted (10 → 5) and passes the quantity override', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={quote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Quoted qty pre-fills to 10; the customer orders 5.
+    const qty = screen.getByLabelText(/order qty/i) as HTMLInputElement;
+    await waitFor(() => expect(qty.value).toBe('10'));
+    fireEvent.change(qty, { target: { value: '5' } });
+
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({
+          lineOverrides: { li1: { quantity: 5, useTierPrice: false } },
+        }),
+      ),
+    );
+  });
+});
+
+describe('ConvertToJobModal — reprice opt-in only on a real price-break crossing', () => {
+  it('does NOT offer a reprice for a single-tier part, even when the tier price differs from the quoted price', async () => {
+    // A single-tier part whose snapshot tier price ($175.28) differs from the
+    // line's stored/quoted price ($127.12) — a drift, not a break. Changing the
+    // ordered qty must NOT surface a "Reprice to the qty-N tier" option, because
+    // there is no other tier to cross.
+    const singleTierQuote = {
+      ...quote(),
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 7,
+          unit_price: 127.12,
+          total_price: 889.84,
+          is_quote_override: false,
+          basis_unknown: false,
+          pricing_basis_snapshot: {
+            tiers: [{ id: 't1', quantity: 1, unit_price: 175.28, markup_percent: 45 }],
+            resolved_tier_id: 't1',
+            resolved_quantity: 7,
+            captured_at: '2026-01-01T00:00:00Z',
+          },
+          parts: { part_name: 'ASM-GEARBOX', primary_unit: null },
+        },
+      ],
+    } as unknown as QuoteWithRelations;
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={singleTierQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Change the ordered qty (7 → 5) — still no reprice option for a single tier.
+    const qty = screen.getByLabelText(/order qty/i);
+    fireEvent.change(qty, { target: { value: '5' } });
+
+    expect(screen.queryByText(/reprice to the qty/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('ConvertToJobModal — price-options part (quick-pick breaks + editable qty)', () => {
+  it('quoted breaks are one-tap chips; any qty converts at the tier price (useTierPrice)', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    const snapshot = {
+      tiers: [
+        { id: 't1', quantity: 1, unit_price: 127.12, markup_percent: 45 },
+        { id: 't2', quantity: 80, unit_price: 119.79, markup_percent: 40 },
+      ],
+      resolved_tier_id: 't1',
+      resolved_quantity: 7,
+      captured_at: '2026-01-01T00:00:00Z',
+    };
+    const mkLine = (id: string, qty: number, price: number) => ({
+      id,
+      sequence: qty,
+      part_id: 'p1',
+      quantity: qty,
+      unit_price: price,
+      total_price: price * qty,
+      is_quote_override: false,
+      basis_unknown: false,
+      pricing_basis_snapshot: snapshot,
+      parts: { part_name: 'ASM-GEARBOX', primary_unit: null },
+    });
+    const optionsQuote = {
+      ...quote(),
+      line_items: [mkLine('li7', 7, 127.12), mkLine('li80', 80, 119.79)],
+    } as unknown as QuoteWithRelations;
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={optionsQuote}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Defaults to the lowest break (7); the editable field is pre-filled.
+    const qty = screen.getByLabelText(/order qty/i) as HTMLInputElement;
+    await waitFor(() => expect(qty.value).toBe('7'));
+
+    // Tap the 80-break chip → sets qty to 80 and that line as the base.
+    await userEvent.click(screen.getByText(/80 ea/i));
+    expect(qty.value).toBe('80');
+
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({
+          selectedLineItemIds: ['li80'],
+          lineOverrides: { li80: { quantity: 80, useTierPrice: true } },
+        }),
+      ),
+    );
   });
 });
 

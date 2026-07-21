@@ -29,7 +29,7 @@ import type {
 } from '@/types/job';
 import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
-import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
+import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { orIlikeValue } from '@/utils/searchFilter';
 import { getJobPartInvoiceSummaries } from '@/utils/quickbooksAccess';
@@ -457,14 +457,32 @@ export async function createJobFromPurchaseOrder(
     throw new Error('Each part can appear only once — combine duplicates into a single quantity.');
   }
 
-  // Pre-flight: every part must already have a routing in this company. Fail
-  // fast before writing anything (this is the "existing parts only" gate).
+  // Pre-flight (the "existing parts only" gate): only MADE parts must already
+  // have a routing. Bought parts are purchased, not manufactured — they have no
+  // routing and become a job_part with no operations (production-complete on
+  // creation), ready to ship + invoice. Fail fast only for a made part missing
+  // its routing.
   const partIds = Array.from(partLineCounts.keys());
+  const { data: partRows, error: partsErr } = await supabase
+    .from('parts')
+    .select('id, source')
+    .eq('company_id', companyId)
+    .in('id', partIds);
+  if (partsErr) {
+    console.error('Error fetching part sources:', partsErr);
+    throw partsErr;
+  }
+  const sourceByPart = new Map(
+    ((partRows ?? []) as Array<{ id: string; source: string }>).map((p) => [p.id, p.source]),
+  );
+  const isBoughtPart = (partId: string) => sourceByPart.get(partId) === 'bought';
+  const madePartIds = partIds.filter((pid) => !isBoughtPart(pid));
+
   const { data: routings, error: routingsErr } = await supabase
     .from('routings')
     .select('id, part_id')
     .eq('company_id', companyId)
-    .in('part_id', partIds);
+    .in('part_id', madePartIds);
   if (routingsErr) {
     console.error('Error fetching routings:', routingsErr);
     throw routingsErr;
@@ -473,10 +491,10 @@ export async function createJobFromPurchaseOrder(
   for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
     routingByPart.set(r.part_id, r.id);
   }
-  const missingRoutingPartIds = partIds.filter((pid) => !routingByPart.has(pid));
+  const missingRoutingPartIds = madePartIds.filter((pid) => !routingByPart.has(pid));
   if (missingRoutingPartIds.length > 0) {
     throw new Error(
-      `No routing defined for ${missingRoutingPartIds.length} part${
+      `No routing defined for ${missingRoutingPartIds.length} made part${
         missingRoutingPartIds.length === 1 ? '' : 's'
       }. Add a routing on the part before creating a job from a PO.`,
     );
@@ -557,10 +575,12 @@ export async function createJobFromPurchaseOrder(
 
   // One job_part per line carrying the agreed price; clone each part's routing
   // into job_operations + job_materials via the shared snapshot RPC.
+  const jobPartNowIso = new Date().toISOString();
   let sequence = 10;
   for (const line of lines) {
+    const isBought = isBoughtPart(line.part_id);
     const routingId = routingByPart.get(line.part_id);
-    if (!routingId) {
+    if (!isBought && !routingId) {
       throw new Error(`Routing for part ${line.part_id} disappeared mid-create.`);
     }
 
@@ -573,8 +593,11 @@ export async function createJobFromPurchaseOrder(
       quantity: line.quantity,
       unit_price: line.unit_price,
       total_price: totalPrice,
-      production_status: 'not_started',
+      // A bought part is purchased, not manufactured — no operations to run, so
+      // its production is complete on creation (ready to ship + invoice).
+      production_status: isBought ? 'completed' : 'not_started',
       fulfillment_status: 'unshipped',
+      ...(isBought ? { started_at: jobPartNowIso, completed_at: jobPartNowIso } : {}),
     };
 
     const { data: jobPart, error: jpErr } = await supabase
@@ -587,13 +610,17 @@ export async function createJobFromPurchaseOrder(
       throw jpErr;
     }
 
-    const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
-      p_job_part_id: jobPart.id,
-      p_routing_id: routingId,
-    });
-    if (rpcErr) {
-      console.error('Failed to copy operations from routing:', rpcErr);
-      throw new Error('Job created but failed to copy operations from routing.');
+    // Made parts clone their routing into operations + materials; bought parts
+    // have nothing to clone.
+    if (!isBought && routingId) {
+      const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+        p_job_part_id: jobPart.id,
+        p_routing_id: routingId,
+      });
+      if (rpcErr) {
+        console.error('Failed to copy operations from routing:', rpcErr);
+        throw new Error('Job created but failed to copy operations from routing.');
+      }
     }
 
     sequence += 10;
@@ -617,41 +644,17 @@ export interface UpdateJobPartQuantityResult {
   priceReresolved: boolean;
 }
 
-/**
- * Pricing basis for a job_part's quantity edit, read from its source quote
- * line. Null for PO-sourced jobs (no quote line) — those always keep the
- * agreed unit_price. Override / basis_unknown lines also keep their price.
- */
-export interface JobPartPricingBasis {
-  isOverride: boolean;
-  basisUnknown: boolean;
-  snapshot: PricingBasisSnapshot | null;
-}
+// JobPartPricingBasis + resolveJobPartUnitPrice moved to quotePricingResolver
+// (pure pricing, no DB deps) so UI previews can import them without pulling in
+// this DB-access module. Imported above for internal use; re-exported here for
+// existing consumers that import them from jobsAccess.
+export { resolveJobPartUnitPrice };
+export type { JobPartPricingBasis };
 
 // job_parts.total_price is numeric(12,4); round the recompute to 4dp to match
 // the convert/PO write paths (calculateTotalPrice rounds to 2dp — too coarse
 // here, it would make an edited line inconsistent with its siblings).
 const roundTotal4dp = (n: number): number => Math.round(n * 10000) / 10000;
-
-/**
- * Resolve the kept vs. tier-crossing unit price for a job_part at a new
- * quantity. Pure, so the edit modal previews it and the writer applies it
- * identically. `keepUnitPrice` is always the agreed price; `tierUnitPrice` is
- * the snapshot-resolved price, present only when the line is tier-priced
- * (not an override / basis_unknown / PO-sourced) — otherwise null.
- */
-export function resolveJobPartUnitPrice(
-  currentUnitPrice: number | null,
-  basis: JobPartPricingBasis | null,
-  newQuantity: number,
-): { keepUnitPrice: number | null; tierUnitPrice: number | null } {
-  const keepUnitPrice = currentUnitPrice;
-  if (!basis || basis.isOverride || basis.basisUnknown || !basis.snapshot) {
-    return { keepUnitPrice, tierUnitPrice: null };
-  }
-  const resolved = resolveTierFromSnapshot(basis.snapshot, newQuantity);
-  return { keepUnitPrice, tierUnitPrice: resolved ? resolved.unit_price : null };
-}
 
 /**
  * Fetch the frozen pricing basis for a job_part's edit modal, read through

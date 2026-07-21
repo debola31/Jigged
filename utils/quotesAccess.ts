@@ -16,10 +16,12 @@ import type {
   QuotePartCostBreakdown,
   QuoteLineItem,
   CompanyMember,
+  PricingBasisSnapshot,
 } from '@/types/quote';
 import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
+import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import {
   insertLineItemForPart,
@@ -1014,6 +1016,17 @@ export interface ConvertToJobOptions {
    * resolve to exactly one line per part_id or the conversion is rejected.
    */
   selectedLineItemIds?: string[];
+  /**
+   * Per-line quantity (and optional reprice) overrides, keyed by line item id.
+   * Lets the customer order a DIFFERENT quantity than quoted — partial
+   * acceptance (quote 15, order 5). The job_part records the ordered quantity
+   * while the quote line stays frozen at the quoted figure. By default the
+   * agreed unit price is KEPT; set `useTierPrice` to re-resolve the price from
+   * the line's frozen tier snapshot at the new quantity (mirrors
+   * updateJobPartQuantity's opt-in reprice). Lines without an override keep
+   * their quoted quantity + price.
+   */
+  lineOverrides?: Record<string, { quantity: number; useTierPrice?: boolean }>;
 }
 
 export interface ConvertToJobResult {
@@ -1126,7 +1139,8 @@ export async function convertQuoteToJob(
       *,
       line_items:quote_line_items (
         id, quote_id, company_id, part_id, source_tier_id, sequence,
-        quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at
+        quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at,
+        is_quote_override, basis_unknown, pricing_basis_snapshot
       )
     `)
     .eq('id', quoteId)
@@ -1302,6 +1316,35 @@ export async function convertQuoteToJob(
       throw new Error(`Routing for part ${li.part_id} disappeared mid-conversion.`);
     }
 
+    // Partial acceptance: the customer may order a different quantity than
+    // quoted. Default to the quoted qty + price; an override reprices exactly
+    // like updateJobPartQuantity (keep the agreed price unless useTierPrice
+    // opts into the snapshot's tier price at the new qty). The quote line itself
+    // stays frozen — only the job_part carries the ordered figures.
+    const override = options.lineOverrides?.[li.id];
+    let orderedQty = li.quantity;
+    let orderedUnitPrice: number | null = li.unit_price;
+    if (override) {
+      if (!Number.isFinite(override.quantity) || override.quantity <= 0) {
+        throw new Error('Ordered quantity must be a number greater than zero.');
+      }
+      orderedQty = override.quantity;
+      const basis: JobPartPricingBasis = {
+        isOverride: li.is_quote_override ?? false,
+        basisUnknown: li.basis_unknown ?? false,
+        snapshot: (li.pricing_basis_snapshot as PricingBasisSnapshot | null) ?? null,
+      };
+      const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(
+        li.unit_price,
+        basis,
+        orderedQty,
+      );
+      orderedUnitPrice =
+        override.useTierPrice && tierUnitPrice !== null ? tierUnitPrice : keepUnitPrice;
+    }
+    const orderedTotal =
+      orderedUnitPrice != null ? Math.round(orderedUnitPrice * orderedQty * 10000) / 10000 : null;
+
     const { data: jobPart, error: jpErr } = await supabase
       .from('job_parts')
       .insert({
@@ -1310,14 +1353,13 @@ export async function convertQuoteToJob(
         part_id: li.part_id,
         source_quote_line_item_id: li.id,
         sequence,
-        quantity: li.quantity,
-        // Copy the quoted price onto the job_part so the invoice read path is
-        // single-shaped (job_parts.unit_price) for both quote- and PO-sourced
-        // jobs — no "quote line vs job_part" branching. Mirrors the backfill in
-        // 20260621162024_add_job_part_pricing.sql.
-        unit_price: li.unit_price,
-        total_price:
-          li.total_price ?? (li.unit_price != null ? li.unit_price * li.quantity : null),
+        quantity: orderedQty,
+        // Copy the (possibly repriced) price onto the job_part so the invoice
+        // read path is single-shaped (job_parts.unit_price) for both quote- and
+        // PO-sourced jobs — no "quote line vs job_part" branching. Mirrors the
+        // backfill in 20260621162024_add_job_part_pricing.sql.
+        unit_price: orderedUnitPrice,
+        total_price: orderedTotal,
         production_status: 'not_started',
         fulfillment_status: 'unshipped',
       })
@@ -1350,7 +1392,7 @@ export async function convertQuoteToJob(
     partsCreated.push({
       id: jobPart.id,
       part_id: jobPart.part_id,
-      quantity: li.quantity,
+      quantity: orderedQty,
       source_quote_line_item_id: li.id,
     });
 

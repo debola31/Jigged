@@ -130,6 +130,45 @@ describe('ConvertToJobModal — per-part selection (multiple jobs/POs per quote)
   });
 });
 
+describe('ConvertToJobModal — partial quantity acceptance', () => {
+  it('lets you order fewer than quoted (10 → 5) and passes the quantity override', async () => {
+    const { convertQuoteToJob } = await import('@/utils/quotesAccess');
+    (convertQuoteToJob as ReturnType<typeof vi.fn>).mockResolvedValue({
+      job: { id: 'job1', job_number: 'J-100', parts: [] },
+    });
+
+    render(
+      wrap(
+        <ConvertToJobModal
+          open
+          onClose={vi.fn()}
+          onConverted={vi.fn()}
+          quote={quote()}
+          conversions={[]}
+        />,
+      ),
+    );
+
+    // Quoted qty pre-fills to 10; the customer orders 5.
+    const qty = screen.getByLabelText(/order qty/i) as HTMLInputElement;
+    await waitFor(() => expect(qty.value).toBe('10'));
+    fireEvent.change(qty, { target: { value: '5' } });
+
+    fireEvent.change(screen.getByLabelText(/due date/i), { target: { value: '2030-01-01' } });
+    await userEvent.type(poField(), 'PO-1');
+    await userEvent.click(screen.getByRole('button', { name: /create j-100/i }));
+
+    await waitFor(() =>
+      expect(convertQuoteToJob).toHaveBeenCalledWith(
+        'q1',
+        expect.objectContaining({
+          lineOverrides: { li1: { quantity: 5, useTierPrice: false } },
+        }),
+      ),
+    );
+  });
+});
+
 describe('ConvertToJobModal — no premature error on the empty due date', () => {
   it('does not show a red "required" error on the untouched due date; Create stays disabled', async () => {
     const base = { open: true, onClose: vi.fn(), onConverted: vi.fn(), quote: quote() };

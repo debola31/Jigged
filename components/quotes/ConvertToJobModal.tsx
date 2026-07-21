@@ -21,9 +21,34 @@ import Checkbox from '@mui/material/Checkbox';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob, type QuoteLineConversion } from '@/utils/quotesAccess';
+import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { unitShortLabel } from '@/lib/standardUnits';
 import { uploadJobAttachment } from '@/utils/jobAttachmentsAccess';
 import AttachmentUploadField from '@/components/jobs/AttachmentUploadField';
+
+/** Parse a positive-number quantity input, or null if blank/invalid. */
+function parseQty(s: string | undefined): number | null {
+  if (s == null || s.trim() === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Repriced order figures for a line at a (possibly changed) quantity. */
+function priceLineAtQty(
+  line: QuoteLineItem,
+  qty: number,
+  useTierPrice: boolean,
+): { unitPrice: number | null; total: number | null; tierPrice: number | null } {
+  const basis: JobPartPricingBasis = {
+    isOverride: line.is_quote_override ?? false,
+    basisUnknown: line.basis_unknown ?? false,
+    snapshot: line.pricing_basis_snapshot ?? null,
+  };
+  const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(line.unit_price, basis, qty);
+  const unitPrice = useTierPrice && tierUnitPrice !== null ? tierUnitPrice : keepUnitPrice;
+  const total = unitPrice != null ? Math.round(unitPrice * qty * 100) / 100 : null;
+  return { unitPrice, total, tierPrice: tierUnitPrice };
+}
 
 interface ConvertToJobModalProps {
   open: boolean;
@@ -147,11 +172,23 @@ export default function ConvertToJobModal({
   // covers; unchecked parts stay on the quote for a later job. Defaults to all-in
   // (the common case: one PO for the whole quote is a single click).
   const [includedByPart, setIncludedByPart] = useState<Record<string, boolean>>({});
+  // part_id → the ORDERED quantity for this job (editable string). Defaults to
+  // the quoted quantity; the customer can order fewer/more (partial acceptance).
+  // Only single-quantity parts expose the field — a price-options part picks a
+  // presented quantity via its radios.
+  const [qtyByPart, setQtyByPart] = useState<Record<string, string>>({});
+  // part_id → opt into the tier price re-resolved at the ordered quantity (vs
+  // keeping the agreed price). Mirrors updateJobPartQuantity's useNewTierPrice.
+  const [useTierByPart, setUseTierByPart] = useState<Record<string, boolean>>({});
   const includedGroups = partGroups.filter((g) => includedByPart[g.part_id]);
   const anyIncluded = includedGroups.length > 0;
   // Every INCLUDED part must resolve to one quantity (single-qty auto-picks; a
   // price-options part needs a deliberate choice).
   const allIncludedChosen = includedGroups.every((g) => !!selectedByPart[g.part_id]);
+  // Every INCLUDED single-quantity part must have a valid (>0) ordered quantity.
+  const allQtysValid = includedGroups.every(
+    (g) => g.items.length > 1 || parseQty(qtyByPart[g.part_id]) !== null,
+  );
 
   // Reset the form each time the modal opens (house convention: onEnter,
   // not a reset useEffect, which would trip set-state-in-effect).
@@ -164,12 +201,18 @@ export default function ConvertToJobModal({
     setError(null);
     const initialSel: Record<string, string> = {};
     const initialInc: Record<string, boolean> = {};
+    const initialQty: Record<string, string> = {};
     for (const g of partGroups) {
       initialInc[g.part_id] = true; // default: this PO covers the whole quote
-      if (g.items.length === 1) initialSel[g.part_id] = g.items[0].id;
+      if (g.items.length === 1) {
+        initialSel[g.part_id] = g.items[0].id;
+        initialQty[g.part_id] = String(g.items[0].quantity); // default = quoted qty
+      }
     }
     setSelectedByPart(initialSel);
     setIncludedByPart(initialInc);
+    setQtyByPart(initialQty);
+    setUseTierByPart({});
   };
 
   // Due date is mandatory and may not be in the past — a job created today
@@ -205,10 +248,21 @@ export default function ConvertToJobModal({
       const selectedLineItemIds = includedGroups
         .map((g) => selectedByPart[g.part_id])
         .filter((id): id is string => !!id);
+      // Per-line quantity/reprice overrides for single-quantity parts whose
+      // ordered qty (or tier opt-in) differs from the quote. Price-options parts
+      // convert at their selected presented quantity (no override).
+      const lineOverrides: Record<string, { quantity: number; useTierPrice?: boolean }> = {};
+      for (const g of includedGroups) {
+        if (g.items.length !== 1) continue;
+        const q = parseQty(qtyByPart[g.part_id]);
+        if (q === null) continue;
+        lineOverrides[g.items[0].id] = { quantity: q, useTierPrice: !!useTierByPart[g.part_id] };
+      }
       const result = await convertQuoteToJob(quote.id, {
         dueDate: dueDateInput,
         customerPoNumber: customerPoInput,
         selectedLineItemIds,
+        lineOverrides,
       });
       // Attach the PO PDF if one was staged — non-fatal. On failure keep the
       // modal open with an "Open Job" action so the new job isn't lost.
@@ -340,19 +394,78 @@ export default function ConvertToJobModal({
                       inputProps={{ 'aria-label': `Include ${group.part_name}` }}
                     />
                     {group.items.length === 1 ? (
-                      <Box>
-                        <Typography variant="body2" fontWeight={600}>
-                          {group.part_name}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {group.items[0].quantity} {group.unit} @{' '}
-                          {formatCurrency(group.items[0].unit_price)} ={' '}
-                          {formatCurrency(
-                            group.items[0].total_price ??
-                              group.items[0].unit_price * group.items[0].quantity,
-                          )}
-                        </Typography>
-                      </Box>
+                      (() => {
+                        const line = group.items[0];
+                        const orderedQty = parseQty(qtyByPart[group.part_id]);
+                        const useTier = !!useTierByPart[group.part_id];
+                        const priced =
+                          orderedQty !== null
+                            ? priceLineAtQty(line, orderedQty, useTier)
+                            : { unitPrice: null, total: null, tierPrice: null };
+                        const qtyChanged = orderedQty !== null && orderedQty !== line.quantity;
+                        // A tier price only differs from the kept price on a
+                        // multi-tier line whose qty crossed a break.
+                        const tierDiffers =
+                          priced.tierPrice !== null && priced.tierPrice !== line.unit_price;
+                        return (
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" fontWeight={600}>
+                              {group.part_name}
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                              <TextField
+                                size="small"
+                                label="Order qty"
+                                value={qtyByPart[group.part_id] ?? ''}
+                                onChange={(e) =>
+                                  setQtyByPart((prev) => ({
+                                    ...prev,
+                                    [group.part_id]: e.target.value,
+                                  }))
+                                }
+                                disabled={!included}
+                                inputMode="decimal"
+                                error={included && orderedQty === null}
+                                sx={{ width: 110 }}
+                                slotProps={{ inputLabel: { shrink: true } }}
+                              />
+                              <Typography variant="body2" color="text.secondary">
+                                {group.unit} @ {formatCurrency(priced.unitPrice)} ={' '}
+                                {formatCurrency(priced.total)}
+                              </Typography>
+                            </Box>
+                            {qtyChanged && (
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                                Quoted {line.quantity} {group.unit}
+                                {tierDiffers ? '' : ' — price kept from the quote'}
+                              </Typography>
+                            )}
+                            {included && tierDiffers && (
+                              <FormControlLabel
+                                sx={{ mt: 0.25 }}
+                                control={
+                                  <Checkbox
+                                    size="small"
+                                    checked={useTier}
+                                    onChange={(e) =>
+                                      setUseTierByPart((prev) => ({
+                                        ...prev,
+                                        [group.part_id]: e.target.checked,
+                                      }))
+                                    }
+                                  />
+                                }
+                                label={
+                                  <Typography variant="caption" color="text.secondary">
+                                    Reprice to the qty-{orderedQty} tier (
+                                    {formatCurrency(priced.tierPrice)}/{group.unit})
+                                  </Typography>
+                                }
+                              />
+                            )}
+                          </Box>
+                        );
+                      })()
                     ) : (
                       <FormControl disabled={!included}>
                         <FormLabel sx={{ fontWeight: 600, color: 'text.primary' }}>
@@ -460,6 +573,7 @@ export default function ConvertToJobModal({
               !anyIncluded ||
               !dueDateValid ||
               !allIncludedChosen ||
+              !allQtysValid ||
               !poValid
             }
             startIcon={loading ? <CircularProgress size={20} /> : null}

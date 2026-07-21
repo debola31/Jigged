@@ -29,7 +29,7 @@ import type {
 } from '@/types/job';
 import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
-import { resolveTierFromSnapshot } from '@/utils/quotePricingResolver';
+import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { orIlikeValue } from '@/utils/searchFilter';
 import { getJobPartInvoiceSummaries } from '@/utils/quickbooksAccess';
@@ -617,41 +617,17 @@ export interface UpdateJobPartQuantityResult {
   priceReresolved: boolean;
 }
 
-/**
- * Pricing basis for a job_part's quantity edit, read from its source quote
- * line. Null for PO-sourced jobs (no quote line) — those always keep the
- * agreed unit_price. Override / basis_unknown lines also keep their price.
- */
-export interface JobPartPricingBasis {
-  isOverride: boolean;
-  basisUnknown: boolean;
-  snapshot: PricingBasisSnapshot | null;
-}
+// JobPartPricingBasis + resolveJobPartUnitPrice moved to quotePricingResolver
+// (pure pricing, no DB deps) so UI previews can import them without pulling in
+// this DB-access module. Imported above for internal use; re-exported here for
+// existing consumers that import them from jobsAccess.
+export { resolveJobPartUnitPrice };
+export type { JobPartPricingBasis };
 
 // job_parts.total_price is numeric(12,4); round the recompute to 4dp to match
 // the convert/PO write paths (calculateTotalPrice rounds to 2dp — too coarse
 // here, it would make an edited line inconsistent with its siblings).
 const roundTotal4dp = (n: number): number => Math.round(n * 10000) / 10000;
-
-/**
- * Resolve the kept vs. tier-crossing unit price for a job_part at a new
- * quantity. Pure, so the edit modal previews it and the writer applies it
- * identically. `keepUnitPrice` is always the agreed price; `tierUnitPrice` is
- * the snapshot-resolved price, present only when the line is tier-priced
- * (not an override / basis_unknown / PO-sourced) — otherwise null.
- */
-export function resolveJobPartUnitPrice(
-  currentUnitPrice: number | null,
-  basis: JobPartPricingBasis | null,
-  newQuantity: number,
-): { keepUnitPrice: number | null; tierUnitPrice: number | null } {
-  const keepUnitPrice = currentUnitPrice;
-  if (!basis || basis.isOverride || basis.basisUnknown || !basis.snapshot) {
-    return { keepUnitPrice, tierUnitPrice: null };
-  }
-  const resolved = resolveTierFromSnapshot(basis.snapshot, newQuantity);
-  return { keepUnitPrice, tierUnitPrice: resolved ? resolved.unit_price : null };
-}
 
 /**
  * Fetch the frozen pricing basis for a job_part's edit modal, read through

@@ -268,7 +268,9 @@ Email action on the detail page.)
 
 **Modal Content:**
 
-Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. Each remaining part has a **checkbox** deciding whether it goes on *this* job/PO. **All boxes start checked** — so the common case (one PO for the whole quote) is a single click — but the user can uncheck parts to leave them on the quote for a later job under a different PO. A part with several quantities (a price-options quote) renders a radio group — one radio per quoted quantity — so the salesperson also picks the accepted quantity (disabled while its box is unchecked):
+Parts already on a job are shown read-only at the top ("Already on a job: Part — Job J-0002 (PO 5567)") and excluded from selection — this pass only offers the **remaining** parts. Each remaining part has a **checkbox** deciding whether it goes on *this* job/PO. **All boxes start checked** — so the common case (one PO for the whole quote) is a single click — but the user can uncheck parts to leave them on the quote for a later job under a different PO.
+
+**Partial-quantity acceptance.** A single-quantity part shows an **editable Order qty field** (pre-filled with the quoted quantity). The customer can accept a *different* quantity than quoted — quote 15, order 5 — and the job records the ordered figure while the quote line stays frozen. By **default the agreed unit price is kept** (frozen-pricing philosophy); if the new quantity crosses a break in the line's frozen tier snapshot, a **"Reprice to the qty-N tier ($X)"** opt-in appears — the same keep-vs-reprice choice `updateJobPartQuantity` offers post-conversion, so at-conversion and on-job edits behave identically (shared `resolveJobPartUnitPrice`). A part with several quantities (a price-options quote) instead renders a radio group — one radio per quoted quantity — so the salesperson picks the accepted quantity (disabled while its box is unchecked):
 
 ```
 ☑ Holder — choose quantity
@@ -277,13 +279,13 @@ Parts already on a job are shown read-only at the top ("Already on a job: Part �
     ◉ 25 ea @ $16.00 = $400.00
 
 ☑ Clamp
-    100 ea @ $9.00 = $900.00     (single quantity)
+    [ 5 ] ea @ $9.00 = $45.00     (Order qty editable; quoted 100)
 
 ☐ Bracket                         (unchecked — stays on the quote for the next PO)
     40 ea @ $3.00 = $120.00
 ```
 
-The header shows "Parts on this job: {checked} of {remaining}". This is the user journey for **multiple jobs per quote**: check the parts covered by the first PO → set that PO# + due date → **Create** the job; the quote then shows **Create Another Job**, and reopening the modal offers whatever is still unchecked/unconverted for the next PO.
+The header shows "Parts on this job: {checked} of {remaining}". This is the user journey for **multiple jobs per quote**: check the parts covered by the first PO, adjust each ordered quantity → set that PO# + due date → **Create** the job; the quote then shows **Create Another Job**, and reopening the modal offers whatever is still unchecked/unconverted for the next PO.
 
 Multi-quantity parts start with **no** radio selected; the user must pick deliberately. A **required Due date** — a not-in-the-past date picker that starts **empty** (no prefill; the user types the job's due date, which is no longer derived from lead time) — and a **required Customer PO #** are captured here — the PO is the work-order authorization, so a job cannot be created without it. An **optional PO PDF** can also be attached; it uploads to the new job after conversion (see [Jobs](jobs.md) → Attachments) and is non-fatal if the upload fails.
 
@@ -487,7 +489,7 @@ If the salesperson quotes this part at quantities 1, 2, and 4, three `quote_line
 3. Pre-flight: every part being converted must have a routing, else fail before any write.
 4. Use the **required** due date passed from the modal — rejected if empty and it must not be in the past. It is written straight to the job and is **no longer derived from lead time**. **Reject if no `customer_po_number` is provided** — the PO is captured as a required, non-empty value, never coerced to NULL.
 5. Insert **one** `jobs` row carrying `quote_id`, `customer_id`, `due_date`, `customer_po_number`, `production_status = 'not_started'`. Job number: the mirror `Q-NNNN → J-NNNN` when free (the first, common case), otherwise a fresh `J-N` from `generate_direct_job_number` (a later PO, or a mirror already held by a since-archived job).
-6. For each resolved line, insert a `job_parts` row (`part_id`, `quantity = line.quantity`, `source_quote_line_item_id = line.id`) and clone the part's routing via the `create_job_part_operations_from_routing(job_part_id, routing_id)` RPC.
+6. For each resolved line, insert a `job_parts` row (`part_id`, `quantity`, `source_quote_line_item_id = line.id`) and clone the part's routing via the `create_job_part_operations_from_routing(job_part_id, routing_id)` RPC. **`quantity` defaults to `line.quantity` but honors an `options.lineOverrides[line.id].quantity`** (partial acceptance — order fewer/more than quoted). Price defaults to the agreed `line.unit_price`; when the override sets `useTierPrice`, it re-resolves from the line's `pricing_basis_snapshot` at the ordered qty via the shared `resolveJobPartUnitPrice`. `total_price` is `unit × qty` (4dp). Overridden quantities must be `> 0`.
 7. Stamp `quote.converted_at` only on the **first** conversion (status unchanged); the quote keeps all its line items as the record of every option offered.
 8. Return `{ quote, job: { id, job_number, parts: [{ id, part_id, quantity, source_quote_line_item_id }, …] } }`.
 
@@ -553,6 +555,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 - [ ] Modal groups the quote's lines by part; a multi-quantity part shows a radio per quoted quantity — *(automation-pending)*
 
 - [ ] Each remaining part has an include checkbox (checked by default); unchecking it leaves the part on the quote for a later PO, and only checked parts convert — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'per-part selection (multiple jobs/POs per quote)' > 'converts only the checked parts, leaving the rest for a later PO'`*.
+- [ ] A single-quantity part's Order qty is editable (partial acceptance); ordering fewer than quoted passes a quantity override and the job records the ordered figure — *verified by `__tests__/components/quotes/ConvertToJobModal.test.tsx > 'partial quantity acceptance' > 'lets you order fewer than quoted (10 → 5) and passes the quantity override'`*.
 
 - [ ] Convert button stays disabled until every multi-quantity part has a quantity selected — *(automation-pending)*
 

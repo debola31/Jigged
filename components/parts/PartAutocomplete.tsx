@@ -154,34 +154,26 @@ export default function PartAutocomplete({
             component="li"
             {...rest}
             key={key as React.Key}
-            // MUI styles the option <li> as display:flex (row), which runs the
-            // part name straight into its description ("ASM-GEARBOXGearbox…").
-            // Stack them so the name sits above its description as a clear label
-            // + subtext.
-            sx={{
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              gap: 0.25,
-            }}
+            // Keep MUI's single-row option layout; the part name and its
+            // description previously ran together ("ASM-GEARBOXGearbox…") because
+            // there was no gap. A gap + a shrinking, truncating description gives
+            // clear demarcation on one line — the name bold, the description muted.
+            sx={{ gap: 1.5, minWidth: 0 }}
           >
             <Typography
+              component="span"
               variant="body2"
-              sx={{ fontWeight: 500, color: isCreate ? 'primary.main' : undefined }}
+              sx={{ fontWeight: 600, flexShrink: 0, color: isCreate ? 'primary.main' : undefined }}
             >
               {option.part_name}
             </Typography>
             {!isCreate && (option as PartSelectOption).description && (
               <Typography
-                variant="caption"
+                component="span"
+                variant="body2"
                 color="text.secondary"
-                sx={{
-                  display: 'block',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
+                noWrap
+                sx={{ minWidth: 0 }}
               >
                 {(option as PartSelectOption).description}
               </Typography>

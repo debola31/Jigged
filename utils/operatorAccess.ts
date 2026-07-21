@@ -983,7 +983,7 @@ export async function getJobPartsOverview(
 // Each note carries its optional step tag (job_operations) and its media so the
 // feed renders thumbnails without a second round-trip.
 const JOB_NOTE_SELECT =
-  'id, job_id, job_operation_id, body, created_at, ' +
+  'id, job_id, job_operation_id, body, note_type, created_at, ' +
   'author:user_company_access(name), ' +
   'operation:job_operations(operation_name, sequence), ' +
   'media:job_note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
@@ -993,6 +993,7 @@ type JobNoteRow = {
   job_id: string;
   job_operation_id: string | null;
   body: string | null;
+  note_type: string | null;
   created_at: string;
   author: { name: string | null } | { name: string | null }[] | null;
   operation:
@@ -1035,6 +1036,7 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
     job_operation_id: n.job_operation_id,
     operation_label: operationLabel,
     body: n.body,
+    note_type: n.note_type === 'event' ? 'event' : 'user',
     created_at: n.created_at,
     author_name: author?.name ?? null,
     media,

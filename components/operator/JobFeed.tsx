@@ -48,6 +48,47 @@ interface JobFeedProps {
   readOnly?: boolean;
   /** Set on the operation page to show the composer + auto-tag captures. */
   operationContext?: JobFeedOperationContext;
+  /**
+   * Bumped by the operation page each time a step is completed. On a *new*
+   * value, if the composer is active and the operator hasn't captured anything
+   * on this job yet, we show a one-time "add a photo/note?" offer. Completion
+   * has already been persisted before this changes, so the offer is purely
+   * additive and never blocks or risks the completion. Ignored when 0/undefined.
+   */
+  captureOfferSignal?: number;
+}
+
+// --- Dictation (keyboard-mic) hint: a quiet, contextual, capped one-liner. ---
+// Shown in the composer where operators type notes; capped so repeat users don't
+// get nagged (the documented failure mode of built-in tips). Per-device, since
+// the subject is the device's own keyboard mic.
+const MIC_HINT_KEY = 'jigged:composer-mic-hint';
+const MIC_HINT_MAX_SHOWS = 3;
+
+interface MicHintState {
+  shows: number;
+  dismissed: boolean;
+}
+
+function readMicHint(): MicHintState {
+  if (typeof window === 'undefined') return { shows: 0, dismissed: true };
+  try {
+    const raw = window.localStorage.getItem(MIC_HINT_KEY);
+    if (!raw) return { shows: 0, dismissed: false };
+    const parsed = JSON.parse(raw) as Partial<MicHintState>;
+    return { shows: Number(parsed.shows) || 0, dismissed: !!parsed.dismissed };
+  } catch {
+    return { shows: 0, dismissed: false };
+  }
+}
+
+function writeMicHint(state: MicHintState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(MIC_HINT_KEY, JSON.stringify(state));
+  } catch {
+    /* private mode / quota — the hint is best-effort, never block on it */
+  }
 }
 
 function formatTimestamp(value: string): string {
@@ -74,7 +115,13 @@ interface PendingPhoto {
  * auto-tagged to the step) and read on both the operation page and the traveler.
  * Listing is a plain Supabase read (no AI on mount).
  */
-export default function JobFeed({ jobId, companyId, readOnly, operationContext }: JobFeedProps) {
+export default function JobFeed({
+  jobId,
+  companyId,
+  readOnly,
+  operationContext,
+  captureOfferSignal,
+}: JobFeedProps) {
   const [error, setError] = useState<string | null>(null);
   // Notes posted optimistically (prepended before the next full load). Deduped
   // out of the merged list once they show up in a fresh load by id.
@@ -91,7 +138,17 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
   // Full-size viewer.
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
+  // Post-completion "add a photo/note?" offer + the dictation hint.
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [showMicHint, setShowMicHint] = useState(false);
+  const offerRef = useRef<HTMLDivElement | null>(null);
+  const lastOfferSignal = useRef<number | undefined>(undefined);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const noteFieldRef = useRef<HTMLInputElement | null>(null);
+  // Monotonic id source for pending picks — avoids the id collisions that
+  // Date.now()+filename produced for rapid same-name camera captures.
+  const pendingIdRef = useRef(0);
 
   const showComposer = !readOnly && !!operationContext;
 
@@ -115,6 +172,19 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
     return [...stillPending, ...loadedNotes];
   }, [loadedNotes, pendingNotes]);
 
+  // Has the operator captured anything real on this job yet? Only human 'user'
+  // notes with text or a photo count — auto-logged 'event' notes (e.g. the
+  // order-qty audit trail) must NOT suppress the offer.
+  const hasUserCapture = useMemo(
+    () =>
+      notes.some(
+        (n) =>
+          n.note_type === 'user' &&
+          ((n.body?.trim().length ?? 0) > 0 || n.media.length > 0),
+      ),
+    [notes],
+  );
+
   useEffect(() => {
     if (!showComposer) return;
     let active = true;
@@ -125,6 +195,34 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
       active = false;
     };
   }, [showComposer, companyId]);
+
+  // Post-completion capture offer: fire ONCE per completion event. Only react to
+  // a *new* signal value (ignore the initial undefined/0), and only offer when
+  // the composer is active and nothing has been captured yet. The parent bumps
+  // the signal strictly after completeOperation resolves, so completion is
+  // already durable — a client death while this is open loses nothing.
+  useEffect(() => {
+    if (!captureOfferSignal) return;
+    if (captureOfferSignal === lastOfferSignal.current) return;
+    lastOfferSignal.current = captureOfferSignal;
+    if (showComposer && !hasUserCapture) setOfferOpen(true);
+  }, [captureOfferSignal, showComposer, hasUserCapture]);
+
+  // Scroll the offer into view when it opens (it sits above a composer that may
+  // be below the fold on a phone).
+  useEffect(() => {
+    if (offerOpen) offerRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+  }, [offerOpen]);
+
+  // Decide the dictation hint once per composer mount, counting the show. Shown
+  // while not dismissed and under the cap; increments the stored show count.
+  useEffect(() => {
+    if (!showComposer) return;
+    const state = readMicHint();
+    if (state.dismissed || state.shows >= MIC_HINT_MAX_SHOWS) return;
+    setShowMicHint(true);
+    writeMicHint({ shows: state.shows + 1, dismissed: false });
+  }, [showComposer]);
 
   // Fetch signed URLs for any media we don't already have a URL for.
   useEffect(() => {
@@ -160,19 +258,44 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handlePickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = '';
+  const handlePickPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const files = Array.from(input.files ?? []);
+    input.value = '';
     if (files.length === 0) return;
     setComposerError(null);
-    setPending((prev) => [
-      ...prev,
-      ...files.map((file, i) => ({
-        id: `${Date.now()}-${i}-${file.name}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      })),
-    ]);
+
+    // iOS "new photo → nothing attached" mitigation (UNCONFIRMED — see PR notes;
+    // not reproducible on desktop). A camera-origin `File` can become unreadable
+    // by the time it's compressed/uploaded at Post, yielding a zero-byte blob.
+    // Copy the bytes into a stable File *now*, while the reference is fresh, and
+    // drop any pick that reads back empty rather than silently posting nothing.
+    const prepared: PendingPhoto[] = [];
+    for (const file of files) {
+      let stable = file;
+      try {
+        const buf = await file.arrayBuffer();
+        stable = new File([buf], file.name || 'photo.jpg', {
+          type: file.type || 'image/jpeg',
+          lastModified: file.lastModified,
+        });
+      } catch {
+        // Copy failed — fall through with the original reference and the size
+        // guard below decides whether it's usable.
+      }
+      if (stable.size === 0) continue;
+      prepared.push({
+        id: `pp-${pendingIdRef.current++}`,
+        file: stable,
+        previewUrl: URL.createObjectURL(stable),
+      });
+    }
+
+    if (prepared.length === 0) {
+      setComposerError('That photo could not be read. Please try taking or picking it again.');
+      return;
+    }
+    setPending((prev) => [...prev, ...prepared]);
   };
 
   const removePending = (id: string) => {
@@ -181,6 +304,25 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
       if (target) URL.revokeObjectURL(target.previewUrl);
       return prev.filter((p) => p.id !== id);
     });
+  };
+
+  // Offer actions. "Add photo" is the prominent path (the observed failure was
+  // photos stuck in the camera roll): close the offer and open the picker, which
+  // now surfaces the photo library too. "Add note" focuses the composer; "Skip"
+  // just dismisses. All three are terminal for this completion event.
+  const handleOfferAddPhoto = () => {
+    setOfferOpen(false);
+    fileInputRef.current?.click();
+  };
+  const handleOfferAddNote = () => {
+    setOfferOpen(false);
+    noteFieldRef.current?.focus();
+  };
+  const handleOfferSkip = () => setOfferOpen(false);
+
+  const dismissMicHint = () => {
+    setShowMicHint(false);
+    writeMicHint({ ...readMicHint(), dismissed: true });
   };
 
   const canPost = (noteDraft.trim().length > 0 || pending.length > 0) && !saving;
@@ -244,6 +386,50 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
 
         {showComposer && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+            {offerOpen && (
+              <Box
+                ref={offerRef}
+                sx={{
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'primary.main',
+                  bgcolor: 'rgba(99, 102, 241, 0.10)',
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  <Typography variant="body2" sx={{ flex: 1 }}>
+                    Step complete. Got a setup photo or a note? Add it before you go —
+                    it stays with the job.
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    aria-label="Dismiss"
+                    onClick={handleOfferSkip}
+                    sx={{ mt: -0.5, mr: -0.5 }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<PhotoCameraIcon />}
+                    onClick={handleOfferAddPhoto}
+                    sx={{ minHeight: 44 }}
+                  >
+                    Add photo
+                  </Button>
+                  <Button variant="text" onClick={handleOfferAddNote} sx={{ minHeight: 44 }}>
+                    Add note
+                  </Button>
+                  <Box sx={{ flex: 1 }} />
+                  <Button variant="text" color="inherit" onClick={handleOfferSkip} sx={{ minHeight: 44 }}>
+                    Skip
+                  </Button>
+                </Box>
+              </Box>
+            )}
             {operationContext?.operationLabel && (
               <Typography variant="caption" color="text.secondary">
                 Adding to {operationContext.operationLabel}
@@ -255,9 +441,26 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
               placeholder="Add a note or photo for this step…"
               value={noteDraft}
               onChange={(e) => setNoteDraft(e.target.value)}
+              inputRef={noteFieldRef}
               fullWidth
               size="small"
             />
+
+            {showMicHint && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+                  ※ Tip: tap the 🎤 on your keyboard to talk instead of type.
+                </Typography>
+                <IconButton
+                  size="small"
+                  aria-label="Dismiss tip"
+                  onClick={dismissMicHint}
+                  sx={{ p: 0.25 }}
+                >
+                  <CloseIcon sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Box>
+            )}
 
             {pending.length > 0 && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
@@ -296,11 +499,16 @@ export default function JobFeed({ jobId, companyId, readOnly, operationContext }
 
             {composerError && <Alert severity="error">{composerError}</Alert>}
 
+            {/* No `capture` attribute: on iOS/Android this makes the OS present
+                the full native sheet (Photo Library / Take Photo / Choose File),
+                so operators can attach an EXISTING photo from the camera roll —
+                the observed failure mode was setup photos stuck in the roll —
+                not only shoot a new one. `capture="environment"` would force the
+                camera and hide the library. */}
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               hidden
               onChange={handlePickPhotos}

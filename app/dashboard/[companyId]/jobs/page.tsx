@@ -41,6 +41,7 @@ import type {
   ICellRendererParams,
   RowClickedEvent,
   CellKeyDownEvent,
+  PostSortRowsParams,
 } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -58,6 +59,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddIcon from '@mui/icons-material/Add';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import AcceptPurchaseOrderModal from '@/components/jobs/AcceptPurchaseOrderModal';
+import JobHotBadge from '@/components/jobs/JobHotBadge';
 import type { JobWithRelations, JobFilters, JobLifecycleStage } from '@/types/job';
 
 /**
@@ -294,6 +296,20 @@ export default function JobsPage() {
     }
   };
 
+  // Hot jobs always float to the top, regardless of which column the user sorts
+  // by. AG Grid's client-side row model re-sorts rows itself, so a server-side
+  // ORDER BY alone wouldn't survive a column-header sort — postSortRows runs
+  // after every sort and stable-partitions hot rows to the top, keeping the
+  // user's chosen sort within each tier.
+  const handlePostSortRows = (params: PostSortRowsParams<JobWithRelations>) => {
+    const nodes = params.nodes;
+    const hot = nodes.filter((n) => n.data?.is_hot);
+    if (hot.length === 0 || hot.length === nodes.length) return;
+    const rest = nodes.filter((n) => !n.data?.is_hot);
+    nodes.length = 0;
+    nodes.push(...hot, ...rest);
+  };
+
   const handleSelectionChanged = (event: SelectionChangedEvent<JobWithRelations>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
@@ -389,7 +405,10 @@ export default function JobsPage() {
         const ms = params.data?.match_source ?? null;
         return (
           <Box sx={{ lineHeight: 1.2 }}>
-            <Box>{params.value}</Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <span>{params.value}</span>
+              {params.data && <JobHotBadge job={params.data} size="small" />}
+            </Box>
             {ms && (
               <Box
                 sx={{
@@ -704,6 +723,12 @@ export default function JobsPage() {
               minHeight: 500,
               '& .ag-root-wrapper': { border: 'none' },
               '& .ag-row': { cursor: 'pointer' },
+              // Hot rows get a subtle red wash + left accent bar so the whole row
+              // reads as rush at a glance, echoing pink-paper travelers.
+              '& .ag-row.job-row-hot': {
+                backgroundColor: 'rgba(239, 68, 68, 0.10)',
+                boxShadow: 'inset 3px 0 0 0 #ef4444',
+              },
               '& .ag-cell:focus, & .ag-header-cell:focus': {
                 outline: 'none !important',
                 border: 'none !important',
@@ -736,6 +761,8 @@ export default function JobsPage() {
               suppressPaginationPanel={false}
               domLayout="normal"
               onSortChanged={handleSortChanged}
+              postSortRows={handlePostSortRows}
+              getRowClass={(params) => (params.data?.is_hot ? 'job-row-hot' : '')}
               onGridReady={handleGridReady}
               loading={loading}
               suppressCellFocus={false}

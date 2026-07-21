@@ -143,8 +143,28 @@ export async function generateJobTravelerPdf(
   doc.setTextColor(60);
   doc.text(`Job ${traveler.job_number}`, pageWidth - MARGIN, headerTop + 36, { align: 'right' });
 
+  // ---------- HOT stamp (right, below the Job #) ----------
+  // The paperless equivalent of Contour's pink paper / "HOT" in red pen. A pure
+  // color would vanish in grayscale printing, so this is a SOLID dark rounded
+  // rect with reversed (white) bold text — unmistakable in black-and-white.
+  let hotStampBottom = headerTop + 36;
+  if (traveler.is_hot) {
+    const stampW = 78;
+    const stampH = 24;
+    const stampX = pageWidth - MARGIN - stampW;
+    const stampY = headerTop + 44;
+    doc.setFillColor(20, 20, 20);
+    doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(255, 255, 255);
+    doc.text('HOT', stampX + stampW / 2, stampY + stampH / 2 + 5, { align: 'center' });
+    doc.setTextColor(30); // restore for subsequent text
+    hotStampBottom = stampY + stampH;
+  }
+
   // No whole-job QR — each operation row carries its own scan-to-complete QR.
-  let cursorY = Math.max(shopBlockBottom, headerTop + 36) + 18;
+  let cursorY = Math.max(shopBlockBottom, hotStampBottom) + 18;
 
   // ---------- Divider ----------
   doc.setDrawColor(210);

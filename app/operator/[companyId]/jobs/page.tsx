@@ -23,6 +23,7 @@ import {
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
 import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
+import JobHotBadge from '@/components/jobs/JobHotBadge';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
 
 /**
@@ -138,7 +139,16 @@ function OperatorJobsPageContent() {
     <Card
       key={key}
       elevation={2}
-      sx={{ bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
+      sx={{
+        bgcolor: 'rgba(26, 31, 74, 0.55)',
+        backdropFilter: 'blur(8px)',
+        // Hot jobs get a red wash + left accent bar so a rush job is unmissable
+        // at the station, echoing pink-paper travelers.
+        ...(row.is_hot && {
+          bgcolor: 'rgba(239, 68, 68, 0.16)',
+          borderLeft: '4px solid #ef4444',
+        }),
+      }}
     >
       <CardActionArea onClick={() => handlePartClick(row)} sx={{ minHeight: 100 }}>
         <CardContent>
@@ -159,17 +169,22 @@ function OperatorJobsPageContent() {
                 Order qty {row.part_quantity}
               </Typography>
             </Box>
-            {/* Completed rows show WHEN they were finished where the (removed)
-                status chip used to sit; active rows convey state via the bar. */}
-            {row.completed_at && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-              >
-                Completed {formatCompletedAt(row.completed_at)}
-              </Typography>
-            )}
+            {/* Right slot: the HOT badge (always, when hot) sits above the
+                completed timestamp. Completed rows show WHEN they were finished
+                where the (removed) status chip used to sit; active rows convey
+                state via the bar. */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
+              <JobHotBadge job={row} size="small" />
+              {row.completed_at && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  Completed {formatCompletedAt(row.completed_at)}
+                </Typography>
+              )}
+            </Box>
           </Box>
 
           <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>

@@ -51,6 +51,7 @@ import { getAllJobs, bulkCancelJobs } from '@/utils/jobsAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import {
   isJobOverdue,
+  isJobClosed,
   getJobLifecycleStage,
   JOB_LIFECYCLE_STAGE_CONFIG,
 } from '@/types/job';
@@ -296,16 +297,22 @@ export default function JobsPage() {
     }
   };
 
-  // Hot jobs always float to the top, regardless of which column the user sorts
-  // by. AG Grid's client-side row model re-sorts rows itself, so a server-side
+  // Hot jobs float to the top, regardless of which column the user sorts by.
+  // AG Grid's client-side row model re-sorts rows itself, so a server-side
   // ORDER BY alone wouldn't survive a column-header sort — postSortRows runs
   // after every sort and stable-partitions hot rows to the top, keeping the
   // user's chosen sort within each tier.
+  //
+  // Only OPEN hot jobs float. Priority is a property of pending work: once a job
+  // is closed (done or cancelled — visible only under "Show completed &
+  // cancelled") its rush is spent, so it sorts normally rather than hijacking the
+  // top of the list above live work. Its badge still shows, muted (see cell).
   const handlePostSortRows = (params: PostSortRowsParams<JobWithRelations>) => {
     const nodes = params.nodes;
-    const hot = nodes.filter((n) => n.data?.is_hot);
+    const isActiveHot = (n: (typeof nodes)[number]) => !!n.data?.is_hot && !isJobClosed(n.data);
+    const hot = nodes.filter(isActiveHot);
     if (hot.length === 0 || hot.length === nodes.length) return;
-    const rest = nodes.filter((n) => !n.data?.is_hot);
+    const rest = nodes.filter((n) => !isActiveHot(n));
     nodes.length = 0;
     nodes.push(...hot, ...rest);
   };
@@ -407,7 +414,9 @@ export default function JobsPage() {
           <Box sx={{ lineHeight: 1.2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
               <span>{params.value}</span>
-              {params.data && <JobHotBadge job={params.data} size="small" />}
+              {params.data && (
+                <JobHotBadge job={params.data} size="small" muted={isJobClosed(params.data)} />
+              )}
             </Box>
             {ms && (
               <Box
@@ -762,7 +771,9 @@ export default function JobsPage() {
               domLayout="normal"
               onSortChanged={handleSortChanged}
               postSortRows={handlePostSortRows}
-              getRowClass={(params) => (params.data?.is_hot ? 'job-row-hot' : '')}
+              getRowClass={(params) =>
+                params.data?.is_hot && !isJobClosed(params.data) ? 'job-row-hot' : ''
+              }
               onGridReady={handleGridReady}
               loading={loading}
               suppressCellFocus={false}

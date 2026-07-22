@@ -174,7 +174,15 @@ function OperatorJobsPageContent() {
                 where the (removed) status chip used to sit; active rows convey
                 state via the bar. */}
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-              <JobHotBadge job={row} size="small" />
+              <JobHotBadge
+                job={row}
+                size="small"
+                muted={
+                  !!row.completed_at ||
+                  row.production_status === 'completed' ||
+                  row.production_status === 'cancelled'
+                }
+              />
               {row.completed_at && (
                 <Typography
                   variant="caption"

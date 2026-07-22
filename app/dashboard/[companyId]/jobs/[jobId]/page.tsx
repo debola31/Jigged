@@ -40,6 +40,7 @@ import {
 } from '@/utils/jobsAccess';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
+import { isJobClosed } from '@/types/job';
 import type { JobPartShipmentSummary } from '@/types/shipment';
 import type { JobNote } from '@/types/operator';
 import { getJobNotes } from '@/utils/operatorAccess';
@@ -348,7 +349,7 @@ export default function JobDetailPage() {
           >
             {job.job_number}
           </Typography>
-          <JobHotBadge job={job} size="medium" />
+          <JobHotBadge job={job} size="medium" muted={isJobClosed(job)} />
           <JobOverdueBadge job={job} size="medium" />
         </Box>
 

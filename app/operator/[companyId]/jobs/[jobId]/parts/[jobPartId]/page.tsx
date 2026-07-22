@@ -141,7 +141,14 @@ export default function OperatorJobTravelerPage() {
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
-              <JobHotBadge job={traveler} size="medium" />
+              <JobHotBadge
+                job={traveler}
+                size="medium"
+                muted={
+                  traveler.production_status === 'completed' ||
+                  traveler.production_status === 'cancelled'
+                }
+              />
               <Chip
                 size="small"
                 label={traveler.production_status}

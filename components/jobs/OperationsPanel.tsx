@@ -10,13 +10,19 @@ import Divider from '@mui/material/Divider';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
 
+import { useLoad } from '@/hooks/useLoad';
 import type { Job, JobOperation, ProductionStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
+import type { OperationCompletionSummary } from '@/types/operationCompletion';
 import {
   completeJobOperation,
   undoJobOperation,
 } from '@/utils/jobsAccess';
+import { getOperationCompletionSummaries } from '@/utils/operationCompletionsAccess';
 import OperationCard from './OperationCard';
+import OperationCompleteDialog from './OperationCompleteDialog';
+
+const EMPTY_SUMMARY_MAP: Map<string, OperationCompletionSummary> = new Map();
 
 interface OperationsPanelProps {
   job: Job;
@@ -46,6 +52,21 @@ export default function OperationsPanel({
     message: '',
     severity: 'success',
   });
+  // The op whose completion dialog is open (null = closed).
+  const [dialogOp, setDialogOp] = useState<JobOperation | null>(null);
+
+  // Per-op good/target/remaining, keyed by job_operation_id. Loaded (via useLoad,
+  // which keeps the fetch out of an effect body) from the completion events, and
+  // reloaded after each complete/undo. Reloads when the set of parts changes.
+  const partIdsKey = Array.from(new Set(operations.map((op) => op.job_part_id))).sort().join(',');
+  const { data: summaryData, reload: reloadSummaries } = useLoad(async () => {
+    const partIds = partIdsKey ? partIdsKey.split(',') : [];
+    const perPart = await Promise.all(partIds.map((id) => getOperationCompletionSummaries(id)));
+    const next = new Map<string, OperationCompletionSummary>();
+    for (const rows of perPart) for (const r of rows) next.set(r.job_operation_id, r);
+    return next;
+  }, [partIdsKey]);
+  const summaryByOp = summaryData ?? EMPTY_SUMMARY_MAP;
 
   // Calculate progress
   const completedCount = operations.filter((op) => op.status === 'completed').length;
@@ -86,20 +107,30 @@ export default function OperationsPanel({
     }
   };
 
-  // One click marks the op complete — no Start step, no notes prompt. Mirrors
-  // the operator view's single MARK COMPLETE action.
-  const handleComplete = async (operationId: string) => {
+  // Clicking Complete opens the quantity dialog (default remaining, warns on
+  // over-completion) rather than completing in full silently.
+  const handleOpenComplete = (operationId: string) => {
+    const op = operations.find((o) => o.id === operationId) ?? null;
+    setDialogOp(op);
+  };
+
+  // Record a completion for the good quantity entered in the dialog (defaults to
+  // the full remaining balance). Omitting quantityGood would complete the whole
+  // remainder, but the dialog always passes an explicit number.
+  const runComplete = async (operationId: string, quantityGood?: number) => {
     setLoading(true);
     try {
-      const result = await completeJobOperation(operationId, job.id);
+      const result = await completeJobOperation(operationId, job.id, { quantityGood });
       if (result.jobStatusChanged || result.jobPartStatusChanged) {
         handleStatusChanges(
           result.jobPartStatusChanged ? result.newJobPartProductionStatus : undefined,
           result.jobStatusChanged ? result.newJobProductionStatus : undefined,
         );
       } else {
-        showSnackbar('Operation completed', 'success');
+        showSnackbar('Completion recorded', 'success');
       }
+      setDialogOp(null);
+      await reloadSummaries();
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to complete operation', 'error');
@@ -113,6 +144,7 @@ export default function OperationsPanel({
     try {
       await undoJobOperation(operationId);
       showSnackbar('Operation reverted to pending', 'info');
+      await reloadSummaries();
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to undo operation', 'error');
@@ -170,15 +202,34 @@ export default function OperationsPanel({
               <OperationCard
                 key={operation.id}
                 operation={operation}
+                companyId={job.company_id}
+                summary={summaryByOp.get(operation.id)}
                 disabled={isDisabled}
                 stepNotes={notesByOperation?.get(operation.id)}
-                onComplete={handleComplete}
+                onComplete={handleOpenComplete}
                 onUndo={handleUndo}
+                onCompletionsChanged={() => {
+                  reloadSummaries();
+                  onOperationUpdate();
+                }}
               />
             ))}
           </Box>
         </CardContent>
       </Card>
+
+      {dialogOp && (
+        <OperationCompleteDialog
+          open={!!dialogOp}
+          operationName={dialogOp.operation_name}
+          target={summaryByOp.get(dialogOp.id)?.target ?? 0}
+          qtyGood={summaryByOp.get(dialogOp.id)?.qty_good ?? 0}
+          remaining={summaryByOp.get(dialogOp.id)?.qty_remaining ?? 0}
+          busy={loading}
+          onClose={() => setDialogOp(null)}
+          onRecord={(qty) => runComplete(dialogOp.id, qty)}
+        />
+      )}
 
       {/* Snackbar for notifications */}
       <Snackbar

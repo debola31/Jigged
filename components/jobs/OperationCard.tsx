@@ -17,17 +17,27 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
+import type { OperationCompletionSummary, OperationCompletionEvent } from '@/types/operationCompletion';
+import {
+  getOperationCompletionEvents,
+  voidOperationCompletion,
+} from '@/utils/operationCompletionsAccess';
 import { formatTime } from '@/types/routings';
 import OperationStatusChip from './OperationStatusChip';
 import OperationNotes from './OperationNotes';
 
 interface OperationCardProps {
   operation: JobOperation;
+  companyId: string;
+  /** Good/target/remaining for this op (from completion events). */
+  summary?: OperationCompletionSummary;
   disabled?: boolean;
   /** Operator step-tagged notes + photos for this operation (from the activity feed). */
   stepNotes?: JobNote[];
   onComplete: (operationId: string) => void;
   onUndo: (operationId: string) => void;
+  /** Called after a per-event void so the panel can refresh summaries + parent. */
+  onCompletionsChanged?: () => void;
 }
 
 // Background and border colors for each status
@@ -48,15 +58,55 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
 
 export default function OperationCard({
   operation,
+  companyId,
+  summary,
   disabled = false,
   stepNotes = [],
   onComplete,
   onUndo,
+  onCompletionsChanged,
 }: OperationCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [events, setEvents] = useState<OperationCompletionEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
 
   const status = operation.status as OperationStatus;
   const styles = STATUS_STYLES[status];
+
+  const target = summary?.target ?? 0;
+  const qtyGood = summary?.qty_good ?? 0;
+  const qtyRemaining = summary?.qty_remaining ?? 0;
+
+  const loadEvents = async () => {
+    setEventsLoading(true);
+    try {
+      setEvents(await getOperationCompletionEvents(operation.id, companyId));
+    } catch {
+      setEvents([]);
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  // Load the completion history lazily on expand (in the click handler, not an
+  // effect, so there's no setState-in-effect cascade).
+  const handleToggleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) loadEvents();
+  };
+
+  const handleVoidEvent = async (completionId: string) => {
+    setVoidingId(completionId);
+    try {
+      await voidOperationCompletion(completionId);
+      await loadEvents();
+      onCompletionsChanged?.();
+    } finally {
+      setVoidingId(null);
+    }
+  };
 
   // One-click completion: any not-done op shows Complete (no separate Start
   // step), and a completed op shows Undo. Mirrors the operator view.
@@ -120,6 +170,17 @@ export default function OperationCard({
               </Typography>
             </Box>
           )}
+          {/* Quantity progress: good pieces vs the part's order qty. Shown when
+              there's a target and either work has started or it's not yet done. */}
+          {target > 0 && (qtyGood > 0 || status !== 'completed') && (
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', mt: 0.5, color: qtyRemaining > 0 ? 'warning.main' : 'success.main' }}
+            >
+              {qtyGood} / {target} good
+              {qtyRemaining > 0 ? ` · ${qtyRemaining} remaining` : ''}
+            </Typography>
+          )}
         </Box>
 
         {/* Status Chip */}
@@ -170,7 +231,7 @@ export default function OperationCard({
         <Tooltip title={noteCount > 0 ? `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}>
           <IconButton
             size="small"
-            onClick={() => setExpanded(!expanded)}
+            onClick={handleToggleExpand}
             sx={{ color: 'text.secondary', borderRadius: 1, gap: 0.5 }}
             data-testid="operation-expand"
             aria-label={`${expanded ? 'Collapse' : 'Expand'} operation details (${noteCount} ${noteCount === 1 ? 'note' : 'notes'})`}
@@ -204,6 +265,57 @@ export default function OperationCard({
             mt: 0,
           }}
         >
+          {/* Completion history — who completed how many, when. Voided events
+              stay on record (struck through) so corrections are auditable. */}
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              Completion history
+            </Typography>
+            {eventsLoading ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                Loading…
+              </Typography>
+            ) : events.length === 0 ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                No completions recorded yet
+              </Typography>
+            ) : (
+              <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                {events.map((e) => {
+                  const voided = e.voided_at !== null;
+                  return (
+                    <Box
+                      key={e.id}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 1, opacity: voided ? 0.5 : 1 }}
+                    >
+                      <Typography
+                        variant="body2"
+                        sx={{ flex: 1, textDecoration: voided ? 'line-through' : 'none' }}
+                      >
+                        {e.quantity_good} good
+                        {e.completed_by_name ? ` · ${e.completed_by_name}` : ''}
+                        {' · '}
+                        {formatDateTime(e.completed_at)}
+                        {voided ? ' · voided' : ''}
+                      </Typography>
+                      {!voided && (
+                        <Button
+                          size="small"
+                          color="inherit"
+                          disabled={disabled || voidingId === e.id}
+                          onClick={() => handleVoidEvent(e.id)}
+                          sx={{ minWidth: 0 }}
+                        >
+                          Void
+                        </Button>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
+          </Box>
+
           {/* Admin note captured at completion (Complete modal). */}
           {operation.notes && (
             <Box sx={{ mt: 2 }}>

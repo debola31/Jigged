@@ -20,12 +20,12 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
   OperatorPlantJob,
   OperatorJobDetail,
   Station,
-  JobCompleteResponse,
   JobTraveler,
   JobPartsOverview,
   JobTravelerOperation,
@@ -205,11 +205,12 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
 
   const jobPartIds = readyRows.map((r) => r.job_part_id);
   const jobIds = Array.from(new Set(readyRows.map((r) => r.job_id)));
+  const currentOpIds = readyRows.map((r) => r.job_operation_id);
 
-  // Three independent reads, each already batched via .in(...). Run them in
-  // parallel — this is the operator hot path (station polling / whole-plant
-  // view), so collapsing 3 sequential round-trips to 1 matters most here.
-  const [{ data: partOps }, { data: jobMeta }, { data: partStatusRows }] =
+  // Independent reads, each already batched via .in(...). Run them in parallel —
+  // this is the operator hot path (station polling / whole-plant view), so
+  // collapsing round-trips matters most here.
+  const [{ data: partOps }, { data: jobMeta }, { data: partStatusRows }, { data: opCompletions }] =
     await Promise.all([
       // Per-part progress (count of ops total + completed per part).
       supabase
@@ -223,6 +224,13 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
         .from('job_parts')
         .select('id, production_status')
         .in('id', jobPartIds),
+      // Good pieces recorded (non-void) against each row's CURRENT operation, so
+      // the card can show partial progress ("3 of 12 good") on the ready step.
+      supabase
+        .from('job_operation_completions')
+        .select('job_operation_id, quantity_good')
+        .in('job_operation_id', currentOpIds)
+        .is('voided_at', null),
     ]);
 
   type PartOpRow = { job_part_id: string; status: string };
@@ -246,6 +254,12 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
     statusByPart.set(r.id, r.production_status);
   }
 
+  type OpCompletionRow = { job_operation_id: string; quantity_good: number };
+  const goodByOp = new Map<string, number>();
+  for (const r of (opCompletions ?? []) as OpCompletionRow[]) {
+    goodByOp.set(r.job_operation_id, (goodByOp.get(r.job_operation_id) ?? 0) + Number(r.quantity_good));
+  }
+
   return readyRows.map((row) => {
     const progress = progressByPart.get(row.job_part_id) ?? { total: 0, done: 0 };
     return {
@@ -262,6 +276,8 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       operation_status: row.op_status,
       operations_total: progress.total,
       operations_completed: progress.done,
+      // Partial progress on the CURRENT operation (good pieces / order qty).
+      current_op_qty_good: goodByOp.get(row.job_operation_id) ?? 0,
     };
   });
 }
@@ -612,150 +628,16 @@ export async function getOperatorOperationDetail(
 // ============================================================================
 
 /**
- * Mark a single operation complete. This is the operator's one-tap action —
- * there is no separate "start" step, no pause, and no on-job timer. We record
- * who completed the step (job_operations.completed_by = the signed-in auth user)
- * and when, then roll the result up to the job_part (which a DB trigger cascades
- * to the job).
- *
- * Time-on-job is intentionally NOT tracked: operators complete in a single tap,
- * so there's no reliable session duration to record (the operator_sessions table
- * and the job_operations actual-time columns were removed with this flow).
- *
- * Completing an earlier-than-final step moves the part to 'in_progress'; the
- * last remaining step moves it to 'completed'. No notes or material-consumption
- * confirmation here: job notes live at the job level (job_notes) and material
- * consumption is driven by the part BOM.
- */
-export async function completeOperation(
-  jobOperationId: string,
-): Promise<JobCompleteResponse> {
-  const supabase = getSupabase();
-
-  const { data: op, error: opError } = await supabase
-    .from('job_operations')
-    .select('id, job_id, job_part_id')
-    .eq('id', jobOperationId)
-    .single();
-  if (opError || !op) throw new Error('Operation not found.');
-
-  // completed_by references auth.users(id) (NOT user_company_access.id), so we
-  // record the signed-in auth user — same as the admin completeJobOperation path.
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const now = new Date().toISOString();
-
-  await supabase
-    .from('job_operations')
-    .update({
-      status: 'completed',
-      completed_at: now,
-      completed_by: user?.id ?? null,
-    })
-    .eq('id', jobOperationId);
-
-  // Per-part rollup: are all ops on THIS part now done?
-  const { data: remaining } = await supabase
-    .from('job_operations')
-    .select('id')
-    .eq('job_part_id', op.job_part_id)
-    .neq('status', 'completed');
-
-  const partCompleted = !remaining || remaining.length === 0;
-
-  if (partCompleted) {
-    await supabase
-      .from('job_parts')
-      .update({
-        production_status: 'completed',
-        completed_at: now,
-        status_changed_at: now,
-        updated_at: now,
-      })
-      .eq('id', op.job_part_id)
-      .not('production_status', 'in', '("cancelled")');
-  } else {
-    // Work has begun even though there was no explicit "start". Move a
-    // not-yet-started part to in_progress (the guard skips parts already
-    // in_progress/completed/cancelled, leaving their started_at untouched).
-    await supabase
-      .from('job_parts')
-      .update({
-        production_status: 'in_progress',
-        started_at: now,
-        status_changed_at: now,
-        updated_at: now,
-      })
-      .eq('id', op.job_part_id)
-      .not('production_status', 'in', '("in_progress","completed","cancelled")');
-  }
-
-  // The job_parts trigger has cascaded production_status to the job; read it
-  // back for the job_completed flag.
-  let jobCompleted = false;
-  if (partCompleted) {
-    const { data: jobRow } = await supabase
-      .from('jobs')
-      .select('production_status')
-      .eq('id', op.job_id)
-      .single();
-    jobCompleted = jobRow?.production_status === 'completed';
-  }
-
-  return { success: true, job_completed: jobCompleted };
-}
-
-/**
- * Undo a completion: put the operation back to 'pending' and recompute the
- * part's status. Backs the operator "Undo completion" action for a step marked
- * done by mistake. Clears completed_at / completed_by.
- *
- * The part can no longer be 'completed' (we just un-completed one of its ops):
- * if any other op is still completed the part is 'in_progress', otherwise it
- * returns to 'not_started'. The job_parts trigger cascades the recomputed
- * status to the job (e.g. a completed job reopens to in_progress).
+ * Undo an operation's completion entirely — void every non-void completion event
+ * on it. Backs the operator "Undo" for a step marked done (or partially done) by
+ * mistake. The recompute trigger derives the op back to pending and cascades the
+ * part/job status (a completed job reopens to in_progress). Quantities are never
+ * deleted — the voided events stay on record.
  */
 export async function revertOperationCompletion(
   jobOperationId: string,
 ): Promise<void> {
-  const supabase = getSupabase();
-
-  const { data: op, error: opError } = await supabase
-    .from('job_operations')
-    .select('id, job_part_id')
-    .eq('id', jobOperationId)
-    .single();
-  if (opError || !op) throw new Error('Operation not found.');
-
-  const now = new Date().toISOString();
-
-  await supabase
-    .from('job_operations')
-    .update({
-      status: 'pending',
-      completed_at: null,
-      completed_by: null,
-    })
-    .eq('id', jobOperationId);
-
-  const { data: stillCompleted } = await supabase
-    .from('job_operations')
-    .select('id')
-    .eq('job_part_id', op.job_part_id)
-    .eq('status', 'completed');
-
-  const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
-
-  await supabase
-    .from('job_parts')
-    .update({
-      production_status: hasCompleted ? 'in_progress' : 'not_started',
-      completed_at: null,
-      status_changed_at: now,
-      updated_at: now,
-    })
-    .eq('id', op.job_part_id)
-    .not('production_status', 'in', '("cancelled")');
+  await voidAllOperationCompletions(jobOperationId);
 }
 
 // ============================================================================

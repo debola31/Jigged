@@ -15,7 +15,6 @@ type JobUpdate = Database['public']['Tables']['jobs']['Update'];
 type JobInsert = Database['public']['Tables']['jobs']['Insert'];
 type JobPartUpdate = Database['public']['Tables']['job_parts']['Update'];
 type JobPartInsert = Database['public']['Tables']['job_parts']['Insert'];
-type JobOperationUpdate = Database['public']['Tables']['job_operations']['Update'];
 import type {
   Job,
   JobPart,
@@ -33,6 +32,29 @@ import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quote
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { orIlikeValue } from '@/utils/searchFilter';
 import { getJobPartInvoiceSummaries } from '@/utils/quickbooksAccess';
+import {
+  createOperationCompletion,
+  voidAllOperationCompletions,
+} from '@/utils/operationCompletionsAccess';
+
+/** PostgREST embeds a to-one relation as either the object or a 1-element array. */
+function firstRelation<T>(rel: T | T[]): T {
+  return Array.isArray(rel) ? rel[0] : rel;
+}
+
+/**
+ * Derive a job_part's production_status from its operation statuses (SQL mirror
+ * of compute_job_part_production_status): all completed → 'completed', any
+ * started → 'in_progress', otherwise 'not_started' (also when there are no ops).
+ * Used by the job-reactivate flow, which reopens parts without the cancelled-skip
+ * the trigger applies. The routine completion path is DB-trigger-driven.
+ */
+function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
+  if (opStatuses.length === 0) return 'not_started';
+  if (opStatuses.every((s) => s === 'completed')) return 'completed';
+  if (opStatuses.some((s) => s !== 'pending')) return 'in_progress';
+  return 'not_started';
+}
 
 /**
  * "Today" formatted as YYYY-MM-DD in the *user's local timezone*. The
@@ -1200,138 +1222,19 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
 }
 
 /**
- * Derive a job_part's production_status from its operation statuses:
- * all completed → 'completed', any started → 'in_progress', otherwise
- * 'not_started' (also the result when the part has no operations).
- */
-function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
-  if (opStatuses.length === 0) return 'not_started';
-  if (opStatuses.every((s) => s === 'completed')) return 'completed';
-  if (opStatuses.some((s) => s !== 'pending')) return 'in_progress';
-  return 'not_started';
-}
-
-/**
- * Recompute a job_part's production_status from its operations and persist
- * the change if it differs. Returns the resolved status and a flag
- * indicating whether it changed. Skips when the part is already cancelled
- * (terminal user-initiated state). Fulfillment is independent and not
- * touched here — it's driven by shipment_line_items in PR 4.
- */
-async function recomputeJobPartStatus(
-  jobPartId: string,
-): Promise<{ changed: boolean; newStatus: ProductionStatus }> {
-  const supabase = getSupabase();
-
-  const { data: part, error: partErr } = await supabase
-    .from('job_parts')
-    .select('production_status, started_at, completed_at')
-    .eq('id', jobPartId)
-    .single();
-  if (partErr || !part) {
-    throw partErr || new Error('job_part not found');
-  }
-
-  if (part.production_status === 'cancelled') {
-    return { changed: false, newStatus: part.production_status as ProductionStatus };
-  }
-
-  const { data: ops, error: opsErr } = await supabase
-    .from('job_operations')
-    .select('status')
-    .eq('job_part_id', jobPartId);
-  if (opsErr) throw opsErr;
-  const opRows = ops ?? [];
-  if (opRows.length === 0) {
-    return { changed: false, newStatus: part.production_status as ProductionStatus };
-  }
-
-  const newStatus = deriveStatusFromOps(opRows.map((o) => o.status));
-
-  if (newStatus === part.production_status) {
-    return { changed: false, newStatus };
-  }
-
-  const nowIso = new Date().toISOString();
-  const updates: JobPartUpdate = {
-    production_status: newStatus,
-    status_changed_at: nowIso,
-    updated_at: nowIso,
-  };
-  if (newStatus === 'in_progress' && !part.started_at) {
-    updates.started_at = nowIso;
-  }
-  if (newStatus === 'completed' && !part.completed_at) {
-    updates.completed_at = nowIso;
-  }
-
-  const { error: updErr } = await supabase
-    .from('job_parts')
-    .update(updates)
-    .eq('id', jobPartId);
-  if (updErr) {
-    console.error('Error updating job_part production_status:', updErr);
-    throw updErr;
-  }
-
-  return { changed: true, newStatus };
-}
-
-/**
- * Snapshot the parent job's production_status before/after a job_part
- * update so the caller can react when the aggregation trigger flips it
- * (e.g., to celebrate the entire job finishing).
- */
-async function detectJobStatusChange(
-  jobId: string,
-  before: ProductionStatus,
-): Promise<{ changed: boolean; newStatus?: ProductionStatus }> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('production_status')
-    .eq('id', jobId)
-    .single();
-  if (error || !data) return { changed: false };
-  const newStatus = data.production_status as ProductionStatus;
-  if (newStatus === before) return { changed: false };
-  return { changed: true, newStatus };
-}
-
-async function getJobIdForOperation(
-  operationId: string,
-): Promise<{ jobId: string; jobPartId: string; jobStatus: ProductionStatus }> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('job_operations')
-    .select('job_id, job_part_id, jobs(production_status)')
-    .eq('id', operationId)
-    .single();
-  if (error || !data) throw error || new Error('operation not found');
-  type OpRow = {
-    job_id: string;
-    job_part_id: string;
-    jobs?: { production_status: string } | { production_status: string }[] | null;
-  };
-  const row = data as OpRow;
-  const jobsField = row.jobs;
-  const jobsRow = Array.isArray(jobsField) ? jobsField[0] : jobsField;
-  if (!jobsRow) throw new Error('parent job not found');
-  return {
-    jobId: row.job_id,
-    jobPartId: row.job_part_id,
-    jobStatus: jobsRow.production_status as ProductionStatus,
-  };
-}
-
-/**
- * Complete a job_operation with optional notes. Flips the
- * job_part to 'completed' once every op on that part is completed.
+ * Complete a job_operation for a quantity of good pieces. Records a
+ * job_operation_completions event; a DB trigger derives job_operations.status
+ * (pending → in_progress → completed at the ordered qty) and cascades
+ * job_parts.production_status → jobs.production_status.
  *
- * Completes from either 'pending' or 'in_progress' (no Start step required) —
- * the admin op list is now one-click complete, mirroring the operator view
- * (operatorAccess.completeOperation). A never-started op gets its started_at
- * stamped at completion so labor windows stay coherent.
+ * `data.quantityGood` records a partial (admin partial-completion). Omitted →
+ * completes the whole remaining balance (the one-click "complete" default,
+ * mirroring the operator view). `data.notes` is stored both on the event and on
+ * job_operations.notes (the admin completion note shown on the op row).
+ *
+ * Over-completion is allowed (only quantity_good > 0 is enforced in the DB).
+ * Returns the resulting op plus whether the part/job status changed, so the UI
+ * can celebrate a finished part or job.
  */
 export async function completeJobOperation(
   operationId: string,
@@ -1339,77 +1242,118 @@ export async function completeJobOperation(
   data: CompleteOperationData = {},
 ): Promise<OperationUpdateResult> {
   const supabase = getSupabase();
-  const ctx = await getJobIdForOperation(operationId);
   void jobId;
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const now = new Date().toISOString();
-
-  const updateData: JobOperationUpdate = {
-    status: 'completed',
-    completed_at: now,
-    completed_by: user?.id || null,
-    updated_at: now,
-  };
-  if (data.notes !== undefined) updateData.notes = data.notes;
-
-  const { data: operation, error: updateError } = await supabase
+  // Context: ids + company + ordered qty (target) + before-statuses (to detect
+  // the trigger-driven part/job transitions this completion causes).
+  const { data: opCtx, error: ctxErr } = await supabase
     .from('job_operations')
-    .update(updateData)
+    .select(
+      'id, job_id, job_part_id, job_parts!inner(company_id, quantity, production_status), jobs!inner(production_status)',
+    )
     .eq('id', operationId)
-    .neq('status', 'completed')
+    .single();
+  if (ctxErr || !opCtx) throw ctxErr || new Error('operation not found');
+  const part = firstRelation(
+    (opCtx as unknown as {
+      job_parts:
+        | { company_id: string; quantity: number; production_status: string }
+        | { company_id: string; quantity: number; production_status: string }[];
+    }).job_parts,
+  );
+  const jobBefore = firstRelation(
+    (opCtx as unknown as {
+      jobs: { production_status: string } | { production_status: string }[];
+    }).jobs,
+  );
+  const partStatusBefore = part.production_status as ProductionStatus;
+  const jobStatusBefore = jobBefore.production_status as ProductionStatus;
+
+  // Good already recorded (non-void) → remaining is the default fill.
+  const { data: comps } = await supabase
+    .from('job_operation_completions')
+    .select('quantity_good')
+    .eq('job_operation_id', operationId)
+    .is('voided_at', null);
+  const good = (comps ?? []).reduce((acc, c) => acc + Number(c.quantity_good), 0);
+  const remaining = Math.max(0, Number(part.quantity) - good);
+  const qtyGood = data.quantityGood != null ? data.quantityGood : remaining;
+
+  if (qtyGood > 0) {
+    await createOperationCompletion({
+      companyId: part.company_id,
+      jobOperationId: operationId,
+      jobPartId: opCtx.job_part_id,
+      quantityGood: qtyGood,
+      note: data.notes ?? null,
+    });
+  }
+  if (data.notes !== undefined) {
+    await supabase
+      .from('job_operations')
+      .update({ notes: data.notes, updated_at: new Date().toISOString() })
+      .eq('id', operationId);
+  }
+
+  // Read back the op + resulting statuses (the trigger already cascaded).
+  const { data: operation, error: opErr } = await supabase
+    .from('job_operations')
     .select(`
       *,
       work_center:work_centers!left(id, name, labor_rate, kind)
     `)
+    .eq('id', operationId)
     .single();
-  if (updateError) {
-    console.error('Error completing operation:', updateError);
-    throw updateError;
-  }
+  if (opErr) throw opErr;
 
-  const partResult = await recomputeJobPartStatus(ctx.jobPartId);
-  const jobResult = await detectJobStatusChange(ctx.jobId, ctx.jobStatus);
+  const { data: partAfter } = await supabase
+    .from('job_parts')
+    .select('production_status')
+    .eq('id', opCtx.job_part_id)
+    .single();
+  const { data: jobAfter } = await supabase
+    .from('jobs')
+    .select('production_status')
+    .eq('id', opCtx.job_id)
+    .single();
+
+  const newPart = partAfter?.production_status as ProductionStatus | undefined;
+  const newJob = jobAfter?.production_status as ProductionStatus | undefined;
+  const partChanged = !!newPart && newPart !== partStatusBefore;
+  const jobChanged = !!newJob && newJob !== jobStatusBefore;
 
   return {
     operation: operation as JobOperation,
-    jobPartStatusChanged: partResult.changed,
-    newJobPartProductionStatus: partResult.changed ? partResult.newStatus : undefined,
-    jobStatusChanged: jobResult.changed,
-    newJobProductionStatus: jobResult.newStatus,
+    jobPartStatusChanged: partChanged,
+    newJobPartProductionStatus: partChanged ? newPart : undefined,
+    jobStatusChanged: jobChanged,
+    newJobProductionStatus: jobChanged ? newJob : undefined,
   };
 }
 
 /**
- * Undo a completed job_operation back to pending. Clears timestamps and
- * completed_by. Recomputes the parent job_part status (it may
- * fall back to in_progress or not_started).
+ * Undo a job_operation's completion entirely — void every non-void completion
+ * event on it. The recompute trigger derives the op back to pending and cascades
+ * the part/job status. Quantities are never deleted (events stay voided). Returns
+ * the resulting op.
  */
 export async function undoJobOperation(operationId: string): Promise<JobOperation> {
   const supabase = getSupabase();
-  const ctx = await getJobIdForOperation(operationId);
+
+  await voidAllOperationCompletions(operationId);
 
   const { data: operation, error } = await supabase
     .from('job_operations')
-    .update({
-      status: 'pending',
-      completed_at: null,
-      completed_by: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', operationId)
-    .eq('status', 'completed')
     .select(`
       *,
       work_center:work_centers!left(id, name, labor_rate, kind)
     `)
+    .eq('id', operationId)
     .single();
   if (error) {
-    console.error('Error undoing operation:', error);
+    console.error('Error reading operation after undo:', error);
     throw error;
   }
-
-  await recomputeJobPartStatus(ctx.jobPartId);
   return operation as JobOperation;
 }
 

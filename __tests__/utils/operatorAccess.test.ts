@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'in', 'not', 'order', 'limit', 'single'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'in', 'is', 'not', 'order', 'limit', 'single'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });

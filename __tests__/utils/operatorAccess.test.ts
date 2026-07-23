@@ -39,12 +39,12 @@ import {
   getAllStationsOperatorJobs,
   getCompletedOperatorJobs,
   getAllStationsCompletedOperatorJobs,
-  completeOperation,
   markOperationSent,
   markOperationReceived,
   revertOperationCompletion,
   getOutsideOpsForCompany,
 } from '@/utils/operatorAccess';
+import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
 // Shape loadOpOutsideContext expects from its single() read (job_operations with
 // jobs + work_center joins). Override fields per test.
@@ -196,6 +196,7 @@ describe('getJobNotes', () => {
         job_id: 'j1',
         job_operation_id: 'op1',
         body: 'looks good',
+        note_type: 'user',
         created_at: '2026-06-23T10:00:00Z',
         author: { name: 'Jane' },
         operation: { operation_name: 'Mill', sequence: 20 },
@@ -217,6 +218,7 @@ describe('getJobNotes', () => {
         job_id: 'j1',
         job_operation_id: null,
         body: null,
+        note_type: 'event',
         created_at: '2026-06-23T09:00:00Z',
         author: null,
         operation: null,
@@ -243,6 +245,29 @@ describe('getJobNotes', () => {
     expect(result[1].operation_label).toBeNull();
     expect(result[1].body).toBeNull();
     expect(result[1].media).toEqual([]);
+
+    // note_type flows through — 'user' vs auto-logged 'event' (drives the
+    // post-completion capture offer's "already captured?" check).
+    expect(result[0].note_type).toBe('user');
+    expect(result[1].note_type).toBe('event');
+  });
+
+  it('defaults an unknown/missing note_type to user', async () => {
+    mockQueryBuilder.data = [
+      {
+        id: 'n3',
+        job_id: 'j1',
+        job_operation_id: null,
+        body: 'hi',
+        note_type: null,
+        created_at: '2026-06-23T08:00:00Z',
+        author: null,
+        operation: null,
+        media: [],
+      },
+    ];
+    const result = await getJobNotes('j1', 'c1');
+    expect(result[0].note_type).toBe('user');
   });
 
   it('throws when the query errors', async () => {
@@ -313,19 +338,16 @@ describe('addJobNote', () => {
 // ============================================================================
 
 describe('external operation lifecycle', () => {
-  describe('completeOperation guard', () => {
+  // The operator internal completion path is now createOperationCompletion
+  // (quantity model). It must refuse external ops so an outside op can never be
+  // completed through the internal path.
+  describe('createOperationCompletion guard', () => {
     it('throws for an external op (never completes via the internal path)', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
-      await expect(completeOperation('op-1')).rejects.toThrow(/outside/i);
-      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
-    });
-
-    it('does NOT throw for an internal op (reaches the update path)', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'pending' });
-      await completeOperation('op-1');
-      // First update = the op completion.
-      expect(mockQueryBuilder.update).toHaveBeenCalled();
-      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'completed' });
+      mockQueryBuilder.data = { work_center: { kind: 'external' } };
+      await expect(
+        createOperationCompletion({ companyId: 'c1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 5 }),
+      ).rejects.toThrow(/outside/i);
+      expect(mockQueryBuilder.insert).not.toHaveBeenCalled();
     });
   });
 

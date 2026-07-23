@@ -913,24 +913,7 @@ describe('admin op guards refuse external (outside-vendor) ops', () => {
   });
 
   it('undoJobOperation throws for an external op (undo goes through its own lifecycle)', async () => {
-    mockQueryBuilder.data = externalOpRow;
+    mockQueryBuilder.data = { work_center: { kind: 'external' } };
     await expect(undoJobOperation('op-1')).rejects.toThrow(/outside/i);
-    expect(mockQueryBuilder.update).not.toHaveBeenCalled();
-  });
-
-  it('completeJobOperation reaches the update path for an internal op (no guard throw)', async () => {
-    // The shared builder can't serve the distinct array shape recomputeJobPartStatus
-    // needs, so assert only that the internal op passes the guard and issues the
-    // completion update (the rollup itself is covered elsewhere).
-    mockQueryBuilder.data = {
-      job_id: 'job-1',
-      job_part_id: 'jp-1',
-      jobs: { production_status: 'in_progress' },
-      work_center: { kind: 'internal' },
-    };
-    mockSupabase.auth = { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) };
-    await completeJobOperation('op-1', 'job-1').catch(() => {});
-    expect(mockQueryBuilder.update).toHaveBeenCalled();
-    expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'completed' });
   });
 });

@@ -65,3 +65,53 @@ FROM "public"."work_centers" wc
 WHERE wc."id" = jo."work_center_id"
   AND wc."kind" = 'external'
   AND jo."status" = 'in_progress';
+
+-- 4. Make operation-status derivation outside-op aware.
+--    The completion-quantity model (20260721023953) derives job_operations.status
+--    from job_operation_completions events via compute_job_operation_status, which
+--    the part-quantity-edit trigger (recompute_job_ops_status_from_part_qty) runs
+--    over EVERY op on a part. Outside (external-vendor) ops carry their status via
+--    the send/receive lifecycle (set directly, with no completion events), so left
+--    unguarded a part-quantity edit would recompute a 'sent' or received external
+--    op back to 'pending' (v_good = 0). Redefine the function to preserve an
+--    external op's stored status untouched. Internal ops are unchanged.
+CREATE OR REPLACE FUNCTION public.compute_job_operation_status(p_job_operation_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_target numeric;
+    v_good numeric;
+    v_kind text;
+    v_status text;
+BEGIN
+    SELECT jp.quantity, wc.kind, o.status
+      INTO v_target, v_kind, v_status
+      FROM public.job_operations o
+      JOIN public.job_parts jp ON jp.id = o.job_part_id
+      LEFT JOIN public.work_centers wc ON wc.id = o.work_center_id
+     WHERE o.id = p_job_operation_id;
+
+    -- Outside (external-vendor) ops are driven by the send/receive lifecycle
+    -- (status set directly), NOT by completion-quantity events. Preserve their
+    -- stored status so a part-quantity edit (or any completion recompute) can't
+    -- reset a sent/received op.
+    IF v_kind = 'external' THEN
+        RETURN v_status;
+    END IF;
+
+    SELECT COALESCE(SUM(c.quantity_good), 0) INTO v_good
+      FROM public.job_operation_completions c
+     WHERE c.job_operation_id = p_job_operation_id
+       AND c.voided_at IS NULL;
+
+    IF v_good <= 0 THEN
+        RETURN 'pending';
+    END IF;
+    IF v_target IS NOT NULL AND v_good >= v_target THEN
+        RETURN 'completed';
+    END IF;
+    RETURN 'in_progress';
+END $function$;

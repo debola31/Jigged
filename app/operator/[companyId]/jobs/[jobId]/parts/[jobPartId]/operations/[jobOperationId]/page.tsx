@@ -12,6 +12,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
+import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -20,11 +21,18 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import {
   getOperatorOperationDetail,
   getCurrentMember,
-  completeOperation,
   revertOperationCompletion,
   markOperationSent,
   markOperationReceived,
 } from '@/utils/operatorAccess';
+import {
+  createOperationCompletion,
+  getOperationCompletionSummaries,
+} from '@/utils/operationCompletionsAccess';
+import {
+  operationCompletionConsequence,
+  completionConsequenceCaption,
+} from '@/components/operations/operationMath';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
@@ -35,16 +43,18 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  * Action view for ONE specific operation on a job_part. Reached by tapping a
  * step on the traveler, or directly from the station-scoped jobs list.
  *
- * Operators have a single deliberate action: MARK COMPLETE — one tap, no
- * "start", no pause/exit, and no on-job timer (shop operators don't reliably
- * start/pause/resume, so we don't pretend to track that time; see
- * operatorAccess.completeOperation). A completed step shows an UNDO so an
- * accidental completion can be reverted on the spot. Loads by job_operation_id
- * so the exact step the operator chose is the one actioned.
+ * Operators record how many GOOD pieces they finished: one number field that
+ * defaults to the full remaining balance, so RECORD COMPLETION completes the
+ * operation by default and records a partial when the number is dialled down
+ * (each event appends to job_operation_completions; a DB trigger derives the
+ * op status). No "start", no pause/exit, no on-job timer (shop operators don't
+ * reliably start/pause/resume, so we don't pretend to track that time). Undo
+ * voids the recorded completions. Loads by job_operation_id so the exact step
+ * the operator chose is the one actioned.
  *
- * Station guard: completing requires a selected station (StationSelector prompts
+ * Station guard: recording requires a selected station (StationSelector prompts
  * when none is set). If the step's work center doesn't match the operator's
- * station — the likely signature of a wrong QR scan — Mark Complete is replaced
+ * station — the likely signature of a wrong QR scan — the action is replaced
  * by a guide with a one-tap "switch & complete" (for legit cross-station work)
  * and a way back to the traveler.
  */
@@ -62,6 +72,14 @@ export default function OperatorOperationActionPage() {
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Good-quantity the operator is about to record. Blank until the summary loads,
+  // then defaults to the remaining balance (dialled down for a partial).
+  const [qtyInput, setQtyInput] = useState('');
+  const [qtyDirty, setQtyDirty] = useState(false);
+  // Bumped after each successful completion to trigger JobFeed's one-time
+  // "add a photo/note?" offer. Bumped strictly AFTER the completion resolves,
+  // so completion is already durable before any prompt appears.
+  const [captureOfferSignal, setCaptureOfferSignal] = useState(0);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -89,21 +107,58 @@ export default function OperatorOperationActionPage() {
     },
   );
 
-  // Completion is a direct, single-tap action — no confirmation. We stay on the
-  // page and re-load into the completed state so a mistaken completion can be
-  // undone immediately.
-  const handleComplete = async () => {
+  // Good/remaining for THIS op (partial-completion progress). Separate load so a
+  // completion re-reads the counts without refetching the whole detail graph.
+  const { data: summary, reload: loadSummary } = useLoad(
+    () =>
+      getOperationCompletionSummaries(jobPartId).then(
+        (rows) => rows.find((r) => r.job_operation_id === jobOperationId) ?? null,
+      ),
+    [jobPartId, jobOperationId],
+  );
+
+  const target = summary?.target ?? job?.part_quantity ?? 0;
+  const qtyGood = summary?.qty_good ?? 0;
+  const remaining = summary?.qty_remaining ?? Math.max(0, target - qtyGood);
+
+  // The field shows the remaining balance by default (states its own outcome,
+  // like the shipment form's prefill) until the operator edits it — derived, not
+  // an effect, so there's no setState-in-effect cascade. A successful record
+  // clears the dirty flag, snapping the value back to the new remaining.
+  const qtyValue = qtyDirty ? qtyInput : remaining > 0 ? String(remaining) : '';
+
+  const reloadAll = async () => {
+    await Promise.all([loadJob(), loadSummary()]);
+  };
+
+  // Record a specific good quantity. Over-completion is allowed (warned, not
+  // blocked) — the only floor is > 0.
+  const handleRecord = async () => {
     if (!currentOperatorId) {
       setError('Operator not found. Please log in again.');
+      return;
+    }
+    const qty = Number(qtyValue);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setError('Enter how many good pieces you finished.');
       return;
     }
     setActionLoading(true);
     setError(null);
     try {
-      await completeOperation(jobOperationId);
-      await loadJob();
+      await createOperationCompletion({
+        companyId,
+        jobOperationId,
+        jobPartId,
+        quantityGood: qty,
+      });
+      setQtyDirty(false);
+      await reloadAll();
+      // Completion is now persisted. Offer capture last, so a client death at
+      // the prompt cannot un-complete the step.
+      setCaptureOfferSignal((n) => n + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to complete operation');
+      setError(err instanceof Error ? err.message : 'Failed to record completion');
     } finally {
       setActionLoading(false);
     }
@@ -114,7 +169,8 @@ export default function OperatorOperationActionPage() {
     setError(null);
     try {
       await revertOperationCompletion(jobOperationId);
-      await loadJob();
+      setQtyDirty(false);
+      await reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to undo completion');
     } finally {
@@ -153,6 +209,7 @@ export default function OperatorOperationActionPage() {
   const isExternal = job?.operation_work_center_kind === 'external';
   const isCompleted = job?.operation_status === 'completed';
   const isSent = job?.operation_status === 'sent';
+  const consequence = operationCompletionConsequence(qtyValue, remaining);
 
   // Wait for BOTH the job fetch and the station context's one-time init before
   // deciding what to render — otherwise the "no station" branch can flash for an
@@ -335,7 +392,9 @@ export default function OperatorOperationActionPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}>
             <CheckCircleIcon color="success" />
             <Box component="span" sx={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: '1.05rem' }}>
-              {isExternal ? 'Parts received from the vendor' : 'This step is complete'}
+              {isExternal
+                ? 'Parts received from the vendor'
+                : `This step is complete${target > 0 ? ` — ${qtyGood} of ${target} good` : ''}`}
             </Box>
             {actionLoading ? (
               <CircularProgress size={18} />
@@ -402,11 +461,10 @@ export default function OperatorOperationActionPage() {
           )}
         </Box>
       ) : (
-        // Not completed. A station mismatch (this step's work center ≠ the
-        // operator's selected station) only WARNS — completion doesn't need or
-        // record the station (completeOperation keys off the operation id), so
-        // the action stays a plain MARK COMPLETE and we don't silently switch
-        // their station. They change it from the header if they've actually moved.
+        // Not completed. Operators record how many GOOD pieces they finished —
+        // the field defaults to the remaining balance (states its own outcome)
+        // and a partial leaves the rest outstanding. A station mismatch only
+        // WARNS (completion keys off the operation id, not the station).
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {stationMismatch && (
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, px: 0.5, color: 'warning.main' }}>
@@ -417,18 +475,74 @@ export default function OperatorOperationActionPage() {
               </Typography>
             </Box>
           )}
+
+          {qtyGood > 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
+              {qtyGood} of {target} good so far · {remaining} remaining
+            </Typography>
+          )}
+
+          <TextField
+            label="Good pieces finished"
+            type="number"
+            value={qtyValue}
+            onChange={(e) => {
+              setQtyDirty(true);
+              setQtyInput(e.target.value);
+            }}
+            inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Good pieces finished' }}
+            fullWidth
+            size="medium"
+            error={consequence.kind === 'over'}
+            helperText={
+              consequence.kind === 'none'
+                ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
+                : completionConsequenceCaption(consequence)
+            }
+            FormHelperTextProps={{
+              sx: {
+                color:
+                  consequence.kind === 'over'
+                    ? 'error.main'
+                    : consequence.kind === 'partial'
+                      ? 'warning.main'
+                      : consequence.kind === 'full'
+                        ? 'success.main'
+                        : 'text.secondary',
+              },
+            }}
+          />
+
+          {/* Single action: the field defaults to the full remaining balance, so
+              this records a full completion by default and a partial when the
+              operator dials the number down (mirrors the shipment form — no
+              separate "complete all" button, which would just duplicate this). */}
           <Button
             fullWidth
             variant="contained"
             size="large"
             color="primary"
             startIcon={<CheckCircleIcon />}
-            onClick={handleComplete}
-            disabled={actionLoading}
-            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+            onClick={handleRecord}
+            disabled={actionLoading || !(Number(qtyValue) > 0)}
+            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
           >
-            {actionLoading ? <CircularProgress size={24} /> : 'MARK COMPLETE'}
+            {actionLoading ? <CircularProgress size={24} /> : 'RECORD COMPLETION'}
           </Button>
+
+          {qtyGood > 0 && (
+            <Button
+              fullWidth
+              variant="text"
+              color="inherit"
+              startIcon={<UndoIcon fontSize="small" />}
+              onClick={handleRevert}
+              disabled={actionLoading}
+              sx={{ minHeight: 44, opacity: 0.8 }}
+            >
+              Undo all ({qtyGood})
+            </Button>
+          )}
         </Box>
       )}
 
@@ -439,10 +553,10 @@ export default function OperatorOperationActionPage() {
         <JobFeed
           jobId={jobId}
           companyId={companyId}
+          captureOfferSignal={captureOfferSignal}
           operationContext={{
             jobPartId,
             jobOperationId,
-            operationLabel: job.operation_name,
           }}
         />
       </Box>

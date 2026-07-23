@@ -20,6 +20,7 @@
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
   OperatorPlantJob,
@@ -206,11 +207,12 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
 
   const jobPartIds = readyRows.map((r) => r.job_part_id);
   const jobIds = Array.from(new Set(readyRows.map((r) => r.job_id)));
+  const currentOpIds = readyRows.map((r) => r.job_operation_id);
 
-  // Three independent reads, each already batched via .in(...). Run them in
-  // parallel — this is the operator hot path (station polling / whole-plant
-  // view), so collapsing 3 sequential round-trips to 1 matters most here.
-  const [{ data: partOps }, { data: jobMeta }, { data: partStatusRows }] =
+  // Independent reads, each already batched via .in(...). Run them in parallel —
+  // this is the operator hot path (station polling / whole-plant view), so
+  // collapsing round-trips matters most here.
+  const [{ data: partOps }, { data: jobMeta }, { data: partStatusRows }, { data: opCompletions }] =
     await Promise.all([
       // Per-part progress (count of ops total + completed per part).
       supabase
@@ -224,6 +226,13 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
         .from('job_parts')
         .select('id, production_status')
         .in('id', jobPartIds),
+      // Good pieces recorded (non-void) against each row's CURRENT operation, so
+      // the card can show partial progress ("3 of 12 good") on the ready step.
+      supabase
+        .from('job_operation_completions')
+        .select('job_operation_id, quantity_good')
+        .in('job_operation_id', currentOpIds)
+        .is('voided_at', null),
     ]);
 
   type PartOpRow = { job_part_id: string; status: string };
@@ -247,6 +256,12 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
     statusByPart.set(r.id, r.production_status);
   }
 
+  type OpCompletionRow = { job_operation_id: string; quantity_good: number };
+  const goodByOp = new Map<string, number>();
+  for (const r of (opCompletions ?? []) as OpCompletionRow[]) {
+    goodByOp.set(r.job_operation_id, (goodByOp.get(r.job_operation_id) ?? 0) + Number(r.quantity_good));
+  }
+
   return readyRows.map((row) => {
     const progress = progressByPart.get(row.job_part_id) ?? { total: 0, done: 0 };
     return {
@@ -263,6 +278,8 @@ async function buildOperatorJobs(readyRows: ReadyRow[]): Promise<OperatorJob[]> 
       operation_status: row.op_status,
       operations_total: progress.total,
       operations_completed: progress.done,
+      // Partial progress on the CURRENT operation (good pieces / order qty).
+      current_op_qty_good: goodByOp.get(row.job_operation_id) ?? 0,
     };
   });
 }
@@ -778,62 +795,6 @@ function vendorClause(op: OpOutsideContext): string {
 }
 
 /**
- * Mark a single operation complete. This is the operator's one-tap action —
- * there is no separate "start" step, no pause, and no on-job timer. We record
- * who completed the step (job_operations.completed_by = the signed-in auth user)
- * and when, then roll the result up to the job_part (which a DB trigger cascades
- * to the job).
- *
- * Time-on-job is intentionally NOT tracked: operators complete in a single tap,
- * so there's no reliable session duration to record (the operator_sessions table
- * and the job_operations actual-time columns were removed with this flow).
- *
- * Completing an earlier-than-final step moves the part to 'in_progress'; the
- * last remaining step moves it to 'completed'. No notes or material-consumption
- * confirmation here: job notes live at the job level (job_notes) and material
- * consumption is driven by the part BOM.
- *
- * EXTERNAL OPS: an operation routed to an external (outside-vendor) work center
- * can NEVER be completed through this path — it must go through
- * markOperationReceived so the send/receive lifecycle and its audit trail are
- * honored. Calling this on an external op throws.
- */
-export async function completeOperation(
-  jobOperationId: string,
-): Promise<JobCompleteResponse> {
-  const supabase = getSupabase();
-
-  const op = await loadOpOutsideContext(jobOperationId);
-  if (op.is_external) {
-    throw new Error(
-      'This is an outside (vendor) operation — use Mark Received, not Complete.',
-    );
-  }
-
-  // completed_by references auth.users(id) (NOT user_company_access.id), so we
-  // record the signed-in auth user — same as the admin completeJobOperation path.
-  const { data: { user } } = await supabase.auth.getUser();
-
-  const now = new Date().toISOString();
-
-  await supabase
-    .from('job_operations')
-    .update({
-      status: 'completed',
-      completed_at: now,
-      completed_by: user?.id ?? null,
-    })
-    .eq('id', jobOperationId);
-
-  const partCompleted = await rollupPartAfterCompletion(op.job_part_id, now);
-
-  return {
-    success: true,
-    job_completed: partCompleted ? await readJobCompleted(op.job_id) : false,
-  };
-}
-
-/**
  * Mark an outside (external-vendor) operation as SENT OUT: the parts have left
  * the shop for the vendor. Moves pending → sent, records who/when (sent_by =
  * signed-in auth user), moves the part to in_progress (work has begun), and logs
@@ -933,59 +894,70 @@ export async function markOperationReceived(
  *
  * The part can no longer be 'completed' if we un-completed one of its ops: if any
  * other op is still completed the part is 'in_progress', otherwise 'not_started'.
- * The job_parts trigger cascades the recomputed status to the job.
+ *
+ * An INTERNAL op undoes by voiding every non-void completion event
+ * (voidAllOperationCompletions); the recompute trigger derives the op back to
+ * pending and cascades the part/job status. Quantities are never deleted.
  */
 export async function revertOperationCompletion(
   jobOperationId: string,
 ): Promise<void> {
-  const supabase = getSupabase();
   const op = await loadOpOutsideContext(jobOperationId);
-  const now = new Date().toISOString();
 
-  if (op.is_external && op.status === 'completed' && op.sent_at) {
-    // Received → back to sent (parts are still out); keep sent_at/by.
-    await supabase
-      .from('job_operations')
-      .update({ status: 'sent', completed_at: null, completed_by: null })
-      .eq('id', jobOperationId);
-    await logOutsideEvent(op, `Undid receipt — back to sent to${vendorClause(op)}.`);
-  } else if (op.is_external && op.status === 'sent') {
-    // Un-send → back to pending; clear the send stamp.
-    await supabase
-      .from('job_operations')
-      .update({ status: 'pending', sent_at: null, sent_by: null })
-      .eq('id', jobOperationId);
-    await logOutsideEvent(op, 'Undid send — parts not sent out.');
-  } else {
-    // Internal op (or a legacy external completed op that never went through
-    // send): back to pending, clearing completion and any stray send stamp.
-    await supabase
-      .from('job_operations')
-      .update({ status: 'pending', completed_at: null, completed_by: null, sent_at: null, sent_by: null })
-      .eq('id', jobOperationId);
-    if (op.is_external) {
+  // Outside (external-vendor) ops carry status via direct writes with no
+  // completion events, so step the lifecycle back one state and roll the part up
+  // manually — voidAllOperationCompletions would be a no-op for them.
+  if (op.is_external) {
+    const supabase = getSupabase();
+    const now = new Date().toISOString();
+
+    if (op.status === 'completed' && op.sent_at) {
+      // Received → back to sent (parts are still out); keep sent_at/by.
+      await supabase
+        .from('job_operations')
+        .update({ status: 'sent', completed_at: null, completed_by: null })
+        .eq('id', jobOperationId);
+      await logOutsideEvent(op, `Undid receipt — back to sent to${vendorClause(op)}.`);
+    } else if (op.status === 'sent') {
+      // Un-send → back to pending; clear the send stamp.
+      await supabase
+        .from('job_operations')
+        .update({ status: 'pending', sent_at: null, sent_by: null })
+        .eq('id', jobOperationId);
+      await logOutsideEvent(op, 'Undid send — parts not sent out.');
+    } else {
+      // Legacy external completed op that never went through send → pending.
+      await supabase
+        .from('job_operations')
+        .update({ status: 'pending', completed_at: null, completed_by: null, sent_at: null, sent_by: null })
+        .eq('id', jobOperationId);
       await logOutsideEvent(op, 'Undid receipt — parts not sent out.');
     }
+
+    const { data: stillCompleted } = await supabase
+      .from('job_operations')
+      .select('id')
+      .eq('job_part_id', op.job_part_id)
+      .eq('status', 'completed');
+
+    const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
+
+    await supabase
+      .from('job_parts')
+      .update({
+        production_status: hasCompleted ? 'in_progress' : 'not_started',
+        completed_at: null,
+        status_changed_at: now,
+        updated_at: now,
+      })
+      .eq('id', op.job_part_id)
+      .not('production_status', 'in', '("cancelled")');
+    return;
   }
 
-  const { data: stillCompleted } = await supabase
-    .from('job_operations')
-    .select('id')
-    .eq('job_part_id', op.job_part_id)
-    .eq('status', 'completed');
-
-  const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
-
-  await supabase
-    .from('job_parts')
-    .update({
-      production_status: hasCompleted ? 'in_progress' : 'not_started',
-      completed_at: null,
-      status_changed_at: now,
-      updated_at: now,
-    })
-    .eq('id', op.job_part_id)
-    .not('production_status', 'in', '("cancelled")');
+  // Internal op: void completion events; the trigger derives op → pending and
+  // cascades part/job status.
+  await voidAllOperationCompletions(jobOperationId);
 }
 
 // ============================================================================
@@ -1330,7 +1302,7 @@ export async function getJobPartsOverview(
 // Each note carries its optional step tag (job_operations) and its media so the
 // feed renders thumbnails without a second round-trip.
 const JOB_NOTE_SELECT =
-  'id, job_id, job_operation_id, body, created_at, ' +
+  'id, job_id, job_operation_id, body, note_type, created_at, ' +
   'author:user_company_access(name), ' +
   'operation:job_operations(operation_name, sequence), ' +
   'media:job_note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
@@ -1340,6 +1312,7 @@ type JobNoteRow = {
   job_id: string;
   job_operation_id: string | null;
   body: string | null;
+  note_type: string | null;
   created_at: string;
   author: { name: string | null } | { name: string | null }[] | null;
   operation:
@@ -1382,6 +1355,7 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
     job_operation_id: n.job_operation_id,
     operation_label: operationLabel,
     body: n.body,
+    note_type: n.note_type === 'event' ? 'event' : 'user',
     created_at: n.created_at,
     author_name: author?.name ?? null,
     media,

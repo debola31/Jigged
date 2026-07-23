@@ -239,7 +239,12 @@ export async function generateJobTravelerPdf(
   doc.text('Operations', MARGIN, cursorY);
   cursorY += 10;
 
-  const head = [['Step', 'Work Center', 'Operation / Instructions', 'Setup (min)', 'Cycle (min/pc)', 'Scan']];
+  // "Good (of N)" is a blank write-in column so the floor can tally good pieces
+  // per operation on paper (the offline-capture fallback for partial completion).
+  const head = [[
+    'Step', 'Work Center', 'Operation / Instructions', 'Setup (min)', 'Cycle (min/pc)',
+    `Good (of ${traveler.quantity})`, 'Scan',
+  ]];
   // Explicit row -> operation map, built alongside `body` so both the QR draw and
   // the external-op banner restyle resolve the op by identity, never by a fragile
   // positional index into traveler.operations (the empty-ops placeholder row maps
@@ -268,16 +273,17 @@ export async function generateJobTravelerPdf(
       detail,
       formatMinutes(op.setup_minutes),
       formatMinutes(op.cycle_minutes),
+      '', // Good made — blank write-in
       '', // Scan — QR drawn in didDrawCell
     ];
   });
 
   if (body.length === 0) {
-    body.push(['—', 'No operations on this part', '', '—', '—', '']);
+    body.push(['—', 'No operations on this part', '', '—', '—', '', '']);
     rowOps.push(null);
   }
 
-  const SCAN_COL = 5;
+  const SCAN_COL = 6;
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
@@ -304,11 +310,12 @@ export async function generateJobTravelerPdf(
     },
     columnStyles: {
       0: { cellWidth: 38, halign: 'center' },
-      1: { cellWidth: 110, fontStyle: 'bold' },
+      1: { cellWidth: 100, fontStyle: 'bold' },
       2: { cellWidth: 'auto' },
-      3: { cellWidth: 58, halign: 'right' },
-      4: { cellWidth: 66, halign: 'right' },
-      5: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
+      3: { cellWidth: 54, halign: 'right' },
+      4: { cellWidth: 60, halign: 'right' },
+      5: { cellWidth: 58, halign: 'center' },
+      6: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
     // Restyle external (outside-vendor) rows as a solid dark banner with white
     // bold text — reads distinctly AND survives grayscale printing (contrast, not

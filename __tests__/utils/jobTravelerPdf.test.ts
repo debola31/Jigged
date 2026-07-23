@@ -110,7 +110,7 @@ async function renderAndGetOpsTable(t: JobTraveler) {
   };
 }
 
-const SCAN_COL = 5;
+const SCAN_COL = 6; // traveler ops table: Step,WC,Detail,Setup,Cycle,Good,Scan
 const DETAIL_COL = 2;
 
 beforeEach(() => {

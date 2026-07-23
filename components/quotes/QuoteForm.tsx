@@ -131,19 +131,15 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 const ADD_NEW_CONTACT_ID = '__add_new_contact__';
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
 /**
- * One option in the payment-terms combobox. `group` drives the "Your saved
- * terms" / "Standard terms" subheaders; `isAdd` marks the synthetic
- * `Add "<typed>"` row surfaced once the user types a new term; `isAddHint` marks
- * the always-visible, disabled "Type to add your own term" cue shown at the top
- * when the field is empty (so custom entry is discoverable before typing).
+ * One option in the payment-terms picker. `group` tags whether the term is one
+ * of the shop's saved custom terms (which get a remove control) or a built-in
+ * preset. Adding a new term happens via the dropdown's "Add New" footer, not by
+ * free-typing, so there's no synthetic create option in the list.
  */
-type PaymentTermOption = {
-  value: string;
-  group: string;
-  isAdd?: boolean;
-  isAddHint?: boolean;
-};
+type PaymentTermOption = { value: string; group: string };
 const paymentTermFilter = createFilterOptions<PaymentTermOption>();
+/** Sentinel value for the "Add New" action row at the bottom of the picker. */
+const ADD_NEW_TERM = '__add_new_payment_term__';
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -275,9 +271,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [contactFormOpen, setContactFormOpen] = useState(false);
 
   // The company's saved custom payment terms (free-text terms kept for reuse),
-  // loaded in loadData. They render under a "Your saved terms" group in the
-  // payment-terms combobox; picking "Add …" appends to this list and persists.
+  // loaded in loadData. They render first in the payment-terms picker (each with
+  // a remove control); choosing "Add New" and submitting a term appends here.
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
+  // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets
+  // addingTerm, which reveals an inline field (below the picker) bound to
+  // newTermDraft; submitting it selects + saves the term.
+  const [addingTerm, setAddingTerm] = useState(false);
+  const [newTermDraft, setNewTermDraft] = useState('');
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -407,23 +408,30 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   };
 
   /**
-   * Grouped options for the payment-terms combobox: the company's saved custom
-   * terms first (excluding any that duplicate a preset), then the standard
-   * presets. The synthetic `Add "…"` row is injected by filterOptions in the JSX.
+   * Options for the payment-terms picker: the company's saved custom terms first
+   * (each removable), then the built-in presets. If the quote already carries a
+   * custom term that isn't in the shop's saved list (e.g. an older quote), it's
+   * included too so the field can still display it.
    */
   const paymentTermOptions = useMemo<PaymentTermOption[]>(() => {
     const savedClean = savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t));
-    return [
+    const opts: PaymentTermOption[] = [
       ...savedClean.map((v) => ({ value: v, group: 'Your saved terms' })),
       ...PAYMENT_TERM_PRESETS.map((v) => ({ value: v, group: 'Standard terms' })),
     ];
-  }, [savedTerms]);
+    const cur = formData.payment_terms.trim();
+    if (cur && !opts.some((o) => o.value === cur)) {
+      opts.unshift({ value: cur, group: 'This quote' });
+    }
+    return opts;
+  }, [savedTerms, formData.payment_terms]);
 
   /**
-   * Commit a chosen/typed payment term. A brand-new custom term (typed, not a
-   * preset, not already saved) is added to the company's saved list —
-   * optimistically in the UI, then persisted best-effort (a failed save still
-   * leaves the term usable on this quote).
+   * Commit a payment term (picked from the list, or entered via the inline
+   * "Add New" field). A brand-new custom term (not a preset, not already saved)
+   * is added to the company's saved list — optimistically in the UI, then
+   * persisted best-effort (a failed save still leaves the term usable on this
+   * quote).
    */
   const commitPaymentTerm = (term: string, isNewCustom: boolean) => {
     const trimmed = term.trim();
@@ -447,6 +455,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     removeCustomPaymentTerm(companyId, term)
       .then(setSavedTerms)
       .catch((e) => console.warn('Could not remove custom payment term:', e));
+  };
+
+  /** Cancel the inline "add a new term" field, reverting to the picker. */
+  const cancelAddTerm = () => {
+    setAddingTerm(false);
+    setNewTermDraft('');
+  };
+
+  /** Commit the inline "add a new term" draft: select it and save it for reuse. */
+  const submitNewTerm = () => {
+    const t = newTermDraft.trim();
+    if (t) commitPaymentTerm(t, true);
+    setAddingTerm(false);
+    setNewTermDraft('');
   };
 
   /**
@@ -1700,79 +1722,48 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              {/* Type-or-pick combobox: standard presets + the shop's saved
-                  custom terms (grouped), with an inline Add "<typed>" row for
-                  new free-text wording. payment_terms stays a single string. */}
-              <Autocomplete<PaymentTermOption, false, false, true>
-                freeSolo
-                selectOnFocus
-                clearOnBlur
-                handleHomeEndKeys
+              {/* Pick-only combobox: the shop's saved custom terms first (each
+                  removable), then the built-in presets, then a highlighted
+                  "Add New" row that reveals the inline field below. New wording
+                  is entered there, never free-typed here. payment_terms stays a
+                  single string. */}
+              <Autocomplete<PaymentTermOption, false, false, false>
                 size="small"
                 fullWidth
                 options={paymentTermOptions}
-                getOptionLabel={(o) => (typeof o === 'string' ? o : o.value)}
-                // The empty-state "Type to add your own term" cue is a
-                // non-selectable hint, not a real option.
-                getOptionDisabled={(o) => typeof o !== 'string' && o.isAddHint === true}
-                isOptionEqualToValue={(option, val) => {
-                  const a = typeof option === 'string' ? option : option.value;
-                  const b = typeof val === 'string' ? val : val.value;
-                  return a === b;
-                }}
+                getOptionLabel={(o) => o.value}
+                isOptionEqualToValue={(option, val) => option.value === val.value}
                 filterOptions={(options, params) => {
                   const filtered = paymentTermFilter(options, params);
-                  const input = params.inputValue.trim();
-                  const exists =
-                    PAYMENT_TERM_PRESETS.includes(input) || savedTerms.includes(input);
-                  // A single always-present "add" row at the TOP (no group
-                  // headers) so custom entry is visible the instant the list
-                  // opens — a disabled hint keeps the first *selectable* option
-                  // the most common term, so frequency-first ordering holds.
-                  if (input === '') {
-                    filtered.unshift({ value: '', group: 'Add new', isAddHint: true });
-                  } else if (!exists) {
-                    filtered.unshift({ value: input, group: 'Add new', isAdd: true });
-                  }
+                  // A highlighted "Add New" action is always the last row.
+                  filtered.push({ value: ADD_NEW_TERM, group: 'Add new' });
                   return filtered;
                 }}
-                value={formData.payment_terms || null}
+                value={
+                  paymentTermOptions.find((o) => o.value === formData.payment_terms) ?? null
+                }
                 onChange={(_e, newValue) => {
-                  if (newValue == null) {
-                    handleFieldChange('payment_terms', '');
+                  if (newValue?.value === ADD_NEW_TERM) {
+                    // "Add New" chosen → reveal the inline add field below.
+                    setNewTermDraft('');
+                    setAddingTerm(true);
                     return;
                   }
-                  // The empty-state hint is disabled, but guard anyway.
-                  if (typeof newValue !== 'string' && newValue.isAddHint) return;
-                  const term = typeof newValue === 'string' ? newValue : newValue.value;
-                  // A raw string (typed + Enter) or the "Add …" row is a new custom term.
-                  const isNewCustom = typeof newValue === 'string' || newValue.isAdd === true;
-                  commitPaymentTerm(term, isNewCustom);
+                  handleFieldChange('payment_terms', newValue ? newValue.value : '');
                 }}
                 renderOption={(props, option) => {
                   const { key, ...liProps } = props as typeof props & { key?: string };
-                  // The "add" row sits at the top with a divider below it so it
-                  // reads as a distinct action, separate from the term list.
-                  const addRowStyle = { borderBottom: '1px solid rgba(255, 255, 255, 0.12)' };
-                  if (option.isAddHint) {
-                    // Prominent (accent, semibold) so the add affordance reads
-                    // like a clear "add" action, not a faint disabled row. The
-                    // opacity override cancels MUI's disabled-option greying.
+                  if (option.value === ADD_NEW_TERM) {
+                    // Highlighted "Add New" action pinned as the last row.
                     return (
-                      <li key={key} {...liProps} style={{ ...addRowStyle, opacity: 1 }}>
+                      <li
+                        key={key}
+                        {...liProps}
+                        style={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)' }}
+                      >
                         <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
                         <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
-                          Type to add your own term
-                        </Box>
-                      </li>
-                    );
-                  }
-                  if (option.isAdd) {
-                    return (
-                      <li key={key} {...liProps} style={addRowStyle}>
-                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
-                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
-                          Add “{option.value}”
+                          Add New
                         </Box>
                       </li>
                     );
@@ -1809,11 +1800,44 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     {...params}
                     label="Payment terms"
                     required
-                    helperText="Choose a standard term or type your own"
                     InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
                   />
                 )}
               />
+              {addingTerm && (
+                // Choosing "Add New" reveals this inline field just below the
+                // picker (a dropdown menu closes on selection, so the field
+                // can't reliably live inside it). Type + Add saves it for reuse.
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    autoFocus
+                    label="New payment term"
+                    placeholder="e.g. Net 30, 1% late charge"
+                    value={newTermDraft}
+                    onChange={(e) => setNewTermDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitNewTerm();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelAddTerm();
+                      }
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <Button
+                    variant="contained"
+                    disabled={newTermDraft.trim() === ''}
+                    onClick={submitNewTerm}
+                  >
+                    Add
+                  </Button>
+                  <Button onClick={cancelAddTerm}>Cancel</Button>
+                </Box>
+              )}
             </Grid>
           </Grid>
         </CardContent>

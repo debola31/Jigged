@@ -299,19 +299,18 @@ describe('QuoteForm', () => {
     expect(screen.queryByRole('option', { name: 'Net 90', exact: true })).not.toBeInTheDocument();
   });
 
-  it('adds a typed custom term inline and saves it to the company for reuse', async () => {
+  it('adds a term via the "Add New" action and saves it to the company for reuse', async () => {
     addCustomPaymentTerm.mockResolvedValue(['Net 30, 1% late charge']);
-    // Start from an empty term so typing isn't appended to a preset value.
     render(
       <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
     );
 
     const user = userEvent.setup();
-    const combo = await screen.findByRole('combobox', { name: /payment terms/i });
-    await user.click(combo);
-    await user.type(combo, 'Net 30, 1% late charge');
-    // The inline "Add …" option appears; choosing it commits and persists.
-    await user.click(await screen.findByRole('option', { name: /Add .Net 30, 1% late charge/i }));
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    // Choose the "Add New" row → an inline field appears below the picker.
+    await user.click(await screen.findByRole('option', { name: /add new/i }));
+    await user.type(await screen.findByLabelText('New payment term'), 'Net 30, 1% late charge');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
 
     expect(addCustomPaymentTerm).toHaveBeenCalledWith('test-company-id', 'Net 30, 1% late charge');
   });
@@ -336,15 +335,15 @@ describe('QuoteForm', () => {
     );
   });
 
-  it('shows an always-visible "type to add" hint when the terms field is empty', async () => {
+  it('shows a highlighted "Add New" row at the bottom of the dropdown', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
     );
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
-    // The custom-entry cue is visible before the user types anything.
-    expect(await screen.findByText('Type to add your own term')).toBeInTheDocument();
+    // The "Add New" affordance is visible in the open dropdown.
+    expect(await screen.findByRole('option', { name: /add new/i })).toBeInTheDocument();
   });
 
   it('calls updateQuote with the payload and navigates on success', async () => {

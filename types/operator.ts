@@ -213,6 +213,13 @@ export interface JobNote {
   operation_label: string | null;
   /** Free text. Null when the note is media-only. */
   body: string | null;
+  /**
+   * 'user' = a human-authored note (typed text and/or attached media).
+   * 'event' = an auto-logged feed entry (e.g. the order-quantity-change audit
+   * trail). Used to distinguish real operator capture from system events — e.g.
+   * the post-completion "add a photo?" offer only counts 'user' notes.
+   */
+  note_type: 'user' | 'event';
   created_at: string;
   /** Author display name (from user_company_access.name); null if unknown. */
   author_name: string | null;

@@ -169,6 +169,7 @@ describe('getJobNotes', () => {
         job_id: 'j1',
         job_operation_id: 'op1',
         body: 'looks good',
+        note_type: 'user',
         created_at: '2026-06-23T10:00:00Z',
         author: { name: 'Jane' },
         operation: { operation_name: 'Mill', sequence: 20 },
@@ -190,6 +191,7 @@ describe('getJobNotes', () => {
         job_id: 'j1',
         job_operation_id: null,
         body: null,
+        note_type: 'event',
         created_at: '2026-06-23T09:00:00Z',
         author: null,
         operation: null,
@@ -216,6 +218,29 @@ describe('getJobNotes', () => {
     expect(result[1].operation_label).toBeNull();
     expect(result[1].body).toBeNull();
     expect(result[1].media).toEqual([]);
+
+    // note_type flows through — 'user' vs auto-logged 'event' (drives the
+    // post-completion capture offer's "already captured?" check).
+    expect(result[0].note_type).toBe('user');
+    expect(result[1].note_type).toBe('event');
+  });
+
+  it('defaults an unknown/missing note_type to user', async () => {
+    mockQueryBuilder.data = [
+      {
+        id: 'n3',
+        job_id: 'j1',
+        job_operation_id: null,
+        body: 'hi',
+        note_type: null,
+        created_at: '2026-06-23T08:00:00Z',
+        author: null,
+        operation: null,
+        media: [],
+      },
+    ];
+    const result = await getJobNotes('j1', 'c1');
+    expect(result[0].note_type).toBe('user');
   });
 
   it('throws when the query errors', async () => {

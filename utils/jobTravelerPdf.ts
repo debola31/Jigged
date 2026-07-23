@@ -144,22 +144,31 @@ export async function generateJobTravelerPdf(
   doc.text(`Job ${traveler.job_number}`, pageWidth - MARGIN, headerTop + 36, { align: 'right' });
 
   // ---------- HOT stamp (right, below the Job #) ----------
-  // The paperless equivalent of Contour's pink paper / "HOT" in red pen. A pure
-  // color would vanish in grayscale printing, so this is a SOLID dark rounded
-  // rect with reversed (white) bold text — unmistakable in black-and-white.
+  // The paperless equivalent of Contour's pink paper / "HOT" in red pen. Drawn as
+  // an OUTLINED "rubber stamp" — a heavy black border with bold black "HOT" on
+  // white, NO filled background. That mirrors the physical HOT rubber stamp,
+  // reads unmistakably in grayscale (no reliance on color), and uses a fraction
+  // of the toner a solid-black fill would (the earlier reversed-white-on-black
+  // version was flagged as too ink-heavy). A double rule gives it stamp presence
+  // without adding meaningful ink.
   let hotStampBottom = headerTop + 36;
   if (traveler.is_hot) {
-    const stampW = 78;
-    const stampH = 24;
+    const stampW = 82;
+    const stampH = 26;
     const stampX = pageWidth - MARGIN - stampW;
     const stampY = headerTop + 44;
-    doc.setFillColor(20, 20, 20);
-    doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'F');
+    doc.setDrawColor(0);
+    doc.setLineWidth(2);
+    doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'S');
+    doc.setLineWidth(0.6);
+    doc.roundedRect(stampX + 3.2, stampY + 3.2, stampW - 6.4, stampH - 6.4, 2.5, 2.5, 'S');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
-    doc.setTextColor(255, 255, 255);
-    doc.text('HOT', stampX + stampW / 2, stampY + stampH / 2 + 5, { align: 'center' });
-    doc.setTextColor(30); // restore for subsequent text
+    doc.setTextColor(0);
+    doc.text('HOT', stampX + stampW / 2, stampY + stampH / 2 + 5.2, { align: 'center' });
+    // Restore stroke/text state for the elements drawn afterwards (divider, etc.).
+    doc.setTextColor(30);
+    doc.setLineWidth(0.75);
     hotStampBottom = stampY + stampH;
   }
 

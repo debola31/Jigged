@@ -1264,6 +1264,7 @@ export type Database = {
           fulfillment_status: string
           id: string
           invoicing_status: string
+          is_hot: boolean
           job_number: string
           production_status: string
           quote_id: string | null
@@ -1290,6 +1291,7 @@ export type Database = {
           fulfillment_status: string
           id?: string
           invoicing_status?: string
+          is_hot?: boolean
           job_number: string
           production_status: string
           quote_id?: string | null
@@ -1316,6 +1318,7 @@ export type Database = {
           fulfillment_status?: string
           id?: string
           invoicing_status?: string
+          is_hot?: boolean
           job_number?: string
           production_status?: string
           quote_id?: string | null
@@ -3113,6 +3116,7 @@ export type Database = {
       get_ready_operations_for_station: {
         Args: { p_company_id: string; p_work_center_id: string }
         Returns: {
+          is_hot: boolean
           job_id: string
           job_number: string
           job_operation_id: string

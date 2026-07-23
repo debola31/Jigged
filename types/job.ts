@@ -71,6 +71,10 @@ export interface Job {
   contact_id: string | null;
   production_status: ProductionStatus;
   fulfillment_status: FulfillmentStatus;
+  // "Hot" (rush) marker — the digital pink-paper / red-pen "HOT" signal. Pure
+  // visibility: no scheduling behavior. Sorts hot jobs first in the admin list
+  // and the operator station queue. Set at creation and toggleable by office staff.
+  is_hot: boolean;
   status_changed_at: string | null;
   started_at: string | null;
   completed_at: string | null;

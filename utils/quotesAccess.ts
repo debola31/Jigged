@@ -16,10 +16,12 @@ import type {
   QuotePartCostBreakdown,
   QuoteLineItem,
   CompanyMember,
+  PricingBasisSnapshot,
 } from '@/types/quote';
 import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
+import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import {
   insertLineItemForPart,
@@ -45,6 +47,26 @@ function asQuote(row: Record<string, unknown> & { status: string }): Quote {
 /** Trim a form string to a value or NULL (empty/whitespace → NULL). */
 function nullIfBlank(s: string | null | undefined): string | null {
   return s && s.trim() !== '' ? s.trim() : null;
+}
+
+/**
+ * The next job number for a job created off `quoteNumber`, given the company's
+ * existing job numbers. EVERY job off a quote keeps the quote's index: the first
+ * is the mirror (Q-0141 → J-0141); each later PO on the same quote gets a numeric
+ * suffix (J-0141-2, J-0141-3, …) so all its jobs stay grouped under one number.
+ * `existingJobNumbers` should include archived jobs — the (company_id, job_number)
+ * uniqueness constraint counts them, so a since-archived mirror still bumps to a
+ * suffix. Pure so it's unit-tested without the DB.
+ */
+export function nextQuoteJobNumber(quoteNumber: string, existingJobNumbers: string[]): string {
+  const mirror = quoteNumber.replace(/^Q-/, 'J-');
+  const esc = mirror.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${esc}(?:-\\d+)?$`);
+  const taken = new Set(existingJobNumbers.filter((n) => re.test(n)));
+  if (!taken.has(mirror)) return mirror;
+  let suffix = 2;
+  while (taken.has(`${mirror}-${suffix}`)) suffix += 1;
+  return `${mirror}-${suffix}`;
 }
 
 /**
@@ -1014,6 +1036,19 @@ export interface ConvertToJobOptions {
    * resolve to exactly one line per part_id or the conversion is rejected.
    */
   selectedLineItemIds?: string[];
+  /**
+   * Per-line quantity (and optional reprice) overrides, keyed by line item id.
+   * Lets the customer order a DIFFERENT quantity than quoted — partial
+   * acceptance (quote 15, order 5). The job_part records the ordered quantity
+   * while the quote line stays frozen at the quoted figure. By default the
+   * agreed unit price is KEPT; set `useTierPrice` to re-resolve the price from
+   * the line's frozen tier snapshot at the new quantity (mirrors
+   * updateJobPartQuantity's opt-in reprice). Lines without an override keep
+   * their quoted quantity + price.
+   */
+  lineOverrides?: Record<string, { quantity: number; useTierPrice?: boolean }>;
+  /** Mark the new job "Hot" (rush) at conversion. Visibility only. Defaults to false. */
+  hot?: boolean;
 }
 
 export interface ConvertToJobResult {
@@ -1031,11 +1066,81 @@ export interface ConvertToJobResult {
 }
 
 /**
- * Convert a quote into a single job that owns one job_part per converted line
- * item (one per part). For a price-options quote the caller passes
- * `options.selectedLineItemIds` to pick the accepted quantity per part; a firm
- * quote converts all its lines. Either way the set must resolve to exactly one
- * line per part_id. The job number mirrors the quote number (Q-NNNN → J-NNNN).
+ * One quote line item already consumed by a job, and the job/PO that owns it. A
+ * quote can be converted in several passes — one job per customer PO, each
+ * covering a subset of the not-yet-converted line items — so this is the source
+ * of truth for "what's left to convert." It drives the Convert-to-Job modal
+ * (hides already-converted parts) and the quote detail page (lists the jobs +
+ * their POs, shows remaining lines).
+ *
+ * A line counts as converted when it has a **non-cancelled** job_part — matching
+ * the `job_parts_one_active_per_quote_line` partial unique index exactly, so the
+ * app view and the DB guarantee never disagree. Cancelling a job cancels its
+ * parts, which frees the line for re-conversion; archiving a job does not (the
+ * archived job stays the record of that conversion — cancel is the way to redo).
+ */
+export interface QuoteLineConversion {
+  line_item_id: string;
+  job_id: string;
+  job_number: string;
+  customer_po_number: string | null;
+  /** Current quantity on the job_part (may differ from the quoted qty). */
+  quantity: number;
+}
+
+export async function getQuoteConversionState(
+  quoteId: string,
+): Promise<QuoteLineConversion[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('job_parts')
+    .select(
+      'source_quote_line_item_id, quantity, production_status, jobs!inner(id, job_number, customer_po_number, quote_id)',
+    )
+    .eq('jobs.quote_id', quoteId)
+    // The job_part's own status — matches the partial unique index predicate.
+    .neq('production_status', 'cancelled')
+    .not('source_quote_line_item_id', 'is', null);
+  if (error) {
+    console.error('Error loading quote conversion state:', error);
+    return [];
+  }
+  type Row = {
+    source_quote_line_item_id: string | null;
+    quantity: number;
+    production_status: string;
+    jobs: {
+      id: string;
+      job_number: string;
+      customer_po_number: string | null;
+      quote_id: string | null;
+    } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  return rows
+    .filter(
+      (r): r is Row & { source_quote_line_item_id: string; jobs: NonNullable<Row['jobs']> } =>
+        Boolean(r.source_quote_line_item_id && r.jobs),
+    )
+    .map((r) => ({
+      line_item_id: r.source_quote_line_item_id,
+      job_id: r.jobs.id,
+      job_number: r.jobs.job_number,
+      customer_po_number: r.jobs.customer_po_number,
+      quantity: r.quantity,
+    }));
+}
+
+/**
+ * Convert (part of) a quote into a job that owns one job_part per converted line
+ * item (one per part). A quote may be converted in SEVERAL passes — one job per
+ * customer PO — each pass taking a subset of the still-unconverted lines; lines
+ * already on a live job are skipped so nothing is double-converted. For a
+ * price-options quote the caller passes `options.selectedLineItemIds` to pick the
+ * accepted quantity per part; a firm quote converts all its remaining lines.
+ * Either way the set must resolve to exactly one line per part_id. The first job
+ * off a quote keeps the mirror number (Q-NNNN → J-NNNN); a later PO draws a fresh
+ * J-N from the shared order counter.
  * Each part's routing is cloned into job_operations + job_materials via the
  * `create_job_part_operations_from_routing` RPC.
  *
@@ -1056,7 +1161,8 @@ export async function convertQuoteToJob(
       *,
       line_items:quote_line_items (
         id, quote_id, company_id, part_id, source_tier_id, sequence,
-        quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at
+        quantity, unit_price, total_price, markup_percent, base_cost_per_unit, created_at,
+        is_quote_override, basis_unknown, pricing_basis_snapshot
       )
     `)
     .eq('id', quoteId)
@@ -1066,9 +1172,6 @@ export async function convertQuoteToJob(
     console.error('Error fetching quote:', quoteError);
     throw quoteError;
   }
-  if (quote.converted_at) {
-    throw new Error('This quote has already been converted to a job.');
-  }
 
   const lineItems = ((quote.line_items || []) as QuoteLineItem[])
     .slice()
@@ -1077,16 +1180,36 @@ export async function convertQuoteToJob(
     throw new Error('This quote has no line items to convert.');
   }
 
+  // A quote is converted in one or more passes (one job per customer PO). Load
+  // the line items already consumed by a live job so this pass never
+  // double-converts one — the quote stays "open" until every line is on a job.
+  const alreadyConverted = new Set(
+    (await getQuoteConversionState(quoteId)).map((c) => c.line_item_id),
+  );
+
   // Resolve which line items become job parts. A price-options quote offers
   // several quantities per part, so the caller picks one line per part via
-  // selectedLineItemIds; a firm quote (one line per part) converts them all.
+  // selectedLineItemIds; a firm quote (one line per part) converts all its
+  // still-unconverted lines. Either way, lines already on a job are excluded.
   const selectedIds = options.selectedLineItemIds;
-  const lineItemsToConvert =
-    selectedIds && selectedIds.length > 0
-      ? lineItems.filter((li) => selectedIds.includes(li.id))
-      : lineItems;
+  const hasExplicitSelection = !!(selectedIds && selectedIds.length > 0);
+  const requested = hasExplicitSelection
+    ? lineItems.filter((li) => selectedIds!.includes(li.id))
+    : lineItems;
+  // An explicitly selected line that's already on a job means the caller's view
+  // is stale — reject rather than silently dropping it.
+  if (hasExplicitSelection && requested.some((li) => alreadyConverted.has(li.id))) {
+    throw new Error(
+      'Some selected parts are already on a job. Reload the quote and pick from the remaining parts.',
+    );
+  }
+  const lineItemsToConvert = requested.filter((li) => !alreadyConverted.has(li.id));
   if (lineItemsToConvert.length === 0) {
-    throw new Error('No matching line items selected to convert.');
+    throw new Error(
+      hasExplicitSelection
+        ? 'No matching line items selected to convert.'
+        : 'Every line item on this quote is already on a job.',
+    );
   }
   // Exactly one line per part — converting two quantities of the same part
   // would silently create duplicate job parts. Reject instead (this also
@@ -1110,12 +1233,29 @@ export async function convertQuoteToJob(
     throw new Error('Customer PO is required to convert a quote to a job.');
   }
 
-  // Pre-flight: every part must have a routing. Fail fast before writing anything.
+  // Pre-flight: only MADE parts need a routing. Bought parts are purchased, not
+  // manufactured — they have no routing and convert to a job_part with no
+  // operations (production-complete on creation), ready to ship + invoice. Fail
+  // fast (before any write) only if a MADE part is missing its routing.
   const partIds = Array.from(new Set(lineItemsToConvert.map((li) => li.part_id)));
+  const { data: partRows, error: partsErr } = await supabase
+    .from('parts')
+    .select('id, source')
+    .in('id', partIds);
+  if (partsErr) {
+    console.error('Error fetching part sources:', partsErr);
+    throw partsErr;
+  }
+  const sourceByPart = new Map(
+    ((partRows ?? []) as Array<{ id: string; source: string }>).map((p) => [p.id, p.source]),
+  );
+  const isBoughtPart = (partId: string) => sourceByPart.get(partId) === 'bought';
+  const madePartIds = partIds.filter((pid) => !isBoughtPart(pid));
+
   const { data: routings, error: routingsErr } = await supabase
     .from('routings')
     .select('id, part_id')
-    .in('part_id', partIds);
+    .in('part_id', madePartIds);
   if (routingsErr) {
     console.error('Error fetching routings:', routingsErr);
     throw routingsErr;
@@ -1124,10 +1264,10 @@ export async function convertQuoteToJob(
   for (const r of (routings ?? []) as Array<{ id: string; part_id: string }>) {
     routingByPart.set(r.part_id, r.id);
   }
-  const missingRoutingPartIds = partIds.filter((pid) => !routingByPart.has(pid));
+  const missingRoutingPartIds = madePartIds.filter((pid) => !routingByPart.has(pid));
   if (missingRoutingPartIds.length > 0) {
     throw new Error(
-      `No routing defined for ${missingRoutingPartIds.length} part${
+      `No routing defined for ${missingRoutingPartIds.length} made part${
         missingRoutingPartIds.length === 1 ? '' : 's'
       } on this quote. Create routings before converting.`,
     );
@@ -1146,9 +1286,25 @@ export async function convertQuoteToJob(
     throw new Error('A due date is required to create the job.');
   }
 
-  // Job number mirrors the quote number (Q-0141 → J-0141). Manual jobs are
-  // not supported, so this is unique by construction.
-  const jobNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  // Job number: EVERY job off a quote keeps the quote's index (mirror J-0141,
+  // then J-0141-2, J-0141-3, … per later PO) — see nextQuoteJobNumber. Uniqueness
+  // is (company_id, job_number) and counts archived rows, so we fetch every job
+  // matching the mirror prefix (including archived) and let the helper pick the
+  // next free slot.
+  const mirrorNumber = quote.quote_number.replace(/^Q-/, 'J-');
+  const { data: existingJobs, error: existingJobsErr } = await supabase
+    .from('jobs')
+    .select('job_number')
+    .eq('company_id', quote.company_id)
+    .like('job_number', `${mirrorNumber}%`);
+  if (existingJobsErr) {
+    console.error('Error checking job numbers:', existingJobsErr);
+    throw existingJobsErr;
+  }
+  const jobNumber = nextQuoteJobNumber(
+    quote.quote_number,
+    ((existingJobs ?? []) as Array<{ job_number: string }>).map((r) => r.job_number),
+  );
 
   const { data: job, error: jobError } = await supabase
     .from('jobs')
@@ -1159,6 +1315,7 @@ export async function convertQuoteToJob(
       job_number: jobNumber,
       production_status: 'not_started',
       fulfillment_status: 'unshipped',
+      is_hot: options.hot ?? false,
       due_date: dueDate,
       customer_po_number: customerPoNumber,
       // Carry the quote's billing/shipping address + contact onto the job so
@@ -1178,14 +1335,53 @@ export async function convertQuoteToJob(
   }
 
   const partsCreated: ConvertToJobResult['job']['parts'] = [];
+  const jobPartNowIso = new Date().toISOString();
 
   let sequence = 10;
   for (const li of lineItemsToConvert) {
+    const isBought = isBoughtPart(li.part_id);
     const routingId = routingByPart.get(li.part_id);
-    if (!routingId) {
+    if (!isBought && !routingId) {
       // Should be impossible after the pre-flight, but guard anyway.
       throw new Error(`Routing for part ${li.part_id} disappeared mid-conversion.`);
     }
+
+    // Partial acceptance: the customer may order a different quantity than
+    // quoted. Default to the quoted qty + price; an override reprices exactly
+    // like updateJobPartQuantity (keep the agreed price unless useTierPrice
+    // opts into the snapshot's tier price at the new qty). The quote line itself
+    // stays frozen — only the job_part carries the ordered figures.
+    const override = options.lineOverrides?.[li.id];
+    let orderedQty = li.quantity;
+    let orderedUnitPrice: number | null = li.unit_price;
+    if (override) {
+      if (!Number.isFinite(override.quantity) || override.quantity <= 0) {
+        throw new Error('Ordered quantity must be a number greater than zero.');
+      }
+      orderedQty = override.quantity;
+      const basis: JobPartPricingBasis = {
+        isOverride: li.is_quote_override ?? false,
+        basisUnknown: li.basis_unknown ?? false,
+        snapshot: (li.pricing_basis_snapshot as PricingBasisSnapshot | null) ?? null,
+      };
+      const { keepUnitPrice, tierUnitPrice } = resolveJobPartUnitPrice(
+        li.unit_price,
+        basis,
+        orderedQty,
+      );
+      // Only honor a reprice when the ordered qty lands in a DIFFERENT tier than
+      // the quoted qty (a real price-break crossing) — never for a single-tier
+      // part. Authoritative regardless of the client flag.
+      const tierAtQuoted = resolveJobPartUnitPrice(li.unit_price, basis, li.quantity).tierUnitPrice;
+      const crossesBreak =
+        tierUnitPrice !== null && tierAtQuoted !== null && tierUnitPrice !== tierAtQuoted;
+      orderedUnitPrice =
+        override.useTierPrice && crossesBreak && tierUnitPrice !== null
+          ? tierUnitPrice
+          : keepUnitPrice;
+    }
+    const orderedTotal =
+      orderedUnitPrice != null ? Math.round(orderedUnitPrice * orderedQty * 10000) / 10000 : null;
 
     const { data: jobPart, error: jpErr } = await supabase
       .from('job_parts')
@@ -1195,50 +1391,81 @@ export async function convertQuoteToJob(
         part_id: li.part_id,
         source_quote_line_item_id: li.id,
         sequence,
-        quantity: li.quantity,
-        // Copy the quoted price onto the job_part so the invoice read path is
-        // single-shaped (job_parts.unit_price) for both quote- and PO-sourced
-        // jobs — no "quote line vs job_part" branching. Mirrors the backfill in
-        // 20260621162024_add_job_part_pricing.sql.
-        unit_price: li.unit_price,
-        total_price:
-          li.total_price ?? (li.unit_price != null ? li.unit_price * li.quantity : null),
-        production_status: 'not_started',
+        quantity: orderedQty,
+        // Copy the (possibly repriced) price onto the job_part so the invoice
+        // read path is single-shaped (job_parts.unit_price) for both quote- and
+        // PO-sourced jobs — no "quote line vs job_part" branching. Mirrors the
+        // backfill in 20260621162024_add_job_part_pricing.sql.
+        unit_price: orderedUnitPrice,
+        total_price: orderedTotal,
+        // A bought part is purchased, not manufactured — no operations to run, so
+        // its production is complete on creation (ready to ship + invoice). Made
+        // parts start not_started and advance as operators complete the cloned
+        // routing operations.
+        production_status: isBought ? 'completed' : 'not_started',
         fulfillment_status: 'unshipped',
+        ...(isBought ? { started_at: jobPartNowIso, completed_at: jobPartNowIso } : {}),
       })
       .select('id, part_id')
       .single();
     if (jpErr) {
+      // Race backstop: the app-level pre-check above can't see a conversion that
+      // landed between it and this insert. The job_parts_one_active_per_quote_line
+      // partial unique index rejects the duplicate (23505); surface the same
+      // friendly message the pre-check uses rather than a raw DB error.
+      const code = (jpErr as { code?: string }).code;
+      if (code === '23505' && (jpErr.message ?? '').includes('one_active_per_quote_line')) {
+        throw new Error(
+          'Some selected parts were just converted on another job. Reload the quote and pick from the remaining parts.',
+        );
+      }
       console.error('Error creating job_part:', jpErr);
       throw jpErr;
     }
 
-    const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
-      p_job_part_id: jobPart.id,
-      p_routing_id: routingId,
-    });
-    if (rpcErr) {
-      console.error('Failed to copy operations from routing:', rpcErr);
-      throw new Error('Job created but failed to copy operations from routing.');
+    // Made parts clone their routing into job_operations + job_materials. Bought
+    // parts have no routing, so there's nothing to clone — the job_part stands
+    // alone (production-complete, ready to ship).
+    if (!isBought && routingId) {
+      const { error: rpcErr } = await supabase.rpc('create_job_part_operations_from_routing', {
+        p_job_part_id: jobPart.id,
+        p_routing_id: routingId,
+      });
+      if (rpcErr) {
+        console.error('Failed to copy operations from routing:', rpcErr);
+        throw new Error('Job created but failed to copy operations from routing.');
+      }
     }
 
     partsCreated.push({
       id: jobPart.id,
       part_id: jobPart.part_id,
-      quantity: li.quantity,
+      quantity: orderedQty,
       source_quote_line_item_id: li.id,
     });
 
     sequence += 10;
   }
 
+  const nowIso = new Date().toISOString();
+  const quoteUpdate: {
+    status_changed_at: string;
+    updated_at: string;
+    converted_at?: string;
+  } = {
+    status_changed_at: nowIso,
+    updated_at: nowIso,
+  };
+  // converted_at marks the FIRST conversion (and locks the quote from edits).
+  // Leave it untouched on later passes so it keeps meaning "acceptance began at",
+  // and so a partially-converted quote doesn't churn its timestamp per PO.
+  if (!quote.converted_at) {
+    quoteUpdate.converted_at = nowIso;
+  }
+
   const { data: updatedQuote, error: updateError } = await supabase
     .from('quotes')
-    .update({
-      converted_at: new Date().toISOString(),
-      status_changed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
+    .update(quoteUpdate)
     .eq('id', quoteId)
     .select()
     .single();

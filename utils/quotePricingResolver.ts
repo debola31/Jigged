@@ -186,6 +186,38 @@ export function resolveTierFromSnapshot(
 }
 
 /**
+ * Pricing basis for a job_part's quantity edit, read from its source quote
+ * line. Null snapshot / override / basis_unknown lines always KEEP the agreed
+ * unit_price (no tier price to offer). Pure data shape — lives here (not in the
+ * DB-access layer) so UI previews can reprice without importing a DB module.
+ */
+export interface JobPartPricingBasis {
+  isOverride: boolean;
+  basisUnknown: boolean;
+  snapshot: PricingBasisSnapshot | null;
+}
+
+/**
+ * Resolve the kept vs. tier-crossing unit price for a job_part at a new
+ * quantity. Pure, so the convert / edit modals preview it and the writers apply
+ * it identically. `keepUnitPrice` is always the agreed price; `tierUnitPrice` is
+ * the snapshot-resolved price, present only when the line is tier-priced (not an
+ * override / basis_unknown / PO-sourced) — otherwise null.
+ */
+export function resolveJobPartUnitPrice(
+  currentUnitPrice: number | null,
+  basis: JobPartPricingBasis | null,
+  newQuantity: number,
+): { keepUnitPrice: number | null; tierUnitPrice: number | null } {
+  const keepUnitPrice = currentUnitPrice;
+  if (!basis || basis.isOverride || basis.basisUnknown || !basis.snapshot) {
+    return { keepUnitPrice, tierUnitPrice: null };
+  }
+  const resolved = resolveTierFromSnapshot(basis.snapshot, newQuantity);
+  return { keepUnitPrice, tierUnitPrice: resolved ? resolved.unit_price : null };
+}
+
+/**
  * Build a `PricingBasisSnapshot` from the live tier list at create-time.
  * Only priced tiers are captured — null-price tiers are filtered out so
  * the snapshot is always usable for later resolution.

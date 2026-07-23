@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Link from 'next/link';
@@ -319,18 +319,36 @@ export default function QuotesPage() {
         if (!params.data) return null;
         const jobs = params.data.jobs ?? [];
         if (jobs.length === 0) return '—';
+        // Single clipped line — a quote can spawn several jobs (one per PO), and
+        // wrapping would overflow the fixed AG Grid row height into the next row.
+        // The full list is on the quote detail page; the title gives a hover.
         return (
-          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          <Box
+            title={jobs.map((j) => j.job_number).join(', ')}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              width: '100%',
+            }}
+          >
             {jobs.map((j, i) => (
-              <MuiLink
-                key={j.id}
-                component={Link}
-                href={`/dashboard/${companyId}/jobs/${j.id}`}
-                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                sx={{ fontWeight: 500 }}
-              >
-                {j.job_number}{i < jobs.length - 1 ? ',' : ''}
-              </MuiLink>
+              <Fragment key={j.id}>
+                <MuiLink
+                  component={Link}
+                  href={`/dashboard/${companyId}/jobs/${j.id}`}
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                  sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}
+                >
+                  {j.job_number}
+                </MuiLink>
+                {i < jobs.length - 1 && (
+                  <Box component="span" sx={{ color: 'text.secondary', mr: 0.5 }}>
+                    ,
+                  </Box>
+                )}
+              </Fragment>
             ))}
           </Box>
         );

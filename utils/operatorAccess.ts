@@ -767,40 +767,16 @@ async function readJobCompleted(jobId: string): Promise<boolean> {
 }
 
 /**
- * Append an auto-logged ('event') audit note to the job feed for an outside-op
- * lifecycle transition (sent / received / undo). Best-effort: a failed note must
- * never block the state change (which is already recorded via sent_by /
- * completed_by). Skipped when there is no acting member (RLS requires the note's
- * author to be the caller's own access row).
- */
-async function logOutsideEvent(
-  op: OpOutsideContext,
-  message: string,
-): Promise<void> {
-  try {
-    const member = await getCurrentMember(op.company_id);
-    if (!member) return;
-    await addJobNote(op.job_id, op.company_id, member.id, message, {
-      jobPartId: op.job_part_id,
-      jobOperationId: op.id,
-      noteType: 'event',
-    });
-  } catch {
-    // Audit note is best-effort; swallow so the lifecycle action still succeeds.
-  }
-}
-
-function vendorClause(op: OpOutsideContext): string {
-  return op.vendor_name ? ` ${op.vendor_name}` : ' the vendor';
-}
-
-/**
  * Mark an outside (external-vendor) operation as SENT OUT: the parts have left
  * the shop for the vendor. Moves pending → sent, records who/when (sent_by =
- * signed-in auth user), moves the part to in_progress (work has begun), and logs
- * an 'event' audit note. Only valid for an external op awaiting send (pending).
- * `sent` is an optional waypoint — see markOperationReceived, which also accepts
- * a still-pending op.
+ * signed-in auth user), and moves the part to in_progress (work has begun). Only
+ * valid for an external op awaiting send (pending). `sent` is an optional
+ * waypoint — see markOperationReceived, which also accepts a still-pending op.
+ *
+ * The send is NOT logged as a job_note. `sent_at`/`sent_by` on the operation are
+ * the record; the /activity feed derives a "Sent to {vendor}" operation activity
+ * from `sent_at` (see dashboardAccess.fetchOperationActivity). Auto-notes would
+ * only clutter the operator notes feed.
  */
 export async function markOperationSent(jobOperationId: string): Promise<void> {
   const supabase = getSupabase();
@@ -821,7 +797,6 @@ export async function markOperationSent(jobOperationId: string): Promise<void> {
     .eq('id', jobOperationId);
 
   await movePartToInProgress(op.job_part_id, now);
-  await logOutsideEvent(op, `Sent out to${vendorClause(op)}.`);
 }
 
 /**
@@ -831,9 +806,10 @@ export async function markOperationSent(jobOperationId: string): Promise<void> {
  *
  * `sent` is an OPTIONAL waypoint: this also accepts a still-`pending` op (the
  * common after-the-fact case where nobody tapped Mark Sent Out while the parts
- * were away). Received-from-pending back-fills sent_at = completed_at and logs
- * BOTH the send and receive audit notes. Throws for a non-external op or one
- * already completed.
+ * were away). Received-from-pending back-fills sent_at = completed_at. Not logged
+ * as a job_note — `sent_at`/`completed_at` on the op are the record, and the
+ * /activity feed derives "Sent to {vendor}" + "Received from {vendor}" operation
+ * activities from them. Throws for a non-external op or one already completed.
  */
 export async function markOperationReceived(
   jobOperationId: string,
@@ -868,11 +844,6 @@ export async function markOperationReceived(
   await supabase.from('job_operations').update(update).eq('id', jobOperationId);
 
   const partCompleted = await rollupPartAfterCompletion(op.job_part_id, now);
-
-  if (receivedFromPending) {
-    await logOutsideEvent(op, `Sent out to${vendorClause(op)}.`);
-  }
-  await logOutsideEvent(op, `Received from${vendorClause(op)}.`);
 
   return {
     success: true,
@@ -917,21 +888,18 @@ export async function revertOperationCompletion(
         .from('job_operations')
         .update({ status: 'sent', completed_at: null, completed_by: null })
         .eq('id', jobOperationId);
-      await logOutsideEvent(op, `Undid receipt — back to sent to${vendorClause(op)}.`);
     } else if (op.status === 'sent') {
       // Un-send → back to pending; clear the send stamp.
       await supabase
         .from('job_operations')
         .update({ status: 'pending', sent_at: null, sent_by: null })
         .eq('id', jobOperationId);
-      await logOutsideEvent(op, 'Undid send — parts not sent out.');
     } else {
       // Legacy external completed op that never went through send → pending.
       await supabase
         .from('job_operations')
         .update({ status: 'pending', completed_at: null, completed_by: null, sent_at: null, sent_by: null })
         .eq('id', jobOperationId);
-      await logOutsideEvent(op, 'Undid receipt — parts not sent out.');
     }
 
     const { data: stillCompleted } = await supabase

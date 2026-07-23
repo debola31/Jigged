@@ -57,6 +57,10 @@ export function getActivityVisual(item: ActivityItem): { icon: SvgIconComponent;
     case 'shipment':
       return { icon: LocalShippingOutlinedIcon, color: 'secondary.main' };
     case 'operation':
+      // Outside-op send/receive get the truck (amber out, green back); internal
+      // completion keeps the machining icon.
+      if (item.action === 'sent') return { icon: LocalShippingOutlinedIcon, color: 'warning.main' };
+      if (item.action === 'received') return { icon: LocalShippingOutlinedIcon, color: 'success.main' };
       return { icon: PrecisionManufacturingOutlinedIcon, color: 'success.main' };
     case 'job':
     default:
@@ -87,6 +91,10 @@ export function formatActivityText(item: ActivityItem): string {
     case 'photo':
       return `${who} added a photo`;
     case 'operation':
+      if (item.action === 'sent')
+        return item.vendorName ? `Sent to ${item.vendorName}` : 'Sent to vendor';
+      if (item.action === 'received')
+        return item.vendorName ? `Received from ${item.vendorName}` : 'Received from vendor';
       return 'Operation completed';
     case 'job':
     default:

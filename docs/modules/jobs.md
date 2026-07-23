@@ -393,8 +393,15 @@ backed by `getOutsideOpsForCompany`). Outside processing is vendor work, so its 
 under Vendors rather than as a pseudo job-type on the Jobs list (matches how job-shop ERPs —
 SyteLine, Infor, Oracle — surface outside processing in the vendor/purchasing context). No
 readiness/predecessor logic — it informs the shipping lead, replacing the hand-highlighted
-traveler / paper slip. Notes + photos stay fully enabled on outside ops; send/receive/undo also
-write a `job_notes` `note_type='event'` audit entry.
+traveler / paper slip. The queue and each row offer Undo (received → sent → not-sent).
+
+**Audit / activity:** send/receive are **not** logged as `job_notes` — `sent_at`/`sent_by` and
+`completed_at`/`completed_by` on the operation are the record, and the **/activity** feed
+derives vendor-tagged **"Sent to {vendor}"** and **"Received from {vendor}"** rows under the
+**Operations** filter (alongside internal "Operation completed"), from those columns
+(`dashboardAccess.fetchOperationActivity`). Undo just clears the stamp, so the activity drops
+off on reload — same as internal-completion undo (no tombstone). Operator notes + photos stay
+fully enabled on outside ops; they are real user notes, no longer polluted by auto-events.
 
 **Deferred (v1):** vendor lead-time → due-date math, PO generation, per-op cost actuals,
 scheduling, and partial/split sends (whole-quantity send/receive only).

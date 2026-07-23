@@ -14,7 +14,11 @@ export type ActivityAction =
   | 'completed'
   | 'shipped'
   | 'noted'
-  | 'photo_added';
+  | 'photo_added'
+  // Outside (external-vendor) operation lifecycle — same 'operation' type as an
+  // internal completion, distinguished by action + vendorName.
+  | 'sent'
+  | 'received';
 
 export interface ActivityItem {
   id: string;
@@ -26,6 +30,8 @@ export interface ActivityItem {
   customerName?: string;
   /** For note/photo events: who authored it. */
   authorName?: string;
+  /** For outside-op sent/received activities: the vendor the part went to. */
+  vendorName?: string;
   /** Deep link to the underlying record. */
   href?: string;
 }
@@ -660,42 +666,99 @@ async function fetchNoteActivity(
   return items;
 }
 
+type WcRel = {
+  kind: 'internal' | 'external';
+  vendor: { name: string } | { name: string }[] | null;
+} | {
+  kind: 'internal' | 'external';
+  vendor: { name: string } | { name: string }[] | null;
+}[] | null;
+
 type OperationActivityRow = {
   id: string;
   completed_at: string | null;
+  sent_at?: string | null;
   job_id: string;
   jobs: { job_number: string } | { job_number: string }[] | null;
+  work_center: WcRel;
 };
 
+function opActivityHref(companyId: string, jobId: string): string {
+  return `/dashboard/${companyId}/jobs/${jobId}`;
+}
+
+/**
+ * Operation lifecycle activities. Two sources, both scoped through the inner
+ * jobs join (job_operations has no company_id):
+ *  - completed_at → 'completed' (internal) or 'received' (external, from vendor)
+ *  - external sent_at → 'sent' (parts went out to the vendor)
+ * A received external op has both stamps, so it emits BOTH a sent and a received
+ * activity. Undo just clears the stamp, so the activity drops off on reload (no
+ * tombstone) — same behavior as internal completion undo.
+ */
 async function fetchOperationActivity(
   companyId: string,
   before: string | undefined,
   perSource: number,
 ): Promise<ActivityItem[]> {
   const supabase = getSupabase();
-  // job_operations has no company_id; scope through the inner jobs join.
-  let q = supabase
+  const WC_SELECT = 'work_center:work_centers(kind, vendor:vendors(name))';
+
+  let completedQ = supabase
     .from('job_operations')
-    .select('id, completed_at, job_id, jobs!inner(job_number, company_id)')
+    .select(`id, completed_at, job_id, jobs!inner(job_number, company_id), ${WC_SELECT}`)
     .eq('jobs.company_id', companyId)
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(perSource);
-  if (before) q = q.lt('completed_at', before);
+  if (before) completedQ = completedQ.lt('completed_at', before);
 
-  const { data } = await q;
+  // Sent (at-vendor) events — external ops only.
+  let sentQ = supabase
+    .from('job_operations')
+    .select(`id, sent_at, job_id, jobs!inner(job_number, company_id), work_center:work_centers!inner(kind, vendor:vendors(name))`)
+    .eq('jobs.company_id', companyId)
+    .eq('work_center.kind', 'external')
+    .not('sent_at', 'is', null)
+    .order('sent_at', { ascending: false })
+    .limit(perSource);
+  if (before) sentQ = sentQ.lt('sent_at', before);
+
+  const [completed, sent] = await Promise.all([completedQ, sentQ]);
   const items: ActivityItem[] = [];
-  for (const r of (data ?? []) as unknown as OperationActivityRow[]) {
+
+  const vendorOf = (wc: WcRel): string | undefined => {
+    const w = firstRel(wc);
+    return w ? firstRel(w.vendor)?.name : undefined;
+  };
+
+  for (const r of (completed.data ?? []) as unknown as OperationActivityRow[]) {
     if (!r.completed_at) continue;
+    const isExternal = firstRel(r.work_center)?.kind === 'external';
     items.push({
-      id: `op-${r.id}`,
+      id: `op-comp-${r.id}`,
       type: 'operation',
-      action: 'completed',
+      action: isExternal ? 'received' : 'completed',
+      vendorName: isExternal ? vendorOf(r.work_center) : undefined,
       entityNumber: firstRel(r.jobs)?.job_number ?? '',
       timestamp: r.completed_at,
-      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+      href: opActivityHref(companyId, r.job_id),
     });
   }
+
+  for (const r of (sent.data ?? []) as unknown as OperationActivityRow[]) {
+    if (!r.sent_at) continue;
+    items.push({
+      id: `op-sent-${r.id}`,
+      type: 'operation',
+      action: 'sent',
+      vendorName: vendorOf(r.work_center),
+      entityNumber: firstRel(r.jobs)?.job_number ?? '',
+      timestamp: r.sent_at,
+      href: opActivityHref(companyId, r.job_id),
+    });
+  }
+
   return items;
 }
 

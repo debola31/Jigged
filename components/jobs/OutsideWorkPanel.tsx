@@ -16,11 +16,13 @@ import Alert from '@mui/material/Alert';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import WhatshotIcon from '@mui/icons-material/Whatshot';
+import UndoIcon from '@mui/icons-material/Undo';
 
 import {
   getOutsideOpsForCompany,
   markOperationSent,
   markOperationReceived,
+  revertOperationCompletion,
 } from '@/utils/operatorAccess';
 import type { OutsideOperation } from '@/types/operator';
 
@@ -37,12 +39,14 @@ function OutsideOpRow({
   busy,
   onSend,
   onReceive,
+  onUndo,
 }: {
   op: OutsideOperation;
   companyId: string;
   busy: boolean;
   onSend: (op: OutsideOperation) => void;
   onReceive: (op: OutsideOperation) => void;
+  onUndo: (op: OutsideOperation) => void;
 }) {
   const router = useRouter();
   return (
@@ -96,6 +100,19 @@ function OutsideOpRow({
         >
           Mark Received
         </Button>
+        {op.status === 'sent' && (
+          <Button
+            size="small"
+            variant="text"
+            color="inherit"
+            startIcon={<UndoIcon />}
+            disabled={busy}
+            onClick={() => onUndo(op)}
+            sx={{ opacity: 0.8 }}
+          >
+            Undo send
+          </Button>
+        )}
       </Box>
     </Box>
   );
@@ -110,6 +127,7 @@ function QueueSection({
   busyId,
   onSend,
   onReceive,
+  onUndo,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -119,6 +137,7 @@ function QueueSection({
   busyId: string | null;
   onSend: (op: OutsideOperation) => void;
   onReceive: (op: OutsideOperation) => void;
+  onUndo: (op: OutsideOperation) => void;
 }) {
   return (
     <Card elevation={2} sx={{ mb: 3 }}>
@@ -144,6 +163,7 @@ function QueueSection({
                 busy={busyId === op.id}
                 onSend={onSend}
                 onReceive={onReceive}
+                onUndo={onUndo}
               />
             </Box>
           ))
@@ -154,12 +174,13 @@ function QueueSection({
 }
 
 /**
- * The company-wide "Outside work" queue — a purely informational worklist for
- * whoever ships parts out to vendors. Two sections: "Not sent" (parts still in
- * the shop, awaiting send) and "At vendor" (out for outside processing). No
- * readiness/predecessor logic — this surface informs, it does not gate. Backs
- * the "Outside work" tab on the Jobs list; replaces the hand-highlighted
- * traveler / paper slip the shipping lead used to work from.
+ * The company-wide outside-processing queue — a worklist for whoever ships parts
+ * out to vendors. Two sections: "Not sent" (parts still in the shop, awaiting
+ * send) and "At vendor" (out for outside processing), each with Mark Sent Out /
+ * Mark Received and Undo. No readiness/predecessor logic — this surface informs,
+ * it does not gate. Backs the "Outside processing" tab on the Vendors page;
+ * replaces the hand-highlighted traveler / paper slip the shipping lead used to
+ * work from.
  */
 export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -167,6 +188,8 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
     open: boolean;
     message: string;
     severity: 'success' | 'info' | 'error';
+    /** When set, the snackbar shows an UNDO button running this. */
+    undo?: () => void;
   }>({ open: false, message: '', severity: 'success' });
 
   const { data, loading, reload } = useLoad(
@@ -177,6 +200,25 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
   const notSent = ops.filter((o) => o.status === 'pending');
   const atVendor = ops.filter((o) => o.status === 'sent');
 
+  // Step the op back one state (received → sent, or sent → not-sent). Backs both
+  // the snackbar UNDO and the inline "Undo send" on At-vendor rows.
+  const runUndo = async (op: OutsideOperation) => {
+    setBusyId(op.id);
+    try {
+      await revertOperationCompletion(op.id);
+      setSnackbar({ open: true, message: 'Undone.', severity: 'info' });
+      await reload();
+    } catch (err) {
+      setSnackbar({
+        open: true,
+        message: err instanceof Error ? err.message : 'Undo failed',
+        severity: 'error',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const runAction = async (
     op: OutsideOperation,
     action: (id: string) => Promise<unknown>,
@@ -185,7 +227,9 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
     setBusyId(op.id);
     try {
       await action(op.id);
-      setSnackbar({ open: true, message: okMessage, severity: 'success' });
+      // Offer immediate undo — a received op leaves the queue, so the snackbar is
+      // the only place to reverse a mis-tap on it.
+      setSnackbar({ open: true, message: okMessage, severity: 'success', undo: () => runUndo(op) });
       await reload();
     } catch (err) {
       setSnackbar({
@@ -221,6 +265,7 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
         busyId={busyId}
         onSend={handleSend}
         onReceive={handleReceive}
+        onUndo={runUndo}
       />
       <QueueSection
         title="At vendor"
@@ -231,6 +276,7 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
         busyId={busyId}
         onSend={handleSend}
         onReceive={handleReceive}
+        onUndo={runUndo}
       />
 
       <Snackbar
@@ -243,6 +289,21 @@ export default function OutsideWorkPanel({ companyId }: { companyId: string }) {
           onClose={() => setSnackbar((p) => ({ ...p, open: false }))}
           severity={snackbar.severity}
           variant="filled"
+          action={
+            snackbar.undo ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  const undo = snackbar.undo;
+                  setSnackbar((p) => ({ ...p, open: false }));
+                  undo?.();
+                }}
+              >
+                UNDO
+              </Button>
+            ) : undefined
+          }
         >
           {snackbar.message}
         </Alert>

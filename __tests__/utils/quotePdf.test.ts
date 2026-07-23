@@ -300,6 +300,50 @@ describe('generateQuotePdf', () => {
     expect(metaTexts.some((t: string) => t.startsWith('Lead Time:'))).toBe(false);
   });
 
+  it('shows lead time per item (in the description cell) and drops the header row when items differ', async () => {
+    const quote: QuoteWithRelations = {
+      ...baseQuote,
+      line_items: [
+        {
+          ...baseQuote.line_items![0],
+          id: 'li-1',
+          part_id: 'part-1',
+          sequence: 10,
+          lead_time_text: '2–3 weeks',
+          parts: { ...baseQuote.line_items![0].parts!, id: 'part-1', part_name: 'BRKT-001' },
+        },
+        {
+          ...baseQuote.line_items![0],
+          id: 'li-2',
+          part_id: 'part-2',
+          sequence: 20,
+          lead_time_text: '3–4 weeks',
+          parts: {
+            ...baseQuote.line_items![0].parts!,
+            id: 'part-2',
+            part_name: 'HSNG-002',
+            description: 'Housing',
+          },
+        },
+      ],
+    };
+
+    await generateQuotePdf(quote, baseCompany);
+
+    // The single quote-level lead-time meta row is suppressed…
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const metaTexts = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+    expect(metaTexts.some((t: string) => t.startsWith('Lead Time:'))).toBe(false);
+
+    // …and each item's lead time appears in the line-items table instead.
+    const config = autoTableFn.mock.calls[0][1];
+    const bodyText = JSON.stringify(config.body);
+    expect(bodyText).toContain('Lead time: 2–3 weeks');
+    expect(bodyText).toContain('Lead time: 3–4 weeks');
+  });
+
   it('renders the company shop block (top-left) with name + address + phone', async () => {
     const filledCompany: Company = {
       ...baseCompany,

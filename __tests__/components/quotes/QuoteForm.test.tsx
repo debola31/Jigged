@@ -246,6 +246,65 @@ describe('QuoteForm', () => {
     expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 0.32 }]);
   });
 
+  it('forwards a per-item lead time on submit (attached to the part’s row)', async () => {
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create quote/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Lead time (optional)'), '2-3 weeks');
+    await user.click(screen.getByRole('button', { name: /create quote/i }));
+
+    await waitFor(() => {
+      expect(createQuote).toHaveBeenCalledTimes(1);
+    });
+    const [, payload] = createQuote.mock.calls[0];
+    expect(payload.parts).toEqual([
+      { part_id: 'part-1', order_quantity: 5, lead_time_text: '2-3 weeks' },
+    ]);
+  });
+
+  it('offers the new Prepay preset under a group heading in the payment-terms dropdown', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('combobox', { name: /payment terms/i }));
+
+    // The Prepay term is offered as a selectable option…
+    expect(
+      screen.getByRole('option', { name: /prepay \(paid in full before work begins\)/i }),
+    ).toBeInTheDocument();
+    // …grouped under labeled subheaders (MUI renders these as inert, non-
+    // focusable list items — clicking one is a no-op — so we match on their text).
+    expect(screen.getByText('Prepay & deposits')).toBeInTheDocument();
+    expect(screen.getByText('Net terms')).toBeInTheDocument();
+  });
+
+  it('treats the Prepay preset as a known term (no custom-terms field)', async () => {
+    render(
+      <QuoteForm
+        mode="edit"
+        quoteId="q-1"
+        initialData={{
+          ...initialPopulated,
+          payment_terms: 'Prepay (paid in full before work begins)',
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+    // A recognized preset must NOT drop into the "Other (specify)" custom field.
+    expect(screen.queryByLabelText('Custom payment terms')).not.toBeInTheDocument();
+  });
+
   it('calls updateQuote with the payload and navigates on success', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-existing" initialData={initialPopulated} />,

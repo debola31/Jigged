@@ -270,6 +270,9 @@ export default function QuoteDetailPage() {
     part_id: string;
     part_name: string;
     description: string | null;
+    // Effective lead time for this part (its own value, else the quote-level
+    // lead time). Only rendered when hasPerItemLeadTimes.
+    lead_time: string;
     items: QuoteLineItem[];
   }[] = [];
   const partGroupIndex = new Map<string, number>();
@@ -282,12 +285,21 @@ export default function QuoteDetailPage() {
         part_id: li.part_id,
         part_name: li.parts?.part_name ?? 'Part',
         description: li.parts?.description ?? null,
+        // Lead time is per-part, so the group's first item carries it; fall
+        // back to the quote-level lead time when this item has none.
+        lead_time: (li.lead_time_text ?? '').trim() || (quote.lead_time_text ?? ''),
         items: [],
       });
     }
     partGroups[gi].items.push(li);
   }
   const isFirmQuote = partGroups.length > 0 && partGroups.every((g) => g.items.length === 1);
+  // When any line has its own lead time, show lead time per item in the table
+  // (below) instead of one quote-level line in the header — see the PDF, which
+  // applies the same rule.
+  const hasPerItemLeadTimes = lineItems.some(
+    (li) => (li.lead_time_text ?? '').trim() !== '',
+  );
 
   // Display the quote's frozen customer/address/contact snapshots (Document
   // Snapshot Standard), not the live address book — so the view matches the PDF
@@ -444,7 +456,7 @@ export default function QuoteDetailPage() {
                   : `Expires ${formatDate(quote.expiration_date)}`}
               </Typography>
             )}
-            {quote.lead_time_text && (
+            {quote.lead_time_text && !hasPerItemLeadTimes && (
               <Typography variant="body2" color="text.secondary">
                 Lead time: {quote.lead_time_text}
               </Typography>
@@ -671,6 +683,20 @@ export default function QuoteDetailPage() {
                                 >
                                   {group.part_name}
                                 </MuiLink>
+                                {hasPerItemLeadTimes && group.lead_time && (
+                                  <Box
+                                    component="span"
+                                    sx={{
+                                      display: 'block',
+                                      fontSize: '0.75rem',
+                                      color: 'text.secondary',
+                                      fontWeight: 400,
+                                      mt: 0.5,
+                                    }}
+                                  >
+                                    Lead time: {group.lead_time}
+                                  </Box>
+                                )}
                               </td>
                             )}
                             {i === 0 && (

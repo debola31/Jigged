@@ -204,4 +204,26 @@ describe('quoteToFormData', () => {
     expect(form.parts).toHaveLength(1);
     expect(form.parts[0].override).toEqual({ unit_price: 999, markup_percent: null });
   });
+
+  it('carries each line’s per-item lead time through to its form entry', () => {
+    const quote = makeQuote([
+      { ...baseLine, id: 'li-1', sequence: 10, quantity: 5, lead_time_text: '2–3 weeks' },
+      { ...baseLine, id: 'li-2', sequence: 20, quantity: 25, lead_time_text: '2–3 weeks' },
+    ]);
+
+    const form = quoteToFormData(quote);
+
+    expect(form.parts[0].lead_time_text).toBe('2–3 weeks');
+    expect(form.parts[1].lead_time_text).toBe('2–3 weeks');
+  });
+
+  it('maps a null per-item lead time through as null (line uses the quote default)', () => {
+    const quote = makeQuote([
+      { ...baseLine, id: 'li-1', sequence: 10, quantity: 5, lead_time_text: null },
+    ]);
+
+    const form = quoteToFormData(quote);
+
+    expect(form.parts[0].lead_time_text).toBeNull();
+  });
 });

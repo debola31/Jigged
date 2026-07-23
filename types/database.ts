@@ -1997,6 +1997,7 @@ export type Database = {
           created_at: string
           id: string
           is_quote_override: boolean
+          lead_time_text: string | null
           markup_percent: number | null
           part_id: string
           pricing_basis_snapshot: Json | null
@@ -2014,6 +2015,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_quote_override?: boolean
+          lead_time_text?: string | null
           markup_percent?: number | null
           part_id: string
           pricing_basis_snapshot?: Json | null
@@ -2031,6 +2033,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_quote_override?: boolean
+          lead_time_text?: string | null
           markup_percent?: number | null
           part_id?: string
           pricing_basis_snapshot?: Json | null

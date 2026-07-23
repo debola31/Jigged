@@ -87,6 +87,7 @@ const {
   getLineItemsForQuoteMock,
   insertLineItemForPartMock,
   updateLineItemQuantityMock,
+  updateLineItemLeadTimeMock,
   repriceLineItemToCurrentMock,
   deleteLineItemMock,
   getTiersWithComputedPricesMock,
@@ -95,6 +96,7 @@ const {
   getLineItemsForQuoteMock: vi.fn(),
   insertLineItemForPartMock: vi.fn(),
   updateLineItemQuantityMock: vi.fn(),
+  updateLineItemLeadTimeMock: vi.fn(),
   repriceLineItemToCurrentMock: vi.fn(),
   deleteLineItemMock: vi.fn(),
   getTiersWithComputedPricesMock: vi.fn(),
@@ -105,6 +107,7 @@ vi.mock('@/utils/quoteLineItemsAccess', () => ({
   getLineItemsForQuote: getLineItemsForQuoteMock,
   insertLineItemForPart: insertLineItemForPartMock,
   updateLineItemQuantity: updateLineItemQuantityMock,
+  updateLineItemLeadTime: updateLineItemLeadTimeMock,
   repriceLineItemToCurrent: repriceLineItemToCurrentMock,
   deleteLineItem: deleteLineItemMock,
   // clearLineItemsForQuote isn't exercised in these tests but the import
@@ -535,6 +538,38 @@ describe('quotesAccess utilities', () => {
       await createQuote('company-1', { ...baseForm, lead_time_text: '   ' });
       expect(insertSpy.mock.calls[0][0].lead_time_text).toBeNull();
     });
+
+    it('forwards a per-item lead time to each of the part’s line-item inserts', async () => {
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) =>
+        table === 'quotes'
+          ? {
+              insert: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({
+                    data: { id: 'quote-new', company_id: 'company-1' },
+                    error: null,
+                  }),
+                }),
+              }),
+            }
+          : mockQueryBuilder,
+      );
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await createQuote('company-1', {
+        ...baseForm,
+        parts: [
+          { part_id: 'part-1', order_quantity: 5, lead_time_text: '2–3 weeks' },
+          { part_id: 'part-1', order_quantity: 10, lead_time_text: '2–3 weeks' },
+        ],
+      });
+
+      // leadTimeText is the 8th positional arg (index 7) — the same value lands
+      // on every quantity row of the part (it's per-part, denormalized).
+      expect(insertLineItemForPartMock.mock.calls[0][7]).toBe('2–3 weeks');
+      expect(insertLineItemForPartMock.mock.calls[1][7]).toBe('2–3 weeks');
+    });
   });
 
   describe('updateQuote', () => {
@@ -902,12 +937,14 @@ describe('quotesAccess utilities', () => {
       getLineItemsForQuoteMock.mockReset();
       insertLineItemForPartMock.mockReset();
       updateLineItemQuantityMock.mockReset();
+      updateLineItemLeadTimeMock.mockReset();
       repriceLineItemToCurrentMock.mockReset();
       deleteLineItemMock.mockReset();
       getTiersWithComputedPricesMock.mockReset();
       getTiersWithComputedPricesMock.mockResolvedValue([]);
       insertLineItemForPartMock.mockResolvedValue({});
       updateLineItemQuantityMock.mockResolvedValue({});
+      updateLineItemLeadTimeMock.mockResolvedValue(undefined);
       repriceLineItemToCurrentMock.mockResolvedValue({});
       deleteLineItemMock.mockResolvedValue(undefined);
     });
@@ -1017,6 +1054,78 @@ describe('quotesAccess utilities', () => {
       expect(repriceLineItemToCurrentMock).not.toHaveBeenCalled();
       // No add → no insert.
       expect(insertLineItemForPartMock).not.toHaveBeenCalled();
+    });
+
+    it('persists a per-item lead-time edit even when the quantity is unchanged', async () => {
+      stubUpdateQuoteHappyPath();
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          lead_time_text: null,
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [
+          { part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A', lead_time_text: '3–4 weeks' },
+        ],
+      };
+
+      await updateQuote('quote-1', formData);
+
+      // Quantity unchanged → no qty update; the lead time changed → it's written.
+      expect(updateLineItemQuantityMock).not.toHaveBeenCalled();
+      expect(updateLineItemLeadTimeMock).toHaveBeenCalledWith('li-A', '3–4 weeks');
+    });
+
+    it('does not write the lead time when it is unchanged (blank ⇄ null normalized)', async () => {
+      stubUpdateQuoteHappyPath();
+      getLineItemsForQuoteMock.mockResolvedValueOnce([
+        {
+          id: 'li-A',
+          quote_id: 'quote-1',
+          company_id: 'company-1',
+          part_id: 'part-A',
+          source_tier_id: 't1',
+          sequence: 10,
+          quantity: 10,
+          unit_price: 100,
+          total_price: 1000,
+          markup_percent: 50,
+          base_cost_per_unit: 66.67,
+          is_quote_override: false,
+          lead_time_text: '2 weeks',
+          pricing_basis_snapshot: { tiers: [], resolved_tier_id: 't1', resolved_quantity: 10, captured_at: '' },
+          basis_unknown: false,
+          created_at: '2026-05-01T00:00:00Z',
+        },
+      ]);
+
+      const formData: QuoteFormData = {
+        ...baseFormData,
+        parts: [
+          { part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A', lead_time_text: '2 weeks' },
+        ],
+      };
+
+      await updateQuote('quote-1', formData);
+
+      expect(updateLineItemLeadTimeMock).not.toHaveBeenCalled();
     });
 
     it('reprices a drifted line ONLY when acceptDriftLineItemIds includes it', async () => {

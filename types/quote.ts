@@ -6,21 +6,38 @@ import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot'
 export type QuoteStatus = 'active' | 'expired';
 
 /**
- * Common B2B payment terms offered as presets in the quote form's
- * combobox. The field is free-solo, so shops can also type custom wording
- * like 'Net 30, 1% late charge'.
+ * Common B2B payment terms offered as presets in the quote form's picker,
+ * organized into labeled groups so the dropdown reads as a few short lists
+ * instead of one wall of near-identical "Net X" rows (rendered with MUI
+ * `ListSubheader`s). The field is still free-solo via the "Other (specify)…"
+ * escape hatch, so shops can type custom wording like 'Net 30, 1% late charge'.
+ *
+ * "Prepay (paid in full before work begins)" is the CIA / cash-in-advance case
+ * — some shops require full payment before starting a job. We use the plainer
+ * "Prepay" wording (not the accounting term "CIA") for the shop-owner audience,
+ * and spell out the meaning so it prints unambiguously on the quote.
  */
-export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = [
-  'Due on Receipt',
-  'Net 15',
-  'Net 30',
-  '2/10 Net 30',
-  'Net 45',
-  'Net 60',
-  'Net 90',
-  'Cash on Delivery',
-  '50% Deposit / Balance Net 30',
+export const PAYMENT_TERM_GROUPS: ReadonlyArray<{
+  label: string;
+  terms: readonly string[];
+}> = [
+  {
+    label: 'Prepay & deposits',
+    terms: ['Prepay (paid in full before work begins)', '50% Deposit / Balance Net 30'],
+  },
+  { label: 'On delivery / receipt', terms: ['Cash on Delivery', 'Due on Receipt'] },
+  { label: 'Net terms', terms: ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Net 90'] },
+  { label: 'Early-payment discount', terms: ['2/10 Net 30'] },
 ];
+
+/**
+ * Flat list of every preset across all groups. Kept as the single source for
+ * membership checks (e.g. "is this saved value a preset, or custom 'Other'
+ * text?") so grouping the dropdown doesn't ripple into that logic.
+ */
+export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = PAYMENT_TERM_GROUPS.flatMap(
+  (g) => g.terms,
+);
 
 /**
  * Quote header record. Part/quantity/pricing lives on quote_line_items.
@@ -146,6 +163,15 @@ export interface QuoteLineItem {
    * drift comparison for these.
    */
   basis_unknown: boolean;
+  /**
+   * Optional per-item lead time (free text, e.g. "2–3 weeks"). NULL means
+   * "use the quote-level lead time" (quotes.lead_time_text) — the read path's
+   * effective value is `lead_time_text ?? quote.lead_time_text`. Lead time is
+   * per-part, so every line row of a part carries the same value (denormalized,
+   * exactly like the part-level price override). Shown per item on the
+   * quote/PDF only when items differ (migration 20260723021949).
+   */
+  lead_time_text: string | null;
   created_at: string;
   // Optional joined part info for UI rendering
   parts?: {
@@ -233,6 +259,13 @@ export interface QuoteLineOverride {
 export interface QuoteFormPartBlock {
   part_id: string;
   order_quantity: number;
+  /**
+   * Optional per-item lead time (free text). Per-part, so every entry for the
+   * same part carries the same value; the access layer writes it onto each of
+   * the part's line rows. Blank/undefined ⇒ the line uses the quote-level lead
+   * time. Undefined on legacy create payloads that predate the field.
+   */
+  lead_time_text?: string | null;
   /** Optional hand-entered price+markup; bypasses tier resolution when present. */
   override?: QuoteLineOverride;
   /** Set on edit-mode payloads so the form can look up drift / basis info. */
@@ -343,6 +376,7 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
       .map((li) => ({
         part_id: li.part_id,
         order_quantity: li.quantity,
+        lead_time_text: li.lead_time_text,
         line_item_id: li.id,
         basis_unknown: li.basis_unknown,
         ...(li.is_quote_override

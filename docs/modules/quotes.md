@@ -88,8 +88,8 @@ The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_
 | quote_number | Text | Auto | Auto-generated: Q-0001, Q-0002, … |
 | legacy_quote_number | Text | No | Original quote number from legacy system (migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
-| lead_time_text | TEXT | No | Free-text lead time as stated (e.g. "2–3 weeks", "In stock"); does not drive the job due date |
-| payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Net 30`, `2/10 Net 30`. Required at the form level — every quote carries payment terms |
+| lead_time_text | TEXT | No | Free-text **quote-level default** lead time as stated (e.g. "2–3 weeks", "In stock"); does not drive the job due date. A line item can override it per part via `quote_line_items.lead_time_text` |
+| payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Prepay (paid in full before work begins)`, `Net 30`, `2/10 Net 30`. A single free-text string (no enum); the form offers grouped presets. Required at the form level — every quote carries payment terms |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
 | status_changed_at | Timestamp | No | When `status` last changed |
@@ -118,6 +118,7 @@ One row per **(part, quantity)** on a quote. Created at quote creation by resolv
 | markup_percent | Decimal(5,2) | No | Snapshotted markup at creation time |
 | base_cost_per_unit | Decimal(12,4) | No | Snapshotted base cost — useful for internal cost-vs-sell reports |
 | is_quote_override | Boolean | Yes | `true` when the salesperson typed a one-off price on the quote form that diverged from the part tier. Drives the green "✏ adjusted for this quote" chip on the cost-breakdown view |
+| lead_time_text | TEXT | No | Optional **per-item** lead time (free text, e.g. "2–3 weeks"). NULL ⇒ the line uses the quote-level `quotes.lead_time_text`. Per-part — every row of a part shares one value (denormalized, like the price override); shown per item on the detail view / PDF only when items differ |
 | created_at | Timestamp | Yes | Auto-generated |
 
 **Unique Constraint:** `(quote_id, sequence)`
@@ -197,15 +198,17 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 **Per-part price override (`✏ Use custom price`):** each part block has a **single** "✏ Use custom price" toggle (not one per quantity) that reveals a `Custom unit price` input applying to **every** quantity of that part. Each resulting `quote_line_items` row carries `is_quote_override = true` at that price, and the block shows a green **"adjusted for this quote"** chip; the part's tier is never touched. (Markup % is no longer a quote-form input.)
 
+**Per-part lead time (optional):** each part block also has a compact **"Lead time (optional)"** free-text field. Leave it blank to use the quote-level lead time (in the Terms card); fill it to give that part its own lead time — so one item can read "2–3 weeks" and another "3–4 weeks" **without splitting the quote in two**. Like the price override it is **per-part** (applies to every quantity row of the part) and is written onto each resulting `quote_line_items.lead_time_text`. When **any** item has its own lead time, the detail view and PDF show lead time **under each item** (each showing its own value, or the quote-level default when blank) instead of a single quote-level line; when none do, a single quote-level lead time is shown as before.
+
 **Firm vs. price-options is implicit:** if every part has exactly one quantity row, the sticky footer shows a **grand total**; if any part has two or more rows, the footer shows "Price options quote — prices shown per quantity" with no grand total.
 
 **Order matters:** the order of part blocks, then rows within a block, drives the `sequence` field on the resulting `quote_line_items`, which in turn drives detail/PDF row order.
 
 ▸ **Terms**
 
-- Lead time — a single **required** free-text field (type anything, e.g. "2–3 weeks", "In stock"). No number field, no unit dropdown; stored verbatim as `lead_time_text` and does not drive the job due date.
+- Lead time — a **required** free-text field (type anything, e.g. "2–3 weeks", "In stock"). No number field, no unit dropdown; stored verbatim as `lead_time_text` and does not drive the job due date. This is the **quote-level default**; individual parts can override it via the per-part "Lead time (optional)" field in the Parts block above.
 - Expiration date (defaults to today + 10 days)
-- Payment terms — a combobox of common presets (Net 15, Net 30, 2/10 Net 30, Net 45/60/90, Due on Receipt, COD, 50% Deposit / Balance Net 30) that also accepts custom free text (e.g. "Net 30, 1% late charge"). Required — the form blocks submission until a preset or custom value is entered.
+- Payment terms — a combobox of common presets, **grouped** under subheaders so the list reads as a few short groups rather than one flat wall: **Prepay & deposits** (Prepay — paid in full before work begins; 50% Deposit / Balance Net 30) · **On delivery / receipt** (Cash on Delivery; Due on Receipt) · **Net terms** (Net 15/30/45/60/90) · **Early-payment discount** (2/10 Net 30). An **"Other (specify)…"** entry reveals a free-text field for custom wording (e.g. "Net 30, 1% late charge"). Presets live in `PAYMENT_TERM_GROUPS` ([types/quote.ts](../../types/quote.ts)); the stored value stays a single free-text `payment_terms` string (no enum). Required — the form blocks submission until a value is entered.
 
 **Actions:**
 
@@ -230,13 +233,13 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Quote number (large)
 - Status pill (Active / Expired)
-- Created date, expires-in, lead time (the raw text as entered, e.g. "2–3 weeks"), payment terms (always present — **payment terms are required** on every quote). The creator is no longer shown here — a **"Prepared by {name}"** line sits below the line items (mirroring the PDF, now that acceptance is by PO rather than signature).
+- Created date, expires-in, lead time (the raw text as entered, e.g. "2–3 weeks" — shown here **only when items share one lead time**; when items carry differing per-item lead times it moves under each line item instead), payment terms (always present — **payment terms are required** on every quote). The creator is no longer shown here — a **"Prepared by {name}"** line sits below the line items (mirroring the PDF, now that acceptance is by PO rather than signature).
 
 **Content cards:**
 
 - **"Jobs from this quote" banner** — shown once any job exists off the quote. Lists every live job by number **with its PO**, click-through links; when parts remain unconverted it adds a "Some parts aren't on a job yet — use Create Another Job" line. Uses the same **part-level** rule as the convert modal (a part is handled once any of its lines is on a live job), so the two never disagree.
 - **Customer card** — three columns in the order **Customer** (name + billing address) · **Ship to** (only when the shipping address differs from billing) · **Customer contact**. When shipping == billing the card is just two columns (Customer + Contact). Customer name click-throughs to the customer record.
-- **Line items** — one table for the whole quote (Part, Description, Order qty, Unit price, Total). A part with several quantities shows its name + description **once**, spanning its quantity rows, with one line per quantity.
+- **Line items** — one table for the whole quote (Part, Description, Order qty, Unit price, Total). A part with several quantities shows its name + description **once**, spanning its quantity rows, with one line per quantity. When items carry differing per-item lead times, each part shows a small **"Lead time: …"** line under its name (its own value, or the quote-level default when blank).
   - **Firm quote** (every part has one quantity): a **grand total** row at the bottom.
   - **Price-options quote** (any part has 2+ quantities): **no grand total** (the customer picks a quantity).
   - A custom-price line shows a "custom" chip next to its unit price.
@@ -644,9 +647,9 @@ Quote detail pages expose a standalone **View PDF** button that generates a cust
 **What the PDF contains:**
 
 - Company logo (if uploaded in Settings → Company Branding) and company name in the header
-- Large "QUOTE" heading with the quote number, date, validity / lead-time / payment-terms meta
+- Large "QUOTE" heading with the quote number, date, validity / lead-time / payment-terms meta (the single quote-level "Lead Time: … ARO" row is **omitted when items carry differing per-item lead times** — those print under each line item instead)
 - **Customer · Ship to (only if different from billing) · Customer contact** — columns on one row (customer name + billing address, the shipping address when it differs, and the contact's name/email/phone) pulled from the quote's snapshotted FKs; missing fields and the ship-to column (when shipping == billing) are skipped cleanly
-- **Line items** — one table (Part, Description, Order qty, Unit price, Total), ordered by `sequence`. A part with several quantities spans its name + description across its quantity rows.
+- **Line items** — one table (Part, Description, Order qty, Unit price, Total), ordered by `sequence`. A part with several quantities spans its name + description across its quantity rows. When items differ in lead time, each part's effective lead time prints as a "Lead time: …" line inside its Description cell.
   - **Firm quote** (every part one quantity): a bottom-line **grand total**.
   - **Price-options quote** (any part 2+ quantities): **no grand total** (the customer hasn't yet picked a quantity, so a single bottom-line price would mislead).
 - **Acceptance block** — instructs the customer to *reply with a purchase order referencing the quote*; there is **no signature/date/PO# ruled line** (acceptance is by PO). A small **"Prepared by {name} · {email}"** line sits just below it, followed by the page footer.
@@ -699,7 +702,7 @@ While creating a quote, users can create new entities without leaving the form:
 
 **Quantities:** each block needs at least one quantity row; every quantity must be a number > 0 (fractional allowed — parts sold by the dozen / ounce / pound / length) and unique within the part. Each non-override row must resolve to a priced tier (or use a custom price).
 
-**Lead time:** required — any non-empty free text (e.g. "2–3 weeks", "In stock"); stored verbatim and does not drive the job due date.
+**Lead time:** required at the quote level — any non-empty free text (e.g. "2–3 weeks", "In stock"); stored verbatim and does not drive the job due date. Optional **per-item** lead times can override it per part (shown under each item on the detail view / PDF when items differ).
 
 **Payment terms:** required — preset or custom free text; submission is blocked until a value is entered.
 

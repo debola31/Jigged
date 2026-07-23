@@ -15,6 +15,7 @@ import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
+import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import type { QuoteLineItem, QuoteWithRelations } from '@/types/quote';
 import { isQuoteExpired } from '@/types/quote';
 import { convertQuoteToJob, type QuoteLineConversion } from '@/utils/quotesAccess';
@@ -113,6 +114,9 @@ export default function ConvertToJobModal({
   // (migration 20260526), so the modal always starts empty — the quote
   // never carries one. REQUIRED to convert (the work-order authorization).
   const [customerPoInput, setCustomerPoInput] = useState<string>('');
+  // "Hot" (rush) marker for the new job. Off by default; office staff can also
+  // toggle it later on the job detail page.
+  const [hot, setHot] = useState<boolean>(false);
   // Optional PO PDF, staged here and uploaded after the job is created.
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
@@ -280,6 +284,7 @@ export default function ConvertToJobModal({
         customerPoNumber: customerPoInput,
         selectedLineItemIds,
         lineOverrides,
+        hot,
       });
       // Attach the PO PDF if one was staged — non-fatal. On failure keep the
       // modal open with an "Open Job" action so the new job isn't lost.
@@ -577,6 +582,19 @@ export default function ConvertToJobModal({
               value={customerPoInput}
               onChange={(e) => setCustomerPoInput(e.target.value)}
               disabled={loading}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={hot}
+                  onChange={(e) => setHot(e.target.checked)}
+                  disabled={loading}
+                  color="error"
+                  icon={<LocalFireDepartmentIcon />}
+                  checkedIcon={<LocalFireDepartmentIcon />}
+                />
+              }
+              label="Mark as Hot (rush)"
             />
             <AttachmentUploadField
               file={attachment}

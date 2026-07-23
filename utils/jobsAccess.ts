@@ -120,6 +120,11 @@ export async function getAllJobs(
       `)
       .eq('company_id', companyId)
       .is('deleted_at', null)
+      // Hot jobs float to the top as a primary tier, with the caller's chosen
+      // column sort applied within each tier. Chained .order() calls apply in
+      // sequence, and the batch loop concatenates in query order, so this holds
+      // across the full result set.
+      .order('is_hot', { ascending: false })
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
@@ -344,7 +349,7 @@ export async function updateJobAddressContact(
 export async function updateJobDetails(
   jobId: string,
   companyId: string,
-  fields: { customer_po_number?: string | null; due_date?: string | null },
+  fields: { customer_po_number?: string | null; due_date?: string | null; is_hot?: boolean },
 ): Promise<Job> {
   const supabase = getSupabase();
   const toNull = (v: string | null | undefined): string | null | undefined =>
@@ -356,6 +361,10 @@ export async function updateJobDetails(
   }
   if (fields.due_date !== undefined) {
     patch.due_date = toNull(fields.due_date);
+  }
+  // Hot toggle — the office-side "mark/unmark Hot" control writes through here.
+  if (fields.is_hot !== undefined) {
+    patch.is_hot = fields.is_hot;
   }
 
   const { data, error } = await supabase
@@ -390,6 +399,8 @@ export interface CreateJobFromPoInput {
   customer_po_number: string;
   /** Promised ship date (YYYY-MM-DD), or null. Entered directly (no lead time). */
   due_date: string | null;
+  /** Mark the new job "Hot" (rush) at creation. Visibility only. Defaults to false. */
+  hot?: boolean;
   lines: CreateJobFromPoLine[];
 }
 
@@ -554,6 +565,7 @@ export async function createJobFromPurchaseOrder(
     job_number: jobNumber as string,
     production_status: 'not_started',
     fulfillment_status: 'unshipped',
+    is_hot: input.hot ?? false,
     due_date: input.due_date || null,
     customer_po_number: customerPoNumber,
     billing_address_id: billingAddressId,

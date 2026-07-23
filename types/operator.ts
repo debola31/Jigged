@@ -33,6 +33,8 @@ export interface OperatorJob {
   customer_name: string | null;
   part_name: string | null;
   part_quantity: number;
+  /** jobs.is_hot — the rush marker. Drives hot-first ordering + the HOT badge. */
+  is_hot: boolean;
   /** job_parts.production_status. */
   production_status: string;
   // Current operation for this station on this part
@@ -142,6 +144,8 @@ export interface JobTraveler {
   due_date: string | null;
   customer_po_number: string | null;
   production_status: string;
+  /** jobs.is_hot — drives the HOT badge on-screen and the grayscale HOT stamp on the PDF. */
+  is_hot: boolean;
   /** Number of parts on the parent job — drives the "all parts" hub link. */
   job_part_count: number;
   operations: JobTravelerOperation[];

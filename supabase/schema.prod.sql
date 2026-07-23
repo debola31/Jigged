@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "contact_snapshot" jsonb,
     "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
     "deleted_at" timestamp with time zone,
+    "is_hot" boolean NOT NULL DEFAULT false,
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),

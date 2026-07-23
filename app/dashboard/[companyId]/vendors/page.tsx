@@ -252,15 +252,18 @@ export default function VendorsPage() {
   return (
     <Box>
       {/* View switch (role standard: Tabs for switching between named views).
-          Directory = the vendor list; Outside work = the company-wide queue of
-          external-vendor operations to send out / receive. */}
+          Directory = the vendor list; Outside processing = the company-wide queue
+          of external-vendor operations to send out / receive. */}
       <Tabs
         value={view}
         onChange={(_e, next: 'directory' | 'outside') => setView(next)}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        // mt: -2 matches the Team page: icon+label tabs are taller (MUI labelIcon),
+        // so pull the strip up into the layout's top padding to close the gap
+        // between the header and the tabs.
+        sx={{ mt: -2, mb: 3, borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab value="directory" icon={<StorefrontIcon />} iconPosition="start" label="Directory" />
-        <Tab value="outside" icon={<LocalShippingIcon />} iconPosition="start" label="Outside work" />
+        <Tab value="outside" icon={<LocalShippingIcon />} iconPosition="start" label="Outside processing" />
       </Tabs>
 
       {view === 'outside' ? (

@@ -120,7 +120,7 @@ Overdue surfaces as:
 
 **Features:**
 
-- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status (with an **"At vendor"** chip when parts are out for outside processing), Due, Created. The **Outside work** queue itself lives on the **Vendors** page (Directory / Outside work tabs) — outside processing is vendor work, not a job type — see [Outside (external-vendor) operations](#outside-external-vendor-operations).
+- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status (with an **"At vendor"** chip when parts are out for outside processing), Due, Created. The **Outside processing** queue itself lives on the **Vendors** page (Directory / Outside processing tabs) — outside processing is vendor work, not a job type — see [Outside (external-vendor) operations](#outside-external-vendor-operations).
 
 - Search box (searches job number, customer name)
 
@@ -386,8 +386,8 @@ parts out.
 
 **Surfaces:** the admin Job Detail op card, the operator traveler + operation page (Mark Sent
 Out / Mark Received, "Outside process" badge + vendor), the printed traveler (high-contrast
-dark banner row), and the company-wide **Outside work** queue — a **tab on the Vendors page**
-(Directory / Outside work), grouped **Not sent** / **At vendor**, sorted by job due date
+dark banner row), and the company-wide **Outside processing** queue — a **tab on the Vendors
+page** (Directory / Outside processing), grouped **Not sent** / **At vendor**, sorted by job due date
 (hot-first), with inline Mark Sent Out / Mark Received (`components/jobs/OutsideWorkPanel.tsx`,
 backed by `getOutsideOpsForCompany`). Outside processing is vendor work, so its queue lives
 under Vendors rather than as a pseudo job-type on the Jobs list (matches how job-shop ERPs —
@@ -415,7 +415,7 @@ The jobs list includes a "Current Op" column that shows the next ready operation
 
 - **Outside op at vendor:** a job whose current live step is a `sent` outside op reads as
   incomplete in the standard list; the Jobs list badges those rows **"At vendor"** so they
-  don't look stalled, and the **Vendors → Outside work** tab is the worklist for them.
+  don't look stalled, and the **Vendors → Outside processing** tab is the worklist for them.
 
 - **Cancelled job or no routing data:** Shows "--"
 

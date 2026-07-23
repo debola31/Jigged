@@ -15,6 +15,14 @@ vi.mock('@/utils/jobNoteMediaAccess', () => ({
   getJobNoteMediaUrl: vi.fn().mockResolvedValue(null),
 }));
 
+// OperationCard pulls in operationCompletionsAccess (completion history + void),
+// which imports the Supabase client at module load — stub it so the unit env
+// needs no creds. Events default to empty (no history rendered unless expanded).
+vi.mock('@/utils/operationCompletionsAccess', () => ({
+  getOperationCompletionEvents: vi.fn().mockResolvedValue([]),
+  voidOperationCompletion: vi.fn().mockResolvedValue(undefined),
+}));
+
 const op = (over: Partial<JobOperation> = {}): JobOperation =>
   ({
     id: 'op-1',

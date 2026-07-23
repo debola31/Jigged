@@ -259,13 +259,15 @@ export async function generateJobTravelerPdf(
       // Drop a redundant operation_name when it equals the work-center label.
       .filter((s, idx) => !(idx === 0 && s === op.work_center_name))
       .join(' — ') || '—';
-    // External rows read as a high-contrast "send it out" banner (see
-    // didParseCell); lead the detail with the vendor so the shipping cue is
-    // unmistakable even in grayscale.
+    // External rows are flagged with a light-gray highlighted band (see
+    // didParseCell). The vendor already shows in the Work Center column, so the
+    // Instructions cell just carries a short "OUTSIDE" flag + the operator's own
+    // instruction — no redundant "send to {vendor}" prose, no non-ASCII glyphs
+    // (jsPDF's helvetica can't render ★, which printed as "&").
     const detail = isExternal
-      ? `★ OUTSIDE PROCESS — send to ${op.vendor_name || 'the vendor'}${
-          baseDetail && baseDetail !== '—' ? ` — ${baseDetail}` : ''
-        }`
+      ? baseDetail && baseDetail !== '—'
+        ? `OUTSIDE — ${baseDetail}`
+        : 'OUTSIDE PROCESS'
       : baseDetail;
     return [
       String(op.sequence),
@@ -317,19 +319,23 @@ export async function generateJobTravelerPdf(
       5: { cellWidth: 58, halign: 'center' },
       6: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
-    // Restyle external (outside-vendor) rows as a solid dark banner with white
-    // bold text — reads distinctly AND survives grayscale printing (contrast, not
-    // hue). The Scan cell stays white so its QR remains scannable inside the row.
+    // Flag external (outside-vendor) rows with a light-gray "highlighter" band +
+    // bold black text + a heavier black outline. This is unmistakable AND survives
+    // grayscale printing (contrast, not hue) while using a fraction of the toner a
+    // solid-black fill did — the shop-owner complaint that prompted this. The Scan
+    // cell stays white so the QR keeps a clean quiet zone.
     didParseCell: (data) => {
       if (data.section !== 'body') return;
       const op = rowOps[data.row.index];
       if (op?.work_center_kind !== 'external') return;
+      data.cell.styles.fontStyle = 'bold';
+      data.cell.styles.lineWidth = 1;
+      data.cell.styles.lineColor = [40, 40, 40];
       if (data.column.index === SCAN_COL) {
         data.cell.styles.fillColor = [255, 255, 255];
       } else {
-        data.cell.styles.fillColor = [30, 30, 30];
-        data.cell.styles.textColor = [255, 255, 255];
-        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fillColor = [224, 224, 224];
+        data.cell.styles.textColor = [20, 20, 20];
       }
     },
     // Draw each operation's QR centered in its Scan cell (op resolved by the

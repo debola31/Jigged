@@ -93,9 +93,11 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
   the machine, printed once; bulk-print all from the work-centers list.
 - **Per-operation traveler QR** (`utils/jobTravelerPdf.ts`): deep-links to a specific step's
   action view. An **optional accelerator** for shops mid-transition — not required under the
-  paperless-preferred model. **Outside (external-vendor) steps render as a high-contrast dark
-  banner row** on the printed traveler (vendor named, survives grayscale) — the automatic
-  version of the yellow highlighter that told the shipping lead "send this out." The Scan cell
+  paperless-preferred model. **Outside (external-vendor) steps are flagged with a light-gray
+  highlighted band (bold black text, heavier outline, a compact "OUTSIDE" label)** on the
+  printed traveler — unmistakable and grayscale-safe, but light on toner (an earlier solid-black
+  fill was too ink-heavy and printed white-on-black poorly). The vendor shows in the Work Center
+  column, so the Instructions cell isn't cluttered with it. The Scan cell
   stays white so its QR remains scannable inside the banner.
 
 ## Admin

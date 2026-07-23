@@ -113,3 +113,35 @@ export function readCompanyDefaults(
   }
   return out;
 }
+
+/** Upper bound on how many saved custom payment terms a company keeps. */
+export const MAX_CUSTOM_PAYMENT_TERMS = 15;
+
+/**
+ * A company's saved custom payment terms — free-text terms a shop typed once on
+ * a quote (via the payment-terms combobox's "Add …" affordance) and kept for
+ * reuse. Stored under `settings.custom_payment_terms` as a string array, a
+ * sibling of the numeric `defaults` block, so no schema migration is needed.
+ *
+ * Returns a trimmed, de-duplicated list (order preserved, most-recent-first as
+ * stored) and tolerates a missing/malformed value by returning []. Preset
+ * membership is NOT filtered here — callers building the picker exclude any
+ * saved term that duplicates a PAYMENT_TERM_PRESETS entry.
+ */
+export function readCustomPaymentTerms(
+  company: SettingsLike | null | undefined,
+): string[] {
+  const settings = company?.settings as Record<string, unknown> | undefined | null;
+  const raw = settings?.custom_payment_terms;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (trimmed === '' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}

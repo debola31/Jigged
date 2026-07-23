@@ -12,7 +12,7 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
-import Autocomplete from '@mui/material/Autocomplete';
+import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
@@ -31,6 +31,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
 import { PAYMENT_TERM_PRESETS } from '@/types/quote';
+import {
+  getCustomPaymentTerms,
+  addCustomPaymentTerm,
+  removeCustomPaymentTerm,
+} from '@/utils/companyAccess';
 import {
   createQuote,
   updateQuote,
@@ -125,8 +130,13 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 /** Sentinel option IDs for "add new" actions inside the dropdowns. */
 const ADD_NEW_CONTACT_ID = '__add_new_contact__';
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
-/** Sentinel for the "Other (specify)…" choice in the payment-terms picker. */
-const PAYMENT_TERMS_OTHER = '__payment_other__';
+/**
+ * One option in the payment-terms combobox. `group` drives the "Your saved
+ * terms" / "Standard terms" subheaders; `isAdd` marks the synthetic
+ * `Add "<typed>"` row surfaced on the fly for free-text entry.
+ */
+type PaymentTermOption = { value: string; group: string; isAdd?: boolean };
+const paymentTermFilter = createFilterOptions<PaymentTermOption>();
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -257,14 +267,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // auto-selected into the Contact field on save.
   const [contactFormOpen, setContactFormOpen] = useState(false);
 
-  // Payment terms: true when the user is entering custom terms (the "Other
-  // (specify)…" path). Seeded true when editing a quote whose saved terms
-  // aren't one of the presets, so the custom field shows with that value.
-  const [paymentOther, setPaymentOther] = useState<boolean>(
-    () =>
-      !!initialData.payment_terms &&
-      !PAYMENT_TERM_PRESETS.includes(initialData.payment_terms),
-  );
+  // The company's saved custom payment terms (free-text terms kept for reuse),
+  // loaded in loadData. They render under a "Your saved terms" group in the
+  // payment-terms combobox; picking "Add …" appends to this list and persists.
+  const [savedTerms, setSavedTerms] = useState<string[]>([]);
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -286,12 +292,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       const initialPartIds = Array.from(
         new Set(initialData.parts.map((p) => p.part_id).filter(Boolean)),
       );
-      const [customersData, hydratedParts] = await Promise.all([
+      const [customersData, hydratedParts, customTerms] = await Promise.all([
         getAllCustomers(companyId),
         initialPartIds.length > 0
           ? getPartsForSelectByIds(initialPartIds)
           : Promise.resolve([]),
+        // Best-effort: a failed load just means no saved-term suggestions.
+        getCustomPaymentTerms(companyId).catch(() => [] as string[]),
       ]);
+      setSavedTerms(customTerms);
       setCustomers([
         CREATE_NEW_CUSTOMER,
         ...customersData.map((c) => ({ id: c.id, name: c.name })),
@@ -388,6 +397,49 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
   const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
+  };
+
+  /**
+   * Grouped options for the payment-terms combobox: the company's saved custom
+   * terms first (excluding any that duplicate a preset), then the standard
+   * presets. The synthetic `Add "…"` row is injected by filterOptions in the JSX.
+   */
+  const paymentTermOptions = useMemo<PaymentTermOption[]>(() => {
+    const savedClean = savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t));
+    return [
+      ...savedClean.map((v) => ({ value: v, group: 'Your saved terms' })),
+      ...PAYMENT_TERM_PRESETS.map((v) => ({ value: v, group: 'Standard terms' })),
+    ];
+  }, [savedTerms]);
+
+  /**
+   * Commit a chosen/typed payment term. A brand-new custom term (typed, not a
+   * preset, not already saved) is added to the company's saved list —
+   * optimistically in the UI, then persisted best-effort (a failed save still
+   * leaves the term usable on this quote).
+   */
+  const commitPaymentTerm = (term: string, isNewCustom: boolean) => {
+    const trimmed = term.trim();
+    handleFieldChange('payment_terms', trimmed);
+    if (
+      isNewCustom &&
+      trimmed !== '' &&
+      !PAYMENT_TERM_PRESETS.includes(trimmed) &&
+      !savedTerms.includes(trimmed)
+    ) {
+      setSavedTerms((prev) => [trimmed, ...prev.filter((t) => t !== trimmed)]);
+      addCustomPaymentTerm(companyId, trimmed)
+        .then(setSavedTerms)
+        .catch((e) => console.warn('Could not save custom payment term for reuse:', e));
+    }
+  };
+
+  /** Remove a saved custom term from the company's list (optimistic + persist). */
+  const handleRemoveSavedTerm = (term: string) => {
+    setSavedTerms((prev) => prev.filter((t) => t !== term));
+    removeCustomPaymentTerm(companyId, term)
+      .then(setSavedTerms)
+      .catch((e) => console.warn('Could not remove custom payment term:', e));
   };
 
   /**
@@ -1641,67 +1693,96 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              {/* Presets + an explicit "Other (specify)…" that reveals a free
-                  text field — discoverable custom entry without losing the
-                  common presets. payment_terms stays a single string column. */}
-              <FormControl size="small" fullWidth required>
-                <InputLabel id="payment-terms-label" shrink>
-                  Payment terms
-                </InputLabel>
-                <Select
-                  labelId="payment-terms-label"
-                  label="Payment terms"
-                  notched
-                  displayEmpty
-                  value={paymentOther ? PAYMENT_TERMS_OTHER : formData.payment_terms}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === PAYMENT_TERMS_OTHER) {
-                      setPaymentOther(true);
-                      handleFieldChange('payment_terms', '');
-                      return;
-                    }
-                    setPaymentOther(false);
-                    handleFieldChange('payment_terms', v);
-                  }}
-                  renderValue={(selected) => {
-                    if (paymentOther || selected === PAYMENT_TERMS_OTHER) {
-                      return 'Other (specify)…';
-                    }
-                    return selected ? (
-                      (selected as string)
-                    ) : (
-                      <Box component="span" sx={{ color: 'text.secondary' }}>
-                        Select…
-                      </Box>
+              {/* Type-or-pick combobox: standard presets + the shop's saved
+                  custom terms (grouped), with an inline Add "<typed>" row for
+                  new free-text wording. payment_terms stays a single string. */}
+              <Autocomplete<PaymentTermOption, false, false, true>
+                freeSolo
+                selectOnFocus
+                clearOnBlur
+                handleHomeEndKeys
+                size="small"
+                fullWidth
+                options={paymentTermOptions}
+                groupBy={(o) => (typeof o === 'string' ? '' : o.group)}
+                getOptionLabel={(o) => (typeof o === 'string' ? o : o.value)}
+                isOptionEqualToValue={(option, val) => {
+                  const a = typeof option === 'string' ? option : option.value;
+                  const b = typeof val === 'string' ? val : val.value;
+                  return a === b;
+                }}
+                filterOptions={(options, params) => {
+                  const filtered = paymentTermFilter(options, params);
+                  const input = params.inputValue.trim();
+                  // Offer "Add …" only for a genuinely new term (not blank, not
+                  // an existing preset or saved term).
+                  const exists =
+                    input === '' ||
+                    PAYMENT_TERM_PRESETS.includes(input) ||
+                    savedTerms.includes(input);
+                  if (input !== '' && !exists) {
+                    filtered.push({ value: input, group: 'Add new', isAdd: true });
+                  }
+                  return filtered;
+                }}
+                value={formData.payment_terms || null}
+                onChange={(_e, newValue) => {
+                  if (newValue == null) {
+                    handleFieldChange('payment_terms', '');
+                    return;
+                  }
+                  const term = typeof newValue === 'string' ? newValue : newValue.value;
+                  // A raw string (typed + Enter) or the "Add …" row is a new custom term.
+                  const isNewCustom = typeof newValue === 'string' || newValue.isAdd === true;
+                  commitPaymentTerm(term, isNewCustom);
+                }}
+                renderOption={(props, option) => {
+                  const { key, ...liProps } = props as typeof props & { key?: string };
+                  if (option.isAdd) {
+                    return (
+                      <li key={`add-${option.value}`} {...liProps}>
+                        <AddIcon fontSize="small" sx={{ mr: 1 }} />
+                        Add “{option.value}”
+                      </li>
                     );
-                  }}
-                >
-                  {/* A short, flat preset list (see PAYMENT_TERM_PRESETS) — no
-                      group subheaders needed at this length. "Other (specify)…"
-                      reveals a free-text field for custom wording. */}
-                  {PAYMENT_TERM_PRESETS.map((p) => (
-                    <MenuItem key={p} value={p}>
-                      {p}
-                    </MenuItem>
-                  ))}
-                  <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
-                    Other (specify)…
-                  </MenuItem>
-                </Select>
-              </FormControl>
-              {paymentOther && (
-                <TextField
-                  sx={{ mt: 1 }}
-                  fullWidth
-                  size="small"
-                  label="Custom payment terms"
-                  placeholder="e.g. Net 30, 1% late charge"
-                  value={formData.payment_terms}
-                  onChange={(e) => handleFieldChange('payment_terms', e.target.value)}
-                  autoFocus
-                />
-              )}
+                  }
+                  if (option.group === 'Your saved terms') {
+                    return (
+                      <li key={option.value} {...liProps}>
+                        <Box
+                          sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}
+                        >
+                          <Box sx={{ flex: 1 }}>{option.value}</Box>
+                          <IconButton
+                            size="small"
+                            aria-label={`Remove ${option.value}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveSavedTerm(option.value);
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      </li>
+                    );
+                  }
+                  return (
+                    <li key={option.value} {...liProps}>
+                      {option.value}
+                    </li>
+                  );
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Payment terms"
+                    required
+                    helperText="Choose a standard term or type your own"
+                    InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
+                  />
+                )}
+              />
             </Grid>
           </Grid>
         </CardContent>

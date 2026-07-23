@@ -90,7 +90,7 @@ test.describe('Quote to Job workflow', () => {
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
 
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)

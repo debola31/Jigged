@@ -188,7 +188,7 @@ test.describe('Quote edit — reload contract', () => {
     });
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -321,7 +321,7 @@ test.describe('Quote edit — reload contract', () => {
 
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -436,7 +436,7 @@ test.describe('Quote edit — reload contract', () => {
     expect(snapshottedDollar).toBeTruthy();
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -526,7 +526,7 @@ test.describe('Quote edit — reload contract', () => {
     await page.getByLabel(/Expiration date/i).fill('2020-01-01');
 
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });

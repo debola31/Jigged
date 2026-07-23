@@ -239,53 +239,55 @@ export async function generateJobTravelerPdf(
   doc.text('Operations', MARGIN, cursorY);
   cursorY += 10;
 
-  // "Good (of N)" is a blank write-in column so the floor can tally good pieces
-  // per operation on paper (the offline-capture fallback for partial completion).
+  // One "Notes" column carries the setup/cycle estimates for internal steps and
+  // the "ship to {vendor}" instruction for outside steps (which have no times) —
+  // so the space isn't wasted on a 0/0 for outside ops. "Completed (of N)" is a
+  // blank write-in for the floor to tally good pieces or tick off the step.
   const head = [[
-    'Step', 'Work Center', 'Operation / Instructions', 'Setup (min)', 'Cycle (min/pc)',
-    `Good (of ${traveler.quantity})`, 'Scan',
+    'Step', 'Work Center', 'Operation / Instructions', 'Notes',
+    `Completed (of ${traveler.quantity})`, 'Scan',
   ]];
   // Explicit row -> operation map, built alongside `body` so both the QR draw and
-  // the external-op banner restyle resolve the op by identity, never by a fragile
+  // the external-op restyle resolve the op by identity, never by a fragile
   // positional index into traveler.operations (the empty-ops placeholder row maps
-  // to null). A wrong QR under a banner row would send a scan to the wrong step.
+  // to null). A wrong QR under a flagged row would send a scan to the wrong step.
   const rowOps: (JobTravelerOperation | null)[] = [];
   const body = traveler.operations.map((op) => {
     rowOps.push(op);
     const isExternal = op.work_center_kind === 'external';
     const workCenter = op.work_center_name ?? op.operation_name ?? '—';
-    const baseDetail = [op.operation_name, op.instructions]
+    const detail = [op.operation_name, op.instructions]
       .filter((s): s is string => Boolean(s && s.trim()))
       // Drop a redundant operation_name when it equals the work-center label.
       .filter((s, idx) => !(idx === 0 && s === op.work_center_name))
       .join(' — ') || '—';
-    // External rows are flagged with a light-gray highlighted band (see
-    // didParseCell). The vendor already shows in the Work Center column, so the
-    // Instructions cell just carries a short "OUTSIDE" flag + the operator's own
-    // instruction — no redundant "send to {vendor}" prose, no non-ASCII glyphs
-    // (jsPDF's helvetica can't render ★, which printed as "&").
-    const detail = isExternal
-      ? baseDetail && baseDetail !== '—'
-        ? `OUTSIDE — ${baseDetail}`
-        : 'OUTSIDE PROCESS'
-      : baseDetail;
+    // Notes: outside steps get "OUTSIDE — ship to {vendor}" (the actionable cue);
+    // internal steps get their setup/cycle estimates.
+    let notes: string;
+    if (isExternal) {
+      notes = `OUTSIDE — ship to ${op.vendor_name || 'the vendor'}`;
+    } else {
+      const t: string[] = [];
+      if (op.setup_minutes > 0) t.push(`Setup ${formatMinutes(op.setup_minutes)} min`);
+      if (op.cycle_minutes > 0) t.push(`Cycle ${formatMinutes(op.cycle_minutes)} min/pc`);
+      notes = t.length ? t.join(' · ') : '—';
+    }
     return [
       String(op.sequence),
       workCenter,
       detail,
-      formatMinutes(op.setup_minutes),
-      formatMinutes(op.cycle_minutes),
-      '', // Good made — blank write-in
+      notes,
+      '', // Completed — blank write-in
       '', // Scan — QR drawn in didDrawCell
     ];
   });
 
   if (body.length === 0) {
-    body.push(['—', 'No operations on this part', '', '—', '—', '', '']);
+    body.push(['—', 'No operations on this part', '', '', '', '']);
     rowOps.push(null);
   }
 
-  const SCAN_COL = 6;
+  const SCAN_COL = 5;
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
@@ -314,29 +316,23 @@ export async function generateJobTravelerPdf(
       0: { cellWidth: 38, halign: 'center' },
       1: { cellWidth: 100, fontStyle: 'bold' },
       2: { cellWidth: 'auto' },
-      3: { cellWidth: 54, halign: 'right' },
-      4: { cellWidth: 60, halign: 'right' },
-      5: { cellWidth: 58, halign: 'center' },
-      6: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
+      3: { cellWidth: 120 },
+      4: { cellWidth: 64, halign: 'center' },
+      5: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
-    // Flag external (outside-vendor) rows with a light-gray "highlighter" band +
-    // bold black text + a heavier black outline. This is unmistakable AND survives
-    // grayscale printing (contrast, not hue) while using a fraction of the toner a
-    // solid-black fill did — the shop-owner complaint that prompted this. The Scan
-    // cell stays white so the QR keeps a clean quiet zone.
+    // Flag external (outside-vendor) rows with a heavy black OUTLINE + bold black
+    // text only — no fill. Unmistakable and grayscale-safe (contrast, not hue),
+    // and uses essentially no extra toner (the earlier gray/solid fills drew a
+    // shop-owner ink complaint). The "OUTSIDE — ship to {vendor}" cue lives in the
+    // Notes column.
     didParseCell: (data) => {
       if (data.section !== 'body') return;
       const op = rowOps[data.row.index];
       if (op?.work_center_kind !== 'external') return;
       data.cell.styles.fontStyle = 'bold';
-      data.cell.styles.lineWidth = 1;
-      data.cell.styles.lineColor = [40, 40, 40];
-      if (data.column.index === SCAN_COL) {
-        data.cell.styles.fillColor = [255, 255, 255];
-      } else {
-        data.cell.styles.fillColor = [224, 224, 224];
-        data.cell.styles.textColor = [20, 20, 20];
-      }
+      data.cell.styles.textColor = [20, 20, 20];
+      data.cell.styles.lineWidth = 1.2;
+      data.cell.styles.lineColor = [20, 20, 20];
     },
     // Draw each operation's QR centered in its Scan cell (op resolved by the
     // explicit rowOps map, not by position).

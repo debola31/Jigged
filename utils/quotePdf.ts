@@ -162,13 +162,6 @@ export async function generateQuotePdf(
   doc.setTextColor(30);
   doc.text('QUOTE', pageWidth - MARGIN, headerTop + 20, { align: 'right' });
 
-  // When any line carries its own lead time, we show lead time per item in the
-  // line-items table below, so the single quote-level lead-time meta row here is
-  // omitted (avoids a header value that contradicts the per-item rows).
-  const hasPerItemLeadTimes = (quote.line_items ?? []).some(
-    (li) => (li.lead_time_text ?? '').trim() !== '',
-  );
-
   const metaRows: Array<{ text: string; color?: [number, number, number] }> = [];
   metaRows.push({ text: `Quote #: ${quote.quote_number}` });
   metaRows.push({ text: `Date: ${formatDate(quote.created_at)}` });
@@ -179,7 +172,7 @@ export async function generateQuotePdf(
       color: expiredOrSoon ? [180, 40, 40] : undefined,
     });
   }
-  if (quote.lead_time_text && !hasPerItemLeadTimes) {
+  if (quote.lead_time_text) {
     metaRows.push({ text: `Lead Time: ${quote.lead_time_text} ARO` });
   }
   if (quote.payment_terms) {
@@ -301,9 +294,6 @@ export async function generateQuotePdf(
     part_name: string;
     description: string;
     unit: string | null;
-    // Effective lead time for this part (its own value, else the quote-level
-    // lead time). Only rendered when hasPerItemLeadTimes.
-    lead_time: string;
     items: typeof lineItems;
   }[] = [];
   const groupIndex = new Map<string, number>();
@@ -317,9 +307,6 @@ export async function generateQuotePdf(
         description: li.parts?.description?.trim() ?? '',
         // Labels a fractional quantity ("0.32 in"); null for count parts.
         unit: quantityUnitSuffix(li.parts?.primary_unit),
-        // Lead time is per-part, so the group's first item carries it; fall
-        // back to the quote-level lead time when this item has none.
-        lead_time: (li.lead_time_text ?? '').trim() || (quote.lead_time_text ?? ''),
         items: [],
       });
     }
@@ -334,12 +321,6 @@ export async function generateQuotePdf(
   if (lineItems.length > 0) {
     for (const group of partGroups) {
       const rows = [...group.items].sort((a, b) => a.quantity - b.quantity);
-      // When items differ in lead time, show each item's effective lead time as
-      // a second line under its description (keeps the fixed 5-column layout).
-      const descriptionCell =
-        hasPerItemLeadTimes && group.lead_time
-          ? `${group.description}${group.description ? '\n' : ''}Lead time: ${group.lead_time}`
-          : group.description;
       rows.forEach((li, i) => {
         const qtyCells = [
           group.unit ? `${li.quantity} ${group.unit}` : String(li.quantity),
@@ -347,11 +328,11 @@ export async function generateQuotePdf(
           formatCurrency(li.total_price ?? li.unit_price * li.quantity),
         ];
         if (rows.length === 1) {
-          body.push([group.part_name, descriptionCell, ...qtyCells]);
+          body.push([group.part_name, group.description, ...qtyCells]);
         } else if (i === 0) {
           body.push([
             { content: group.part_name, rowSpan: rows.length },
-            { content: descriptionCell, rowSpan: rows.length },
+            { content: group.description, rowSpan: rows.length },
             ...qtyCells,
           ]);
         } else {

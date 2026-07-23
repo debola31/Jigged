@@ -68,7 +68,6 @@ export async function insertLineItemForPart(
   tiers: ComputedPartPricingTier[],
   sequence: number,
   override?: QuoteLineItemOverride,
-  leadTimeText?: string | null,
 ): Promise<QuoteLineItem> {
   const supabase = getSupabase();
 
@@ -142,9 +141,6 @@ export async function insertLineItemForPart(
       markup_percent: markupPercent,
       base_cost_per_unit: baseCost,
       is_quote_override: !!override,
-      // Per-item lead time (per-part, denormalized onto each line row). Blank
-      // ⇒ NULL, i.e. this line uses the quote-level lead time.
-      lead_time_text: leadTimeText && leadTimeText.trim() !== '' ? leadTimeText : null,
       pricing_basis_snapshot: basisSnapshot as unknown as Json,
       basis_unknown: false,
     })
@@ -240,29 +236,6 @@ export async function updateLineItemQuantity(
     throw error;
   }
   return data as unknown as QuoteLineItem;
-}
-
-/**
- * Update only a line item's per-item lead time (free text). Kept separate from
- * `updateLineItemQuantity` — lead time carries no pricing, so it must persist
- * even when the quantity is unchanged (and must NOT trigger a price recompute).
- * Blank ⇒ NULL, i.e. the line falls back to the quote-level lead time.
- */
-export async function updateLineItemLeadTime(
-  lineItemId: string,
-  leadTimeText: string | null,
-): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase
-    .from('quote_line_items')
-    .update({
-      lead_time_text: leadTimeText && leadTimeText.trim() !== '' ? leadTimeText : null,
-    })
-    .eq('id', lineItemId);
-  if (error) {
-    console.error('Error updating line item lead time:', error);
-    throw error;
-  }
 }
 
 /**

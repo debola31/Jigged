@@ -22,7 +22,6 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import ListSubheader from '@mui/material/ListSubheader';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -31,7 +30,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
-import { PAYMENT_TERM_PRESETS, PAYMENT_TERM_GROUPS } from '@/types/quote';
+import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   createQuote,
   updateQuote,
@@ -106,12 +105,6 @@ interface PartBlockState {
    */
   override_open: boolean;
   override_unit_price: string;
-  /**
-   * Part-level lead time (free text). Applies to every quantity row of this
-   * part; on save it's written onto each resulting line item. Blank ⇒ the line
-   * falls back to the quote-level lead time.
-   */
-  lead_time_text: string;
   tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
@@ -149,7 +142,6 @@ function emptyBlock(): PartBlockState {
     rows: [emptyRow()],
     override_open: false,
     override_unit_price: '',
-    lead_time_text: '',
     tiers: [],
     loading: false,
     error: null,
@@ -188,7 +180,6 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
         rows: [],
         override_open: false,
         override_unit_price: '',
-        lead_time_text: '',
         tiers: [],
         loading: false,
         error: null,
@@ -197,11 +188,6 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
     if (p.override && !blocks[idx].override_open) {
       blocks[idx].override_open = true;
       blocks[idx].override_unit_price = String(p.override.unit_price);
-    }
-    // Lead time is per-part; take it from the first entry that carries one
-    // (all entries for a part share the same value on save).
-    if (p.lead_time_text && !blocks[idx].lead_time_text) {
-      blocks[idx].lead_time_text = p.lead_time_text;
     }
     blocks[idx].rows.push(rowFromInitial(p));
   }
@@ -922,11 +908,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           };
           if (r.line_item_id) entry.line_item_id = r.line_item_id;
           if (r.basis_unknown) entry.basis_unknown = r.basis_unknown;
-          // Per-part lead time → same value on every row of the part. Omit when
-          // blank so an untouched quote's payload shape is unchanged; on edit,
-          // reconcile reads a missing value as "use the quote default" and
-          // clears any lead time the line previously had.
-          if (b.lead_time_text.trim() !== '') entry.lead_time_text = b.lead_time_text;
           if (overrideUnitPrice !== null) {
             // Part-level custom price → same override on every row of the part.
             entry.override = {
@@ -1581,25 +1562,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         </Typography>
                       </Box>
                     )}
-
-                    {/* Per-item lead time (per-part — applies to every quantity
-                        of this part). Blank ⇒ the quote-level lead time is used.
-                        Shown under each item on the quote/PDF only when items
-                        differ. */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                      <TextField
-                        size="small"
-                        label="Lead time (optional)"
-                        value={block.lead_time_text}
-                        onChange={(e) => updateBlock(idx, { lead_time_text: e.target.value })}
-                        placeholder={'e.g. “2–3 weeks”'}
-                        sx={{ width: 220 }}
-                        InputLabelProps={{ shrink: true }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        Leave blank to use the quote’s lead time
-                      </Typography>
-                    </Box>
                   </Box>
                 )}
               </Box>
@@ -1678,21 +1640,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     );
                   }}
                 >
-                  {/* Grouped presets: a ListSubheader per group, then its
-                      terms. ListSubheader isn't a MenuItem, so it's never
-                      selectable and carries no `option` role — the renderValue
-                      above still drives the closed display, and the preset
-                      membership check keys off the flat PAYMENT_TERM_PRESETS. */}
-                  {PAYMENT_TERM_GROUPS.map((group) => [
-                    <ListSubheader key={`payment-group-${group.label}`}>
-                      {group.label}
-                    </ListSubheader>,
-                    ...group.terms.map((p) => (
-                      <MenuItem key={p} value={p}>
-                        {p}
-                      </MenuItem>
-                    )),
-                  ])}
+                  {PAYMENT_TERM_PRESETS.map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {p}
+                    </MenuItem>
+                  ))}
                   <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
                     Other (specify)…
                   </MenuItem>

@@ -23,10 +23,8 @@ interface OperationCompleteDialogProps {
   remaining: number;
   busy?: boolean;
   onClose: () => void;
-  /** Record a specific good quantity (partial). */
+  /** Record the entered good quantity (defaults to the full remaining balance). */
   onRecord: (quantityGood: number) => void;
-  /** Complete the whole remaining balance in one click. */
-  onCompleteAll: () => void;
 }
 
 /**
@@ -44,7 +42,6 @@ export default function OperationCompleteDialog({
   busy = false,
   onClose,
   onRecord,
-  onCompleteAll,
 }: OperationCompleteDialogProps) {
   // The dialog is mounted fresh each open (the parent renders it only while an op
   // is selected), so initialising from the remaining balance is enough — no
@@ -96,15 +93,10 @@ export default function OperationCompleteDialog({
           />
         </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2, flexWrap: 'wrap', gap: 1 }}>
+      <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
         <Button onClick={onClose} disabled={busy} color="inherit">
           Cancel
         </Button>
-        {remaining > 0 && (
-          <Button onClick={onCompleteAll} disabled={busy}>
-            Complete all ({remaining})
-          </Button>
-        )}
         <Button
           variant="contained"
           color="success"

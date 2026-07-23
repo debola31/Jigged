@@ -18,7 +18,6 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import {
   getOperatorOperationDetail,
   getCurrentMember,
-  completeOperation,
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
 import {
@@ -39,16 +38,18 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  * Action view for ONE specific operation on a job_part. Reached by tapping a
  * step on the traveler, or directly from the station-scoped jobs list.
  *
- * Operators have a single deliberate action: MARK COMPLETE — one tap, no
- * "start", no pause/exit, and no on-job timer (shop operators don't reliably
- * start/pause/resume, so we don't pretend to track that time; see
- * operatorAccess.completeOperation). A completed step shows an UNDO so an
- * accidental completion can be reverted on the spot. Loads by job_operation_id
- * so the exact step the operator chose is the one actioned.
+ * Operators record how many GOOD pieces they finished: one number field that
+ * defaults to the full remaining balance, so RECORD COMPLETION completes the
+ * operation by default and records a partial when the number is dialled down
+ * (each event appends to job_operation_completions; a DB trigger derives the
+ * op status). No "start", no pause/exit, no on-job timer (shop operators don't
+ * reliably start/pause/resume, so we don't pretend to track that time). Undo
+ * voids the recorded completions. Loads by job_operation_id so the exact step
+ * the operator chose is the one actioned.
  *
- * Station guard: completing requires a selected station (StationSelector prompts
+ * Station guard: recording requires a selected station (StationSelector prompts
  * when none is set). If the step's work center doesn't match the operator's
- * station — the likely signature of a wrong QR scan — Mark Complete is replaced
+ * station — the likely signature of a wrong QR scan — the action is replaced
  * by a guide with a one-tap "switch & complete" (for legit cross-station work)
  * and a way back to the traveler.
  */
@@ -146,25 +147,6 @@ export default function OperatorOperationActionPage() {
       await reloadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record completion');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // One-tap "finish the rest" — records the whole remaining balance.
-  const handleCompleteAll = async () => {
-    if (!currentOperatorId) {
-      setError('Operator not found. Please log in again.');
-      return;
-    }
-    setActionLoading(true);
-    setError(null);
-    try {
-      await completeOperation(jobOperationId);
-      setQtyDirty(false);
-      await reloadAll();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to complete operation');
     } finally {
       setActionLoading(false);
     }
@@ -403,6 +385,10 @@ export default function OperatorOperationActionPage() {
             }}
           />
 
+          {/* Single action: the field defaults to the full remaining balance, so
+              this records a full completion by default and a partial when the
+              operator dials the number down (mirrors the shipment form — no
+              separate "complete all" button, which would just duplicate this). */}
           <Button
             fullWidth
             variant="contained"
@@ -415,18 +401,6 @@ export default function OperatorOperationActionPage() {
           >
             {actionLoading ? <CircularProgress size={24} /> : 'RECORD COMPLETION'}
           </Button>
-
-          {remaining > 0 && (
-            <Button
-              fullWidth
-              variant="text"
-              onClick={handleCompleteAll}
-              disabled={actionLoading}
-              sx={{ minHeight: 44 }}
-            >
-              Complete all remaining ({remaining})
-            </Button>
-          )}
 
           {qtyGood > 0 && (
             <Button

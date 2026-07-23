@@ -29,7 +29,6 @@ import type {
   OperatorPlantJob,
   OperatorJobDetail,
   Station,
-  JobCompleteResponse,
   JobTraveler,
   JobPartsOverview,
   JobTravelerOperation,
@@ -630,66 +629,6 @@ export async function getOperatorOperationDetail(
 // ============================================================================
 // OPERATION ACTIONS — keyed on job_operation_id
 // ============================================================================
-
-/**
- * Mark a single operation FULLY complete — record the whole remaining good
- * quantity as one completion event. This backs the operator's "Complete all
- * remaining" shortcut (the common full case). Partial completion goes through
- * createOperationCompletion directly with a chosen quantity.
- *
- * Completion is now event-backed: we append a job_operation_completions row and
- * a DB trigger derives job_operations.status (pending → in_progress → completed)
- * and cascades job_parts.production_status → jobs.production_status. We record
- * who (completed_by = signed-in auth user) and when on the event.
- *
- * Time-on-job is intentionally NOT tracked: operators complete in a single tap,
- * so there's no reliable session duration to record. Job notes live at the job
- * level (job_notes); material consumption is driven by the part BOM.
- */
-export async function completeOperation(
-  jobOperationId: string,
-): Promise<JobCompleteResponse> {
-  const supabase = getSupabase();
-
-  // Load the op's part context: company (for the event insert) + ordered qty
-  // (the target that "fully complete" fills to).
-  const { data: op, error: opError } = await supabase
-    .from('job_operations')
-    .select('id, job_id, job_part_id, job_parts!inner(company_id, quantity)')
-    .eq('id', jobOperationId)
-    .single();
-  if (opError || !op) throw new Error('Operation not found.');
-  const partRel = (op as unknown as {
-    job_parts: { company_id: string; quantity: number } | { company_id: string; quantity: number }[];
-  }).job_parts;
-  const part = Array.isArray(partRel) ? partRel[0] : partRel;
-
-  // Remaining good = ordered − good already recorded (non-void).
-  const { data: comps } = await supabase
-    .from('job_operation_completions')
-    .select('quantity_good')
-    .eq('job_operation_id', jobOperationId)
-    .is('voided_at', null);
-  const good = (comps ?? []).reduce((acc, c) => acc + Number(c.quantity_good), 0);
-  const remaining = Math.max(0, Number(part.quantity) - good);
-
-  if (remaining > 0) {
-    await createOperationCompletion({
-      companyId: part.company_id,
-      jobOperationId,
-      jobPartId: op.job_part_id,
-      quantityGood: remaining,
-    });
-  }
-
-  // The trigger cascaded production_status to the job; read it back for the flag.
-  const { data: jobRow } = await supabase
-    .from('jobs')
-    .select('production_status')
-    .eq('id', op.job_id)
-    .single();
-  return { success: true, job_completed: jobRow?.production_status === 'completed' };
-}
 
 /**
  * Undo an operation's completion entirely — void every non-void completion event

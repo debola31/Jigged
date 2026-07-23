@@ -331,7 +331,6 @@ export default function OperatorOperationActionPage() {
           operationContext={{
             jobPartId,
             jobOperationId,
-            operationLabel: job.operation_name,
           }}
         />
       </Box>

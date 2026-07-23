@@ -21,7 +21,7 @@ vi.mock('@/utils/imageCompression', () => ({ compressPhoto: vi.fn() }));
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
-const OP_CONTEXT = { jobPartId: 'jp1', jobOperationId: 'jo1', operationLabel: 'Op 20 · Mill' };
+const OP_CONTEXT = { jobPartId: 'jp1', jobOperationId: 'jo1' };
 const OFFER_TEXT = /add it before you go/i;
 const HINT_TEXT = /talk instead of type/i;
 

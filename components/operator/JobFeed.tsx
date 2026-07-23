@@ -37,8 +37,6 @@ const EMPTY_NOTES: JobNote[] = [];
 export interface JobFeedOperationContext {
   jobPartId: string;
   jobOperationId: string;
-  /** Label for the current step, e.g. "Op 20 · Mill", shown on the composer. */
-  operationLabel?: string | null;
 }
 
 interface JobFeedProps {
@@ -429,11 +427,6 @@ export default function JobFeed({
                   </Button>
                 </Box>
               </Box>
-            )}
-            {operationContext?.operationLabel && (
-              <Typography variant="caption" color="text.secondary">
-                Adding to {operationContext.operationLabel}
-              </Typography>
             )}
             <TextField
               multiline

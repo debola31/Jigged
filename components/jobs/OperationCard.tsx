@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -89,11 +89,13 @@ export default function OperationCard({
     }
   };
 
-  // Load the completion history lazily when the row is first expanded.
-  useEffect(() => {
-    if (expanded) loadEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, operation.id]);
+  // Load the completion history lazily on expand (in the click handler, not an
+  // effect, so there's no setState-in-effect cascade).
+  const handleToggleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) loadEvents();
+  };
 
   const handleVoidEvent = async (completionId: string) => {
     setVoidingId(completionId);
@@ -229,7 +231,7 @@ export default function OperationCard({
         <Tooltip title={noteCount > 0 ? `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}` : ''}>
           <IconButton
             size="small"
-            onClick={() => setExpanded(!expanded)}
+            onClick={handleToggleExpand}
             sx={{ color: 'text.secondary', borderRadius: 1, gap: 0.5 }}
             data-testid="operation-expand"
             aria-label={`${expanded ? 'Collapse' : 'Expand'} operation details (${noteCount} ${noteCount === 1 ? 'note' : 'notes'})`}

@@ -111,12 +111,11 @@ export default function OperatorOperationActionPage() {
   const qtyGood = summary?.qty_good ?? 0;
   const remaining = summary?.qty_remaining ?? Math.max(0, target - qtyGood);
 
-  // Default the input to the remaining balance once the summary loads, until the
-  // operator edits it (so the number states its own outcome, like the shipment
-  // form's prefill). Reset the dirty flag after a successful record.
-  useEffect(() => {
-    if (!qtyDirty && summary) setQtyInput(remaining > 0 ? String(remaining) : '');
-  }, [summary, remaining, qtyDirty]);
+  // The field shows the remaining balance by default (states its own outcome,
+  // like the shipment form's prefill) until the operator edits it — derived, not
+  // an effect, so there's no setState-in-effect cascade. A successful record
+  // clears the dirty flag, snapping the value back to the new remaining.
+  const qtyValue = qtyDirty ? qtyInput : remaining > 0 ? String(remaining) : '';
 
   const reloadAll = async () => {
     await Promise.all([loadJob(), loadSummary()]);
@@ -129,7 +128,7 @@ export default function OperatorOperationActionPage() {
       setError('Operator not found. Please log in again.');
       return;
     }
-    const qty = Number(qtyInput);
+    const qty = Number(qtyValue);
     if (!Number.isFinite(qty) || qty <= 0) {
       setError('Enter how many good pieces you finished.');
       return;
@@ -186,7 +185,7 @@ export default function OperatorOperationActionPage() {
   };
 
   const isCompleted = job?.operation_status === 'completed';
-  const consequence = operationCompletionConsequence(qtyInput, remaining);
+  const consequence = operationCompletionConsequence(qtyValue, remaining);
 
   // Wait for BOTH the job fetch and the station context's one-time init before
   // deciding what to render — otherwise the "no station" branch can flash for an
@@ -376,7 +375,7 @@ export default function OperatorOperationActionPage() {
           <TextField
             label="Good pieces finished"
             type="number"
-            value={qtyInput}
+            value={qtyValue}
             onChange={(e) => {
               setQtyDirty(true);
               setQtyInput(e.target.value);
@@ -411,7 +410,7 @@ export default function OperatorOperationActionPage() {
             color="primary"
             startIcon={<CheckCircleIcon />}
             onClick={handleRecord}
-            disabled={actionLoading || !(Number(qtyInput) > 0)}
+            disabled={actionLoading || !(Number(qtyValue) > 0)}
             sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
           >
             {actionLoading ? <CircularProgress size={24} /> : 'RECORD COMPLETION'}

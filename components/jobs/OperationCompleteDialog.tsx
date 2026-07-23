@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -46,12 +46,10 @@ export default function OperationCompleteDialog({
   onRecord,
   onCompleteAll,
 }: OperationCompleteDialogProps) {
-  const [qtyInput, setQtyInput] = useState('');
-
-  // Reset the field to the remaining balance each time the dialog opens.
-  useEffect(() => {
-    if (open) setQtyInput(remaining > 0 ? String(remaining) : '');
-  }, [open, remaining]);
+  // The dialog is mounted fresh each open (the parent renders it only while an op
+  // is selected), so initialising from the remaining balance is enough — no
+  // reset effect, no setState-in-effect cascade.
+  const [qtyInput, setQtyInput] = useState(() => (remaining > 0 ? String(remaining) : ''));
 
   const consequence = operationCompletionConsequence(qtyInput, remaining);
   const qty = Number(qtyInput);

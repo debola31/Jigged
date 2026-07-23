@@ -1755,10 +1755,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   // reads as a distinct action, separate from the term list.
                   const addRowStyle = { borderBottom: '1px solid rgba(255, 255, 255, 0.12)' };
                   if (option.isAddHint) {
+                    // Prominent (accent, semibold) so the add affordance reads
+                    // like a clear "add" action, not a faint disabled row. The
+                    // opacity override cancels MUI's disabled-option greying.
                     return (
-                      <li key={key} {...liProps} style={addRowStyle}>
-                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
-                        <Box component="span" sx={{ color: 'text.secondary' }}>
+                      <li key={key} {...liProps} style={{ ...addRowStyle, opacity: 1 }}>
+                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
+                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
                           Type to add your own term
                         </Box>
                       </li>
@@ -1768,7 +1771,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     return (
                       <li key={key} {...liProps} style={addRowStyle}>
                         <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
-                        Add “{option.value}”
+                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                          Add “{option.value}”
+                        </Box>
                       </li>
                     );
                   }

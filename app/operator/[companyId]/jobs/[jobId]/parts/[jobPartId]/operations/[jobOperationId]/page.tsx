@@ -57,6 +57,10 @@ export default function OperatorOperationActionPage() {
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped after each successful completion to trigger JobFeed's one-time
+  // "add a photo/note?" offer. Bumped strictly AFTER completeOperation resolves,
+  // so completion is already durable before any prompt appears.
+  const [captureOfferSignal, setCaptureOfferSignal] = useState(0);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -97,6 +101,9 @@ export default function OperatorOperationActionPage() {
     try {
       await completeOperation(jobOperationId);
       await loadJob();
+      // Completion is now persisted. Offer capture last, so a client death at
+      // the prompt cannot un-complete the step.
+      setCaptureOfferSignal((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete operation');
     } finally {
@@ -320,10 +327,10 @@ export default function OperatorOperationActionPage() {
         <JobFeed
           jobId={jobId}
           companyId={companyId}
+          captureOfferSignal={captureOfferSignal}
           operationContext={{
             jobPartId,
             jobOperationId,
-            operationLabel: job.operation_name,
           }}
         />
       </Box>

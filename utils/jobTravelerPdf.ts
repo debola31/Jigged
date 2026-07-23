@@ -12,9 +12,11 @@
  *     title + Job # (top-right).
  *   - Info block: Customer / Part Number / Description / Quantity /
  *     Customer PO / Order Date (jobs.created_at) / Due Date.
- *   - Operations table: Step / Work Center / Operation · Instructions /
- *     Setup (min) / Cycle (min/pc) / Scan (per-operation QR).
- *   - Footer (every page): generated date + page numbers.
+ *   - Operations table: Step / Work Center / Operation · Instructions / Notes
+ *     (setup·cycle for internal, "OUTSIDE — ship to {vendor}" for outside) /
+ *     Done (blank write-in) / Scan (per-operation QR). Outside rows are flagged
+ *     with a heavy black outline + bold text (border only, low ink).
+ *   - Footer (every page): page numbers.
  */
 
 import { jsPDF } from 'jspdf';
@@ -243,9 +245,10 @@ export async function generateJobTravelerPdf(
   // the "ship to {vendor}" instruction for outside steps (which have no times) —
   // so the space isn't wasted on a 0/0 for outside ops. "Completed (of N)" is a
   // blank write-in for the floor to tally good pieces or tick off the step.
+  // "Done" (not "Completed (of N)", which wrapped) — a short, single-line write-in
+  // for a good-piece count or a tick; the order qty already sits in the header.
   const head = [[
-    'Step', 'Work Center', 'Operation / Instructions', 'Notes',
-    `Completed (of ${traveler.quantity})`, 'Scan',
+    'Step', 'Work Center', 'Operation / Instructions', 'Notes', 'Done', 'Scan',
   ]];
   // Explicit row -> operation map, built alongside `body` so both the QR draw and
   // the external-op restyle resolve the op by identity, never by a fragile
@@ -316,8 +319,8 @@ export async function generateJobTravelerPdf(
       0: { cellWidth: 38, halign: 'center' },
       1: { cellWidth: 100, fontStyle: 'bold' },
       2: { cellWidth: 'auto' },
-      3: { cellWidth: 120 },
-      4: { cellWidth: 64, halign: 'center' },
+      3: { cellWidth: 132 },
+      4: { cellWidth: 52, halign: 'center' },
       5: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
     // Flag external (outside-vendor) rows with a heavy black OUTLINE + bold black
@@ -435,10 +438,11 @@ export async function generateJobTravelerPdf(
     doc.setLineWidth(0.5);
     doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
 
+    // Page numbers only. The company name + Job # already head the document, so
+    // repeating them here was redundant.
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
-    doc.text(`${company.name} · Job ${traveler.job_number}`, MARGIN, footerY);
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

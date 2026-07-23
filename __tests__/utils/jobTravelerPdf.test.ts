@@ -110,7 +110,7 @@ async function renderAndGetOpsTable(t: JobTraveler) {
   };
 }
 
-// traveler ops table columns: Step, WC, Operation/Instructions, Notes, Completed, Scan
+// traveler ops table columns: Step, WC, Operation/Instructions, Notes, Done, Scan
 const DETAIL_COL = 2;
 const NOTES_COL = 3;
 const SCAN_COL = 5;

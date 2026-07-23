@@ -133,9 +133,16 @@ const ADD_NEW_ADDRESS_ID = '__add_new_address__';
 /**
  * One option in the payment-terms combobox. `group` drives the "Your saved
  * terms" / "Standard terms" subheaders; `isAdd` marks the synthetic
- * `Add "<typed>"` row surfaced on the fly for free-text entry.
+ * `Add "<typed>"` row surfaced once the user types a new term; `isAddHint` marks
+ * the always-visible, disabled "Type to add your own term" cue shown at the top
+ * when the field is empty (so custom entry is discoverable before typing).
  */
-type PaymentTermOption = { value: string; group: string; isAdd?: boolean };
+type PaymentTermOption = {
+  value: string;
+  group: string;
+  isAdd?: boolean;
+  isAddHint?: boolean;
+};
 const paymentTermFilter = createFilterOptions<PaymentTermOption>();
 
 function formatCurrency(value: number | null | undefined): string {
@@ -1706,6 +1713,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 options={paymentTermOptions}
                 groupBy={(o) => (typeof o === 'string' ? '' : o.group)}
                 getOptionLabel={(o) => (typeof o === 'string' ? o : o.value)}
+                // The empty-state "Type to add your own term" cue is a
+                // non-selectable hint, not a real option.
+                getOptionDisabled={(o) => typeof o !== 'string' && o.isAddHint === true}
                 isOptionEqualToValue={(option, val) => {
                   const a = typeof option === 'string' ? option : option.value;
                   const b = typeof val === 'string' ? val : val.value;
@@ -1714,14 +1724,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 filterOptions={(options, params) => {
                   const filtered = paymentTermFilter(options, params);
                   const input = params.inputValue.trim();
-                  // Offer "Add …" only for a genuinely new term (not blank, not
-                  // an existing preset or saved term).
                   const exists =
-                    input === '' ||
-                    PAYMENT_TERM_PRESETS.includes(input) ||
-                    savedTerms.includes(input);
-                  if (input !== '' && !exists) {
-                    filtered.push({ value: input, group: 'Add new', isAdd: true });
+                    PAYMENT_TERM_PRESETS.includes(input) || savedTerms.includes(input);
+                  // Keep an "Add new" row at the TOP at all times so custom
+                  // entry is discoverable before the user types: a disabled hint
+                  // when empty, an actionable "Add …" once they type a new term.
+                  if (input === '') {
+                    filtered.unshift({ value: '', group: 'Add new', isAddHint: true });
+                  } else if (!exists) {
+                    filtered.unshift({ value: input, group: 'Add new', isAdd: true });
                   }
                   return filtered;
                 }}
@@ -1731,6 +1742,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     handleFieldChange('payment_terms', '');
                     return;
                   }
+                  // The empty-state hint is disabled, but guard anyway.
+                  if (typeof newValue !== 'string' && newValue.isAddHint) return;
                   const term = typeof newValue === 'string' ? newValue : newValue.value;
                   // A raw string (typed + Enter) or the "Add …" row is a new custom term.
                   const isNewCustom = typeof newValue === 'string' || newValue.isAdd === true;
@@ -1738,6 +1751,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 }}
                 renderOption={(props, option) => {
                   const { key, ...liProps } = props as typeof props & { key?: string };
+                  if (option.isAddHint) {
+                    return (
+                      <li key={key} {...liProps}>
+                        <AddIcon fontSize="small" sx={{ mr: 1 }} />
+                        <Box component="span" sx={{ color: 'text.secondary' }}>
+                          Type to add your own term
+                        </Box>
+                      </li>
+                    );
+                  }
                   if (option.isAdd) {
                     return (
                       <li key={key} {...liProps}>

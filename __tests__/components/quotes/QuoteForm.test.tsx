@@ -336,6 +336,17 @@ describe('QuoteForm', () => {
     );
   });
 
+  it('shows an always-visible "type to add" hint when the terms field is empty', async () => {
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    // The custom-entry cue is visible before the user types anything.
+    expect(await screen.findByText('Type to add your own term')).toBeInTheDocument();
+  });
+
   it('calls updateQuote with the payload and navigates on success', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-existing" initialData={initialPopulated} />,

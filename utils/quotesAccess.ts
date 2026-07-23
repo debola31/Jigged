@@ -99,13 +99,10 @@ function hydrateCreators<T extends QuoteWithRelations>(
 
 // ============== CRUD Operations ==============
 
-// Select all quote_line_items columns (incl. lead_time_text) plus the joined
-// part. Uses `*` rather than an explicit column list — matching
-// getLineItemsForQuote — so a newly-added column loads without an explicit
-// reference that schemaEmbedCheck would flag against the prod snapshot before
-// the migration has deployed (the snapshot only refreshes post-deploy).
 const QUOTE_LINE_ITEM_FIELDS = `
-  *,
+  id, quote_id, company_id, part_id, source_tier_id, sequence,
+  quantity, unit_price, total_price, markup_percent, base_cost_per_unit,
+  is_quote_override, lead_time_text, pricing_basis_snapshot, basis_unknown, created_at,
   parts(id, part_name, description, primary_unit)
 `;
 

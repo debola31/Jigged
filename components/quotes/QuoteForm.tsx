@@ -1725,13 +1725,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   const input = params.inputValue.trim();
                   const exists =
                     PAYMENT_TERM_PRESETS.includes(input) || savedTerms.includes(input);
-                  // A single always-present "add" row at the BOTTOM (no group
-                  // headers): a disabled "type to add" hint when empty, an
-                  // actionable "Add …" once the user types a new term.
+                  // A single always-present "add" row at the TOP (no group
+                  // headers) so custom entry is visible the instant the list
+                  // opens — a disabled hint keeps the first *selectable* option
+                  // the most common term, so frequency-first ordering holds.
                   if (input === '') {
-                    filtered.push({ value: '', group: 'Add new', isAddHint: true });
+                    filtered.unshift({ value: '', group: 'Add new', isAddHint: true });
                   } else if (!exists) {
-                    filtered.push({ value: input, group: 'Add new', isAdd: true });
+                    filtered.unshift({ value: input, group: 'Add new', isAdd: true });
                   }
                   return filtered;
                 }}
@@ -1750,9 +1751,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 }}
                 renderOption={(props, option) => {
                   const { key, ...liProps } = props as typeof props & { key?: string };
-                  // The "add" row sits at the bottom with a divider above it so
-                  // it reads as a distinct action, separate from the term list.
-                  const addRowStyle = { borderTop: '1px solid rgba(255, 255, 255, 0.12)' };
+                  // The "add" row sits at the top with a divider below it so it
+                  // reads as a distinct action, separate from the term list.
+                  const addRowStyle = { borderBottom: '1px solid rgba(255, 255, 255, 0.12)' };
                   if (option.isAddHint) {
                     return (
                       <li key={key} {...liProps} style={addRowStyle}>

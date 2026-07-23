@@ -120,14 +120,7 @@ Overdue surfaces as:
 
 **Features:**
 
-- **Jobs / Outside work** view toggle at the top. **Jobs** is the table below. **Outside work**
-  is a purely informational company-wide queue of external-vendor operations
-  (`components/jobs/OutsideWorkPanel.tsx`, backed by `getOutsideOpsForCompany`), grouped **Not
-  sent** and **At vendor**, sorted by job due date (hot-first), with inline **Mark Sent Out** /
-  **Mark Received**. No readiness/predecessor logic — it informs the shipping lead, replacing
-  the hand-highlighted traveler / paper slip. See [Outside (external-vendor) operations](#outside-external-vendor-operations).
-
-- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status (with an **"At vendor"** chip when parts are out for outside processing), Due, Created
+- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status (with an **"At vendor"** chip when parts are out for outside processing), Due, Created. The **Outside work** queue itself lives on the **Vendors** page (Directory / Outside work tabs) — outside processing is vendor work, not a job type — see [Outside (external-vendor) operations](#outside-external-vendor-operations).
 
 - Search box (searches job number, customer name)
 
@@ -393,9 +386,15 @@ parts out.
 
 **Surfaces:** the admin Job Detail op card, the operator traveler + operation page (Mark Sent
 Out / Mark Received, "Outside process" badge + vendor), the printed traveler (high-contrast
-dark banner row), and the **Outside work** tab on the Jobs list (below). Notes + photos stay
-fully enabled on outside ops; send/receive/undo also write a `job_notes` `note_type='event'`
-audit entry.
+dark banner row), and the company-wide **Outside work** queue — a **tab on the Vendors page**
+(Directory / Outside work), grouped **Not sent** / **At vendor**, sorted by job due date
+(hot-first), with inline Mark Sent Out / Mark Received (`components/jobs/OutsideWorkPanel.tsx`,
+backed by `getOutsideOpsForCompany`). Outside processing is vendor work, so its queue lives
+under Vendors rather than as a pseudo job-type on the Jobs list (matches how job-shop ERPs —
+SyteLine, Infor, Oracle — surface outside processing in the vendor/purchasing context). No
+readiness/predecessor logic — it informs the shipping lead, replacing the hand-highlighted
+traveler / paper slip. Notes + photos stay fully enabled on outside ops; send/receive/undo also
+write a `job_notes` `note_type='event'` audit entry.
 
 **Deferred (v1):** vendor lead-time → due-date math, PO generation, per-op cost actuals,
 scheduling, and partial/split sends (whole-quantity send/receive only).
@@ -416,7 +415,7 @@ The jobs list includes a "Current Op" column that shows the next ready operation
 
 - **Outside op at vendor:** a job whose current live step is a `sent` outside op reads as
   incomplete in the standard list; the Jobs list badges those rows **"At vendor"** so they
-  don't look stalled, and the **Outside work** tab is the worklist for them.
+  don't look stalled, and the **Vendors → Outside work** tab is the worklist for them.
 
 - **Cancelled job or no routing data:** Shows "--"
 

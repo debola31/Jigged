@@ -183,6 +183,11 @@ export default function PartPricing({
   const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
   const inFlightTierQtys = useRef<Set<number>>(new Set());
   const tierBaseCostsRef = useRef(tierBaseCosts);
+  // Latest partId, so an in-flight base-cost fetch can tell whether the part
+  // changed under it before persisting its result (guards cross-part staleness
+  // without a per-effect-run `cancelled` flag — see the fetch effect below). Kept
+  // current in the ref-sync effect (refs must not be written during render).
+  const partIdRef = useRef(partId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -249,10 +254,12 @@ export default function PartPricing({
     loadAll();
   }, [loadAll, refreshKey]);
 
-  // Keep the ref current for loadAll (see tierBaseCostsRef).
+  // Keep the refs current for loadAll (tierBaseCostsRef) and the base-cost fetch
+  // guard (partIdRef) — written here, not during render.
   useEffect(() => {
     tierBaseCostsRef.current = tierBaseCosts;
-  }, [tierBaseCosts]);
+    partIdRef.current = partId;
+  }, [tierBaseCosts, partId]);
 
   // Re-seed the costing-qty field when the persisted part value changes.
   useEffect(() => {
@@ -309,21 +316,27 @@ export default function PartPricing({
     ];
     const missing = qtys.filter((q) => !tierBaseCosts.has(q) && !inFlightTierQtys.current.has(q));
     if (missing.length === 0) return;
-    let cancelled = false;
+    // `tierBaseCosts` is a dependency so a refreshKey-driven cache wipe (below)
+    // re-runs this and refetches every tier. That means resolving ONE qty re-runs
+    // the effect — so we must NOT use a per-run `cancelled` flag to gate the
+    // write: it would cancel the still-in-flight sibling qtys, leaving an
+    // untouched tier permanently without a base cost ("—" + blank Unit price)
+    // after save. Each result is a pure function of (partId, qty); persist it as
+    // long as we're still on the same part (partIdRef guards a real part change).
+    const forPartId = partId;
     const handle = setTimeout(() => {
       for (const q of missing) {
         inFlightTierQtys.current.add(q);
-        getComputedPartCost(partId, q)
+        getComputedPartCost(forPartId, q)
           .catch(() => null)
           .then((base) => {
             inFlightTierQtys.current.delete(q);
-            if (cancelled) return;
+            if (forPartId !== partIdRef.current) return;
             setTierBaseCosts((prev) => new Map(prev).set(q, base));
           });
       }
     }, 300);
     return () => {
-      cancelled = true;
       clearTimeout(handle);
     };
   }, [rows, tierBaseCosts, partId, isBought]);

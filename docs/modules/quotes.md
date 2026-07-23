@@ -89,7 +89,7 @@ The quote is now a thin header. Per-part, per-tier pricing lives on `quote_line_
 | legacy_quote_number | Text | No | Original quote number from legacy system (migrated quotes) |
 | customer_id | UUID (FK) | Yes | Link to customer |
 | lead_time_text | TEXT | No | Free-text **quote-level default** lead time as stated (e.g. "2–3 weeks", "In stock"); does not drive the job due date. A line item can override it per part via `quote_line_items.lead_time_text` |
-| payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Prepay (paid in full before work begins)`, `Net 30`, `2/10 Net 30`. A single free-text string (no enum); the form offers grouped presets. Required at the form level — every quote carries payment terms |
+| payment_terms | Text | Yes | Payment terms shown on the quote (preset or custom free text), e.g. `Prepay`, `Net 30`, `2/10 Net 30`. A single free-text string (no enum); the form offers a short flat preset list. Required at the form level — every quote carries payment terms |
 | expiration_date | Date | No | When the quoted price stops being honored. Defaults to `created_at + 10 days` |
 | status | Text | Yes | `active` or `expired` |
 | status_changed_at | Timestamp | No | When `status` last changed |
@@ -208,7 +208,7 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 
 - Lead time — a **required** free-text field (type anything, e.g. "2–3 weeks", "In stock"). No number field, no unit dropdown; stored verbatim as `lead_time_text` and does not drive the job due date. This is the **quote-level default**; individual parts can override it via the per-part "Lead time (optional)" field in the Parts block above.
 - Expiration date (defaults to today + 10 days)
-- Payment terms — a combobox of common presets, **grouped** under subheaders so the list reads as a few short groups rather than one flat wall: **Prepay & deposits** (Prepay — paid in full before work begins; 50% Deposit / Balance Net 30) · **On delivery / receipt** (Cash on Delivery; Due on Receipt) · **Net terms** (Net 15/30/45/60/90) · **Early-payment discount** (2/10 Net 30). An **"Other (specify)…"** entry reveals a free-text field for custom wording (e.g. "Net 30, 1% late charge"). Presets live in `PAYMENT_TERM_GROUPS` ([types/quote.ts](../../types/quote.ts)); the stored value stays a single free-text `payment_terms` string (no enum). Required — the form blocks submission until a value is entered.
+- Payment terms — a combobox of a short, flat preset list: **Due on Receipt · Net 15 · Net 30 · Net 60 · 2/10 Net 30 · 50% Deposit / Balance Net 30 · Prepay · Cash on Delivery** (mirrors QuickBooks' built-in terms plus the deposit / prepay / COD and early-pay-discount terms shops use; kept short, so no group subheaders). An **"Other (specify)…"** entry reveals a free-text field for custom wording (e.g. "Net 30, 1% late charge"). Presets live in `PAYMENT_TERM_PRESETS` ([types/quote.ts](../../types/quote.ts)); the stored value stays a single free-text `payment_terms` string (no enum). Required — the form blocks submission until a value is entered.
 
 **Actions:**
 

@@ -22,7 +22,6 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import ListSubheader from '@mui/material/ListSubheader';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -31,7 +30,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
-import { PAYMENT_TERM_PRESETS, PAYMENT_TERM_GROUPS } from '@/types/quote';
+import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   createQuote,
   updateQuote,
@@ -1678,21 +1677,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     );
                   }}
                 >
-                  {/* Grouped presets: a ListSubheader per group, then its
-                      terms. ListSubheader isn't a MenuItem, so it's never
-                      selectable and carries no `option` role — the renderValue
-                      above still drives the closed display, and the preset
-                      membership check keys off the flat PAYMENT_TERM_PRESETS. */}
-                  {PAYMENT_TERM_GROUPS.map((group) => [
-                    <ListSubheader key={`payment-group-${group.label}`}>
-                      {group.label}
-                    </ListSubheader>,
-                    ...group.terms.map((p) => (
-                      <MenuItem key={p} value={p}>
-                        {p}
-                      </MenuItem>
-                    )),
-                  ])}
+                  {/* A short, flat preset list (see PAYMENT_TERM_PRESETS) — no
+                      group subheaders needed at this length. "Other (specify)…"
+                      reveals a free-text field for custom wording. */}
+                  {PAYMENT_TERM_PRESETS.map((p) => (
+                    <MenuItem key={p} value={p}>
+                      {p}
+                    </MenuItem>
+                  ))}
                   <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
                     Other (specify)…
                   </MenuItem>

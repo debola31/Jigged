@@ -6,38 +6,28 @@ import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot'
 export type QuoteStatus = 'active' | 'expired';
 
 /**
- * Common B2B payment terms offered as presets in the quote form's picker,
- * organized into labeled groups so the dropdown reads as a few short lists
- * instead of one wall of near-identical "Net X" rows (rendered with MUI
- * `ListSubheader`s). The field is still free-solo via the "Other (specify)…"
- * escape hatch, so shops can type custom wording like 'Net 30, 1% late charge'.
+ * Common B2B payment terms offered as presets in the quote form's picker.
+ * A short, flat list: it mirrors QuickBooks' built-in terms (Due on Receipt /
+ * Net 15 / 30 / 60) — our accounting-integration target — plus the deposit /
+ * prepay / COD and early-pay-discount terms shops actually use. Kept short on
+ * purpose (grouping subheaders stop earning their keep under ~10 options), and
+ * the field is still free-solo via the "Other (specify)…" escape hatch, so any
+ * custom wording (e.g. "Net 30, 1% late charge") is one step away.
  *
- * "Prepay (paid in full before work begins)" is the CIA / cash-in-advance case
- * — some shops require full payment before starting a job. We use the plainer
- * "Prepay" wording (not the accounting term "CIA") for the shop-owner audience,
- * and spell out the meaning so it prints unambiguously on the quote.
+ * "Prepay" is the CIA / cash-in-advance case — full payment before production.
+ * The plain word (not the accounting term "CIA") reads clearly for the
+ * shop-owner audience and prints fine on the customer's quote.
  */
-export const PAYMENT_TERM_GROUPS: ReadonlyArray<{
-  label: string;
-  terms: readonly string[];
-}> = [
-  {
-    label: 'Prepay & deposits',
-    terms: ['Prepay (paid in full before work begins)', '50% Deposit / Balance Net 30'],
-  },
-  { label: 'On delivery / receipt', terms: ['Cash on Delivery', 'Due on Receipt'] },
-  { label: 'Net terms', terms: ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Net 90'] },
-  { label: 'Early-payment discount', terms: ['2/10 Net 30'] },
+export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = [
+  'Due on Receipt',
+  'Net 15',
+  'Net 30',
+  'Net 60',
+  '2/10 Net 30',
+  '50% Deposit / Balance Net 30',
+  'Prepay',
+  'Cash on Delivery',
 ];
-
-/**
- * Flat list of every preset across all groups. Kept as the single source for
- * membership checks (e.g. "is this saved value a preset, or custom 'Other'
- * text?") so grouping the dropdown doesn't ripple into that logic.
- */
-export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = PAYMENT_TERM_GROUPS.flatMap(
-  (g) => g.terms,
-);
 
 /**
  * Quote header record. Part/quantity/pricing lives on quote_line_items.

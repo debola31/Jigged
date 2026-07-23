@@ -266,7 +266,7 @@ describe('QuoteForm', () => {
     ]);
   });
 
-  it('offers the new Prepay preset under a group heading in the payment-terms dropdown', async () => {
+  it('offers the new Prepay preset in the (flat, trimmed) payment-terms dropdown', async () => {
     render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
 
     await waitFor(() => {
@@ -276,14 +276,12 @@ describe('QuoteForm', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('combobox', { name: /payment terms/i }));
 
-    // The Prepay term is offered as a selectable option…
-    expect(
-      screen.getByRole('option', { name: /prepay \(paid in full before work begins\)/i }),
-    ).toBeInTheDocument();
-    // …grouped under labeled subheaders (MUI renders these as inert, non-
-    // focusable list items — clicking one is a no-op — so we match on their text).
-    expect(screen.getByText('Prepay & deposits')).toBeInTheDocument();
-    expect(screen.getByText('Net terms')).toBeInTheDocument();
+    // Prepay and 2/10 Net 30 are offered…
+    expect(screen.getByRole('option', { name: 'Prepay', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2/10 Net 30', exact: true })).toBeInTheDocument();
+    // …and the trimmed-out net terms are gone (Net 45 / Net 90).
+    expect(screen.queryByRole('option', { name: 'Net 45', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Net 90', exact: true })).not.toBeInTheDocument();
   });
 
   it('treats the Prepay preset as a known term (no custom-terms field)', async () => {
@@ -293,7 +291,7 @@ describe('QuoteForm', () => {
         quoteId="q-1"
         initialData={{
           ...initialPopulated,
-          payment_terms: 'Prepay (paid in full before work begins)',
+          payment_terms: 'Prepay',
         }}
       />,
     );

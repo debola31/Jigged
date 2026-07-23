@@ -12,7 +12,7 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
-import Autocomplete from '@mui/material/Autocomplete';
+import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
@@ -31,6 +31,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
 import { PAYMENT_TERM_PRESETS } from '@/types/quote';
+import {
+  getCustomPaymentTerms,
+  addCustomPaymentTerm,
+  removeCustomPaymentTerm,
+} from '@/utils/companyAccess';
 import {
   createQuote,
   updateQuote,
@@ -105,6 +110,12 @@ interface PartBlockState {
    */
   override_open: boolean;
   override_unit_price: string;
+  /**
+   * Part-level lead time (free text). Applies to every quantity row of this
+   * part; on save it's written onto each resulting line item. Blank ⇒ the line
+   * falls back to the quote-level lead time.
+   */
+  lead_time_text: string;
   tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
@@ -119,8 +130,16 @@ const CREATE_NEW_CUSTOMER: CustomerOption = {
 /** Sentinel option IDs for "add new" actions inside the dropdowns. */
 const ADD_NEW_CONTACT_ID = '__add_new_contact__';
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
-/** Sentinel for the "Other (specify)…" choice in the payment-terms picker. */
-const PAYMENT_TERMS_OTHER = '__payment_other__';
+/**
+ * One option in the payment-terms picker. `group` tags whether the term is one
+ * of the shop's saved custom terms (which get a remove control) or a built-in
+ * preset. Adding a new term happens via the dropdown's "Add New" footer, not by
+ * free-typing, so there's no synthetic create option in the list.
+ */
+type PaymentTermOption = { value: string; group: string };
+const paymentTermFilter = createFilterOptions<PaymentTermOption>();
+/** Sentinel value for the "Add New" action row at the bottom of the picker. */
+const ADD_NEW_TERM = '__add_new_payment_term__';
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -142,6 +161,7 @@ function emptyBlock(): PartBlockState {
     rows: [emptyRow()],
     override_open: false,
     override_unit_price: '',
+    lead_time_text: '',
     tiers: [],
     loading: false,
     error: null,
@@ -180,6 +200,7 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
         rows: [],
         override_open: false,
         override_unit_price: '',
+        lead_time_text: '',
         tiers: [],
         loading: false,
         error: null,
@@ -188,6 +209,11 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
     if (p.override && !blocks[idx].override_open) {
       blocks[idx].override_open = true;
       blocks[idx].override_unit_price = String(p.override.unit_price);
+    }
+    // Lead time is per-part; take it from the first entry that carries one
+    // (all entries for a part share the same value on save).
+    if (p.lead_time_text && !blocks[idx].lead_time_text) {
+      blocks[idx].lead_time_text = p.lead_time_text;
     }
     blocks[idx].rows.push(rowFromInitial(p));
   }
@@ -244,14 +270,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // auto-selected into the Contact field on save.
   const [contactFormOpen, setContactFormOpen] = useState(false);
 
-  // Payment terms: true when the user is entering custom terms (the "Other
-  // (specify)…" path). Seeded true when editing a quote whose saved terms
-  // aren't one of the presets, so the custom field shows with that value.
-  const [paymentOther, setPaymentOther] = useState<boolean>(
-    () =>
-      !!initialData.payment_terms &&
-      !PAYMENT_TERM_PRESETS.includes(initialData.payment_terms),
-  );
+  // The company's saved custom payment terms (free-text terms kept for reuse),
+  // loaded in loadData. They render first in the payment-terms picker (each with
+  // a remove control); choosing "Add New" and submitting a term appends here.
+  const [savedTerms, setSavedTerms] = useState<string[]>([]);
+  // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets
+  // addingTerm, which reveals an inline field (below the picker) bound to
+  // newTermDraft; submitting it selects + saves the term.
+  const [addingTerm, setAddingTerm] = useState(false);
+  const [newTermDraft, setNewTermDraft] = useState('');
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -273,12 +300,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       const initialPartIds = Array.from(
         new Set(initialData.parts.map((p) => p.part_id).filter(Boolean)),
       );
-      const [customersData, hydratedParts] = await Promise.all([
+      const [customersData, hydratedParts, customTerms] = await Promise.all([
         getAllCustomers(companyId),
         initialPartIds.length > 0
           ? getPartsForSelectByIds(initialPartIds)
           : Promise.resolve([]),
+        // Best-effort: a failed load just means no saved-term suggestions.
+        getCustomPaymentTerms(companyId).catch(() => [] as string[]),
       ]);
+      setSavedTerms(customTerms);
       setCustomers([
         CREATE_NEW_CUSTOMER,
         ...customersData.map((c) => ({ id: c.id, name: c.name })),
@@ -375,6 +405,70 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
   const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
+  };
+
+  /**
+   * Options for the payment-terms picker: the company's saved custom terms first
+   * (each removable), then the built-in presets. If the quote already carries a
+   * custom term that isn't in the shop's saved list (e.g. an older quote), it's
+   * included too so the field can still display it.
+   */
+  const paymentTermOptions = useMemo<PaymentTermOption[]>(() => {
+    const savedClean = savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t));
+    const opts: PaymentTermOption[] = [
+      ...savedClean.map((v) => ({ value: v, group: 'Your saved terms' })),
+      ...PAYMENT_TERM_PRESETS.map((v) => ({ value: v, group: 'Standard terms' })),
+    ];
+    const cur = formData.payment_terms.trim();
+    if (cur && !opts.some((o) => o.value === cur)) {
+      opts.unshift({ value: cur, group: 'This quote' });
+    }
+    return opts;
+  }, [savedTerms, formData.payment_terms]);
+
+  /**
+   * Commit a payment term (picked from the list, or entered via the inline
+   * "Add New" field). A brand-new custom term (not a preset, not already saved)
+   * is added to the company's saved list — optimistically in the UI, then
+   * persisted best-effort (a failed save still leaves the term usable on this
+   * quote).
+   */
+  const commitPaymentTerm = (term: string, isNewCustom: boolean) => {
+    const trimmed = term.trim();
+    handleFieldChange('payment_terms', trimmed);
+    if (
+      isNewCustom &&
+      trimmed !== '' &&
+      !PAYMENT_TERM_PRESETS.includes(trimmed) &&
+      !savedTerms.includes(trimmed)
+    ) {
+      setSavedTerms((prev) => [trimmed, ...prev.filter((t) => t !== trimmed)]);
+      addCustomPaymentTerm(companyId, trimmed)
+        .then(setSavedTerms)
+        .catch((e) => console.warn('Could not save custom payment term for reuse:', e));
+    }
+  };
+
+  /** Remove a saved custom term from the company's list (optimistic + persist). */
+  const handleRemoveSavedTerm = (term: string) => {
+    setSavedTerms((prev) => prev.filter((t) => t !== term));
+    removeCustomPaymentTerm(companyId, term)
+      .then(setSavedTerms)
+      .catch((e) => console.warn('Could not remove custom payment term:', e));
+  };
+
+  /** Cancel the inline "add a new term" field, reverting to the picker. */
+  const cancelAddTerm = () => {
+    setAddingTerm(false);
+    setNewTermDraft('');
+  };
+
+  /** Commit the inline "add a new term" draft: select it and save it for reuse. */
+  const submitNewTerm = () => {
+    const t = newTermDraft.trim();
+    if (t) commitPaymentTerm(t, true);
+    setAddingTerm(false);
+    setNewTermDraft('');
   };
 
   /**
@@ -908,6 +1002,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           };
           if (r.line_item_id) entry.line_item_id = r.line_item_id;
           if (r.basis_unknown) entry.basis_unknown = r.basis_unknown;
+          // Per-part lead time → same value on every row of the part. Omit when
+          // blank so an untouched quote's payload shape is unchanged; on edit,
+          // reconcile reads a missing value as "use the quote default" and
+          // clears any lead time the line previously had.
+          if (b.lead_time_text.trim() !== '') entry.lead_time_text = b.lead_time_text;
           if (overrideUnitPrice !== null) {
             // Part-level custom price → same override on every row of the part.
             entry.override = {
@@ -1562,6 +1661,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         </Typography>
                       </Box>
                     )}
+
+                    {/* Per-item lead time (per-part — applies to every quantity
+                        of this part). Blank ⇒ the quote-level lead time is used.
+                        Shown under each item on the quote/PDF only when items
+                        differ. */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <TextField
+                        size="small"
+                        label="Lead time (optional)"
+                        value={block.lead_time_text}
+                        onChange={(e) => updateBlock(idx, { lead_time_text: e.target.value })}
+                        placeholder={'e.g. “2–3 weeks”'}
+                        sx={{ width: 220 }}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                      <Typography variant="caption" color="text.secondary">
+                        Leave blank to use the quote’s lead time
+                      </Typography>
+                    </Box>
                   </Box>
                 )}
               </Box>
@@ -1604,63 +1722,121 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              {/* Presets + an explicit "Other (specify)…" that reveals a free
-                  text field — discoverable custom entry without losing the
-                  common presets. payment_terms stays a single string column. */}
-              <FormControl size="small" fullWidth required>
-                <InputLabel id="payment-terms-label" shrink>
-                  Payment terms
-                </InputLabel>
-                <Select
-                  labelId="payment-terms-label"
-                  label="Payment terms"
-                  notched
-                  displayEmpty
-                  value={paymentOther ? PAYMENT_TERMS_OTHER : formData.payment_terms}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === PAYMENT_TERMS_OTHER) {
-                      setPaymentOther(true);
-                      handleFieldChange('payment_terms', '');
-                      return;
-                    }
-                    setPaymentOther(false);
-                    handleFieldChange('payment_terms', v);
-                  }}
-                  renderValue={(selected) => {
-                    if (paymentOther || selected === PAYMENT_TERMS_OTHER) {
-                      return 'Other (specify)…';
-                    }
-                    return selected ? (
-                      (selected as string)
-                    ) : (
-                      <Box component="span" sx={{ color: 'text.secondary' }}>
-                        Select…
-                      </Box>
+              {/* Pick-only combobox: the shop's saved custom terms first (each
+                  removable), then the built-in presets, then a highlighted
+                  "Add New" row that reveals the inline field below. New wording
+                  is entered there, never free-typed here. payment_terms stays a
+                  single string. */}
+              <Autocomplete<PaymentTermOption, false, false, false>
+                size="small"
+                fullWidth
+                options={paymentTermOptions}
+                getOptionLabel={(o) => o.value}
+                isOptionEqualToValue={(option, val) => option.value === val.value}
+                filterOptions={(options, params) => {
+                  const filtered = paymentTermFilter(options, params);
+                  // A highlighted "Add New" action is always the last row.
+                  filtered.push({ value: ADD_NEW_TERM, group: 'Add new' });
+                  return filtered;
+                }}
+                value={
+                  paymentTermOptions.find((o) => o.value === formData.payment_terms) ?? null
+                }
+                onChange={(_e, newValue) => {
+                  if (newValue?.value === ADD_NEW_TERM) {
+                    // "Add New" chosen → reveal the inline add field below.
+                    setNewTermDraft('');
+                    setAddingTerm(true);
+                    return;
+                  }
+                  handleFieldChange('payment_terms', newValue ? newValue.value : '');
+                }}
+                renderOption={(props, option) => {
+                  const { key, ...liProps } = props as typeof props & { key?: string };
+                  if (option.value === ADD_NEW_TERM) {
+                    // Highlighted "Add New" action pinned as the last row.
+                    return (
+                      <li
+                        key={key}
+                        {...liProps}
+                        style={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)' }}
+                      >
+                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
+                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                          Add New
+                        </Box>
+                      </li>
                     );
-                  }}
-                >
-                  {PAYMENT_TERM_PRESETS.map((p) => (
-                    <MenuItem key={p} value={p}>
-                      {p}
-                    </MenuItem>
-                  ))}
-                  <MenuItem value={PAYMENT_TERMS_OTHER} sx={{ fontStyle: 'italic' }}>
-                    Other (specify)…
-                  </MenuItem>
-                </Select>
-              </FormControl>
-              {paymentOther && (
-                <TextField
-                  sx={{ mt: 1 }}
-                  fullWidth
-                  size="small"
-                  label="Custom payment terms"
-                  placeholder="e.g. Net 30, 1% late charge"
-                  value={formData.payment_terms}
-                  onChange={(e) => handleFieldChange('payment_terms', e.target.value)}
-                  autoFocus
-                />
+                  }
+                  if (option.group === 'Your saved terms') {
+                    return (
+                      <li key={key} {...liProps}>
+                        <Box
+                          sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}
+                        >
+                          <Box sx={{ flex: 1 }}>{option.value}</Box>
+                          <IconButton
+                            size="small"
+                            aria-label={`Remove ${option.value}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveSavedTerm(option.value);
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      </li>
+                    );
+                  }
+                  return (
+                    <li key={key} {...liProps}>
+                      {option.value}
+                    </li>
+                  );
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Payment terms"
+                    required
+                    InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
+                  />
+                )}
+              />
+              {addingTerm && (
+                // Choosing "Add New" reveals this inline field just below the
+                // picker (a dropdown menu closes on selection, so the field
+                // can't reliably live inside it). Type + Add saves it for reuse.
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    autoFocus
+                    label="New payment term"
+                    placeholder="e.g. Net 30, 1% late charge"
+                    value={newTermDraft}
+                    onChange={(e) => setNewTermDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitNewTerm();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelAddTerm();
+                      }
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <Button
+                    variant="contained"
+                    disabled={newTermDraft.trim() === ''}
+                    onClick={submitNewTerm}
+                  >
+                    Add
+                  </Button>
+                  <Button onClick={cancelAddTerm}>Cancel</Button>
+                </Box>
               )}
             </Grid>
           </Grid>

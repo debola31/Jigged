@@ -41,6 +41,17 @@ vi.mock('@/utils/customerAccess', () => ({
   pickPrimaryContact: vi.fn(() => null),
 }));
 
+// Company access — the form loads/persists the company's saved custom payment
+// terms. Mocked so tests don't hit the real Supabase-backed access layer.
+const getCustomPaymentTerms = vi.fn();
+const addCustomPaymentTerm = vi.fn();
+const removeCustomPaymentTerm = vi.fn();
+vi.mock('@/utils/companyAccess', () => ({
+  getCustomPaymentTerms: (...args: unknown[]) => getCustomPaymentTerms(...args),
+  addCustomPaymentTerm: (...args: unknown[]) => addCustomPaymentTerm(...args),
+  removeCustomPaymentTerm: (...args: unknown[]) => removeCustomPaymentTerm(...args),
+}));
+
 // Pricing tiers — return non-empty so the validation tier-check passes
 const getTiersWithComputedPrices = vi.fn();
 vi.mock('@/utils/partPricingTiersAccess', () => ({
@@ -136,6 +147,10 @@ describe('QuoteForm', () => {
     updateQuote.mockResolvedValue({ id: 'edit-quote-id' });
     // Default: no drift. Individual tests override.
     detectQuoteLineDrift.mockResolvedValue([]);
+    // Company saved-terms: none by default; add/remove echo back a list.
+    getCustomPaymentTerms.mockResolvedValue([]);
+    addCustomPaymentTerm.mockResolvedValue([]);
+    removeCustomPaymentTerm.mockResolvedValue([]);
   });
 
   it('renders the Create-quote button label in create mode', async () => {
@@ -244,6 +259,91 @@ describe('QuoteForm', () => {
     });
     const [, payload] = createQuote.mock.calls[0];
     expect(payload.parts).toEqual([{ part_id: 'part-1', order_quantity: 0.32 }]);
+  });
+
+  it('forwards a per-item lead time on submit (attached to the part’s row)', async () => {
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create quote/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Lead time (optional)'), '2-3 weeks');
+    await user.click(screen.getByRole('button', { name: /create quote/i }));
+
+    await waitFor(() => {
+      expect(createQuote).toHaveBeenCalledTimes(1);
+    });
+    const [, payload] = createQuote.mock.calls[0];
+    expect(payload.parts).toEqual([
+      { part_id: 'part-1', order_quantity: 5, lead_time_text: '2-3 weeks' },
+    ]);
+  });
+
+  it('offers the trimmed presets (with Prepay) in the payment-terms combobox', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('combobox', { name: /payment terms/i }));
+
+    // Prepay and 2/10 Net 30 are offered…
+    expect(await screen.findByRole('option', { name: 'Prepay', exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '2/10 Net 30', exact: true })).toBeInTheDocument();
+    // …and the trimmed-out net terms are gone (Net 45 / Net 90).
+    expect(screen.queryByRole('option', { name: 'Net 45', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Net 90', exact: true })).not.toBeInTheDocument();
+  });
+
+  it('adds a term via the "Add New" action and saves it to the company for reuse', async () => {
+    addCustomPaymentTerm.mockResolvedValue(['Net 30, 1% late charge']);
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    // Choose the "Add New" row → an inline field appears below the picker.
+    await user.click(await screen.findByRole('option', { name: /add new/i }));
+    await user.type(await screen.findByLabelText('New payment term'), 'Net 30, 1% late charge');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+
+    expect(addCustomPaymentTerm).toHaveBeenCalledWith('test-company-id', 'Net 30, 1% late charge');
+  });
+
+  it('shows the company’s saved terms in the combobox and can remove one', async () => {
+    getCustomPaymentTerms.mockResolvedValue(['Net 30, 1% late charge']);
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    // The saved term appears as an option…
+    expect(
+      await screen.findByRole('option', { name: /Net 30, 1% late charge/i }),
+    ).toBeInTheDocument();
+    // …with a remove button wired to removeCustomPaymentTerm.
+    await user.click(screen.getByRole('button', { name: 'Remove Net 30, 1% late charge' }));
+    expect(removeCustomPaymentTerm).toHaveBeenCalledWith(
+      'test-company-id',
+      'Net 30, 1% late charge',
+    );
+  });
+
+  it('shows a highlighted "Add New" row at the bottom of the dropdown', async () => {
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    // The "Add New" affordance is visible in the open dropdown.
+    expect(await screen.findByRole('option', { name: /add new/i })).toBeInTheDocument();
   });
 
   it('calls updateQuote with the payload and navigates on success', async () => {

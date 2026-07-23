@@ -6,20 +6,27 @@ import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot'
 export type QuoteStatus = 'active' | 'expired';
 
 /**
- * Common B2B payment terms offered as presets in the quote form's
- * combobox. The field is free-solo, so shops can also type custom wording
- * like 'Net 30, 1% late charge'.
+ * Common B2B payment terms offered as presets in the quote form's picker.
+ * A short, flat list: it mirrors QuickBooks' built-in terms (Due on Receipt /
+ * Net 15 / 30 / 60) — our accounting-integration target — plus the deposit /
+ * prepay / COD and early-pay-discount terms shops actually use. Kept short on
+ * purpose (grouping subheaders stop earning their keep under ~10 options), and
+ * the field is still free-solo via the "Other (specify)…" escape hatch, so any
+ * custom wording (e.g. "Net 30, 1% late charge") is one step away.
+ *
+ * "Prepay" is the CIA / cash-in-advance case — full payment before production.
+ * The plain word (not the accounting term "CIA") reads clearly for the
+ * shop-owner audience and prints fine on the customer's quote.
  */
 export const PAYMENT_TERM_PRESETS: ReadonlyArray<string> = [
   'Due on Receipt',
   'Net 15',
   'Net 30',
-  '2/10 Net 30',
-  'Net 45',
   'Net 60',
-  'Net 90',
-  'Cash on Delivery',
+  '2/10 Net 30',
   '50% Deposit / Balance Net 30',
+  'Prepay',
+  'Cash on Delivery',
 ];
 
 /**
@@ -146,6 +153,15 @@ export interface QuoteLineItem {
    * drift comparison for these.
    */
   basis_unknown: boolean;
+  /**
+   * Optional per-item lead time (free text, e.g. "2–3 weeks"). NULL means
+   * "use the quote-level lead time" (quotes.lead_time_text) — the read path's
+   * effective value is `lead_time_text ?? quote.lead_time_text`. Lead time is
+   * per-part, so every line row of a part carries the same value (denormalized,
+   * exactly like the part-level price override). Shown per item on the
+   * quote/PDF only when items differ (migration 20260723021949).
+   */
+  lead_time_text: string | null;
   created_at: string;
   // Optional joined part info for UI rendering
   parts?: {
@@ -233,6 +249,13 @@ export interface QuoteLineOverride {
 export interface QuoteFormPartBlock {
   part_id: string;
   order_quantity: number;
+  /**
+   * Optional per-item lead time (free text). Per-part, so every entry for the
+   * same part carries the same value; the access layer writes it onto each of
+   * the part's line rows. Blank/undefined ⇒ the line uses the quote-level lead
+   * time. Undefined on legacy create payloads that predate the field.
+   */
+  lead_time_text?: string | null;
   /** Optional hand-entered price+markup; bypasses tier resolution when present. */
   override?: QuoteLineOverride;
   /** Set on edit-mode payloads so the form can look up drift / basis info. */
@@ -343,6 +366,7 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
       .map((li) => ({
         part_id: li.part_id,
         order_quantity: li.quantity,
+        lead_time_text: li.lead_time_text,
         line_item_id: li.id,
         basis_unknown: li.basis_unknown,
         ...(li.is_quote_override

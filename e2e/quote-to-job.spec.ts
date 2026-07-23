@@ -87,10 +87,10 @@ test.describe('Quote to Job workflow', () => {
     // Expiration date defaults from EMPTY_QUOTE_FORM so we don't touch it.
     // Without a lead time the submit button stays disabled and the next step
     // times out waiting to click.
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
 
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
 
     // Create the quote (approval flow is gone — quotes are now 'active' by default)

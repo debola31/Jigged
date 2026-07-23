@@ -62,9 +62,9 @@ test.describe('Fractional quote to job workflow', () => {
       timeout: 10_000,
     });
 
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
 
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
 
     await page.getByRole('button', { name: /Create Quote/i }).click();

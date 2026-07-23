@@ -4,6 +4,7 @@ import {
   readCompanyDefault,
   readQuoteValidityDays,
   readCompanyDefaults,
+  readCustomPaymentTerms,
 } from '@/lib/companyDefaults';
 import { DEFAULT_QUOTE_VALIDITY_DAYS } from '@/types/quote';
 
@@ -47,5 +48,31 @@ describe('companyDefaults: quote_validity_days', () => {
 
     const none = readCompanyDefaults(null);
     expect(none.quote_validity_days).toBe(DEFAULT_QUOTE_VALIDITY_DAYS);
+  });
+});
+
+describe('readCustomPaymentTerms', () => {
+  it('returns [] when unset, null, or malformed', () => {
+    expect(readCustomPaymentTerms(null)).toEqual([]);
+    expect(readCustomPaymentTerms({ settings: {} })).toEqual([]);
+    expect(readCustomPaymentTerms({ settings: { custom_payment_terms: 'nope' } })).toEqual([]);
+    expect(readCustomPaymentTerms({ settings: { custom_payment_terms: [1, 2] } })).toEqual([]);
+  });
+
+  it('trims, drops blanks, and de-duplicates (order preserved)', () => {
+    expect(
+      readCustomPaymentTerms({
+        settings: {
+          custom_payment_terms: [
+            '  Net 30, 1% late  ',
+            '',
+            'Prepay',
+            'Net 30, 1% late',
+            '   ',
+            'Prepay',
+          ],
+        },
+      }),
+    ).toEqual(['Net 30, 1% late', 'Prepay']);
   });
 });

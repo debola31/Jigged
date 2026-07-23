@@ -3,6 +3,7 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
+import { readCustomPaymentTerms, MAX_CUSTOM_PAYMENT_TERMS } from '@/lib/companyDefaults';
 
 export interface Company {
   id: string;
@@ -350,4 +351,64 @@ export async function updateCompanyDefaults(
     console.error('Error updating company defaults:', error);
     throw new Error(`Failed to update company defaults: ${error.message}`);
   }
+}
+
+/**
+ * Read a company's saved custom payment terms (the free-text terms it kept for
+ * reuse via the quote form's payment-terms combobox). See readCustomPaymentTerms.
+ */
+export async function getCustomPaymentTerms(companyId: string): Promise<string[]> {
+  const company = await getCompany(companyId);
+  return readCustomPaymentTerms(company);
+}
+
+/**
+ * Read-modify-write the whole settings object (preserving the sibling
+ * `defaults` / `features` blocks), replacing `custom_payment_terms`. Internal —
+ * callers use addCustomPaymentTerm / removeCustomPaymentTerm.
+ */
+async function writeCustomPaymentTerms(companyId: string, terms: string[]): Promise<void> {
+  const supabase = getSupabase();
+  const company = await getCompany(companyId);
+  if (!company) {
+    throw new Error('Company not found.');
+  }
+  const settings = (company.settings ?? {}) as Record<string, unknown>;
+  const nextSettings = { ...settings, custom_payment_terms: terms } as Json;
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings: nextSettings, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating custom payment terms:', error);
+    throw new Error(`Failed to save payment term: ${error.message}`);
+  }
+}
+
+/**
+ * Add a custom payment term to the company's saved list; returns the new list.
+ * De-duplicated, most-recent-first, capped at MAX_CUSTOM_PAYMENT_TERMS. A blank
+ * term is a no-op (returns the existing list unchanged).
+ */
+export async function addCustomPaymentTerm(companyId: string, term: string): Promise<string[]> {
+  const trimmed = term.trim();
+  const existing = await getCustomPaymentTerms(companyId);
+  if (trimmed === '') return existing;
+  const next = [trimmed, ...existing.filter((t) => t !== trimmed)].slice(
+    0,
+    MAX_CUSTOM_PAYMENT_TERMS,
+  );
+  await writeCustomPaymentTerms(companyId, next);
+  return next;
+}
+
+/**
+ * Remove a custom payment term from the company's saved list; returns the new
+ * list.
+ */
+export async function removeCustomPaymentTerm(companyId: string, term: string): Promise<string[]> {
+  const existing = await getCustomPaymentTerms(companyId);
+  const next = existing.filter((t) => t !== term);
+  await writeCustomPaymentTerms(companyId, next);
+  return next;
 }

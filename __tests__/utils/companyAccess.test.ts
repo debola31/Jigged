@@ -47,6 +47,9 @@ import {
   getPostLoginRoute,
   verifyCompanyAccess,
   getUserRole,
+  getCustomPaymentTerms,
+  addCustomPaymentTerm,
+  removeCustomPaymentTerm,
 } from '@/utils/companyAccess';
 
 describe('companyAccess utilities', () => {
@@ -582,6 +585,66 @@ describe('companyAccess utilities', () => {
       const result = await getUserRole('user-1', 'company-1');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('custom payment terms', () => {
+    const companyRow = {
+      id: 'company-1',
+      name: 'Acme',
+      settings: {
+        defaults: { quote_validity_days: 20 },
+        custom_payment_terms: ['Net 30, 1% late'],
+      },
+    };
+
+    it('getCustomPaymentTerms reads the saved list', async () => {
+      mockQueryBuilder.data = companyRow;
+      mockQueryBuilder.error = null;
+
+      expect(await getCustomPaymentTerms('company-1')).toEqual(['Net 30, 1% late']);
+    });
+
+    it('addCustomPaymentTerm prepends (dedup) and preserves sibling settings', async () => {
+      mockQueryBuilder.data = companyRow;
+      mockQueryBuilder.error = null;
+
+      const next = await addCustomPaymentTerm('company-1', 'Prepay');
+
+      expect(next).toEqual(['Prepay', 'Net 30, 1% late']);
+      // The whole settings object is written back with `defaults` preserved.
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: {
+            defaults: { quote_validity_days: 20 },
+            custom_payment_terms: ['Prepay', 'Net 30, 1% late'],
+          },
+        }),
+      );
+    });
+
+    it('addCustomPaymentTerm ignores a blank term (no write)', async () => {
+      mockQueryBuilder.data = companyRow;
+      mockQueryBuilder.error = null;
+
+      const next = await addCustomPaymentTerm('company-1', '   ');
+
+      expect(next).toEqual(['Net 30, 1% late']);
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('removeCustomPaymentTerm drops the term', async () => {
+      mockQueryBuilder.data = companyRow;
+      mockQueryBuilder.error = null;
+
+      const next = await removeCustomPaymentTerm('company-1', 'Net 30, 1% late');
+
+      expect(next).toEqual([]);
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({ custom_payment_terms: [] }),
+        }),
+      );
     });
   });
 });

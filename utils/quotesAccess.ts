@@ -27,6 +27,7 @@ import {
   insertLineItemForPart,
   getLineItemsForQuote,
   updateLineItemQuantity,
+  updateLineItemLeadTime,
   repriceLineItemToCurrent,
   deleteLineItem,
 } from '@/utils/quoteLineItemsAccess';
@@ -98,10 +99,13 @@ function hydrateCreators<T extends QuoteWithRelations>(
 
 // ============== CRUD Operations ==============
 
+// Select all quote_line_items columns (incl. lead_time_text) plus the joined
+// part. Uses `*` rather than an explicit column list — matching
+// getLineItemsForQuote — so a newly-added column loads without an explicit
+// reference that schemaEmbedCheck would flag against the prod snapshot before
+// the migration has deployed (the snapshot only refreshes post-deploy).
 const QUOTE_LINE_ITEM_FIELDS = `
-  id, quote_id, company_id, part_id, source_tier_id, sequence,
-  quantity, unit_price, total_price, markup_percent, base_cost_per_unit,
-  is_quote_override, pricing_basis_snapshot, basis_unknown, created_at,
+  *,
   parts(id, part_name, description, primary_unit)
 `;
 
@@ -428,6 +432,7 @@ export async function createQuote(
       tiers,
       sequence,
       block.override,
+      block.lead_time_text,
     );
     sequence += 10;
   }
@@ -635,6 +640,7 @@ async function reconcileQuoteLineItems(
         tiers,
         nextSequence,
         block.override,
+        block.lead_time_text,
       );
       nextSequence += 10;
       continue;
@@ -649,6 +655,18 @@ async function reconcileQuoteLineItems(
 
     if (existing.quantity !== block.order_quantity) {
       await updateLineItemQuantity(existing.id, block.order_quantity);
+    }
+
+    // Persist a per-item lead-time edit even when the quantity is unchanged
+    // (lead time carries no pricing, so updateLineItemQuantity wouldn't run).
+    // Blank and NULL both mean "use the quote default", so normalize before
+    // comparing to skip a redundant write.
+    const nextLeadTime =
+      block.lead_time_text && block.lead_time_text.trim() !== ''
+        ? block.lead_time_text
+        : null;
+    if ((existing.lead_time_text ?? null) !== nextLeadTime) {
+      await updateLineItemLeadTime(existing.id, nextLeadTime);
     }
   }
 }

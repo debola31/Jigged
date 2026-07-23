@@ -186,9 +186,9 @@ test.describe('Quote edit — reload contract', () => {
     await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
       timeout: 10_000,
     });
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -319,9 +319,9 @@ test.describe('Quote edit — reload contract', () => {
     const snapshottedDollar = (snapshottedUnitPriceText ?? '').match(/\$[\d.,]+/)?.[0];
     expect(snapshottedDollar).toBeTruthy();
 
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -434,9 +434,9 @@ test.describe('Quote edit — reload contract', () => {
     const snapshottedDollarText = (await unitPriceLocator.first().textContent()) ?? '';
     const snapshottedDollar = snapshottedDollarText.match(/\$[\d.,]+/)?.[0];
     expect(snapshottedDollar).toBeTruthy();
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     // Payment terms are required — pick a preset before submitting.
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     // UUID-strict — /[^/]+$/ also matches /quotes/new (the form URL),
@@ -525,8 +525,8 @@ test.describe('Quote edit — reload contract', () => {
     // so the quote is expired-by-date the moment it's created.
     await page.getByLabel(/Expiration date/i).fill('2020-01-01');
 
-    await page.getByRole('textbox', { name: /Lead time/i }).fill('2 weeks');
-    await page.getByRole('combobox', { name: /Payment terms/i }).click();
+    await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
+    await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
     await page.getByRole('option', { name: 'Net 30', exact: true }).click();
     await page.getByRole('button', { name: /Create Quote/i }).click();
     await expect(page).toHaveURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15_000 });

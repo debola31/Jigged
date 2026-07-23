@@ -449,7 +449,32 @@ export default function JobFeed({
             {showMicHint && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-                  ※ Tip: tap the 🎤 on your keyboard to talk instead of type.
+                  ※ Tip: tap the{' '}
+                  {/* The iOS keyboard's dictation glyph (outlined mic + cradle +
+                      stem + base bar), so it reads as the exact key operators
+                      tap — not a generic emoji. */}
+                  <Box
+                    component="svg"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                    sx={{
+                      width: '1.05em',
+                      height: '1.05em',
+                      verticalAlign: '-0.2em',
+                      mx: '1px',
+                      fill: 'none',
+                      stroke: 'currentColor',
+                      strokeWidth: 1.6,
+                      strokeLinecap: 'round',
+                      strokeLinejoin: 'round',
+                    }}
+                  >
+                    <rect x="9.5" y="3" width="5" height="10" rx="2.5" />
+                    <path d="M6.5 11a5.5 5.5 0 0 0 11 0" />
+                    <path d="M12 16.5V19" />
+                    <path d="M8.5 19h7" />
+                  </Box>{' '}
+                  on your keyboard to talk instead of type.
                 </Typography>
                 <IconButton
                   size="small"

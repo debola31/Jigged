@@ -1740,7 +1740,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   const { key, ...liProps } = props as typeof props & { key?: string };
                   if (option.isAdd) {
                     return (
-                      <li key={`add-${option.value}`} {...liProps}>
+                      <li key={key} {...liProps}>
                         <AddIcon fontSize="small" sx={{ mr: 1 }} />
                         Add “{option.value}”
                       </li>
@@ -1748,7 +1748,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   }
                   if (option.group === 'Your saved terms') {
                     return (
-                      <li key={option.value} {...liProps}>
+                      <li key={key} {...liProps}>
                         <Box
                           sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}
                         >
@@ -1768,7 +1768,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     );
                   }
                   return (
-                    <li key={option.value} {...liProps}>
+                    <li key={key} {...liProps}>
                       {option.value}
                     </li>
                   );

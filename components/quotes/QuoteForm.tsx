@@ -1711,7 +1711,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 size="small"
                 fullWidth
                 options={paymentTermOptions}
-                groupBy={(o) => (typeof o === 'string' ? '' : o.group)}
                 getOptionLabel={(o) => (typeof o === 'string' ? o : o.value)}
                 // The empty-state "Type to add your own term" cue is a
                 // non-selectable hint, not a real option.
@@ -1726,13 +1725,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   const input = params.inputValue.trim();
                   const exists =
                     PAYMENT_TERM_PRESETS.includes(input) || savedTerms.includes(input);
-                  // Keep an "Add new" row at the TOP at all times so custom
-                  // entry is discoverable before the user types: a disabled hint
-                  // when empty, an actionable "Add …" once they type a new term.
+                  // A single always-present "add" row at the BOTTOM (no group
+                  // headers): a disabled "type to add" hint when empty, an
+                  // actionable "Add …" once the user types a new term.
                   if (input === '') {
-                    filtered.unshift({ value: '', group: 'Add new', isAddHint: true });
+                    filtered.push({ value: '', group: 'Add new', isAddHint: true });
                   } else if (!exists) {
-                    filtered.unshift({ value: input, group: 'Add new', isAdd: true });
+                    filtered.push({ value: input, group: 'Add new', isAdd: true });
                   }
                   return filtered;
                 }}
@@ -1751,10 +1750,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 }}
                 renderOption={(props, option) => {
                   const { key, ...liProps } = props as typeof props & { key?: string };
+                  // The "add" row sits at the bottom with a divider above it so
+                  // it reads as a distinct action, separate from the term list.
+                  const addRowStyle = { borderTop: '1px solid rgba(255, 255, 255, 0.12)' };
                   if (option.isAddHint) {
                     return (
-                      <li key={key} {...liProps}>
-                        <AddIcon fontSize="small" sx={{ mr: 1 }} />
+                      <li key={key} {...liProps} style={addRowStyle}>
+                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'text.secondary' }} />
                         <Box component="span" sx={{ color: 'text.secondary' }}>
                           Type to add your own term
                         </Box>
@@ -1763,8 +1765,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                   }
                   if (option.isAdd) {
                     return (
-                      <li key={key} {...liProps}>
-                        <AddIcon fontSize="small" sx={{ mr: 1 }} />
+                      <li key={key} {...liProps} style={addRowStyle}>
+                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
                         Add “{option.value}”
                       </li>
                     );

@@ -200,8 +200,14 @@ describe('JobFeed — dictation hint', () => {
     expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!)).toEqual({ shows: 1, dismissed: false });
   });
 
-  it('stops showing after the cap is reached', async () => {
-    window.localStorage.setItem(HINT_KEY, JSON.stringify({ shows: 3, dismissed: false }));
+  it('still shows on the last allowed mount (below the cap of 5)', async () => {
+    window.localStorage.setItem(HINT_KEY, JSON.stringify({ shows: 4, dismissed: false }));
+    renderFeed();
+    expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
+  });
+
+  it('stops showing once the cap of 5 is reached', async () => {
+    window.localStorage.setItem(HINT_KEY, JSON.stringify({ shows: 5, dismissed: false }));
     renderFeed();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     expect(screen.queryByText(HINT_TEXT)).not.toBeInTheDocument();

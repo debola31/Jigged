@@ -61,7 +61,7 @@ interface JobFeedProps {
 // get nagged (the documented failure mode of built-in tips). Per-device, since
 // the subject is the device's own keyboard mic.
 const MIC_HINT_KEY = 'jigged:composer-mic-hint';
-const MIC_HINT_MAX_SHOWS = 3;
+const MIC_HINT_MAX_SHOWS = 5;
 
 interface MicHintState {
   shows: number;

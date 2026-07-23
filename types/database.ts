@@ -1015,6 +1015,8 @@ export type Database = {
           notes: string | null
           operation_name: string
           routing_operation_id: string | null
+          sent_at: string | null
+          sent_by: string | null
           sequence: number
           status: string
           updated_at: string | null
@@ -1033,6 +1035,8 @@ export type Database = {
           notes?: string | null
           operation_name: string
           routing_operation_id?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
           sequence: number
           status?: string
           updated_at?: string | null
@@ -1051,6 +1055,8 @@ export type Database = {
           notes?: string | null
           operation_name?: string
           routing_operation_id?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
           sequence?: number
           status?: string
           updated_at?: string | null

@@ -11,14 +11,19 @@ import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
+import Chip from '@mui/material/Chip';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 import {
   getOperatorOperationDetail,
   getCurrentMember,
   completeOperation,
   revertOperationCompletion,
+  markOperationSent,
+  markOperationReceived,
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
@@ -117,7 +122,37 @@ export default function OperatorOperationActionPage() {
     }
   };
 
+  // Outside (external-vendor) op actions — the part leaves the shop for a vendor
+  // (Mark Sent Out) and comes back (Mark Received). Distinct from Mark Complete.
+  const handleSend = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await markOperationSent(jobOperationId);
+      await loadJob();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to mark sent out');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReceive = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await markOperationReceived(jobOperationId);
+      await loadJob();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to mark received');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const isExternal = job?.operation_work_center_kind === 'external';
   const isCompleted = job?.operation_status === 'completed';
+  const isSent = job?.operation_status === 'sent';
 
   // Wait for BOTH the job fetch and the station context's one-time init before
   // deciding what to render — otherwise the "no station" branch can flash for an
@@ -143,7 +178,9 @@ export default function OperatorOperationActionPage() {
   // nor the stored default supplied a station — e.g. a returning operator whose
   // tab was evicted overnight. Gated on `initializing` above so it can't flash
   // for an operator who does have a stored station.
-  if (!isCompleted && !stationId) {
+  // Outside ops have no operator station (they run at a vendor), so they never
+  // require a selected station and never trigger the station-match guard.
+  if (!isCompleted && !isExternal && !stationId) {
     return <StationSelector subtitle="Select your station to complete this step." />;
   }
 
@@ -153,6 +190,7 @@ export default function OperatorOperationActionPage() {
   // are the backstop there.)
   const stationMismatch =
     !isCompleted &&
+    !isExternal &&
     !!stationId &&
     !!job.operation_work_center_id &&
     job.operation_work_center_id !== stationId;
@@ -198,6 +236,31 @@ export default function OperatorOperationActionPage() {
           <Typography variant="body2" color="text.secondary">
             Order qty {job.part_quantity}
           </Typography>
+
+          {isExternal && (
+            <Box
+              sx={{
+                mt: 1.5,
+                p: 1.5,
+                borderRadius: 1,
+                bgcolor: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid',
+                borderColor: 'warning.main',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+              }}
+            >
+              <LocalShippingIcon sx={{ color: 'warning.main' }} />
+              <Box>
+                <Chip size="small" color="warning" label="OUTSIDE PROCESS" sx={{ fontWeight: 700 }} />
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  Performed by {job.operation_vendor_name || 'an outside vendor'}. Send the parts
+                  out, then mark received when they&apos;re back.
+                </Typography>
+              </Box>
+            </Box>
+          )}
 
           {job.operation_instructions && (
             <Box
@@ -257,21 +320,22 @@ export default function OperatorOperationActionPage() {
 
       {isCompleted ? (
         // The completed state IS the undo control — one element shows the status
-        // (green check + "complete") and doubles as the button that reverts it,
-        // instead of a separate success banner above a big UNDO button.
+        // (green check + "complete"/"received") and doubles as the button that
+        // reverts it. For an outside op, undo steps back to "sent" (parts still
+        // out), not straight to pending.
         <Button
           fullWidth
           variant="outlined"
           size="large"
           onClick={handleRevert}
           disabled={actionLoading}
-          aria-label="This step is complete — tap to undo"
+          aria-label={isExternal ? 'Parts received — tap to undo' : 'This step is complete — tap to undo'}
           sx={{ minHeight: 56 }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}>
             <CheckCircleIcon color="success" />
             <Box component="span" sx={{ flex: 1, textAlign: 'left', fontWeight: 600, fontSize: '1.05rem' }}>
-              This step is complete
+              {isExternal ? 'Parts received from the vendor' : 'This step is complete'}
             </Box>
             {actionLoading ? (
               <CircularProgress size={18} />
@@ -282,6 +346,61 @@ export default function OperatorOperationActionPage() {
             )}
           </Box>
         </Button>
+      ) : isExternal ? (
+        // Outside op: send/receive, never Mark Complete. A pending op offers both
+        // (received directly from pending is allowed — sent is optional); a sent
+        // op shows "at vendor" + Mark Received + Undo send.
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          {isSent && job.operation_sent_at && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.5, color: 'warning.main' }}>
+              <LocalShippingIcon fontSize="small" sx={{ flexShrink: 0 }} />
+              <Typography variant="body2" color="inherit">
+                At the vendor since{' '}
+                <strong>{new Date(job.operation_sent_at).toLocaleDateString()}</strong>. Mark
+                received when the parts come back.
+              </Typography>
+            </Box>
+          )}
+          {!isSent && (
+            <Button
+              fullWidth
+              variant="outlined"
+              size="large"
+              color="warning"
+              startIcon={<LocalShippingIcon />}
+              onClick={handleSend}
+              disabled={actionLoading}
+              sx={{ minHeight: 56, fontWeight: 600 }}
+            >
+              {actionLoading ? <CircularProgress size={22} /> : 'MARK SENT OUT'}
+            </Button>
+          )}
+          <Button
+            fullWidth
+            variant="contained"
+            size="large"
+            color="primary"
+            startIcon={<Inventory2Icon />}
+            onClick={handleReceive}
+            disabled={actionLoading}
+            sx={{ minHeight: 64, fontSize: '1.25rem', fontWeight: 600 }}
+          >
+            {actionLoading ? <CircularProgress size={24} /> : 'MARK RECEIVED'}
+          </Button>
+          {isSent && (
+            <Button
+              fullWidth
+              variant="text"
+              size="small"
+              color="inherit"
+              startIcon={<UndoIcon />}
+              onClick={handleRevert}
+              disabled={actionLoading}
+            >
+              Undo send
+            </Button>
+          )}
+        </Box>
       ) : (
         // Not completed. A station mismatch (this step's work center ≠ the
         // operator's selected station) only WARNS — completion doesn't need or

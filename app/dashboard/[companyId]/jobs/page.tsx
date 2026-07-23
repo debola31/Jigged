@@ -27,9 +27,12 @@ import ListItemText from '@mui/material/ListItemText';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import Divider from '@mui/material/Divider';
 import Chip from '@mui/material/Chip';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -48,6 +51,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import { getAllJobs, bulkCancelJobs } from '@/utils/jobsAccess';
+import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import {
   isJobOverdue,
@@ -61,6 +65,7 @@ import AddIcon from '@mui/icons-material/Add';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import AcceptPurchaseOrderModal from '@/components/jobs/AcceptPurchaseOrderModal';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
+import OutsideWorkPanel from '@/components/jobs/OutsideWorkPanel';
 import type { JobWithRelations, JobFilters, JobLifecycleStage } from '@/types/job';
 
 /**
@@ -145,6 +150,8 @@ export default function JobsPage() {
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
+  // Jobs list vs. the company-wide "Outside work" queue (external-vendor ops).
+  const [view, setView] = useState<'jobs' | 'outside'>('jobs');
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [statusFilter, setStatusFilter] = useState<JobLifecycleStage[]>(
@@ -238,6 +245,19 @@ export default function JobsPage() {
     },
   );
   const jobs = jobsData ?? EMPTY_JOBS;
+
+  // Jobs whose only live work is out at a vendor read as stalled in the normal
+  // list (the "current op" is a sent external op, which counts as incomplete but
+  // isn't actionable in-shop). A small "At vendor" chip on those rows explains
+  // why. Reuses the Outside-work queue query — external ops only, so it's cheap.
+  const { data: outsideData } = useLoad(
+    () => getOutsideOpsForCompany(companyId),
+    [companyId],
+  );
+  const atVendorJobIds = useMemo(
+    () => new Set((outsideData ?? []).filter((o) => o.status === 'sent').map((o) => o.job_id)),
+    [outsideData],
+  );
 
   // Narrow to the exact stages the user selected. Stages are derived from
   // (production_status, fulfillment_status), so we match on the same helper the
@@ -473,7 +493,23 @@ export default function JobsPage() {
       cellRenderer: (params: ICellRendererParams<JobWithRelations>) => {
         if (!params.data) return null;
         const cfg = JOB_LIFECYCLE_STAGE_CONFIG[getJobLifecycleStage(params.data)];
-        return <Chip label={cfg.label} color={cfg.color} size="small" />;
+        const atVendor = atVendorJobIds.has(params.data.id);
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+            <Chip label={cfg.label} color={cfg.color} size="small" />
+            {atVendor && (
+              <Tooltip title="Parts are out at an outside vendor">
+                <Chip
+                  label="At vendor"
+                  color="warning"
+                  variant="outlined"
+                  size="small"
+                  icon={<LocalShippingIcon />}
+                />
+              </Tooltip>
+            )}
+          </Box>
+        );
       },
     },
     {
@@ -559,6 +595,28 @@ export default function JobsPage() {
 
   return (
     <Box>
+      {/* View toggle: the jobs list vs. the informational Outside-work queue. */}
+      <ToggleButtonGroup
+        value={view}
+        exclusive
+        size="small"
+        onChange={(_e, next) => {
+          if (next) setView(next);
+        }}
+        sx={{ mb: 3 }}
+      >
+        <ToggleButton value="jobs">
+          <WorkIcon sx={{ fontSize: 18, mr: 0.75 }} /> Jobs
+        </ToggleButton>
+        <ToggleButton value="outside">
+          <LocalShippingIcon sx={{ fontSize: 18, mr: 0.75 }} /> Outside work
+        </ToggleButton>
+      </ToggleButtonGroup>
+
+      {view === 'outside' && <OutsideWorkPanel companyId={companyId} />}
+
+      {view === 'jobs' && (
+      <>
       {/* Toolbar */}
       <Box
         sx={{
@@ -784,6 +842,8 @@ export default function JobsPage() {
             />
           </Box>
         </Card>
+      )}
+      </>
       )}
 
       {/* Cancel Confirmation Dialog */}

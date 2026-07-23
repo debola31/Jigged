@@ -57,7 +57,7 @@ UX is deliberately minimal so a busy operator on the floor does as little as pos
 |---|---|
 | **No start / pause / resume** — only a single **Mark Complete** | Start/stop on the floor is unreliable; one finish trigger is all an operator must do. (See `prd.md` §4.3.) |
 | **No per-operation time tracking** | Same; costing/quoting use *estimated* times only. `operator_sessions` and `job_operations.actual_*` were already removed. |
-| **No operation-level WIP/"in progress" status** | An operation is **pending → completed**. "Work in progress" is meaningful only at the **job/part** level (derived from partial completion via `production_status`), not per operation. |
+| **No operation-level WIP/"in progress" status** | An internal operation is **pending → completed**. "Work in progress" is meaningful only at the **job/part** level (derived from partial completion via `production_status`), not per operation. *Exception:* an **outside (external-vendor) step** carries a `sent` (at-vendor) waypoint — `pending → (Mark Sent Out) sent → (Mark Received) completed` — because the part is physically out of the shop and invisible while it's away (see §5.2). |
 | **No permanent operator↔station assignment** | Operators roam; station is chosen per session (scan or tap), persisted in `sessionStorage` only. |
 | **No shift management / clock-in** | Out of scope; sign-in time is whatever Supabase Auth records, nothing more. |
 | **No downtime / stoppage reasons** | Follows directly from complete-only — there is no "paused" state to attribute. |
@@ -189,11 +189,23 @@ single device is shared at a station, which isn't our model. *Consequence:* `prd
 "enter PIN or scan personal QR badge" language is **stale** ([§9](#9-stale-doc-reconciliation)).
 
 ### 5.2 Status model (no operation-level WIP)
-An operation is **pending → completed** (single tap; `completed_by`/`completed_at` recorded).
-"In progress" is a **job/part** concept only, derived from partial completion and surfaced as
-`production_status`. We do **not** need a separate operation-level "in progress" state.
-*Open item:* confirm whether `job_operations.status = 'in_progress'` is used anywhere
-meaningfully or is vestigial under complete-only; if vestigial, simplify to pending/completed.
+An **internal** operation is **pending → completed** (single tap; `completed_by`/`completed_at`
+recorded). "In progress" is a **job/part** concept only, derived from partial completion and
+surfaced as `production_status`. We do **not** need a separate operation-level "in progress"
+state for in-shop work.
+
+**Outside (external-vendor) steps are the one exception.** A step at a work center with
+`kind='external'` (e.g. coating) is done off-site, so it uses a send/receive waypoint:
+`pending → (Mark Sent Out) sent → (Mark Received) completed`. `sent` is optional (Mark Received
+also completes from `pending`); received == completed. This exists precisely because the part
+is invisible while it's out — the highest-value note in the system is "sent to coater 7/9,
+expected back 7/16." An outside step can never be completed via the internal path and is never
+auto-skipped. See [jobs.md](modules/jobs.md#outside-external-vendor-operations).
+
+*Resolved:* `job_operations.status = 'in_progress'` stays a legal value (the enum is now
+`pending | in_progress | completed | sent`); the complete-only flow never sets `in_progress`
+itself, but `deriveStatusFromOps` still maps a mix that includes a `sent` op to part-level
+`in_progress`.
 
 ### 5.3 Freshness: manual refresh
 **Decided:** manual refresh via **browser reload / pull-to-refresh**; **no WebSockets / live

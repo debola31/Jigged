@@ -88,6 +88,14 @@ export interface OperatorJobDetail {
   /** Work center this operation runs at — drives the station-match guard. */
   operation_work_center_id: string | null;
   operation_work_center_name: string | null;
+  /** work_centers.kind — 'external' ops use the send/receive action set and
+   *  suppress the station-mismatch guard (they have no operator station). Null
+   *  when the work center was deleted. */
+  operation_work_center_kind: 'internal' | 'external' | null;
+  /** Vendor name for an external op (from work_centers.vendor_id). */
+  operation_vendor_name: string | null;
+  /** job_operations.sent_at — when an external op left for the vendor. */
+  operation_sent_at: string | null;
   estimated_minutes: number | null;
   // Per-part operation progress
   operations_total: number;
@@ -115,12 +123,44 @@ export interface JobTravelerOperation {
   /** Work center / station name. */
   work_center_id: string | null;
   work_center_name: string | null;
-  /** 'pending' | 'in_progress' | 'completed'. */
+  /** work_centers.kind — 'external' ops (outside vendor) get distinct treatment
+   *  on the traveler (banner row) and the operation page (send/receive actions).
+   *  Null when the work center was deleted (FK ON DELETE SET NULL) — treat as
+   *  non-external/unknown, never crash. */
+  work_center_kind: 'internal' | 'external' | null;
+  /** Vendor name for an external op (from work_centers.vendor_id → vendors.name).
+   *  Null for internal ops or when unresolved. */
+  vendor_name: string | null;
+  /** 'pending' | 'in_progress' | 'completed' | 'sent'. */
   status: string;
   /** estimated_setup_minutes (the traveler's "Setup" column). */
   setup_minutes: number;
   /** estimated_run_minutes_per_unit (the traveler's "Cycle" column). */
   cycle_minutes: number;
+}
+
+/**
+ * One outside (external-vendor) operation across all jobs, for the company-wide
+ * "Outside work" queue (a tab on the Jobs list). Purely informational — no
+ * readiness/predecessor logic; grouped by status ('pending' = Not sent, 'sent' =
+ * At vendor) and ordered by the parent job's due date.
+ */
+export interface OutsideOperation {
+  /** job_operation_id — the action target for Mark Sent Out / Mark Received. */
+  id: string;
+  job_id: string;
+  job_part_id: string;
+  job_number: string;
+  part_name: string | null;
+  operation_name: string;
+  vendor_name: string | null;
+  /** 'pending' (Not sent) | 'sent' (At vendor). */
+  status: 'pending' | 'sent';
+  sent_at: string | null;
+  /** Resolved name of sent_by (user_company_access.name); null if unset/unresolved. */
+  sent_by_name: string | null;
+  due_date: string | null;
+  is_hot: boolean;
 }
 
 /**

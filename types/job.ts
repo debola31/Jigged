@@ -29,12 +29,16 @@ export interface JobOperation {
   routing_operation_id: string | null;
   estimated_setup_minutes: number;
   estimated_run_minutes_per_unit: number;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: OperationStatus;
   completed_at: string | null;
   completed_by: string | null;
   /** Resolved display name of `completed_by` (from user_company_access), attached by
    *  getJobWithRelations — not a DB column. Null if unresolved/unset. */
   completed_by_name?: string | null;
+  /** External-op send waypoint (see OperationStatus). received == completed, so
+   *  these mirror completed_at/completed_by; set only on external ops. */
+  sent_at: string | null;
+  sent_by: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -43,6 +47,8 @@ export interface JobOperation {
     name: string;
     labor_rate: number | null;
     kind: 'internal' | 'external';
+    /** Present for external work centers (kind='external' requires a vendor). */
+    vendor?: { id: string; name: string } | null;
   } | null;
 }
 
@@ -407,19 +413,25 @@ export const STAGE_TO_JOB_FILTERS: Record<
 
 /**
  * Operation status values.
+ *
+ * `sent` is the external-operation (outside vendor) waypoint: an external op
+ * moves pending → sent (Mark Sent Out) → completed (Mark Received). `sent` is
+ * optional — Mark Received also completes directly from `pending`. `received`
+ * is not a distinct value; a received external op is `completed`.
  */
-export type OperationStatus = 'pending' | 'in_progress' | 'completed';
+export type OperationStatus = 'pending' | 'in_progress' | 'completed' | 'sent';
 
 /**
  * Operation status display configuration.
  */
 export const OPERATION_STATUS_CONFIG: Record<
   OperationStatus,
-  { label: string; color: 'default' | 'info' | 'success' }
+  { label: string; color: 'default' | 'info' | 'success' | 'warning' }
 > = {
   pending: { label: 'Pending', color: 'default' },
   in_progress: { label: 'In Progress', color: 'info' },
   completed: { label: 'Completed', color: 'success' },
+  sent: { label: 'At Vendor', color: 'warning' },
 };
 
 /**

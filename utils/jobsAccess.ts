@@ -239,7 +239,7 @@ export async function getJobWithRelations(
         parts(id, part_name, description),
         job_operations(
           *,
-          work_center:work_centers!left(id, name, labor_rate, kind)
+          work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
         )
       )
     `)
@@ -1187,7 +1187,7 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
@@ -1204,7 +1204,7 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
  * all completed → 'completed', any started → 'in_progress', otherwise
  * 'not_started' (also the result when the part has no operations).
  */
-function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
+export function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
   if (opStatuses.length === 0) return 'not_started';
   if (opStatuses.every((s) => s === 'completed')) return 'completed';
   if (opStatuses.some((s) => s !== 'pending')) return 'in_progress';
@@ -1300,11 +1300,11 @@ async function detectJobStatusChange(
 
 async function getJobIdForOperation(
   operationId: string,
-): Promise<{ jobId: string; jobPartId: string; jobStatus: ProductionStatus }> {
+): Promise<{ jobId: string; jobPartId: string; jobStatus: ProductionStatus; isExternal: boolean }> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('job_operations')
-    .select('job_id, job_part_id, jobs(production_status)')
+    .select('job_id, job_part_id, jobs(production_status), work_center:work_centers(kind)')
     .eq('id', operationId)
     .single();
   if (error || !data) throw error || new Error('operation not found');
@@ -1312,15 +1312,19 @@ async function getJobIdForOperation(
     job_id: string;
     job_part_id: string;
     jobs?: { production_status: string } | { production_status: string }[] | null;
+    work_center?: { kind: string } | { kind: string }[] | null;
   };
   const row = data as OpRow;
   const jobsField = row.jobs;
   const jobsRow = Array.isArray(jobsField) ? jobsField[0] : jobsField;
   if (!jobsRow) throw new Error('parent job not found');
+  const wcField = row.work_center;
+  const wcRow = Array.isArray(wcField) ? wcField[0] : wcField;
   return {
     jobId: row.job_id,
     jobPartId: row.job_part_id,
     jobStatus: jobsRow.production_status as ProductionStatus,
+    isExternal: wcRow?.kind === 'external',
   };
 }
 
@@ -1342,6 +1346,15 @@ export async function completeJobOperation(
   const ctx = await getJobIdForOperation(operationId);
   void jobId;
 
+  // Outside (external-vendor) ops can NEVER be completed through this internal
+  // path — they go through the send/receive lifecycle
+  // (operatorAccess.markOperationReceived). See docs/modules/jobs.md.
+  if (ctx.isExternal) {
+    throw new Error(
+      'This is an outside (vendor) operation — use Mark Received, not Complete.',
+    );
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
   const now = new Date().toISOString();
 
@@ -1360,7 +1373,7 @@ export async function completeJobOperation(
     .neq('status', 'completed')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .single();
   if (updateError) {
@@ -1389,6 +1402,15 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
   const supabase = getSupabase();
   const ctx = await getJobIdForOperation(operationId);
 
+  // Outside (external-vendor) ops step back through their own lifecycle
+  // (operatorAccess.revertOperationCompletion: received → sent → pending), never
+  // this internal completed → pending path. The UI routes them there.
+  if (ctx.isExternal) {
+    throw new Error(
+      'This is an outside (vendor) operation — undo it from its send/receive controls.',
+    );
+  }
+
   const { data: operation, error } = await supabase
     .from('job_operations')
     .update({
@@ -1401,7 +1423,7 @@ export async function undoJobOperation(operationId: string): Promise<JobOperatio
     .eq('status', 'completed')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .single();
   if (error) {

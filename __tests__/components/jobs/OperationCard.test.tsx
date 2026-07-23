@@ -113,3 +113,53 @@ describe('OperationCard — always-expandable + note count', () => {
     expect(screen.queryByText(/No notes yet/i)).not.toBeInTheDocument();
   });
 });
+
+describe('OperationCard — external (outside-vendor) operations', () => {
+  const externalOp = (over: Partial<JobOperation> = {}): JobOperation =>
+    op({
+      work_center: { id: 'wc-x', name: 'Coating', labor_rate: null, kind: 'external', vendor: { id: 'v1', name: 'AcmeCoat' } },
+      ...over,
+    } as Partial<JobOperation>);
+
+  const renderExternal = (operation: JobOperation, over: Partial<typeof baseProps> = {}) =>
+    render(
+      <ThemeProvider theme={jiggedTheme}>
+        <OperationCard
+          operation={operation}
+          {...baseProps}
+          onSend={vi.fn()}
+          onReceive={vi.fn()}
+          {...over}
+        />
+      </ThemeProvider>,
+    );
+
+  it('a pending external op shows Mark Sent Out + Mark Received, never Complete', () => {
+    renderExternal(externalOp({ status: 'pending' }));
+    expect(screen.getByRole('button', { name: /Mark Sent Out/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Mark Received/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Complete$/i })).not.toBeInTheDocument();
+    // Outside identity + vendor chip.
+    expect(screen.getByText(/Outside · AcmeCoat/i)).toBeInTheDocument();
+  });
+
+  it('a sent (at-vendor) external op shows Mark Received but not Mark Sent Out', () => {
+    renderExternal(externalOp({ status: 'sent', sent_at: '2026-07-15T00:00:00Z' }));
+    expect(screen.getByRole('button', { name: /Mark Received/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Complete$/i })).not.toBeInTheDocument();
+  });
+
+  it('calls onSend with the op id when Mark Sent Out is clicked', async () => {
+    const onSend = vi.fn();
+    renderExternal(externalOp({ status: 'pending' }), { onSend });
+    await userEvent.click(screen.getByRole('button', { name: /Mark Sent Out/i }));
+    expect(onSend).toHaveBeenCalledWith('op-1');
+  });
+
+  it('an internal op still shows Complete (no send/receive)', () => {
+    renderExternal(op({ status: 'pending', work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50, kind: 'internal' } as JobOperation['work_center'] }));
+    expect(screen.getByRole('button', { name: /Complete/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
+  });
+});

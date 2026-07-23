@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'in', 'not', 'order', 'limit', 'single'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'order', 'limit', 'single'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -14,6 +14,10 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
     mockSupabase: {
       from: vi.fn().mockImplementation(() => builder),
       rpc: vi.fn().mockResolvedValue({ data: [], error: null }),
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'auth-user-1' } } }),
+        getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: 'auth-user-1' } } } }),
+      },
     },
   };
 });
@@ -35,7 +39,30 @@ import {
   getAllStationsOperatorJobs,
   getCompletedOperatorJobs,
   getAllStationsCompletedOperatorJobs,
+  completeOperation,
+  markOperationSent,
+  markOperationReceived,
+  revertOperationCompletion,
+  getOutsideOpsForCompany,
 } from '@/utils/operatorAccess';
+
+// Shape loadOpOutsideContext expects from its single() read (job_operations with
+// jobs + work_center joins). Override fields per test.
+function outsideOpRow(over: Partial<{
+  id: string; job_id: string; job_part_id: string; status: string; sent_at: string | null;
+  kind: 'internal' | 'external'; vendor: { name: string } | null;
+}> = {}) {
+  const kind = over.kind ?? 'external';
+  return {
+    id: over.id ?? 'op-1',
+    job_id: over.job_id ?? 'job-1',
+    job_part_id: over.job_part_id ?? 'jp-1',
+    status: over.status ?? 'pending',
+    sent_at: over.sent_at ?? null,
+    jobs: { company_id: 'c1' },
+    work_center: { kind, vendor: over.vendor ?? (kind === 'external' ? { name: 'AcmeCoat' } : null) },
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -278,5 +305,152 @@ describe('addJobNote', () => {
     await expect(addJobNote('j1', 'c1', 'acc1', 'x', { jobOperationId: 'op1' })).rejects.toThrow(
       /Failed to add note/,
     );
+  });
+});
+
+// ============================================================================
+// External (outside-vendor) operation lifecycle: send / receive / guards
+// ============================================================================
+
+describe('external operation lifecycle', () => {
+  describe('completeOperation guard', () => {
+    it('throws for an external op (never completes via the internal path)', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
+      await expect(completeOperation('op-1')).rejects.toThrow(/outside/i);
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('does NOT throw for an internal op (reaches the update path)', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'pending' });
+      await completeOperation('op-1');
+      // First update = the op completion.
+      expect(mockQueryBuilder.update).toHaveBeenCalled();
+      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'completed' });
+    });
+  });
+
+  describe('markOperationSent', () => {
+    it('rejects an internal op', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'pending' });
+      await expect(markOperationSent('op-1')).rejects.toThrow(/outside/i);
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an external op that is not pending', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent' });
+      await expect(markOperationSent('op-1')).rejects.toThrow(/awaiting send/i);
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('sets status=sent + sent_at + sent_by for an external pending op', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
+      await markOperationSent('op-1');
+      const payload = mockQueryBuilder.update.mock.calls[0][0];
+      expect(payload.status).toBe('sent');
+      expect(payload.sent_by).toBe('auth-user-1');
+      expect(payload.sent_at).toEqual(expect.any(String));
+    });
+  });
+
+  describe('markOperationReceived', () => {
+    it('rejects an internal op', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'sent' });
+      await expect(markOperationReceived('op-1')).rejects.toThrow(/outside/i);
+    });
+
+    it('completes from sent WITHOUT re-stamping send', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
+      await markOperationReceived('op-1');
+      const payload = mockQueryBuilder.update.mock.calls[0][0];
+      expect(payload.status).toBe('completed');
+      expect(payload.completed_by).toBe('auth-user-1');
+      // Send already happened — do not overwrite it.
+      expect(payload).not.toHaveProperty('sent_at');
+    });
+
+    it('completes from pending AND back-fills the send stamp (sent is optional)', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
+      await markOperationReceived('op-1');
+      const payload = mockQueryBuilder.update.mock.calls[0][0];
+      expect(payload.status).toBe('completed');
+      expect(payload.sent_at).toEqual(expect.any(String));
+      expect(payload.sent_by).toBe('auth-user-1');
+    });
+  });
+
+  describe('revertOperationCompletion (external branches)', () => {
+    it('received (completed WITH sent_at) steps back to sent', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'completed', sent_at: '2026-07-10T00:00:00Z' });
+      await revertOperationCompletion('op-1');
+      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'sent' });
+    });
+
+    it('legacy completed WITHOUT sent_at steps back to pending', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'completed', sent_at: null });
+      await revertOperationCompletion('op-1');
+      expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'pending' });
+    });
+
+    it('sent (un-send) steps back to pending and clears the send stamp', async () => {
+      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
+      await revertOperationCompletion('op-1');
+      const payload = mockQueryBuilder.update.mock.calls[0][0];
+      expect(payload.status).toBe('pending');
+      expect(payload.sent_at).toBeNull();
+      expect(payload.sent_by).toBeNull();
+    });
+  });
+});
+
+describe('getOutsideOpsForCompany', () => {
+  const outsideRow = (over: Record<string, unknown>) => ({
+    id: 'op',
+    job_id: 'j',
+    job_part_id: 'jp',
+    operation_name: 'Anodize',
+    status: 'pending',
+    sent_at: null,
+    sent_by: null,
+    work_center: { kind: 'external', vendor: { name: 'AcmeCoat' } },
+    job_part: { parts: { part_name: 'Bracket' } },
+    jobs: { job_number: 'J-1', due_date: '2026-07-20', is_hot: false, company_id: 'c1', production_status: 'in_progress', deleted_at: null },
+    ...over,
+  });
+
+  it('filters to external ops, maps vendor/part, and groups by status', async () => {
+    mockQueryBuilder.data = [
+      outsideRow({ id: 'op-pending', status: 'pending' }),
+      outsideRow({ id: 'op-sent', status: 'sent', sent_at: '2026-07-15T00:00:00Z' }),
+    ];
+    const result = await getOutsideOpsForCompany('c1');
+
+    // Scoped to the company + external work centers.
+    expect(mockSupabase.from).toHaveBeenCalledWith('job_operations');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('work_center.kind', 'external');
+    expect(mockQueryBuilder.is).toHaveBeenCalledWith('jobs.deleted_at', null);
+    expect(mockQueryBuilder.in).toHaveBeenCalledWith('status', ['pending', 'sent']);
+
+    expect(result).toHaveLength(2);
+    const pending = result.find((o) => o.id === 'op-pending')!;
+    expect(pending.status).toBe('pending');
+    expect(pending.vendor_name).toBe('AcmeCoat');
+    expect(pending.part_name).toBe('Bracket');
+    expect(pending.job_number).toBe('J-1');
+    expect(result.find((o) => o.id === 'op-sent')!.status).toBe('sent');
+  });
+
+  it('orders hot jobs first', async () => {
+    mockQueryBuilder.data = [
+      outsideRow({ id: 'cold', jobs: { job_number: 'J-COLD', due_date: '2026-07-01', is_hot: false, company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
+      outsideRow({ id: 'hot', jobs: { job_number: 'J-HOT', due_date: '2026-08-01', is_hot: true, company_id: 'c1', production_status: 'in_progress', deleted_at: null } }),
+    ];
+    const result = await getOutsideOpsForCompany('c1');
+    expect(result[0].id).toBe('hot');
+  });
+
+  it('returns [] on query error', async () => {
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = { message: 'boom' };
+    expect(await getOutsideOpsForCompany('c1')).toEqual([]);
   });
 });

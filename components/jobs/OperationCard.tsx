@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
@@ -14,6 +15,8 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { JobNote } from '@/types/operator';
@@ -28,6 +31,10 @@ interface OperationCardProps {
   stepNotes?: JobNote[];
   onComplete: (operationId: string) => void;
   onUndo: (operationId: string) => void;
+  /** Outside-op actions. Required in practice when the op is external; the panel
+   *  wires them to operatorAccess.markOperationSent / markOperationReceived. */
+  onSend?: (operationId: string) => void;
+  onReceive?: (operationId: string) => void;
 }
 
 // Background and border colors for each status
@@ -44,6 +51,11 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
     bg: 'rgba(16, 185, 129, 0.1)',
     border: 'success.main',
   },
+  // Outside op sent out and awaiting return — amber "at vendor" treatment.
+  sent: {
+    bg: 'rgba(245, 158, 11, 0.12)',
+    border: 'warning.main',
+  },
 };
 
 export default function OperationCard({
@@ -52,16 +64,25 @@ export default function OperationCard({
   stepNotes = [],
   onComplete,
   onUndo,
+  onSend,
+  onReceive,
 }: OperationCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const status = operation.status as OperationStatus;
   const styles = STATUS_STYLES[status];
 
-  // One-click completion: any not-done op shows Complete (no separate Start
-  // step), and a completed op shows Undo. Mirrors the operator view.
-  const canComplete = status !== 'completed';
-  const canUndo = status === 'completed';
+  // Outside (external-vendor) op: the part is finished elsewhere, so it uses a
+  // send/receive lifecycle instead of a single Complete. Null kind (deleted work
+  // center) reads as internal.
+  const isExternal = operation.work_center?.kind === 'external';
+  const vendorName = operation.work_center?.vendor?.name ?? null;
+
+  // Internal: any not-done op shows Complete; a completed op shows Undo. External
+  // ops never show Complete — a pending op offers both Mark Sent Out and Mark
+  // Received; a sent op offers Mark Received; both send and receipt can be undone.
+  const canComplete = !isExternal && status !== 'completed';
+  const canUndo = status === 'completed' || (isExternal && status === 'sent');
 
   const formatDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '—';
@@ -100,22 +121,44 @@ export default function OperationCard({
       >
         {/* Operation Info */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography fontWeight={500} noWrap>
-            {operation.operation_name}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-            <AccessTimeIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
-            <Typography variant="caption" color="text.secondary">
-              Est: {operation.estimated_setup_minutes > 0
-                ? `${formatTime(operation.estimated_setup_minutes)} setup, `
-                : ''}{formatTime(operation.estimated_run_minutes_per_unit)}/unit
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+            <Typography fontWeight={500} noWrap>
+              {operation.operation_name}
             </Typography>
+            {isExternal && (
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                icon={<LocalShippingIcon />}
+                label={vendorName ? `Outside · ${vendorName}` : 'Outside'}
+                sx={{ flexShrink: 0 }}
+              />
+            )}
           </Box>
+          {!isExternal && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+              <AccessTimeIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+              <Typography variant="caption" color="text.secondary">
+                Est: {operation.estimated_setup_minutes > 0
+                  ? `${formatTime(operation.estimated_setup_minutes)} setup, `
+                  : ''}{formatTime(operation.estimated_run_minutes_per_unit)}/unit
+              </Typography>
+            </Box>
+          )}
+          {isExternal && status === 'sent' && operation.sent_at && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+              <LocalShippingIcon sx={{ fontSize: 14, color: 'warning.main' }} />
+              <Typography variant="caption" color="text.secondary">
+                At vendor since {formatDateTime(operation.sent_at)}
+              </Typography>
+            </Box>
+          )}
           {status === 'completed' && operation.completed_at && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
               <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
               <Typography variant="caption" color="text.secondary">
-                Completed {formatDateTime(operation.completed_at)}
+                {isExternal ? 'Received' : 'Completed'} {formatDateTime(operation.completed_at)}
                 {operation.completed_by_name ? ` by ${operation.completed_by_name}` : ''}
               </Typography>
             </Box>
@@ -139,6 +182,41 @@ export default function OperationCard({
                   disabled={disabled}
                 >
                   Complete
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+
+          {/* Outside op: Mark Sent Out (only while pending) + Mark Received
+              (while pending or sent — sent is an optional waypoint). */}
+          {isExternal && status === 'pending' && onSend && (
+            <Tooltip title="Mark parts sent out to the vendor">
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  startIcon={<LocalShippingIcon />}
+                  onClick={() => onSend(operation.id)}
+                  disabled={disabled}
+                >
+                  Mark Sent Out
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          {isExternal && (status === 'pending' || status === 'sent') && onReceive && (
+            <Tooltip title="Mark parts received back from the vendor">
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  startIcon={<Inventory2Icon />}
+                  onClick={() => onReceive(operation.id)}
+                  disabled={disabled}
+                >
+                  Mark Received
                 </Button>
               </span>
             </Tooltip>

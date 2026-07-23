@@ -334,6 +334,24 @@ This rule is enforced by [`__tests__/standards/interactionStandards.test.ts`](..
 />
 ```
 
+### Tabs vs. segmented toggles (role-based)
+
+Two controls look similar but have distinct roles — pick by **what the control does**, not by preference:
+
+- **MUI `Tabs`** (underline indicator) — for **switching between named content views** of a
+  section (e.g. Admins / Users / Operators on Team; Internal / External on Work Centers;
+  Directory / Outside work on Vendors; the part-workspace sections). Use `icon` +
+  `iconPosition="start"` for the polished icon-and-label treatment. Scales to 3–5 views.
+- **MUI `ToggleButtonGroup`** (segmented pill) — for a **compact binary/ternary mode or filter
+  applied to the same content** (e.g. My Station / All Stations; made / bought;
+  addition / depletion / adjustment; this step / all part). Use the shared
+  [`highContrastToggleSx`](../lib/highContrastToggleSx.ts) so the pill reads on the navy
+  surface.
+
+Rule of thumb: if picking an option **changes which list/panel is shown**, it's a view → Tabs.
+If it **filters or re-modes the panel you're already looking at**, it's a toggle → pill. Don't
+build the same switch two different ways across pages.
+
 ---
 
 ## Typography Scale

@@ -44,7 +44,16 @@ step, and record progress with a single **Mark Complete**.
 
 **Operations** — `job_operations`: one row per routing step on a `job_part`.
 - `sequence`, `operation_name`, `instructions`, `work_center_id`.
-- `status`: **`pending` → `completed`** (single tap). `completed_at` / `completed_by` record who and when.
+- `status`: **`pending` → `completed`** (single tap) for internal steps. `completed_at` /
+  `completed_by` record who and when.
+- **Outside (external-vendor) steps** — a step routed to a work center with `kind='external'`
+  is performed by a vendor (e.g. coating), so it uses a **send/receive** lifecycle instead of
+  Mark Complete: `pending → (Mark Sent Out) sent → (Mark Received) completed`. `sent` is an
+  **optional waypoint** — Mark Received also completes directly from `pending` (the common
+  after-the-fact case), back-filling the send stamp. `sent_at` / `sent_by` record the send;
+  received reuses `completed_at` / `completed_by` (received == completed). An external step can
+  **never** be completed through the internal Mark Complete path. See
+  [jobs.md](jobs.md#outside-external-vendor-operations) and [prd.md](../prd.md) §4.3.
 - `estimated_setup_minutes`, `estimated_run_minutes_per_unit` — estimates only, used for costing/quoting.
 - **No actual-time columns and no `operator_sessions` table** — both were removed. There is no
   start/stop, no timer, no shift/clock-in. See [prd.md](../prd.md) §4.3 (Complete-Only).
@@ -59,7 +68,10 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
   completed. Out-of-order work is **warned, not blocked** (`predecessors_incomplete`).
 - Completing the last incomplete operation on a part completes the part; the job's
   `production_status` is derived (`not_started` / `in_progress` / `completed`). There is no
-  separate operation-level "in progress" concept beyond the operation row's status.
+  separate operation-level "in progress" concept beyond the operation row's status — the one
+  exception is an outside step's `sent` (at-vendor) state, which counts as *not completed*, so
+  it holds the part at `in_progress` and blocks downstream internal steps until the parts are
+  received.
 
 ---
 
@@ -71,7 +83,7 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
 | Station job list (dispatch) | `/operator/{companyId}/jobs` | Work ready/in-progress at the selected station — one row per (job, part), sorted by due date. An **All Stations** lens shows the whole plant grouped by station. |
 | Job parts hub | `/operator/{companyId}/jobs/{jobId}` | For multi-part jobs, lists the job's parts with progress; single-part jobs redirect straight to the traveler. |
 | Part traveler | `…/jobs/{jobId}/parts/{jobPartId}` | All steps for one part (read-only), with a back-link to the parts hub on multi-part jobs. |
-| Operation action | `…/parts/{jobPartId}/operations/{jobOperationId}` | **Mark Complete** / **Undo**, notes + photos, "last time we ran this part" guidance, and a station-mismatch guard. |
+| Operation action | `…/parts/{jobPartId}/operations/{jobOperationId}` | Internal step: **Mark Complete** / **Undo**. Outside step: an "Outside process" banner (+ vendor) and **Mark Sent Out** / **Mark Received** (station-mismatch guard suppressed — outside steps have no operator station). Both: notes + photos, "last time we ran this part" guidance. |
 | Inventory (optional) | `/operator/{companyId}/inventory[/locations/{id}]` | Feature-gated bin browse + add/remove/adjust stock. |
 | Profile | `/operator/{companyId}/profile` | Operator name, email, company name, **Logout**, and **Give Feedback**. (The current station lives in the header selector, not on this page.) |
 
@@ -81,7 +93,10 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
   the machine, printed once; bulk-print all from the work-centers list.
 - **Per-operation traveler QR** (`utils/jobTravelerPdf.ts`): deep-links to a specific step's
   action view. An **optional accelerator** for shops mid-transition — not required under the
-  paperless-preferred model.
+  paperless-preferred model. **Outside (external-vendor) steps render as a high-contrast dark
+  banner row** on the printed traveler (vendor named, survives grayscale) — the automatic
+  version of the yellow highlighter that told the shipping lead "send this out." The Scan cell
+  stays white so its QR remains scannable inside the banner.
 
 ## Admin
 
@@ -164,6 +179,8 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 ## Out of scope (deliberate)
 
 Single-tap completion keeps the operator's burden minimal. Intentionally **not** part of this
-module: start/stop, time tracking, shift/clock-in, downtime reasons, operation-level WIP status,
-and permanent operator↔station assignment. Scrap/defect capture is in discovery (see
+module: start/stop, time tracking, shift/clock-in, downtime reasons, general operation-level WIP
+status, and permanent operator↔station assignment. (The one deliberate operation-level state is
+an outside step's `sent`/at-vendor waypoint — it exists because the part is physically invisible
+while it's out, not to track in-shop WIP.) Scrap/defect capture is in discovery (see
 [operator-paperless-flow.md](../operator-paperless-flow.md) §5.4).

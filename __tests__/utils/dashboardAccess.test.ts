@@ -154,4 +154,37 @@ describe('getActivityStream', () => {
     const items = await getActivityStream('c1', { types: ['job'] });
     expect(items).toEqual([]);
   });
+
+  it('emits an internal completion as a plain "completed" operation activity', async () => {
+    DATA.operations = [
+      { id: 'opI', completed_at: '2026-07-23T06:00:00Z', sent_at: null, job_id: 'j1', jobs: { job_number: 'J-1' }, work_center: null },
+    ];
+    const ops = await getActivityStream('c1', { types: ['operation'] });
+    expect(ops).toHaveLength(1);
+    expect(ops[0].type).toBe('operation');
+    expect(ops[0].action).toBe('completed');
+    expect(ops[0].vendorName).toBeUndefined();
+  });
+
+  it('emits external send/receive as vendor-tagged "sent"/"received" operation activities', async () => {
+    // A received external op carries both stamps → both a sent and a received row.
+    DATA.operations = [
+      {
+        id: 'opX',
+        completed_at: '2026-07-23T05:00:00Z',
+        sent_at: '2026-07-23T04:00:00Z',
+        job_id: 'j1',
+        jobs: { job_number: 'J-1' },
+        work_center: { kind: 'external', vendor: { name: 'ProFinish Coatings' } },
+      },
+    ];
+    const ops = await getActivityStream('c1', { types: ['operation'] });
+    expect(ops.map((o) => o.action).sort()).toEqual(['received', 'sent']);
+    for (const o of ops) {
+      expect(o.type).toBe('operation');
+      expect(o.vendorName).toBe('ProFinish Coatings');
+    }
+    // Newest-first: received (05:00) before sent (04:00).
+    expect(ops[0].action).toBe('received');
+  });
 });

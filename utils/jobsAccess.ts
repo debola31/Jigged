@@ -49,7 +49,7 @@ function firstRelation<T>(rel: T | T[]): T {
  * Used by the job-reactivate flow, which reopens parts without the cancelled-skip
  * the trigger applies. The routine completion path is DB-trigger-driven.
  */
-function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
+export function deriveStatusFromOps(opStatuses: string[]): ProductionStatus {
   if (opStatuses.length === 0) return 'not_started';
   if (opStatuses.every((s) => s === 'completed')) return 'completed';
   if (opStatuses.some((s) => s !== 'pending')) return 'in_progress';
@@ -261,7 +261,7 @@ export async function getJobWithRelations(
         parts(id, part_name, description),
         job_operations(
           *,
-          work_center:work_centers!left(id, name, labor_rate, kind)
+          work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
         )
       )
     `)
@@ -1209,7 +1209,7 @@ export async function getJobPartOperations(jobPartId: string): Promise<JobOperat
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .eq('job_part_id', jobPartId)
     .order('sequence', { ascending: true });
@@ -1245,15 +1245,28 @@ export async function completeJobOperation(
   void jobId;
 
   // Context: ids + company + ordered qty (target) + before-statuses (to detect
-  // the trigger-driven part/job transitions this completion causes).
+  // the trigger-driven part/job transitions this completion causes) + work-center
+  // kind (to reject outside ops).
   const { data: opCtx, error: ctxErr } = await supabase
     .from('job_operations')
     .select(
-      'id, job_id, job_part_id, job_parts!inner(company_id, quantity, production_status), jobs!inner(production_status)',
+      'id, job_id, job_part_id, job_parts!inner(company_id, quantity, production_status), jobs!inner(production_status), work_center:work_centers(kind)',
     )
     .eq('id', operationId)
     .single();
   if (ctxErr || !opCtx) throw ctxErr || new Error('operation not found');
+
+  // Outside (external-vendor) ops can NEVER be completed through this internal
+  // path — they go through the send/receive lifecycle
+  // (operatorAccess.markOperationReceived). See docs/modules/jobs.md.
+  const opWc = firstRelation(
+    (opCtx as unknown as { work_center: { kind: string } | { kind: string }[] | null }).work_center ?? { kind: 'internal' },
+  );
+  if (opWc?.kind === 'external') {
+    throw new Error(
+      'This is an outside (vendor) operation — use Mark Received, not Complete.',
+    );
+  }
   const part = firstRelation(
     (opCtx as unknown as {
       job_parts:
@@ -1300,7 +1313,7 @@ export async function completeJobOperation(
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .eq('id', operationId)
     .single();
@@ -1340,13 +1353,31 @@ export async function completeJobOperation(
 export async function undoJobOperation(operationId: string): Promise<JobOperation> {
   const supabase = getSupabase();
 
+  // Outside (external-vendor) ops step back through their own lifecycle
+  // (operatorAccess.revertOperationCompletion: received → sent → pending), never
+  // this internal completion-void path. The UI routes them there; guard anyway.
+  const { data: wcRow } = await supabase
+    .from('job_operations')
+    .select('work_center:work_centers(kind)')
+    .eq('id', operationId)
+    .single();
+  const undoWc = firstRelation(
+    (wcRow as unknown as { work_center: { kind: string } | { kind: string }[] | null } | null)
+      ?.work_center ?? { kind: 'internal' },
+  );
+  if (undoWc?.kind === 'external') {
+    throw new Error(
+      'This is an outside (vendor) operation — undo it from its send/receive controls.',
+    );
+  }
+
   await voidAllOperationCompletions(operationId);
 
   const { data: operation, error } = await supabase
     .from('job_operations')
     .select(`
       *,
-      work_center:work_centers!left(id, name, labor_rate, kind)
+      work_center:work_centers!left(id, name, labor_rate, kind, vendor:vendors(id, name))
     `)
     .eq('id', operationId)
     .single();

@@ -21,7 +21,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import type { Company } from '@/utils/companyAccess';
-import type { JobTraveler } from '@/types/operator';
+import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 import type { BomLineWithChildPart } from '@/types/bom';
 import {
   buildShopHeaderLines,
@@ -245,13 +245,28 @@ export async function generateJobTravelerPdf(
     'Step', 'Work Center', 'Operation / Instructions', 'Setup (min)', 'Cycle (min/pc)',
     `Good (of ${traveler.quantity})`, 'Scan',
   ]];
+  // Explicit row -> operation map, built alongside `body` so both the QR draw and
+  // the external-op banner restyle resolve the op by identity, never by a fragile
+  // positional index into traveler.operations (the empty-ops placeholder row maps
+  // to null). A wrong QR under a banner row would send a scan to the wrong step.
+  const rowOps: (JobTravelerOperation | null)[] = [];
   const body = traveler.operations.map((op) => {
+    rowOps.push(op);
+    const isExternal = op.work_center_kind === 'external';
     const workCenter = op.work_center_name ?? op.operation_name ?? '—';
-    const detail = [op.operation_name, op.instructions]
+    const baseDetail = [op.operation_name, op.instructions]
       .filter((s): s is string => Boolean(s && s.trim()))
       // Drop a redundant operation_name when it equals the work-center label.
       .filter((s, idx) => !(idx === 0 && s === op.work_center_name))
       .join(' — ') || '—';
+    // External rows read as a high-contrast "send it out" banner (see
+    // didParseCell); lead the detail with the vendor so the shipping cue is
+    // unmistakable even in grayscale.
+    const detail = isExternal
+      ? `★ OUTSIDE PROCESS — send to ${op.vendor_name || 'the vendor'}${
+          baseDetail && baseDetail !== '—' ? ` — ${baseDetail}` : ''
+        }`
+      : baseDetail;
     return [
       String(op.sequence),
       workCenter,
@@ -265,6 +280,7 @@ export async function generateJobTravelerPdf(
 
   if (body.length === 0) {
     body.push(['—', 'No operations on this part', '', '—', '—', '', '']);
+    rowOps.push(null);
   }
 
   const SCAN_COL = 6;
@@ -301,10 +317,26 @@ export async function generateJobTravelerPdf(
       5: { cellWidth: 58, halign: 'center' },
       6: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
     },
-    // Draw each operation's QR centered in its Scan cell.
+    // Restyle external (outside-vendor) rows as a solid dark banner with white
+    // bold text — reads distinctly AND survives grayscale printing (contrast, not
+    // hue). The Scan cell stays white so its QR remains scannable inside the row.
+    didParseCell: (data) => {
+      if (data.section !== 'body') return;
+      const op = rowOps[data.row.index];
+      if (op?.work_center_kind !== 'external') return;
+      if (data.column.index === SCAN_COL) {
+        data.cell.styles.fillColor = [255, 255, 255];
+      } else {
+        data.cell.styles.fillColor = [30, 30, 30];
+        data.cell.styles.textColor = [255, 255, 255];
+        data.cell.styles.fontStyle = 'bold';
+      }
+    },
+    // Draw each operation's QR centered in its Scan cell (op resolved by the
+    // explicit rowOps map, not by position).
     didDrawCell: (data) => {
       if (data.section !== 'body' || data.column.index !== SCAN_COL) return;
-      const op = traveler.operations[data.row.index];
+      const op = rowOps[data.row.index];
       const dataUrl = op ? qrByOpId.get(op.id) : undefined;
       if (!dataUrl) return;
       const x = data.cell.x + (data.cell.width - OP_QR_SIZE) / 2;

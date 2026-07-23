@@ -17,6 +17,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
@@ -42,6 +43,8 @@ function formatDate(value: string | null): string | null {
 
 function StepIcon({ status }: { status: string }) {
   if (status === 'completed') return <CheckCircleIcon color="success" />;
+  // 'sent' = an outside op is out at the vendor (amber truck).
+  if (status === 'sent') return <LocalShippingIcon color="warning" />;
   if (status === 'in_progress') return <PlayCircleFilledIcon color="primary" />;
   return <RadioButtonUncheckedIcon color="disabled" />;
 }
@@ -243,15 +246,34 @@ export default function OperatorJobTravelerPage() {
                     </Typography>
                   </Box>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="body1" fontWeight={600} noWrap>
-                      {op.work_center_name || op.operation_name}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                      <Typography variant="body1" fontWeight={600} noWrap>
+                        {op.work_center_name || op.operation_name}
+                      </Typography>
+                      {op.work_center_kind === 'external' && (
+                        <Chip
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                          icon={<LocalShippingIcon />}
+                          label={op.vendor_name ? `Outside · ${op.vendor_name}` : 'Outside'}
+                          sx={{ flexShrink: 0 }}
+                        />
+                      )}
+                    </Box>
                     <Typography variant="body2" color="text.secondary" noWrap>
                       {op.instructions || op.operation_name}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Setup {formatMinutes(op.setup_minutes)} &middot; Cycle {formatMinutes(op.cycle_minutes)}
-                    </Typography>
+                    {op.work_center_kind !== 'external' && (
+                      <Typography variant="caption" color="text.secondary">
+                        Setup {formatMinutes(op.setup_minutes)} &middot; Cycle {formatMinutes(op.cycle_minutes)}
+                      </Typography>
+                    )}
+                    {op.status === 'sent' && (
+                      <Typography variant="caption" color="warning.main" display="block">
+                        At vendor — tap to mark received
+                      </Typography>
+                    )}
                     {op.status === 'in_progress' && (
                       <Typography variant="caption" color="primary" display="block">
                         In progress

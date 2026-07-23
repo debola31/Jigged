@@ -14,11 +14,16 @@ import Typography from '@mui/material/Typography';
 import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+
+import OutsideWorkPanel from '@/components/jobs/OutsideWorkPanel';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -51,6 +56,10 @@ export default function VendorsPage() {
   const params = useParams();
   const companyId = params.companyId as string;
 
+  // Vendor directory vs. the company-wide "Outside work" queue (external-vendor
+  // operations sent out / at a vendor). Outside processing is vendor work, so it
+  // lives here rather than as a pseudo job-type on the Jobs list.
+  const [view, setView] = useState<'directory' | 'outside'>('directory');
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
@@ -242,6 +251,25 @@ export default function VendorsPage() {
 
   return (
     <Box>
+      {/* View switch (role standard: Tabs for switching between named views).
+          Directory = the vendor list; Outside processing = the company-wide queue
+          of external-vendor operations to send out / receive. */}
+      <Tabs
+        value={view}
+        onChange={(_e, next: 'directory' | 'outside') => setView(next)}
+        // mt: -2 matches the Team page: icon+label tabs are taller (MUI labelIcon),
+        // so pull the strip up into the layout's top padding to close the gap
+        // between the header and the tabs.
+        sx={{ mt: -2, mb: 3, borderBottom: 1, borderColor: 'divider' }}
+      >
+        <Tab value="directory" icon={<StorefrontIcon />} iconPosition="start" label="Directory" />
+        <Tab value="outside" icon={<LocalShippingIcon />} iconPosition="start" label="Outside processing" />
+      </Tabs>
+
+      {view === 'outside' ? (
+        <OutsideWorkPanel companyId={companyId} />
+      ) : (
+      <>
       <Box
         sx={{
           display: 'flex',
@@ -391,6 +419,8 @@ export default function VendorsPage() {
             />
           </Box>
         </Card>
+      )}
+      </>
       )}
 
       <DeleteImpactDialog

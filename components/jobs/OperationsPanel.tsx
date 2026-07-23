@@ -18,6 +18,11 @@ import {
   completeJobOperation,
   undoJobOperation,
 } from '@/utils/jobsAccess';
+import {
+  markOperationSent,
+  markOperationReceived,
+  revertOperationCompletion,
+} from '@/utils/operatorAccess';
 import { getOperationCompletionSummaries } from '@/utils/operationCompletionsAccess';
 import OperationCard from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
@@ -142,12 +147,54 @@ export default function OperationsPanel({
   const handleUndo = async (operationId: string) => {
     setLoading(true);
     try {
-      await undoJobOperation(operationId);
-      showSnackbar('Operation reverted to pending', 'info');
+      // Outside ops step back through their own lifecycle (received → sent →
+      // pending); internal ops void their completion events.
+      const op = operations.find((o) => o.id === operationId);
+      if (op?.work_center?.kind === 'external') {
+        await revertOperationCompletion(operationId);
+      } else {
+        await undoJobOperation(operationId);
+      }
+      showSnackbar('Operation reverted', 'info');
       await reloadSummaries();
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to undo operation', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Outside (external-vendor) op actions — the part leaves the shop and comes
+  // back. markOperationSent/Received live in operatorAccess and are shared with
+  // the operator view and the Outside-work tab.
+  const handleSend = async (operationId: string) => {
+    setLoading(true);
+    try {
+      await markOperationSent(operationId);
+      showSnackbar('Marked sent out to the vendor.', 'info');
+      await reloadSummaries();
+      onOperationUpdate();
+    } catch (err) {
+      showSnackbar(err instanceof Error ? err.message : 'Failed to mark sent', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReceive = async (operationId: string) => {
+    setLoading(true);
+    try {
+      const result = await markOperationReceived(operationId);
+      if (result.job_completed) {
+        showSnackbar('Parts received — job marked as completed!', 'success');
+      } else {
+        showSnackbar('Marked received from the vendor.', 'success');
+      }
+      await reloadSummaries();
+      onOperationUpdate();
+    } catch (err) {
+      showSnackbar(err instanceof Error ? err.message : 'Failed to mark received', 'error');
     } finally {
       setLoading(false);
     }
@@ -208,6 +255,8 @@ export default function OperationsPanel({
                 stepNotes={notesByOperation?.get(operation.id)}
                 onComplete={handleOpenComplete}
                 onUndo={handleUndo}
+                onSend={handleSend}
+                onReceive={handleReceive}
                 onCompletionsChanged={() => {
                   reloadSummaries();
                   onOperationUpdate();

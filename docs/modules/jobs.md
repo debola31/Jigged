@@ -120,7 +120,7 @@ Overdue surfaces as:
 
 **Features:**
 
-- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status, Due, Created
+- Table showing: Job #, Customer, Parts (truncated list "ADP-001, ADP-002, +1 more"), Current Op, Status (with an **"At vendor"** chip when parts are out for outside processing), Due, Created. The **Outside processing** queue itself lives on the **Vendors** page (Directory / Outside processing tabs) — outside processing is vendor work, not a job type — see [Outside (external-vendor) operations](#outside-external-vendor-operations).
 
 - Search box (searches job number, customer name)
 
@@ -351,13 +351,60 @@ Jobs automatically have operations copied from the part's routing when created. 
 
 - `routing_node_id` - FK to routing_nodes, links back to the routing operation this was created from
 
-- `status` - pending | in_progress | completed | skipped
+- `status` - pending | in_progress | completed | **sent** (outside op at vendor — see below)
 
 - `estimated_setup_minutes` / `estimated_run_minutes_per_unit` - Copied from routing
 
-- `actual_setup_minutes` / `actual_run_minutes` - Recorded when completing
+- `sent_at` / `sent_by` - When an outside op was sent to the vendor (received reuses `completed_at` / `completed_by`)
 
-- `started_at` / `completed_at` - Timestamps for tracking
+- `completed_at` - Completion timestamp
+
+> Note: the shipped operator/admin flow is complete-only (no Start/Skip step and no
+> `actual_*`-hours capture); the values above reflect the current schema.
+
+---
+
+## Outside (external-vendor) operations
+
+An operation routed to a work center with `kind='external'` is performed by an outside vendor
+(e.g. anodizing, plating, heat-treat). It is a first-class routing step, not paperwork — it
+appears everywhere internal steps do, with a distinct identity, and drives whoever ships the
+parts out.
+
+**Lifecycle (a send/receive axis on `job_operations.status`):**
+
+- `pending → (Mark Sent Out) sent → (Mark Received) completed`.
+- `sent` is an **optional waypoint**: Mark Received also completes directly from `pending` (the
+  common after-the-fact case), back-filling `sent_at = completed_at`.
+- **Received == completed** (reuses `completed_at` / `completed_by`), so every part/job rollup
+  works unchanged; a `sent` op counts as *not completed*, holding the part at `in_progress`.
+- An external op can **never** be completed through the internal Mark Complete path
+  (`completeOperation` / `completeJobOperation` throw); it is **never auto-skipped** (the
+  routing→job snapshot creates it `pending` and nothing advances it without a human action).
+- Undo steps back one state: received → `sent` (or → `pending` for a legacy op that never went
+  through send); `sent` → `pending`.
+
+**Surfaces:** the admin Job Detail op card, the operator traveler + operation page (Mark Sent
+Out / Mark Received, "Outside process" badge + vendor), the printed traveler (high-contrast
+dark banner row), and the company-wide **Outside processing** queue — a **tab on the Vendors
+page** (Directory / Outside processing), grouped **Not sent** / **At vendor**, sorted by job due date
+(hot-first), with inline Mark Sent Out / Mark Received (`components/jobs/OutsideWorkPanel.tsx`,
+backed by `getOutsideOpsForCompany`). Outside processing is vendor work, so its queue lives
+under Vendors rather than as a pseudo job-type on the Jobs list (matches how job-shop ERPs —
+SyteLine, Infor, Oracle — surface outside processing in the vendor/purchasing context). No
+readiness/predecessor logic — it informs the shipping lead, replacing the hand-highlighted
+traveler / paper slip. The queue and each row offer Undo (received → sent → not-sent).
+
+**Audit / activity:** send/receive are **not** logged as `job_notes` — `sent_at`/`sent_by` and
+`completed_at`/`completed_by` on the operation are the record, and the **/activity** feed
+derives vendor-tagged **"Sent to {vendor}"** and **"Received from {vendor}"** rows under the
+**Operations** filter (alongside internal "Operation completed"), from those columns
+(`dashboardAccess.fetchOperationActivity`). Undo just clears the stamp, so the activity drops
+off on reload — same as internal-completion undo (no tombstone). Operator notes + photos stay
+fully enabled on outside ops; they are real user notes, no longer polluted by auto-events.
+
+**Deferred (v1):** vendor lead-time → due-date math, PO generation, per-op cost actuals,
+scheduling, and partial/split sends (whole-quantity send/receive only).
 
 ---
 
@@ -372,6 +419,10 @@ The jobs list includes a "Current Op" column that shows the next ready operation
 - **Next ready operation:** Shows the lowest-sequence pending operation whose predecessors are all completed or skipped
 
 - **Completed/Shipped job:** Shows "Done" in italic secondary text
+
+- **Outside op at vendor:** a job whose current live step is a `sent` outside op reads as
+  incomplete in the standard list; the Jobs list badges those rows **"At vendor"** so they
+  don't look stalled, and the **Vendors → Outside processing** tab is the worklist for them.
 
 - **Cancelled job or no routing data:** Shows "--"
 

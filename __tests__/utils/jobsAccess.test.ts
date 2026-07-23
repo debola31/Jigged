@@ -39,6 +39,9 @@ import {
   applyOverdueJobsFilter,
   deleteJob,
   bulkCancelJobs,
+  completeJobOperation,
+  undoJobOperation,
+  deriveStatusFromOps,
   createJobFromPurchaseOrder,
   getAllJobs,
   getCustomersForSelect,
@@ -876,5 +879,41 @@ describe('jobsAccess', () => {
       expect(orderCalls[0]).toEqual(['is_hot', { ascending: false }]);
       expect(orderCalls[1]).toEqual(['created_at', { ascending: false }]);
     });
+  });
+});
+
+// ============================================================================
+// External (outside-vendor) operations: derive-status + admin guards
+// ============================================================================
+
+describe('deriveStatusFromOps with the sent (at-vendor) state', () => {
+  it("treats a 'sent' op as work-in-progress (not completed, not not_started)", () => {
+    expect(deriveStatusFromOps(['completed', 'sent'])).toBe('in_progress');
+    expect(deriveStatusFromOps(['sent'])).toBe('in_progress');
+    expect(deriveStatusFromOps(['pending', 'sent'])).toBe('in_progress');
+  });
+
+  it("still completes a part only when every op is 'completed' (a received external op counts)", () => {
+    expect(deriveStatusFromOps(['completed', 'completed'])).toBe('completed');
+  });
+});
+
+describe('admin op guards refuse external (outside-vendor) ops', () => {
+  const externalOpRow = {
+    job_id: 'job-1',
+    job_part_id: 'jp-1',
+    jobs: { production_status: 'in_progress' },
+    work_center: { kind: 'external' },
+  };
+
+  it('completeJobOperation throws for an external op (never completes via the internal path)', async () => {
+    mockQueryBuilder.data = externalOpRow;
+    await expect(completeJobOperation('op-1', 'job-1')).rejects.toThrow(/outside/i);
+    expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+  });
+
+  it('undoJobOperation throws for an external op (undo goes through its own lifecycle)', async () => {
+    mockQueryBuilder.data = { work_center: { kind: 'external' } };
+    await expect(undoJobOperation('op-1')).rejects.toThrow(/outside/i);
   });
 });

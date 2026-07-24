@@ -230,8 +230,11 @@ export default function OperationCard({
           )}
         </Box>
 
-        {/* Status Chip */}
-        <OperationStatusChip status={status} />
+        {/* Status chip — omitted while pending. A pending op already reads as
+            "not done" from its Mark Complete button; the grey "Pending" chip
+            added noise and made the row look finished. Kept for in-progress /
+            completed / at-vendor, where it carries real state. */}
+        {status !== 'pending' && <OperationStatusChip status={status} />}
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
@@ -246,7 +249,7 @@ export default function OperationCard({
                   onClick={() => onComplete(operation.id)}
                   disabled={disabled}
                 >
-                  Complete
+                  Mark Complete
                 </Button>
               </span>
             </Tooltip>

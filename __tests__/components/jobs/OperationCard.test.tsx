@@ -165,9 +165,25 @@ describe('OperationCard — external (outside-vendor) operations', () => {
     expect(onSend).toHaveBeenCalledWith('op-1');
   });
 
-  it('an internal op still shows Complete (no send/receive)', () => {
+  it('an internal op shows Mark Complete (no send/receive) and no Pending chip', () => {
     renderExternal(op({ status: 'pending', work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50, kind: 'internal' } as JobOperation['work_center'] }));
-    expect(screen.getByRole('button', { name: /Complete/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Mark Complete/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
+    // A pending op reads as "not done" from the Mark Complete button, so the
+    // grey "Pending" chip is omitted (it made the row look finished).
+    expect(screen.queryByText(/^Pending$/i)).not.toBeInTheDocument();
+  });
+
+  it('a completed internal op still shows its status chip', () => {
+    renderExternal(
+      op({
+        status: 'completed',
+        completed_at: '2026-07-15T00:00:00Z',
+        work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50, kind: 'internal' } as JobOperation['work_center'],
+      }),
+    );
+    // Only 'pending' is suppressed; real states (Completed / In Progress / At
+    // Vendor) still render their chip.
+    expect(screen.getByText(/^Completed$/i)).toBeInTheDocument();
   });
 });

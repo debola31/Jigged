@@ -110,28 +110,36 @@ async function renderAndGetOpsTable(t: JobTraveler) {
   };
 }
 
-const SCAN_COL = 6; // traveler ops table: Step,WC,Detail,Setup,Cycle,Good,Scan
+// traveler ops table columns: Step, WC, Operation/Instructions, Notes, Done, Scan
 const DETAIL_COL = 2;
+const NOTES_COL = 3;
+const SCAN_COL = 5;
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe('generateJobTravelerPdf — external (outside) operations', () => {
-  it('renders an external row with a vendor banner in the detail cell', async () => {
+  it('puts "OUTSIDE — ship to {vendor}" in the Notes column; internal Notes carry the times', async () => {
     const opts = await renderAndGetOpsTable(
       traveler([
-        op({ id: 'op-0', sequence: 10, work_center_kind: 'internal', operation_name: 'Mill' }),
+        op({ id: 'op-0', sequence: 10, work_center_kind: 'internal', operation_name: 'Mill', setup_minutes: 15, cycle_minutes: 3 }),
         op({ id: 'op-1', sequence: 20, work_center_kind: 'external', vendor_name: 'AcmeCoat', operation_name: 'Anodize' }),
       ]),
     );
-    expect(opts.body[1][DETAIL_COL]).toContain('OUTSIDE PROCESS');
-    expect(opts.body[1][DETAIL_COL]).toContain('AcmeCoat');
-    // Internal row is untouched.
-    expect(opts.body[0][DETAIL_COL]).not.toContain('OUTSIDE PROCESS');
+    // External: the ship-to cue lives in Notes, not the Instructions cell, and has
+    // no non-ASCII star glyph.
+    expect(opts.body[1][NOTES_COL]).toContain('OUTSIDE');
+    expect(opts.body[1][NOTES_COL]).toContain('ship to AcmeCoat');
+    expect(opts.body[1][NOTES_COL]).not.toContain('★');
+    // The Instructions cell is the plain operation detail (no OUTSIDE prefix).
+    expect(opts.body[1][DETAIL_COL]).not.toContain('OUTSIDE');
+    // Internal: Notes carry the setup/cycle estimates.
+    expect(opts.body[0][NOTES_COL]).toContain('Setup 15');
+    expect(opts.body[0][NOTES_COL]).toContain('Cycle 3');
   });
 
-  it('restyles the external row dark (white text) but keeps the Scan cell white', async () => {
+  it('flags the external row with a heavy outline + bold black text, NO fill', async () => {
     const opts = await renderAndGetOpsTable(
       traveler([
         op({ id: 'op-0', work_center_kind: 'internal' }),
@@ -143,10 +151,10 @@ describe('generateJobTravelerPdf — external (outside) operations', () => {
       opts.didParseCell({ section: 'body', row: { index: rowIndex }, column: { index: colIndex }, cell });
       return cell.styles;
     };
-    // External non-scan cell → dark fill + white bold text.
-    expect(parse(1, DETAIL_COL)).toMatchObject({ fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: 'bold' });
-    // External Scan cell → white (so the QR stays scannable).
-    expect(parse(1, SCAN_COL)).toMatchObject({ fillColor: [255, 255, 255] });
+    // External cell → bold black text + heavy dark outline, and NO fill (border only).
+    const ext = parse(1, DETAIL_COL);
+    expect(ext).toMatchObject({ textColor: [20, 20, 20], fontStyle: 'bold', lineWidth: 1.2, lineColor: [20, 20, 20] });
+    expect(ext.fillColor).toBeUndefined();
     // Internal row → no restyle.
     expect(parse(0, DETAIL_COL)).toEqual({});
   });
@@ -172,12 +180,12 @@ describe('generateJobTravelerPdf — external (outside) operations', () => {
     expect(drawnUrls[1]).toContain('operation=op-1');
   });
 
-  it('renders a no-vendor external op without throwing (generic "the vendor")', async () => {
+  it('renders a no-vendor external op without throwing (still flagged OUTSIDE)', async () => {
     const opts = await renderAndGetOpsTable(
       traveler([op({ id: 'op-1', work_center_kind: 'external', vendor_name: null })]),
     );
-    expect(opts.body[0][DETAIL_COL]).toContain('OUTSIDE PROCESS');
-    expect(opts.body[0][DETAIL_COL]).toContain('the vendor');
+    expect(opts.body[0][NOTES_COL]).toContain('OUTSIDE');
+    expect(opts.body[0][NOTES_COL]).toContain('the vendor');
   });
 
   it('handles the empty-ops placeholder row (null op) without throwing on the hooks', async () => {

@@ -385,8 +385,8 @@ parts out.
   through send); `sent` → `pending`.
 
 **Surfaces:** the admin Job Detail op card, the operator traveler + operation page (Mark Sent
-Out / Mark Received, "Outside process" badge + vendor), the printed traveler (high-contrast
-dark banner row), and the company-wide **Outside processing** queue — a **tab on the Vendors
+Out / Mark Received, "Outside process" badge + vendor), the printed traveler (heavy black
+outline + bold text, border-only/low-ink, with "OUTSIDE — ship to {vendor}" in the Notes column), and the company-wide **Outside processing** queue — a **tab on the Vendors
 page** (Directory / Outside processing), grouped **Not sent** / **At vendor**, sorted by job due date
 (hot-first), with inline Mark Sent Out / Mark Received (`components/jobs/OutsideWorkPanel.tsx`,
 backed by `getOutsideOpsForCompany`). Outside processing is vendor work, so its queue lives

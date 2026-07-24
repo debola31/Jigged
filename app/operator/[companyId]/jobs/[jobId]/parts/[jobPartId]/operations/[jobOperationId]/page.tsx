@@ -263,13 +263,6 @@ export default function OperatorOperationActionPage() {
         </Alert>
       )}
 
-      {!isCompleted && job.predecessors_incomplete && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Earlier steps on this part aren&apos;t complete yet. You can still complete this
-          step if you&apos;re working out of order.
-        </Alert>
-      )}
-
       <Card
         elevation={2}
         sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}

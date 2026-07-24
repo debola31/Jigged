@@ -8,7 +8,6 @@ import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
-import CheckIcon from '@mui/icons-material/Check';
 import UndoIcon from '@mui/icons-material/Undo';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -244,8 +243,7 @@ export default function OperationCard({
                 <Button
                   size="small"
                   variant="contained"
-                  color="success"
-                  startIcon={<CheckIcon />}
+                  color="primary"
                   onClick={() => onComplete(operation.id)}
                   disabled={disabled}
                 >

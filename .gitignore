@@ -83,3 +83,5 @@ api/.coverage
 
 # Blender
 /outputs/
+# 3d-experiments: local copy of the (gitignored) Blender export, kept out of git
+/public/week1-scene.glb

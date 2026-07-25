@@ -111,7 +111,7 @@ export default function PartLocationInventory({
   return (
     <Box sx={{ textAlign: 'left' }}>
       <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
-        <Button variant="contained" color="success" startIcon={<AddIcon />} onClick={() => setAction('add')}>
+        <Button variant="contained" color="primary" startIcon={<AddIcon />} onClick={() => setAction('add')}>
           Add
         </Button>
         <Button variant="contained" color="error" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>

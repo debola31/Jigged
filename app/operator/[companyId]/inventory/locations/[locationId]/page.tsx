@@ -203,7 +203,7 @@ export default function OperatorBinViewPage() {
                     <Button
                       fullWidth
                       variant="contained"
-                      color="success"
+                      color="primary"
                       startIcon={<AddIcon />}
                       onClick={() => setModal({ action: 'add', part })}
                     >

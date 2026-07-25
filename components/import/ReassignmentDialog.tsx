@@ -42,7 +42,7 @@ export default function ReassignmentDialog({
         <Button onClick={onCancel} color="inherit">
           Cancel
         </Button>
-        <Button onClick={onConfirm} variant="contained" color="warning">
+        <Button onClick={onConfirm} variant="contained">
           Reassign
         </Button>
       </DialogActions>

@@ -1,6 +1,6 @@
 /**
- * interactionStandardsCheck — a source scanner that turns two documented-but-
- * unenforced design rules into a CI gate. Both rules drifted in real PRs because
+ * interactionStandardsCheck — a source scanner that turns documented-but-
+ * unenforced design rules into a CI gate. Each rule drifted in real PRs because
  * docs alone don't stop hand-rolled regressions:
  *
  *   1. Misleading placeholders — a placeholder that looks like real data (bare
@@ -10,6 +10,11 @@
  *      rest, never grey (`color: 'text.secondary'`). See
  *      docs/interaction-standards.md "Destructive actions". Use the shared
  *      components/common/DeleteIconButton so the color can't be set wrong.
+ *   3. Semantic-color button fills — a filled (contained) action <Button> may
+ *      only be primary (blue) or error (red). success/warning/info are status-
+ *      chip colors; on a button fill they mislead (a green button reads as
+ *      "already done"). See docs/design-system.md "Buttons". This is exactly
+ *      how the green "Complete"/"Mark Received" one-offs crept in.
  *
  * Mirrors scripts/schemaEmbedCheck.ts: a pure scan function the test drives,
  * plus a main() for `pnpm exec tsx`.
@@ -20,7 +25,7 @@ import path from 'path';
 export interface StandardsViolation {
   file: string; // relative to repo root
   line: number;
-  rule: 'placeholder' | 'grey-delete';
+  rule: 'placeholder' | 'grey-delete' | 'button-color';
   message: string;
 }
 
@@ -101,10 +106,70 @@ export function findGreyDeleteViolations(source: string, relPath: string): Stand
 // We intentionally do NOT enforce a single glyph here — that's a per-call-site
 // judgment. We DO enforce that no delete is grey (findGreyDeleteViolations).
 
+/**
+ * Slice a JSX opening tag that starts at `source[start]` (the `<`), returning the
+ * text up to and including the tag's own closing `>`. Skips any `>` inside {expr}
+ * braces and string / template literals, so `onClick={() => fn()}` and `sx={{…}}`
+ * don't end the tag early. Heuristic (no escaped-quote handling) — same spirit as
+ * this file's other regex scanners. Returns null if no closer is found.
+ */
+function sliceOpeningTag(source: string, start: number): string | null {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      if (depth > 0) depth--;
+    } else if (c === '>' && depth === 0) {
+      return source.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Find action buttons that carry a semantic FILL color. We flag only
+ * `variant="contained"` with `color="success|warning|info"` — that is the one
+ * case that actually renders the misleading color, because the theme re-colors
+ * outlined (white) and text (primary.light) buttons regardless of the `color`
+ * prop. So the sanctioned outlined exception ("Mark Sent Out" = outlined warning)
+ * passes automatically, and `color="error"` (destructive red) and primary/omitted
+ * stay allowed. Only literal string props are checked; `color={expr}` is left to
+ * review. Matches `<Button` exactly (not ButtonBase / IconButton / ToggleButton).
+ */
+export function findButtonColorViolations(source: string, relPath: string): StandardsViolation[] {
+  const out: StandardsViolation[] = [];
+  const re = /<Button\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const tag = sliceOpeningTag(source, m.index);
+    if (!tag) continue;
+    if (!/\bvariant=["']contained["']/.test(tag)) continue;
+    const cm = tag.match(/\bcolor=["'](success|warning|info)["']/);
+    if (!cm) continue;
+    if (ALLOWLIST.has(`${relPath}::button-color`)) continue;
+    const line = source.slice(0, m.index).split('\n').length;
+    out.push({
+      file: relPath,
+      line,
+      rule: 'button-color',
+      message: `Contained <Button> uses color="${cm[1]}" — a status-chip color. A filled action button is primary (blue) or, if destructive, error (red). See docs/design-system.md "Buttons".`,
+    });
+  }
+  return out;
+}
+
 export function scanSource(source: string, relPath: string): StandardsViolation[] {
   return [
     ...findPlaceholderViolations(source, relPath),
     ...findGreyDeleteViolations(source, relPath),
+    ...findButtonColorViolations(source, relPath),
   ];
 }
 

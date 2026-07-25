@@ -84,7 +84,7 @@ export default function InventoryTab({
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 4, flexWrap: 'wrap' }}>
               <Button
                 variant="contained"
-                color="success"
+                color="primary"
                 size="large"
                 startIcon={<AddIcon />}
                 onClick={() => openTxnModal('addition')}

@@ -93,7 +93,7 @@ function OutsideOpRow({
         <Button
           size="small"
           variant="contained"
-          color="success"
+          color="primary"
           startIcon={<Inventory2Icon />}
           disabled={busy}
           onClick={() => onReceive(op)}

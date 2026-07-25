@@ -8,7 +8,6 @@ import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import Tooltip from '@mui/material/Tooltip';
-import CheckIcon from '@mui/icons-material/Check';
 import UndoIcon from '@mui/icons-material/Undo';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -230,8 +229,11 @@ export default function OperationCard({
           )}
         </Box>
 
-        {/* Status Chip */}
-        <OperationStatusChip status={status} />
+        {/* Status chip — omitted while pending. A pending op already reads as
+            "not done" from its Mark Complete button; the grey "Pending" chip
+            added noise and made the row look finished. Kept for in-progress /
+            completed / at-vendor, where it carries real state. */}
+        {status !== 'pending' && <OperationStatusChip status={status} />}
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
@@ -241,12 +243,11 @@ export default function OperationCard({
                 <Button
                   size="small"
                   variant="contained"
-                  color="success"
-                  startIcon={<CheckIcon />}
+                  color="primary"
                   onClick={() => onComplete(operation.id)}
                   disabled={disabled}
                 >
-                  Complete
+                  Mark Complete
                 </Button>
               </span>
             </Tooltip>
@@ -276,7 +277,7 @@ export default function OperationCard({
                 <Button
                   size="small"
                   variant="contained"
-                  color="success"
+                  color="primary"
                   startIcon={<Inventory2Icon />}
                   onClick={() => onReceive(operation.id)}
                   disabled={disabled}

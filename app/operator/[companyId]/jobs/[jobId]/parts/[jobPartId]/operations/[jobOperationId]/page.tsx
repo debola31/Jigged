@@ -6,6 +6,7 @@ import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import ButtonBase from '@mui/material/ButtonBase';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -18,6 +19,7 @@ import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import {
   getOperatorOperationDetail,
   getCurrentMember,
@@ -34,7 +36,7 @@ import {
   completionConsequenceCaption,
 } from '@/components/operations/operationMath';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
@@ -68,6 +70,7 @@ export default function OperatorOperationActionPage() {
   const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
 
   const { stationId, stationName, initializing } = useStationContext();
+  const nav = useOperatorNav();
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -260,22 +263,34 @@ export default function OperatorOperationActionPage() {
         </Alert>
       )}
 
-      {!isCompleted && job.predecessors_incomplete && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Earlier steps on this part aren&apos;t complete yet. You can still complete this
-          step if you&apos;re working out of order.
-        </Alert>
-      )}
-
       <Card
         elevation={2}
         sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
       >
         <CardContent>
           <Box sx={{ mb: 2 }}>
-            <Typography variant="h5" component="h1" fontWeight={700}>
-              {job.job_number}
-            </Typography>
+            {/* The job number doubles as the link to this part's traveler — the
+                full step list. It's the way there for an operator who scanned
+                straight into one operation (no in-app history to pop back to);
+                the list icon signals it's tappable. */}
+            <ButtonBase
+              onClick={() => nav.push(travelerHref)}
+              aria-label={`View all steps for job ${job.job_number}`}
+              sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.75,
+                minHeight: 44,
+                borderRadius: 1,
+                mx: -0.75,
+                px: 0.75,
+              }}
+            >
+              <Typography variant="h5" component="span" fontWeight={700}>
+                {job.job_number}
+              </Typography>
+              <FormatListBulletedIcon fontSize="small" sx={{ color: 'primary.light' }} />
+            </ButtonBase>
             <Typography variant="body2" color="text.secondary">
               {job.customer_name || 'No customer'}
             </Typography>
@@ -295,27 +310,21 @@ export default function OperatorOperationActionPage() {
           </Typography>
 
           {isExternal && (
-            <Box
-              sx={{
-                mt: 1.5,
-                p: 1.5,
-                borderRadius: 1,
-                bgcolor: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid',
-                borderColor: 'warning.main',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-              }}
-            >
-              <LocalShippingIcon sx={{ color: 'warning.main' }} />
-              <Box>
-                <Chip size="small" color="warning" label="OUTSIDE PROCESS" sx={{ fontWeight: 700 }} />
-                <Typography variant="body2" sx={{ mt: 0.5 }}>
-                  Performed by {job.operation_vendor_name || 'an outside vendor'}. Send the parts
-                  out, then mark received when they&apos;re back.
-                </Typography>
-              </Box>
+            // Just name the vendor (matches the traveler/admin "Outside · …"
+            // chip). The Mark Sent Out / Mark Received buttons below carry the
+            // "what to do" — no separate instructional banner needed.
+            <Box sx={{ mt: 1.5 }}>
+              <Chip
+                size="small"
+                color="warning"
+                variant="outlined"
+                icon={<LocalShippingIcon />}
+                label={
+                  job.operation_vendor_name
+                    ? `Outside · ${job.operation_vendor_name}`
+                    : 'Outside process'
+                }
+              />
             </Box>
           )}
 

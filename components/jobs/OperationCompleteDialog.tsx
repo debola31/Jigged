@@ -99,7 +99,7 @@ export default function OperationCompleteDialog({
         </Button>
         <Button
           variant="contained"
-          color="success"
+          color="primary"
           onClick={() => onRecord(qty)}
           disabled={busy || !(qty > 0)}
         >

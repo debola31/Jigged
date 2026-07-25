@@ -160,29 +160,46 @@ Follow Material Design 3 guidelines for consistency, accessibility, and familiar
 
 ### Buttons
 
-Primary Actions (job creation, approvals):
+**Every button answers two questions: what rank is it (→ `variant`), and is it
+destructive (→ `color`)?** Those are the only two axes. Do **not** reach for
+`success` / `warning` / `info` *fills* to brighten an ordinary action — those are
+status-chip colors (see [Status Colors](#status-colors)); on an action button they
+mislead. A green button reads as *already done* — exactly the trap we hit with green
+"Complete" / "Mark Received" buttons.
 
-```javascript
-<Button variant="contained" color="primary" size="large">
-  Create job
-</Button>
+**Rank → variant.** `color` is almost always **omitted** — the theme default is
+`primary` (steel blue). `size="large"` is *not* needed (the theme already floors
+every button at a 48px touch target).
+
+| Rank | Style | Use for |
+|---|---|---|
+| **Primary** | `variant="contained"` (blue) | The main action on the surface: Save, Create, Add, Submit, Convert, Mark Complete, Mark Received, Record |
+| **Secondary** | `variant="outlined"` (white-on-transparent) | Alternate / less-committing actions: Import, Edit, empty-state CTAs |
+| **Tertiary / dismiss** | `variant="text"` | Cancel, Back, Close, Skip, Undo |
+
+```tsx
+<Button variant="contained">Create job</Button>   {/* primary — blue */}
+<Button variant="outlined">Import</Button>          {/* secondary */}
+<Button variant="text">Cancel</Button>             {/* dismiss */}
 ```
 
-**Secondary Actions** (cancel, back):
+**Destructive → `color="error"` (red), always.** Any Delete / Remove / Cancel-job /
+Void / Disconnect / Logout is red — `contained error` for the final confirm,
+`outlined` / `text error` for the at-rest trigger. This is the one button rule we
+**enforce**: use `components/common/DeleteIconButton` for the trash affordance,
+guarded by a CI source-scan (see [interaction-standards.md §1](interaction-standards.md)).
 
-```javascript
-<Button variant="outlined" color="primary">
-  Cancel
-</Button>
-```
+**`success` / `warning` / `info` are for status chips, not action buttons.** The
+only sanctioned exceptions:
 
-**Tertiary Actions** (less important options):
-
-```javascript
-<Button variant="text" color="primary">
-  Skip
-</Button>
-```
+- **Send-to-vendor waypoint** — "Mark Sent Out" is `outlined color="warning"`: a
+  reversible "parts left the shop" step, deliberately amber, paired with a blue
+  primary "Mark Received."
+- **Inventory verbs** — **Remove** is `color="error"` (subtractive); **Adjust** is
+  `variant="outlined"` (secondary); **Add** is a normal blue primary — *not* green.
+- **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically
+  (add = success / remove = error / adjust = info) — they indicate the *selected
+  mode*, not an action.
 
 **Button Variant Theme Overrides:**
 

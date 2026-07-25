@@ -363,13 +363,11 @@ export default function PartTransactionModal({
           onClick={handleSubmit}
           disabled={loading || formData.quantity <= 0 || wouldGoNegative}
           startIcon={loading ? <CircularProgress size={20} /> : null}
-          color={
-            formData.type === 'addition'
-              ? 'success'
-              : formData.type === 'depletion'
-              ? 'error'
-              : 'info'
-          }
+          // Primary action = blue; the one exception is depletion (removing
+          // stock), which stays red like every other destructive action. The
+          // mode's semantic color lives on the ToggleButtonGroup above, not on
+          // this action button.
+          color={formData.type === 'depletion' ? 'error' : 'primary'}
         >
           {loading ? 'Processing...' : getTypeLabel(formData.type)}
         </Button>

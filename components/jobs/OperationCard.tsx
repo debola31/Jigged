@@ -277,7 +277,7 @@ export default function OperationCard({
                 <Button
                   size="small"
                   variant="contained"
-                  color="success"
+                  color="primary"
                   startIcon={<Inventory2Icon />}
                   onClick={() => onReceive(operation.id)}
                   disabled={disabled}

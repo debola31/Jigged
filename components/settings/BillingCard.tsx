@@ -51,7 +51,7 @@ function formatDate(iso: string | null): string {
 export default function BillingCard() {
   const params = useParams();
   const companyId = params.companyId as string;
-  const { billing, isDemo, isLoading, refresh } = useSubscription();
+  const { billing, isDemo, isLoading, refresh, isReadOnly } = useSubscription();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reconciledFor = useRef<string | null>(null);
@@ -73,8 +73,12 @@ export default function BillingCard() {
 
   const status = billing?.subscription_status ?? null;
   const graceEnd = graceEndMs(billing);
-  const withinGrace = graceEnd !== null && graceEnd >= Date.now();
-  const readOnly = (status === 'canceled' || status === 'unpaid') && !withinGrace;
+  // "Ended" (read-only) vs "Ending" (still in grace) comes from the provider's
+  // entitlement rather than recomputing the grace boundary here — that keeps a
+  // single source of truth and avoids calling Date.now() during render (impure).
+  // It also correctly accounts for billing_exempt / demo, which a local
+  // status+grace check would miss.
+  const readOnly = isReadOnly;
   // A still-live subscription (trial/active/past_due) that's set to cancel at
   // period end: Stripe keeps it live with cancel_at set. Surface the pending
   // cancellation instead of "renews"/"billing begins".

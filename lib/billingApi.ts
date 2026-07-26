@@ -2,11 +2,11 @@
  * Thin client for the FastAPI Stripe endpoints. Checkout and Portal return
  * Stripe-hosted URLs; the caller redirects the browser to them (no Stripe.js).
  */
-import { getSupabase } from '@/lib/supabase';
+import { getTypedSupabase } from '@/lib/supabase';
 import { API_BASE_URL } from '@/lib/api';
 
 async function authToken(): Promise<string> {
-  const supabase = getSupabase();
+  const supabase = getTypedSupabase();
   const {
     data: { session },
   } = await supabase.auth.getSession();

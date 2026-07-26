@@ -58,7 +58,9 @@ export default function SubscriptionProvider({ children }: { children: ReactNode
 
   const fetchBilling = useCallback(async () => {
     if (!companyId) return;
-    setIsLoading(true);
+    // Note: no synchronous setIsLoading(true) here. `isLoading` starts true, so
+    // the first load shows the spinner; all state writes below happen after the
+    // await (async), which keeps the calling effect free of synchronous setState.
     try {
       const row = await getCompanyBilling(companyId);
       setBilling(row);
@@ -75,29 +77,36 @@ export default function SubscriptionProvider({ children }: { children: ReactNode
 
   useEffect(() => {
     if (demoLoading) return; // wait until we know whether this is a demo company
-    if (isDemoMode) {
-      // Demo companies are never billing-gated — skip the fetch entirely.
-      setBilling(null);
-      setIsLoading(false);
-      return;
+    if (isDemoMode) return; // demo companies are never billing-gated — skip the fetch
+    // Inline async wrapper (mirrors DemoModeProvider) so the effect body doesn't
+    // directly invoke a setState-bearing callback — react-hooks/set-state-in-effect.
+    async function load() {
+      await fetchBilling();
     }
-    fetchBilling();
+    load();
   }, [companyId, isDemoMode, demoLoading, fetchBilling]);
 
-  const entitlement = getEntitlement(isDemoMode, billing);
+  // Demo companies never fetch billing; treat their cache as empty and resolved.
+  // Deriving these (rather than setting state inside the effect) keeps the effect
+  // free of synchronous setState and gives the same result — getEntitlement
+  // short-circuits is_demo → full regardless of the row.
+  const effectiveBilling = isDemoMode ? null : billing;
+  const loading = demoLoading || (!isDemoMode && isLoading);
+
+  const entitlement = getEntitlement(isDemoMode, effectiveBilling);
 
   return (
     <SubscriptionContext.Provider
       value={{
         entitlement,
-        billing,
+        billing: effectiveBilling,
         isDemo: isDemoMode,
         isPastDue: entitlement === 'past_due',
         isReadOnly: entitlement === 'read_only',
         mustSubscribe: entitlement === 'must_subscribe',
         canWrite: isWriteAllowed(entitlement),
-        hasCustomer: Boolean(billing?.stripe_customer_id),
-        isLoading: isLoading || demoLoading,
+        hasCustomer: Boolean(effectiveBilling?.stripe_customer_id),
+        isLoading: loading,
         refresh: fetchBilling,
       }}
     >

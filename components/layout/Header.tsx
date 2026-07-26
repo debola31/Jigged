@@ -5,7 +5,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -198,9 +198,8 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
           {pageTitle}
         </Typography>
         {isDemoMode && (
-          <Chip
+          <StatusChip
             label="DEMO"
-            size="small"
             color="warning"
             sx={{ fontWeight: 600, letterSpacing: 0.5 }}
           />

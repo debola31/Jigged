@@ -269,6 +269,50 @@ export async function getCompany(companyId: string): Promise<Company | null> {
 }
 
 /**
+ * The webhook-fed Stripe billing cache row for a company. Read-only on the
+ * client (only the service-role webhook writes it). Entitlement is derived from
+ * this via `getEntitlement` in `lib/entitlement.ts`.
+ */
+export interface CompanyBilling {
+  company_id: string;
+  billing_exempt: boolean;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  subscription_status: string | null;
+  subscription_price_id: string | null;
+  current_period_end: string | null;
+  cancel_at: string | null;
+  canceled_at: string | null;
+  ended_at: string | null;
+  trial_end: string | null;
+}
+
+/**
+ * Read a company's Stripe billing cache. Returns `null` when the company has no
+ * billing row (a new, never-subscribed company → the subscribe funnel). Throws
+ * on a genuine read error so the caller can surface it to Sentry rather than
+ * silently defaulting entitlement — this is a billing path. Reads via RLS; touches
+ * Stripe zero times, so it is safe on mount.
+ */
+export async function getCompanyBilling(companyId: string): Promise<CompanyBilling | null> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('company_billing')
+    .select(
+      'company_id, billing_exempt, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_price_id, current_period_end, cancel_at, canceled_at, ended_at, trial_end'
+    )
+    .eq('company_id', companyId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to read company_billing for ${companyId}: ${error.message}`);
+  }
+
+  return (data as CompanyBilling | null) ?? null;
+}
+
+/**
  * Update the company's logo storage path (or clear it by passing null).
  * The caller is responsible for uploading/removing the file in storage.
  */

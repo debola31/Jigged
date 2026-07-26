@@ -74,6 +74,15 @@ insert into public.companies (id, name, settings) values
    '{"features": {"data_import": true}}'::jsonb)
 on conflict (id) do nothing;
 
+-- Billing cache: the grandfather backfill in the stripe_billing_cache migration
+-- runs on an empty DB (before this seed), so the seeded company gets no row and
+-- would be write-blocked once billing enforcement is on. Grandfather it here so
+-- dev / preview / E2E have a fully writable company (entitlement = full, no
+-- billing banner). Devs can still exercise Checkout in Stripe test mode.
+insert into public.company_billing (company_id, billing_exempt) values
+  ('22222222-2222-2222-2222-222222222222', true)
+on conflict (company_id) do nothing;
+
 insert into public.user_company_access (id, user_id, company_id, role, name) values
   ('23000000-0000-0000-0000-000000000001',
    '11111111-1111-1111-1111-111111111111',

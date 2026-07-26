@@ -10,6 +10,8 @@ import { PageTitleProvider } from '@/components/layout/PageTitleProvider';
 import { AuthGuard } from '@/components/auth';
 import DemoModeProvider from '@/components/providers/DemoModeProvider';
 import DemoModeBanner from '@/components/demo/DemoModeBanner';
+import SubscriptionProvider from '@/components/providers/SubscriptionProvider';
+import BillingBanner from '@/components/billing/BillingBanner';
 import { useMobileDrawer } from '@/hooks/useMobileDrawer';
 import FeedbackFab, { useFeedbackDialog } from '@/components/feedback/FeedbackFab';
 
@@ -31,6 +33,7 @@ export default function DashboardLayout({
   return (
     <AuthGuard companyId={companyId} requireCompany>
       <DemoModeProvider>
+        <SubscriptionProvider>
         <PageTitleProvider>
         <Box sx={{ position: 'relative', minHeight: '100vh' }}>
           {/* Ambient shop-floor backdrop — sits behind the workspace, above the theme base */}
@@ -40,6 +43,7 @@ export default function DashboardLayout({
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', ml: { xs: 0, md: '240px' }, minWidth: 0 }}>
               <Header isMobile={isMobile} onMenuClick={openDrawer} />
               <DemoModeBanner />
+              <BillingBanner />
               <Box component="main" sx={{ flex: 1, p: { xs: 2, md: 3 }, overflow: 'auto' }}>
                 {children}
               </Box>
@@ -55,6 +59,7 @@ export default function DashboardLayout({
           onSnackbarClose={feedback.closeSnackbar}
         />
         </PageTitleProvider>
+        </SubscriptionProvider>
       </DemoModeProvider>
     </AuthGuard>
   );

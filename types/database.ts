@@ -237,6 +237,74 @@ export type Database = {
           },
         ]
       }
+      company_billing: {
+        Row: {
+          billing_exempt: boolean
+          cancel_at: string | null
+          canceled_at: string | null
+          company_id: string
+          created_at: string
+          current_period_end: string | null
+          ended_at: string | null
+          override_price_id: string | null
+          override_trial_days: number | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_event_at: string | null
+          subscription_price_id: string | null
+          subscription_status: string | null
+          synced_at: string
+          trial_end: string | null
+          updated_at: string
+        }
+        Insert: {
+          billing_exempt?: boolean
+          cancel_at?: string | null
+          canceled_at?: string | null
+          company_id: string
+          created_at?: string
+          current_period_end?: string | null
+          ended_at?: string | null
+          override_price_id?: string | null
+          override_trial_days?: number | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_event_at?: string | null
+          subscription_price_id?: string | null
+          subscription_status?: string | null
+          synced_at?: string
+          trial_end?: string | null
+          updated_at?: string
+        }
+        Update: {
+          billing_exempt?: boolean
+          cancel_at?: string | null
+          canceled_at?: string | null
+          company_id?: string
+          created_at?: string
+          current_period_end?: string | null
+          ended_at?: string | null
+          override_price_id?: string | null
+          override_trial_days?: number | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_event_at?: string | null
+          subscription_price_id?: string | null
+          subscription_status?: string | null
+          synced_at?: string
+          trial_end?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_billing_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_custom_units: {
         Row: {
           company_id: string
@@ -2997,7 +3065,31 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_billing_write_gate: {
+        Args: { p_table: unknown }
+        Returns: undefined
+      }
+      apply_stripe_subscription: {
+        Args: {
+          p_cancel_at: string
+          p_canceled_at: string
+          p_company_id: string
+          p_current_period_end: string
+          p_ended_at: string
+          p_event_at: string
+          p_price_id: string
+          p_status: string
+          p_stripe_customer_id: string
+          p_stripe_subscription_id: string
+          p_trial_end: string
+        }
+        Returns: undefined
+      }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
+      company_can_write: {
+        Args: { check_company_id: string }
+        Returns: boolean
+      }
       compute_job_fulfillment_status: {
         Args: { p_job_id: string }
         Returns: string
@@ -3191,6 +3283,12 @@ export type Database = {
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined
+      }
+      tenant_tables_missing_write_gate: {
+        Args: never
+        Returns: {
+          table_name: string
+        }[]
       }
       transfer_stock: {
         Args: {

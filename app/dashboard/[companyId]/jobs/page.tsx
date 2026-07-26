@@ -27,6 +27,7 @@ import ListItemText from '@mui/material/ListItemText';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import Divider from '@mui/material/Divider';
 import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import SearchIcon from '@mui/icons-material/Search';
 import CancelIcon from '@mui/icons-material/Cancel';
 import WorkIcon from '@mui/icons-material/Work';
@@ -492,7 +493,7 @@ export default function JobsPage() {
         const atVendor = atVendorJobIds.has(params.data.id);
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-            <Chip label={cfg.label} color={cfg.color} size="small" />
+            <StatusChip label={cfg.label} color={cfg.color} />
             {atVendor && (
               <Tooltip title="Parts are out at an outside vendor">
                 <Chip

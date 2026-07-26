@@ -20,6 +20,10 @@ google-genai>=0.3.0
 # Error monitoring
 sentry-sdk[fastapi]>=2.0.0
 
+# Subscription billing (Stripe-hosted Checkout + Customer Portal + webhooks).
+# Pin the SDK line that supports API version 2026-06-24.dahlia.
+stripe>=12.0.0
+
 # Outbound email (quote-to-customer, future invitation emails)
 resend>=0.17.0
 # Outbound HTTP for the QuickBooks OAuth + API calls (also present transitively

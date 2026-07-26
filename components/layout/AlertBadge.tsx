@@ -6,6 +6,7 @@ import { useLoad } from '@/hooks/useLoad';
 import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
@@ -148,9 +149,8 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                                 {job.job_number}
                               </Typography>
-                              <Chip
+                              <StatusChip
                                 label={job.severity}
-                                size="small"
                                 color={severityColor(job.severity)}
                                 sx={{ height: 18, fontSize: '0.7rem' }}
                               />
@@ -206,9 +206,8 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                                 {alert.item_name}
                               </Typography>
-                              <Chip
+                              <StatusChip
                                 label={alert.severity}
-                                size="small"
                                 color={severityColor(alert.severity)}
                                 sx={{ height: 18, fontSize: '0.7rem' }}
                               />

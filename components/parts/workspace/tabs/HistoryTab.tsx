@@ -10,6 +10,7 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import CircularProgress from '@mui/material/CircularProgress';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
@@ -306,7 +307,7 @@ function FeedPrimary({ ev }: { ev: PartActivityEvent }) {
         <Typography variant="body2">
           {TXN_VERB[ev.txn.type] ?? ev.txn.type} {ev.txn.quantity} {ev.txn.unit}
         </Typography>
-        {ev.txn.has_discrepancy && <Chip size="small" color="warning" label="Discrepancy" />}
+        {ev.txn.has_discrepancy && <StatusChip color="warning" label="Discrepancy" />}
       </Box>
     );
   }

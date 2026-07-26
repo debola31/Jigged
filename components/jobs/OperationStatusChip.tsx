@@ -1,4 +1,4 @@
-import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import type { OperationStatus } from '@/types/job';
 import { OPERATION_STATUS_CONFIG } from '@/types/job';
 
@@ -11,12 +11,6 @@ export default function OperationStatusChip({ status, size = 'small' }: Operatio
   const config = OPERATION_STATUS_CONFIG[status] || { label: status, color: 'default' as const };
 
   return (
-    <Chip
-      label={config.label}
-      color={config.color}
-      size={size}
-      variant="filled"
-      sx={{ fontWeight: 500 }}
-    />
+    <StatusChip label={config.label} color={config.color} size={size} sx={{ fontWeight: 500 }} />
   );
 }

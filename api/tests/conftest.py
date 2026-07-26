@@ -265,6 +265,19 @@ def seeded_user_b(supabase_admin: Client) -> Generator[dict, None, None]:
     _teardown_seeded_user(supabase_admin, seeded)
 
 
+@pytest.fixture
+def billing_user(supabase_admin: Client) -> Generator[dict, None, None]:
+    """Function-scoped fresh company + admin user + user-JWT client for billing
+    write-gate tests. The company starts with NO company_billing row (→
+    must_subscribe / write-blocked); each test sets the state it needs via
+    supabase_admin. Function scope keeps state changes isolated per test."""
+    seeded = _create_seeded_user(supabase_admin, "billing")
+    try:
+        yield seeded
+    finally:
+        _teardown_seeded_user(supabase_admin, seeded)
+
+
 @pytest.fixture(scope="session")
 def seeded_company_b_graph(
     supabase_admin: Client, seeded_user_b: dict

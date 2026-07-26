@@ -18,10 +18,17 @@ import { startCheckout, openBillingPortal } from '@/lib/billingApi';
 export default function BillingBanner() {
   const params = useParams();
   const companyId = params.companyId as string;
-  const { entitlement, isPastDue, isReadOnly, mustSubscribe, hasCustomer, refresh } =
+  const { entitlement, isLoading, isPastDue, isReadOnly, mustSubscribe, hasCustomer, refresh } =
     useSubscription();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Render nothing until billing is known. While the cache is still loading,
+  // `billing` is null → entitlement resolves to `must_subscribe`, which would
+  // flash the "Start your subscription" banner for a split second before the
+  // fetch confirms the shop is exempt/subscribed. Default to hidden; only show
+  // once we've actually resolved that a subscription is needed.
+  if (isLoading) return null;
 
   if (!isPastDue && !isReadOnly && !mustSubscribe) return null;
 

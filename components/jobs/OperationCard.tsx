@@ -384,7 +384,7 @@ export default function OperationCard({
                       {!voided && (
                         <Button
                           size="small"
-                          color="inherit"
+                          color="error"
                           disabled={disabled || voidingId === e.id}
                           onClick={() => handleVoidEvent(e.id)}
                           sx={{ minWidth: 0 }}

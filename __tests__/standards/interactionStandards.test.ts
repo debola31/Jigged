@@ -4,6 +4,7 @@ import {
   isValueLikePlaceholder,
   findPlaceholderViolations,
   findGreyDeleteViolations,
+  findButtonColorViolations,
   scanProject,
 } from '../../scripts/interactionStandardsCheck';
 
@@ -52,6 +53,55 @@ describe('interactionStandardsCheck — grey-delete rule', () => {
   it('does not flag a grey non-delete IconButton (e.g. edit)', () => {
     const src = `<IconButton aria-label="Edit" sx={{ color: 'text.secondary' }}><EditIcon /></IconButton>`;
     expect(findGreyDeleteViolations(src, 'Example.tsx')).toHaveLength(0);
+  });
+});
+
+describe('interactionStandardsCheck — button-color rule', () => {
+  it('flags a contained button with a semantic fill color (success/warning/info)', () => {
+    for (const color of ['success', 'warning', 'info']) {
+      const src = `<Button variant="contained" color="${color}">Go</Button>`;
+      const found = findButtonColorViolations(src, 'Example.tsx');
+      expect(found, color).toHaveLength(1);
+      expect(found[0].rule).toBe('button-color');
+    }
+  });
+
+  it('allows contained primary (default/explicit) and contained error (destructive)', () => {
+    for (const src of [
+      `<Button variant="contained">Save</Button>`,
+      `<Button variant="contained" color="primary">Save</Button>`,
+      `<Button variant="contained" color="error">Delete</Button>`,
+    ]) {
+      expect(findButtonColorViolations(src, 'X.tsx'), src).toHaveLength(0);
+    }
+  });
+
+  it('does not flag outlined/text buttons — the theme re-colors them regardless', () => {
+    // "Mark Sent Out" (outlined warning) is the sanctioned exception; text=default.
+    const outlined = `<Button variant="outlined" color="warning">Mark Sent Out</Button>`;
+    const text = `<Button color="warning">Skip</Button>`;
+    expect(findButtonColorViolations(outlined, 'X.tsx')).toHaveLength(0);
+    expect(findButtonColorViolations(text, 'X.tsx')).toHaveLength(0);
+  });
+
+  it('parses a multi-line tag with an arrow onClick without ending the tag early', () => {
+    const src = [
+      '<Button',
+      '  variant="contained"',
+      '  color="success"',
+      '  onClick={() => doThing()}',
+      '>',
+      '  Add',
+      '</Button>',
+    ].join('\n');
+    const found = findButtonColorViolations(src, 'Example.tsx');
+    expect(found).toHaveLength(1);
+    expect(found[0].line).toBe(1);
+  });
+
+  it('matches <Button> only — not ButtonBase / IconButton / ToggleButton', () => {
+    const src = `<ButtonBase color="success" />\n<IconButton color="warning" />\n<ToggleButton value="a" color="success" />`;
+    expect(findButtonColorViolations(src, 'X.tsx')).toHaveLength(0);
   });
 });
 

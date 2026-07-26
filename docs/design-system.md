@@ -201,6 +201,13 @@ only sanctioned exceptions:
   (add = success / remove = error / adjust = info) — they indicate the *selected
   mode*, not an action.
 
+**Enforced.** A source-scan test fails CI on any `contained` `<Button>` with a
+`success` / `warning` / `info` fill — the `button-color` rule in
+`scripts/interactionStandardsCheck.ts` (the same gate that keeps deletes red).
+`outlined` / `text` buttons are re-colored by the theme regardless of `color`, so
+the sanctioned outlined exceptions pass automatically; `color={expr}` is left to
+review. Genuine exceptions go in that scanner's `ALLOWLIST`.
+
 **Button Variant Theme Overrides:**
 
 The MUI theme includes custom styling for outlined and text button variants to ensure proper contrast against the gradient background:

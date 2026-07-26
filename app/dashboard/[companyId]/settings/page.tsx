@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Chip from '@mui/material/Chip';
+import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -12,15 +12,21 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import { useSubscription } from '@/components/providers/SubscriptionProvider';
+import { syncCheckout } from '@/lib/billingApi';
 import AdminGuard from '@/components/auth/AdminGuard';
+import StatusChip from '@/components/common/StatusChip';
 import SettingsSection from '@/components/settings/SettingsSection';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
+import BillingCard from '@/components/settings/BillingCard';
 
 export default function SettingsPage() {
   const params = useParams();
+  const router = useRouter();
   const companyId = params.companyId as string;
+  const { refresh } = useSubscription();
   const {
     isDemoMode,
     hasDemoCompany,
@@ -32,20 +38,55 @@ export default function SettingsPage() {
     isLoading,
   } = useDemoMode();
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [justSubscribed, setJustSubscribed] = useState(false);
 
   const handleReset = async () => {
     setResetDialogOpen(false);
     await resetDemo();
   };
 
+  // Checkout success lands here with ?session_id=… (before the webhook may have
+  // arrived). Reconcile the billing cache immediately from the live session, then
+  // refresh entitlement and drop the query param so a reload doesn't re-sync.
+  useEffect(() => {
+    const sessionId = new URLSearchParams(window.location.search).get('session_id');
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await syncCheckout(companyId, sessionId);
+        if (!cancelled) {
+          setJustSubscribed(true);
+          await refresh();
+          router.replace(`/dashboard/${companyId}/settings`);
+        }
+      } catch {
+        // Non-fatal: the webhook will reconcile the cache shortly regardless.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
   return (
     <AdminGuard message="You don't have permission to access settings.">
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {justSubscribed && (
+        <Alert severity="success" onClose={() => setJustSubscribed(false)}>
+          You&apos;re all set — welcome aboard! Your subscription is active.
+        </Alert>
+      )}
+
       {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
 
       {/* Company-configurable business defaults (quote validity, etc.) */}
       <AppDefaultsCard companyId={companyId} />
+
+      {/* Subscription status + Subscribe / Manage billing (hidden in demo mode) */}
+      <BillingCard />
 
       {/* QuickBooks Online connection + invoice push settings */}
       <QuickBooksIntegrationCard companyId={companyId} />
@@ -56,11 +97,9 @@ export default function SettingsPage() {
         variant="advanced"
         statusChip={
           !isLoading ? (
-            <Chip
+            <StatusChip
               label={isDemoMode ? 'Active' : hasDemoCompany ? 'Available' : 'Not set up'}
-              size="small"
               color={isDemoMode ? 'warning' : 'default'}
-              variant={isDemoMode ? 'filled' : 'outlined'}
             />
           ) : undefined
         }

@@ -1,8 +1,8 @@
 'use client';
 
-import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import StatusChip from '@/components/common/StatusChip';
 import { isJobOverdue } from '@/types/job';
 import type { Job } from '@/types/job';
 
@@ -18,7 +18,7 @@ export default function JobOverdueBadge({ job, size = 'small' }: JobOverdueBadge
 
   return (
     <Tooltip title={`Was due ${dueDate}`}>
-      <Chip
+      <StatusChip
         icon={<ScheduleIcon sx={{ fontSize: size === 'medium' ? 18 : 14 }} />}
         label="Overdue"
         size={size}

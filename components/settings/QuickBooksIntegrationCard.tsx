@@ -6,6 +6,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
@@ -110,12 +111,11 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
 
   const statusChip = !loading ? (
     <>
-      <Chip
+      <StatusChip
         label={connected ? 'Connected' : 'Not connected'}
-        size="small"
         color={connected ? 'success' : 'default'}
-        variant={connected ? 'filled' : 'outlined'}
       />
+      {/* Secondary environment tag — kept outlined to sit quietly next to status. */}
       {connected && status?.environment === 'sandbox' && (
         <Chip label="Sandbox" size="small" color="warning" variant="outlined" />
       )}

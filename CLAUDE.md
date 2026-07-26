@@ -150,6 +150,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO service_role;
 
 **Symptom of a missing grant:** PostgREST returns `42501 permission denied`, and its error hint names the grant to add. Because local now matches prod, this fails in dev rather than only in production.
 
+### Billing write-gate (new tenant tables)
+
+Entitlement is enforced at the DB layer: every browser-writable tenant table carries `billing_gate_*` restrictive RLS policies that call `company_can_write(company_id)`, so a lapsed/unsubscribed shop can't write (reads stay open). RLS is per-table — **a new `company_id` table without the gate silently bypasses billing.** When you add a tenant table:
+
+- Gate it in the same migration (direct-`company_id` tables): `SELECT public.apply_billing_write_gate('public.your_table');` (parent-resolved child tables need hand-written policies resolving the parent's company — see the `stripe_write_enforcement` migration).
+- Or, if it's genuinely exempt (identity/bootstrap or service-role-only), add it to the exempt list in `tenant_tables_missing_write_gate()`.
+
+The CI test [`test_no_tenant_table_left_ungated`](api/tests/integration/test_billing_enforcement.py) fails if any `company_id` table is neither gated nor exempt — so a forgotten gate is a red build, not silent tech debt. Full standard: [docs/modules/billing.md](docs/modules/billing.md) §4. If you change the entitlement rule, change **both** `lib/entitlement.ts` `getEntitlement` and the SQL `company_can_write` (parity is tested).
+
 ### Schema source-of-truth
 
 Two artifacts describe the database schema. They serve different purposes:
@@ -628,6 +637,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Operator View](docs/modules/operator-view.md)
 - [Invitation System](docs/modules/invitation-system.md)
 - [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))
+- [Billing & Subscriptions](docs/modules/billing.md) (Stripe-hosted checkout/portal; DB-enforced entitlement)
 
 ### Testing Documentation
 

@@ -1,4 +1,4 @@
-import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import type { ProductionStatus, FulfillmentStatus } from '@/types/job';
 import { PRODUCTION_STATUS_CONFIG, FULFILLMENT_STATUS_CONFIG } from '@/types/job';
 
@@ -19,13 +19,7 @@ export function ProductionStatusChip({
     color: 'default' as const,
   };
   return (
-    <Chip
-      label={config.label}
-      color={config.color}
-      size={size}
-      variant="filled"
-      sx={{ fontWeight: 500 }}
-    />
+    <StatusChip label={config.label} color={config.color} size={size} sx={{ fontWeight: 500 }} />
   );
 }
 
@@ -46,13 +40,7 @@ export function FulfillmentStatusChip({
     color: 'default' as const,
   };
   return (
-    <Chip
-      label={config.label}
-      color={config.color}
-      size={size}
-      variant="outlined"
-      sx={{ fontWeight: 500 }}
-    />
+    <StatusChip label={config.label} color={config.color} size={size} sx={{ fontWeight: 500 }} />
   );
 }
 

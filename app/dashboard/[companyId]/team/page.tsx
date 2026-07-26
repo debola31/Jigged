@@ -19,7 +19,7 @@ import Snackbar from '@mui/material/Snackbar';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
-import Chip from '@mui/material/Chip';
+import StatusChip from '@/components/common/StatusChip';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
@@ -587,9 +587,9 @@ export default function TeamPage() {
   // Status cell renderer
   const StatusCellRenderer = useCallback((params: { value: string }) => {
     if (params.value === 'pending') {
-      return <Chip label="Pending" color="warning" size="small" variant="outlined" />;
+      return <StatusChip label="Pending" color="warning" />;
     }
-    return <Chip label="Active" color="success" size="small" variant="outlined" />;
+    return <StatusChip label="Active" color="success" />;
   }, []);
 
   // Actions cell renderer for pending invitation rows

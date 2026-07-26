@@ -142,6 +142,20 @@ async function ensureCompany(supabase: SupabaseClient): Promise<string> {
   return data.id;
 }
 
+// Billing enforcement (company_can_write RLS gate) blocks writes for companies
+// with no billing row. The grandfather backfill runs on an empty DB before any
+// test company exists, so grandfather the test company here — otherwise every
+// app-driven write in the specs would be rejected by RLS.
+async function ensureCompanyBilling(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('company_billing')
+    .upsert({ company_id: companyId, billing_exempt: true }, { onConflict: 'company_id' });
+  if (error) throw new Error(`company_billing upsert failed: ${error.message}`);
+}
+
 async function ensureUserCompanyAccess(
   supabase: SupabaseClient,
   userId: string,
@@ -480,6 +494,7 @@ export default async function globalSetup(): Promise<void> {
   const user = await ensureAuthUser(supabase);
   const companyId = await ensureCompany(supabase);
   await ensureUserCompanyAccess(supabase, user.id, companyId);
+  await ensureCompanyBilling(supabase, companyId);
 
   const vendorId = await ensureVendor(supabase, companyId);
   const wcInternalId = await ensureWorkCenter(

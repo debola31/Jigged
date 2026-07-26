@@ -83,3 +83,6 @@ api/.coverage
 
 # Blender
 /outputs/
+
+#Agents
+.agents/

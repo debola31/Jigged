@@ -331,25 +331,34 @@ This rule is enforced by [`__tests__/standards/interactionStandards.test.ts`](..
 
 ### Status Badges
 
-```javascript
-<Chip 
-  label="In Progress" 
-  color="info" 
-  size="small"
-/>
+**Use `StatusChip` (`components/common/StatusChip.tsx`) for every on/off/lifecycle
+status badge — never a hand-rolled `<Chip variant=…>`.** It enforces the one
+variant rule so status chips look identical everywhere (this was previously
+inconsistent — QuickBooks "Connected" was filled while Billing "Active" was
+outlined):
 
-<Chip 
-  label="Complete" 
-  color="success" 
-  size="small"
-/>
+- a **semantic color** (`info` / `success` / `warning` / `error` / `primary`) →
+  **filled** (draws the eye: Active, Connected, Trial, Overdue…);
+- the neutral **`default`** color → **outlined** (de-emphasized "off" states: No
+  subscription, Not connected, Not set up).
 
-<Chip 
-  label="Overdue" 
-  color="error" 
-  size="small"
-/>
+Always `size="small"`. Pass the semantic `color`; the variant is derived for you.
+
+```jsx
+import StatusChip from '@/components/common/StatusChip';
+
+<StatusChip label="In Progress" color="info" />       {/* filled */}
+<StatusChip label="Complete"    color="success" />    {/* filled */}
+<StatusChip label="Overdue"     color="error" />      {/* filled */}
+<StatusChip label="Not set up" />                     {/* default → outlined */}
 ```
+
+**Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a
+bespoke palette for a domain reason — stock level (`StockStatusChip`), part
+classification (`PartClassificationChips`), customer active state
+(`CustomerStatusChip`), work-center kind — and the `HOT` rush badge
+(`JobHotBadge`), which deliberately mutes to outlined for historical jobs. These
+use custom hex/rgba, not the semantic palette, and are not on/off status badges.
 
 ### Tabs vs. segmented toggles (role-based)
 

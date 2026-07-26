@@ -15,6 +15,7 @@ import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Grid from '@mui/material/Grid';
 import InputLabel from '@mui/material/InputLabel';
+import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import TextField from '@mui/material/TextField';
@@ -73,6 +74,12 @@ export default function JobBillingShippingCard({
   const contact = job.contact_snapshot;
   const billingSameAsShipping =
     !!job.shipping_address_id && job.billing_address_id === job.shipping_address_id;
+
+  // Read-only layout: collapse the Billing column when it equals shipping (the
+  // common case) so the remaining columns get room in this half-width card —
+  // mirrors the quote card. An explicit note keeps the "same as shipping" fact.
+  const showBillingColumn = !billingSameAsShipping;
+  const infoColSize = showBillingColumn ? { xs: 12, sm: 4 } : { xs: 12, sm: 6 };
 
   const customerHref = `/dashboard/${companyId}/customers/${job.customer_id}`;
 
@@ -134,7 +141,7 @@ export default function JobBillingShippingCard({
 
         {!editing ? (
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 4 }}>
+            <Grid size={infoColSize} sx={{ minWidth: 0 }}>
               <Typography variant="body2" color="text.secondary">
                 Contact
               </Typography>
@@ -144,14 +151,22 @@ export default function JobBillingShippingCard({
                     {contact.name}
                   </Typography>
                   {contact.email && (
-                    <Typography variant="body2" color="text.secondary">
+                    <Link
+                      href={`mailto:${contact.email}`}
+                      variant="body2"
+                      sx={{ display: 'block', overflowWrap: 'anywhere' }}
+                    >
                       {contact.email}
-                    </Typography>
+                    </Link>
                   )}
                   {contact.phone && (
-                    <Typography variant="body2" color="text.secondary">
+                    <Link
+                      href={`tel:${contact.phone}`}
+                      variant="body2"
+                      sx={{ display: 'block' }}
+                    >
                       {contact.phone}
-                    </Typography>
+                    </Link>
                   )}
                 </Box>
               ) : (
@@ -160,24 +175,29 @@ export default function JobBillingShippingCard({
                 </Typography>
               )}
             </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
+            <Grid size={infoColSize} sx={{ minWidth: 0 }}>
               <Typography variant="body2" color="text.secondary">
                 Shipping address
               </Typography>
               <AddressDisplay address={shippingAddress} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <Typography variant="body2" color="text.secondary">
-                Billing address
-              </Typography>
-              {billingSameAsShipping ? (
-                <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                  Same as shipping
+              {!showBillingColumn && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}
+                >
+                  Billing address — same as shipping
                 </Typography>
-              ) : (
-                <AddressDisplay address={billingAddress} />
               )}
             </Grid>
+            {showBillingColumn && (
+              <Grid size={infoColSize} sx={{ minWidth: 0 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Billing address
+                </Typography>
+                <AddressDisplay address={billingAddress} />
+              </Grid>
+            )}
           </Grid>
         ) : (
           <Box>

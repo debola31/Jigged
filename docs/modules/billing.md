@@ -191,9 +191,12 @@ Payment failed · Paused.
 
 ## 10. Environment variables
 
-Backend only (no `NEXT_PUBLIC_STRIPE_*`). Prefer a restricted key (`rk_`). See
+Backend only (no `NEXT_PUBLIC_STRIPE_*`). The app reads a **restricted key**
+(`rk_`) from `STRIPE_RESTRICTED_KEY` — least-privilege, and it matches the var
+the Stripe Dashboard / Vercel label (so the unused `STRIPE_SECRET_KEY` /
+`STRIPE_PUBLISHABLE_KEY` can't be edited by mistake and silently take effect). See
 `.env.local.example`:
-`STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_FOUNDING_PRICE_ID`,
+`STRIPE_RESTRICTED_KEY`, `STRIPE_PRICE_ID`, `STRIPE_FOUNDING_PRICE_ID`,
 `STRIPE_WEBHOOK_SECRET`. **Local** webhook secret = the `whsec_…` from
 `stripe listen`; **prod** = the Dashboard endpoint's secret (they differ). The
 backend loads env at startup — restart `python api/index.py` after changing them

@@ -52,9 +52,16 @@ LIVE_STATUSES = ("trialing", "active", "past_due")
 
 # ───────────────────────── config helpers ─────────────────────────
 def _stripe():
-    key = os.getenv("STRIPE_SECRET_KEY")
+    # Use a RESTRICTED key (rk_...) — least-privilege by design, and it maps
+    # 1:1 to the var the Stripe Dashboard/Vercel label "STRIPE_RESTRICTED_KEY".
+    # We deliberately do NOT fall back to STRIPE_SECRET_KEY: a single
+    # authoritative var avoids someone later editing the (unused) secret key and
+    # wondering why nothing changed.
+    key = os.getenv("STRIPE_RESTRICTED_KEY")
     if not key:
-        raise HTTPException(status_code=503, detail="Stripe not configured (STRIPE_SECRET_KEY)")
+        raise HTTPException(
+            status_code=503, detail="Stripe not configured (STRIPE_RESTRICTED_KEY)"
+        )
     stripe.api_key = key
     stripe.api_version = STRIPE_API_VERSION
     return stripe

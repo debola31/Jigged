@@ -17,9 +17,9 @@ NOT run in CI by default (CI can't hold your Stripe sandbox secrets). To run:
     cd api && conda run -n jigged python -m pytest \
         tests/integration/test_billing_stripe_lifecycle.py -m stripe_live -q
 
-STRIPE_SECRET_KEY / STRIPE_PRICE_ID / STRIPE_FOUNDING_PRICE_ID are read from the
-repo's .env.local. The suite skips if STRIPE_SECRET_KEY is not a TEST key. Every
-test creates and then deletes its own Stripe test Customer.
+STRIPE_RESTRICTED_KEY / STRIPE_PRICE_ID / STRIPE_FOUNDING_PRICE_ID are read from
+the repo's .env.local. The suite skips if STRIPE_RESTRICTED_KEY is not a TEST key.
+Every test creates and then deletes its own Stripe test Customer.
 """
 from __future__ import annotations
 
@@ -36,14 +36,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.stripe_live]
 # Load the repo .env.local so STRIPE_* are available (as the backend does).
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env.local"))
 
-_STRIPE_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+_STRIPE_KEY = os.getenv("STRIPE_RESTRICTED_KEY", "")
 _DEFAULT_PRICE = os.getenv("STRIPE_PRICE_ID")
 _FOUNDER_PRICE = os.getenv("STRIPE_FOUNDING_PRICE_ID")
 
 # Guard: only run against a TEST-mode key, never live.
 if not _STRIPE_KEY.startswith(("sk_test", "rk_test")):
     pytest.skip(
-        "STRIPE_SECRET_KEY is not a test key — skipping live Stripe lifecycle tests.",
+        "STRIPE_RESTRICTED_KEY is not a test key — skipping live Stripe lifecycle tests.",
         allow_module_level=True,
     )
 if not _DEFAULT_PRICE or not _FOUNDER_PRICE:

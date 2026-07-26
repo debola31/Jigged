@@ -553,7 +553,7 @@ export default function QuoteDetailPage() {
                       <AddressDisplay address={shippingAddress} />
                     </Grid>
                   )}
-                  <Grid size={{ xs: 12, sm: 6, md: showShippingColumn ? 4 : 6 }}>
+                  <Grid size={{ xs: 12, sm: 6, md: showShippingColumn ? 4 : 6 }} sx={{ minWidth: 0 }}>
                     <Typography variant="body2" color="text.secondary">
                       Contact
                     </Typography>
@@ -563,14 +563,22 @@ export default function QuoteDetailPage() {
                           {quoteContact.name}
                         </Typography>
                         {quoteContact.email && (
-                          <Typography variant="body2" color="text.secondary">
+                          <MuiLink
+                            href={`mailto:${quoteContact.email}`}
+                            variant="body2"
+                            sx={{ display: 'block', overflowWrap: 'anywhere' }}
+                          >
                             {quoteContact.email}
-                          </Typography>
+                          </MuiLink>
                         )}
                         {quoteContact.phone && (
-                          <Typography variant="body2" color="text.secondary">
+                          <MuiLink
+                            href={`tel:${quoteContact.phone}`}
+                            variant="body2"
+                            sx={{ display: 'block' }}
+                          >
                             {quoteContact.phone}
-                          </Typography>
+                          </MuiLink>
                         )}
                       </Box>
                     ) : (

@@ -45,7 +45,11 @@ export default function AddressDisplay({ address }: { address: DisplayAddress | 
   return (
     <Box>
       {lines.map((line, i) => (
-        <Typography key={i} variant="body1" sx={{ fontWeight: i === 0 ? 500 : 400 }}>
+        <Typography
+          key={i}
+          variant="body1"
+          sx={{ fontWeight: i === 0 ? 500 : 400, overflowWrap: 'anywhere' }}
+        >
           {line}
         </Typography>
       ))}

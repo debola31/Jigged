@@ -35,10 +35,10 @@ export interface JobTravelerPreviewDialogProps {
 
 /**
  * Per-part job-traveler preview. Re-renders the PDF from the job_part on
- * every open. The traveler carries one QR PER OPERATION (generated inside
- * generateJobTravelerPdf), each deep-linking the operator to
- * /operator/{companyId}/login?job=&part=&operation= and, post-login, straight
- * to that exact step's action view.
+ * every open. The traveler carries a SINGLE QR (generated inside
+ * generateJobTravelerPdf) that links to /operator/{companyId}/login?job=&part=
+ * and, post-login, to that part's traveler page — where the operator picks the
+ * step they're working.
  */
 export default function JobTravelerPreviewDialog({
   open,

@@ -27,7 +27,7 @@ const { jsPDFCtor, autoTableFn, addImageMock, qrMock } = vi.hoisted(() => {
     return docInstance;
   });
   const autoTableFn = vi.fn();
-  // Deterministic QR per URL so we can assert which op's code lands on which row.
+  // Deterministic QR per URL so we can assert what the single header code encodes.
   const qrMock = vi.fn().mockImplementation((url: string) => Promise.resolve(`QR::${url}`));
   return { jsPDFCtor, autoTableFn, addImageMock, qrMock };
 });
@@ -104,16 +104,16 @@ async function renderAndGetOpsTable(t: JobTraveler) {
   );
   if (!call) throw new Error('operations autoTable not found');
   return call[1] as {
+    head: string[][];
     body: string[][];
     didParseCell: (d: unknown) => void;
-    didDrawCell: (d: unknown) => void;
+    didDrawCell?: (d: unknown) => void;
   };
 }
 
-// traveler ops table columns: Step, WC, Operation/Instructions, Notes, Done, Scan
+// traveler ops table columns: Step, WC, Operation/Instructions, Notes, Done
 const DETAIL_COL = 2;
 const NOTES_COL = 3;
-const SCAN_COL = 5;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -159,27 +159,6 @@ describe('generateJobTravelerPdf — external (outside) operations', () => {
     expect(parse(0, DETAIL_COL)).toEqual({});
   });
 
-  it('maps each QR to the correct op id by identity (mixed routing, not by position)', async () => {
-    const opts = await renderAndGetOpsTable(
-      traveler([
-        op({ id: 'op-0', work_center_kind: 'internal' }),
-        op({ id: 'op-1', work_center_kind: 'external', vendor_name: 'AcmeCoat' }),
-      ]),
-    );
-    const drawScan = (rowIndex: number) =>
-      opts.didDrawCell({
-        section: 'body',
-        row: { index: rowIndex },
-        column: { index: SCAN_COL },
-        cell: { x: 0, y: 0, width: 80, height: 80 },
-      });
-    drawScan(0);
-    drawScan(1);
-    const drawnUrls = addImageMock.mock.calls.map((c) => c[0] as string);
-    expect(drawnUrls[0]).toContain('operation=op-0');
-    expect(drawnUrls[1]).toContain('operation=op-1');
-  });
-
   it('renders a no-vendor external op without throwing (still flagged OUTSIDE)', async () => {
     const opts = await renderAndGetOpsTable(
       traveler([op({ id: 'op-1', work_center_kind: 'external', vendor_name: null })]),
@@ -196,10 +175,46 @@ describe('generateJobTravelerPdf — external (outside) operations', () => {
       opts.didParseCell({ section: 'body', row: { index: 0 }, column: { index: DETAIL_COL }, cell }),
     ).not.toThrow();
     expect(cell.styles).toEqual({});
-    expect(() =>
-      opts.didDrawCell({ section: 'body', row: { index: 0 }, column: { index: SCAN_COL }, cell: { x: 0, y: 0, width: 80, height: 80 } }),
-    ).not.toThrow();
-    // No QR drawn for the placeholder row.
+  });
+});
+
+describe('generateJobTravelerPdf — single traveler QR', () => {
+  it('generates exactly one QR, pointing at the part traveler (no operation param)', async () => {
+    await generateJobTravelerPdf({
+      traveler: traveler([
+        op({ id: 'op-0', sequence: 10 }),
+        op({ id: 'op-1', sequence: 20 }),
+        op({ id: 'op-2', sequence: 30 }),
+      ]),
+      company,
+      bom: [],
+      companyId: 'c1',
+      baseUrl: 'https://app.test',
+      supabase: null,
+    });
+
+    // One code for the whole sheet, regardless of how many operations it lists.
+    expect(qrMock).toHaveBeenCalledTimes(1);
+    const url = qrMock.mock.calls[0][0] as string;
+    expect(url).toBe('https://app.test/operator/c1/login?job=job-1&part=jp-1');
+    expect(url).not.toContain('operation=');
+
+    // ...and it's the only image drawn (no logo on this company).
+    expect(addImageMock).toHaveBeenCalledTimes(1);
+    expect(addImageMock.mock.calls[0][0]).toBe(`QR::${url}`);
+  });
+
+  it('drops the per-operation Scan column from the operations table', async () => {
+    const opts = await renderAndGetOpsTable(traveler([op({ id: 'op-0' })]));
+    expect(opts.head[0]).toEqual(['Step', 'Work Center', 'Operation / Instructions', 'Notes', 'Done']);
+    expect(opts.body[0]).toHaveLength(5);
+    expect(opts.didDrawCell).toBeUndefined();
+  });
+
+  it('still renders the sheet when QR generation fails', async () => {
+    qrMock.mockRejectedValueOnce(new Error('qr boom'));
+    const opts = await renderAndGetOpsTable(traveler([op({ id: 'op-0' })]));
+    expect(opts.body).toHaveLength(1);
     expect(addImageMock).not.toHaveBeenCalled();
   });
 });

@@ -91,15 +91,19 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
 
 - **Station placard** (per work center): selects the station and opens its job list. Posted at
   the machine, printed once; bulk-print all from the work-centers list.
-- **Per-operation traveler QR** (`utils/jobTravelerPdf.ts`): deep-links to a specific step's
-  action view. An **optional accelerator** for shops mid-transition — not required under the
-  paperless-preferred model. **Outside (external-vendor) steps are flagged with a heavy black
-  outline + bold text (border only, no fill)** on the printed traveler — unmistakable and
+- **Traveler QR** (`utils/jobTravelerPdf.ts`): **exactly one per traveler sheet**, in the header
+  beside the Job #, captioned "Scan to open this traveler". It opens that part's traveler page,
+  where the operator taps the step they're working. An **optional accelerator** for shops
+  mid-transition — not required under the paperless-preferred model.
+  *A previous revision printed a QR on every operation row; operators couldn't tell which code
+  they were pointing their phone at, so the sheet is back to one unambiguous target. The
+  `?job=&part=&operation=` deep link still resolves for sheets printed under that revision.*
+- The printed traveler's other shop-floor conventions: **outside (external-vendor) steps are
+  flagged with a heavy black outline + bold text (border only, no fill)** — unmistakable and
   grayscale-safe, but essentially no extra toner (earlier gray/solid fills drew a shop-owner ink
-  complaint). The traveler's merged **Notes** column carries the "OUTSIDE — ship to {vendor}"
-  cue for outside steps (and the setup/cycle estimates for internal steps), and the **Completed
-  (of N)** column is a blank write-in for a count or tick. The Scan cell
-  stays white so its QR remains scannable inside the banner.
+  complaint). The merged **Notes** column carries the "OUTSIDE — ship to {vendor}" cue for
+  outside steps (and the setup/cycle estimates for internal steps), and the **Done** column is a
+  blank write-in for a count or tick.
 
 ## Admin
 
@@ -126,7 +130,7 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 - [ ] **Given** an operator scans a station placard, **when** they open `…/login?station={workCenterId}` and sign in with email/password, **then** the station is written to `sessionStorage` (`jigged_operator_station`) and they land on that station's job list — *write path verified by `__tests__/components/operations/StationQRCode.test.tsx > 'StationQRCode' > 'renders the QR code with the operator-login URL'`; login/session-persist E2E automation-pending (`OperatorLoginPage`)*.
 - [ ] **Given** a signed-in user with `role='operator'`, **when** `getPostLoginRoute` runs, **then** they are routed to `/operator/{companyId}` (office roles go to `/dashboard/{companyId}`) — *automation-pending (`getPostLoginRoute` in `utils/companyAccess.ts`)*.
-- [ ] **Given** a per-operation QR (`?job=&part=&operation=`), **when** the operator signs in, **then** they jump straight to that step's action view; a `?location=` QR opens that bin, and a bare scan falls back to the station jobs list — *automation-pending (`OperatorLoginPage.postLoginPath`)*.
+- [ ] **Given** the traveler QR (`?job=&part=`) — the one code printed on a job traveler — **when** the operator signs in, **then** they land on that part's traveler page and pick the step themselves; a `?job=&part=&operation=` QR (older travelers still on the floor) jumps straight to that step's action view, a `?location=` QR opens that bin, and a bare scan falls back to the station jobs list — *automation-pending (`OperatorLoginPage.postLoginPath`); the traveler's single-QR contract is verified by `__tests__/utils/jobTravelerPdf.test.ts > 'generateJobTravelerPdf — single traveler QR'`*.
 
 **Station selection (work centers)**
 

@@ -38,11 +38,12 @@ export default function OperatorLoginPage() {
   const locationId = searchParams.get('location') || undefined;
 
   // Where to land after auth, given the scanned QR's params. A location QR
-  // (printed on a bin/cabinet label) opens that location's bin view; a
-  // per-operation QR (job + part + operation) jumps straight to that step's
-  // action view; a per-part QR (legacy travelers) to the part traveler;
-  // anything else — incl. a job-only scan, which we no longer print — falls back
-  // to the station jobs list.
+  // (printed on a bin/cabinet label) opens that location's bin view; the
+  // traveler QR (job + part) opens that part's traveler, where the operator
+  // picks the step; a job + part + operation QR (printed on older travelers,
+  // still in circulation on the floor) jumps straight to that step's action
+  // view; anything else — incl. a job-only scan — falls back to the station
+  // jobs list.
   const postLoginPath = () => {
     if (locationId) return `/operator/${companyId}/inventory/locations/${locationId}`;
     if (jobId && partId && operationId) {

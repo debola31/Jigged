@@ -3,19 +3,22 @@
  *
  * Modeled on utils/packingSlipPdf.ts — same jsPDF + jspdf-autotable
  * letter format, margins, logo embedding, and footer. One traveler is
- * unique to a single job_part. Each OPERATION row carries its own QR code,
- * which deep-links the operator straight to that exact step's action view
- * (a per-operation "scan to complete"). There is no single whole-job QR.
+ * unique to a single job_part and carries exactly ONE QR code, in the header:
+ * scanning it opens that part's traveler page, where every step is listed and
+ * the operator taps the one they're working. Earlier revisions printed a QR on
+ * every operation row; a column of codes an inch apart left operators unsure
+ * which one they were pointing at, so the sheet is back to a single
+ * unambiguous target.
  *
  * Layout:
  *   - Header: company logo (top-left) + return address; "JOB TRAVELER"
- *     title + Job # (top-right).
+ *     title + Job # (top-right) with the traveler QR beneath it.
  *   - Info block: Customer / Part Number / Description / Quantity /
  *     Customer PO / Order Date (jobs.created_at) / Due Date.
  *   - Operations table: Step / Work Center / Operation · Instructions / Notes
  *     (setup·cycle for internal, "OUTSIDE — ship to {vendor}" for outside) /
- *     Done (blank write-in) / Scan (per-operation QR). Outside rows are flagged
- *     with a heavy black outline + bold text (border only, low ink).
+ *     Done (blank write-in). Outside rows are flagged with a heavy black
+ *     outline + bold text (border only, low ink).
  *   - Footer (every page): page numbers.
  */
 
@@ -33,11 +36,8 @@ import {
 } from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
-// Side of the per-operation QR drawn inside each table row (points). Sized
-// generously and paired with a quiet zone (toDataURL margin) + tall rows
-// (bodyStyles.minCellHeight) so adjacent QR codes are far enough apart that a
-// phone camera locks onto a single one instead of getting confused by neighbors.
-const OP_QR_SIZE = 56;
+/** Side of the single header QR (points) — big enough to scan off a taped-up sheet. */
+const QR_SIZE = 90;
 
 function formatMinutes(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -68,9 +68,9 @@ export interface JobTravelerPdfContext {
   company: Company;
   /** The part's bill of materials (parts_bom), quantities per unit. */
   bom: BomLineWithChildPart[];
-  /** Company id — used to build each operation's deep-link QR URL. */
+  /** Company id — used to build the traveler's deep-link QR URL. */
   companyId: string;
-  /** Absolute origin (e.g. window.location.origin) the scan URLs resolve against. */
+  /** Absolute origin (e.g. window.location.origin) the scan URL resolves against. */
   baseUrl: string;
   /** Optional Supabase client to resolve the logo signed URL. */
   supabase?: SupabaseLike | null;
@@ -81,24 +81,22 @@ export async function generateJobTravelerPdf(
 ): Promise<jsPDF> {
   const { traveler, company, bom, companyId, baseUrl } = ctx;
 
-  // One QR per operation: scanning it deep-links to that exact step's action
-  // view (via the operator login passthrough). Generated up front as PNG data
-  // URLs and drawn into each row by the autotable didDrawCell hook below.
-  const qrByOpId = new Map<string, string>();
-  await Promise.all(
-    traveler.operations.map(async (op) => {
-      const url =
-        `${baseUrl}/operator/${companyId}/login` +
-        `?job=${traveler.job_id}&part=${traveler.job_part_id}&operation=${op.id}`;
-      try {
-        // margin: 2 = a white quiet zone baked into the image so the scanner
-        // can isolate this code from its neighbors on the sheet.
-        qrByOpId.set(op.id, await QRCode.toDataURL(url, { margin: 2, width: 220, errorCorrectionLevel: 'M' }));
-      } catch {
-        // Skip this row's QR; the rest of the traveler is still useful.
-      }
-    }),
-  );
+  // The one QR on the sheet: it opens this job_part's traveler page (via the
+  // operator login passthrough), which lists every step for the operator to
+  // pick from. No `operation=` param — the sheet no longer targets a step.
+  const travelerUrl =
+    `${baseUrl}/operator/${companyId}/login` +
+    `?job=${traveler.job_id}&part=${traveler.job_part_id}`;
+  let travelerQrDataUrl: string | null = null;
+  try {
+    travelerQrDataUrl = await QRCode.toDataURL(travelerUrl, {
+      margin: 2,
+      width: 320,
+      errorCorrectionLevel: 'M',
+    });
+  } catch {
+    // Skip the QR; the printed traveler is still useful without it.
+  }
 
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -145,7 +143,29 @@ export async function generateJobTravelerPdf(
   doc.setTextColor(60);
   doc.text(`Job ${traveler.job_number}`, pageWidth - MARGIN, headerTop + 36, { align: 'right' });
 
-  // ---------- HOT stamp (right, below the Job #) ----------
+  // ---------- Header: the traveler QR (far right, under the Job #) ----------
+  // One code, one meaning: "open this traveler". Captioned so nobody has to guess
+  // what scanning it does.
+  const qrX = pageWidth - MARGIN - QR_SIZE;
+  const qrY = headerTop + 46;
+  let qrBlockBottom = headerTop + 36;
+  if (travelerQrDataUrl) {
+    try {
+      doc.addImage(travelerQrDataUrl, 'PNG', qrX, qrY, QR_SIZE, QR_SIZE);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(110);
+      doc.text('Scan to open this traveler', pageWidth - MARGIN, qrY + QR_SIZE + 11, {
+        align: 'right',
+      });
+      doc.setTextColor(30);
+      qrBlockBottom = qrY + QR_SIZE + 11;
+    } catch {
+      // Skip silently — the rest of the traveler is still useful.
+    }
+  }
+
+  // ---------- HOT stamp (left of the QR) ----------
   // The paperless equivalent of Contour's pink paper / "HOT" in red pen. Drawn as
   // an OUTLINED "rubber stamp" — a heavy black border with bold black "HOT" on
   // white, NO filled background. That mirrors the physical HOT rubber stamp,
@@ -153,12 +173,12 @@ export async function generateJobTravelerPdf(
   // of the toner a solid-black fill would (the earlier reversed-white-on-black
   // version was flagged as too ink-heavy). A double rule gives it stamp presence
   // without adding meaningful ink.
-  let hotStampBottom = headerTop + 36;
   if (traveler.is_hot) {
     const stampW = 82;
     const stampH = 26;
-    const stampX = pageWidth - MARGIN - stampW;
-    const stampY = headerTop + 44;
+    // Sits beside the QR, not under it — the QR owns the right column now.
+    const stampX = qrX - 14 - stampW;
+    const stampY = qrY + (QR_SIZE - stampH) / 2;
     doc.setDrawColor(0);
     doc.setLineWidth(2);
     doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'S');
@@ -171,11 +191,9 @@ export async function generateJobTravelerPdf(
     // Restore stroke/text state for the elements drawn afterwards (divider, etc.).
     doc.setTextColor(30);
     doc.setLineWidth(0.75);
-    hotStampBottom = stampY + stampH;
   }
 
-  // No whole-job QR — each operation row carries its own scan-to-complete QR.
-  let cursorY = Math.max(shopBlockBottom, hotStampBottom) + 18;
+  let cursorY = Math.max(shopBlockBottom, qrBlockBottom) + 18;
 
   // ---------- Divider ----------
   doc.setDrawColor(210);
@@ -248,12 +266,11 @@ export async function generateJobTravelerPdf(
   // "Done" (not "Completed (of N)", which wrapped) — a short, single-line write-in
   // for a good-piece count or a tick; the order qty already sits in the header.
   const head = [[
-    'Step', 'Work Center', 'Operation / Instructions', 'Notes', 'Done', 'Scan',
+    'Step', 'Work Center', 'Operation / Instructions', 'Notes', 'Done',
   ]];
-  // Explicit row -> operation map, built alongside `body` so both the QR draw and
-  // the external-op restyle resolve the op by identity, never by a fragile
-  // positional index into traveler.operations (the empty-ops placeholder row maps
-  // to null). A wrong QR under a flagged row would send a scan to the wrong step.
+  // Explicit row -> operation map, built alongside `body` so the external-op
+  // restyle resolves the op by identity, never by a fragile positional index
+  // into traveler.operations (the empty-ops placeholder row maps to null).
   const rowOps: (JobTravelerOperation | null)[] = [];
   const body = traveler.operations.map((op) => {
     rowOps.push(op);
@@ -280,17 +297,15 @@ export async function generateJobTravelerPdf(
       workCenter,
       detail,
       notes,
-      '', // Completed — blank write-in
-      '', // Scan — QR drawn in didDrawCell
+      '', // Done — blank write-in
     ];
   });
 
   if (body.length === 0) {
-    body.push(['—', 'No operations on this part', '', '', '', '']);
+    body.push(['—', 'No operations on this part', '', '', '']);
     rowOps.push(null);
   }
 
-  const SCAN_COL = 5;
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN },
@@ -311,17 +326,16 @@ export async function generateJobTravelerPdf(
       lineWidth: 0.5,
     },
     bodyStyles: {
-      // Tall rows put vertical whitespace between adjacent QR codes so a phone
-      // camera doesn't see two codes at once.
-      minCellHeight: OP_QR_SIZE + 30,
+      // Enough row height to hand-write a piece count in the Done column,
+      // without the QR-spacing bloat the per-operation codes used to need.
+      minCellHeight: 32,
     },
     columnStyles: {
       0: { cellWidth: 38, halign: 'center' },
-      1: { cellWidth: 100, fontStyle: 'bold' },
+      1: { cellWidth: 110, fontStyle: 'bold' },
       2: { cellWidth: 'auto' },
-      3: { cellWidth: 132 },
-      4: { cellWidth: 52, halign: 'center' },
-      5: { cellWidth: OP_QR_SIZE + 18, halign: 'center' },
+      3: { cellWidth: 140 },
+      4: { cellWidth: 60, halign: 'center' },
     },
     // Flag external (outside-vendor) rows with a heavy black OUTLINE + bold black
     // text only — no fill. Unmistakable and grayscale-safe (contrast, not hue),
@@ -336,21 +350,6 @@ export async function generateJobTravelerPdf(
       data.cell.styles.textColor = [20, 20, 20];
       data.cell.styles.lineWidth = 1.2;
       data.cell.styles.lineColor = [20, 20, 20];
-    },
-    // Draw each operation's QR centered in its Scan cell (op resolved by the
-    // explicit rowOps map, not by position).
-    didDrawCell: (data) => {
-      if (data.section !== 'body' || data.column.index !== SCAN_COL) return;
-      const op = rowOps[data.row.index];
-      const dataUrl = op ? qrByOpId.get(op.id) : undefined;
-      if (!dataUrl) return;
-      const x = data.cell.x + (data.cell.width - OP_QR_SIZE) / 2;
-      const y = data.cell.y + (data.cell.height - OP_QR_SIZE) / 2;
-      try {
-        doc.addImage(dataUrl, 'PNG', x, y, OP_QR_SIZE, OP_QR_SIZE);
-      } catch {
-        // Skip silently — the row's text is still printed.
-      }
     },
     theme: 'grid',
   });

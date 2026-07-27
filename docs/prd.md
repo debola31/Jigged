@@ -149,7 +149,7 @@ Flow 1: job Happy Path
 
 3. Salesperson/Owner converts quote directly into a job (job.due_date = entered manually at conversion)
 
-4. Operator scans the station QR placard (or a job's per-operation QR), opens the step, and taps Mark Complete (part → In Progress)
+4. Operator scans the station QR placard (or the single QR on a job traveler, which opens that part's step list), opens the step, and taps Mark Complete (part → In Progress)
 
 5. Operator completes work, logs output
 

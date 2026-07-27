@@ -40,8 +40,19 @@ import {
 } from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
-/** Side of the single header QR (points) — big enough to scan off a taped-up sheet. */
-const QR_SIZE = 90;
+/**
+ * Side of the single header QR (points).
+ *
+ * The scan URL is ~156 chars (origin + two UUIDs), which lands the code at
+ * version 8 — 49x49 modules, plus 2 quiet-zone modules a side = 53 across. At
+ * 64pt (22.6mm) that is ~0.43mm per module: fine for a phone held close to a
+ * clean laser print, and sized to the title + Job # stack beside it rather than
+ * towering over it. Do not shrink further without shortening the URL — below
+ * ~0.4mm/module a greasy or lightly-smudged sheet starts failing to scan, which
+ * defeats the whole point of the code. Shortening the URL is the lever that buys
+ * a smaller code for free: fewer chars -> lower version -> fewer, fatter modules.
+ */
+const QR_SIZE = 64;
 
 function formatMinutes(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -140,8 +151,8 @@ export async function generateJobTravelerPdf(
   );
 
   // ---------- Header: the traveler QR (far right, top-aligned) ----------
-  // The QR sits BESIDE the title, not under it, so header height is the QR's
-  // 82pt rather than title + QR + caption stacked to ~165pt. No caption — a QR
+  // The QR sits BESIDE the title, not under it, so header height is one element
+  // tall rather than title + QR + caption stacked to ~165pt. No caption — a QR
   // already reads as "scan me", and the old line just cost a row of paper.
   const qrX = pageWidth - MARGIN - QR_SIZE;
   const qrY = headerTop;
@@ -176,13 +187,14 @@ export async function generateJobTravelerPdf(
   // of the toner a solid-black fill would (the earlier reversed-white-on-black
   // version was flagged as too ink-heavy). A double rule gives it stamp presence
   // without adding meaningful ink.
+  let hotStampBottom = headerTop;
   if (traveler.is_hot) {
     const stampW = 82;
     const stampH = 26;
-    // Tucked into the gap under the Job #, right-aligned to the title. It fits
-    // inside the QR's height, so a hot job costs no extra header rows.
+    // Tucked into the gap under the Job #, right-aligned to the title.
     const stampX = titleRight - stampW;
     const stampY = headerTop + 46;
+    hotStampBottom = stampY + stampH;
     doc.setDrawColor(0);
     doc.setLineWidth(2);
     doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'S');
@@ -197,7 +209,10 @@ export async function generateJobTravelerPdf(
     doc.setLineWidth(0.75);
   }
 
-  let cursorY = Math.max(shopBlockBottom, qrBlockBottom) + 16;
+  // Header height is whichever column runs longest. The HOT stamp MUST be in
+  // this max: it hangs 8pt below a 64pt QR, so leaving it out draws the divider
+  // straight through the stamp on every hot job.
+  let cursorY = Math.max(shopBlockBottom, qrBlockBottom, hotStampBottom) + 16;
 
   // ---------- Divider ----------
   doc.setDrawColor(205);

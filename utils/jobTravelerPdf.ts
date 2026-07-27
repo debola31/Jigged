@@ -10,11 +10,15 @@
  * which one they were pointing at, so the sheet is back to a single
  * unambiguous target.
  *
- * Layout:
- *   - Header: company logo (top-left) + return address; "JOB TRAVELER"
- *     title + Job # (top-right) with the traveler QR beneath it.
- *   - Info block: Customer / Part Number / Description / Quantity /
- *     Customer PO / Order Date (jobs.created_at) / Due Date.
+ * Layout — kept tight on purpose. The header used to stack title over QR over a
+ * caption and ran ~165pt, pushing the Operations table 40% down the page with a
+ * void beside it for any shop that hasn't filled in an address:
+ *   - Header (~82pt): company logo (top-left) + return address; the traveler QR
+ *     at the far right, top-aligned, with "JOB TRAVELER" + Job # right-aligned
+ *     to ITS left — so header height is the QR, not the sum of the stack.
+ *   - Info block: Customer / Part Number / Quantity / Customer PO / Order Date
+ *     (jobs.created_at) / Due Date, in two label/value columns, closed by a
+ *     divider. Description spans full width beneath.
  *   - Operations table: Step / Work Center / Operation · Instructions / Notes
  *     (setup·cycle for internal, "OUTSIDE — ship to {vendor}" for outside) /
  *     Done (blank write-in). Outside rows are flagged with a heavy black
@@ -125,47 +129,46 @@ export async function generateJobTravelerPdf(
 
   const shopLines = buildShopHeaderLines(company);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(80);
+  doc.setFontSize(9.5);
+  doc.setTextColor(90);
   shopLines.forEach((line, i) => {
-    doc.text(line, shopNameX, headerTop + 30 + i * 12);
+    doc.text(line, shopNameX, headerTop + 30 + i * 11.5);
   });
-  const shopBlockBottom = Math.max(logoBottom, headerTop + 30 + shopLines.length * 12);
+  const shopBlockBottom = Math.max(
+    logoBottom,
+    headerTop + (shopLines.length ? 30 + shopLines.length * 11.5 : 18),
+  );
 
-  // ---------- Header: title + QR (right) ----------
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(24);
-  doc.setTextColor(30);
-  doc.text('JOB TRAVELER', pageWidth - MARGIN, headerTop + 18, { align: 'right' });
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.setTextColor(60);
-  doc.text(`Job ${traveler.job_number}`, pageWidth - MARGIN, headerTop + 36, { align: 'right' });
-
-  // ---------- Header: the traveler QR (far right, under the Job #) ----------
-  // One code, one meaning: "open this traveler". Captioned so nobody has to guess
-  // what scanning it does.
+  // ---------- Header: the traveler QR (far right, top-aligned) ----------
+  // The QR sits BESIDE the title, not under it, so header height is the QR's
+  // 82pt rather than title + QR + caption stacked to ~165pt. No caption — a QR
+  // already reads as "scan me", and the old line just cost a row of paper.
   const qrX = pageWidth - MARGIN - QR_SIZE;
-  const qrY = headerTop + 46;
-  let qrBlockBottom = headerTop + 36;
+  const qrY = headerTop;
+  let qrBlockBottom = headerTop;
   if (travelerQrDataUrl) {
     try {
       doc.addImage(travelerQrDataUrl, 'PNG', qrX, qrY, QR_SIZE, QR_SIZE);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(110);
-      doc.text('Scan to open this traveler', pageWidth - MARGIN, qrY + QR_SIZE + 11, {
-        align: 'right',
-      });
-      doc.setTextColor(30);
-      qrBlockBottom = qrY + QR_SIZE + 11;
+      qrBlockBottom = qrY + QR_SIZE;
     } catch {
       // Skip silently — the rest of the traveler is still useful.
     }
   }
 
-  // ---------- HOT stamp (left of the QR) ----------
+  // ---------- Header: title + Job # (right, left of the QR) ----------
+  // Right-aligned to the QR's left edge so the two never collide.
+  const titleRight = qrX - 16;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(21);
+  doc.setTextColor(30);
+  doc.text('JOB TRAVELER', titleRight, headerTop + 18, { align: 'right' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.setTextColor(70);
+  doc.text(`Job ${traveler.job_number}`, titleRight, headerTop + 36, { align: 'right' });
+
+  // ---------- HOT stamp (under the Job #, left of the QR) ----------
   // The paperless equivalent of Contour's pink paper / "HOT" in red pen. Drawn as
   // an OUTLINED "rubber stamp" — a heavy black border with bold black "HOT" on
   // white, NO filled background. That mirrors the physical HOT rubber stamp,
@@ -176,9 +179,10 @@ export async function generateJobTravelerPdf(
   if (traveler.is_hot) {
     const stampW = 82;
     const stampH = 26;
-    // Sits beside the QR, not under it — the QR owns the right column now.
-    const stampX = qrX - 14 - stampW;
-    const stampY = qrY + (QR_SIZE - stampH) / 2;
+    // Tucked into the gap under the Job #, right-aligned to the title. It fits
+    // inside the QR's height, so a hot job costs no extra header rows.
+    const stampX = titleRight - stampW;
+    const stampY = headerTop + 46;
     doc.setDrawColor(0);
     doc.setLineWidth(2);
     doc.roundedRect(stampX, stampY, stampW, stampH, 4, 4, 'S');
@@ -193,10 +197,10 @@ export async function generateJobTravelerPdf(
     doc.setLineWidth(0.75);
   }
 
-  let cursorY = Math.max(shopBlockBottom, qrBlockBottom) + 18;
+  let cursorY = Math.max(shopBlockBottom, qrBlockBottom) + 16;
 
   // ---------- Divider ----------
-  doc.setDrawColor(210);
+  doc.setDrawColor(205);
   doc.setLineWidth(0.75);
   doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
   cursorY += 20;
@@ -205,9 +209,11 @@ export async function generateJobTravelerPdf(
   // Short label/value pairs in two columns; each row advances by the taller
   // of its two cells. Description spans the full width below the grid so a
   // long description wraps cleanly instead of colliding with the next row.
+  // labelGap is the label -> value gutter: wide enough that values line up in a
+  // column, narrow enough not to leave a channel of white down the page.
   const colWidth = (pageWidth - MARGIN * 2) / 2;
   const lineHeight = 13;
-  const labelGap = 80;
+  const labelGap = 66;
 
   const drawPair = (label: string, value: string, x: number, y: number, maxWidth: number): number => {
     doc.setFont('helvetica', 'normal');
@@ -239,7 +245,8 @@ export async function generateJobTravelerPdf(
   gridRows.forEach(([left, right]) => {
     const ll = drawPair(left[0], left[1], MARGIN, cursorY, cellWidth);
     const rl = drawPair(right[0], right[1], MARGIN + colWidth, cursorY, cellWidth);
-    cursorY += Math.max(ll, rl) * lineHeight + 4;
+    // Single-line rows advance 16pt; a wrapped value still gets its full height.
+    cursorY += Math.max(ll, rl) * lineHeight + 3;
   });
 
   // Description — full width so it never overlaps the adjacent column.
@@ -250,7 +257,15 @@ export async function generateJobTravelerPdf(
     cursorY,
     pageWidth - MARGIN * 2 - labelGap,
   );
-  cursorY += descLines * lineHeight + 16;
+  cursorY += descLines * lineHeight + 4;
+
+  // ---------- Divider ----------
+  // Closes the info block so it reads as a band rather than trailing off into
+  // the Operations heading.
+  doc.setDrawColor(205);
+  doc.setLineWidth(0.75);
+  doc.line(MARGIN, cursorY, pageWidth - MARGIN, cursorY);
+  cursorY += 22;
 
   // ---------- Operations table ----------
   doc.setFont('helvetica', 'bold');

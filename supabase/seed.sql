@@ -67,8 +67,18 @@ insert into auth.identities (
 ) on conflict do nothing;
 
 -- ── Company + access ─────────────────────────────────────────────────────────
-insert into public.companies (id, name, settings) values
+-- The address / phone / email / website columns are NOT decoration: every
+-- generated document (job traveler, packing slip, quote, invoice) builds its
+-- letterhead from them via buildShopHeaderLines(). Left null, each PDF prints a
+-- company name floating over a block of empty paper, which reads as a layout bug
+-- rather than as missing profile data — so dev and preview branches were tuning
+-- print layouts against a shop that doesn't exist. Keep these populated.
+insert into public.companies (
+  id, name, address_line1, city, state, postal_code, country, phone, email, website, settings
+) values
   ('22222222-2222-2222-2222-222222222222', 'Vanguard Precision Works',
+   '1420 Rand Drive', 'Detroit', 'MI', '48211', 'USA',
+   '(313) 555-0142', 'shop@vanguardprecision.test', 'vanguardprecision.test',
    -- Enable the opt-in data-import tool in dev + preview branches so
    -- it's visible while the feature rolls out. Seed is local/preview-only, never prod.
    '{"features": {"data_import": true}}'::jsonb)
@@ -454,12 +464,50 @@ begin
   return v_jp;
 end $$;
 
+-- Record the completion event behind an advanced operation. Outside
+-- (external-vendor) ops are skipped: compute_job_operation_status() returns their
+-- stored status untouched because they move through the send/receive lifecycle,
+-- so a quantity event there would be meaningless noise. (The seeded routings are
+-- all-internal today; the guard keeps this correct if an outside step is added.)
+create function pg_temp.record_completion(
+  p_op uuid, p_jp uuid, p_qty numeric, p_at timestamptz, p_note text)
+returns void language plpgsql as $$
+begin
+  if exists (
+    select 1 from public.job_operations o
+    join public.work_centers wc on wc.id = o.work_center_id
+    where o.id = p_op and wc.kind = 'external'
+  ) then
+    return;
+  end if;
+  insert into public.job_operation_completions
+    (company_id, job_operation_id, job_part_id, quantity_good, completed_by, completed_at, created_at, note)
+  values ('22222222-2222-2222-2222-222222222222', p_op, p_jp, p_qty,
+          '11111111-1111-1111-1111-111111111111', p_at, p_at, p_note);
+end $$;
+
 -- Progress a job's parts + operations (job status rolls up via trigger).
+--
+-- job_operations.status is DERIVED, not authoritative: job_operation_completions
+-- is the append-only source of truth and
+-- recompute_job_operation_status_from_completion() computes the status from
+-- SUM(quantity_good) vs the ordered qty. So every op this helper advances also
+-- gets the completion event the app itself would have written. Without it the
+-- seed shipped "completed" ops with no history behind them — the operator
+-- completion feed was empty, and completeJobOperation() would compute
+-- `remaining = quantity - 0` and offer to re-complete the whole order as though
+-- the work had never happened.
+--
+-- ORDERING IS LOAD-BEARING: the status UPDATE comes first, the event second. The
+-- recompute trigger only writes when the computed status differs from the stored
+-- one, so seeding the status first makes the event a no-op transition and the
+-- backdated completed_at / completed_by survive. Insert the event first and the
+-- trigger stamps both with now(), flattening the seed's dated history.
 create function pg_temp.progress_job(p_job uuid, p_status text, p_anchor int)
 returns void language plpgsql as $$
-declare jp record; op record; n int; i int;
+declare jp record; op record; n int; i int; v_at timestamptz;
 begin
-  for jp in select id from public.job_parts where job_id = p_job loop
+  for jp in select id, quantity from public.job_parts where job_id = p_job loop
     if p_status = 'cancelled' then
       update public.job_parts set production_status='cancelled', status_changed_at = now() - (p_anchor||' days')::interval where id = jp.id;
       continue;
@@ -469,16 +517,32 @@ begin
     for op in select id from public.job_operations where job_part_id = jp.id order by sequence loop
       i := i + 1;
       if p_status = 'completed' then
+        v_at := now() - ((p_anchor + (n - i + 1)*2 - 1)||' days')::interval;
         update public.job_operations set status='completed',
-          completed_at = now() - ((p_anchor + (n - i + 1)*2 - 1)||' days')::interval,
+          completed_at = v_at,
           completed_by = '11111111-1111-1111-1111-111111111111' where id = op.id;
+        perform pg_temp.record_completion(op.id, jp.id, jp.quantity, v_at, 'Seed: full run complete');
       elsif p_status = 'in_progress' then
         if i = 1 then
+          v_at := now() - ((p_anchor+2)||' days')::interval;
           update public.job_operations set status='completed',
-            completed_at = now() - ((p_anchor+2)||' days')::interval,
+            completed_at = v_at,
             completed_by='11111111-1111-1111-1111-111111111111' where id = op.id;
+          perform pg_temp.record_completion(op.id, jp.id, jp.quantity, v_at, 'Seed: full run complete');
         elsif i = 2 then
           update public.job_operations set status='in_progress' where id = op.id;
+          -- Half the order booked: 0 < good < target is exactly what
+          -- compute_job_operation_status() reads back as 'in_progress', so the
+          -- derived status agrees with the one set above and the op carries a
+          -- real good-piece count for the partial-completion UI to show.
+          -- Floor it so a discrete part reads as whole pieces (2 of 5, not 2.5);
+          -- only fall back to the raw half when flooring would hit 0 and the
+          -- status would collapse to 'pending'.
+          perform pg_temp.record_completion(
+            op.id, jp.id,
+            case when floor(jp.quantity / 2) >= 1 then floor(jp.quantity / 2)
+                 else jp.quantity / 2 end,
+            now() - ((p_anchor+1)||' days')::interval, 'Seed: partial run');
         end if;
       end if;
     end loop;

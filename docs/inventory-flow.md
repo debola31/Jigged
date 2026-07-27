@@ -727,7 +727,9 @@ Worth pulling; do not cite numbers from either until someone has read them.
 ## 9. Next steps
 
 1. Run the [discovery script](usability-tests/inventory-discovery-script-v1.md) with
-   Shane and Johnny. Fill the findings CSV in the shop.
+   Shane and Johnny. It's a **video call**, so send the pre-call photo request 2–3 days ahead
+   — remote discovery without artefacts is just an interview. Record the call; fill the
+   findings CSV from the recording the same day.
 2. Answer the certs question first — it gates a whole phase.
 3. Decide [§5.2](#52-is-a-job-a-place--decide-before-phase-1-ships) (job as place) from the
    staging finding.

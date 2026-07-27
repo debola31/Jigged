@@ -436,11 +436,11 @@ A pending operation is considered "ready" when no earlier-sequence `job_operatio
 
 ## Job Creation from Routing
 
-When a job is created for a part that has a routing, the DB function `create_job_operations_from_routing(p_job_id, p_routing_id)` runs and:
+When a job part is created for a part that has a routing, the DB function `create_job_part_operations_from_routing(p_job_part_id, p_routing_id)` runs and:
 
-1. Inserts one `job_operations` row per `routing_nodes` row, ordered by `routing_nodes.sequence`. The new rows get fresh sequences of 10, 20, 30, ... and carry over `operation_type_id`, `instructions`, `setup_time`, and `run_time_per_unit`.
+1. Inserts one `job_operations` row per `routing_operations` row, ordered by `routing_operations.sequence`. The new rows get fresh sequences of 10, 20, 30, ... and carry over `operation_type_id`, `instructions`, `setup_time`, and `run_time_per_unit`.
 
-2. Copies the routing's materials into `job_materials` — one row per `routing_materials` row — capturing each material as a snapshot for this job.
+2. Copies the part's BOM into `job_materials` — one row per `parts_bom` edge — capturing each material as a snapshot for this job. The snapshot is idempotent on `parts_bom_id`.
 
 3. Sets `jobs.current_operation_sequence = 10` so the job is primed to start at the first operation.
 
@@ -450,31 +450,51 @@ If the routing is later edited, existing jobs are not retroactively updated. The
 
 ## Material Tracking
 
-Jobs carry a routing-level materials list (not per-operation). When a job is created, each routing material is snapshotted into `job_materials`. Operators mark materials as consumed (or skipped) and can record an actual quantity that differs from the expected quantity.
+Materials are **part-attached** (`parts_bom`), not routing-attached — the old
+`routing_materials` table was removed. A job part has a single materials list regardless of
+how many operations its routing has.
+
+> **There is no per-job consumption tracking today.** Marking materials consumed or skipped,
+> recording an actual quantity, and auto-depleting stock on completion were **removed** by
+> migration `20260614043526_retire_job_material_consumption`. Stock depletion is a deliberate
+> manual transaction. Rebuilding it is journey **J9** in
+> [`docs/inventory-flow.md`](../inventory-flow.md) (issue #550).
 
 ### `job_materials` Table
+
+Written once at job-part creation and **read by nothing** — the UI reads the live BOM instead
+(see [UI](#ui) below). Its fate is an open decision:
+[`inventory-flow.md`](../inventory-flow.md) §5.9.
 
 | Column | Type | Required | Description |
 |---|---|---|---|
 | id | uuid | Yes | Primary key |
-| job_id | uuid | Yes | FK to jobs (cascade delete) |
-| routing_material_id | uuid | No | FK to routing_materials; set to NULL if the source routing material is deleted |
-| inventory_item_id | uuid | Yes | FK to inventory_items (restricted delete) |
-| expected_quantity | numeric | Yes | Snapshot of `routing_materials.quantity` at job creation (>= 0) |
-| actual_quantity | numeric | No | Quantity actually consumed, recorded by the operator on consumption. NULL until consumed. |
-| unit | text | Yes | Unit of measure (snapshot from routing material) |
-| status | text | Yes | `pending`, `consumed`, or `skipped` |
-| consumed_at | timestamptz | No | Timestamp when status moved to `consumed` |
-| consumed_by | uuid | No | FK to `auth.users` — who marked it consumed |
+| job_id | uuid | Yes | FK to jobs |
+| job_part_id | uuid | Yes | FK to job_parts |
+| parts_bom_id | uuid | No | FK to the source `parts_bom` edge; the snapshot is idempotent on this |
+| material_part_id | uuid | Yes | FK to `parts` — the material |
+| expected_quantity | numeric | Yes | Snapshot of the BOM quantity at job creation |
+| unit | text | Yes | Unit of measure (snapshot) |
 | created_at | timestamptz | Yes | Record creation |
 | updated_at | timestamptz | Yes | Last update |
 
+There are no `status`, `actual_quantity`, `consumed_at`, or `consumed_by` columns.
+
 ### UI
 
-The Job Detail page includes a `JobMaterialsCard` (`components/jobs/JobMaterialsCard.tsx`) that lists the job's materials with their expected quantity, actual quantity, and status, and exposes the actions to mark a material consumed or skipped.
+The job page renders `JobPartMaterialsCard`
+(`components/jobs/JobPartMaterialsCard.tsx`), which is **read-only** and sourced **live from
+the part's BOM** via `getBomForPart` — not from the `job_materials` snapshot — so the job
+reflects the current BOM. There is no mark-consumed or mark-skipped action.
 
 ### User Flow
 
-- Designer defines materials once on the routing (`routing_materials`).
-- Job creation copies those materials into `job_materials` with `status = 'pending'` and `expected_quantity` snapshotted from the routing.
-- Operator marks each material `consumed` (recording `actual_quantity` and optionally differing from expected) or `skipped` (with a reason). This is what drives the inventory depletion transaction — see [Inventory Module — Material Consumption Flow](inventory.md#material-consumption-flow).
+- Designer defines the materials a part consumes once, on the part's BOM (`parts_bom`).
+- Job-part creation snapshots those edges into `job_materials`.
+- The job page displays the **live BOM**. To decrement stock, someone records a Remove Stock
+  transaction against the material part — a deliberate action, not a side effect of
+  completing the job.
+
+> Note the unresolved contradiction: the snapshot is taken at creation, and the UI then
+> deliberately ignores it in favour of the live BOM. See
+> [Inventory Module](inventory.md#job_materials-is-write-only).

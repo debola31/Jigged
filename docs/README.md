@@ -10,8 +10,9 @@ Welcome to the Jigged documentation. Jigged is a data platform for small precisi
 - [System Architecture](architecture.md) - Technical architecture overview
 - [Design System](design-system.md) - UI/UX design guidelines and MUI theme
 
-### Build Guide
-- [Build Sequence](build-sequence.md) - Implementation roadmap
+### Journey Specs
+- [Operator Paperless Flow](operator-paperless-flow.md) - Operator journeys and the decisions bounding them
+- [Inventory & Material Flow](inventory-flow.md) - Material journeys J1–J13, phasing, and open questions
 
 ### Module Specifications
 See [modules/](modules/) for detailed specifications:

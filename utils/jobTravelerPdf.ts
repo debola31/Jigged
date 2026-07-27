@@ -44,15 +44,22 @@ const MARGIN = 40;
  * Side of the single header QR (points).
  *
  * The scan URL is ~156 chars (origin + two UUIDs), which lands the code at
- * version 8 — 49x49 modules, plus 2 quiet-zone modules a side = 53 across. At
- * 64pt (22.6mm) that is ~0.43mm per module: fine for a phone held close to a
- * clean laser print, and sized to the title + Job # stack beside it rather than
- * towering over it. Do not shrink further without shortening the URL — below
- * ~0.4mm/module a greasy or lightly-smudged sheet starts failing to scan, which
- * defeats the whole point of the code. Shortening the URL is the lever that buys
- * a smaller code for free: fewer chars -> lower version -> fewer, fatter modules.
+ * version 8 — 49x49 modules, plus a 2-module quiet zone a side = 53 across. At
+ * 56pt (19.8mm) that works out to ~0.37mm per module.
+ *
+ * That number is set by precedent, not by a generic spec: the per-operation QRs
+ * this sheet used to print were also 56pt but carried a THIRD uuid (203 chars,
+ * version 9, 53x53) for ~0.35mm per module. This code is strictly less dense
+ * than what the traveler already shipped, at the same physical size. Caveat
+ * worth keeping in mind — the paperless operator flow was built but paper won by
+ * habit, so 0.35mm is an accepted precedent rather than a proven field result.
+ *
+ * If a shop ever reports a scan failing off a greasy or smudged sheet, do NOT
+ * just enlarge this. Shorten the URL instead: a `/t/{jobPartId}` redirect route
+ * (~60 chars) drops the code to version 4 / 33x33, which at this same 56pt is
+ * ~0.53mm per module — nearly half again more robust, with no layout change.
  */
-const QR_SIZE = 64;
+const QR_SIZE = 56;
 
 function formatMinutes(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -210,8 +217,8 @@ export async function generateJobTravelerPdf(
   }
 
   // Header height is whichever column runs longest. The HOT stamp MUST be in
-  // this max: it hangs 8pt below a 64pt QR, so leaving it out draws the divider
-  // straight through the stamp on every hot job.
+  // this max: its bottom sits 16pt below a 56pt QR, so leaving it out draws the
+  // divider straight through the stamp on every hot job.
   let cursorY = Math.max(shopBlockBottom, qrBlockBottom, hotStampBottom) + 16;
 
   // ---------- Divider ----------

@@ -19,7 +19,7 @@ import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CloseIcon from '@mui/icons-material/Close';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
-import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
+import { addJobNoteMedia, getJobNoteMediaUrl, deleteJobNote } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
@@ -440,11 +440,19 @@ export default function JobFeed({
     }
     setSaving(true);
     setComposerError(null);
+
+    // The note row is created first, then each photo is uploaded against it, so a
+    // mid-loop failure leaves partial state. Track it so the catch can clean up
+    // rather than leaving the operator to work out what landed.
+    let createdNoteId: string | null = null;
+    let attached = 0;
+
     try {
       const note = await addJobNote(jobId, companyId, operatorId, body || null, {
         jobPartId: operationContext.jobPartId,
         jobOperationId: operationContext.jobOperationId,
       });
+      createdNoteId = note.id;
 
       const media: JobNoteMedia[] = [];
       for (const p of pending) {
@@ -455,6 +463,7 @@ export default function JobFeed({
             thumbnail: prepared.thumbnail,
           }),
         );
+        attached = media.length;
       }
 
       setPendingNotes((prev) => [{ ...note, media }, ...prev]);
@@ -470,6 +479,26 @@ export default function JobFeed({
       });
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : 'Could not post. Please try again.');
+
+      // A note with no text and no photo is not a note — it is debris from a
+      // failed attach. Reproduced live on a preview where the storage bucket was
+      // missing: the row was created, the upload failed, and an empty entry was
+      // left sitting in the feed under the operator's name. Remove it.
+      if (createdNoteId && !body && attached === 0) {
+        await deleteJobNote(createdNoteId).catch(() => {});
+        createdNoteId = null;
+      }
+
+      // Drop the photos that DID attach. They are on the note already, so leaving
+      // them pending means a retry re-uploads them and creates a second copy —
+      // the operator's obvious next action turning one failure into duplicates.
+      if (attached > 0) {
+        setPending((prev) => {
+          prev.slice(0, attached).forEach((p) => URL.revokeObjectURL(p.previewUrl));
+          return prev.slice(attached);
+        });
+      }
+
       // The note may have been created with partial media — refresh to show truth.
       load();
     } finally {

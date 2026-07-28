@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import JobFeed from '@/components/operator/JobFeed';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
-import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
+import { addJobNoteMedia, getJobNoteMediaUrl, deleteJobNote } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote } from '@/types/operator';
@@ -17,6 +17,7 @@ vi.mock('@/utils/operatorAccess', () => ({
 vi.mock('@/utils/jobNoteMediaAccess', () => ({
   addJobNoteMedia: vi.fn(),
   getJobNoteMediaUrl: vi.fn(),
+  deleteJobNote: vi.fn(),
 }));
 vi.mock('@/utils/imageCompression', () => ({ compressPhoto: vi.fn() }));
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
@@ -88,6 +89,7 @@ beforeEach(() => {
   mock(getJobNoteMediaUrl).mockResolvedValue('blob:thumb');
   mock(compressPhoto).mockResolvedValue({ file: new File(['x'], 'p.jpg', { type: 'image/jpeg' }) });
   mock(addJobNoteMedia).mockResolvedValue({ id: 'm1' });
+  mock(deleteJobNote).mockResolvedValue(undefined);
   // Pre-dismiss the mic hint by default so it doesn't collide with offer assertions.
   window.localStorage.setItem('jigged:composer-mic-hint', JSON.stringify({ shows: 0, dismissed: true }));
 });
@@ -441,5 +443,90 @@ describe('JobFeed — photo path', () => {
       'photo_attached',
       expect.objectContaining({ attached: 1, unreadable: 0, picked: 1 }),
     );
+  });
+});
+
+// Reproduced live on a preview whose storage bucket was missing: the note row was
+// created, the photo upload failed, and an empty entry was left in the feed under
+// the operator's name while the photo sat pending — so the obvious retry would
+// have made a second note.
+describe('JobFeed — partial post failure', () => {
+  it('removes the note when nothing landed on it', async () => {
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'orphan', body: null }));
+    mock(compressPhoto).mockResolvedValue({
+      file: new File(['f'], 'setup.jpg', { type: 'image/jpeg' }),
+    });
+    mock(addJobNoteMedia).mockRejectedValue(new Error('Bucket not found'));
+
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'setup.jpg', { type: 'image/jpeg' }));
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(deleteJobNote).toHaveBeenCalledWith('orphan'));
+  });
+
+  it('keeps a note that has text, even when its photo fails', async () => {
+    // The text is real work. Only an entry with nothing in it is debris.
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'kept', body: 'watch the bore' }));
+    mock(compressPhoto).mockResolvedValue({
+      file: new File(['f'], 'setup.jpg', { type: 'image/jpeg' }),
+    });
+    mock(addJobNoteMedia).mockRejectedValue(new Error('Bucket not found'));
+
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'watch the bore',
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'setup.jpg', { type: 'image/jpeg' }));
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    // Target the error text, not role=alert — the "not saved yet" warning is an
+    // Alert too, so the role matches both.
+    await screen.findByText(/Bucket not found/i);
+    expect(deleteJobNote).not.toHaveBeenCalled();
+  });
+
+  it('does not re-offer photos that already attached, so a retry cannot duplicate them', async () => {
+    // Two photos, second upload fails. The first is on the note; leaving it
+    // pending would upload it again on the operator's next tap.
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'partial', body: 'two shots' }));
+    mock(compressPhoto).mockResolvedValue({
+      file: new File(['f'], 'setup.jpg', { type: 'image/jpeg' }),
+    });
+    mock(addJobNoteMedia)
+      .mockResolvedValueOnce({
+        id: 'm1',
+        note_id: 'partial',
+        storage_path: 'p',
+        thumbnail_path: null,
+        kind: 'photo',
+        mime_type: 'image/jpeg',
+        width: null,
+        height: null,
+      })
+      .mockRejectedValueOnce(new Error('network died'));
+
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    await user.type(screen.getByPlaceholderText('Add a note or photo for this step…'), 'two shots');
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['a'], 'one.jpg', { type: 'image/jpeg' }),
+      new File(['b'], 'two.jpg', { type: 'image/jpeg' }),
+    ]);
+    expect(screen.getAllByAltText('Pending photo')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    // Only the failed one remains queued.
+    await waitFor(() => expect(screen.getAllByAltText('Pending photo')).toHaveLength(1));
   });
 });

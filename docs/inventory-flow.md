@@ -227,15 +227,19 @@ to hand-key every opening balance, or start at zero. This directly contradicts P
 **Missing:** `quantity` and `reorder_point` columns in the parts import mapping, writing
 an opening `adjustment` ledger row per item rather than a bare `parts.quantity` write.
 
-> **Deferred out of Phase 1 — validated 2026-07-27.** Contour **starts from zero**. They do
-> have stock figures in their old system, but *"whether it's up to date and accurate is
-> questionable"* — and importing numbers nobody trusts just launders bad data into a fresh
-> system, which is worse than an honest zero. **The way Contour establishes opening balances
-> is [J10](#j10--count-it), not an import.**
+> **Mostly deferred out of Phase 1 — validated 2026-07-27.** Contour's old parts table *does*
+> carry on-hand figures for a lot of parts, but *"whether it's up to date and accurate is
+> questionable."* Importing those straight into `parts.quantity` would launder distrusted
+> numbers into a fresh system — worse than an honest zero.
 >
-> The importer gap is still real and still contradicts FR-16 — it just isn't customer #1's
-> problem. It becomes blocking at the **second** company, where trusted figures may exist.
-> Keep it on the roadmap; move it out of Phase 1.
+> **Split the feature.** Importing quantities **into stock** stays deferred. Importing them
+> **into a count sheet's expected column** ships with [J10](#j10--count-it) in Phase 1, so the
+> first count verifies the legacy data instead of ignoring it. Same parsing work, radically
+> different trust semantics: nothing reaches the ledger until a human counts it.
+>
+> The general importer gap is still real and still contradicts FR-16 — it just isn't customer
+> #1's problem. It becomes blocking at the **second** company, where trusted figures may
+> exist and a direct-to-stock import is legitimate.
 
 ### J2 — Say where something lives
 
@@ -394,16 +398,34 @@ without it. It also carries the label-maintenance task — replacing damaged QR 
 [a job for a scheduled audit](https://www.sortly.com/blog/how-to-label-inventory/), and the
 count session is that audit.
 
-> **Promoted — this is also how Contour onboards.** Since they start from zero and their
-> legacy figures aren't trustworthy ([J1](#j1--seed-the-item-master-and-opening-balances)),
-> the **first count session *is* the opening balance**. That makes J10 the entry point to the
-> whole module for customer #1, not a maintenance feature that arrives later. Design the first
-> run as onboarding: walk the ~10 places, enter what's there, commit. Every subsequent run is
-> the same flow with a variance column.
+> **Promoted — this is how Contour onboards.** The **first count session *is* the opening
+> balance**, which makes J10 the entry point to the whole module for customer #1, not a
+> maintenance feature that arrives later.
 >
-> **Still open:** whether they have *ever* counted. If not, we are introducing a practice
-> rather than digitising one, and the first session likely needs to be facilitated by us
-> rather than self-served.
+> **They have tried counting before** *(validated 2026-07-27)* — their old ERP had an
+> inventory-locations feature and an on-hand column on the parts table. So we are **rescuing a
+> lapsed practice, not introducing a new one**: no education needed, and the first session can
+> be self-served rather than facilitated. But see
+> [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — a previous attempt failing
+> raises the bar rather than lowering it.
+>
+> **Seed the first count from the legacy data — as *expected*, never as truth.**
+> Their old parts table has on-hand figures populated for a lot of parts, of unknown accuracy
+> and unknown freshness. Do **not** import those into `parts.quantity`; that launders numbers
+> nobody trusts into a fresh system. Import them into the **count sheet's expected column**
+> instead, so the first run is a *verification* rather than a blank-slate discovery. Three
+> things fall out:
+>
+> - The first count is much faster — you're checking a number, not inventing one.
+> - The variance report becomes a genuine onboarding moment: *here is how wrong your old
+>   system was.* That is the most persuasive argument for the ritual we will ever get, and it
+>   is free.
+> - Nothing enters the ledger until the count commits, so the first `adjustment` row is an
+>   honest counted value. No fabricated opening balance, consistent with the no-silent-
+>   fallbacks rule in `CLAUDE.md`.
+>
+> If the legacy export turns out to be unusable, the fallback is the blank-slate walk — the
+> flow is the same, the expected column is just empty.
 
 ### J11 — Don't run out
 
@@ -559,6 +581,31 @@ of divergence.
 it looks and should be its own PR, not smuggled into a journey.
 
 ### 5.5 Locations: keep them visual, change *when* they appear
+
+> ⚠️ **Contour has already been through a failed locations feature.** *(Validated 2026-07-27.)*
+> Their old ERP had one, and it was *"badly designed and not really intuitive for them to
+> use."* We are not introducing this concept — we are **rebuilding something that already
+> burned them once.**
+>
+> That changes the standard this redesign is held to. A second bad locations experience does
+> not get a third attempt; it confirms their prior that this category of feature is not for
+> them. Two consequences:
+>
+> 1. **Find out precisely what was wrong with the old one before designing ours.** They lived
+>    it, so this is free, and it is better evidence than any amount of generic WMS research.
+>    It is now the **highest-value open question in this spec** — see
+>    [§8](#8-what-we-know-and-what-we-still-dont).
+> 2. **Establish whether it was a *usability* failure or a *maintenance* failure** — the two
+>    have opposite implications and "badly designed" is ambiguous between them:
+>
+>    | If the real cause was… | Then… |
+>    |---|---|
+>    | **Usability** — too many clicks, wrong vocabulary, setup too heavy | The §5.5 redesign is the right bet. Proceed. |
+>    | **Maintenance** — it worked, nobody kept it current | **No UI fixes this.** Locations stay deprioritised behind the material↔job loop, and [J10](#j10--count-it) is the only lever that matters. |
+>
+>    The existing evidence tilts toward usability — *"not really intuitive"* is a usability
+>    complaint — but that is our inference from a secondhand paraphrase, not their words. Ask
+>    directly before committing Phase 2.
 
 Research is **for** visual — [Sortly](https://www.sortly.com/blog/why-photos-are-vital-in-inventory-management/)
 (visual-over-alphanumeric is the small-business wedge),
@@ -832,6 +879,9 @@ shop's own words — good enough for the structural decisions below, not for pri
 | Certs / heat / regulated customers? | **None** | [J12](#j12--prove-it-traceability--cut) cut, lot layer cut, Phase 4 halved |
 | Customer-supplied material? | **Yes, and there are a lot of them** — service-style one-offs | Promoted to [J14](#j14--customer-supplied-material); ownership flag into Phase 1 |
 | How many storage places? | **~10, ±4.** Cabinets and shelving | Validates [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — one wizard pass generating 16 is over-built for this shop |
+| Have they ever counted? | **Yes, tried.** Their old ERP had an inventory-locations feature and an on-hand column on parts | Rescuing a lapsed practice, not introducing one → [J10](#j10--count-it) first run can be self-served |
+| Is there legacy on-hand data? | **Yes, populated for a lot of parts** — accuracy and update frequency both unknown | Seed the first count sheet's *expected* column from it; never import it into stock |
+| Did a locations feature already fail them? | **Yes** — *"badly designed and not really intuitive"* | ⚠️ Raises the bar on [§5.5](#55-locations-keep-them-visual-change-when-they-appear). We get one more attempt, not two |
 
 ### Still open
 
@@ -839,7 +889,8 @@ shop's own words — good enough for the structural decisions below, not for pri
 
 | Question | Gates | Note |
 |---|---|---|
-| Have they *ever* counted? | [J10](#j10--count-it) design | If never, the first session needs facilitating by us, not self-serving. **Highest-value remaining question** — J10 is Phase 1's first build. |
+| **What exactly was wrong with the old ERP's locations feature — and was it usability or maintenance?** | [§5.5](#55-locations-keep-them-visual-change-when-they-appear) / all of Phase 2 | **Highest-value question in the spec.** They lived it, so it's free to ask, and it beats any generic research. Usability → our redesign is the right bet. Maintenance → no UI saves it and locations stay deprioritised. |
+| Can we get their legacy on-hand export? | [J10](#j10--count-it) first run | Determines whether the first count is a verification or a blank-slate walk. Same flow either way, so it doesn't block design — but it changes the onboarding demo considerably. |
 | Is there a **bar rack**? | Phase 2 palette | Only *cabinets and shelving* were named — the standing bar-rack hypothesis is **neither confirmed nor refuted**. They hold material in feet/inches, which implies long stock lives somewhere. Do not add the card on a guess. |
 | What do they call each of the ~10 places? | Phase 2 palette naming | The card-sort in the discovery script is still the instrument |
 | Do service jobs have a BOM at all? | [J14](#j14--customer-supplied-material) | May be "here's a part, fix it" with no material line |
@@ -877,10 +928,11 @@ Worth pulling; do not cite numbers from either until someone has read them.
 resolved, and nothing on the still-open list gates the first build. Design can start.
 
 1. **Design [J10](#j10--count-it) first** — it is Phase 1's entry point, because the first
-   count session *is* Contour's opening balance.
-2. **Ask the one remaining J10 question before designing it:** *have they ever counted?* If
-   never, the first session needs facilitating rather than self-serving, and that changes the
-   UI. It is a single question, not a research session.
+   count session *is* Contour's opening balance. They have counted before, so it can be
+   self-served. Seed the expected column from their legacy on-hand export if we can get it.
+2. **Ask what was wrong with the old ERP's locations feature** — usability or maintenance?
+   It doesn't block Phase 1, but it decides whether Phase 2 is worth doing at all, and it
+   costs one question to someone who lived it.
 3. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
    Re-scope **#496** from *"the use isn't validated"* to the phasing in [§6](#6-sequencing).
 4. **Fold #571 into Phase 3** and **#550 into Phase 1** ([J7](#j7--issue-material-to-a-job))

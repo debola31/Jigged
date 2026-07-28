@@ -107,7 +107,7 @@ the dedicated `/activity` page instead.
 
 **"View all activity" link:** navigates to the full activity stream at
 `/dashboard/{companyId}/activity` (`app/dashboard/[companyId]/activity/page.tsx`)
-— `getActivityStream` there adds `job_notes` (as note/photo events) and
+— `getActivityStream` there adds `notes` (as note/photo events) and
 `job_operations` completions, with type-filter chips and `before`-cursor
 pagination ("Load more").
 

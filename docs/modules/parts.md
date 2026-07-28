@@ -16,7 +16,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 
 **Dependencies:** None (parts are independent company-wide entities)
 
-**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, and `part_notes`
+**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, and `part_comments`
 
 ---
 
@@ -107,7 +107,7 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 **Index:** `(part_id, created_at DESC)` — the newest-first list query.
 
-**RLS** (mirrors `part_notes`):
+**RLS** (mirrors `part_comments`):
 - **SELECT** — any company member can read the company's attachments.
 - **INSERT** — a member can upload, but only as themselves (`uploaded_by = get_operator_access_id(company_id)`).
 - **DELETE** — the uploader **or** a company admin (`uploaded_by = get_operator_access_id(company_id) OR is_company_admin(company_id)`).

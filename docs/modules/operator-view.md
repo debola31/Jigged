@@ -58,7 +58,7 @@ step, and record progress with a single **Mark Complete**.
 - **No actual-time columns and no `operator_sessions` table** — both were removed. There is no
   start/stop, no timer, no shift/clock-in. See [prd.md](../prd.md) §4.3 (Complete-Only).
 
-**Job feed** — `job_notes` (+ `job_note_media`): one append-only stream per job; a note may be
+**Job feed** — `notes` (+ `note_media`): one append-only stream per job; a note may be
 tagged to a step via `job_operation_id`. Captured on the operation page (text + photo/video).
 
 ## Routing & readiness
@@ -158,7 +158,7 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Job feed (notes + media)**
 
-- [ ] **Given** the operation page, **when** the operator adds a note (optionally media-only) with a step tag, **then** it inserts into `job_notes` with the trimmed body, `job_part_id`, and `job_operation_id`, then reloads into the feed with a readable "Op N · Name" label — *edit->save->reload verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote' > 'inserts the step tag + trimmed body and returns the mapped note'` AND `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
+- [ ] **Given** the operation page, **when** the operator adds a note (optionally media-only) with a step tag, **then** it inserts into `notes` with the trimmed body, `job_part_id`, and `job_operation_id`, then reloads into the feed with a readable "Op N · Name" label — *edit->save->reload verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote' > 'inserts the step tag + trimmed body and returns the mapped note'` AND `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
 - [ ] **Given** a blank-text note, **when** it is saved, **then** `body` is stored as null so a media-only note is valid — *verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote' > 'stores a null body for a media-only (blank text) note'`*.
 - [ ] **Given** the job feed, **when** it loads, **then** both job-level and operation-scoped notes roll up together (newest first) because operation notes still carry `job_id` — *verified by `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
 

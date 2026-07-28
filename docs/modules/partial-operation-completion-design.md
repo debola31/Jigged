@@ -5,7 +5,7 @@
 Jigged already lets a shop ship a subset of a job's quantity and invoice a subset,
 but **operations can only be completed whole**. A real case from our design partner:
 order quantity 12, material for 5, 2 came out wrong, 3 completed. The operator's only
-way to record "3 done, 9 to go" was a free-text note (`job_notes`): *"3 are complete
+way to record "3 done, 9 to go" was a free-text note (`notes`): *"3 are complete
 need 9 more."* That fact lives in prose instead of data — nothing rolls it up, nothing
 shows it to the admin, and the next run has to re-read the note.
 
@@ -216,7 +216,7 @@ today). The data to build that gate now exists; wiring it is a named deferred it
 
 **v1 records good quantity only; scrap is deferred** (user decision). The motivating
 incident's "2 came out wrong" will not be structurally captured in v1 — the operator can
-still note it free-text in the existing `job_notes` feed. The schema is deliberately
+still note it free-text in the existing `notes` feed. The schema is deliberately
 forward-compatible: adding scrap later is one additive `quantity_scrap numeric DEFAULT 0
 CHECK (>= 0)` column plus one optional input, with **no** change to the v1 rollup
 (`remaining = target − good`; scrap would remain display/audit-only, never reducing

@@ -103,7 +103,7 @@ Let them talk. Do not steer. Note every point where material is touched, and by 
 > "What do you keep on hand, versus buy for a specific job?"
 
 *Decides:* whether the job-shop hypothesis holds — that most material is bought per job and
-only common sizes are stocked. If they stock heavily, J1 and J10 matter much more. If they
+only common sizes are stocked. If they stock heavily, J1 and J9 matter much more. If they
 buy per job, J4–J7 are the whole product.
 
 ### 3. Certs and heat numbers — **ask this early**
@@ -139,7 +139,7 @@ job id.
 ### 7. Counting
 > "When did you last count anything? What triggered it?"
 
-*Decides:* J10. The PRD promises "100% inventory accuracy within 3 months" and that is
+*Decides:* J9. The PRD promises "100% inventory accuracy within 3 months" and that is
 unmeasurable without a counting ritual. If they have never counted, we are introducing a
 practice, not digitising one — which is a much harder sell and should change how we pitch it.
 

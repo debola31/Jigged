@@ -457,14 +457,16 @@ how many operations its routing has.
 > **There is no per-job consumption tracking today.** Marking materials consumed or skipped,
 > recording an actual quantity, and auto-depleting stock on completion were **removed** by
 > migration `20260614043526_retire_job_material_consumption`. Stock depletion is a deliberate
-> manual transaction. Rebuilding it is journey **J9** in
-> [`inventory.md`](inventory.md) (issue #550).
+> manual transaction. Rebuilding it is journey **J7 — Issue material to a job** in
+> [`inventory.md`](inventory.md) (issue #550), where consumption is recorded as an
+> `inventory_transactions` depletion tagged with `job_id` rather than on `job_materials`.
 
 ### `job_materials` Table
 
 Written once at job-part creation and **read by nothing** — the UI reads the live BOM instead
-(see [UI](#ui) below). Its fate is an open decision:
-[`inventory.md`](inventory.md) §5.9.
+(see [UI](#ui) below). **It is scheduled for removal** — see
+[`inventory.md`](inventory.md) §5.9. Consumption will be recorded on
+`inventory_transactions`, so nothing needs this snapshot.
 
 | Column | Type | Required | Description |
 |---|---|---|---|

@@ -66,18 +66,18 @@ A shop can answer five questions about material without leaving Jigged:
 | Question | Journey |
 |---|---|
 | Do we have it? | [J4](#j4--job-kickoff-material-check) |
-| Where is it? | [J12](#j12--find-it) |
+| Where is it? | [J11](#j11--find-it) |
 | Did we buy it? | [J5](#j5--buy-it) / [J6](#j6--receive-it) |
-| Did we use it? | [J7](#j7--issue-material-to-a-job) / [J9](#j9--confirm-consumption-at-the-operation) |
-| Will we run out? | [J11](#j11--dont-run-out) |
+| Did we use it? | [J7](#j7--issue-material-to-a-job) |
+| Will we run out? | [J10](#j10--dont-run-out) |
 
 **And one question underneath all of them:**
 
 | | |
 |---|---|
-| **Can we trust any of the above?** | **[J10](#j10--count-it)** — the count session |
+| **Can we trust any of the above?** | **[J9](#j9--count-it)** — the count session |
 
-J10 is deliberately not a sixth row. It isn't a lookup anyone performs; it is the ritual
+J9 is deliberately not a sixth row. It isn't a lookup anyone performs; it is the ritual
 that keeps the other five true, and every one of them degrades to a guess without it. It is
 also **Phase 1 work, not a later addition** — imported numbers are a starting position, not a
 truth claim, and a shop arriving with nothing usable has no other way in. Treating counting as
@@ -104,7 +104,7 @@ The remaining journeys are the write side and the setup that keep those answers 
 | Non-goal | Rationale |
 |---|---|
 | **No demand forecasting** | A job shop's demand *is* its order book. Forecasting a make-to-order backlog is modelling noise. |
-| **No MRP planning run / netting** | Requires reliable lead times and BOM depth we don't have, and produces output nobody in a 10-person shop acts on. Reorder points ([J11](#j11--dont-run-out)) cover the real need. |
+| **No MRP planning run / netting** | Requires reliable lead times and BOM depth we don't have, and produces output nobody in a 10-person shop acts on. Reorder points ([J10](#j10--dont-run-out)) cover the real need. |
 | **No multi-warehouse** | One building. `inventory_locations` already nests if a second site ever appears. |
 | **No customer-owned stock model** | Customer-supplied material is real and frequent but **never enters stock** — it arrives with the job, is worked, and leaves ([Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it)). No ownership flag, no consignment ledger, no valuation. |
 | **No inventory valuation, COGS, or accounting postings** | Accounting stays in QuickBooks. Jigged tracks *quantities and identity*; money is costing's job (`part_procurement_tiers`, `compute_part_cost_at_qty`). |
@@ -276,9 +276,10 @@ BOM is the source of truth."*
 
 So a table whose entire purpose was consumption tracking is still written on every job creation
 and never read. **It is slated for removal** — the decision and its reasoning are in
-[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table), along with what backs
-[J9](#j9--confirm-consumption-at-the-operation) instead (nothing new:
-`inventory_transactions` already carries every field consumption needs).
+[§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger), along with what backs
+consumption tracking instead — nothing new:
+[`inventory_transactions`](#inventory_transactions) already carries every field
+[J7](#j7--issue-material-to-a-job) needs.
 
 > ⚠️ `docs/modules/jobs.md` was corrected in this branch, but older copies may still document
 > this table with consumption columns and an `inventory_item_id` FK. The grid above is verified
@@ -471,7 +472,7 @@ Useful as evidence of where the model drifted:
 | `buildLocationUrl` | Duplicate of `locationLabelPdf.buildLocationScanUrl`. |
 | `enable_location_tracking_for_company`, `inv_location_path_label` | RPCs with no caller. |
 | `VisualLocationBuilder` `parentId` / `parentCode` props | Always `null` — unreachable from the UI. |
-| `job_materials` | Written at job creation, read by nothing. **Scheduled for drop** — [§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table). |
+| `job_materials` | Written at job creation, read by nothing. **Scheduled for drop** — [§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger). |
 
 Path-walking (`parent_id` → names array with a cycle guard) is reimplemented **four times** in
 TypeScript, plus once in unused SQL.
@@ -514,7 +515,7 @@ has provenance from the first day.
 > **Assume the numbers are wrong anyway.** Shops in this niche rarely hold accurate counts —
 > Contour's legacy `onHand` was populated on 43 of 9,428 rows (0.5%), and freshness was
 > unknowable for most of the rest. So an import is a *starting position*, not a truth claim,
-> and the system has to expect drift from day one. That is what [J10](#j10--count-it) is for,
+> and the system has to expect drift from day one. That is what [J9](#j9--count-it) is for,
 > and it is why counting is not optional. A lighter-weight periodic **reconciliation** pass —
 > refresh these numbers without running a full physical count — is a reasonable later addition
 > once we see how the drift actually behaves; it is deliberately **not** specced here.
@@ -623,7 +624,7 @@ draft of this spec:
 - **The flow should be job-first** — operator is on the job traveler → sees the material the
   job needs → taps it → sees where it is → confirms taking it. The depletion is job-linked by
   construction rather than by an optional field the operator must remember.
-- Bin-first stays as the secondary path. It is the right shape for J10 counting and J12
+- Bin-first stays as the secondary path. It is the right shape for J9 counting and J11
   finding, and it already works.
 
 **Consequence for issue #59.** The March ask was a job selector in the owner's
@@ -635,6 +636,32 @@ number set the priority.
 **Deliberately not adopted:** Sortly's *close out the job and lock the history* step. It
 belongs to their job-as-container model, which [§5.2](#52-is-a-job-a-place--resolved-no)
 rejected for us. Revisit only if that fork reopens.
+
+#### This journey *is* consumption tracking
+
+An earlier draft had a separate **J9 — "confirm consumption at the operation"**, carrying
+issue **#550**. It has been **folded in here**, because once the operator records taking the
+material, that record *is* the consumption. A second confirmation step at operation completion
+would re-state a fact already captured, and it would add friction to an operator UX that is
+deliberately complete-only, one tap
+([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2).
+
+The mechanics that were specced under J9 carry over unchanged:
+
+- **No new table.** A consumption event is an `inventory_transactions` depletion row tagged
+  with `job_id` — every field already exists and is indexed. Expected comes from the live BOM
+  (the same computation [J4](#j4--job-kickoff-material-check) needs), actual is the sum of
+  those rows, variance is computed on read. `job_materials` is not revived; see
+  [§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger).
+- **Graceful over-depletion is reused** — clamp to zero, flag `has_discrepancy`, stamp the
+  operator. That already works on the bin path and should behave identically here.
+- **Issue #550 resolves against this journey**, not a separate one. Note its premise has
+  shifted twice: it assumed an `inventory_transactions` feature flag that does not exist, and
+  it assumed the wrong actor.
+
+**Reopen a distinct confirmation step only if** a real need appears for variance capture that
+the take-event can't express — for example a material consumed by one operator and reconciled
+by another. Nothing observed at Contour suggests that.
 
 ### J8 — Cut it, return the remnant
 
@@ -651,29 +678,7 @@ Shop practice to respect: machinists already
 [mark both ends of a bar and re-mark the cut end](https://www.practicalmachinist.com/forum/threads/solution-for-raw-material-inventory-management.404375/)
 before it goes back on the rack. The software should mirror that habit, not replace it.
 
-### J9 — Confirm consumption at the operation
-
-**Actor:** operator. **Trigger:** finishing an operation that consumed material.
-
-Confirm what was actually used, correcting the expected quantity where it differs.
-
-**Today: missing** — issue **#550**, blocked behind a feature flag that doesn't exist.
-Graceful over-depletion (clamp to zero, flag `has_discrepancy`, stamp the operator) already
-works at the bin level and should be reused here.
-
-**Backing table: none needed.** A consumption event is an `inventory_transactions` depletion
-row tagged with `job_id` — every field is already there and indexed. Expected comes from the
-live BOM (the same computation [J4](#j4--job-kickoff-material-check) needs), actual is the sum
-of those rows, variance is computed on read. `job_materials` is **not** revived for this; see
-[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table) for why, and for the two
-consequences that come with it.
-
-**Tension to resolve in discovery:** the operator UX is deliberately minimal — *complete-only*,
-no start/stop, one tap ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2).
-Adding a material confirmation step cuts against that. It may belong on the *job*, done once
-by one person, rather than on every operation.
-
-### **J10 — Count it**
+### **J9 — Count it**
 
 **Actor:** whoever is assigned. **Trigger:** a schedule, or distrust of a number.
 
@@ -714,7 +719,7 @@ built for one shop — **both are normal, and the module needs both.**
 would be a second code path that rots; the opening count is just a count whose expected column
 happens to be empty.
 
-### J11 — Don't run out
+### J10 — Don't run out
 
 **Actor:** owner. **Trigger:** stock crosses a threshold.
 
@@ -731,7 +736,7 @@ and plans to **hide it** behind the non-existent `inventory_transactions` flag. 
 [`docs/modules/ai-insights.md`](ai-insights.md) records the low-inventory alert
 badge as **built and checked off**. Three docs, three positions, one feature.
 
-### J12 — Find it
+### J11 — Find it
 
 **Actor:** anyone. **Today: built, and it works.**
 
@@ -746,7 +751,7 @@ This is the genuinely good part of the June build. Keep it.
 
 Two journeys were specced and then removed once the shop was understood. They are kept here,
 **without numbers**, so the decisions are on the record and don't get re-proposed — but they
-are deliberately outside the J1–J12 sequence, because they are not work.
+are deliberately outside the J1–J11 sequence, because they are not work.
 
 ### Cut — Traceability *("can we prove it?")*
 
@@ -797,7 +802,7 @@ frequent. Whether that can happen depends on a single unanswered question:
 | **Yes** | J4 needs one exclusion so those lines don't raise shortages. A flag on the BOM line or the job — **not** on stock, and not a journey. |
 
 That question is in [§9](#9-what-we-know-and-what-we-still-dont). It does not block Phase 1:
-J10 and J7 are unaffected either way, and J4 can ship with the exclusion added later if it
+J9 and J7 are unaffected either way, and J4 can ship with the exclusion added later if it
 turns out to be needed.
 
 **Reopen only if** customer material starts being *stored* between delivery and use — at which
@@ -1009,7 +1014,7 @@ Stated explicitly because the current shape reads like an event-sourced system t
 one. If we ever want the ledger to be authoritative, that is a deliberate re-architecture
 with a reconciliation job, not a drift.
 
-### 5.9 `job_materials` — **RESOLVED: drop it. J9 needs no new table.**
+### 5.9 `job_materials` — **RESOLVED: drop it. Consumption backs onto the ledger.**
 
 **Drop `job_materials`.** Its own retirement migration states the purpose it was kept for —
 *"a per-job expected-BOM snapshot"* — and that purpose no longer holds on either of the two
@@ -1029,7 +1034,7 @@ person who opens the schema.
 and remove its entry from the billing write-gate (`stripe_write_enforcement`, where it is
 parent-resolved via `jobs.job_id`). Job creation is core, so this is not a free deletion.
 
-#### What backs [J9](#j9--confirm-consumption-at-the-operation) instead
+#### What backs consumption tracking instead
 
 **`inventory_transactions`, unchanged.** A consumption event is a `depletion` row tagged with
 `job_id`. Every field J9 needs already exists and is already indexed:
@@ -1091,7 +1096,7 @@ Buildable in a PWA, with a caveat that may be disqualifying:
   so the home-screen icon opens in Safari rather than standalone.
 
 **Which flow needs it:** walking up to one bin is ~2 taps either way. The workflow the current
-architecture cannot serve is **continuous scanning** — a count session ([J10](#j10--count-it))
+architecture cannot serve is **continuous scanning** — a count session ([J9](#j9--count-it))
 or checking in a pallet ([J6](#j6--receive-it)), where ten scans mean ten camera-app round
 trips.
 
@@ -1112,7 +1117,7 @@ material somewhere temporary and add the bin code later; later rarely comes"*
 ([Craftybase](https://craftybase.com/blog/bin-location)). Sortly's stockroom method makes
 step 5 *"establish standard operating procedures"* with periodic audits.
 
-Our equivalent is [J10](#j10--count-it). The count session is **not a reporting feature** —
+Our equivalent is [J9](#j9--count-it). The count session is **not a reporting feature** —
 it is the ritual that keeps the other twelve journeys true. Spec it as recurring, assignable
 and place-scoped, not a one-off Adjust button.
 
@@ -1128,12 +1133,12 @@ Ordered by dependency, not value. **Get numbers in → use them → keep them tr
    - **[J1](#j1--seed-the-item-master-and-opening-balances) import**: `quantity` and
      `reorder_point` through the existing Upload → Map → **Review & Fix** → Import flow.
      Completes a pipeline that already exists and closes FR-16.
-   - **[J10](#j10--count-it) count session**: for shops arriving with nothing usable, and
+   - **[J9](#j9--count-it) count session**: for shops arriving with nothing usable, and
      thereafter the correction mechanism for everyone. The opening count is just a count with
      an empty expected column — **one flow, not an onboarding special case.**
 
    These are peers. Which gets built first is a team call, not a product one — but a shop with
-   no importable data (Contour) can't start until J10 exists, and a shop with good data
+   no importable data (Contour) can't start until J9 exists, and a shop with good data
    shouldn't be made to count 9,000 rows by hand.
 
 2. **[J4](#j4--job-kickoff-material-check) material check** — the rush-job question:
@@ -1161,7 +1166,7 @@ mandatory wizard · PWA basics + the scanner spike ([§5.10](#510-native-app-def
 
 ### Phase 3 — purchasing
 
-**J5** POs · **J6** receiving against PO · **J11** buy list + on-order. **This is issue #571**
+**J5** POs · **J6** receiving against PO · **J10** buy list + on-order. **This is issue #571**
 — merge, don't parallelise.
 
 ### Phase 4 — debt paydown and remnants
@@ -1175,12 +1180,12 @@ gone. What's left:
   before building it** — that was never asked.
 - **Reconciliation** — a lighter-weight periodic refresh of on-hand figures without running a
   full physical count. Deliberately unspecced until we can see how drift actually behaves in
-  production; [J10](#j10--count-it) covers correctness in the meantime.
+  production; [J9](#j9--count-it) covers correctness in the meantime.
 - **[J4](#j4--job-kickoff-material-check) customer-material exclusion** — *only if* service
   jobs turn out to carry BOM lines for customer-supplied material, which would otherwise raise
   false shortages. See [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it).
 - **[§5.4](#54-one-stock-engine) one-stock-engine collapse** and the
-  **[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table) `job_materials` drop**
+  **[§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger) `job_materials` drop**
   (stop writing it, drop the table, remove it from the billing write-gate) — debt paydowns
   that want a quiet phase.
 
@@ -1200,19 +1205,18 @@ point of the exercise.
 | J4 material check | Flow 3 step 2 | silent | ❌ |
 | J5 buy it | Flow 3 steps 4–5 | silent | ❌ |
 | J6 receive it | Admin persona; Flow 3 step 6 | silent | ❌ |
-| J7 issue to job | **Open Question 2 — the primary path** | "Planned (#550)" | ❌ regressed |
+| J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ❌ regressed; consumption removed then re-intended |
 | J8 remnants | *(absent)* | silent | ❌ |
-| J9 operator consumption | FR-3 / Flow 1 step 1 | "Planned (#550)" | ❌ removed then re-intended |
-| J10 count | success metric: 100% accuracy | silent | ❌ label text only |
-| J11 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
-| J12 traceability | *(absent)* | silent | ⛔ **cut** — no regulated customers |
-| J12 find it | *(absent)* | AC only | ✅ |
+| J9 count | success metric: 100% accuracy | silent | ❌ label text only |
+| J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
+| J11 find it | *(absent)* | AC only | ✅ |
+| Traceability *(cut)* | *(absent)* | silent | ⛔ **cut** — no regulated customers |
 | Customer-supplied *(cut)* | *(absent)* | *(absent)* | ⛔ **cut** — frequent, but never stocked |
 
 **Three structural misses, in order of cost:**
 
 1. **We shipped the only journey with no requirement behind it, and skipped the one marked
-   primary.** J2/J12 got six PRs; J4/J7/J10 got nothing.
+   primary.** J2/J11 got six PRs; J4/J7/J9 got nothing.
 2. **The module doc could only describe what was built.** Because it was written as an
    implementation audit, absent concepts (receiving, purchasing, counting, shortage,
    remnants, traceability) do not appear even as gaps. You cannot notice a missing journey in
@@ -1324,11 +1328,11 @@ shop's own words — good enough for the structural decisions below, not for pri
 | Stock vs buy per job? | **They stock** — lots of rush jobs, so they hold what those need | Confirms Phase 1's premise; [J4](#j4--job-kickoff-material-check) reframed around *"can I say yes to this rush job?"* |
 | Who moves material? | **The operator, on the floor** | [J7](#j7--issue-material-to-a-job) becomes job-first on the operator surface; #59's owner-side fix demoted |
 | What units? | **Mixed** — some `each`, some feet/inches | FR-1 conversion is load-bearing, both discrete and continuous |
-| Opening balances? | **Start from zero.** Legacy figures exist but accuracy is *"questionable"* | [J1](#j1--seed-the-item-master-and-opening-balances) out of Phase 1; [J10](#j10--count-it) becomes onboarding |
+| Opening balances? | **Start from zero.** Legacy figures exist but accuracy is *"questionable"* | [J1](#j1--seed-the-item-master-and-opening-balances) out of Phase 1; [J9](#j9--count-it) becomes onboarding |
 | Certs / heat / regulated customers? | **None** | [Traceability, cut](#cut--traceability-can-we-prove-it) cut, lot layer cut, Phase 4 halved |
 | Customer-supplied material? | **Yes, a lot of them** — service one-offs. **Never stocked**: arrives with the job, worked, leaves | [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it). It's a job attribute, not inventory — no ownership flag anywhere |
 | How many storage places? | **~10, ±4.** Cabinets and shelving | Validates [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — one wizard pass generating 16 is over-built for this shop |
-| Have they ever counted? | **Yes, tried** | Rescuing a lapsed practice, not introducing one → [J10](#j10--count-it) first run can be self-served |
+| Have they ever counted? | **Yes, tried** | Rescuing a lapsed practice, not introducing one → [J9](#j9--count-it) first run can be self-served |
 | Did a locations feature already fail them? | **Yes** — *"badly designed and not really intuitive"*, and we now have the export | ⚠️ Raises the bar on [§5.5](#55-locations-keep-them-visual-change-when-they-appear). We get one more attempt, not two |
 
 ### Measured — from their legacy exports, 2026-07-27
@@ -1344,7 +1348,7 @@ it: it is what they did, not what anyone remembers.
 | …using the `/` hierarchy | **3 of 121** | **Nesting was never used.** Flat-first is correct. |
 | Near-duplicates | `STOCK`/`ST0CK`, `JEFF'S DESK`/`JEFFS DESK`, `J-52818-01`/`J52818-01`, 3× dated `MISC` | Free text decays. Create-on-the-fly **must** dedupe. |
 | Parts rows | **9,428** | Real scale; cf. NFR-8's 10,000-item target |
-| …with `onHand` populated | **43 (0.5%)** | ⛔ **This shop has no opening-balance data.** They enter through the counting door, not the import door — see [J10](#j10--count-it). |
+| …with `onHand` populated | **43 (0.5%)** | ⛔ **This shop has no opening-balance data.** They enter through the counting door, not the import door — see [J9](#j9--count-it). |
 | …with `price1` / `custCode` | 88% / 51% | Their parts table is a **quoting catalogue**, not an inventory record |
 | …with `lastEditDate` | 28% | Freshness is unknowable for most rows — assume imported numbers drift from day one |
 
@@ -1382,7 +1386,7 @@ Carried forward from elsewhere:
 
 Whether they will **sustain** the count ritual, and whether a shortage view changes behaviour.
 These are predictive, not descriptive — observation of current practice cannot reach them.
-They are answered by shipping Phase 1 and watching, which is a reason to ship J10 early rather
+They are answered by shipping Phase 1 and watching, which is a reason to ship J9 early rather
 than to keep asking.
 
 **Two Sortly reports are gated downloads and were not obtained** — *2026 State of Inventory*
@@ -1406,7 +1410,7 @@ self-report is weakest. What remains for it (their vocabulary, the bar rack, the
 spike) is **Phase 2 input and can run in parallel with Phase 1 development.** Do not hold the
 build for it.
 
-1. **Build [J10](#j10--count-it) first** — Phase 1's entry point. Blank-slate walk across ~12–18
+1. **Build [J9](#j9--count-it) first** — Phase 1's entry point. Blank-slate walk across ~12–18
    places; the first commit *is* the opening balance. Self-served, since they've counted before.
 2. **Then [J4](#j4--job-kickoff-material-check)** — no new tables, and it's the rush-job payoff.
 3. **Then [J7](#j7--issue-material-to-a-job) job-first** — the largest build, and the

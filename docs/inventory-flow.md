@@ -227,19 +227,14 @@ to hand-key every opening balance, or start at zero. This directly contradicts P
 **Missing:** `quantity` and `reorder_point` columns in the parts import mapping, writing
 an opening `adjustment` ledger row per item rather than a bare `parts.quantity` write.
 
-> **Mostly deferred out of Phase 1 — validated 2026-07-27.** Contour's old parts table *does*
-> carry on-hand figures for a lot of parts, but *"whether it's up to date and accurate is
-> questionable."* Importing those straight into `parts.quantity` would launder distrusted
-> numbers into a fresh system — worse than an honest zero.
+> **Deferred out of Phase 1 entirely — measured 2026-07-27.** Contour's legacy `onHand` column
+> is populated for **43 of 9,428 parts (0.5%)**. There is nothing worth importing. They start
+> from zero via [J10](#j10--count-it), and that is the honest state rather than a compromise.
 >
-> **Split the feature.** Importing quantities **into stock** stays deferred. Importing them
-> **into a count sheet's expected column** ships with [J10](#j10--count-it) in Phase 1, so the
-> first count verifies the legacy data instead of ignoring it. Same parsing work, radically
-> different trust semantics: nothing reaches the ledger until a human counts it.
->
-> The general importer gap is still real and still contradicts FR-16 — it just isn't customer
-> #1's problem. It becomes blocking at the **second** company, where trusted figures may
-> exist and a direct-to-stock import is legitimate.
+> The importer gap is still real and still contradicts FR-16 — it just isn't customer #1's
+> problem. It becomes blocking at the **second** company. When it is built, prefer
+> **import-into-count-sheet-expected** over import-into-stock, so the numbers get verified by
+> a human before they become balances.
 
 ### J2 — Say where something lives
 
@@ -329,6 +324,12 @@ get material.
 Take the material, and the depletion is **linked to the job**. This is the PRD's stated
 primary path and issue #59's ask.
 
+> **Their legacy data proves the demand.** 97 of the 121 "locations" in their old ERP were
+> job, work-order or part numbers ([§5.5](#55-locations-keep-them-visual-change-when-they-appear)).
+> Users typed job numbers into a location field for years because there was no job↔material
+> link. **This journey is not a hypothesis — it is a workaround they already built by hand,
+> in the wrong field, at scale.** It is the strongest-evidenced item in the entire spec.
+
 **The entry point must be the job, not the bin.** This is the sharpest consequence of the
 validation, and it reverses an assumption baked into both the current build and the earlier
 draft of this spec:
@@ -409,23 +410,21 @@ count session is that audit.
 > [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — a previous attempt failing
 > raises the bar rather than lowering it.
 >
-> **Seed the first count from the legacy data — as *expected*, never as truth.**
-> Their old parts table has on-hand figures populated for a lot of parts, of unknown accuracy
-> and unknown freshness. Do **not** import those into `parts.quantity`; that launders numbers
-> nobody trusts into a fresh system. Import them into the **count sheet's expected column**
-> instead, so the first run is a *verification* rather than a blank-slate discovery. Three
-> things fall out:
+> **The first run is a blank-slate walk. There is no legacy data to seed it with.**
+> *(Measured 2026-07-27 against their actual parts export — see
+> [§8](#8-what-we-know-and-what-we-still-dont).)* The old parts table has an `onHand` column,
+> but it is populated for **43 of 9,428 parts — 0.5%**. That is not a starting point; it is
+> noise. Their parts table is a **quoting catalogue**, not an inventory record: `price1` is
+> 88% full and `custCode` 51% full, while `onHand` is 0.5% and `lastEditDate` 28%.
 >
-> - The first count is much faster — you're checking a number, not inventing one.
-> - The variance report becomes a genuine onboarding moment: *here is how wrong your old
->   system was.* That is the most persuasive argument for the ritual we will ever get, and it
->   is free.
-> - Nothing enters the ledger until the count commits, so the first `adjustment` row is an
->   honest counted value. No fabricated opening balance, consistent with the no-silent-
->   fallbacks rule in `CLAUDE.md`.
+> So: walk the places, enter what's there, commit. The expected column is empty and that is
+> the honest state.
 >
-> If the legacy export turns out to be unusable, the fallback is the blank-slate walk — the
-> flow is the same, the expected column is just empty.
+> **Keep the seeded-count pattern for company #2.** Where a shop *does* have trustworthy
+> figures, import them into the count sheet's **expected** column — never into
+> `parts.quantity` — so the first run verifies rather than launders. Nothing reaches the
+> ledger until a human counts it, consistent with the no-silent-fallbacks rule in `CLAUDE.md`.
+> The pattern is right; Contour just has nothing to feed it.
 
 ### J11 — Don't run out
 
@@ -582,30 +581,51 @@ it looks and should be its own PR, not smuggled into a journey.
 
 ### 5.5 Locations: keep them visual, change *when* they appear
 
-> ⚠️ **Contour has already been through a failed locations feature.** *(Validated 2026-07-27.)*
-> Their old ERP had one, and it was *"badly designed and not really intuitive for them to
-> use."* We are not introducing this concept — we are **rebuilding something that already
-> burned them once.**
+> ⚠️ **Contour already had a locations feature, and we have the wreckage.** Their old ERP's
+> location table was exported on 2026-07-27 — **121 rows** — and it is the best evidence in
+> this entire spec, because it is *behaviour*, not self-report.
 >
-> That changes the standard this redesign is held to. A second bad locations experience does
-> not get a third attempt; it confirms their prior that this category of feature is not for
-> them. Two consequences:
+> | What the 121 rows actually contain | Count |
+> |---|---|
+> | Job numbers (`J55502-04`, `J-32579-01`…) | **46** |
+> | Bare work-order numbers (a run of `45292`–`45362`…) | **45** |
+> | Part numbers (`174712-33-2`, `B5981B-33-1`…) | 6 |
+> | `MISC 2-4-20`, `MISC 8-25-21`, `MISC. 6-23-18` | 3 |
+> | **Things that are actually places** (`STOCK`, `SHELF`, `YARD`, `OFFICE`, `QC`, `CABINET 3-10`, `JEFF'S DESK`, `DB BOX`, `ENG WINDOW`, `ZAPP`, `SMD`, `SBS`…) | **22** |
 >
-> 1. **Find out precisely what was wrong with the old one before designing ours.** They lived
->    it, so this is free, and it is better evidence than any amount of generic WMS research.
->    It is now the **highest-value open question in this spec** — see
->    [§8](#8-what-we-know-and-what-we-still-dont).
-> 2. **Establish whether it was a *usability* failure or a *maintenance* failure** — the two
->    have opposite implications and "badly designed" is ambiguous between them:
+> Three findings, each of which independently supports the redesign:
 >
->    | If the real cause was… | Then… |
->    |---|---|
->    | **Usability** — too many clicks, wrong vocabulary, setup too heavy | The §5.5 redesign is the right bet. Proceed. |
->    | **Maintenance** — it worked, nobody kept it current | **No UI fixes this.** Locations stay deprioritised behind the material↔job loop, and [J10](#j10--count-it) is the only lever that matters. |
+> **1. The hierarchy was never used. 118 of 121 are flat** — only `Main/Main`,
+> `Main/Main/Control` and one other use the `/` path separator at all. Their old system encoded
+> nesting as a delimited string, exactly the
+> [MRPeasy flat-list convention](https://www.mrpeasy.com/resources/user-manual/stock/settings/locations/),
+> and they still didn't nest. **Our multi-level wizard is solving a problem this shop has
+> demonstrably never had.** This is the single strongest argument in §5.5 and it comes from
+> their own data.
 >
->    The existing evidence tilts toward usability — *"not really intuitive"* is a usability
->    complaint — but that is our inference from a secondhand paraphrase, not their words. Ask
->    directly before committing Phase 2.
+> **2. Free text decayed exactly as predicted.** `STOCK` and `ST0CK` (letter O vs zero).
+> `JEFF'S DESK` and `JEFFS DESK`. `J-52818-01` and `J52818-01`. Three separate dated `MISC`
+> entries — the *"put it somewhere temporary and fix the code later"* pattern,
+> [documented as the #1 failure mode](https://craftybase.com/blog/bin-location), preserved in
+> amber. **Create-on-the-fly is right, but it must dedupe aggressively** — a bare freeSolo text
+> field reproduces this within a year.
+>
+> **3. ~80% of the "locations" are not locations.** 97 of 121 are job, work-order or part
+> numbers. Users were writing *"this material is for job J55502"* into the only field
+> available, because **the system had no way to express job↔material allocation.** That is not
+> a location system failing; that is people hand-building [J7](#j7--issue-material-to-a-job)
+> out of the wrong primitive.
+>
+> **Usability or maintenance? The data answers it: neither, quite.** It was a **modelling**
+> failure — one free-text field asked to carry two unrelated concepts, with no constraint on
+> either. That is fixable by design, so the redesign is the right bet, and §5.5's direction
+> holds. But note the corrected priority: **the missing job↔material link (Phase 1) caused
+> most of the location mess.** Fixing J7 will remove ~80% of what made their old location list
+> unusable *before Phase 2 writes a line of code.*
+>
+> **~22 real places** also lands close to the founder's ~10 (±4) estimate once the job numbers
+> are stripped out — and several of the 22 (`0-5`, `1/2''DBL`, `3/8 DRILL BLK`) look like
+> tooling sizes rather than places, so the true figure is plausibly 12–18.
 
 Research is **for** visual — [Sortly](https://www.sortly.com/blog/why-photos-are-vital-in-inventory-management/)
 (visual-over-alphanumeric is the small-business wedge),
@@ -879,19 +899,46 @@ shop's own words — good enough for the structural decisions below, not for pri
 | Certs / heat / regulated customers? | **None** | [J12](#j12--prove-it-traceability--cut) cut, lot layer cut, Phase 4 halved |
 | Customer-supplied material? | **Yes, and there are a lot of them** — service-style one-offs | Promoted to [J14](#j14--customer-supplied-material); ownership flag into Phase 1 |
 | How many storage places? | **~10, ±4.** Cabinets and shelving | Validates [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — one wizard pass generating 16 is over-built for this shop |
-| Have they ever counted? | **Yes, tried.** Their old ERP had an inventory-locations feature and an on-hand column on parts | Rescuing a lapsed practice, not introducing one → [J10](#j10--count-it) first run can be self-served |
-| Is there legacy on-hand data? | **Yes, populated for a lot of parts** — accuracy and update frequency both unknown | Seed the first count sheet's *expected* column from it; never import it into stock |
-| Did a locations feature already fail them? | **Yes** — *"badly designed and not really intuitive"* | ⚠️ Raises the bar on [§5.5](#55-locations-keep-them-visual-change-when-they-appear). We get one more attempt, not two |
+| Have they ever counted? | **Yes, tried** | Rescuing a lapsed practice, not introducing one → [J10](#j10--count-it) first run can be self-served |
+| Did a locations feature already fail them? | **Yes** — *"badly designed and not really intuitive"*, and we now have the export | ⚠️ Raises the bar on [§5.5](#55-locations-keep-them-visual-change-when-they-appear). We get one more attempt, not two |
+
+### Measured — from their legacy exports, 2026-07-27
+
+Two CSVs from the old ERP. This is **behavioural evidence**, which outranks everything above
+it: it is what they did, not what anyone remembers.
+
+| Measurement | Value | What it settled |
+|---|---|---|
+| Legacy locations, total | **121** | — |
+| …that are job / work-order / part numbers | **97 (80%)** | Users hand-built [J7](#j7--issue-material-to-a-job) in a location field. Strongest evidence in the spec. |
+| …that are genuinely places | **22** (likely 12–18 after tooling sizes) | Confirms the founder's ~10 ±4. Wizard generating 16 in one pass is over-built. |
+| …using the `/` hierarchy | **3 of 121** | **Nesting was never used.** Flat-first is correct. |
+| Near-duplicates | `STOCK`/`ST0CK`, `JEFF'S DESK`/`JEFFS DESK`, `J-52818-01`/`J52818-01`, 3× dated `MISC` | Free text decays. Create-on-the-fly **must** dedupe. |
+| Parts rows | **9,428** | Real scale; cf. NFR-8's 10,000-item target |
+| …with `onHand` populated | **43 (0.5%)** | ⛔ **No opening-balance data exists.** J10 starts blank; the seed-from-legacy design is void for Contour. |
+| …with `price1` / `custCode` | 88% / 51% | Their parts table is a **quoting catalogue**, not an inventory record |
+| …with `lastEditDate` | 28% | Freshness is unknowable for most rows — reinforces "don't import it" |
+
+> **Correction.** An earlier revision of this spec read the founder's *"rare data was
+> populated"* as *"raw data … for a lot of parts"* and built a seed-the-count-sheet design on
+> it. The export shows 0.5%. The design is retained only as guidance for company #2.
 
 ### Still open
 
 **Blocks nothing in Phase 1** — none of these need answering before development starts.
 
+**Nothing here blocks Phase 1, and the export closed the two that mattered most** — the
+locations post-mortem and the opening-balance question.
+
 | Question | Gates | Note |
 |---|---|---|
-| **What exactly was wrong with the old ERP's locations feature — and was it usability or maintenance?** | [§5.5](#55-locations-keep-them-visual-change-when-they-appear) / all of Phase 2 | **Highest-value question in the spec.** They lived it, so it's free to ask, and it beats any generic research. Usability → our redesign is the right bet. Maintenance → no UI saves it and locations stay deprioritised. |
-| Can we get their legacy on-hand export? | [J10](#j10--count-it) first run | Determines whether the first count is a verification or a blank-slate walk. Same flow either way, so it doesn't block design — but it changes the onboarding demo considerably. |
-| Is there a **bar rack**? | Phase 2 palette | Only *cabinets and shelving* were named — the standing bar-rack hypothesis is **neither confirmed nor refuted**. They hold material in feet/inches, which implies long stock lives somewhere. Do not add the card on a guess. |
+| Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. The bar-rack hypothesis is now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Ask; don't add the card on a guess either way. |
+| What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean? | Phase 2 palette naming | Their vocabulary is opaque from outside and it is the vocabulary that matters. One screen-share answers all of it. |
+| Do service jobs have a BOM at all? | [J14](#j14--customer-supplied-material) | `custCode` is set on 51% of parts, but that likely means *"made for customer X"*, not *"customer supplied the material"* — **do not conflate them** |
+| Does leftover customer material get returned, scrapped, or absorbed? | [J14](#j14--customer-supplied-material) | |
+| Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Remnants lost their free ride when lots were cut |
+| Scan ten in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) spike | Phase 2 only |
+| Frequency / pain ranking | Prioritisation within phases | The one thing neither observation nor exports reach |
 | What do they call each of the ~10 places? | Phase 2 palette naming | The card-sort in the discovery script is still the instrument |
 | Do service jobs have a BOM at all? | [J14](#j14--customer-supplied-material) | May be "here's a part, fix it" with no material line |
 | Does leftover customer material get returned, scrapped, or absorbed? | [J14](#j14--customer-supplied-material) | |
@@ -923,23 +970,35 @@ Worth pulling; do not cite numbers from either until someone has read them.
 
 ## 9. Next steps
 
-**Phase 1 is unblocked.** The structural questions are answered
-([§8](#8-what-we-know-and-what-we-still-dont)), [§5.2](#52-is-a-job-a-place--resolved-no) is
-resolved, and nothing on the still-open list gates the first build. Design can start.
+**This spec is done, and Phase 1 is unblocked. Start building.**
 
-1. **Design [J10](#j10--count-it) first** — it is Phase 1's entry point, because the first
-   count session *is* Contour's opening balance. They have counted before, so it can be
-   self-served. Seed the expected column from their legacy on-hand export if we can get it.
-2. **Ask what was wrong with the old ERP's locations feature** — usability or maintenance?
-   It doesn't block Phase 1, but it decides whether Phase 2 is worth doing at all, and it
-   costs one question to someone who lived it.
-3. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
+The structural questions are answered, [§5.2](#52-is-a-job-a-place--resolved-no) is resolved,
+and the legacy exports closed the two questions that were still worth waiting on. Nothing on
+the open list gates the first build.
+
+**On the usability test: it is no longer a gate.** It was the right instrument when we had no
+evidence. We now have something better for the questions that mattered — 121 location rows and
+9,428 part rows of actual behaviour, which beats self-report on exactly the points where
+self-report is weakest. What remains for it (their vocabulary, the bar rack, the scanning
+spike) is **Phase 2 input and can run in parallel with Phase 1 development.** Do not hold the
+build for it.
+
+1. **Build [J10](#j10--count-it) first** — Phase 1's entry point. Blank-slate walk across ~12–18
+   places; the first commit *is* the opening balance. Self-served, since they've counted before.
+2. **Then [J4](#j4--job-kickoff-material-check)** — no new tables, and it's the rush-job payoff.
+3. **Then [J7](#j7--issue-material-to-a-job) job-first** — the largest build, and the
+   best-evidenced thing in the spec: they hand-built it in a location field 97 times.
+4. **[J14](#j14--customer-supplied-material) ownership flag** into the Phase 1 data model.
+5. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
    Re-scope **#496** from *"the use isn't validated"* to the phasing in [§6](#6-sequencing).
-4. **Fold #571 into Phase 3** and **#550 into Phase 1** ([J7](#j7--issue-material-to-a-job))
-   and J9. Note #550's premise has shifted: it assumed an `inventory_transactions` feature
-   flag that does not exist, and the actor is the operator, not the owner.
-5. **Run the [discovery script](usability-tests/inventory-discovery-script-v1.md)** for the
-   Phase 2 questions — storage vocabulary, the bar-rack question, the scanning/PWA spike
-   inputs. No longer blocking, so it can happen alongside Phase 1 rather than before it. It's
-   a video call: send the pre-call photo request 2–3 days ahead, record it, fill the findings
-   CSV the same day.
+6. **Fold #571 into Phase 3** and **#550 into Phase 1** (J7) and J9. #550's premise has shifted:
+   it assumed an `inventory_transactions` flag that does not exist, and the actor is the
+   operator, not the owner.
+7. **Run the [discovery script](usability-tests/inventory-discovery-script-v1.md) alongside**,
+   for Phase 2 only. Trim it to the vocabulary walk, the bar-rack question and the scanning
+   probes — the rest is answered.
+
+> **Expect Phase 1 to shrink Phase 2.** Roughly 80% of what made their old location list
+> unusable was job numbers in the wrong field. [J7](#j7--issue-material-to-a-job) removes that
+> pressure. Re-evaluate how much locations work is actually needed *after* Phase 1 ships,
+> rather than committing to Phase 2's scope now.

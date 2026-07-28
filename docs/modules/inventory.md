@@ -354,8 +354,9 @@ unit conversions, transaction history, stock status, and reorder alerts.
 | Stock checks or reservations on quotes | Deliberate. Quotes are speculative; reserving against them would corrupt on-hand. |
 | Automatic depletion from production | Nothing decrements on operation complete, job complete, shipment, or invoice. Every movement is a deliberate human action. |
 | Purchase orders, receiving, on-order | Not built. Phase 3 / issue #571. |
-| Lots, heat numbers, certs, traceability | Not built. Phase 4, gated on discovery. |
-| Remnants and drops | Not built. Phase 4. |
+| Lots, heat numbers, certs, traceability | **Not built and deliberately cut** — Contour keeps no certs and serves no regulated customers (validated 2026-07-27). Stock is a quantity of an item at a place; nothing sits between them. [flow §5.6](../inventory-flow.md) |
+| Remnants and drops | Not built. Phase 4, and now has to justify itself on material-cost grounds — it was going to arrive free with the lot layer that got cut. |
+| Customer-owned stock *accounting* | Customer-supplied material is real and frequent; it gets an ownership flag on stock (Phase 1) and a journey (J14). Valuing it, or reporting it as a liability, stays out. |
 | Count sessions / cycle counting | Not built. *"Cycle count"* appears only as label text on the Adjust action. |
 | Inventory valuation, COGS, accounting | QuickBooks. |
 | Tool crib / perishable tooling | Different object, different lifecycle. Out of scope. |
@@ -477,5 +478,7 @@ on its own.
 | Two stock engines, one non-atomic | Flow §5.4 |
 | `job_materials` written and never read | Flow §5.9 |
 | Storage setup is structure-first | Flow §5.5 |
-| No purchasing, receiving, lots, certs, or remnants | Flow phases 3–4 |
+| No purchasing or receiving | Flow phase 3 (issue #571) |
+| No ownership flag — customer-supplied material is indistinguishable from shop-owned, and it's frequent | Flow J14 · Phase 1 |
+| Lots / certs / traceability **cut**, not pending | Flow §5.6 — no regulated customers |
 | Aggregate stock path has no unit tests; no E2E spec covers inventory at all | — |

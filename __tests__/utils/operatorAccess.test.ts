@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'order', 'limit', 'single'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -228,9 +228,13 @@ describe('getJobNotes', () => {
 
     const result = await getJobNotes('j1', 'c1');
 
-    expect(mockSupabase.from).toHaveBeenCalledWith('job_notes');
-    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('job_id', 'j1');
+    expect(mockSupabase.from).toHaveBeenCalledWith('notes');
     expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'c1');
+    // The feed unions job-subject notes with DURABLE part-subject notes captured
+    // on this job. Filtering on job_id alone would drop every new capture.
+    expect(mockQueryBuilder.or).toHaveBeenCalledWith(
+      'job_id.eq.j1,captured_job_id.eq.j1',
+    );
     expect(mockQueryBuilder.order).toHaveBeenCalledWith('created_at', { ascending: false });
 
     // Operation-scoped note rolls up with a readable step label + mapped media.
@@ -294,7 +298,7 @@ describe('addJobNote', () => {
       jobOperationId: 'op1',
     });
 
-    expect(mockSupabase.from).toHaveBeenCalledWith('job_notes');
+    expect(mockSupabase.from).toHaveBeenCalledWith('notes');
     expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         company_id: 'c1',

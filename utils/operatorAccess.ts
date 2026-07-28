@@ -1270,23 +1270,36 @@ export async function getJobPartsOverview(
 // Each note carries its optional step tag (job_operations) and its media so the
 // feed renders thumbnails without a second round-trip.
 const JOB_NOTE_SELECT =
-  'id, job_id, job_operation_id, body, note_type, created_at, ' +
+  'id, subject_kind, job_id, job_operation_id, captured_job_id, ' +
+  'captured_job_operation_id, part_id, routing_operation_id, ' +
+  'viewer_count, usage_count, body, note_type, created_at, ' +
   'author:user_company_access(name), ' +
-  'operation:job_operations(operation_name, sequence), ' +
-  'media:job_note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+  'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
+  'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
+  'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+
+type StepRel =
+  | { operation_name: string | null; sequence: number | null }
+  | { operation_name: string | null; sequence: number | null }[]
+  | null;
 
 type JobNoteRow = {
   id: string;
-  job_id: string;
+  subject_kind: string;
+  job_id: string | null;
   job_operation_id: string | null;
+  captured_job_id: string | null;
+  captured_job_operation_id: string | null;
+  part_id: string | null;
+  routing_operation_id: string | null;
+  viewer_count: number;
+  usage_count: number;
   body: string | null;
   note_type: string | null;
   created_at: string;
   author: { name: string | null } | { name: string | null }[] | null;
-  operation:
-    | { operation_name: string | null; sequence: number | null }
-    | { operation_name: string | null; sequence: number | null }[]
-    | null;
+  operation: StepRel;
+  captured_operation: StepRel;
   media: Array<{
     id: string;
     note_id: string;
@@ -1299,14 +1312,18 @@ type JobNoteRow = {
   }> | null;
 };
 
+function stepLabel(rel: StepRel): string | null {
+  const op = Array.isArray(rel) ? rel[0] : rel;
+  if (!op?.operation_name) return null;
+  return op.sequence != null ? `Op ${op.sequence} · ${op.operation_name}` : op.operation_name;
+}
+
 function mapJobNoteRow(n: JobNoteRow): JobNote {
   const author = Array.isArray(n.author) ? n.author[0] : n.author;
-  const op = Array.isArray(n.operation) ? n.operation[0] : n.operation;
-  const operationLabel = op?.operation_name
-    ? op.sequence != null
-      ? `Op ${op.sequence} · ${op.operation_name}`
-      : op.operation_name
-    : null;
+  // A durable part-subject note carries no job_operation_id — its step is the
+  // routing step. Its captured_job_operation_id is what names the step the operator
+  // was standing at, so the feed row still reads "Op 20 · Deburr" either way.
+  const operationLabel = stepLabel(n.operation) ?? stepLabel(n.captured_operation);
   const media: JobNoteMedia[] = (n.media ?? []).map((m) => ({
     id: m.id,
     note_id: m.note_id,
@@ -1319,23 +1336,36 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
   }));
   return {
     id: n.id,
-    job_id: n.job_id,
-    job_operation_id: n.job_operation_id,
+    // The job this note belongs to FROM THE FEED'S POINT OF VIEW: its own job for a
+    // job-subject note, the capturing job for a durable part-subject one.
+    job_id: n.job_id ?? n.captured_job_id ?? '',
+    job_operation_id: n.job_operation_id ?? n.captured_job_operation_id,
     operation_label: operationLabel,
     body: n.body,
     note_type: n.note_type === 'event' ? 'event' : 'user',
     created_at: n.created_at,
     author_name: author?.name ?? null,
+    subject_kind: n.subject_kind === 'part' || n.subject_kind === 'work_center'
+      ? n.subject_kind
+      : 'job',
+    viewer_count: n.viewer_count,
+    usage_count: n.usage_count,
     media,
   };
 }
 
 /**
- * The job feed (newest first): one append-only stream per job. Returns both
- * job-level notes and operation-scoped notes — operation notes roll up here
- * automatically because they still carry job_id. Each note includes its step
- * tag label (if any) and its attached media. Backs both the traveler (read-only)
- * and the operation page.
+ * The job feed (newest first): one append-only stream per job. Two kinds of row
+ * appear here, and the union is the point:
+ *
+ *   - job-subject notes (job_id) — legacy captures, and anything genuinely about
+ *     THIS run only;
+ *   - durable part-subject notes captured on this job (captured_job_id) — every
+ *     new operator capture. Their subject is (part, routing step), so the next
+ *     person running the part reads them without ever touching this job.
+ *
+ * Filtering on job_id alone would silently drop every new capture from the feed.
+ * Both columns are indexed, so the `or` is a bitmap OR, not a scan.
  */
 export async function getJobNotes(
   jobId: string,
@@ -1344,10 +1374,10 @@ export async function getJobNotes(
   const supabase = getSupabase();
 
   const { data, error } = await supabase
-    .from('job_notes')
+    .from('notes')
     .select(JOB_NOTE_SELECT)
-    .eq('job_id', jobId)
     .eq('company_id', companyId)
+    .or(`job_id.eq.${jobId},captured_job_id.eq.${jobId}`)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -1356,19 +1386,55 @@ export async function getJobNotes(
 }
 
 /**
- * Append a note to the job feed. `authorId` is the author's user_company_access
- * id (from getCurrentMember); RLS requires it to match the caller's access row.
+ * Resolve the DURABLE anchor for a step the operator is standing at: the part and
+ * the routing (template) step, as opposed to this job's instance of it.
  *
- * `opts.jobOperationId` is the optional step tag. The operation page always
- * passes it (with `jobPartId`) so operator captures are step-scoped; the
- * read-only traveler never calls this. `body` may be null/blank for a media-only
- * note — callers must guarantee body-or-media (a fully empty note is useless);
- * the returned note's `media` is empty until media is attached via
- * addJobNoteMedia.
+ * Returns null when the job operation has no routing link — an ad-hoc step added
+ * to one job has nothing durable to anchor to. That is a real subject difference,
+ * not a silent fallback for a data-at-rest problem.
+ */
+async function resolveDurableAnchor(
+  jobOperationId: string,
+): Promise<{ partId: string; routingOperationId: string } | null> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from('job_operations')
+    .select('routing_operation_id, job_part:job_parts(part_id)')
+    .eq('id', jobOperationId)
+    .single();
+
+  if (!data?.routing_operation_id) return null;
+  const jobPart = Array.isArray(data.job_part) ? data.job_part[0] : data.job_part;
+  if (!jobPart?.part_id) return null;
+
+  return { partId: jobPart.part_id, routingOperationId: data.routing_operation_id };
+}
+
+/**
+ * Append a note. `authorId` is the author's user_company_access id (from
+ * getCurrentMember); RLS requires it to match the caller's access row — there is
+ * no path for anyone to author as someone else.
  *
- * `opts.noteType` defaults to 'user' (a human-authored note). Pass 'event' for
- * auto-logged feed entries (e.g. the order-quantity-change audit trail) so the
- * feed can style them differently from typed notes.
+ * SUBJECT CHOICE, which is the whole point of this workstream. The operator is
+ * never asked to classify anything:
+ *
+ *   - step has a routing link  -> subject_kind 'part', anchored to
+ *     (part_id, routing_operation_id), with the capturing job recorded as
+ *     PROVENANCE. The note outlives the job, so the next person running this part
+ *     reads it from one index hit — no prior-run traversal, no toggle.
+ *   - otherwise                -> subject_kind 'job', the old behaviour, because
+ *     there is no durable step to anchor to.
+ *
+ * Either way the note appears in this job's feed (getJobNotes unions both), so
+ * nothing is lost at the capture surface.
+ *
+ * `body` may be null/blank for a media-only note — callers must guarantee
+ * body-or-media (a fully empty note is useless); the returned note's `media` is
+ * empty until media is attached via addJobNoteMedia.
+ *
+ * `opts.noteType` defaults to 'user'. Pass 'event' for auto-logged feed entries
+ * (e.g. the order-quantity-change audit trail); those are always job-subject,
+ * since a machine-generated audit line is not durable part knowledge.
  */
 export async function addJobNote(
   jobId: string,
@@ -1384,18 +1450,41 @@ export async function addJobNote(
   const supabase = getSupabase();
 
   const trimmed = body?.trim() || null;
+  const noteType = opts?.noteType ?? 'user';
+
+  const anchor =
+    noteType === 'user' && opts?.jobOperationId
+      ? await resolveDurableAnchor(opts.jobOperationId)
+      : null;
+
+  const row = anchor
+    ? {
+        company_id: companyId,
+        author_id: authorId,
+        body: trimmed,
+        note_type: noteType,
+        subject_kind: 'part',
+        part_id: anchor.partId,
+        routing_operation_id: anchor.routingOperationId,
+        // Provenance, never subject: keeps the note in this job's feed and lets
+        // the card name the step, without tying the knowledge to the job.
+        captured_job_id: jobId,
+        captured_job_operation_id: opts?.jobOperationId ?? null,
+      }
+    : {
+        company_id: companyId,
+        author_id: authorId,
+        body: trimmed,
+        note_type: noteType,
+        subject_kind: 'job',
+        job_id: jobId,
+        job_part_id: opts?.jobPartId ?? null,
+        job_operation_id: opts?.jobOperationId ?? null,
+      };
 
   const { data, error } = await supabase
-    .from('job_notes')
-    .insert({
-      company_id: companyId,
-      job_id: jobId,
-      author_id: authorId,
-      body: trimmed,
-      note_type: opts?.noteType ?? 'user',
-      job_part_id: opts?.jobPartId ?? null,
-      job_operation_id: opts?.jobOperationId ?? null,
-    })
+    .from('notes')
+    .insert(row)
     .select(JOB_NOTE_SELECT)
     .single();
 
@@ -1411,7 +1500,7 @@ export async function addJobNote(
   return mapJobNoteRow(data as unknown as JobNoteRow);
 }
 
-/** Resolve a step's identity (routing op id + name) for cross-run matching. */
+/** Resolve a step's identity for the RPC's legacy step-name fallback. */
 async function getStepIdentity(
   jobOperationId: string,
 ): Promise<{ routing_operation_id: string | null; operation_name: string } | null> {
@@ -1424,43 +1513,40 @@ async function getStepIdentity(
   return (data as { routing_operation_id: string | null; operation_name: string } | null) ?? null;
 }
 
-/**
- * The job_operation ids within `jobId` that are the SAME step as `identity` —
- * matched by routing_operation_id, falling back to operation_name when either
- * side lacks a routing id. Used to scope prior-run notes to "this step".
- */
-async function matchingStepOperationIds(
-  jobId: string,
-  identity: { routing_operation_id: string | null; operation_name: string },
-): Promise<Set<string>> {
-  const supabase = getSupabase();
-  const { data } = await supabase
-    .from('job_operations')
-    .select('id, routing_operation_id, operation_name')
-    .eq('job_id', jobId);
-  type OpRow = { id: string; routing_operation_id: string | null; operation_name: string };
-  return new Set(
-    ((data ?? []) as OpRow[])
-      .filter((op) =>
-        identity.routing_operation_id && op.routing_operation_id
-          ? op.routing_operation_id === identity.routing_operation_id
-          : op.operation_name === identity.operation_name,
-      )
-      .map((op) => op.id),
-  );
-}
+type PlaybookRow = {
+  id: string;
+  body: string | null;
+  created_at: string;
+  note_type: string | null;
+  subject_kind: string;
+  routing_operation_id: string | null;
+  corrects_note_id: string | null;
+  viewer_count: number;
+  usage_count: number;
+  author_name: string | null;
+  job_number: string | null;
+  operation_label: string | null;
+  media: JobNoteMedia[] | null;
+  reactions: unknown;
+};
 
 /**
- * Notes from PRIOR completed runs of a part, flattened newest-first — the
- * operator's "previous notes for this part" guidance (accumulated setup tips,
- * gotchas, photos), NOT a list of past jobs. Each note keeps its source
- * job_number for a light reference.
+ * Everything known about running this part, newest first — accumulated setup
+ * tips, gotchas and photos, NOT a list of past jobs. Part-centric and never
+ * operator-comparative: no time metrics, no per-person counters.
  *
- * Part-centric (keyed on part_id), never operator-comparative — no time metrics.
- * When `jobOperationId` is given, notes are filtered to the SAME step across runs
- * (matched by routing_operation_id, falling back to operation_name) for the
- * sheet's "this step" filter. Capped at the most recent `maxRuns` completed runs
- * (default 10) to bound the per-run note fetches. Empty array when none.
+ * ONE round trip, via the part_playbook_notes RPC. This used to issue up to 22
+ * (one for the prior runs, then getJobNotes + a step lookup per run, capped at
+ * 10) and sort in JS — slow enough on shop wifi that prior knowledge effectively
+ * wasn't there, which is a large part of why seeded notes went unread in the last
+ * usability session.
+ *
+ * Most of what the RPC does is now vestigial: a note written after the subject
+ * migration is anchored to (part, routing step) directly, so it comes back from a
+ * single index hit. The prior-run walk survives only for pre-migration notes.
+ *
+ * When `jobOperationId` is given, scopes to that step: by routing step for
+ * durable notes, falling back to operation_name for legacy ones.
  */
 export async function getPartPreviousNotes(
   partId: string,
@@ -1469,45 +1555,41 @@ export async function getPartPreviousNotes(
 ): Promise<PartPreviousNote[]> {
   const supabase = getSupabase();
 
-  // Completed prior runs of this part (job_parts carries part-level completion
-  // + company_id). Low volume per part, so sort/cap in JS.
-  const { data, error } = await supabase
-    .from('job_parts')
-    .select('job_id, completed_at, jobs!inner(id, job_number)')
-    .eq('part_id', partId)
-    .eq('company_id', companyId)
-    .eq('production_status', 'completed');
+  const identity = opts?.jobOperationId
+    ? await getStepIdentity(opts.jobOperationId)
+    : null;
+
+  const { data, error } = await supabase.rpc('part_playbook_notes', {
+    p_part_id: partId,
+    p_routing_operation_id: identity?.routing_operation_id ?? undefined,
+    p_operation_name: identity?.operation_name ?? undefined,
+    p_exclude_job_id: opts?.excludeJobId ?? undefined,
+    p_max_runs: opts?.maxRuns ?? 10,
+  });
+
+  // companyId is intentionally unused as a filter: the RPC is SECURITY INVOKER, so
+  // RLS on notes/jobs/job_parts already scopes it to the caller's companies. A
+  // second client-side filter would be a redundant source of truth.
+  void companyId;
 
   if (error || !data) return [];
 
-  type PriorRow = {
-    job_id: string;
-    completed_at: string | null;
-    jobs: { id: string; job_number: string } | { id: string; job_number: string }[] | null;
-  };
-  const rows = (data as unknown as PriorRow[])
-    .filter((r) => r.job_id !== opts?.excludeJobId)
-    // Newest completed first (nulls last), then cap the number of runs scanned.
-    .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''))
-    .slice(0, opts?.maxRuns ?? 10);
-  if (rows.length === 0) return [];
-
-  // Resolve the current step's identity once for the optional "this step" filter.
-  const stepIdentity = opts?.jobOperationId ? await getStepIdentity(opts.jobOperationId) : null;
-
-  const perRun = await Promise.all(
-    rows.map(async (row): Promise<PartPreviousNote[]> => {
-      const priorJob = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs;
-      if (!priorJob) return [];
-      let notes = await getJobNotes(row.job_id, companyId);
-      if (stepIdentity) {
-        const matchIds = await matchingStepOperationIds(row.job_id, stepIdentity);
-        notes = notes.filter((n) => n.job_operation_id && matchIds.has(n.job_operation_id));
-      }
-      return notes.map((n) => ({ ...n, job_number: priorJob.job_number }));
-    }),
-  );
-
-  // Flatten across runs, newest note first.
-  return perRun.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return (data as unknown as PlaybookRow[]).map((r) => ({
+    id: r.id,
+    job_id: '',
+    job_operation_id: null,
+    operation_label: r.operation_label,
+    body: r.body,
+    note_type: r.note_type === 'event' ? 'event' : 'user',
+    created_at: r.created_at,
+    author_name: r.author_name,
+    subject_kind:
+      r.subject_kind === 'part' || r.subject_kind === 'work_center'
+        ? r.subject_kind
+        : 'job',
+    viewer_count: r.viewer_count,
+    usage_count: r.usage_count,
+    media: r.media ?? [],
+    job_number: r.job_number ?? '',
+  }));
 }

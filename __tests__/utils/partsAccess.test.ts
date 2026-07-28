@@ -237,7 +237,7 @@ describe('partsAccess utilities', () => {
 
       const notes = await getPartNotes('p1', 'c1');
 
-      expect(mockSupabase.from).toHaveBeenCalledWith('part_notes');
+      expect(mockSupabase.from).toHaveBeenCalledWith('part_comments');
       expect(notes[0]).toMatchObject({ id: 'n1', body: 'first', author_id: 'a1', author_name: 'Sam' });
       expect(notes[1]).toMatchObject({ id: 'n2', author_id: null, author_name: 'Pat' });
     });
@@ -276,7 +276,7 @@ describe('partsAccess utilities', () => {
   describe('deletePartNote', () => {
     it('deletes by id (RLS enforces author/admin)', async () => {
       await deletePartNote('n1');
-      expect(mockSupabase.from).toHaveBeenCalledWith('part_notes');
+      expect(mockSupabase.from).toHaveBeenCalledWith('part_comments');
       expect(mockQueryBuilder.delete).toHaveBeenCalled();
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
     });
@@ -308,7 +308,7 @@ describe('partsAccess utilities', () => {
     it('merges notes + transactions into one newest-first feed (job/quote dropped)', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
         switch (table) {
-          case 'part_notes':
+          case 'part_comments':
             return makeResult([
               {
                 id: 'n2', part_id: 'p1', body: 'Pricing updated', created_at: '2026-04-01T00:00:00Z',
@@ -345,7 +345,7 @@ describe('partsAccess utilities', () => {
     it('throws if any source errors (no silent partial feed)', async () => {
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
         const b = makeResult([]);
-        if (table === 'part_notes') b.error = { message: 'boom' };
+        if (table === 'part_comments') b.error = { message: 'boom' };
         return b;
       });
       await expect(getPartActivity('p1', 'c1')).rejects.toBeTruthy();

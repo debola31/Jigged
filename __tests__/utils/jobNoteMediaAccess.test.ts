@@ -131,7 +131,7 @@ describe('getJobNoteMediaUrl', () => {
 describe('deleteJobNoteMedia', () => {
   it('deletes the row first, then the file (row-first)', async () => {
     await deleteJobNoteMedia({ id: 'media-1', storage_path: 'c1/jobs/j1/x.jpg' });
-    expect(mockSupabase.from).toHaveBeenCalledWith('job_note_media');
+    expect(mockSupabase.from).toHaveBeenCalledWith('note_media');
     expect(mockQueryBuilder.delete).toHaveBeenCalled();
     expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'media-1');
     expect(mockDeleteFileFromStorage).toHaveBeenCalledWith('c1/jobs/j1/x.jpg');
@@ -154,8 +154,8 @@ describe('deleteJobNote', () => {
     ];
     await deleteJobNote('n1');
 
-    expect(mockSupabase.from).toHaveBeenCalledWith('job_note_media');
-    expect(mockSupabase.from).toHaveBeenCalledWith('job_notes');
+    expect(mockSupabase.from).toHaveBeenCalledWith('note_media');
+    expect(mockSupabase.from).toHaveBeenCalledWith('notes');
     expect(mockQueryBuilder.eq).toHaveBeenCalledWith('note_id', 'n1');
     expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
     expect(mockDeleteFileFromStorage).toHaveBeenCalledWith('c1/jobs/j1/a.jpg');

@@ -599,25 +599,44 @@ begin
   end if;
 end $$;
 
+-- Job-level note: genuinely about this run, so subject_kind stays 'job'.
 create function pg_temp.add_note(p_job uuid, p_body text, p_type text, p_days int)
 returns void language plpgsql as $$
 begin
-  insert into public.job_notes (company_id, job_id, author_id, body, note_type, created_at)
-  values ('22222222-2222-2222-2222-222222222222', p_job, '23000000-0000-0000-0000-000000000001', p_body, p_type, now() - (p_days||' days')::interval);
+  insert into public.notes (company_id, subject_kind, job_id, author_id, body, note_type, created_at)
+  values ('22222222-2222-2222-2222-222222222222', 'job', p_job, '23000000-0000-0000-0000-000000000001', p_body, p_type, now() - (p_days||' days')::interval);
 end $$;
 
--- Step-tagged operator note: ties a note to a specific operation (by sequence)
--- on the job's part, so the operator "Previous notes" view surfaces it for later
--- runs of the same part and can filter to "this step". Author is an operator's
--- user_company_access id (operators write these on the floor).
+-- Step note captured on the floor. Mirrors what addJobNote() does in the app: if
+-- the job's step has a routing link, the note's SUBJECT is the durable
+-- (part, routing step) and the job is recorded only as provenance — so the next
+-- run of this part surfaces it with no prior-job traversal. Falls back to a
+-- job-subject note for an ad-hoc step with no routing link.
+--
+-- Keeping the seed on the same branch as the app matters: E2E specs assert
+-- against this shape, and a seed that only ever wrote job-subject notes would
+-- leave the durable read-back path untested.
 create function pg_temp.add_op_note(p_job uuid, p_seq int, p_author uuid, p_body text, p_days int)
 returns void language plpgsql as $$
-declare v_jp uuid; v_op uuid;
+declare v_jp uuid; v_op uuid; v_part uuid; v_ro uuid;
 begin
-  select id into v_jp from public.job_parts where job_id = p_job order by sequence limit 1;
-  select id into v_op from public.job_operations where job_part_id = v_jp and sequence = p_seq limit 1;
-  insert into public.job_notes (company_id, job_id, author_id, job_part_id, job_operation_id, body, note_type, created_at)
-  values ('22222222-2222-2222-2222-222222222222', p_job, p_author, v_jp, v_op, p_body, 'user', now() - (p_days||' days')::interval);
+  select id, part_id into v_jp, v_part
+    from public.job_parts where job_id = p_job order by sequence limit 1;
+  select id, routing_operation_id into v_op, v_ro
+    from public.job_operations where job_part_id = v_jp and sequence = p_seq limit 1;
+
+  if v_ro is not null and v_part is not null then
+    insert into public.notes (company_id, subject_kind, part_id, routing_operation_id,
+                              captured_job_id, captured_job_operation_id,
+                              author_id, body, note_type, created_at)
+    values ('22222222-2222-2222-2222-222222222222', 'part', v_part, v_ro,
+            p_job, v_op, p_author, p_body, 'user', now() - (p_days||' days')::interval);
+  else
+    insert into public.notes (company_id, subject_kind, job_id, job_part_id, job_operation_id,
+                              author_id, body, note_type, created_at)
+    values ('22222222-2222-2222-2222-222222222222', 'job', p_job, v_jp, v_op,
+            p_author, p_body, 'user', now() - (p_days||' days')::interval);
+  end if;
 end $$;
 
 create function pg_temp.add_invoice(p_job uuid, p_quote uuid, p_doc text, p_days int)

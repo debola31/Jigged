@@ -1,0 +1,526 @@
+"""Integration tests for note view-logging: dedupe, exclusions, and the privacy rules.
+
+These are the acceptance criteria for the attribution loop, written against a real
+database because every one of them is enforced in Postgres rather than in the app:
+
+  - dedupe is a UNIQUE constraint, not application logic;
+  - "never the author" and "never an excluded account" live inside a SECURITY
+    DEFINER function, so the browser cannot opt out;
+  - "everyone else sees counts only" is the ABSENCE of a SELECT grant, which no
+    frontend test could observe.
+
+The product rule underneath all of it: if a shop owner can audit who reads notes,
+reading becomes an admission of ignorance and the read side dies. So the strongest
+assertions here are the negative ones.
+
+Requires a local Supabase with all migrations applied (TEST_SUPABASE_URL /
+TEST_SUPABASE_PUBLISHABLE_KEY / TEST_SUPABASE_SECRET_KEY). Skipped without it.
+"""
+from __future__ import annotations
+
+import os
+
+import pytest
+from supabase import create_client
+
+pytestmark = pytest.mark.integration
+
+
+def _publishable_key() -> str:
+    return os.environ.get("TEST_SUPABASE_PUBLISHABLE_KEY") or os.environ["TEST_SUPABASE_ANON_KEY"]
+
+
+def _add_member(admin, company_id: str, label: str, role: str = "operator") -> dict:
+    """A company member with their own signed-in client.
+
+    Deliberately defaults to `operator`, not `admin`: note_viewers() blocks admins
+    outright (an admin could otherwise author a must-read note and legitimately
+    harvest a named read list), so an admin-by-default cast would make the core
+    author-sees-names test silently vacuous.
+    """
+    email = f"nv-{label}-{os.urandom(4).hex()}@test.jigged.local"
+    password = "test-password-note-views"
+    created = admin.auth.admin.create_user(
+        {"email": email, "password": password, "email_confirm": True}
+    )
+    access = (
+        admin.table("user_company_access")
+        .insert(
+            {
+                "user_id": created.user.id,
+                "company_id": company_id,
+                "role": role,
+                "name": label.title(),
+            }
+        )
+        .execute()
+    )
+    client = create_client(os.environ["TEST_SUPABASE_URL"], _publishable_key())
+    client.auth.sign_in_with_password({"email": email, "password": password})
+    return {
+        "user_id": created.user.id,
+        "access_id": access.data[0]["id"],
+        "name": label.title(),
+        "client": client,
+    }
+
+
+@pytest.fixture
+def shop(supabase_admin):
+    """A company with an author, two readers, an admin, a routed part, and two jobs."""
+    admin = supabase_admin
+    company_id = (
+        admin.table("companies")
+        .insert({"name": f"nv-{os.urandom(3).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    # Demo company => company_can_write() is true without a billing row, so the
+    # billing gate never masks an RLS result we are actually trying to assert.
+    admin.table("companies").update({"is_demo": True}).eq("id", company_id).execute()
+
+    author = _add_member(admin, company_id, "kurtis")
+    reader = _add_member(admin, company_id, "dana")
+    reader2 = _add_member(admin, company_id, "sam")
+    boss = _add_member(admin, company_id, "shane", role="admin")
+
+    part_id = (
+        admin.table("parts")
+        .insert({"company_id": company_id, "part_name": f"BRACKET-{os.urandom(2).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    wc_id = (
+        admin.table("work_centers")
+        .insert({"company_id": company_id, "name": f"MILL-{os.urandom(2).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    routing_id = (
+        admin.table("routings")
+        .insert({"company_id": company_id, "part_id": part_id, "name": "Main"})
+        .execute()
+        .data[0]["id"]
+    )
+    routing_op_id = (
+        admin.table("routing_operations")
+        .insert({"routing_id": routing_id, "work_center_id": wc_id, "sequence": 10})
+        .execute()
+        .data[0]["id"]
+    )
+
+    jobs = []
+    for n in ("J-0041", "J-0052"):
+        jobs.append(
+            admin.table("jobs")
+            .insert({"company_id": company_id, "job_number": f"{n}-{os.urandom(2).hex()}"})
+            .execute()
+            .data[0]["id"]
+        )
+
+    ctx = {
+        "company_id": company_id,
+        "author": author,
+        "reader": reader,
+        "reader2": reader2,
+        "boss": boss,
+        "part_id": part_id,
+        "routing_operation_id": routing_op_id,
+        "job_a": jobs[0],
+        "job_b": jobs[1],
+        "admin": admin,
+    }
+    yield ctx
+
+    for table in ("jobs", "routings", "parts", "work_centers"):
+        try:
+            admin.table(table).delete().eq("company_id", company_id).execute()
+        except Exception:
+            pass
+    admin.table("companies").delete().eq("id", company_id).execute()
+    for m in (author, reader, reader2, boss):
+        try:
+            admin.auth.admin.delete_user(m["user_id"])
+        except Exception:
+            pass
+
+
+def _make_note(shop, body: str = "back the feed off on the last pass") -> str:
+    """A DURABLE part-subject note authored by `author`, captured on job A."""
+    return (
+        shop["admin"]
+        .table("notes")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "part",
+                "part_id": shop["part_id"],
+                "routing_operation_id": shop["routing_operation_id"],
+                "captured_job_id": shop["job_a"],
+                "author_id": shop["author"]["access_id"],
+                "body": body,
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+
+
+def _counts(shop, note_id: str) -> tuple[int, int]:
+    row = (
+        shop["admin"]
+        .table("notes")
+        .select("viewer_count, usage_count")
+        .eq("id", note_id)
+        .single()
+        .execute()
+        .data
+    )
+    return row["viewer_count"], row["usage_count"]
+
+
+def _rows(shop, note_id: str) -> list[dict]:
+    return (
+        shop["admin"].table("note_views").select("*").eq("note_id", note_id).execute().data
+    )
+
+
+# ── dedupe: rows are (person, job), counters split people from jobs ──────────
+
+
+def test_same_person_same_job_twice_is_one_row(shop):
+    note_id = _make_note(shop)
+    for _ in range(2):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+        ).execute()
+
+    assert len(_rows(shop, note_id)) == 1
+    assert _counts(shop, note_id) == (1, 1)
+
+
+def test_same_person_two_jobs_is_repeat_use_not_repeat_opens(shop):
+    """The distinction the two counters exist for: one PERSON, two JOBS."""
+    note_id = _make_note(shop)
+    for job in (shop["job_a"], shop["job_b"]):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": job}
+        ).execute()
+
+    assert len(_rows(shop, note_id)) == 2
+    viewers, usage = _counts(shop, note_id)
+    assert viewers == 1, "one person read it, however many jobs they used it on"
+    assert usage == 2, "used on two jobs — the signal that it is load-bearing"
+
+
+def test_job_less_reads_dedupe_to_one_row(shop):
+    """NULLS NOT DISTINCT. Without it, every Playbook read inserts a new row."""
+    note_id = _make_note(shop)
+    for _ in range(3):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": None}
+        ).execute()
+
+    assert len(_rows(shop, note_id)) == 1
+    viewers, usage = _counts(shop, note_id)
+    assert viewers == 1
+    assert usage == 0, "a read with no job context is not usage on a job"
+
+
+def test_two_people_two_viewers(shop):
+    note_id = _make_note(shop)
+    for m in ("reader", "reader2"):
+        shop[m]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+        ).execute()
+
+    assert _counts(shop, note_id) == (2, 1)
+
+
+# ── exclusions, enforced in the DB rather than the client ────────────────────
+
+
+def test_author_reading_own_note_logs_nothing(shop):
+    note_id = _make_note(shop)
+    shop["author"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    assert _rows(shop, note_id) == []
+    assert _counts(shop, note_id) == (0, 0)
+
+
+def test_excluded_account_logs_nothing(shop):
+    """The founder logs in constantly and must not inflate anyone's numbers."""
+    note_id = _make_note(shop)
+    shop["admin"].table("user_company_access").update(
+        {"excluded_from_metrics": True}
+    ).eq("id", shop["reader"]["access_id"]).execute()
+
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    assert _rows(shop, note_id) == []
+
+
+def test_browser_cannot_flip_the_exclusion_flag(shop):
+    """Otherwise: exclude everyone but one person, watch the counters, and you
+    have that person's entire reading history. RLS cannot scope to a column;
+    the column-level GRANT is what closes this."""
+    with pytest.raises(Exception) as exc:
+        shop["boss"]["client"].table("user_company_access").update(
+            {"excluded_from_metrics": True}
+        ).eq("id", shop["reader"]["access_id"]).execute()
+    assert "42501" in str(exc.value).lower() or "permission" in str(exc.value).lower()
+
+
+def test_admin_can_still_change_a_member_role(shop):
+    """Regression guard on the column-scoped grant above: the one browser write
+    this table actually has must keep working."""
+    shop["boss"]["client"].table("user_company_access").update({"role": "user"}).eq(
+        "id", shop["reader2"]["access_id"]
+    ).execute()
+    row = (
+        shop["admin"]
+        .table("user_company_access")
+        .select("role")
+        .eq("id", shop["reader2"]["access_id"])
+        .single()
+        .execute()
+        .data
+    )
+    assert row["role"] == "user"
+
+
+# ── visibility: counts for everyone, names for the author only ───────────────
+
+
+def test_note_views_is_unreadable_by_any_browser_role(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    for who in ("author", "reader", "boss"):
+        try:
+            res = shop[who]["client"].table("note_views").select("*").execute()
+            assert res.data == [], f"{who} could read note_views rows"
+        except Exception as exc:  # a permission error is the expected outcome
+            assert "42501" in str(exc).lower() or "permission" in str(exc).lower()
+
+
+def test_author_sees_named_viewers_with_job_numbers(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    rows = shop["author"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data
+    assert [r["viewer_name"] for r in rows] == ["Dana"]
+    assert rows[0]["job_number"]
+
+
+def test_author_sees_one_row_per_person_however_many_jobs(shop):
+    """With job in the dedupe key this is a query obligation rather than a
+    physical impossibility, so it gets its own test."""
+    note_id = _make_note(shop)
+    for job in (shop["job_a"], shop["job_b"]):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": job}
+        ).execute()
+
+    rows = shop["author"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data
+    assert len(rows) == 1, "the author must never see that one person came back"
+
+
+def test_non_author_gets_no_names(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    assert shop["reader2"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data == []
+
+
+def test_admin_gets_no_names_even_on_a_note_they_authored(shop):
+    """Closes the bait-note bypass: an admin authors a must-read note, then
+    harvests a named read list entirely legitimately."""
+    note_id = (
+        shop["admin"]
+        .table("notes")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "part",
+                "part_id": shop["part_id"],
+                "author_id": shop["boss"]["access_id"],
+                "body": "everyone read the new spec",
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    assert shop["boss"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data == []
+    # ...but the aggregate count is still visible, as designed.
+    assert _counts(shop, note_id)[0] == 1
+
+
+def test_counters_never_fall_when_a_member_is_deleted(shop):
+    """The strongest attack this design faces: snapshot the counters, delete one
+    member so their rows cascade, snapshot again, and every note whose count
+    dropped was read by that person. Monotonic counters close it."""
+    note_id = _make_note(shop)
+    for m in ("reader", "reader2"):
+        shop[m]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+        ).execute()
+    before = _counts(shop, note_id)
+
+    shop["admin"].table("user_company_access").delete().eq(
+        "id", shop["reader"]["access_id"]
+    ).execute()
+
+    assert _counts(shop, note_id) == before
+
+
+# ── the login-banner digest ──────────────────────────────────────────────────
+
+
+def test_digest_counts_people_not_rows(shop):
+    """Three rows can be one person on three jobs. "3 people used your notes"
+    for a single reader is the exact overstatement this must not make."""
+    note_id = _make_note(shop)
+    for job in (shop["job_a"], shop["job_b"]):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [note_id], "p_job_id": job}
+        ).execute()
+
+    assert len(_rows(shop, note_id)) == 2
+    n = shop["author"]["client"].rpc(
+        "my_note_view_digest", {"p_tz": "America/Detroit"}
+    ).execute().data
+    assert n == 1
+
+
+def test_digest_is_scoped_to_the_callers_own_notes(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    n = shop["reader2"]["client"].rpc(
+        "my_note_view_digest", {"p_tz": "America/Detroit"}
+    ).execute().data
+    assert n == 0
+
+
+# ── the durable subject, and the constraints protecting it ───────────────────
+
+
+def test_durable_note_is_readable_without_touching_the_capturing_job(shop):
+    """The whole point: a note written on job A is found by part + step alone."""
+    note_id = _make_note(shop)
+
+    found = (
+        shop["reader"]["client"]
+        .table("notes")
+        .select("id")
+        .eq("part_id", shop["part_id"])
+        .eq("routing_operation_id", shop["routing_operation_id"])
+        .execute()
+        .data
+    )
+    assert [r["id"] for r in found] == [note_id]
+
+
+def test_subject_check_rejects_a_mixed_subject(shop):
+    with pytest.raises(Exception):
+        shop["admin"].table("notes").insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "part",
+                "part_id": shop["part_id"],
+                "job_id": shop["job_a"],  # a part-subject note has no job
+                "body": "mixed",
+            }
+        ).execute()
+
+
+def test_subject_check_rejects_an_unknown_kind(shop):
+    with pytest.raises(Exception):
+        shop["admin"].table("notes").insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "sandwich",
+                "part_id": shop["part_id"],
+                "body": "nope",
+            }
+        ).execute()
+
+
+def test_subject_must_belong_to_the_same_company(shop, supabase_admin):
+    """A Postgres CHECK cannot span tables, so this is the trigger's job. The
+    hole predates this work: a member of two companies could file a note under
+    company A referencing company B's job."""
+    other_company = (
+        supabase_admin.table("companies")
+        .insert({"name": f"nv-other-{os.urandom(3).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    other_part = (
+        supabase_admin.table("parts")
+        .insert({"company_id": other_company, "part_name": "FOREIGN"})
+        .execute()
+        .data[0]["id"]
+    )
+    try:
+        with pytest.raises(Exception) as exc:
+            supabase_admin.table("notes").insert(
+                {
+                    "company_id": shop["company_id"],
+                    "subject_kind": "part",
+                    "part_id": other_part,
+                    "body": "cross-tenant",
+                }
+            ).execute()
+        assert "not in company" in str(exc.value)
+    finally:
+        supabase_admin.table("parts").delete().eq("company_id", other_company).execute()
+        supabase_admin.table("companies").delete().eq("id", other_company).execute()
+
+
+def test_note_survives_its_routing_step_being_deleted(shop):
+    """Deleting a routing step must degrade the note to part-level, never destroy
+    accumulated knowledge. This is why part_id is stored alongside the step."""
+    note_id = _make_note(shop)
+    shop["admin"].table("routing_operations").delete().eq(
+        "id", shop["routing_operation_id"]
+    ).execute()
+
+    row = shop["admin"].table("notes").select("*").eq("id", note_id).single().execute().data
+    assert row["routing_operation_id"] is None
+    assert row["part_id"] == shop["part_id"]
+    assert row["subject_kind"] == "part"
+
+
+# ── drift and coverage invariants ────────────────────────────────────────────
+
+
+def test_counters_never_drift_below_reality(supabase_admin):
+    """One-sided by design: stored > live is expected (departed members), stored
+    < live means the trigger failed."""
+    rows = supabase_admin.rpc("note_count_anomalies", {}).execute().data
+    assert rows == [], f"counter drift: {rows}"
+
+
+def test_new_tables_are_gated_or_explicitly_exempt(supabase_admin):
+    """Mirrors test_no_tenant_table_left_ungated — note_views and operator_events
+    are SECURITY DEFINER-only writers, so they are exempt rather than gated."""
+    rows = supabase_admin.rpc("tenant_tables_missing_write_gate", {}).execute().data
+    assert rows == [], f"un-gated tenant tables: {rows}"

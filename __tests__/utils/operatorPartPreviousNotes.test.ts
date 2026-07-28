@@ -1,49 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Per-table Supabase mock so the multi-query flow (job_parts → job_notes →
-// job_operations) can return distinct data per source.
-const DATA: {
-  jobParts: unknown[];
-  notes: unknown[];
-  curOp: unknown;
-  priorOps: unknown[];
-  error?: unknown;
-} = { jobParts: [], notes: [], curOp: null, priorOps: [] };
+// getPartPreviousNotes used to fan out across job_parts -> job_notes ->
+// job_operations, up to 22 round trips for the default 10 prior runs. It is now
+// ONE part_playbook_notes RPC, because a note's subject is the durable
+// (part, routing step) rather than the job it happened to be written on.
+//
+// These tests assert the CONTRACT — which RPC, with which arguments, and how the
+// rows map — not the internals of the SQL, which belongs to the migration and its
+// integration tests.
 
-function resolveData(state: { table: string; single: boolean }) {
-  if (DATA.error) return { data: null, error: DATA.error };
-  switch (state.table) {
-    case 'job_parts':
-      return { data: DATA.jobParts, error: null };
-    case 'job_notes':
-      return { data: DATA.notes, error: null };
-    case 'job_operations':
-      return { data: state.single ? DATA.curOp : DATA.priorOps, error: null };
-    default:
-      return { data: [], error: null };
-  }
-}
+const STEP: { data: unknown; error: unknown } = { data: null, error: null };
+const RPC: { data: unknown; error: unknown } = { data: [], error: null };
 
-function makeBuilder(table: string) {
-  const state = { table, single: false };
+function makeBuilder() {
   const b: Record<string, unknown> = {};
   const ret = () => b;
   b.select = vi.fn(ret);
   b.eq = vi.fn(ret);
-  b.in = vi.fn(ret);
-  b.not = vi.fn(ret);
-  b.order = vi.fn(ret);
-  b.limit = vi.fn(ret);
-  b.lt = vi.fn(ret);
-  b.single = vi.fn(() => {
-    state.single = true;
-    return b;
-  });
-  b.then = (resolve: (v: unknown) => void) => resolve(resolveData(state));
+  b.single = vi.fn(ret);
+  b.then = (resolve: (v: unknown) => void) => resolve(STEP);
   return b;
 }
 
-const mockSupabase = { from: vi.fn((t: string) => makeBuilder(t)) };
+const mockRpc = vi.fn(async () => RPC);
+const mockSupabase = { from: vi.fn(() => makeBuilder()), rpc: mockRpc };
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
@@ -55,83 +35,109 @@ vi.mock('@/lib/supabaseErrors', () => ({
 
 import { getPartPreviousNotes } from '@/utils/operatorAccess';
 
-function note(over: Record<string, unknown>) {
+/** One row in the shape part_playbook_notes returns. */
+function row(over: Record<string, unknown> = {}) {
   return {
-    id: 'n',
-    job_id: 'jNew',
-    job_operation_id: null,
-    body: 'x',
+    id: 'n1',
+    body: 'back the feed off on the last pass',
     created_at: '2026-06-10T00:00:00Z',
-    author: null,
-    operation: null,
+    note_type: 'user',
+    subject_kind: 'part',
+    routing_operation_id: 'ro1',
+    corrects_note_id: null,
+    viewer_count: 4,
+    usage_count: 11,
+    author_name: 'Kurtis',
+    job_number: 'J-0041',
+    operation_label: 'Op 20 · Mill',
     media: [],
+    reactions: [],
     ...over,
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  DATA.jobParts = [];
-  DATA.notes = [];
-  DATA.curOp = null;
-  DATA.priorOps = [];
-  delete DATA.error;
+  STEP.data = null;
+  STEP.error = null;
+  RPC.data = [];
+  RPC.error = null;
 });
 
 describe('getPartPreviousNotes', () => {
-  it('returns prior-run notes tagged with the source job number, excluding the current job', async () => {
-    DATA.jobParts = [
-      { job_id: 'jNew', completed_at: '2026-06-10T00:00:00Z', jobs: { id: 'jNew', job_number: 'J-NEW' } },
-      { job_id: 'jCur', completed_at: '2026-06-15T00:00:00Z', jobs: { id: 'jCur', job_number: 'J-CUR' } },
-    ];
-    DATA.notes = [note({ id: 'n1', body: 'setup notes' })];
+  it('reads the whole part in ONE rpc call when no step is given', async () => {
+    RPC.data = [row()];
 
     const notes = await getPartPreviousNotes('part-1', 'c1', { excludeJobId: 'jCur' });
 
-    // Only the non-excluded run is fetched; each note carries its source job number.
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(mockRpc).toHaveBeenCalledWith(
+      'part_playbook_notes',
+      expect.objectContaining({ p_part_id: 'part-1', p_exclude_job_id: 'jCur' }),
+    );
+    // No step given -> no step scoping is requested.
+    const args = mockRpc.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_routing_operation_id).toBeUndefined();
     expect(notes).toHaveLength(1);
-    expect(notes[0].body).toBe('setup notes');
-    expect(notes[0].job_number).toBe('J-NEW');
+    expect(notes[0].body).toBe('back the feed off on the last pass');
+    expect(notes[0].job_number).toBe('J-0041');
   });
 
-  it('returns [] when the only completed run is the current job', async () => {
-    DATA.jobParts = [
-      { job_id: 'jCur', completed_at: '2026-06-15T00:00:00Z', jobs: { id: 'jCur', job_number: 'J-CUR' } },
-    ];
-    expect(await getPartPreviousNotes('part-1', 'c1', { excludeJobId: 'jCur' })).toEqual([]);
-  });
+  it('scopes to a step by ROUTING operation, with the name as the legacy fallback', async () => {
+    // The durable anchor is the routing (template) step; operation_name only
+    // matters for pre-migration notes whose job step had no routing link.
+    STEP.data = { routing_operation_id: 'ro1', operation_name: 'Mill' };
+    RPC.data = [row()];
 
-  it('returns [] when there are no completed prior runs', async () => {
-    DATA.jobParts = [];
-    expect(await getPartPreviousNotes('part-1', 'c1', {})).toEqual([]);
-  });
-
-  it('filters notes to the same step across runs via routing_operation_id', async () => {
-    DATA.jobParts = [
-      { job_id: 'jNew', completed_at: '2026-06-10T00:00:00Z', jobs: { id: 'jNew', job_number: 'J-NEW' } },
-    ];
-    DATA.curOp = { routing_operation_id: 'ro1', operation_name: 'Mill' };
-    DATA.priorOps = [
-      { id: 'opPrior', routing_operation_id: 'ro1', operation_name: 'Mill' },
-      { id: 'opOther', routing_operation_id: 'ro2', operation_name: 'Saw' },
-    ];
-    DATA.notes = [
-      note({ id: 'n1', job_operation_id: 'opPrior', body: 'this step' }),
-      note({ id: 'n2', job_operation_id: 'opOther', body: 'other step' }),
-      note({ id: 'n3', job_operation_id: null, body: 'general' }),
-    ];
-
-    const notes = await getPartPreviousNotes('part-1', 'c1', {
+    await getPartPreviousNotes('part-1', 'c1', {
       excludeJobId: 'jCur',
       jobOperationId: 'opCur',
     });
 
-    expect(notes).toHaveLength(1);
-    expect(notes[0].body).toBe('this step');
+    expect(mockRpc).toHaveBeenCalledWith(
+      'part_playbook_notes',
+      expect.objectContaining({
+        p_part_id: 'part-1',
+        p_routing_operation_id: 'ro1',
+        p_operation_name: 'Mill',
+      }),
+    );
   });
 
-  it('returns [] when the job_parts query errors', async () => {
-    DATA.error = { message: 'boom' };
+  it('surfaces both counters, so a card can say "used on N jobs by N people"', async () => {
+    // viewer_count saturates near shop size; usage_count is the one that keeps
+    // growing and distinguishes a load-bearing note from a curiosity.
+    RPC.data = [row({ viewer_count: 4, usage_count: 11 })];
+
+    const notes = await getPartPreviousNotes('part-1', 'c1', {});
+
+    expect(notes[0].viewer_count).toBe(4);
+    expect(notes[0].usage_count).toBe(11);
+    expect(notes[0].subject_kind).toBe('part');
+  });
+
+  it('maps a legacy job-subject note without pretending it is durable', async () => {
+    RPC.data = [row({ subject_kind: 'job', routing_operation_id: null })];
+
+    const notes = await getPartPreviousNotes('part-1', 'c1', {});
+
+    expect(notes[0].subject_kind).toBe('job');
+  });
+
+  it('defaults an unknown note_type to user', async () => {
+    RPC.data = [row({ note_type: null })];
+    const notes = await getPartPreviousNotes('part-1', 'c1', {});
+    expect(notes[0].note_type).toBe('user');
+  });
+
+  it('returns [] when the rpc errors, rather than surfacing a partial feed', async () => {
+    RPC.data = null;
+    RPC.error = { message: 'boom' };
+    expect(await getPartPreviousNotes('part-1', 'c1', {})).toEqual([]);
+  });
+
+  it('returns [] when the part has nothing recorded yet', async () => {
+    RPC.data = [];
     expect(await getPartPreviousNotes('part-1', 'c1', {})).toEqual([]);
   });
 });

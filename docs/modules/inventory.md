@@ -1,7 +1,7 @@
 # Inventory Module
 
 > **Journey source of truth:** [`docs/inventory-flow.md`](../inventory-flow.md) — what
-> inventory is *for*, the thirteen target journeys (J1–J13), the design decisions, and the
+> inventory is *for*, the twelve target journeys (J1–J12), the design decisions, and the
 > phasing. **This doc describes what is built today** and the data model behind it. When the
 > two disagree, the flow doc describes the target and this one describes reality.
 >
@@ -356,7 +356,7 @@ unit conversions, transaction history, stock status, and reorder alerts.
 | Purchase orders, receiving, on-order | Not built. Phase 3 / issue #571. |
 | Lots, heat numbers, certs, traceability | **Not built and deliberately cut** — Contour keeps no certs and serves no regulated customers (validated 2026-07-27). Stock is a quantity of an item at a place; nothing sits between them. [flow §5.6](../inventory-flow.md) |
 | Remnants and drops | Not built. Phase 4, and now has to justify itself on material-cost grounds — it was going to arrive free with the lot layer that got cut. |
-| Customer-owned stock *accounting* | Customer-supplied material is real and frequent; it gets an ownership flag on stock (Phase 1) and a journey (J14). Valuing it, or reporting it as a liability, stays out. |
+| Customer-supplied material | Real and frequent, but **never stocked** — it arrives with the job, is worked on, and leaves with the finished part. It's an attribute of a job, not inventory. No ownership flag, no consignment ledger, no valuation. see [inventory-flow.md](../inventory-flow.md) "Considered and cut" |
 | Count sessions / cycle counting | Not built. *"Cycle count"* appears only as label text on the Adjust action. |
 | Inventory valuation, COGS, accounting | QuickBooks. |
 | Tool crib / perishable tooling | Different object, different lifecycle. Out of scope. |
@@ -478,7 +478,6 @@ on its own.
 | Two stock engines, one non-atomic | Flow §5.4 |
 | `job_materials` written and never read | Flow §5.9 |
 | Storage setup is structure-first | Flow §5.5 |
-| No purchasing or receiving | Flow phase 3 (issue #571) |
-| No ownership flag — customer-supplied material is indistinguishable from shop-owned, and it's frequent | Flow J14 · Phase 1 |
+| No purchasing or receiving | Flow J5–J6 · Phase 3 (issue #571) |
 | Lots / certs / traceability **cut**, not pending | Flow §5.6 — no regulated customers |
 | Aggregate stock path has no unit tests; no E2E spec covers inventory at all | — |

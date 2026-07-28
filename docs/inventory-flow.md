@@ -17,8 +17,8 @@
 > founder's multi-day on-site observation at Contour Tool & Machine — see
 > [§8](#8-what-we-know-and-what-we-still-dont). Those answers **resolved the largest
 > modelling fork** ([§5.2](#52-is-a-job-a-place--resolved-no)), **cut a phase**
-> (no regulated customers → no traceability), and **promoted customer-supplied material**
-> from a footnote to a journey ([J14](#j14--customer-supplied-material)). They are founder
+> (no regulated customers → no traceability), and **cut a second**
+> ([Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it) — customer material is never stocked). They are founder
 > observation, not participant interview: reliable on structure, weaker on frequency and
 > pain-ranking. What remains open is listed in [§8](#8-what-we-know-and-what-we-still-dont).
 >
@@ -64,13 +64,12 @@ the build the shop actually asked for — but they stop being the front door.
 
 ### Goal
 
-A shop can answer six questions about material without leaving Jigged:
+A shop can answer five questions about material without leaving Jigged:
 
 | Question | Journey |
 |---|---|
 | Do we have it? | [J4](#j4--job-kickoff-material-check) |
-| Where is it? | [J13](#j13--find-it) |
-| Whose is it? | [J14](#j14--customer-supplied-material) |
+| Where is it? | [J12](#j12--find-it) |
 | Did we buy it? | [J5](#j5--buy-it) / [J6](#j6--receive-it) |
 | Did we use it? | [J7](#j7--issue-material-to-a-job) / [J9](#j9--confirm-consumption-at-the-operation) |
 | Will we run out? | [J11](#j11--dont-run-out) |
@@ -81,8 +80,8 @@ A shop can answer six questions about material without leaving Jigged:
 |---|---|
 | **Can we trust any of the above?** | **[J10](#j10--count-it)** — the count session |
 
-J10 is deliberately not a seventh row. It isn't a lookup anyone performs; it is the ritual
-that keeps the other six true, and every one of them degrades to a guess without it. It is
+J10 is deliberately not a sixth row. It isn't a lookup anyone performs; it is the ritual
+that keeps the other five true, and every one of them degrades to a guess without it. It is
 also **the first thing built** — for Contour the opening count *is* the opening balance, so
 the module has no numbers at all until J10 exists. Treating counting as a reporting feature
 that arrives later is how inventory modules rot; see
@@ -94,10 +93,14 @@ The remaining journeys are the write side and the setup that keep those answers 
 [J3](#j3--estimate-material-cost-on-a-quote) the quoting boundary, and
 [J8](#j8--cut-it-return-the-remnant) remnants.
 
-> **Considered and cut:** *"Can we prove it?"* — [J12](#j12--prove-it-traceability--cut)
-> traceability. Contour keeps no certs or heat numbers and serves no regulated customers, so
-> the whole lot layer went with it ([§5.6](#56-lots--resolved-dont-build-them)). It is listed
-> here so the omission reads as a decision rather than an oversight.
+> **Considered and cut**, listed so the omissions read as decisions rather than oversights:
+>
+> - *"Can we prove it?"* — [Traceability](#cut--traceability-can-we-prove-it), cut. No certs, no
+>   heat numbers, no regulated customers, so the whole lot layer went with it
+>   ([§5.6](#56-lots--resolved-dont-build-them)).
+> - *"Whose is it?"* — [Customer-supplied material](#cut--customer-supplied-material-whose-is-it), cut.
+>   Real and frequent, but **never stocked**: it arrives with the job, is worked, and leaves.
+>   It's an attribute of a job, not of inventory.
 
 ### Explicit non-goals (deliberate, decided)
 
@@ -106,14 +109,14 @@ The remaining journeys are the write side and the setup that keep those answers 
 | **No demand forecasting** | A job shop's demand *is* its order book. Forecasting a make-to-order backlog is modelling noise. |
 | **No MRP planning run / netting** | Requires reliable lead times and BOM depth we don't have, and produces output nobody in a 10-person shop acts on. Reorder points ([J11](#j11--dont-run-out)) cover the real need. |
 | **No multi-warehouse** | One building. `inventory_locations` already nests if a second site ever appears. |
-| **No consignment or customer-owned stock *accounting*** | Customer-supplied material is real and frequent — it gets a journey ([J14](#j14--customer-supplied-material)) and an **ownership flag on stock**. What stays out of scope is valuing it, or reporting on it as a liability. |
+| **No customer-owned stock model** | Customer-supplied material is real and frequent but **never enters stock** — it arrives with the job, is worked, and leaves ([Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it)). No ownership flag, no consignment ledger, no valuation. |
 | **No inventory valuation, COGS, or accounting postings** | Accounting stays in QuickBooks. Jigged tracks *quantities and identity*; money is costing's job (`part_procurement_tiers`, `compute_part_cost_at_qty`). |
 | **No automatic purchasing** | The system proposes a buy list; a human places the order. Auto-ordering requires vendor integration and trust we haven't earned. |
 | **No tool-crib / perishable-tooling management** | Adjacent and real, but a different object with a different lifecycle (tool life, regrinds, checkout). Out of scope; revisit as its own module. |
 
 ### In scope
 
-The thirteen journeys in [§4](#4-target-journeys), the modelling decisions in
+The twelve journeys in [§4](#4-target-journeys), the modelling decisions in
 [§5](#5-design-decisions), the phasing in [§6](#6-sequencing), and the discovery needed to
 validate them.
 
@@ -365,7 +368,7 @@ draft of this spec:
 - **The flow should be job-first** — operator is on the job traveler → sees the material the
   job needs → taps it → sees where it is → confirms taking it. The depletion is job-linked by
   construction rather than by an optional field the operator must remember.
-- Bin-first stays as the secondary path. It is the right shape for J10 counting and J13
+- Bin-first stays as the secondary path. It is the right shape for J10 counting and J12
   finding, and it already works.
 
 **Consequence for issue #59.** The March ask was a job selector in the owner's
@@ -468,7 +471,24 @@ and plans to **hide it** behind the non-existent `inventory_transactions` flag. 
 [`docs/modules/ai-insights.md`](modules/ai-insights.md) records the low-inventory alert
 badge as **built and checked off**. Three docs, three positions, one feature.
 
-### J12 — Prove it (traceability) — **CUT**
+### J12 — Find it
+
+**Actor:** anyone. **Today: built, and it works.**
+
+Scan a location QR → the phone opens the bin view → contents, drill-down, and add / remove /
+set per part. Searching an item shows its per-location balances with full paths.
+
+This is the genuinely good part of the June build. Keep it.
+
+---
+
+## Considered and cut
+
+Two journeys were specced and then removed once the shop was understood. They are kept here,
+**without numbers**, so the decisions are on the record and don't get re-proposed — but they
+are deliberately outside the J1–J12 sequence, because they are not work.
+
+### Cut — Traceability *("can we prove it?")*
 
 *"Which jobs used heat 5521-B?"* · *"Show me the cert for the parts on this shipment."*
 
@@ -490,48 +510,38 @@ significant build, not a toggle. The
 [heat-lot linkage research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/)
 is cited in [J6](#j6--receive-it) so the requirement doesn't have to be relearned.
 
-### J14 — Customer-supplied material
+### Cut — Customer-supplied material *("whose is it?")*
 
-**Actor:** admin receiving, then the operator consuming. **Trigger:** a customer drops off
-material and asks for work on it.
+Customers do bring their own material for service-style one-off jobs, and there are a lot of
+them. An earlier revision of this spec promoted that into a journey with an ownership flag on
+stock.
 
-*Validated 2026-07-27 — this was a footnote in the earlier draft and is now a real
-requirement:* **"there are a lot of them."** Customers bring their own material for
-service-style, one-off jobs.
+**Cut on 2026-07-27: customer-supplied material is never stocked.** It arrives with the job,
+is worked on while the job is active, and leaves with the finished part. It has no balance, no
+life in a storage location, and nothing to count. It is an attribute of a **job**, not of
+inventory — and modelling it as stock-we-don't-own would have pushed an ownership flag through
+every read path (on-hand math, reorder logic, count sheets, buy list) to describe something
+that never behaves like stock.
 
-Material arrives that **the shop does not own**. It must be findable and consumable like any
-other stock, while being excluded from anything that treats stock as an asset or a
-replenishment signal.
+Same test that cut job-as-place in [§5.2](#52-is-a-job-a-place--resolved-no): don't model a
+workflow the shop doesn't have.
 
-**Today: missing entirely.** Every stocked item is implicitly shop-owned.
+**One narrow interaction survives, and it belongs to [J4](#j4--job-kickoff-material-check),
+not here.** If a service job carries a BOM line for the customer's material, J4 would compute
+a shortage against it and push it onto a buy list — a false alarm, on a job type that is
+frequent. Whether that can happen depends on a single unanswered question:
 
-The properties that make this distinct — worth settling before Phase 1 designs the item model,
-because retrofitting an ownership flag through the ledger later is painful:
+| Do service jobs carry a BOM line for the customer's material? | Then |
+|---|---|
+| **No** — it's "here's a part, fix it", no material line | **Nothing to do.** J4 has nothing to compute against, no false shortage is possible, and this is fully closed. |
+| **Yes** | J4 needs one exclusion so those lines don't raise shortages. A flag on the BOM line or the job — **not** on stock, and not a journey. |
 
-| Behaviour | Shop-owned | Customer-supplied |
-|---|---|---|
-| Counts toward on-hand for [J4](#j4--job-kickoff-material-check) | Yes, for any job | **Only for that customer's job** |
-| Triggers a reorder point ([J11](#j11--dont-run-out)) | Yes | **Never** — we don't buy it |
-| Appears on the buy list | Yes | **Never** |
-| Contributes to material cost on the quote | Yes | **No** — it's free to us |
-| Leftover returns to general stock | Yes | **No** — it's still theirs |
+That question is in [§8](#8-what-we-know-and-what-we-still-dont). It does not block Phase 1:
+J10 and J7 are unaffected either way, and J4 can ship with the exclusion added later if it
+turns out to be needed.
 
-Two open questions this raises, both cheap to answer and both listed in
-[§8](#8-what-we-know-and-what-we-still-dont): do these service jobs have a BOM at all (they
-may be "here's a part, fix it"), and does leftover customer material get returned, scrapped,
-or quietly absorbed?
-
-**Sequencing note:** the *flag* is cheap and belongs in Phase 1's data model. The *workflows*
-around it (return, segregation, per-customer visibility) can wait.
-
-### J13 — Find it
-
-**Actor:** anyone. **Today: built, and it works.**
-
-Scan a location QR → the phone opens the bin view → contents, drill-down, and add / remove /
-set per part. Searching an item shows its per-location balances with full paths.
-
-This is the genuinely good part of the June build. Keep it.
+**Reopen only if** customer material starts being *stored* between delivery and use — at which
+point it is genuinely stock with an owner, and this section's original analysis applies.
 
 ---
 
@@ -710,17 +720,17 @@ and remnant reuse fall out of one shape.
 
 **Contour keeps no certs or heat numbers and serves no regulated customers
 (validated 2026-07-27), so the layer has no justification.** Stock is a quantity of an item
-at a place, with an ownership flag. Nothing sits between them.
+at a place. Nothing sits between them.
 
 Two knock-ons, recorded so they aren't missed:
 
 - **[J8 remnants](#j8--cut-it-return-the-remnant) must now stand on its own.** It was going to
   arrive free as a child-lot. Building it now means an explicit remnant concept — and it needs
   confirming they actually reuse drops before that's worth it.
-- **[J14 customer-supplied](#j14--customer-supplied-material) is a flag on stock, not on a
-  lot** — which is simpler, and is why it can ship in Phase 1.
+- **[Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it) needed no lot either** — it
+  was subsequently cut altogether, because that material is never stocked.
 
-**Reopen with [J12](#j12--prove-it-traceability--cut)** if a regulated customer ever appears.
+**Reopen with [Traceability, cut](#cut--traceability-can-we-prove-it)** if a regulated customer ever appears.
 
 ### 5.7 Quoting never touches stock
 
@@ -819,15 +829,16 @@ Revised against the 2026-07-27 findings. Ordered by dependency, not value:
 3. **[J7](#j7--issue-material-to-a-job) issue-to-job, job-first, on the operator surface** —
    the operator's entry point is the job traveler, not a bin scan. This is the largest build
    in the phase and the one the earlier draft had pointed at the wrong actor.
-4. **[J14](#j14--customer-supplied-material) ownership flag only** — cheap, and belongs in the
-   item model now rather than being retrofitted through the ledger later. Workflows deferred.
+Three builds, not four — [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it) was cut, and with it the
+ownership flag that would have touched every read path.
 
 **Dropped from Phase 1:** [J1](#j1--seed-the-item-master-and-opening-balances) opening-balance
 import — customer #1 starts from zero, so this becomes blocking only at company #2.
 Restoring the #59 owner-side job selector stays a small correctness patch, **not** a
 headline item — the owner is not who moves material.
 
-No new feature flag. New tables: the count session, and an ownership flag on stock.
+No new feature flag. **One new table: the count session.** That is the entire schema cost of
+Phase 1.
 
 [§5.2](#52-is-a-job-a-place--resolved-no) is resolved — a job is **not** a place. Build the
 simple depletion.
@@ -845,7 +856,7 @@ mandatory wizard · PWA basics + the scanner spike ([§5.10](#510-native-app-def
 ### Phase 4 — debt paydown, remnants, and the deferred import
 
 **The traceability half is cut** — Contour keeps no certs or heat numbers and serves no
-regulated customers, so [J12](#j12--prove-it-traceability--cut) and the whole lot layer are
+regulated customers, so [Traceability, cut](#cut--traceability-can-we-prove-it) and the whole lot layer are
 gone. What's left:
 
 - **[J8](#j8--cut-it-return-the-remnant) remnants**, now justified on material-cost grounds
@@ -853,8 +864,9 @@ gone. What's left:
   before building it** — that was never asked.
 - **[J1](#j1--seed-the-item-master-and-opening-balances) opening-balance import**, deferred
   here from Phase 1. Becomes blocking at company #2.
-- **[J14](#j14--customer-supplied-material) workflows** — return, segregation, per-customer
-  visibility. The flag itself ships in Phase 1.
+- **[J4](#j4--job-kickoff-material-check) customer-material exclusion** — *only if* service
+  jobs turn out to carry BOM lines for customer-supplied material, which would otherwise raise
+  false shortages. See [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it).
 - **[§5.4](#54-one-stock-engine) one-stock-engine collapse** and
   **[§5.9](#59-decide-job_materials-fate) `job_materials` resolution** — debt paydowns that
   want a quiet phase.
@@ -863,7 +875,7 @@ gone. What's left:
 
 ## 7. Gap analysis — what we missed
 
-Scored against the thirteen journeys.
+Scored against the twelve journeys, plus the two that were cut.
 
 | Journey | PRD says | Doc says | Built? |
 |---|---|---|---|
@@ -879,13 +891,13 @@ Scored against the thirteen journeys.
 | J10 count | success metric: 100% accuracy | silent | ❌ label text only |
 | J11 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
 | J12 traceability | *(absent)* | silent | ⛔ **cut** — no regulated customers |
-| J13 find it | *(absent)* | AC only | ✅ |
-| J14 customer-supplied | *(absent)* | *(absent)* | ❌ — and it's frequent |
+| J12 find it | *(absent)* | AC only | ✅ |
+| Customer-supplied *(cut)* | *(absent)* | *(absent)* | ⛔ **cut** — frequent, but never stocked |
 
 **Three structural misses, in order of cost:**
 
 1. **We shipped the only journey with no requirement behind it, and skipped the one marked
-   primary.** J2/J13 got six PRs; J4/J7/J10 got nothing.
+   primary.** J2/J12 got six PRs; J4/J7/J10 got nothing.
 2. **The module doc could only describe what was built.** Because it was written as an
    implementation audit, absent concepts (receiving, purchasing, counting, shortage,
    remnants, traceability) do not appear even as gaps. You cannot notice a missing journey in
@@ -921,8 +933,8 @@ shop's own words — good enough for the structural decisions below, not for pri
 | Who moves material? | **The operator, on the floor** | [J7](#j7--issue-material-to-a-job) becomes job-first on the operator surface; #59's owner-side fix demoted |
 | What units? | **Mixed** — some `each`, some feet/inches | FR-1 conversion is load-bearing, both discrete and continuous |
 | Opening balances? | **Start from zero.** Legacy figures exist but accuracy is *"questionable"* | [J1](#j1--seed-the-item-master-and-opening-balances) out of Phase 1; [J10](#j10--count-it) becomes onboarding |
-| Certs / heat / regulated customers? | **None** | [J12](#j12--prove-it-traceability--cut) cut, lot layer cut, Phase 4 halved |
-| Customer-supplied material? | **Yes, and there are a lot of them** — service-style one-offs | Promoted to [J14](#j14--customer-supplied-material); ownership flag into Phase 1 |
+| Certs / heat / regulated customers? | **None** | [Traceability, cut](#cut--traceability-can-we-prove-it) cut, lot layer cut, Phase 4 halved |
+| Customer-supplied material? | **Yes, a lot of them** — service one-offs. **Never stocked**: arrives with the job, worked, leaves | [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it). It's a job attribute, not inventory — no ownership flag anywhere |
 | How many storage places? | **~10, ±4.** Cabinets and shelving | Validates [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — one wizard pass generating 16 is over-built for this shop |
 | Have they ever counted? | **Yes, tried** | Rescuing a lapsed practice, not introducing one → [J10](#j10--count-it) first run can be self-served |
 | Did a locations feature already fail them? | **Yes** — *"badly designed and not really intuitive"*, and we now have the export | ⚠️ Raises the bar on [§5.5](#55-locations-keep-them-visual-change-when-they-appear). We get one more attempt, not two |
@@ -950,27 +962,18 @@ it: it is what they did, not what anyone remembers.
 
 ### Still open
 
-**Blocks nothing in Phase 1** — none of these need answering before development starts.
-
-**Nothing here blocks Phase 1, and the export closed the two that mattered most** — the
-locations post-mortem and the opening-balance question.
+**Nothing here blocks Phase 1.** The exports closed the two that mattered most — the locations
+post-mortem and the opening-balance question — and the rest is Phase 2 input.
 
 | Question | Gates | Note |
 |---|---|---|
-| Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. The bar-rack hypothesis is now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Ask; don't add the card on a guess either way. |
-| What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean? | Phase 2 palette naming | Their vocabulary is opaque from outside and it is the vocabulary that matters. One screen-share answers all of it. |
-| Do service jobs have a BOM at all? | [J14](#j14--customer-supplied-material) | `custCode` is set on 51% of parts, but that likely means *"made for customer X"*, not *"customer supplied the material"* — **do not conflate them** |
-| Does leftover customer material get returned, scrapped, or absorbed? | [J14](#j14--customer-supplied-material) | |
-| Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Remnants lost their free ride when lots were cut |
-| Scan ten in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) spike | Phase 2 only |
+| **Do service jobs carry a BOM line for the customer's material?** | [J4](#j4--job-kickoff-material-check) only | The last live question from the cut [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it). If yes, J4 needs one exclusion so those lines don't raise false shortages; if no, fully closed. Doesn't block Phase 1 either way. `custCode` is set on 51% of parts, but that likely means *"made for customer X"*, not *"customer supplied the material"* — **do not conflate them**. |
+| Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. Now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Don't add the card on a guess either way. |
+| What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` actually mean? | Phase 2 palette naming | Their vocabulary is opaque from outside, and it's the vocabulary that matters. One screen-share answers all of it — the card-sort in the discovery script is still the instrument. |
+| Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Remnants lost their free ride when lots were cut, so this now has to justify itself |
+| Scan ten in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) PWA-vs-native spike | Phase 2 only |
+| Label durability and placement | Label PDF | Implementation detail, not data model |
 | Frequency / pain ranking | Prioritisation within phases | The one thing neither observation nor exports reach |
-| What do they call each of the ~10 places? | Phase 2 palette naming | The card-sort in the discovery script is still the instrument |
-| Do service jobs have a BOM at all? | [J14](#j14--customer-supplied-material) | May be "here's a part, fix it" with no material line |
-| Does leftover customer material get returned, scrapped, or absorbed? | [J14](#j14--customer-supplied-material) | |
-| Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Now that remnants lost their free ride, this must justify itself |
-| Would anyone scan ten things in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) PWA-vs-native spike | Phase 2 only |
-| Label durability and placement | Label PDF | Implementation detail |
-| Frequency / pain ranking | Prioritisation within phases | The one thing observation is genuinely weak at |
 
 Carried forward from elsewhere:
 
@@ -1013,13 +1016,12 @@ build for it.
 2. **Then [J4](#j4--job-kickoff-material-check)** — no new tables, and it's the rush-job payoff.
 3. **Then [J7](#j7--issue-material-to-a-job) job-first** — the largest build, and the
    best-evidenced thing in the spec: they hand-built it in a location field 97 times.
-4. **[J14](#j14--customer-supplied-material) ownership flag** into the Phase 1 data model.
-5. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
+4. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
    Re-scope **#496** from *"the use isn't validated"* to the phasing in [§6](#6-sequencing).
-6. **Fold #571 into Phase 3** and **#550 into Phase 1** (J7) and J9. #550's premise has shifted:
+5. **Fold #571 into Phase 3** and **#550 into Phase 1** (J7) and J9. #550's premise has shifted:
    it assumed an `inventory_transactions` flag that does not exist, and the actor is the
    operator, not the owner.
-7. **Run the [discovery script](usability-tests/inventory-discovery-script-v1.md) alongside**,
+6. **Run the [discovery script](usability-tests/inventory-discovery-script-v1.md) alongside**,
    for Phase 2 only. Trim it to the vocabulary walk, the bar-rack question and the scanning
    probes — the rest is answered.
 

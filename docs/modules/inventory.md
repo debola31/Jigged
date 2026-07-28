@@ -136,7 +136,7 @@ Four things, easy to conflate:
 | **Location** | `inventory_locations` | A place stock can sit. A nullable-parent tree; QR labels encode the location UUID. |
 
 **Absent entirely** — commonly assumed to exist, and does not: purchase orders · receiving ·
-lots / heat numbers / material certs · remnants and drops · count sessions · on-order quantity ·
+lots / heat numbers / material certs · remnants and drops · on-order quantity ·
 min/max · reserved or allocated stock · ABC class · serial / expiry · landed, standard or
 average cost · location capacity.
 
@@ -489,15 +489,31 @@ Numbered so issues and later docs can cite them. **Bold** = Phase 1.
 
 Import the things you stock, with their current on-hand quantity, unit, and reorder point.
 
-**Today:** partial. The [guided import flow](data-import.md) (Upload → Map →
-Review & Fix → Import) exists and handles name / description / unit / vendor / BOM.
-**Stock quantity is not an importable field** — so a shop migrating in must hand-key every
-opening balance or start at zero. This contradicts PRD **FR-16** (*"System supports CSV
-upload for inventory items"*).
+**Was:** the [guided import flow](data-import.md) (Upload → Map → Review & Fix → Import)
+handled name / description / unit / vendor / BOM, but **stock quantity was not an importable
+field** — so a shop migrating in had to hand-key every opening balance or start at zero,
+contradicting PRD **FR-16** (*"System supports CSV upload for inventory items"*).
 
-**Missing:** `quantity` and `reorder_point` in the import mapping, and writing an opening
-`adjustment` ledger row per item rather than a bare `parts.quantity` write, so the balance
-has provenance from the first day.
+> **Built 2026-07-28.** `quantity` and `reorder_point` are mappable in both import flows, and
+> an imported balance now writes an `adjustment` ledger row so it has provenance from day one
+> — shaped exactly like `adjustPartStock`'s (`abs(delta)` in the primary unit, direction in the
+> notes, since `CHECK (quantity >= 0)` makes a signed delta unstorable). No row when nothing
+> moved.
+>
+> Two things surfaced underneath and were fixed with it:
+>
+> - **The importer wrote `parts.quantity` unconditionally**, including an explicit `0` when the
+>   column was unmapped — zeroing stock on any re-import that didn't map it. For a
+>   location-tracked part it also tripped `enforce_tracked_part_quantity`, and since upserts
+>   batch 500 at a time, **one such row failed all 500** with an opaque `500`.
+> - **`PART_FIELDS` had drifted from `PART_SCHEMA`** — it listed a `category` field that exists
+>   nowhere, and omitted `primary_unit`, which the backend marks required. The mapping UI
+>   recomputes the required set from that list on the first edit, so `primary_unit` silently
+>   dropped out mid-flow.
+>
+> A quantity for a **location-tracked** part is deliberately not written (its balance is a
+> rollup of `part_location_stock`) — and the skip is **reported** in the import result rather
+> than the balance quietly not appearing. Set those with a count, or at a location.
 
 > **Verification belongs *inside* the import flow, not after it.** An earlier revision of this
 > spec proposed importing quantities into a count sheet's "expected" column so a human would
@@ -682,11 +698,39 @@ before it goes back on the rack. The software should mirror that habit, not repl
 
 **Actor:** whoever is assigned. **Trigger:** a schedule, or distrust of a number.
 
-A **count session** scoped to a place: here is what we think is here, walk it, enter what
-you find, review the variance, commit. Committing writes `adjustment` rows with a reason.
+A **count sheet**: here is what we think is here, walk it, enter what you find, review the
+variance, commit. Committing writes `adjustment` rows with a reason.
 
-**Today: missing.** *"Cycle count"* appears in the codebase only as **label text** on the
-Adjust button. There are no count sessions, sheets, variance reports, or freeze.
+> **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — Scope → Sheet → Review.
+> Two deviations from what this section originally specified, both deliberate:
+>
+> **1. Item-scoped, not "scoped to a place."** `inventory_locations` is opt-in and default-off,
+> so place-scoping would have made Phase 1 depend on Phase 2. You pick parts by search and
+> selection instead. *Reopen when Phase 2 lands:* location scoping becomes the natural entry
+> point, and the multi-bin exclusion below disappears with it.
+>
+> **2. No count-session table.** The sheet is client state autosaved to localStorage, matching
+> every other wizard in the app and what dedicated stock-count apps do. **Phase 1 therefore
+> adds no tables at all.** Given up: assignment to a person, and cross-device resume. Sortly
+> built the server-side lifecycle for exactly those, citing *"lack of accountability"* — a
+> multi-counter problem this shop doesn't have yet. Revisit if two people ever count at once.
+>
+> **An item-level count is ambiguous for a part split across bins**, so the write target is
+> resolved per part (`resolveCountTarget` in [`lib/inventoryCountPlan.ts`](../../lib/inventoryCountPlan.ts)):
+>
+> | Part | Commits to |
+> |---|---|
+> | Not location-tracked | `parts.quantity` via `adjustPartStock` |
+> | Tracked, no stock anywhere | **Unassigned** — the opening-count case, since `trg_auto_track_stocked_part` seeds every stocked part there at 0 |
+> | Tracked, stock in exactly one location | that location |
+> | Tracked, stock in two or more | **excluded and named** on the scope step — "count this at its locations" |
+>
+> "Holding stock" means `quantity > 0`; the seeded zero-row must not make a part look placed.
+>
+> Review **re-reads current quantities** before showing variances and flags anything that moved
+> while the sheet was open — the commit is safe either way (adjust sets absolutes), but variance
+> against a stale snapshot would mislead. Changes over 50% get one confirm rather than a review
+> gate, since [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/).
 
 **Why this is Phase 1:** it is the ritual that keeps the other eleven journeys true, and
 the PRD's own success metric (*"100% inventory accuracy within 3 months"*) is unmeasurable
@@ -1153,8 +1197,10 @@ ownership flag that would have touched every read path. Restoring the #59 owner-
 selector stays a small correctness patch, **not** a headline item — the owner is not who moves
 material.
 
-No new feature flag. **One new table: the count session.** J1 adds columns to an existing
-import mapping, not a schema of its own.
+No new feature flag, and — as built — **no new tables and no migrations.** J1 adds columns to
+an existing import mapping; J9's sheet is a localStorage draft committing through the existing
+adjust functions. *(This section originally budgeted one table for a count session; see J9 for
+why that turned out to be unnecessary.)*
 
 [§5.2](#52-is-a-job-a-place--resolved-no) is resolved — a job is **not** a place. Build the
 simple depletion.
@@ -1199,7 +1245,7 @@ point of the exercise.
 
 | Journey | PRD says | Docs said (pre-rewrite) | Built? |
 |---|---|---|---|
-| J1 opening balances | FR-16 `Should` — CSV upload for inventory items | silent | ❌ quantity not importable |
+| J1 opening balances | FR-16 `Should` — CSV upload for inventory items | silent | ✅ **built 2026-07-28** |
 | J2 where it lives | *(absent — no PRD requirement at all)* | AC only, no user story | ⚠️ inverted |
 | J3 quote cost | FR-11 | in parts/routings docs | ✅ |
 | J4 material check | Flow 3 step 2 | silent | ❌ |
@@ -1207,7 +1253,7 @@ point of the exercise.
 | J6 receive it | Admin persona; Flow 3 step 6 | silent | ❌ |
 | J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ❌ regressed; consumption removed then re-intended |
 | J8 remnants | *(absent)* | silent | ❌ |
-| J9 count | success metric: 100% accuracy | silent | ❌ label text only |
+| J9 count | success metric: 100% accuracy | silent | ✅ **built 2026-07-28** |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
 | J11 find it | *(absent)* | AC only | ✅ |
 | Traceability *(cut)* | *(absent)* | silent | ⛔ **cut** — no regulated customers |
@@ -1301,14 +1347,50 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
 - [x] **Given** an operator at a location, **when** they receive a tracked part, **then** it is
   added at that location — *verified by `__tests__/components/operator/OperatorReceivePartModal.test.tsx`*.
 
+**Opening balances (J1)**
+
+- [x] **Given** a CSV with an on-hand column, **when** it is mapped, **then** `quantity` and
+  `reorder_point` appear at the Map step and import — *verified by
+  `api/tests/integration/test_parts_import_api.py > 'test_execute_imports_stocked_part_with_unit_and_quantity'`*.
+- [x] **Given** an imported quantity that changes a balance, **then** an `adjustment` row is
+  written carrying both numbers — and **no** row when the value is unchanged — *verified by
+  `…> 'test_execute_writes_an_adjustment_ledger_row_for_an_imported_balance'` AND
+  `…> 'test_execute_writes_no_ledger_row_when_the_quantity_is_unchanged'`*.
+- [x] **Given** the quantity column is unmapped, **then** the key is absent rather than `0`, so
+  a re-import cannot zero existing stock — *verified by
+  `…> 'test_execute_omits_quantity_entirely_when_the_column_is_unmapped'`*.
+- [x] **Given** a location-tracked part, **then** its quantity is not written **and the skip is
+  reported** — *verified by `…> 'test_execute_skips_and_reports_quantity_for_a_location_tracked_part'`*.
+- [x] **Given** a brand-new part at a locations-enabled company, **then** the quantity *is*
+  written, since the guard is BEFORE UPDATE and the auto-track trigger seeds from it —
+  *verified by `…> 'test_execute_writes_quantity_for_a_brand_new_part_even_with_locations_on'`*.
+
+**Stock count (J9)**
+
+- [x] **Given** a part split across two or more locations, **then** it is excluded from the
+  sheet and named — *verified by `__tests__/lib/inventoryCountPlan.test.ts > 'resolveCountTarget'`
+  AND `__tests__/components/inventory/InventoryCountPage.test.tsx > 'names parts held back…'`*.
+- [x] **Given** a tracked part with no stock anywhere, **then** the count commits to Unassigned
+  — *verified by `__tests__/lib/inventoryCountPlan.test.ts`*.
+- [x] **Given** a counted line, **then** it routes to `adjustPartStock` or
+  `adjustStockAtLocation` per its target, and never writes `parts.quantity` for a tracked part
+  — *verified by `__tests__/utils/inventoryCountAccess.test.ts > 'commitCount routing'`*.
+- [x] **Given** entering Review, **then** system quantities are re-read and anything that moved
+  is flagged — *verified by `__tests__/components/inventory/InventoryCountPage.test.tsx`*.
+- [x] **Given** an uncounted line, **then** its balance is left untouched — *verified by
+  `__tests__/lib/inventoryCountPlan.test.ts > 'buildVariances'`*.
+- [x] **Given** an unfinished sheet, **then** it can be resumed, and a draft from another
+  company is ignored — *verified by `…InventoryCountPage.test.tsx > 'draft resume'`*.
+
 **Known-failing by design** (recorded so they are not mistaken for oversights)
 
 - [ ] **Given** an owner in the dashboard, **when** they remove stock, **then** they can link it
-  to a job — **regressed**, see the `PartTransactionModal` note above. Issue #59.
+  to a job — **regressed**, see the `PartTransactionModal` note above. Issue #59. Demoted, not
+  forgotten: the operator moves material, so [J7](#j7--issue-material-to-a-job) is the fix.
 - [ ] **Given** a job, **when** it is viewed, **then** required material is compared to on-hand
-  — **not built** (J4).
+  — **not built** ([J4](#j4--job-kickoff-material-check), next in Phase 1).
 - [ ] **Given** a completed operation, **when** material was consumed, **then** stock depletes
-  — **not built** (J9, issue #550).
+  — **not built** ([J7](#j7--issue-material-to-a-job), issue #550).
 
 ---
 

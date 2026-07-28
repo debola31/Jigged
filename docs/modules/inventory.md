@@ -275,8 +275,10 @@ BOM** instead, with the comment *"Material consumption is no longer tracked per 
 BOM is the source of truth."*
 
 So a table whose entire purpose was consumption tracking is still written on every job creation
-and never read. It is either the foundation for [J9](#j9--confirm-consumption-at-the-operation)
-or dead weight; [§5.9](#59-decide-job_materials-fate) decides.
+and never read. **It is slated for removal** — the decision and its reasoning are in
+[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table), along with what backs
+[J9](#j9--confirm-consumption-at-the-operation) instead (nothing new:
+`inventory_transactions` already carries every field consumption needs).
 
 > ⚠️ `docs/modules/jobs.md` was corrected in this branch, but older copies may still document
 > this table with consumption columns and an `inventory_item_id` FK. The grid above is verified
@@ -469,7 +471,7 @@ Useful as evidence of where the model drifted:
 | `buildLocationUrl` | Duplicate of `locationLabelPdf.buildLocationScanUrl`. |
 | `enable_location_tracking_for_company`, `inv_location_path_label` | RPCs with no caller. |
 | `VisualLocationBuilder` `parentId` / `parentCode` props | Always `null` — unreachable from the UI. |
-| `job_materials` | Written at job creation, read by nothing. |
+| `job_materials` | Written at job creation, read by nothing. **Scheduled for drop** — [§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table). |
 
 Path-walking (`parent_id` → names array with a cycle guard) is reimplemented **four times** in
 TypeScript, plus once in unused SQL.
@@ -658,6 +660,13 @@ Confirm what was actually used, correcting the expected quantity where it differ
 **Today: missing** — issue **#550**, blocked behind a feature flag that doesn't exist.
 Graceful over-depletion (clamp to zero, flag `has_discrepancy`, stamp the operator) already
 works at the bin level and should be reused here.
+
+**Backing table: none needed.** A consumption event is an `inventory_transactions` depletion
+row tagged with `job_id` — every field is already there and indexed. Expected comes from the
+live BOM (the same computation [J4](#j4--job-kickoff-material-check) needs), actual is the sum
+of those rows, variance is computed on read. `job_materials` is **not** revived for this; see
+[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table) for why, and for the two
+consequences that come with it.
 
 **Tension to resolve in discovery:** the operator UX is deliberately minimal — *complete-only*,
 no start/stop, one tap ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2).
@@ -1000,17 +1009,60 @@ Stated explicitly because the current shape reads like an event-sourced system t
 one. If we ever want the ledger to be authoritative, that is a deliberate re-architecture
 with a reconciliation job, not a drift.
 
-### 5.9 Decide `job_materials`' fate
+### 5.9 `job_materials` — **RESOLVED: drop it. J9 needs no new table.**
 
-It is written on every job creation and read by nothing. Either it becomes the backing table
-for [J9](#j9--confirm-consumption-at-the-operation) — gaining `actual_quantity`, `status`,
-`consumed_at`, `consumed_by` back — or it is dropped. **Leaving a write-only table in place
-is the worst of the three options**, because it looks like a source of truth to the next
-person reading the schema.
+**Drop `job_materials`.** Its own retirement migration states the purpose it was kept for —
+*"a per-job expected-BOM snapshot"* — and that purpose no longer holds on either of the two
+grounds a snapshot could stand on:
 
-Note the existing smell: the snapshot is taken at job creation, and then the UI deliberately
-reads the *live* BOM instead, so the job reflects current BOM edits. Those two behaviours
-contradict each other. Decide which one is intended.
+| Reason to snapshot expected quantities | Still valid? |
+|---|---|
+| **Deletion resilience** — a referenced part is deleted and the job would lose its material list | **No.** Universal archive means the row survives and by-id reads still resolve it. Nothing is lost. |
+| **Drift resilience** — the BOM is *edited* and the job should still show what was planned | **No** — archive doesn't cover this (an edited edge is mutated, not archived), but the product already chose the opposite behaviour: `JobPartMaterialsCard` deliberately reads the **live** BOM so the job reflects current edits. |
+
+So the snapshot is dead for its stated purpose *and* for the deletion case, and nothing reads
+it — every code reference is a type definition, a comment, or the RPC that writes it. A
+write-only table is worse than no table, because it reads as a source of truth to the next
+person who opens the schema.
+
+**Work involved:** stop `create_job_part_operations_from_routing()` writing it, drop the table,
+and remove its entry from the billing write-gate (`stripe_write_enforcement`, where it is
+parent-resolved via `jobs.job_id`). Job creation is core, so this is not a free deletion.
+
+#### What backs [J9](#j9--confirm-consumption-at-the-operation) instead
+
+**`inventory_transactions`, unchanged.** A consumption event is a `depletion` row tagged with
+`job_id`. Every field J9 needs already exists and is already indexed:
+
+`job_id` · `job_operation_id` · `part_id` · `quantity` · `unit` · `converted_quantity` ·
+`operator_id` · `created_at` · `location_id` · `has_discrepancy`
+
+The model becomes three parts, only one of which is stored:
+
+| | Source |
+|---|---|
+| **Expected** | BOM × job-part quantity, **computed live** — the same computation [J4](#j4--job-kickoff-material-check) already needs |
+| **Actual** | `SUM(inventory_transactions.converted_quantity)` where `job_id = X AND part_id = Y AND type = 'depletion'` |
+| **Variance** | Computed on read |
+
+This is the ledger doing the job a ledger is for: answering *what happened*. It also handles a
+case a snapshot row handles badly — **the same material consumed more than once** (two
+operations, or a correction). Multiple rows sum naturally, and the history survives; a single
+`actual_quantity` column would be overwritten and the earlier value lost.
+
+**Two consequences to accept explicitly:**
+
+1. **Editing a BOM retroactively changes "expected" on historical jobs**, so variance figures
+   shift. This is already true today via the live-BOM read. Acceptable for a shop that isn't
+   doing cost-variance analysis; revisit if anyone asks for a frozen planned-vs-actual record,
+   at which point the answer is a snapshot **at consumption time**, not at job creation.
+2. **"Skipped" is not representable.** The old model had `status: pending | consumed | skipped`;
+   with a ledger, no row means *either* skipped or not-yet-done. Given the operator UX is
+   deliberately minimal — complete-only, one tap
+   ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2) — the recommendation is
+   **don't model completeness at all**: the operator records what they took, and silence is not
+   an error state. If a real need for explicit skip appears, add it then, and not by reviving a
+   per-job material row.
 
 ### 5.10 Native app: deferred, scanning case must be spiked
 
@@ -1127,9 +1179,10 @@ gone. What's left:
 - **[J4](#j4--job-kickoff-material-check) customer-material exclusion** — *only if* service
   jobs turn out to carry BOM lines for customer-supplied material, which would otherwise raise
   false shortages. See [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it).
-- **[§5.4](#54-one-stock-engine) one-stock-engine collapse** and
-  **[§5.9](#59-decide-job_materials-fate) `job_materials` resolution** — debt paydowns that
-  want a quiet phase.
+- **[§5.4](#54-one-stock-engine) one-stock-engine collapse** and the
+  **[§5.9](#59-job_materials--resolved-drop-it-j9-needs-no-new-table) `job_materials` drop**
+  (stop writing it, drop the table, remove it from the billing write-gate) — debt paydowns
+  that want a quiet phase.
 
 ---
 

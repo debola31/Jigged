@@ -41,6 +41,8 @@ import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
+import { usePageTitle } from '@/components/layout/PageTitleProvider';
+
 import {
   buildDraft,
   buildVariances,
@@ -73,6 +75,14 @@ export default function InventoryCountPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
+
+  // Without this the Header falls back to "Inventory Details" for any unrecognised
+  // /inventory/* route, which is both wrong and confusing mid-count.
+  const { setTitle } = usePageTitle();
+  useEffect(() => {
+    setTitle('Stock Count');
+    return () => setTitle(null);
+  }, [setTitle]);
 
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(true);

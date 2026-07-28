@@ -445,6 +445,38 @@ Shop floors are noisy, dirty, and workers may have gloves on. UI elements should
 | Pilot feedback incorporated | Pilot customer uses system for 60 days, feedback collected and addressed | Debola / pilot shop owner | 2026-04-30  | Not started |
 | GA release | Public launch with integrations (QuickBooks, shipping carriers), marketing site live | Debola | 2026-07-31  | Not started |
 
+### 8.1 Inventory & Material — phased delivery
+
+Inventory is delivered in four phases against eleven numbered journeys (J1–J11). **The
+journeys, the reasoning behind each phase, and the decisions that shaped them live in
+[docs/modules/inventory.md](modules/inventory.md)** — that doc is the source of truth and
+this table is the index, so keep it short and keep it pointing there.
+
+| Phase | Journeys | Delivers | Schema cost |
+|---|---|---|---|
+| **1 — close the loop** | **J1** import balances · **J9** count session · **J4** material check · **J7** issue-to-job (incl. consumption) | Numbers get in, get used on a job, and stay true. Closes FR-1/FR-13 gaps and delivers FR-16's inventory half. | One table (count session) |
+| **2 — locations reshaped** | **J2** | Incremental places, permanent visual board, photos + fill state, retire the structure-first wizard. PWA basics + iOS scanner spike. | None expected |
+| **3 — purchasing** | **J5** POs · **J6** receiving · **J10** buy list + on-order | Completes **Flow 3 (Inventory Reorder)** below, and satisfies **FR-2** properly. **This is issue #571** — merge, don't run in parallel. | POs, receipts |
+| **4 — debt paydown** | **J8** remnants | Remnants, reconciliation, one-stock-engine collapse, `job_materials` drop. | Removals, mostly |
+
+**Already built:** J3 (material cost on a quote, FR-11), J11 (find it — QR scan → bin view).
+
+**Deliberately cut, with reasons recorded** so they are not re-proposed:
+
+- **Traceability** (certs, heat numbers, lot layer) — the pilot shop keeps no certs and serves
+  no regulated customers. Reopen only if an aerospace / defense / medical customer appears.
+- **Customer-supplied material** — real and frequent, but it never enters stock: it arrives
+  with the job, is worked, and leaves. An attribute of a job, not of inventory.
+
+**Corrections this phasing makes to requirements written above:**
+
+- **FR-2 is a `Must`** and is only partially delivered (a low-stock badge; no email, no buy
+  list, no on-order concept). It completes in Phase 3, not Phase 1.
+- **Flow 3 (Inventory Reorder)** has roughly two of its seven steps implemented. Phase 1
+  delivers step 1 and Phase 3 the remainder.
+- **Open Question 2** — *"should operators be able to deplete inventory without a job?"* —
+  was answered *"primarily deplete through jobs"* and then never built. J7 is that answer.
+
 ---
 
 ### 9. Open Questions

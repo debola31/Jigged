@@ -799,6 +799,28 @@ async def execute_import(
         errors: list[PartImportError] = []
         skipped = 0
 
+        # Existing parts, keyed by lowercased name. Fetched BEFORE the row loop because the
+        # loop needs three things from it: whether the part is location-tracked (its quantity
+        # must not be written directly — see below), its prior quantity (the delta on the
+        # provenance ledger row), and its primary_unit. Also drives the created/updated split,
+        # which the upsert response can't tell apart.
+        existing_by_name: dict[str, dict] = {
+            (p.get("part_name") or "").lower(): p
+            for p in fetch_all_by_company(
+                supabase,
+                "parts",
+                "id, part_name, quantity, primary_unit, is_location_tracked",
+                request.company_id,
+            )
+        }
+
+        # Opening balances that actually moved a number, staged for the ledger write after the
+        # upsert. Each entry is (part_name, prior_qty, new_qty, unit).
+        pending_stock_ledger: list[tuple[str, float, float, str]] = []
+        # Rows whose quantity was deliberately NOT written because the part is location-tracked.
+        # Surfaced in the response — never silently dropped.
+        location_tracked_skips: list[str] = []
+
         for i, row in enumerate(request.rows):
             row_number = i + 1
 
@@ -935,11 +957,29 @@ async def execute_import(
                 continue
 
             part_data["primary_unit"] = resolved_unit
+
+            # Quantity is only written when the CSV actually supplied one.
+            #
+            # Two rules, both load-bearing:
+            #  1. Never write it when unmapped. The column is NOT NULL DEFAULT 0, so inserts
+            #     are fine without it — but writing an explicit 0 on an UPDATE zeroed the
+            #     stock of every existing part on any re-import that didn't map quantity.
+            #  2. Never write it for a location-tracked part. parts.quantity is a
+            #     trigger-maintained rollup of part_location_stock there, and the
+            #     enforce_tracked_part_quantity BEFORE UPDATE trigger raises if we disagree
+            #     with it — which, because upserts are batched 500 at a time, failed all 500
+            #     rows with an opaque 500. Those balances are set by a count or at a location.
+            existing = existing_by_name.get(part_name.lower())
             if quantity_val is not None:
-                part_data["quantity"] = quantity_val
-            else:
-                # Schema NOT NULL DEFAULT 0; explicit for clarity
-                part_data["quantity"] = 0
+                if existing and existing.get("is_location_tracked"):
+                    location_tracked_skips.append(part_name)
+                else:
+                    part_data["quantity"] = quantity_val
+                    prior_qty = float(existing.get("quantity") or 0) if existing else 0.0
+                    if prior_qty != quantity_val:
+                        pending_stock_ledger.append(
+                            (part_name, prior_qty, float(quantity_val), resolved_unit)
+                        )
             # parts.cost_per_unit was dropped (migration 20260514). For bought
             # rows we stage a NULL-vendor procurement tier post-insert; made
             # rows' cost_val is ignored — compute_part_cost_at_qty recomputes
@@ -967,12 +1007,8 @@ async def execute_import(
         # run (the upsert response can't tell them apart). id_by_part_name lets us attach the
         # staged procurement tiers without a re-query.
         BATCH_SIZE = 500
-        existing_names = {
-            (p.get("part_name") or "").lower()
-            for p in fetch_all_by_company(supabase, "parts", "part_name", request.company_id)
-        }
         imported_count = sum(
-            1 for r in rows_to_upsert if r["part_name"].lower() not in existing_names
+            1 for r in rows_to_upsert if r["part_name"].lower() not in existing_by_name
         )
         updated_count = len(rows_to_upsert) - imported_count
         id_by_part_name: dict[str, str] = {}
@@ -999,6 +1035,48 @@ async def execute_import(
                 logger.error(f"Parts import upsert error: {error_str}", exc_info=True)
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
+
+        # ── Provenance for opening balances ────────────────────────────────
+        # An imported quantity is a stock movement like any other, so it gets a ledger row —
+        # a balance with no transaction explaining it is exactly what inventory.md J1 forbids.
+        #
+        # Shape mirrors adjustPartStock (utils/partsAccess.ts) so there is ONE adjustment
+        # convention per table: quantity is abs(delta) in the primary unit (the table's
+        # inventory_transactions_quantity_positive CHECK makes a signed delta unstorable), and
+        # direction lives in the notes text.
+        if pending_stock_ledger:
+            try:
+                ledger_rows = []
+                for name, prior_qty, new_qty, unit in pending_stock_ledger:
+                    part_id = id_by_part_name.get(name)
+                    if not part_id:
+                        continue
+                    delta = abs(new_qty - prior_qty)
+                    ledger_rows.append(
+                        {
+                            "company_id": request.company_id,
+                            "part_id": part_id,
+                            "item_name": name,
+                            "type": "adjustment",
+                            "quantity": delta,
+                            "unit": unit,
+                            "converted_quantity": delta,
+                            "notes": (
+                                f"Opening balance from import — set from {prior_qty} "
+                                f"to {new_qty} {unit}"
+                            ),
+                        }
+                    )
+                for batch_start in range(0, len(ledger_rows), BATCH_SIZE):
+                    supabase.table("inventory_transactions").insert(
+                        ledger_rows[batch_start : batch_start + BATCH_SIZE]
+                    ).execute()
+            except Exception as e:
+                # The balances are already committed and correct. A missing ledger row is a
+                # provenance gap, not a data error, so log loudly rather than fail the import
+                # and leave the caller unsure what landed.
+                logger.error(f"Parts import ledger write failed: {e}", exc_info=True)
+                sentry_sdk.capture_exception(e)
 
         # ── Procurement tiers for bought rows ──────────────────────────────
         # CSV imports historically wrote cost into parts.cost_per_unit. With
@@ -1053,12 +1131,19 @@ async def execute_import(
             f"Parts import complete: {imported_count} created, {updated_count} updated, {skipped} skipped"
         )
 
+        if location_tracked_skips:
+            logger.info(
+                f"Parts import: {len(location_tracked_skips)} quantities not written "
+                f"(location-tracked parts): {location_tracked_skips[:10]}"
+            )
+
         return PartExecuteResponse(
             success=True,
             imported_count=imported_count,
             updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
+            location_tracked_skipped=location_tracked_skips,
         )
 
     except HTTPException:

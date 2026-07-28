@@ -197,7 +197,7 @@ describe('review and commit', () => {
   });
 
   it('says there is nothing to do when every count matched', async () => {
-    const user = await reachReview('40'); // equals the system quantity
+    await reachReview('40'); // equals the system quantity
     expect(await screen.findByText(/nothing to change/i)).toBeInTheDocument();
   });
 });

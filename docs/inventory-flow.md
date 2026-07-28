@@ -82,10 +82,10 @@ A shop can answer five questions about material without leaving Jigged:
 
 J10 is deliberately not a sixth row. It isn't a lookup anyone performs; it is the ritual
 that keeps the other five true, and every one of them degrades to a guess without it. It is
-also **the first thing built** — for Contour the opening count *is* the opening balance, so
-the module has no numbers at all until J10 exists. Treating counting as a reporting feature
-that arrives later is how inventory modules rot; see
-[§5.11](#511-design-for-the-sustain-not-the-setup).
+also **Phase 1 work, not a later addition** — imported numbers are a starting position, not a
+truth claim, and a shop arriving with nothing usable has no other way in. Treating counting as
+a reporting feature that arrives once the "real" features are done is how inventory modules
+rot; see [§5.11](#511-design-for-the-sustain-not-the-setup).
 
 The remaining journeys are the write side and the setup that keep those answers current —
 [J1](#j1--seed-the-item-master-and-opening-balances) seeding,
@@ -241,28 +241,42 @@ in TypeScript, plus once in unused SQL.
 
 Numbered so issues and later docs can cite them. **Bold** = Phase 1.
 
-### J1 — Seed the item master and opening balances
+### **J1 — Seed the item master and opening balances**
 
-**Actor:** owner, at onboarding. **Trigger:** migrating off Tangle / a spreadsheet.
+**Actor:** owner, at onboarding. **Trigger:** migrating off a legacy ERP or a spreadsheet.
 
 Import the things you stock, with their current on-hand quantity, unit, and reorder point.
 
-**Today:** partial. The parts importer exists and handles name / description / unit /
-vendor / BOM. **Stock quantity is not an importable field** — so a shop migrating in has
-to hand-key every opening balance, or start at zero. This directly contradicts PRD **FR-16**
-(*"System supports CSV upload for inventory items"*).
+**Today:** partial. The [guided import flow](modules/data-import.md) (Upload → Map →
+Review & Fix → Import) exists and handles name / description / unit / vendor / BOM.
+**Stock quantity is not an importable field** — so a shop migrating in must hand-key every
+opening balance or start at zero. This contradicts PRD **FR-16** (*"System supports CSV
+upload for inventory items"*).
 
-**Missing:** `quantity` and `reorder_point` columns in the parts import mapping, writing
-an opening `adjustment` ledger row per item rather than a bare `parts.quantity` write.
+**Missing:** `quantity` and `reorder_point` in the import mapping, and writing an opening
+`adjustment` ledger row per item rather than a bare `parts.quantity` write, so the balance
+has provenance from the first day.
 
-> **Deferred out of Phase 1 entirely — measured 2026-07-27.** Contour's legacy `onHand` column
-> is populated for **43 of 9,428 parts (0.5%)**. There is nothing worth importing. They start
-> from zero via [J10](#j10--count-it), and that is the honest state rather than a compromise.
+> **Verification belongs *inside* the import flow, not after it.** An earlier revision of this
+> spec proposed importing quantities into a count sheet's "expected" column so a human would
+> count before anything became a balance. **That was wrong** — it bolts a second verification
+> step onto a pipeline that already has one, makes "import" not actually import, and couples
+> two features that should be independent.
 >
-> The importer gap is still real and still contradicts FR-16 — it just isn't customer #1's
-> problem. It becomes blocking at the **second** company. When it is built, prefer
-> **import-into-count-sheet-expected** over import-into-stock, so the numbers get verified by
-> a human before they become balances.
+> The **Review & Fix** step is the verification step. Quantities should flow through it like
+> every other column, with the flow surfacing what it can actually determine from the data:
+> how many rows carry a quantity at all, which look stale against a last-edited date, which
+> are zero versus blank versus missing. Confirm what's readable, flag what isn't, and let the
+> human accept or correct **in one place**. That strengthens the import flow rather than
+> routing around it.
+>
+> **Assume the numbers are wrong anyway.** Shops in this niche rarely hold accurate counts —
+> Contour's legacy `onHand` was populated on 43 of 9,428 rows (0.5%), and freshness was
+> unknowable for most of the rest. So an import is a *starting position*, not a truth claim,
+> and the system has to expect drift from day one. That is what [J10](#j10--count-it) is for,
+> and it is why counting is not optional. A lighter-weight periodic **reconciliation** pass —
+> refresh these numbers without running a full physical count — is a reasonable later addition
+> once we see how the drift actually behaves; it is deliberately **not** specced here.
 
 ### J2 — Say where something lives
 
@@ -421,38 +435,36 @@ you find, review the variance, commit. Committing writes `adjustment` rows with 
 **Today: missing.** *"Cycle count"* appears in the codebase only as **label text** on the
 Adjust button. There are no count sessions, sheets, variance reports, or freeze.
 
-**Why this is Phase 1:** it is the ritual that keeps the other twelve journeys true, and
+**Why this is Phase 1:** it is the ritual that keeps the other eleven journeys true, and
 the PRD's own success metric (*"100% inventory accuracy within 3 months"*) is unmeasurable
 without it. It also carries the label-maintenance task — replacing damaged QR labels is
 [a job for a scheduled audit](https://www.sortly.com/blog/how-to-label-inventory/), and the
 count session is that audit.
 
-> **Promoted — this is how Contour onboards.** The **first count session *is* the opening
-> balance**, which makes J10 the entry point to the whole module for customer #1, not a
-> maintenance feature that arrives later.
->
-> **They have tried counting before** *(validated 2026-07-27)* — their old ERP had an
-> inventory-locations feature and an on-hand column on the parts table. So we are **rescuing a
-> lapsed practice, not introducing a new one**: no education needed, and the first session can
-> be self-served rather than facilitated. But see
+**It is also the only way a shop with no usable legacy data gets numbers at all.** Import
+([J1](#j1--seed-the-item-master-and-opening-balances)) and counting are the two doors into
+the module, and every shop comes through one or the other:
+
+| The shop arrives with… | Door |
+|---|---|
+| Trustworthy on-hand figures | Import ([J1](#j1--seed-the-item-master-and-opening-balances)) |
+| Figures of unknown quality | Import, then count to correct |
+| Nothing usable | Count only — the first session *is* the opening balance |
+
+Contour is the third row: their legacy `onHand` was populated on **43 of 9,428 rows (0.5%)**,
+with freshness unknowable for most of the rest. Their parts table is a quoting catalogue
+(`price1` 88% full, `custCode` 51%), not an inventory record. Neither door is a special case
+built for one shop — **both are normal, and the module needs both.**
+
+> **They have tried counting before** *(2026-07-27)* — their old ERP had a locations feature
+> and an on-hand column. So this is **rescuing a lapsed practice, not introducing one**: no
+> education needed, and the first session can be self-served rather than facilitated. But see
 > [§5.5](#55-locations-keep-them-visual-change-when-they-appear) — a previous attempt failing
 > raises the bar rather than lowering it.
->
-> **The first run is a blank-slate walk. There is no legacy data to seed it with.**
-> *(Measured 2026-07-27 against their actual parts export — see
-> [§8](#8-what-we-know-and-what-we-still-dont).)* The old parts table has an `onHand` column,
-> but it is populated for **43 of 9,428 parts — 0.5%**. That is not a starting point; it is
-> noise. Their parts table is a **quoting catalogue**, not an inventory record: `price1` is
-> 88% full and `custCode` 51% full, while `onHand` is 0.5% and `lastEditDate` 28%.
->
-> So: walk the places, enter what's there, commit. The expected column is empty and that is
-> the honest state.
->
-> **Keep the seeded-count pattern for company #2.** Where a shop *does* have trustworthy
-> figures, import them into the count sheet's **expected** column — never into
-> `parts.quantity` — so the first run verifies rather than launders. Nothing reaches the
-> ledger until a human counts it, consistent with the no-silent-fallbacks rule in `CLAUDE.md`.
-> The pattern is right; Contour just has nothing to feed it.
+
+**Design the first run and the hundredth as the same flow.** An onboarding-only count mode
+would be a second code path that rots; the opening count is just a count whose expected column
+happens to be empty.
 
 ### J11 — Don't run out
 
@@ -819,26 +831,34 @@ and place-scoped, not a one-off Adjust button.
 
 ### Phase 1 — close the validated loop
 
-Revised against the 2026-07-27 findings. Ordered by dependency, not value:
+Ordered by dependency, not value. **Get numbers in → use them → keep them true.**
 
-1. **[J10](#j10--count-it) count session** — *first, because it is onboarding.* Contour starts
-   from zero and their legacy figures aren't trustworthy, so the first count **is** the
-   opening balance. Nothing downstream means anything until there are numbers to check.
+1. **Get numbers in — two doors, both required.**
+   - **[J1](#j1--seed-the-item-master-and-opening-balances) import**: `quantity` and
+     `reorder_point` through the existing Upload → Map → **Review & Fix** → Import flow.
+     Completes a pipeline that already exists and closes FR-16.
+   - **[J10](#j10--count-it) count session**: for shops arriving with nothing usable, and
+     thereafter the correction mechanism for everyone. The opening count is just a count with
+     an empty expected column — **one flow, not an onboarding special case.**
+
+   These are peers. Which gets built first is a team call, not a product one — but a shop with
+   no importable data (Contour) can't start until J10 exists, and a shop with good data
+   shouldn't be made to count 9,000 rows by hand.
+
 2. **[J4](#j4--job-kickoff-material-check) material check** — the rush-job question:
-   *can I say yes right now?* Needs no new tables.
+   *can I say yes right now?* No new tables.
+
 3. **[J7](#j7--issue-material-to-a-job) issue-to-job, job-first, on the operator surface** —
-   the operator's entry point is the job traveler, not a bin scan. This is the largest build
-   in the phase and the one the earlier draft had pointed at the wrong actor.
-Three builds, not four — [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it) was cut, and with it the
-ownership flag that would have touched every read path.
+   the operator's entry point is the job traveler, not a bin scan. Largest build in the phase,
+   and the one an earlier draft had pointed at the wrong actor.
 
-**Dropped from Phase 1:** [J1](#j1--seed-the-item-master-and-opening-balances) opening-balance
-import — customer #1 starts from zero, so this becomes blocking only at company #2.
-Restoring the #59 owner-side job selector stays a small correctness patch, **not** a
-headline item — the owner is not who moves material.
+[Customer-supplied](#cut--customer-supplied-material-whose-is-it) was cut, and with it the
+ownership flag that would have touched every read path. Restoring the #59 owner-side job
+selector stays a small correctness patch, **not** a headline item — the owner is not who moves
+material.
 
-No new feature flag. **One new table: the count session.** That is the entire schema cost of
-Phase 1.
+No new feature flag. **One new table: the count session.** J1 adds columns to an existing
+import mapping, not a schema of its own.
 
 [§5.2](#52-is-a-job-a-place--resolved-no) is resolved — a job is **not** a place. Build the
 simple depletion.
@@ -853,7 +873,7 @@ mandatory wizard · PWA basics + the scanner spike ([§5.10](#510-native-app-def
 **J5** POs · **J6** receiving against PO · **J11** buy list + on-order. **This is issue #571**
 — merge, don't parallelise.
 
-### Phase 4 — debt paydown, remnants, and the deferred import
+### Phase 4 — debt paydown and remnants
 
 **The traceability half is cut** — Contour keeps no certs or heat numbers and serves no
 regulated customers, so [Traceability, cut](#cut--traceability-can-we-prove-it) and the whole lot layer are
@@ -862,8 +882,9 @@ gone. What's left:
 - **[J8](#j8--cut-it-return-the-remnant) remnants**, now justified on material-cost grounds
   alone rather than riding along with lot modelling. **Confirm they actually reuse drops
   before building it** — that was never asked.
-- **[J1](#j1--seed-the-item-master-and-opening-balances) opening-balance import**, deferred
-  here from Phase 1. Becomes blocking at company #2.
+- **Reconciliation** — a lighter-weight periodic refresh of on-hand figures without running a
+  full physical count. Deliberately unspecced until we can see how drift actually behaves in
+  production; [J10](#j10--count-it) covers correctness in the meantime.
 - **[J4](#j4--job-kickoff-material-check) customer-material exclusion** — *only if* service
   jobs turn out to carry BOM lines for customer-supplied material, which would otherwise raise
   false shortages. See [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it).
@@ -952,13 +973,16 @@ it: it is what they did, not what anyone remembers.
 | …using the `/` hierarchy | **3 of 121** | **Nesting was never used.** Flat-first is correct. |
 | Near-duplicates | `STOCK`/`ST0CK`, `JEFF'S DESK`/`JEFFS DESK`, `J-52818-01`/`J52818-01`, 3× dated `MISC` | Free text decays. Create-on-the-fly **must** dedupe. |
 | Parts rows | **9,428** | Real scale; cf. NFR-8's 10,000-item target |
-| …with `onHand` populated | **43 (0.5%)** | ⛔ **No opening-balance data exists.** J10 starts blank; the seed-from-legacy design is void for Contour. |
+| …with `onHand` populated | **43 (0.5%)** | ⛔ **This shop has no opening-balance data.** They enter through the counting door, not the import door — see [J10](#j10--count-it). |
 | …with `price1` / `custCode` | 88% / 51% | Their parts table is a **quoting catalogue**, not an inventory record |
-| …with `lastEditDate` | 28% | Freshness is unknowable for most rows — reinforces "don't import it" |
+| …with `lastEditDate` | 28% | Freshness is unknowable for most rows — assume imported numbers drift from day one |
 
-> **Correction.** An earlier revision of this spec read the founder's *"rare data was
-> populated"* as *"raw data … for a lot of parts"* and built a seed-the-count-sheet design on
-> it. The export shows 0.5%. The design is retained only as guidance for company #2.
+> **Two corrections this measurement forced.** An earlier revision read the founder's *"rare
+> data was populated"* as *"raw data … for a lot of parts"*, and on that basis proposed
+> importing quantities into a count sheet's *expected* column instead of into stock. Both are
+> withdrawn: the export shows 0.5%, and bolting a verification step onto the far side of the
+> importer was the wrong shape regardless — verification belongs in **Review & Fix**, inside
+> the flow. See [J1](#j1--seed-the-item-master-and-opening-balances).
 
 ### Still open
 

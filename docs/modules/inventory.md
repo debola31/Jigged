@@ -471,8 +471,8 @@ on its own.
 |---|---|
 | Job-linked depletion missing for owners (regression) | Issue #59 · flow J7 |
 | No material check on a job | Flow J4 |
-| No count / cycle-count workflow | Flow J10 |
-| Opening stock balances not importable, contradicting FR-16 | Flow J1 |
+| No count workflow — imported or entered numbers have no way to be corrected | Flow J10 · Phase 1 |
+| Opening stock balances not importable, contradicting FR-16 | Flow J1 · Phase 1 |
 | Per-job consumption removed, re-declared intended, unbuilt | Issue #550 · flow J9 |
 | FR-2 reorder alerts are a PRD **`Must`**; only the badge exists — no email, no buy list | Flow J11 |
 | Two stock engines, one non-atomic | Flow §5.4 |

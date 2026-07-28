@@ -84,9 +84,18 @@ def shop(supabase_admin):
     reader2 = _add_member(admin, company_id, "sam")
     boss = _add_member(admin, company_id, "shane", role="admin")
 
+    # primary_unit is NOT NULL via parts_requires_unit; production/fulfillment
+    # status are NOT NULL on jobs. Both are easy to miss because the access layer
+    # always supplies them.
     part_id = (
         admin.table("parts")
-        .insert({"company_id": company_id, "part_name": f"BRACKET-{os.urandom(2).hex()}"})
+        .insert(
+            {
+                "company_id": company_id,
+                "part_name": f"BRACKET-{os.urandom(2).hex()}",
+                "primary_unit": "ea",
+            }
+        )
         .execute()
         .data[0]["id"]
     )
@@ -113,7 +122,14 @@ def shop(supabase_admin):
     for n in ("J-0041", "J-0052"):
         jobs.append(
             admin.table("jobs")
-            .insert({"company_id": company_id, "job_number": f"{n}-{os.urandom(2).hex()}"})
+            .insert(
+                {
+                    "company_id": company_id,
+                    "job_number": f"{n}-{os.urandom(2).hex()}",
+                    "production_status": "not_started",
+                    "fulfillment_status": "unshipped",
+                }
+            )
             .execute()
             .data[0]["id"]
         )
@@ -498,7 +514,13 @@ def test_subject_must_belong_to_the_same_company(shop, supabase_admin):
     )
     other_part = (
         supabase_admin.table("parts")
-        .insert({"company_id": other_company, "part_name": "FOREIGN"})
+        .insert(
+            {
+                "company_id": other_company,
+                "part_name": "FOREIGN",
+                "primary_unit": "ea",
+            }
+        )
         .execute()
         .data[0]["id"]
     )

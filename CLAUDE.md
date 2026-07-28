@@ -618,9 +618,32 @@ preview branch runs `supabase/seed.sql`, so it has the full Vanguard Precision
 Works data graph. Get `$PREVIEW_URL` from the PR's Vercel comment or
 `gh pr view <n> --json comments`.
 
+**Use a fresh `--session` per preview domain.** The bypass cookie is set for one
+host; carrying a session over from a previous PR's preview makes the new domain
+bounce to Vercel's SSO login even though the headers are correct. `agent-browser
+open … --session <pr-number>` avoids it.
+
+**If the app shows "Something Went Wrong" on every route, it is almost certainly
+not your code.** Check `agent-browser console` for:
+
+```
+@supabase/ssr: Your project's URL and API key are required to create a Supabase client!
+```
+
+That means the deployment has no `NEXT_PUBLIC_SUPABASE_*`. Those are inlined at
+**build** time, so the first Vercel build of a new preview branch can outrun
+Supabase Branching provisioning and bake in empty values. Observed on two
+consecutive PRs. **A rebuild fixes it with no code change** — push any commit, or
+redeploy from the Vercel dashboard.
+
+It presents as a total outage rather than a broken page because
+[`lib/supabase.ts`](lib/supabase.ts) creates the client eagerly at module scope
+(`export const supabase = typeof window !== 'undefined' ? getSupabase() : null`),
+so the throw happens during module evaluation and nothing renders anywhere.
+
 Notes: `agent-browser get text` needs a selector (`get text body`); prefer
 `snapshot -i -c` or `eval` since a not-yet-hydrated App Router page returns raw
-RSC payload. Docs:
+RSC payload. `agent-browser console` / `errors` are the fastest triage. Docs:
 <https://vercel.com/docs/deployment-protection/automated-agent-access>
 - **Merge → local:** merging to `main` auto-applies the migration to **prod**
   (branching pipeline), but your **local** stack only picks it up when you

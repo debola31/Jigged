@@ -16,6 +16,7 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CloseIcon from '@mui/icons-material/Close';
 import { getPartPreviousNotes } from '@/utils/operatorAccess';
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import NoteMediaGallery from '@/components/operator/NoteMediaGallery';
 import type { PartPreviousNote } from '@/types/operator';
 
@@ -89,7 +90,23 @@ export default function PartNotesSheet({
 }: PartNotesSheetProps) {
   // Default to the whole part's notes (the operator asked for "notes for the
   // part"); when opened from a step, offer a filter to just that step.
+  //
+  // Whether this default is RIGHT is an open question, and deliberately an
+  // empirical one rather than an argued one. An earlier revision of the plan
+  // proposed deleting the toggle in favour of a step-first list, on the inference
+  // that it was the "non-default toggle" that hid seeded knowledge in a prior
+  // usability session. That inference was unsupported — the default is the
+  // BROADER view, so the toggle narrows rather than hides — and it contradicted
+  // the operator request recorded above. The industry evidence splits too:
+  // work-instruction guidance favours per-step scoping, but tribal knowledge is
+  // precisely the cross-cutting material that isn't in a step's SOP.
+  //
+  // So: keep the toggle, and instrument it (see handleClose). If operators
+  // habitually narrow to their step, that argues for a step-first default. If the
+  // toggle is never touched, it is dead weight and can go. Either way the next
+  // decision is made on data from the shop rather than on a plausible story.
   const [scope, setScope] = useState<Scope>('part');
+  const [toggled, setToggled] = useState(false);
 
   const { data, loading, error } = useLoad(
     () =>
@@ -101,8 +118,27 @@ export default function PartNotesSheet({
   );
   const notes = data ?? [];
 
+  // One event per visit, emitted on close so it can carry the whole interaction:
+  // which scope they landed on, whether they narrowed, and how much was there to
+  // read. Logging on OPEN instead would miss the toggle entirely, and a separate
+  // "scope changed" kind would need a migration to widen the kind CHECK.
+  //
+  // Records counts and the scope only — never which notes were shown. Naming the
+  // notes someone read is exactly what note_views' RLS exists to prevent, and an
+  // operator_events row is service-role readable, so it must not become a back
+  // door into the same information.
+  const handleClose = () => {
+    logOperatorEvent(companyId, 'prior_notes_opened', {
+      openedFrom: jobOperationId ? 'operation' : 'traveler',
+      finalScope: scope,
+      toggled,
+      noteCount: notes.length,
+    });
+    onClose();
+  };
+
   return (
-    <Dialog open={open} onClose={onClose} fullScreen>
+    <Dialog open={open} onClose={handleClose} fullScreen>
       <AppBar position="relative" elevation={0} sx={{ bgcolor: 'rgba(17, 20, 57, 0.98)' }}>
         <Toolbar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -115,7 +151,7 @@ export default function PartNotesSheet({
               </Typography>
             )}
           </Box>
-          <IconButton edge="end" aria-label="Close" onClick={onClose}>
+          <IconButton edge="end" aria-label="Close" onClick={handleClose}>
             <CloseIcon />
           </IconButton>
         </Toolbar>
@@ -128,7 +164,9 @@ export default function PartNotesSheet({
             exclusive
             value={scope}
             onChange={(_e, v) => {
-              if (v) setScope(v as Scope);
+              if (!v) return;
+              setScope(v as Scope);
+              setToggled(true);
             }}
             aria-label="Notes scope"
             sx={{ mb: 2 }}

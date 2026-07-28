@@ -96,6 +96,10 @@ function makeAdminClient(env: SetupEnv): SupabaseClient {
  * reset makes re-runs deterministic without a full DB reset. (On CI the DB
  * is always fresh, so this is a no-op there.)
  */
+/** Body of the seeded durable note; the read-back spec asserts on this string. */
+export const DURABLE_NOTE_BODY =
+  'E2E durable note: indicate the fixture to 0.001 before the first bore.';
+
 async function ensureAuthUser(supabase: SupabaseClient): Promise<User> {
   const { data: existingList, error: listErr } = await supabase.auth.admin.listUsers({
     perPage: 100,
@@ -442,6 +446,84 @@ interface JobStageSpec {
  * triggers with no shipment/operation rows. Find key is (company, job_number)
  * so re-runs are idempotent.
  */
+/**
+ * A DURABLE part-subject note on a prior run, so the read-back loop has something
+ * to read.
+ *
+ * Anchored to (part_id, routing_operation_id) — the routing TEMPLATE step — which
+ * is what makes it job-independent: the operator on a later job for this part sees
+ * it without any traversal of the job it was written on. `captured_job_id` records
+ * where it came from (provenance, never subject), so the sheet can show its source
+ * job number.
+ *
+ * Seeded rather than runtime-skipped, per CLAUDE.md: a skip would hide exactly the
+ * regression this spec exists to catch — the jobs.status incident shipped that way.
+ */
+async function ensureDurableNote(
+  supabase: SupabaseClient,
+  companyId: string,
+  partId: string,
+  capturedJobNumber: string,
+): Promise<void> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('notes')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('part_id', partId)
+    .eq('body', DURABLE_NOTE_BODY)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`note lookup failed: ${lookupErr.message}`);
+  if (existing) return;
+
+  // The routing step for this part. routing_operations has no company_id — it
+  // resolves through routings — and notes_validate_subject enforces that the step
+  // actually belongs to part_id, so this must be looked up rather than guessed.
+  const { data: routing, error: rErr } = await supabase
+    .from('routings')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('part_id', partId)
+    .maybeSingle();
+  if (rErr || !routing) throw new Error(`routing lookup failed: ${rErr?.message ?? 'missing'}`);
+
+  const { data: routingOp, error: roErr } = await supabase
+    .from('routing_operations')
+    .select('id')
+    .eq('routing_id', routing.id)
+    .order('sequence')
+    .limit(1)
+    .maybeSingle();
+  if (roErr || !routingOp) {
+    throw new Error(`routing_operation lookup failed: ${roErr?.message ?? 'missing'}`);
+  }
+
+  const { data: access, error: aErr } = await supabase
+    .from('user_company_access')
+    .select('id')
+    .eq('company_id', companyId)
+    .limit(1)
+    .maybeSingle();
+  if (aErr || !access) throw new Error(`access lookup failed: ${aErr?.message ?? 'missing'}`);
+
+  const { data: capturedJob } = await supabase
+    .from('jobs')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('job_number', capturedJobNumber)
+    .maybeSingle();
+
+  const { error } = await supabase.from('notes').insert({
+    company_id: companyId,
+    subject_kind: 'part',
+    part_id: partId,
+    routing_operation_id: routingOp.id,
+    captured_job_id: capturedJob?.id ?? null,
+    author_id: access.id,
+    body: DURABLE_NOTE_BODY,
+  });
+  if (error) throw new Error(`durable note insert failed: ${error.message}`);
+}
+
 async function ensureJobAtStage(
   supabase: SupabaseClient,
   companyId: string,
@@ -581,6 +663,9 @@ export default async function globalSetup(): Promise<void> {
     productionStatus: 'cancelled',
     fulfillmentStatus: 'unshipped',
   });
+
+  // After the jobs, so the note's provenance job resolves.
+  await ensureDurableNote(supabase, companyId, mfgPartId, 'E2E-JS-DONE');
 
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
 }

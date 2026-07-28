@@ -96,6 +96,36 @@ describe('summarizeResults', () => {
     expect(s.failed).toBe(true);
   });
 
+  it('collects location-tracked skips across batches, deduped, without counting them as errors', () => {
+    const s = summarizeResults([
+      {
+        entity: 'parts',
+        response: {
+          imported_count: 2,
+          skipped_count: 0,
+          errors: [],
+          location_tracked_skipped: ['STEEL-4140', 'BRASS-360'],
+        },
+      },
+      {
+        entity: 'parts',
+        response: {
+          imported_count: 1,
+          skipped_count: 0,
+          errors: [],
+          // STEEL-4140 again: the same part can appear in more than one batch.
+          location_tracked_skipped: ['STEEL-4140', 'ALU-6061'],
+        },
+      },
+    ]);
+    const parts = s.byEntity.find((e) => e.entity === 'parts');
+    expect(parts?.locationTrackedSkipped).toEqual(['STEEL-4140', 'BRASS-360', 'ALU-6061']);
+    // The parts imported — only their balances were left alone.
+    expect(s.totalErrors).toBe(0);
+    expect(s.totalSkipped).toBe(0);
+    expect(s.failed).toBe(false);
+  });
+
   it('groups row-level errors by reason with examples, and counts a failed batch by its rows', () => {
     const s = summarizeResults([
       {

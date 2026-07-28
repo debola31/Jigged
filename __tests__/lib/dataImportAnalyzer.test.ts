@@ -163,6 +163,48 @@ describe('cost coverage', () => {
   });
 });
 
+describe('quantity coverage', () => {
+  it('counts usable quantities and breaks down what is not', () => {
+    const parts = af(
+      'parts.csv',
+      'parts',
+      { part_name: 'PartNo', quantity: 'OnHand' },
+      [
+        { PartNo: 'A', OnHand: '250' },
+        { PartNo: 'B', OnHand: '' },
+        { PartNo: 'C', OnHand: '0' },
+        { PartNo: 'D', OnHand: 'n/a' },
+      ],
+    );
+    const cov = byCat(analyzeBundle([parts]), 'quantity_coverage');
+    expect(cov).toHaveLength(1);
+    expect(cov[0].count).toBe(1); // only 'A' carries a real number
+    expect(cov[0].title).toContain('1 of 4');
+    expect(cov[0].detail).toContain('1 blank');
+    expect(cov[0].detail).toContain('1 zero');
+    expect(cov[0].detail).toContain('1 not a number');
+  });
+
+  it('is informational — an import with no balances is valid, not a blocker', () => {
+    const parts = af('parts.csv', 'parts', { part_name: 'PartNo', quantity: 'OnHand' }, [
+      { PartNo: 'A', OnHand: '' },
+      { PartNo: 'B', OnHand: '' },
+    ]);
+    expect(byCat(analyzeBundle([parts]), 'quantity_coverage')[0].severity).toBe('info');
+  });
+
+  it('says nothing when the column is unmapped, or when every row has a number', () => {
+    const unmapped = af('parts.csv', 'parts', { part_name: 'PartNo' }, [{ PartNo: 'A' }]);
+    expect(byCat(analyzeBundle([unmapped]), 'quantity_coverage')).toHaveLength(0);
+
+    const complete = af('parts.csv', 'parts', { part_name: 'PartNo', quantity: 'OnHand' }, [
+      { PartNo: 'A', OnHand: '5' },
+      { PartNo: 'B', OnHand: '7' },
+    ]);
+    expect(byCat(analyzeBundle([complete]), 'quantity_coverage')).toHaveLength(0);
+  });
+});
+
 describe('name variants', () => {
   it('groups spelling differences', () => {
     const vendors = af('v.csv', 'vendors', { name: 'VendName' }, [

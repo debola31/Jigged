@@ -937,354 +937,6 @@ export type Database = {
           },
         ]
       }
-      note_media: {
-        Row: {
-          company_id: string
-          created_at: string
-          duration_seconds: number | null
-          height: number | null
-          id: string
-          kind: string
-          mime_type: string | null
-          note_id: string
-          size_bytes: number | null
-          storage_path: string
-          thumbnail_path: string | null
-          width: number | null
-        }
-        Insert: {
-          company_id: string
-          created_at?: string
-          duration_seconds?: number | null
-          height?: number | null
-          id?: string
-          kind?: string
-          mime_type?: string | null
-          note_id: string
-          size_bytes?: number | null
-          storage_path: string
-          thumbnail_path?: string | null
-          width?: number | null
-        }
-        Update: {
-          company_id?: string
-          created_at?: string
-          duration_seconds?: number | null
-          height?: number | null
-          id?: string
-          kind?: string
-          mime_type?: string | null
-          note_id?: string
-          size_bytes?: number | null
-          storage_path?: string
-          thumbnail_path?: string | null
-          width?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "note_media_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_media_note_fk"
-            columns: ["note_id"]
-            isOneToOne: false
-            referencedRelation: "notes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      notes: {
-        Row: {
-          author_id: string | null
-          body: string | null
-          captured_job_id: string | null
-          captured_job_operation_id: string | null
-          company_id: string
-          corrects_note_id: string | null
-          created_at: string
-          id: string
-          job_id: string | null
-          job_operation_id: string | null
-          job_part_id: string | null
-          note_type: string
-          part_id: string | null
-          routing_operation_id: string | null
-          subject_kind: string
-          usage_count: number
-          viewer_count: number
-          work_center_id: string | null
-        }
-        Insert: {
-          author_id?: string | null
-          body?: string | null
-          captured_job_id?: string | null
-          captured_job_operation_id?: string | null
-          company_id: string
-          corrects_note_id?: string | null
-          created_at?: string
-          id?: string
-          job_id?: string | null
-          job_operation_id?: string | null
-          job_part_id?: string | null
-          note_type?: string
-          part_id?: string | null
-          routing_operation_id?: string | null
-          subject_kind: string
-          usage_count?: number
-          viewer_count?: number
-          work_center_id?: string | null
-        }
-        Update: {
-          author_id?: string | null
-          body?: string | null
-          captured_job_id?: string | null
-          captured_job_operation_id?: string | null
-          company_id?: string
-          corrects_note_id?: string | null
-          created_at?: string
-          id?: string
-          job_id?: string | null
-          job_operation_id?: string | null
-          job_part_id?: string | null
-          note_type?: string
-          part_id?: string | null
-          routing_operation_id?: string | null
-          subject_kind?: string
-          usage_count?: number
-          viewer_count?: number
-          work_center_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "notes_author_fk"
-            columns: ["author_id"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_captured_job_fk"
-            columns: ["captured_job_id"]
-            isOneToOne: false
-            referencedRelation: "jobs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_captured_job_operation_fk"
-            columns: ["captured_job_operation_id"]
-            isOneToOne: false
-            referencedRelation: "job_operations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_corrects_fk"
-            columns: ["corrects_note_id"]
-            isOneToOne: false
-            referencedRelation: "notes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_job_fk"
-            columns: ["job_id"]
-            isOneToOne: false
-            referencedRelation: "jobs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_job_operation_fk"
-            columns: ["job_operation_id"]
-            isOneToOne: false
-            referencedRelation: "job_operations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_job_part_fk"
-            columns: ["job_part_id"]
-            isOneToOne: false
-            referencedRelation: "job_parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_part_fk"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_routing_operation_fk"
-            columns: ["routing_operation_id"]
-            isOneToOne: false
-            referencedRelation: "routing_operations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "notes_work_center_fk"
-            columns: ["work_center_id"]
-            isOneToOne: false
-            referencedRelation: "work_centers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      note_reactions: {
-        Row: {
-          company_id: string
-          created_at: string
-          id: string
-          kind: string
-          note_id: string
-          reactor_id: string
-        }
-        Insert: {
-          company_id: string
-          created_at?: string
-          id?: string
-          kind: string
-          note_id: string
-          reactor_id: string
-        }
-        Update: {
-          company_id?: string
-          created_at?: string
-          id?: string
-          kind?: string
-          note_id?: string
-          reactor_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "note_reactions_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_reactions_note_fk"
-            columns: ["note_id"]
-            isOneToOne: false
-            referencedRelation: "notes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_reactions_reactor_fk"
-            columns: ["reactor_id"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      note_views: {
-        Row: {
-          company_id: string
-          created_at: string
-          id: string
-          job_id: string | null
-          note_id: string
-          viewer_id: string
-        }
-        Insert: {
-          company_id: string
-          created_at?: string
-          id?: string
-          job_id?: string | null
-          note_id: string
-          viewer_id: string
-        }
-        Update: {
-          company_id?: string
-          created_at?: string
-          id?: string
-          job_id?: string | null
-          note_id?: string
-          viewer_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "note_views_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_views_job_fk"
-            columns: ["job_id"]
-            isOneToOne: false
-            referencedRelation: "jobs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_views_note_fk"
-            columns: ["note_id"]
-            isOneToOne: false
-            referencedRelation: "notes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "note_views_viewer_fk"
-            columns: ["viewer_id"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      operator_events: {
-        Row: {
-          actor_id: string | null
-          company_id: string
-          context: Json
-          id: string
-          kind: string
-          occurred_at: string
-        }
-        Insert: {
-          actor_id?: string | null
-          company_id: string
-          context?: Json
-          id?: string
-          kind: string
-          occurred_at?: string
-        }
-        Update: {
-          actor_id?: string | null
-          company_id?: string
-          context?: Json
-          id?: string
-          kind?: string
-          occurred_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "operator_events_actor_fk"
-            columns: ["actor_id"]
-            isOneToOne: false
-            referencedRelation: "user_company_access"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "operator_events_company_fk"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       job_operation_completions: {
         Row: {
           company_id: string
@@ -1663,6 +1315,354 @@ export type Database = {
           },
         ]
       }
+      note_media: {
+        Row: {
+          company_id: string
+          created_at: string
+          duration_seconds: number | null
+          height: number | null
+          id: string
+          kind: string
+          mime_type: string | null
+          note_id: string
+          size_bytes: number | null
+          storage_path: string
+          thumbnail_path: string | null
+          width: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          duration_seconds?: number | null
+          height?: number | null
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          note_id: string
+          size_bytes?: number | null
+          storage_path: string
+          thumbnail_path?: string | null
+          width?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          duration_seconds?: number | null
+          height?: number | null
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          note_id?: string
+          size_bytes?: number | null
+          storage_path?: string
+          thumbnail_path?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_media_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_media_note_fk"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_reactions: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          kind: string
+          note_id: string
+          reactor_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          note_id: string
+          reactor_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          note_id?: string
+          reactor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_reactions_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_reactions_note_fk"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_reactions_reactor_fk"
+            columns: ["reactor_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_views: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          job_id: string | null
+          note_id: string
+          viewer_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          note_id: string
+          viewer_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          note_id?: string
+          viewer_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_views_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_views_job_fk"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_views_note_fk"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_views_viewer_fk"
+            columns: ["viewer_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes: {
+        Row: {
+          author_id: string | null
+          body: string | null
+          captured_job_id: string | null
+          captured_job_operation_id: string | null
+          company_id: string
+          corrects_note_id: string | null
+          created_at: string
+          id: string
+          job_id: string | null
+          job_operation_id: string | null
+          job_part_id: string | null
+          note_type: string
+          part_id: string | null
+          routing_operation_id: string | null
+          subject_kind: string
+          usage_count: number
+          viewer_count: number
+          work_center_id: string | null
+        }
+        Insert: {
+          author_id?: string | null
+          body?: string | null
+          captured_job_id?: string | null
+          captured_job_operation_id?: string | null
+          company_id: string
+          corrects_note_id?: string | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          note_type?: string
+          part_id?: string | null
+          routing_operation_id?: string | null
+          subject_kind: string
+          usage_count?: number
+          viewer_count?: number
+          work_center_id?: string | null
+        }
+        Update: {
+          author_id?: string | null
+          body?: string | null
+          captured_job_id?: string | null
+          captured_job_operation_id?: string | null
+          company_id?: string
+          corrects_note_id?: string | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          note_type?: string
+          part_id?: string | null
+          routing_operation_id?: string | null
+          subject_kind?: string
+          usage_count?: number
+          viewer_count?: number
+          work_center_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_author_fk"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_captured_job_fk"
+            columns: ["captured_job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_captured_job_operation_fk"
+            columns: ["captured_job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_corrects_fk"
+            columns: ["corrects_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_job_fk"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_job_operation_fk"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_job_part_fk"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_routing_operation_fk"
+            columns: ["routing_operation_id"]
+            isOneToOne: false
+            referencedRelation: "routing_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_work_center_fk"
+            columns: ["work_center_id"]
+            isOneToOne: false
+            referencedRelation: "work_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operator_events: {
+        Row: {
+          actor_id: string | null
+          company_id: string
+          context: Json
+          id: string
+          kind: string
+          occurred_at: string
+        }
+        Insert: {
+          actor_id?: string | null
+          company_id: string
+          context?: Json
+          id?: string
+          kind: string
+          occurred_at?: string
+        }
+        Update: {
+          actor_id?: string | null
+          company_id?: string
+          context?: Json
+          id?: string
+          kind?: string
+          occurred_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_events_actor_fk"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_events_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       part_attachments: {
         Row: {
           company_id: string
@@ -1724,55 +1724,6 @@ export type Database = {
           },
         ]
       }
-      part_location_stock: {
-        Row: {
-          company_id: string
-          created_at: string
-          id: string
-          location_id: string
-          part_id: string
-          quantity: number
-        }
-        Insert: {
-          company_id: string
-          created_at?: string
-          id?: string
-          location_id: string
-          part_id: string
-          quantity?: number
-        }
-        Update: {
-          company_id?: string
-          created_at?: string
-          id?: string
-          location_id?: string
-          part_id?: string
-          quantity?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "part_location_stock_company_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "part_location_stock_location_fkey"
-            columns: ["location_id"]
-            isOneToOne: false
-            referencedRelation: "inventory_locations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "part_location_stock_part_fkey"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       part_comments: {
         Row: {
           author_id: string | null
@@ -1818,6 +1769,55 @@ export type Database = {
           },
           {
             foreignKeyName: "part_comments_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      part_location_stock: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          location_id: string
+          part_id: string
+          quantity: number
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          location_id: string
+          part_id: string
+          quantity?: number
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          location_id?: string
+          part_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_part_fkey"
             columns: ["part_id"]
             isOneToOne: false
             referencedRelation: "parts"
@@ -3305,61 +3305,6 @@ export type Database = {
         Returns: undefined
       }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
-      log_note_views: {
-        Args: { p_job_id?: string; p_note_ids: string[] }
-        Returns: undefined
-      }
-      log_operator_event: {
-        Args: { p_company_id: string; p_context?: Json; p_kind: string }
-        Returns: undefined
-      }
-      my_note_view_digest: { Args: { p_tz: string }; Returns: number }
-      note_count_anomalies: {
-        Args: Record<PropertyKey, never>
-        Returns: {
-          live_usage: number
-          live_viewers: number
-          note_id: string
-          stored_usage: number
-          stored_viewers: number
-        }[]
-      }
-      note_viewers: {
-        Args: { p_note_id: string }
-        Returns: {
-          job_number: string
-          viewer_name: string
-        }[]
-      }
-      part_playbook_notes: {
-        Args: {
-          p_exclude_job_id?: string
-          p_max_runs?: number
-          p_operation_name?: string
-          p_part_id: string
-          p_routing_operation_id?: string
-        }
-        Returns: {
-          author_name: string
-          body: string
-          corrects_note_id: string
-          created_at: string
-          id: string
-          job_number: string
-          media: Json
-          note_type: string
-          operation_label: string
-          reactions: Json
-          routing_operation_id: string
-          subject_kind: string
-          usage_count: number
-          viewer_count: number
-        }[]
-      }
-      viewer_excluded_from_metrics: {
-        Args: { p_access_id: string }
-        Returns: boolean
-      }
       company_can_write: {
         Args: { check_company_id: string }
         Returns: boolean
@@ -3524,7 +3469,66 @@ export type Database = {
         Args: { p_job_part_id: string }
         Returns: string
       }
+      log_note_views: {
+        Args: { p_job_id?: string; p_note_ids: string[] }
+        Returns: undefined
+      }
+      log_operator_event: {
+        Args: { p_company_id: string; p_context?: Json; p_kind: string }
+        Returns: undefined
+      }
+      my_note_view_digest: { Args: { p_tz: string }; Returns: number }
       next_order_number: { Args: { company_uuid: string }; Returns: number }
+      no_client_access_grant_leaks: {
+        Args: never
+        Returns: {
+          grantee: string
+          privilege_type: string
+          table_name: string
+        }[]
+      }
+      note_count_anomalies: {
+        Args: never
+        Returns: {
+          live_usage: number
+          live_viewers: number
+          note_id: string
+          stored_usage: number
+          stored_viewers: number
+        }[]
+      }
+      note_viewers: {
+        Args: { p_note_id: string }
+        Returns: {
+          job_number: string
+          viewer_name: string
+        }[]
+      }
+      part_playbook_notes: {
+        Args: {
+          p_exclude_job_id?: string
+          p_max_runs?: number
+          p_operation_name?: string
+          p_part_id: string
+          p_routing_operation_id?: string
+        }
+        Returns: {
+          author_name: string
+          body: string
+          corrects_note_id: string
+          created_at: string
+          id: string
+          job_number: string
+          media: Json
+          note_type: string
+          operation_label: string
+          reactions: Json
+          routing_operation_id: string
+          subject_kind: string
+          usage_count: number
+          viewer_count: number
+        }[]
+      }
       parts_deletion_impact: {
         Args: { p_ids: string[] }
         Returns: {
@@ -3575,6 +3579,10 @@ export type Database = {
           p_unit: string
         }
         Returns: Json
+      }
+      viewer_excluded_from_metrics: {
+        Args: { p_access_id: string }
+        Returns: boolean
       }
     }
     Enums: {
@@ -3704,9 +3712,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

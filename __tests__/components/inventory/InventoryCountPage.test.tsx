@@ -63,9 +63,17 @@ const renderPage = () =>
     wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
   });
 
-/** The count input for a named part — every row has one, so scope by label. */
+/** The count input for a named part — every sheet row has one, so scope by label. */
 const inputFor = (partName: string) =>
   screen.getByRole('spinbutton', { name: new RegExp(`counted quantity for ${partName}`, 'i') });
+
+/** Pick parts on step 1 and advance to the sheet. */
+const chooseParts = async (user: ReturnType<typeof userEvent.setup>, ...partNames: string[]) => {
+  for (const name of partNames) {
+    await user.click(screen.getByRole('checkbox', { name: new RegExp(`count ${name}`, 'i') }));
+  }
+  await user.click(screen.getByRole('button', { name: /^count \d+ parts?$/i }));
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -78,24 +86,41 @@ beforeEach(() => {
   asMock(commitCount).mockResolvedValue({ committed: 1, failures: [] });
 });
 
-describe('landing', () => {
-  it('drops you straight onto the parts with no scope step to get past', async () => {
+describe('choosing what to count', () => {
+  it('makes counting a single part an obvious option', async () => {
+    const user = userEvent.setup();
     renderPage();
-    // Both parts, and their inputs, are present on arrival — no selection gate.
-    expect(await screen.findByText('4140 bar')).toBeInTheDocument();
-    expect(inputFor('4140 bar')).toBeInTheDocument();
-    expect(inputFor('6061 plate')).toBeInTheDocument();
+    await screen.findByText('4140 bar');
+    // Framing says one part is fine, and the CTA counts what you picked — not everything.
+    expect(screen.getByText(/one part or the whole shop/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: /count 4140 bar/i }));
+    expect(screen.getByRole('button', { name: /count 1 part$/i })).toBeEnabled();
   });
 
-  it('says what the page is for, and that blanks are safe', async () => {
+  it('cannot advance with nothing chosen', async () => {
     renderPage();
-    expect(await screen.findByText(/walk your shop and enter what you actually have/i)).toBeInTheDocument();
-    expect(screen.getByText(/leave blank stays exactly as it is/i)).toBeInTheDocument();
+    await screen.findByText('4140 bar');
+    expect(screen.getByRole('button', { name: /^count$/i })).toBeDisabled();
+  });
+
+  it('scopes the sheet to the chosen parts only', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+    await chooseParts(user, '4140 bar');
+
+    expect(inputFor('4140 bar')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('spinbutton', { name: /counted quantity for 6061 plate/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('starts every input empty, so nothing can be tabbed past and accepted', async () => {
+    const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
+    await chooseParts(user, '4140 bar', '6061 plate');
     expect(inputFor('4140 bar')).toHaveValue(null);
     expect(inputFor('6061 plate')).toHaveValue(null);
   });
@@ -123,43 +148,42 @@ describe('landing', () => {
 });
 
 describe('inline feedback', () => {
-  it('shows the delta on the row as soon as a number is typed', async () => {
+  /** Both parts on the sheet, ready to type into. */
+  const onSheet = async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
+    await chooseParts(user, '4140 bar', '6061 plate');
+    return user;
+  };
 
+  it('shows the delta on the row as soon as a number is typed', async () => {
+    const user = await onSheet();
     await user.type(inputFor('4140 bar'), '38');
     expect(await screen.findByText('-2')).toBeInTheDocument();
   });
 
   it('says a count matches rather than showing a zero delta', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByText('4140 bar');
-
+    const user = await onSheet();
     await user.type(inputFor('4140 bar'), '40');
     // Anchored: the footer also says "Everything matches so far".
     expect(await screen.findByText(/^Matches$/)).toBeInTheDocument();
   });
 
-  it('tracks progress and what will change, in plain language', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByText('4140 bar');
+  it('tracks progress against the chosen scope, in plain language', async () => {
+    const user = await onSheet();
     expect(screen.getByText(/nothing entered yet/i)).toBeInTheDocument();
 
     await user.type(inputFor('4140 bar'), '40'); // matches
     expect(await screen.findByText(/everything matches so far/i)).toBeInTheDocument();
 
     await user.type(inputFor('6061 plate'), '9'); // changes
-    expect(await screen.findByText('2 counted')).toBeInTheDocument();
+    expect(await screen.findByText('2 of 2 counted')).toBeInTheDocument();
     expect(screen.getByText('1 will change')).toBeInTheDocument();
   });
 
   it('cannot save when nothing would change', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByText('4140 bar');
+    const user = await onSheet();
     expect(screen.getByRole('button', { name: /save 0 changes/i })).toBeDisabled();
 
     await user.type(inputFor('4140 bar'), '40'); // matches — still nothing to write
@@ -167,15 +191,22 @@ describe('inline feedback', () => {
   });
 
   it('clearing an input un-counts the row rather than counting it as zero', async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await screen.findByText('4140 bar');
-
+    const user = await onSheet();
     await user.type(inputFor('4140 bar'), '38');
-    expect(await screen.findByText('1 counted')).toBeInTheDocument();
+    expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
 
     await user.clear(inputFor('4140 bar'));
-    expect(await screen.findByText('0 counted')).toBeInTheDocument();
+    expect(await screen.findByText('0 of 2 counted')).toBeInTheDocument();
+  });
+
+  it('going back to the scope step keeps what has been typed', async () => {
+    const user = await onSheet();
+    await user.type(inputFor('4140 bar'), '38');
+    await user.click(screen.getByRole('button', { name: /^back$/i }));
+
+    await screen.findByText(/one part or the whole shop/i);
+    await user.click(screen.getByRole('button', { name: /^count 2 parts$/i }));
+    expect(inputFor('4140 bar')).toHaveValue(38);
   });
 });
 
@@ -184,6 +215,7 @@ describe('saving', () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
+    await chooseParts(user, '4140 bar');
     await user.type(inputFor(partName), value);
     await user.click(screen.getByRole('button', { name: /save 1 change/i }));
     return user;
@@ -251,59 +283,56 @@ describe('saving', () => {
 });
 
 describe('draft', () => {
-  it('picks a count back up automatically, without asking', async () => {
+  const storeDraft = (partIds: string[], entries: Record<string, number>) =>
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
-      JSON.stringify({ version: 2, companyId: 'co1', entries: { p1: 38 }, savedAt: Date.now() }),
+      JSON.stringify({ version: 3, companyId: 'co1', partIds, entries, savedAt: Date.now() }),
     );
 
+  it('offers to resume, reporting how far the count got', async () => {
+    storeDraft(['p1', 'p2'], { p1: 38 });
     renderPage();
-    await screen.findByText('4140 bar');
-    // Restored into the field, and reported so it isn't a surprise.
+    expect(await screen.findByText(/1 of 2 counted/i)).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /resume/i }));
+    // Straight back to the sheet, scope and entries restored.
+    expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
     expect(inputFor('4140 bar')).toHaveValue(38);
-    expect(screen.getByText(/picked up your unfinished count/i)).toBeInTheDocument();
+    expect(inputFor('6061 plate')).toHaveValue(null);
   });
 
   it('can be discarded to start clean', async () => {
-    window.localStorage.setItem(
-      'jigged.inventoryCount.co1',
-      JSON.stringify({ version: 2, companyId: 'co1', entries: { p1: 38 }, savedAt: Date.now() }),
-    );
+    storeDraft(['p1'], { p1: 38 });
     renderPage();
-    await screen.findByText('4140 bar');
+    await screen.findByText(/unfinished count/i);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /start over/i }));
-    await waitFor(() => expect(inputFor('4140 bar')).toHaveValue(null));
+    await userEvent.setup().click(screen.getByRole('button', { name: /discard/i }));
+    await waitFor(() => expect(screen.queryByText(/unfinished count/i)).not.toBeInTheDocument());
   });
 
   it('ignores a draft from another company', async () => {
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
       JSON.stringify({
-        version: 2,
+        version: 3,
         companyId: 'SOMEONE-ELSE',
+        partIds: ['p1'],
         entries: { p1: 5 },
         savedAt: Date.now(),
       }),
     );
     renderPage();
     await screen.findByText('4140 bar');
-    expect(inputFor('4140 bar')).toHaveValue(null);
+    expect(screen.queryByText(/unfinished count/i)).not.toBeInTheDocument();
   });
 
-  it('drops entries whose part no longer exists rather than misattaching them', async () => {
-    window.localStorage.setItem(
-      'jigged.inventoryCount.co1',
-      JSON.stringify({
-        version: 2,
-        companyId: 'co1',
-        entries: { 'deleted-part': 99, p1: 7 },
-        savedAt: Date.now(),
-      }),
-    );
+  it('drops parts that no longer exist rather than misattaching their numbers', async () => {
+    storeDraft(['deleted-part', 'p1'], { 'deleted-part': 99, p1: 7 });
     renderPage();
-    await screen.findByText('4140 bar');
+    await screen.findByText(/unfinished count/i);
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /resume/i }));
+    expect(await screen.findByText('1 of 1 counted')).toBeInTheDocument();
     expect(inputFor('4140 bar')).toHaveValue(7);
-    expect(await screen.findByText('1 counted')).toBeInTheDocument();
   });
 });

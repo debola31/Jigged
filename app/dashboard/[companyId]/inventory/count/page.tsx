@@ -3,19 +3,20 @@
 /**
  * Stock count sheet — journey J9 in docs/modules/inventory.md.
  *
- * ONE page. You land on your stocked parts and type what you actually have; the delta appears
- * on the row as you type, and Save opens a single confirm dialog.
+ * TWO steps: choose what you're counting, then count it. Save opens a confirm dialog.
  *
- * An earlier build was Scope → Sheet → Review. Three problems, all from speccing the data flow
- * and not the interaction:
- *  - the scope step made you declare what you'd count *before* counting — structure before
- *    value, the same mistake §5.5 diagnoses in the location builder. Physically you walk to a
- *    shelf and write down what's there; the set emerges from the counting.
- *  - the review page restated deltas you'd have understood better the instant you typed them.
- *  - the count field didn't read as a field.
+ * Both halves of that shape were arrived at by getting it wrong first, so the reasoning is
+ * worth keeping:
  *
- * So: no scope gate, inline deltas, dash placeholder in an obviously-empty input, and plain
- * language instead of "1 item needs adjusting. 0 matched."
+ *  - It started as Scope → Sheet → **Review**. The review page restated deltas the counter
+ *    would have understood better the instant they typed them, so it's gone — the variance now
+ *    appears on the row as you type, and the dialog is the summary.
+ *  - It was then rebuilt as a **single** page listing every stocked part. That over-corrected:
+ *    a wall of empty inputs reads as "fill in this form", hides that counting one part is
+ *    perfectly normal, and loses what choosing was quietly doing — making a count a bounded,
+ *    finishable task. "I'm counting these five things" beats a row per stocked part.
+ *
+ * So the scope step earns its place; the review step didn't.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,6 +26,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
@@ -36,6 +38,9 @@ import InputAdornment from '@mui/material/InputAdornment';
 import LinearProgress from '@mui/material/LinearProgress';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
+import Step from '@mui/material/Step';
+import StepLabel from '@mui/material/StepLabel';
+import Stepper from '@mui/material/Stepper';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -70,6 +75,8 @@ import type {
   CountVariance,
 } from '@/types/inventoryCount';
 
+const STEPS = ['Choose what to count', 'Count'];
+
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 const signed = (n: number) => `${n > 0 ? '+' : ''}${num(n)}`;
 
@@ -86,17 +93,22 @@ export default function InventoryCountPage() {
     return () => setTitle(null);
   }, [setTitle]);
 
+  const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<CountCandidate[]>([]);
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [entries, setEntries] = useState<CountEntries>({});
   const [search, setSearch] = useState('');
-  const [resumedAt, setResumedAt] = useState<number | null>(null);
 
   /** System quantities as the sheet loaded — compared to a fresh read at save, so we can say
    *  which parts moved underneath the count. */
   const openedWithRef = useRef<Map<string, number>>(new Map());
 
+  const [resume, setResume] = useState<{ partIds: string[]; entries: CountEntries; savedAt: number } | null>(
+    null,
+  );
   const [confirm, setConfirm] = useState<CountVariance[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -113,18 +125,16 @@ export default function InventoryCountPage() {
         setCandidates(found);
         openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
 
-        // Restore only entries whose part still exists, so numbers can't reattach to the
+        // Offer a resume only for parts that still exist, so numbers can't reattach to the
         // wrong row after the catalogue changes.
         const draft = readDraft(companyId);
         if (draft) {
           const known = new Set(found.map((c) => c.partId));
-          const restored = Object.fromEntries(
-            Object.entries(draft.entries).filter(([partId]) => known.has(partId)),
+          const partIds = draft.partIds.filter((id) => known.has(id));
+          const kept = Object.fromEntries(
+            Object.entries(draft.entries).filter(([id]) => known.has(id)),
           );
-          if (Object.keys(restored).length > 0) {
-            setEntries(restored);
-            setResumedAt(draft.savedAt);
-          }
+          if (partIds.length > 0) setResume({ partIds, entries: kept, savedAt: draft.savedAt });
         }
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your stocked parts.');
@@ -145,22 +155,29 @@ export default function InventoryCountPage() {
     return q ? countable.filter((c) => c.partName.toLowerCase().includes(q)) : countable;
   }, [countable, search]);
 
+  /** The chosen parts, in list order. */
+  const sheet = useMemo(
+    () => countable.filter((c) => selectedIds.includes(c.partId)),
+    [countable, selectedIds],
+  );
+
   const counted = countedTally(entries);
   const changes = useMemo(
     () =>
-      countable.filter((c) => {
+      sheet.filter((c) => {
         const d = rowDelta(c, entries);
         return d !== null && d !== 0;
       }).length,
-    [countable, entries],
+    [sheet, entries],
   );
 
   // ── Draft autosave ──────────────────────────────────────────────────────
+  // Only while counting: a draft written before a scope exists, or after commit, would offer
+  // to resume something meaningless.
   useEffect(() => {
-    if (loading) return;
-    if (counted === 0) return;
-    writeDraft(buildDraft(companyId, entries, Date.now()));
-  }, [entries, counted, companyId, loading]);
+    if (step !== 1 || selectedIds.length === 0) return;
+    writeDraft(buildDraft(companyId, selectedIds, entries, Date.now()));
+  }, [step, selectedIds, entries, companyId]);
 
   const clearDraft = useCallback(() => clearStoredDraft(companyId), [companyId]);
 
@@ -176,14 +193,18 @@ export default function InventoryCountPage() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [committing]);
 
-  const setCount = (partId: string, raw: string) => {
+  const toggle = (partId: string) =>
+    setSelectedIds((prev) =>
+      prev.includes(partId) ? prev.filter((id) => id !== partId) : [...prev, partId],
+    );
+
+  const setCount = (partId: string, raw: string) =>
     setEntries((prev) => {
       const next = { ...prev };
       if (raw === '') delete next[partId];
       else next[partId] = Number(raw);
       return next;
     });
-  };
 
   // ── Save ────────────────────────────────────────────────────────────────
   /** Re-read current quantities, then show what will change. The commit is safe either way
@@ -273,7 +294,7 @@ export default function InventoryCountPage() {
   }
 
   return (
-    <Box sx={{ pb: 12 }}>
+    <Box sx={{ pb: step === 1 ? 12 : 4 }}>
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => router.push(`/dashboard/${companyId}/inventory`)}
@@ -282,13 +303,13 @@ export default function InventoryCountPage() {
         Back to inventory
       </Button>
 
-      {/* Say what this is. The old build dropped you straight into a checkbox list. */}
-      <Typography variant="body1" sx={{ mb: 0.5 }}>
-        Walk your shop and enter what you actually have.
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Anything you leave blank stays exactly as it is. Nothing saves until you press Save.
-      </Typography>
+      <Stepper activeStep={step} sx={{ mb: 4, maxWidth: 460 }}>
+        {STEPS.map((label) => (
+          <Step key={label}>
+            <StepLabel>{label}</StepLabel>
+          </Step>
+        ))}
+      </Stepper>
 
       {loadError && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -296,52 +317,163 @@ export default function InventoryCountPage() {
         </Alert>
       )}
 
-      {resumedAt && (
+      {resume && step === 0 && (
         <Alert
           severity="info"
           sx={{ mb: 3 }}
           action={
-            <Button
-              size="small"
-              onClick={() => {
-                setEntries({});
-                setResumedAt(null);
-                clearDraft();
-              }}
-            >
-              Start over
-            </Button>
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                onClick={() => {
+                  clearDraft();
+                  setResume(null);
+                }}
+              >
+                Discard
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => {
+                  setSelectedIds(resume.partIds);
+                  setEntries(resume.entries);
+                  setResume(null);
+                  setStep(1);
+                }}
+              >
+                Resume
+              </Button>
+            </Stack>
           }
         >
-          Picked up your unfinished count from {new Date(resumedAt).toLocaleString()}.
+          You have an unfinished count from {new Date(resume.savedAt).toLocaleString()} —{' '}
+          {Object.keys(resume.entries).length} of {resume.partIds.length} counted.
         </Alert>
       )}
 
-      {countable.length === 0 ? (
-        <Card elevation={2}>
-          <CardContent sx={{ p: 6, textAlign: 'center' }}>
-            <Inventory2OutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              Nothing to count yet
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Mark a few parts as stocked and they&apos;ll show up here.
-            </Typography>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <TextField
-            placeholder="Search parts..."
-            size="small"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            sx={{ width: 300, mb: 3 }}
-          />
+      {/* ── Step 1: what are you counting? ───────────────────────────────── */}
+      {step === 0 && (
+        <Box>
+          <Typography variant="body1" sx={{ mb: 0.5 }}>
+            Pick the parts you&apos;re about to count.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            One part or the whole shop — whatever you&apos;re walking right now. You can always
+            count the rest later.
+          </Typography>
+
+          {countable.length === 0 ? (
+            <Card elevation={2}>
+              <CardContent sx={{ p: 6, textAlign: 'center' }}>
+                <Inventory2OutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" gutterBottom>
+                  Nothing to count yet
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Mark a few parts as stocked and they&apos;ll show up here.
+                </Typography>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                <TextField
+                  placeholder="Search parts..."
+                  size="small"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  sx={{ width: 300 }}
+                />
+                <Box sx={{ flex: 1 }} />
+                <Button onClick={() => setSelectedIds(visible.map((c) => c.partId))}>
+                  Select all{visible.length !== countable.length ? ' shown' : ''}
+                </Button>
+                <Button
+                  variant="contained"
+                  size="large"
+                  disabled={selectedIds.length === 0}
+                  onClick={() => setStep(1)}
+                >
+                  {selectedIds.length === 0
+                    ? 'Count'
+                    : `Count ${selectedIds.length} ${selectedIds.length === 1 ? 'part' : 'parts'}`}
+                </Button>
+              </Box>
+
+              <Card elevation={2}>
+                <Stack divider={<Divider />}>
+                  {visible.map((c) => (
+                    <Box
+                      key={c.partId}
+                      onClick={() => toggle(c.partId)}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        px: 2,
+                        py: 1,
+                        minHeight: 56,
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      <Checkbox
+                        checked={selectedIds.includes(c.partId)}
+                        tabIndex={-1}
+                        inputProps={{ 'aria-label': `Count ${c.partName}` }}
+                      />
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body1" noWrap>
+                          {c.partName}
+                        </Typography>
+                        {c.target.kind === 'location' && (
+                          <Typography variant="caption" color="text.secondary">
+                            {c.target.locationName}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        {num(c.systemQuantity)} {c.unit}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Card>
+
+              {/* Parts held back, named rather than silently missing. */}
+              {excluded.length > 0 && (
+                <Alert severity="info" sx={{ mt: 3 }}>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    {excluded.length} {excluded.length === 1 ? 'part is' : 'parts are'} not on this
+                    sheet — their stock sits in more than one place, so a single total has no
+                    unambiguous home. Count these at their locations.
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                    {excluded.slice(0, 8).map((c) => (
+                      <Chip key={c.partId} size="small" variant="outlined" label={c.partName} />
+                    ))}
+                  </Box>
+                </Alert>
+              )}
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* ── Step 2: count them ───────────────────────────────────────────── */}
+      {step === 1 && (
+        <Box>
+          <Typography variant="body1" sx={{ mb: 0.5 }}>
+            Enter what you actually have.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Anything you leave blank stays exactly as it is. Nothing saves until you press Save.
+          </Typography>
 
           <Card elevation={2}>
             <Stack divider={<Divider />}>
-              {visible.map((c) => {
+              {sheet.map((c) => {
                 const delta = rowDelta(c, entries);
                 const isCounted = delta !== null;
                 const matches = delta === 0;
@@ -428,27 +560,11 @@ export default function InventoryCountPage() {
               })}
             </Stack>
           </Card>
-
-          {/* Parts held back, named rather than silently missing. */}
-          {excluded.length > 0 && (
-            <Alert severity="info" sx={{ mt: 3 }}>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                {excluded.length} {excluded.length === 1 ? 'part is' : 'parts are'} not on this
-                sheet — their stock sits in more than one place, so a single total has no
-                unambiguous home. Count these at their locations.
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                {excluded.slice(0, 8).map((c) => (
-                  <Chip key={c.partId} size="small" variant="outlined" label={c.partName} />
-                ))}
-              </Box>
-            </Alert>
-          )}
-        </>
+        </Box>
       )}
 
-      {/* Sticky footer: progress and the only commit affordance on the page. */}
-      {countable.length > 0 && (
+      {/* Sticky footer: progress and the only commit affordance. */}
+      {step === 1 && (
         <Box
           sx={{
             position: 'fixed',
@@ -461,7 +577,8 @@ export default function InventoryCountPage() {
             // for a card sitting on the page and wrong for a bar with content scrolling under
             // it — rows showed straight through. Opaque base + the same blur the cards use.
             bgcolor: 'background.default',
-            backgroundImage: (t) => `linear-gradient(${t.palette.background.paper}, ${t.palette.background.paper})`,
+            backgroundImage: (t) =>
+              `linear-gradient(${t.palette.background.paper}, ${t.palette.background.paper})`,
             backdropFilter: 'blur(15px)',
             borderTop: 1,
             borderColor: 'divider',
@@ -472,8 +589,9 @@ export default function InventoryCountPage() {
             zIndex: (t) => t.zIndex.appBar - 1,
           }}
         >
+          <Button onClick={() => setStep(0)}>Back</Button>
           <Typography variant="body1" sx={{ fontWeight: 600 }}>
-            {counted} counted
+            {counted} of {sheet.length} counted
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {changes === 0

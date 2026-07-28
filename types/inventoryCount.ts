@@ -6,9 +6,10 @@
  * is no count table. The audit record is the `adjustment` rows in `inventory_transactions`,
  * which already carry timestamp, actor and notes.
  *
- * Nor is there a scope step. You land on your stocked parts and start typing; a part enters
- * the count *by being counted*. Requiring the set to be declared up front was the same
- * structure-before-value mistake §5.5 diagnoses in the location builder.
+ * Two steps: choose the parts, then count them. The choosing step is what makes a count a
+ * bounded, finishable task — "I'm counting these five things" rather than a form with a row
+ * per stocked part. There is no third review step; the variance shows on each row as it's
+ * typed, and a confirm dialog summarises before anything is written.
  */
 
 /**
@@ -45,10 +46,17 @@ export interface CountCandidate {
  */
 export type CountEntries = Record<string, number>;
 
-/** The persisted draft. Versioned so a shape change is discarded rather than half-restored. */
+/**
+ * The persisted draft. Versioned so a shape change is discarded rather than half-restored.
+ *
+ * Carries the chosen scope as well as the entries: a count of five parts with two filled in
+ * is still a count of five, and resuming needs to know that.
+ */
 export interface CountDraft {
-  version: 2;
+  version: 3;
   companyId: string;
+  /** The parts in this count, in sheet order. */
+  partIds: string[];
   entries: CountEntries;
   /** ms epoch — shown as "unfinished count from …" on return. */
   savedAt: number;

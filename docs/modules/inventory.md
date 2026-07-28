@@ -701,32 +701,33 @@ before it goes back on the rack. The software should mirror that habit, not repl
 A **count sheet**: here is what we think is here, walk it, enter what you find, review the
 variance, commit. Committing writes `adjustment` rows with a reason.
 
-> **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **one page.** You land on
-> your stocked parts, type what you actually have, and the delta appears on the row as you
-> type. Save opens a single confirm dialog.
+> **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **two steps.** Choose the
+> parts you're counting, then count them; the delta appears on each row as you type, and Save
+> opens a confirm dialog. There is no third review step.
 >
-> **This shipped as Scope → Sheet → Review first, and that was wrong.** The lesson is worth
-> keeping, because the failure came from this spec: J9 said *"walk it, enter what you find,
-> review the variance, commit"* — a data flow — and that got built literally, as three pages.
-> Reviewing it surfaced three problems, one of them structural:
+> **The shape was arrived at by getting it wrong twice, and both errors are worth recording.**
 >
-> - **The scope step was a gate before value.** You had to declare what you'd count before
->   counting anything. But you walk to a shelf and write down what's there; the set *emerges*
->   from counting. That is structure-before-value — **the identical mistake
->   [§5.5](#55-locations-keep-them-visual-change-when-they-appear) diagnoses in the location
->   builder**, rebuilt in a different costume by the same person who wrote the diagnosis.
->   [Sortly's count](https://help.sortly.com/hc/en-us/articles/41121062802203-Stock-Counts) has
->   no scope step either: an item enters the count by being counted.
-> - **The review page restated deltas** the counter would have understood better the moment
->   they typed them. Inline feedback strictly beats a page reached later.
-> - **The count field didn't read as a field** — an outlined input with a floating label and no
->   value looks like a static chip. It now shows a dash placeholder with the unit beside it.
+> **First: Scope → Sheet → Review.** J9 said *"walk it, enter what you find, review the
+> variance, commit"* — a data flow — and it was built literally, as three pages. Three problems
+> on first use: the review page restated deltas the counter would have understood better the
+> instant they typed them; the count field didn't read as a field (an outlined input with a
+> floating label and no value looks like a static chip); and *"1 item needs adjusting. 0
+> matched"* used accounting language nobody in a shop has a model for.
 >
-> Also gone: *"1 item needs adjusting. 0 matched."* — "matched" is accounting language. The
-> footer now reads *"3 counted · 2 will change"*.
+> **Then, over-correcting: a single page listing every stocked part.** Removing the review page
+> was right. Removing the *scope* step was not — and the reasoning that led there is the
+> instructive part. The scope step looked like structure-before-value, the same error
+> [§5.5](#55-locations-keep-them-visual-change-when-they-appear) diagnoses in the location
+> builder. But that critique was about **ordering**, and it took the **bounding** benefit down
+> with it: choosing says *"I'm counting these five things and then I'm done."* A wall of empty
+> inputs, one per stocked part, reads as a form you must complete and hides that counting a
+> single part is normal.
 >
-> **Design a journey, not a data flow.** A pipeline described in a spec will be built as a
-> pipeline of screens unless someone says otherwise.
+> So: the scope step earns its place, the review step didn't.
+>
+> **Two lessons.** Design a journey, not a data flow — a pipeline described in a spec gets built
+> as a pipeline of screens unless someone says otherwise. And when removing something, separate
+> what it did *badly* from what it did *quietly well*.
 >
 > Two deviations from what this section originally specified, both deliberate:
 >

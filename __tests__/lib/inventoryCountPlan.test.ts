@@ -211,7 +211,7 @@ describe('draft persistence', () => {
   const entries: CountEntries = { a: 3 };
 
   it('round-trips a draft', () => {
-    const draft = buildDraft('co1', entries, 1000);
+    const draft = buildDraft('co1', ['a'], entries, 1000);
     expect(parseDraft(JSON.stringify(draft), 'co1')).toEqual(draft);
   });
 
@@ -220,20 +220,24 @@ describe('draft persistence', () => {
   });
 
   it('discards a draft belonging to another company', () => {
-    const draft = buildDraft('co1', entries, 1000);
+    const draft = buildDraft('co1', ['a'], entries, 1000);
     expect(parseDraft(JSON.stringify(draft), 'co2')).toBeNull();
   });
 
   it('discards an older shape rather than half-restoring it', () => {
-    // v1 stored { partIds, lines }; the sheet no longer has a scoped line set.
-    const v1 = JSON.stringify({ version: 1, companyId: 'co1', partIds: ['a'], lines: [], savedAt: 1 });
-    expect(parseDraft(v1, 'co1')).toBeNull();
+    // v2 dropped partIds when the sheet briefly had no scope step; v3 needs them back.
+    const v2 = JSON.stringify({ version: 2, companyId: 'co1', entries, savedAt: 1 });
+    expect(parseDraft(v2, 'co1')).toBeNull();
   });
 
   it('survives corrupted or absent storage', () => {
     expect(parseDraft('not json', 'co1')).toBeNull();
     expect(parseDraft(null, 'co1')).toBeNull();
-    expect(parseDraft(JSON.stringify({ version: 1, companyId: 'co1' }), 'co1')).toBeNull();
+    expect(parseDraft(JSON.stringify({ version: 3, companyId: 'co1' }), 'co1')).toBeNull();
+    // entries present but scope missing — can't tell how big the count was meant to be.
+    expect(
+      parseDraft(JSON.stringify({ version: 3, companyId: 'co1', entries, savedAt: 1 }), 'co1'),
+    ).toBeNull();
   });
 });
 
@@ -249,7 +253,7 @@ describe('storage helpers when localStorage is unavailable', () => {
       configurable: true,
     });
 
-    const draft = buildDraft('co1', { a: 3 }, 1);
+    const draft = buildDraft('co1', ['a'], { a: 3 }, 1);
     expect(safeStorage()).toBeNull();
     expect(readDraft('co1')).toBeNull();
     expect(() => writeDraft(draft)).not.toThrow();

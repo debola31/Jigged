@@ -162,14 +162,19 @@ export function countNote(v: CountVariance): string {
 
 // ── Draft persistence ────────────────────────────────────────────────────────
 
-export const DRAFT_VERSION = 2 as const;
+export const DRAFT_VERSION = 3 as const;
 
 export function draftKey(companyId: string): string {
   return `jigged.inventoryCount.${companyId}`;
 }
 
-export function buildDraft(companyId: string, entries: CountEntries, now: number): CountDraft {
-  return { version: DRAFT_VERSION, companyId, entries, savedAt: now };
+export function buildDraft(
+  companyId: string,
+  partIds: string[],
+  entries: CountEntries,
+  now: number,
+): CountDraft {
+  return { version: DRAFT_VERSION, companyId, partIds, entries, savedAt: now };
 }
 
 /**
@@ -186,6 +191,7 @@ export function parseDraft(raw: string | null, companyId: string): CountDraft | 
     if (parsed.version !== DRAFT_VERSION) return null;
     if (parsed.companyId !== companyId) return null;
     if (typeof parsed.savedAt !== 'number') return null;
+    if (!Array.isArray(parsed.partIds)) return null;
     if (!parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
       return null;
     }

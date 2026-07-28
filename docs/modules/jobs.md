@@ -458,13 +458,13 @@ how many operations its routing has.
 > recording an actual quantity, and auto-depleting stock on completion were **removed** by
 > migration `20260614043526_retire_job_material_consumption`. Stock depletion is a deliberate
 > manual transaction. Rebuilding it is journey **J9** in
-> [`docs/inventory-flow.md`](../inventory-flow.md) (issue #550).
+> [`inventory.md`](inventory.md) (issue #550).
 
 ### `job_materials` Table
 
 Written once at job-part creation and **read by nothing** — the UI reads the live BOM instead
 (see [UI](#ui) below). Its fate is an open decision:
-[`inventory-flow.md`](../inventory-flow.md) §5.9.
+[`inventory.md`](inventory.md) §5.9.
 
 | Column | Type | Required | Description |
 |---|---|---|---|

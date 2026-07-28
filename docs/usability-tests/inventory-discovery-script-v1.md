@@ -14,7 +14,7 @@
 >
 > **Why this exists.** No user research on inventory has ever been run. The storage
 > vocabulary in the product came from generic warehouse research, not from this shop. Every
-> journey in [`docs/inventory-flow.md`](../inventory-flow.md) marked *hypothesis* is waiting
+> journey in [`docs/modules/inventory.md`](../modules/inventory.md) marked *hypothesis* is waiting
 > on this conversation.
 
 ---
@@ -131,7 +131,7 @@ a fiction. Ask specifically whether anything is checked against the order.
 > "Once you know a job is running, does the material get pulled and set aside beforehand, or
 > does someone grab it at the machine when they start?"
 
-*Decides:* [`inventory-flow.md`](../inventory-flow.md) §5.2 — whether **a job is a place**. If
+*Decides:* [`inventory.md`](../modules/inventory.md) §5.2 — whether **a job is a place**. If
 they stage material against a job, modelling a job as a container gives us kitting and
 shortage-at-kitting for free. If they grab it at the machine, J7 is a plain depletion with a
 job id.
@@ -154,7 +154,7 @@ label would survive — and whether anything in the building is already labelled
 > "Would anyone ever scan ten things one after another? Counting a shelf, or checking in a
 > pallet?"
 
-*Decides:* **the entire native-app question** ([`inventory-flow.md`](../inventory-flow.md)
+*Decides:* **the entire native-app question** ([`inventory.md`](../modules/inventory.md)
 §5.10). Walking up to one bin is about two taps either way. Ten bins is ten camera-app round
 trips, and that is the only workflow a native app clearly wins.
 
@@ -260,7 +260,7 @@ Severity:
 
 | Severity | Meaning |
 |---|---|
-| `blocker` | Contradicts a decision already made in `inventory-flow.md` |
+| `blocker` | Contradicts a decision already made in `docs/modules/inventory.md` |
 | `major` | Changes the shape of a journey |
 | `minor` | Changes a detail or a label |
 | `confirm` | Validates a hypothesis — record these too; they're how a hypothesis becomes a decision |
@@ -269,7 +269,7 @@ Photos go in a dated folder; reference the filename in the row.
 
 ### Immediately after
 
-1. Answer the certs question in [`inventory-flow.md`](../inventory-flow.md) §8 and, if the
+1. Answer the certs question in [`inventory.md`](../modules/inventory.md) §9 and, if the
    answer is no, cut Phase 4's traceability half.
 2. Decide §5.2 (job as place) from probe 6.
 3. Update every journey still marked *hypothesis* to *validated* or *revised*.

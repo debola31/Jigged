@@ -668,7 +668,6 @@ Product documentation is version-controlled in the `/docs` folder.
 | System Architecture | [docs/architecture.md](docs/architecture.md) |
 | Design System | [docs/design-system.md](docs/design-system.md) |
 | Operator Paperless Flow (journey spec) | [docs/operator-paperless-flow.md](docs/operator-paperless-flow.md) |
-| Inventory & Material Flow (journey spec) | [docs/inventory-flow.md](docs/inventory-flow.md) |
 
 ### Module Specifications
 

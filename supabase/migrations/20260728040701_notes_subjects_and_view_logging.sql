@@ -659,15 +659,26 @@ AS $$
   JOIN public.user_company_access uca ON uca.id = v.viewer_id
   LEFT JOIN public.jobs j             ON j.id = v.job_id
   WHERE n.id = p_note_id
-    -- The caller must BE the author. author_id is nullable (ON DELETE SET NULL) and
-    -- get_operator_access_id() is NULL for a non-member, so the IS NOT NULL guard
-    -- prevents a NULL = NULL accident from ever mattering.
+    -- The caller must BE the author, and that is the ONLY test. author_id is
+    -- nullable (ON DELETE SET NULL) and get_operator_access_id() is NULL for a
+    -- non-member, so the IS NOT NULL guard prevents a NULL = NULL accident from
+    -- ever mattering.
+    --
+    -- DELIBERATELY NOT role-dependent. An earlier draft excluded company admins,
+    -- to block an admin authoring a must-read note and harvesting a named read
+    -- list. That is dropped, because in a fifteen-person shop roles are fluid:
+    -- an operator promoted to lead would silently stop seeing who used their own
+    -- notes, losing the feedback loop that got them writing. Behaviour that
+    -- changes when someone's role changes is worse than the speed bump it buys —
+    -- and the bump was already defeatable, since anyone who can create accounts
+    -- can author from a non-admin one.
+    --
+    -- The guarantee is now one sentence with no exceptions: you see who used YOUR
+    -- notes; nobody sees who used anyone else's. The protection that actually
+    -- matters — no shop-wide report of who read which notes — is unaffected, and
+    -- lives in note_views having no client read path at all.
     AND n.author_id IS NOT NULL
     AND n.author_id = public.get_operator_access_id(n.company_id)
-    -- The boss never gets names, not even on notes he wrote himself. Without this an
-    -- admin authors a must-read note and harvests a named read list entirely
-    -- legitimately — the largest hole that looks like a feature.
-    AND NOT public.is_company_admin(n.company_id)
   GROUP BY uca.id, uca.name
   -- Ordered by NAME, never by time. No timestamp is returned at all.
   ORDER BY uca.name NULLS LAST;

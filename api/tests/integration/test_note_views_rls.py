@@ -343,9 +343,13 @@ def test_non_author_gets_no_names(shop):
     assert shop["reader2"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data == []
 
 
-def test_admin_gets_no_names_even_on_a_note_they_authored(shop):
-    """Closes the bait-note bypass: an admin authors a must-read note, then
-    harvests a named read list entirely legitimately."""
+def test_attribution_does_not_depend_on_the_authors_role(shop):
+    """An admin author sees names exactly like an operator author does.
+
+    Roles are fluid in a shop this size — an operator promoted to lead must not
+    silently lose the feedback loop on notes they already wrote. The rule has no
+    role branch: you see who used YOUR notes, nobody sees who used anyone else's.
+    """
     note_id = (
         shop["admin"]
         .table("notes")
@@ -365,9 +369,28 @@ def test_admin_gets_no_names_even_on_a_note_they_authored(shop):
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
 
-    assert shop["boss"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data == []
-    # ...but the aggregate count is still visible, as designed.
+    rows = shop["boss"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data
+    assert [r["viewer_name"] for r in rows] == ["Dana"]
     assert _counts(shop, note_id)[0] == 1
+
+
+def test_role_change_does_not_change_what_an_author_can_see(shop):
+    """The concrete regression the role branch would have caused: promote the
+    author, and their view of their own notes must be identical."""
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    before = shop["author"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data
+
+    shop["admin"].table("user_company_access").update({"role": "admin"}).eq(
+        "id", shop["author"]["access_id"]
+    ).execute()
+
+    after = shop["author"]["client"].rpc("note_viewers", {"p_note_id": note_id}).execute().data
+    assert after == before
+    assert [r["viewer_name"] for r in after] == ["Dana"]
 
 
 def test_counters_never_fall_when_a_member_is_deleted(shop):

@@ -524,3 +524,16 @@ def test_new_tables_are_gated_or_explicitly_exempt(supabase_admin):
     are SECURITY DEFINER-only writers, so they are exempt rather than gated."""
     rows = supabase_admin.rpc("tenant_tables_missing_write_gate", {}).execute().data
     assert rows == [], f"un-gated tenant tables: {rows}"
+
+
+def test_read_log_is_not_granted_to_the_ai_sql_role(shop):
+    """Regression guard for a grant that arrives by DEFAULT, not by anyone writing it.
+
+    baseline.sql sets `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES TO
+    jigged_ai_readonly`, so every new public table is granted to the AI SQL role on
+    creation. Both tables here therefore need an explicit REVOKE, and this test
+    exists because reading the migration will not reveal the grant — only the
+    database will. "Which operators read the setup notes?" must not be answerable.
+    """
+    leaks = shop["admin"].rpc("no_client_access_grant_leaks", {}).execute().data
+    assert leaks == [], f"no-client-access tables are granted to: {leaks}"

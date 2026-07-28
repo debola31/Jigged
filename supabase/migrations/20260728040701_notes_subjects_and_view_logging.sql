@@ -439,8 +439,16 @@ ALTER TABLE public.note_views ENABLE ROW LEVEL SECURITY;
 -- value of writing this down is that RESTRICTIVE policies AND together, so a future
 -- migration that adds a well-meaning permissive SELECT policy still evaluates false.
 -- The guarantee survives someone else's good intentions.
+--
+-- jigged_ai_readonly is named EXPLICITLY, and that is not belt-and-braces. The AI SQL
+-- path (api/tools/sql_executor.py) runs LLM-generated SQL as that role, and
+-- docs/modules/ai-insights.md instructs anyone widening AI scope to add an
+-- `ai_readonly_select ... USING (true)` policy to the table. On a table whose
+-- RESTRICTIVE policy named only anon/authenticated, that instruction would silently
+-- open the read log to "which operators read the setup notes?". Listing the role here
+-- makes the deny survive that too.
 CREATE POLICY note_views_no_client_access ON public.note_views
-    AS RESTRICTIVE FOR ALL TO anon, authenticated
+    AS RESTRICTIVE FOR ALL TO anon, authenticated, jigged_ai_readonly
     USING (false) WITH CHECK (false);
 
 -- Grants are the load-bearing control here, more than RLS is. In particular there is no
@@ -449,9 +457,15 @@ CREATE POLICY note_views_no_client_access ON public.note_views
 -- that RLS is powerless against, because the count is over exactly the rows a policy
 -- admitted. If SELECT is ever granted with ANY row-returning policy, that hole is open.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.note_views TO service_role;
--- No-ops under the current default privileges; kept as documentation-as-code, matching
--- the quickbooks_connections precedent for backend-only tables.
 REVOKE ALL ON public.note_views FROM anon, authenticated;
+
+-- NOT a no-op, unlike the line above. baseline.sql:6431 sets
+--   ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+--     GRANT SELECT ON TABLES TO jigged_ai_readonly;
+-- so every new public table is granted to the AI role on creation. Without this
+-- REVOKE the read log ships readable-by-grant, held shut only by RLS and a Python
+-- denylist. Any new table in this family needs the same line.
+REVOKE ALL ON public.note_views FROM jigged_ai_readonly;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- 6. COUNTERS
@@ -808,13 +822,17 @@ CREATE INDEX idx_operator_events_company_time
 
 ALTER TABLE public.operator_events ENABLE ROW LEVEL SECURITY;
 
--- Same shape as note_views, and for the same reason.
+-- Same shape as note_views, and for the same reasons — including naming
+-- jigged_ai_readonly so a future ai_readonly_select policy cannot open a
+-- per-operator behaviour log.
 CREATE POLICY operator_events_no_client_access ON public.operator_events
-    AS RESTRICTIVE FOR ALL TO anon, authenticated
+    AS RESTRICTIVE FOR ALL TO anon, authenticated, jigged_ai_readonly
     USING (false) WITH CHECK (false);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.operator_events TO service_role;
 REVOKE ALL ON public.operator_events FROM anon, authenticated;
+-- Undoes the baseline's default GRANT to the AI role — see the note on note_views.
+REVOKE ALL ON public.operator_events FROM jigged_ai_readonly;
 
 CREATE OR REPLACE FUNCTION public.log_operator_event(
   p_company_id uuid,
@@ -901,3 +919,37 @@ COMMENT ON FUNCTION public.tenant_tables_missing_write_gate() IS
   'Lists public tables with a company_id column that are neither billing-gated nor exempt. A CI test asserts this returns no rows, so a new tenant table left un-gated fails the build instead of silently bypassing billing.';
 
 GRANT EXECUTE ON FUNCTION public.tenant_tables_missing_write_gate() TO service_role;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 11. NO-CLIENT-ACCESS COMPLETENESS CHECK
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- The tables in section 5 and 9 must be unreachable by every non-service role. The
+-- non-obvious hazard is that one of those grants arrives BY DEFAULT: baseline.sql
+-- runs
+--     ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+--       GRANT SELECT ON TABLES TO jigged_ai_readonly;
+-- so a new table is granted to the AI SQL role at CREATE time, without anyone
+-- writing a GRANT. Reading the migration will not reveal it — only the database
+-- will — so this is a runtime check rather than a code-review convention.
+--
+-- Same idiom as tenant_tables_missing_write_gate(): a CI test asserts no rows, so a
+-- future table in this family that forgets its REVOKE fails the build instead of
+-- silently exposing a per-operator reading report.
+CREATE OR REPLACE FUNCTION public.no_client_access_grant_leaks()
+RETURNS TABLE(table_name text, grantee text, privilege_type text)
+LANGUAGE sql
+STABLE
+SET search_path TO 'public', 'pg_temp'
+AS $$
+  SELECT g.table_name::text, g.grantee::text, g.privilege_type::text
+  FROM information_schema.role_table_grants g
+  WHERE g.table_schema = 'public'
+    AND g.table_name IN ('note_views', 'operator_events')
+    AND g.grantee IN ('anon', 'authenticated', 'jigged_ai_readonly', 'PUBLIC')
+  ORDER BY 1, 2, 3;
+$$;
+
+COMMENT ON FUNCTION public.no_client_access_grant_leaks() IS
+  'Lists any grant on the no-client-access tables (note_views, operator_events) to a browser or AI role. Must always be empty: those tables are readable only by service_role, and written only through SECURITY DEFINER functions. Catches the default-privilege GRANT to jigged_ai_readonly that lands automatically on every new public table.';
+
+GRANT EXECUTE ON FUNCTION public.no_client_access_grant_leaks() TO service_role;

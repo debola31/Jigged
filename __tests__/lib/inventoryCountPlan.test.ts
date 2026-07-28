@@ -10,15 +10,17 @@ import {
   countableCandidates,
   countedTally,
   draftKey,
+  isBigDelta,
   excludedCandidates,
   parseDraft,
   readDraft,
   resolveCountTarget,
+  rowDelta,
   safeStorage,
   writeDraft,
   type LocationBalance,
 } from '@/lib/inventoryCountPlan';
-import type { CountCandidate, CountLine } from '@/types/inventoryCount';
+import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
 
 const bal = (locationId: string, quantity: number, locationName = locationId): LocationBalance => ({
   locationId,
@@ -99,13 +101,35 @@ describe('scope partitioning', () => {
 });
 
 describe('countedTally', () => {
-  it('counts only lines carrying a number', () => {
-    const lines: CountLine[] = [
-      { partId: 'a', counted: 5 },
-      { partId: 'b', counted: null },
-      { partId: 'c', counted: 0 }, // zero is a real count, not "unanswered"
-    ];
-    expect(countedTally(lines)).toEqual({ counted: 2, total: 3 });
+  it('counts entries, and zero is a real count rather than "unanswered"', () => {
+    expect(countedTally({ a: 5, c: 0 })).toBe(2);
+    expect(countedTally({})).toBe(0);
+  });
+});
+
+describe('rowDelta', () => {
+  const c = candidate({ partId: 'a', systemQuantity: 10 });
+
+  it('returns null for an uncounted row, so the UI shows nothing', () => {
+    expect(rowDelta(c, {})).toBeNull();
+  });
+
+  it('returns a signed delta once counted, and 0 when it matches', () => {
+    expect(rowDelta(c, { a: 7 })).toBe(-3);
+    expect(rowDelta(c, { a: 10 })).toBe(0);
+  });
+});
+
+describe('isBigDelta', () => {
+  it('flags a change of half or more', () => {
+    const c = candidate({ partId: 'a', systemQuantity: 10 });
+    expect(isBigDelta(c, -6)).toBe(true);
+    expect(isBigDelta(c, -1)).toBe(false);
+    expect(isBigDelta(c, 0)).toBe(false);
+  });
+
+  it('treats any count against zero on-hand as big', () => {
+    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5)).toBe(true);
   });
 });
 
@@ -116,13 +140,12 @@ describe('buildVariances', () => {
     candidate({ partId: 'x', partName: 'X', target: { kind: 'excluded', reason: 'split' } }),
   ];
 
-  it('ignores uncounted lines entirely — no entry means no opinion', () => {
-    const v = buildVariances(candidates, [{ partId: 'a', counted: null }], new Map());
-    expect(v).toEqual([]);
+  it('ignores uncounted parts entirely — no entry means no opinion', () => {
+    expect(buildVariances(candidates, {}, new Map())).toEqual([]);
   });
 
   it('computes a signed delta against the current system quantity', () => {
-    const v = buildVariances(candidates, [{ partId: 'a', counted: 7 }], new Map());
+    const v = buildVariances(candidates, { a: 7 }, new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(-3);
     expect(v[0].magnitude).toBeCloseTo(0.3);
@@ -130,22 +153,22 @@ describe('buildVariances', () => {
 
   it('flags a line whose system quantity moved while the sheet was open', () => {
     const openedWith = new Map([['a', 12]]); // sheet opened at 12, now 10
-    const v = buildVariances(candidates, [{ partId: 'a', counted: 7 }], openedWith);
+    const v = buildVariances(candidates, { a: 7 }, openedWith);
     expect(v[0].movedSinceOpened).toBe(true);
   });
 
   it('does not flag a line that held still', () => {
-    const v = buildVariances(candidates, [{ partId: 'a', counted: 7 }], new Map([['a', 10]]));
+    const v = buildVariances(candidates, { a: 7 }, new Map([['a', 10]]));
     expect(v[0].movedSinceOpened).toBe(false);
   });
 
   it('skips excluded parts even if a count somehow got entered', () => {
-    expect(buildVariances(candidates, [{ partId: 'x', counted: 3 }], new Map())).toEqual([]);
+    expect(buildVariances(candidates, { x: 3 }, new Map())).toEqual([]);
   });
 
   it('treats any count against zero on-hand as a full-magnitude change', () => {
     const zeroed = [candidate({ partId: 'z', systemQuantity: 0 })];
-    const v = buildVariances(zeroed, [{ partId: 'z', counted: 5 }], new Map());
+    const v = buildVariances(zeroed, { z: 5 }, new Map());
     expect(v[0].magnitude).toBe(1);
   });
 });
@@ -156,12 +179,12 @@ describe('committable + big variances', () => {
     candidate({ partId: 'small', systemQuantity: 10 }),
     candidate({ partId: 'big', systemQuantity: 10 }),
   ];
-  const lines: CountLine[] = [
-    { partId: 'same', counted: 10 }, // matches — nothing to write
-    { partId: 'small', counted: 9 }, // 10%
-    { partId: 'big', counted: 2 }, // 80%
-  ];
-  const variances = buildVariances(candidates, lines, new Map());
+  const entries: CountEntries = {
+    same: 10, // matches — nothing to write
+    small: 9, // 10%
+    big: 2, // 80%
+  };
+  const variances = buildVariances(candidates, entries, new Map());
 
   it('drops lines counted equal to the system — no write needed', () => {
     expect(committableVariances(variances).map((v) => v.candidate.partId)).toEqual(['small', 'big']);
@@ -177,7 +200,7 @@ describe('countNote', () => {
   it('records both numbers so the ledger explains where the count came from', () => {
     const v = buildVariances(
       [candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 })],
-      [{ partId: 'a', counted: 38 }],
+      { a: 38 },
       new Map(),
     )[0];
     expect(countNote(v)).toBe('Stock count — counted 38 ft (system said 40 ft)');
@@ -185,10 +208,10 @@ describe('countNote', () => {
 });
 
 describe('draft persistence', () => {
-  const lines: CountLine[] = [{ partId: 'a', counted: 3 }];
+  const entries: CountEntries = { a: 3 };
 
   it('round-trips a draft', () => {
-    const draft = buildDraft('co1', ['a'], lines, 1000);
+    const draft = buildDraft('co1', entries, 1000);
     expect(parseDraft(JSON.stringify(draft), 'co1')).toEqual(draft);
   });
 
@@ -197,13 +220,14 @@ describe('draft persistence', () => {
   });
 
   it('discards a draft belonging to another company', () => {
-    const draft = buildDraft('co1', ['a'], lines, 1000);
+    const draft = buildDraft('co1', entries, 1000);
     expect(parseDraft(JSON.stringify(draft), 'co2')).toBeNull();
   });
 
   it('discards an older shape rather than half-restoring it', () => {
-    const stale = JSON.stringify({ version: 0, companyId: 'co1', partIds: ['a'], lines, savedAt: 1 });
-    expect(parseDraft(stale, 'co1')).toBeNull();
+    // v1 stored { partIds, lines }; the sheet no longer has a scoped line set.
+    const v1 = JSON.stringify({ version: 1, companyId: 'co1', partIds: ['a'], lines: [], savedAt: 1 });
+    expect(parseDraft(v1, 'co1')).toBeNull();
   });
 
   it('survives corrupted or absent storage', () => {
@@ -225,7 +249,7 @@ describe('storage helpers when localStorage is unavailable', () => {
       configurable: true,
     });
 
-    const draft = buildDraft('co1', ['a'], [{ partId: 'a', counted: 3 }], 1);
+    const draft = buildDraft('co1', { a: 3 }, 1);
     expect(safeStorage()).toBeNull();
     expect(readDraft('co1')).toBeNull();
     expect(() => writeDraft(draft)).not.toThrow();

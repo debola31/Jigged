@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -26,9 +26,9 @@ import type { CountCandidate } from '@/types/inventoryCount';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
-// This jsdom setup doesn't provide localStorage (no --localstorage-file), which is also a
-// real browser case — private mode and some webviews. The page tolerates its absence; these
-// tests need a working one to exercise the draft, so install a minimal in-memory shim.
+// This jsdom setup doesn't provide localStorage (no --localstorage-file), which is also a real
+// browser case — private mode and some webviews. The page tolerates its absence; these tests
+// need a working one to exercise the draft, so install a minimal in-memory shim.
 const memoryStorage = () => {
   let store: Record<string, string> = {};
   return {
@@ -63,6 +63,10 @@ const renderPage = () =>
     wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
   });
 
+/** The count input for a named part — every row has one, so scope by label. */
+const inputFor = (partName: string) =>
+  screen.getByRole('spinbutton', { name: new RegExp(`counted quantity for ${partName}`, 'i') });
+
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
@@ -74,11 +78,26 @@ beforeEach(() => {
   asMock(commitCount).mockResolvedValue({ committed: 1, failures: [] });
 });
 
-describe('scope step', () => {
-  it('lists stocked parts with their current quantity', async () => {
+describe('landing', () => {
+  it('drops you straight onto the parts with no scope step to get past', async () => {
     renderPage();
+    // Both parts, and their inputs, are present on arrival — no selection gate.
     expect(await screen.findByText('4140 bar')).toBeInTheDocument();
-    expect(screen.getByText('40 ft')).toBeInTheDocument();
+    expect(inputFor('4140 bar')).toBeInTheDocument();
+    expect(inputFor('6061 plate')).toBeInTheDocument();
+  });
+
+  it('says what the page is for, and that blanks are safe', async () => {
+    renderPage();
+    expect(await screen.findByText(/walk your shop and enter what you actually have/i)).toBeInTheDocument();
+    expect(screen.getByText(/leave blank stays exactly as it is/i)).toBeInTheDocument();
+  });
+
+  it('starts every input empty, so nothing can be tabbed past and accepted', async () => {
+    renderPage();
+    await screen.findByText('4140 bar');
+    expect(inputFor('4140 bar')).toHaveValue(null);
+    expect(inputFor('6061 plate')).toHaveValue(null);
   });
 
   it('names parts held back instead of dropping them silently', async () => {
@@ -92,7 +111,6 @@ describe('scope step', () => {
     ]);
     renderPage();
     await screen.findByText('4140 bar');
-
     expect(screen.getByText(/not on this sheet/i)).toBeInTheDocument();
     expect(screen.getByText('Split part')).toBeInTheDocument();
   });
@@ -104,84 +122,118 @@ describe('scope step', () => {
   });
 });
 
-describe('counting', () => {
-  it('tracks progress and leaves blank lines alone', async () => {
+describe('inline feedback', () => {
+  it('shows the delta on the row as soon as a number is typed', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
-    await user.click(screen.getByRole('button', { name: /select all/i }));
-    await user.click(screen.getByRole('button', { name: /count 2 items/i }));
-
-    expect(await screen.findByText('0 of 2 counted')).toBeInTheDocument();
-
-    const inputs = screen.getAllByRole('spinbutton', { name: /counted/i });
-    await user.type(inputs[0], '38');
-
-    expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
+    await user.type(inputFor('4140 bar'), '38');
+    expect(await screen.findByText('-2')).toBeInTheDocument();
   });
 
-  it('re-reads current quantities before showing variances', async () => {
+  it('says a count matches rather than showing a zero delta', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
-    await user.click(screen.getByRole('button', { name: /select all/i }));
-    await user.click(screen.getByRole('button', { name: /count 2 items/i }));
-    await user.type(screen.getAllByRole('spinbutton', { name: /counted/i })[0], '38');
-    await user.click(screen.getByRole('button', { name: /^review$/i }));
-
-    // Variances must be computed against a fresh read, not the sheet's opening snapshot.
-    await waitFor(() => expect(refreshSystemQuantities).toHaveBeenCalledWith(['p1', 'p2']));
+    await user.type(inputFor('4140 bar'), '40');
+    // Anchored: the footer also says "Everything matches so far".
+    expect(await screen.findByText(/^Matches$/)).toBeInTheDocument();
   });
 
-  it('says a part moved while the count was open', async () => {
+  it('tracks progress and what will change, in plain language', async () => {
     const user = userEvent.setup();
-    // Opened at 40, now 44 — the count is still valid, but the variance shifted underneath.
-    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    renderPage();
+    await screen.findByText('4140 bar');
+    expect(screen.getByText(/nothing entered yet/i)).toBeInTheDocument();
+
+    await user.type(inputFor('4140 bar'), '40'); // matches
+    expect(await screen.findByText(/everything matches so far/i)).toBeInTheDocument();
+
+    await user.type(inputFor('6061 plate'), '9'); // changes
+    expect(await screen.findByText('2 counted')).toBeInTheDocument();
+    expect(screen.getByText('1 will change')).toBeInTheDocument();
+  });
+
+  it('cannot save when nothing would change', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+    expect(screen.getByRole('button', { name: /save 0 changes/i })).toBeDisabled();
+
+    await user.type(inputFor('4140 bar'), '40'); // matches — still nothing to write
+    expect(screen.getByRole('button', { name: /save 0 changes/i })).toBeDisabled();
+  });
+
+  it('clearing an input un-counts the row rather than counting it as zero', async () => {
+    const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
-    await user.click(screen.getByRole('button', { name: /select all/i }));
-    await user.click(screen.getByRole('button', { name: /count 2 items/i }));
-    await user.type(screen.getAllByRole('spinbutton', { name: /counted/i })[0], '38');
-    await user.click(screen.getByRole('button', { name: /^review$/i }));
+    await user.type(inputFor('4140 bar'), '38');
+    expect(await screen.findByText('1 counted')).toBeInTheDocument();
 
-    expect(await screen.findByText(/moved while you were counting/i)).toBeInTheDocument();
+    await user.clear(inputFor('4140 bar'));
+    expect(await screen.findByText('0 counted')).toBeInTheDocument();
   });
 });
 
-describe('review and commit', () => {
-  const reachReview = async (counted: string) => {
+describe('saving', () => {
+  const enterAndSave = async (partName: string, value: string) => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
-    await user.click(screen.getByRole('button', { name: /select all/i }));
-    await user.click(screen.getByRole('button', { name: /count 2 items/i }));
-    await user.type(screen.getAllByRole('spinbutton', { name: /counted/i })[0], counted);
-    await user.click(screen.getByRole('button', { name: /^review$/i }));
+    await user.type(inputFor(partName), value);
+    await user.click(screen.getByRole('button', { name: /save 1 change/i }));
     return user;
   };
 
-  it('commits a routine change without an extra prompt', async () => {
-    const user = await reachReview('38'); // 40 -> 38, a 5% change
-    await user.click(await screen.findByRole('button', { name: /save 1 change/i }));
+  it('re-reads current quantities before confirming', async () => {
+    await enterAndSave('4140 bar', '38');
+    await waitFor(() => expect(refreshSystemQuantities).toHaveBeenCalledWith(['p1']));
+  });
 
+  it('confirms in a dialog instead of a separate review page', async () => {
+    const user = await enterAndSave('4140 bar', '38');
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/save 1 change\?/i)).toBeInTheDocument();
+    expect(commitCount).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
     const [variances] = asMock(commitCount).mock.calls[0];
     expect(variances).toHaveLength(1);
     expect(variances[0].counted).toBe(38);
   });
 
-  it('asks before committing a big swing — most of those are miscounts', async () => {
-    const user = await reachReview('2'); // 40 -> 2, a 95% change
-    await user.click(await screen.findByRole('button', { name: /save 1 change/i }));
+  it('calls out a big swing in the dialog — most of those are miscounts', async () => {
+    await enterAndSave('4140 bar', '2'); // 40 -> 2
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/more than half of what the system had/i)).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText(/big change/i)).toBeInTheDocument();
+  it('does not call that out for a routine change', async () => {
+    await enterAndSave('4140 bar', '38'); // 5%
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByText(/more than half/i)).not.toBeInTheDocument();
+  });
+
+  it('says which parts moved while the count was open', async () => {
+    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    await enterAndSave('4140 bar', '38');
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/moved while you were counting/i)).toBeInTheDocument();
+  });
+
+  it('backs out to the sheet with entries intact', async () => {
+    const user = await enterAndSave('4140 bar', '38');
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /keep counting/i }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(inputFor('4140 bar')).toHaveValue(38);
     expect(commitCount).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: /save anyway/i }));
-    await waitFor(() => expect(commitCount).toHaveBeenCalled());
   });
 
   it('reports partial failure instead of claiming success', async () => {
@@ -189,56 +241,69 @@ describe('review and commit', () => {
       committed: 0,
       failures: [{ partName: '4140 bar', message: 'network died' }],
     });
-    const user = await reachReview('38');
-    await user.click(await screen.findByRole('button', { name: /save 1 change/i }));
+    const user = await enterAndSave('4140 bar', '38');
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
 
     expect(await screen.findByText(/could not be saved/i)).toBeInTheDocument();
     expect(mockPush).not.toHaveBeenCalled();
   });
-
-  it('says there is nothing to do when every count matched', async () => {
-    await reachReview('40'); // equals the system quantity
-    expect(await screen.findByText(/nothing to change/i)).toBeInTheDocument();
-  });
 });
 
-describe('draft resume', () => {
-  it('offers to resume an unfinished count', async () => {
+describe('draft', () => {
+  it('picks a count back up automatically, without asking', async () => {
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
-      JSON.stringify({
-        version: 1,
-        companyId: 'co1',
-        partIds: ['p1', 'p2'],
-        lines: [
-          { partId: 'p1', counted: 38 },
-          { partId: 'p2', counted: null },
-        ],
-        savedAt: Date.now(),
-      }),
+      JSON.stringify({ version: 2, companyId: 'co1', entries: { p1: 38 }, savedAt: Date.now() }),
     );
 
     renderPage();
-    expect(await screen.findByText(/unfinished count/i)).toBeInTheDocument();
+    await screen.findByText('4140 bar');
+    // Restored into the field, and reported so it isn't a surprise.
+    expect(inputFor('4140 bar')).toHaveValue(38);
+    expect(screen.getByText(/picked up your unfinished count/i)).toBeInTheDocument();
+  });
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /resume/i }));
-    // Picks up where it left off rather than restarting at zero.
-    expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
+  it('can be discarded to start clean', async () => {
+    window.localStorage.setItem(
+      'jigged.inventoryCount.co1',
+      JSON.stringify({ version: 2, companyId: 'co1', entries: { p1: 38 }, savedAt: Date.now() }),
+    );
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /start over/i }));
+    await waitFor(() => expect(inputFor('4140 bar')).toHaveValue(null));
   });
 
   it('ignores a draft from another company', async () => {
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
       JSON.stringify({
-        version: 1,
+        version: 2,
         companyId: 'SOMEONE-ELSE',
-        partIds: ['p1'],
-        lines: [{ partId: 'p1', counted: 5 }],
+        entries: { p1: 5 },
         savedAt: Date.now(),
       }),
     );
     renderPage();
     await screen.findByText('4140 bar');
-    expect(screen.queryByText(/unfinished count/i)).not.toBeInTheDocument();
+    expect(inputFor('4140 bar')).toHaveValue(null);
+  });
+
+  it('drops entries whose part no longer exists rather than misattaching them', async () => {
+    window.localStorage.setItem(
+      'jigged.inventoryCount.co1',
+      JSON.stringify({
+        version: 2,
+        companyId: 'co1',
+        entries: { 'deleted-part': 99, p1: 7 },
+        savedAt: Date.now(),
+      }),
+    );
+    renderPage();
+    await screen.findByText('4140 bar');
+    expect(inputFor('4140 bar')).toHaveValue(7);
+    expect(await screen.findByText('1 counted')).toBeInTheDocument();
   });
 });

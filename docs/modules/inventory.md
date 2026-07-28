@@ -701,7 +701,33 @@ before it goes back on the rack. The software should mirror that habit, not repl
 A **count sheet**: here is what we think is here, walk it, enter what you find, review the
 variance, commit. Committing writes `adjustment` rows with a reason.
 
-> **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — Scope → Sheet → Review.
+> **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **one page.** You land on
+> your stocked parts, type what you actually have, and the delta appears on the row as you
+> type. Save opens a single confirm dialog.
+>
+> **This shipped as Scope → Sheet → Review first, and that was wrong.** The lesson is worth
+> keeping, because the failure came from this spec: J9 said *"walk it, enter what you find,
+> review the variance, commit"* — a data flow — and that got built literally, as three pages.
+> Reviewing it surfaced three problems, one of them structural:
+>
+> - **The scope step was a gate before value.** You had to declare what you'd count before
+>   counting anything. But you walk to a shelf and write down what's there; the set *emerges*
+>   from counting. That is structure-before-value — **the identical mistake
+>   [§5.5](#55-locations-keep-them-visual-change-when-they-appear) diagnoses in the location
+>   builder**, rebuilt in a different costume by the same person who wrote the diagnosis.
+>   [Sortly's count](https://help.sortly.com/hc/en-us/articles/41121062802203-Stock-Counts) has
+>   no scope step either: an item enters the count by being counted.
+> - **The review page restated deltas** the counter would have understood better the moment
+>   they typed them. Inline feedback strictly beats a page reached later.
+> - **The count field didn't read as a field** — an outlined input with a floating label and no
+>   value looks like a static chip. It now shows a dash placeholder with the unit beside it.
+>
+> Also gone: *"1 item needs adjusting. 0 matched."* — "matched" is accounting language. The
+> footer now reads *"3 counted · 2 will change"*.
+>
+> **Design a journey, not a data flow.** A pipeline described in a spec will be built as a
+> pipeline of screens unless someone says otherwise.
+>
 > Two deviations from what this section originally specified, both deliberate:
 >
 > **1. Item-scoped, not "scoped to a place."** `inventory_locations` is opt-in and default-off,

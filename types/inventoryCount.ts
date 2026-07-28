@@ -1,11 +1,14 @@
 /**
  * Inventory count sheet — domain types (journey J9 in docs/modules/inventory.md).
  *
- * A count is deliberately NOT a server-side session: the sheet is client state autosaved to
+ * A count is deliberately NOT a server-side session: entries are client state autosaved to
  * localStorage, and each committed line writes through the existing adjust functions. There
  * is no count table. The audit record is the `adjustment` rows in `inventory_transactions`,
- * which already carry timestamp, actor and notes — so "when did we last count this" is
- * answerable without one.
+ * which already carry timestamp, actor and notes.
+ *
+ * Nor is there a scope step. You land on your stocked parts and start typing; a part enters
+ * the count *by being counted*. Requiring the set to be declared up front was the same
+ * structure-before-value mistake §5.5 diagnoses in the location builder.
  */
 
 /**
@@ -13,7 +16,7 @@
  *
  * An item-level count is ambiguous for a part split across bins — if it holds 10+20+10 and
  * you count 38, no bin defensibly absorbs the -2 — so those are excluded rather than guessed
- * at. See COUNT_TARGET rules in lib/inventoryCountPlan.ts.
+ * at. See `resolveCountTarget` in lib/inventoryCountPlan.ts.
  */
 export type CountTarget =
   /** Untracked part: write parts.quantity directly via adjustPartStock. */
@@ -23,37 +26,35 @@ export type CountTarget =
   /** Location-tracked and split across bins — not countable item-by-item. */
   | { kind: 'excluded'; reason: string };
 
-/** A part as it appears on the count sheet, with its system quantity and resolved target. */
+/** A part as it appears on the sheet, with its system quantity and resolved target. */
 export interface CountCandidate {
   partId: string;
   partName: string;
-  /** Primary unit; counts are entered in it. Null units can't be counted (nor stocked). */
+  /** Primary unit; counts are entered in it. */
   unit: string;
-  /** What the system believes right now — refreshed on entering Review. */
+  /** What the system believes. Re-read at save so variances aren't against a stale snapshot. */
   systemQuantity: number;
   target: CountTarget;
 }
 
-/** One line of the sheet. `counted` is null until someone types a number. */
-export interface CountLine {
-  partId: string;
-  /** null = not counted. Never coerced to 0: no entry means no opinion, so the balance
-   *  is left alone rather than zeroed by an abandoned sheet. */
-  counted: number | null;
-}
+/**
+ * What's been typed so far: partId → counted quantity.
+ *
+ * A missing key means "not counted" — never coerced to 0, so a part you walked past keeps its
+ * balance rather than being zeroed by an abandoned sheet.
+ */
+export type CountEntries = Record<string, number>;
 
-/** The persisted draft. Versioned so a shape change can be discarded rather than crash. */
+/** The persisted draft. Versioned so a shape change is discarded rather than half-restored. */
 export interface CountDraft {
-  version: 1;
+  version: 2;
   companyId: string;
-  /** Sheet order, and the set of parts in scope. */
-  partIds: string[];
-  lines: CountLine[];
-  /** ms epoch — shown as "saved 2 minutes ago" and used to warn on a stale resume. */
+  entries: CountEntries;
+  /** ms epoch — shown as "unfinished count from …" on return. */
   savedAt: number;
 }
 
-/** A counted line paired with what it will do, computed fresh at Review. */
+/** A counted part paired with what it will do, computed fresh at save. */
 export interface CountVariance {
   candidate: CountCandidate;
   counted: number;
@@ -61,7 +62,7 @@ export interface CountVariance {
   delta: number;
   /** True when the system quantity moved since the sheet was opened. */
   movedSinceOpened: boolean;
-  /** |delta| as a share of the system quantity, for the big-variance prompt. */
+  /** |delta| as a share of the system quantity, for the big-variance warning. */
   magnitude: number;
 }
 

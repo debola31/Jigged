@@ -8,7 +8,7 @@
 import type {
   CountCandidate,
   CountDraft,
-  CountLine,
+  CountEntries,
   CountTarget,
   CountVariance,
 } from '@/types/inventoryCount';
@@ -23,18 +23,15 @@ export interface LocationBalance {
 /**
  * Decide where a counted quantity goes for one part.
  *
- * The rules, and why each exists:
- *
- *  - **Untracked** → `parts.quantity` directly. The only legal write for a part whose
- *    quantity isn't a rollup.
- *  - **Tracked, nothing anywhere** → Unassigned. This is the opening-count case, not an edge
- *    case: `trg_auto_track_stocked_part` seeds every stocked part at Unassigned with 0, so a
- *    shop starting from zero has every part here. Unassigned is also the honest target — you
- *    counted the stock, you haven't said where it lives.
- *  - **Tracked, exactly one location holding stock** → that location. Unambiguous.
- *  - **Tracked, two or more** → excluded. Counting "38 total" against 10+20+10 has no
- *    defensible bin to absorb the difference, and pushing it to Unassigned would corrupt
- *    bin-level accuracy — the one part of the locations build that works today.
+ *  - **Untracked** → `parts.quantity`. The only legal write for a part whose quantity isn't
+ *    a rollup.
+ *  - **Tracked, nothing anywhere** → Unassigned. The opening-count case, not an edge case:
+ *    `trg_auto_track_stocked_part` seeds every stocked part there at 0, so a shop starting
+ *    from zero has every part here. It's also the honest target — you counted the stock, you
+ *    haven't said where it lives.
+ *  - **Tracked, exactly one location holding stock** → that location.
+ *  - **Tracked, two or more** → excluded. "38 total" against 10+20+10 has no defensible bin
+ *    to absorb the difference, and pushing it to Unassigned would corrupt bin-level accuracy.
  *
  * "Holding stock" means quantity > 0: the seeded zero-row at Unassigned must not make a part
  * look placed.
@@ -50,10 +47,7 @@ export function resolveCountTarget(
 
   if (holding.length === 0) {
     if (!unassigned) {
-      return {
-        kind: 'excluded',
-        reason: 'No "Unassigned" location exists to hold the count.',
-      };
+      return { kind: 'excluded', reason: 'No "Unassigned" location exists to hold the count.' };
     }
     return { kind: 'location', locationId: unassigned.id, locationName: unassigned.name };
   }
@@ -72,51 +66,62 @@ export function resolveCountTarget(
   };
 }
 
-/** Candidates that can actually be counted item-by-item. */
+/** Candidates that can be counted item-by-item. */
 export function countableCandidates(candidates: CountCandidate[]): CountCandidate[] {
   return candidates.filter((c) => c.target.kind !== 'excluded');
 }
 
-/** Candidates held back, so the scope step can name them instead of dropping them silently. */
+/** Candidates held back, so they can be named rather than silently missing. */
 export function excludedCandidates(candidates: CountCandidate[]): CountCandidate[] {
   return candidates.filter((c) => c.target.kind === 'excluded');
 }
 
-/** How many lines carry a number. Drives the "18 of 40 counted" header. */
-export function countedTally(lines: CountLine[]): { counted: number; total: number } {
-  return { counted: lines.filter((l) => l.counted !== null).length, total: lines.length };
+/** How many parts carry a number. Drives the footer's running tally. */
+export function countedTally(entries: CountEntries): number {
+  return Object.keys(entries).length;
 }
 
 /**
- * Variances for the counted lines only, against **freshly read** system quantities.
+ * The delta for one row, or null when it hasn't been counted.
  *
- * `openedWith` is what the sheet showed when it was started; a line whose current system
- * quantity differs moved while the count was open, which is worth flagging even though the
- * commit is unaffected (adjust sets an absolute value).
+ * Used for the inline feedback that replaced the separate review page — the number appears on
+ * the row the moment it's typed, which is when it's actually useful.
+ */
+export function rowDelta(candidate: CountCandidate, entries: CountEntries): number | null {
+  const counted = entries[candidate.partId];
+  if (counted === undefined) return null;
+  return counted - candidate.systemQuantity;
+}
+
+/**
+ * Variances for every counted part, against **freshly read** system quantities.
+ *
+ * `openedWith` is what the sheet showed when it loaded; a part whose current quantity differs
+ * moved while the count was open. Worth flagging, though the commit is unaffected — adjust
+ * sets an absolute value.
  */
 export function buildVariances(
   candidates: CountCandidate[],
-  lines: CountLine[],
+  entries: CountEntries,
   openedWith: Map<string, number>,
 ): CountVariance[] {
-  const byId = new Map(candidates.map((c) => [c.partId, c]));
   const out: CountVariance[] = [];
 
-  for (const line of lines) {
-    if (line.counted === null) continue;
-    const candidate = byId.get(line.partId);
-    if (!candidate || candidate.target.kind === 'excluded') continue;
+  for (const candidate of candidates) {
+    const counted = entries[candidate.partId];
+    if (counted === undefined) continue;
+    if (candidate.target.kind === 'excluded') continue;
 
-    const delta = line.counted - candidate.systemQuantity;
-    const opened = openedWith.get(line.partId);
+    const delta = counted - candidate.systemQuantity;
+    const opened = openedWith.get(candidate.partId);
     out.push({
       candidate,
-      counted: line.counted,
+      counted,
       delta,
       movedSinceOpened: opened !== undefined && opened !== candidate.systemQuantity,
       magnitude:
         candidate.systemQuantity === 0
-          ? line.counted === 0
+          ? counted === 0
             ? 0
             : 1
           : Math.abs(delta) / candidate.systemQuantity,
@@ -125,19 +130,25 @@ export function buildVariances(
   return out;
 }
 
-/** Variances that change something. A line counted equal to the system needs no write. */
+/** Variances that change something. A part counted equal to the system needs no write. */
 export function committableVariances(variances: CountVariance[]): CountVariance[] {
   return variances.filter((v) => v.delta !== 0);
 }
 
 /**
- * Lines worth a second look before committing.
+ * Changes worth a second look.
  *
- * ~30% of large variances turn out to be count errors rather than real movement, so a
- * confirm on the big ones catches more than a blanket review gate would — and costs nothing
- * on the routine ones.
+ * ~30% of large variances turn out to be count errors rather than real movement, so these get
+ * a warning on the row and a callout in the save dialog — cheaper than gating every count
+ * behind a review page.
  */
 export const BIG_VARIANCE_THRESHOLD = 0.5;
+
+export function isBigDelta(candidate: CountCandidate, delta: number): boolean {
+  if (delta === 0) return false;
+  if (candidate.systemQuantity === 0) return true;
+  return Math.abs(delta) / candidate.systemQuantity >= BIG_VARIANCE_THRESHOLD;
+}
 
 export function bigVariances(variances: CountVariance[]): CountVariance[] {
   return committableVariances(variances).filter((v) => v.magnitude >= BIG_VARIANCE_THRESHOLD);
@@ -149,20 +160,47 @@ export function countNote(v: CountVariance): string {
   return `Stock count — counted ${v.counted} ${unit} (system said ${v.candidate.systemQuantity} ${unit})`;
 }
 
-// ── Draft persistence (shape only; the storage call sites live in the page) ──────────────
+// ── Draft persistence ────────────────────────────────────────────────────────
 
-export const DRAFT_VERSION = 1 as const;
+export const DRAFT_VERSION = 2 as const;
 
 export function draftKey(companyId: string): string {
   return `jigged.inventoryCount.${companyId}`;
+}
+
+export function buildDraft(companyId: string, entries: CountEntries, now: number): CountDraft {
+  return { version: DRAFT_VERSION, companyId, entries, savedAt: now };
+}
+
+/**
+ * Parse a stored draft, returning null for anything unusable.
+ *
+ * Deliberately strict: a draft from an older shape, another company, or corrupted storage is
+ * discarded rather than half-restored. Losing an in-progress count is annoying; resuming one
+ * with numbers attached to the wrong parts would be worse.
+ */
+export function parseDraft(raw: string | null, companyId: string): CountDraft | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CountDraft>;
+    if (parsed.version !== DRAFT_VERSION) return null;
+    if (parsed.companyId !== companyId) return null;
+    if (typeof parsed.savedAt !== 'number') return null;
+    if (!parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
+      return null;
+    }
+    return parsed as CountDraft;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * localStorage, or null where it isn't usable.
  *
  * Absent during SSR, and *also* absent or throwing in private-browsing modes and some
- * embedded webviews — so this is a real runtime case, not just a test artefact. A count must
- * work without a draft; losing resume is a downgrade, not a failure.
+ * embedded webviews — a real runtime case, not just a test artefact. A count must work
+ * without a draft; losing resume is a downgrade, not a failure.
  */
 export function safeStorage(): Storage | null {
   try {
@@ -173,7 +211,6 @@ export function safeStorage(): Storage | null {
   }
 }
 
-/** Read a stored draft, tolerating storage being unavailable or unreadable. */
 export function readDraft(companyId: string): CountDraft | null {
   const store = safeStorage();
   if (!store) return null;
@@ -195,7 +232,6 @@ export function writeDraft(draft: CountDraft): void {
   }
 }
 
-/** Drop a draft once its counts are committed, or when explicitly discarded. */
 export function clearDraft(companyId: string): void {
   const store = safeStorage();
   if (!store) return;
@@ -203,30 +239,5 @@ export function clearDraft(companyId: string): void {
     store.removeItem(draftKey(companyId));
   } catch {
     /* nothing to clean up */
-  }
-}
-
-export function buildDraft(companyId: string, partIds: string[], lines: CountLine[], now: number): CountDraft {
-  return { version: DRAFT_VERSION, companyId, partIds, lines, savedAt: now };
-}
-
-/**
- * Parse a stored draft, returning null for anything unusable.
- *
- * Deliberately strict: a draft from an older shape, another company, or corrupted storage is
- * discarded rather than half-restored. Losing an in-progress count is annoying; resuming one
- * with lines silently mismatched to the wrong parts would be worse.
- */
-export function parseDraft(raw: string | null, companyId: string): CountDraft | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<CountDraft>;
-    if (parsed.version !== DRAFT_VERSION) return null;
-    if (parsed.companyId !== companyId) return null;
-    if (!Array.isArray(parsed.partIds) || !Array.isArray(parsed.lines)) return null;
-    if (typeof parsed.savedAt !== 'number') return null;
-    return parsed as CountDraft;
-  } catch {
-    return null;
   }
 }

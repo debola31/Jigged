@@ -65,11 +65,25 @@ export async function addJobNoteMedia(
   jobId: string,
   noteId: string,
   file: File,
-  opts?: { dims?: { width: number; height: number } },
+  opts?: { dims?: { width: number; height: number }; thumbnail?: File },
 ): Promise<JobNoteMedia> {
   const supabase = getSupabase();
   const storagePath = generateStoragePath(companyId, 'jobs', jobId, file.name);
   await uploadFileToStorage(storagePath, file);
+
+  // The thumbnail is an optimisation, so a failure here must not cost the photo.
+  // Upload it best-effort and fall back to a null thumbnail_path — the renderers
+  // already fall back to storage_path, which is today's behaviour for every row.
+  let thumbnailPath: string | null = null;
+  if (opts?.thumbnail) {
+    const candidate = generateStoragePath(companyId, 'jobs', jobId, opts.thumbnail.name);
+    try {
+      await uploadFileToStorage(candidate, opts.thumbnail);
+      thumbnailPath = candidate;
+    } catch {
+      thumbnailPath = null;
+    }
+  }
 
   const { data, error } = await supabase
     .from('note_media')
@@ -77,6 +91,7 @@ export async function addJobNoteMedia(
       company_id: companyId,
       note_id: noteId,
       storage_path: storagePath,
+      thumbnail_path: thumbnailPath,
       kind: 'photo',
       mime_type: file.type || null,
       size_bytes: file.size,
@@ -87,8 +102,9 @@ export async function addJobNoteMedia(
     .single();
 
   if (error) {
-    // Roll back the orphaned upload so a failed insert doesn't leak a file.
+    // Roll back BOTH orphaned uploads so a failed insert doesn't leak files.
     await deleteFileFromStorage(storagePath).catch(() => {});
+    if (thumbnailPath) await deleteFileFromStorage(thumbnailPath).catch(() => {});
     console.error('Error inserting job note media:', error);
     throw new Error('Failed to attach the photo. Please try again.');
   }
@@ -110,6 +126,7 @@ export function getJobNoteMediaUrl(storagePath: string): Promise<string> {
 export async function deleteJobNoteMedia(media: {
   id: string;
   storage_path: string;
+  thumbnail_path?: string | null;
 }): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.from('note_media').delete().eq('id', media.id);
@@ -117,9 +134,13 @@ export async function deleteJobNoteMedia(media: {
     console.error('Error deleting job note media row:', error);
     throw error;
   }
-  await deleteFileFromStorage(media.storage_path).catch((err) =>
-    console.warn('Failed to delete media file after row delete:', err),
-  );
+  // Both objects, or the thumbnail outlives the row it belonged to.
+  for (const path of [media.storage_path, media.thumbnail_path]) {
+    if (!path) continue;
+    await deleteFileFromStorage(path).catch((err) =>
+      console.warn('Failed to delete media file after row delete:', err),
+    );
+  }
 }
 
 /**
@@ -135,14 +156,14 @@ export async function deleteJobNote(noteId: string): Promise<void> {
   let paths: string[] = [];
   const { data: mediaRows, error: listError } = await supabase
     .from('note_media')
-    .select('storage_path')
+    .select('storage_path, thumbnail_path')
     .eq('note_id', noteId);
   if (listError) {
     console.warn('Could not list note media for cleanup:', listError);
   } else {
-    paths = ((mediaRows ?? []) as Array<{ storage_path: string }>)
-      .map((r) => r.storage_path)
-      .filter(Boolean);
+    paths = ((mediaRows ?? []) as Array<{ storage_path: string; thumbnail_path: string | null }>)
+      .flatMap((r) => [r.storage_path, r.thumbnail_path])
+      .filter((p): p is string => Boolean(p));
   }
 
   const { error } = await supabase.from('notes').delete().eq('id', noteId);

@@ -55,6 +55,18 @@ interface JobFeedProps {
    * additive and never blocks or risks the completion. Ignored when 0/undefined.
    */
   captureOfferSignal?: number;
+  /**
+   * Bumped by the operation page's above-the-fold "Add photo" button. Opens this
+   * component's file picker and scrolls the composer into view.
+   *
+   * The picker lives here because the composer owns the pending-photo state, but
+   * the AFFORDANCE has to live further up the page: the composer sits below the
+   * job card, the reference row and the completion block, so on a phone it is
+   * off-screen. An operator who has already taken the photo on their camera app
+   * — the actual observed behaviour — has no reason to scroll to the bottom of a
+   * page to look for a way in. Ignored when 0/undefined.
+   */
+  photoPickSignal?: number;
 }
 
 // --- Dictation (keyboard-mic) hint: a quiet, contextual, capped one-liner. ---
@@ -120,6 +132,7 @@ export default function JobFeed({
   readOnly,
   operationContext,
   captureOfferSignal,
+  photoPickSignal,
 }: JobFeedProps) {
   const [error, setError] = useState<string | null>(null);
   // Notes posted optimistically (prepended before the next full load). Deduped
@@ -142,6 +155,8 @@ export default function JobFeed({
   const [showMicHint, setShowMicHint] = useState(false);
   const offerRef = useRef<HTMLDivElement | null>(null);
   const lastOfferSignal = useRef<number | undefined>(undefined);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const lastPhotoSignal = useRef<number | undefined>(undefined);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const noteFieldRef = useRef<HTMLInputElement | null>(null);
@@ -214,6 +229,19 @@ export default function JobFeed({
     if (showComposer && !hasUserCapture) setOfferOpen(true);
   }, [captureOfferSignal, showComposer, hasUserCapture]);
 
+  // Above-the-fold "Add photo": open the picker, and bring the composer into
+  // view so the pending thumbnail and Post button are where the operator is
+  // looking when the picker closes. Without the scroll they would return to an
+  // apparently unchanged page and reasonably conclude nothing happened.
+  useEffect(() => {
+    if (!photoPickSignal) return;
+    if (photoPickSignal === lastPhotoSignal.current) return;
+    lastPhotoSignal.current = photoPickSignal;
+    if (!showComposer) return;
+    composerRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    fileInputRef.current?.click();
+  }, [photoPickSignal, showComposer]);
+
   // Scroll the offer into view when it opens (it sits above a composer that may
   // be below the fold on a phone).
   useEffect(() => {
@@ -271,6 +299,26 @@ export default function JobFeed({
     draftRef.current = { bodyLength: noteDraft.trim().length, photoCount: pending.length };
   }, [noteDraft, pending]);
 
+  // A pending capture is NOT saved yet. Attaching a photo shows a thumbnail and
+  // the flow reads as finished, but nothing is stored until Post — so a back tap,
+  // a nav tap, or an evicted tab drops it with no signal at all. That is the most
+  // likely explanation for any "I attached a photo and it vanished" report.
+  //
+  // This covers the browser-level exits (close, refresh, external link). It does
+  // NOT cover in-app navigation, which is the more common case on the floor —
+  // hence the unmissable banner below as well. Both are mitigations; the class is
+  // only closed by folding capture into a single submit alongside completion.
+  const hasUnposted = noteDraft.trim().length > 0 || pending.length > 0;
+  useEffect(() => {
+    if (!showComposer || !hasUnposted) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [showComposer, hasUnposted]);
+
   // Abandonment: they opened the composer and left without saving. This is the
   // funnel step that separates "capture friction" from "container fit" — a high
   // focus rate with a low save rate means they tried and gave up, which is a very
@@ -301,6 +349,7 @@ export default function JobFeed({
     // Copy the bytes into a stable File *now*, while the reference is fresh, and
     // drop any pick that reads back empty rather than silently posting nothing.
     const prepared: PendingPhoto[] = [];
+    let unreadable = 0;
     for (const file of files) {
       let stable = file;
       try {
@@ -313,7 +362,15 @@ export default function JobFeed({
         // Copy failed — fall through with the original reference and the size
         // guard below decides whether it's usable.
       }
-      if (stable.size === 0) continue;
+      if (stable.size === 0) {
+        // Previously a bare `continue`: picking three photos where one read back
+        // empty attached two and said nothing, because the error below only fires
+        // when EVERY pick fails. Silently dropping part of a batch is the same
+        // class of bug as losing the lot — the operator believes they attached
+        // what they selected.
+        unreadable += 1;
+        continue;
+      }
       prepared.push({
         id: `pp-${pendingIdRef.current++}`,
         file: stable,
@@ -322,9 +379,25 @@ export default function JobFeed({
     }
 
     if (prepared.length === 0) {
-      setComposerError('That photo could not be read. Please try taking or picking it again.');
+      setComposerError(
+        files.length > 1
+          ? 'Those photos could not be read. Please try picking them again.'
+          : 'That photo could not be read. Please try taking or picking it again.',
+      );
       return;
     }
+    if (unreadable > 0) {
+      setComposerError(
+        `${unreadable} of ${files.length} photos could not be read and ${
+          unreadable === 1 ? 'was' : 'were'
+        } not attached.`,
+      );
+    }
+    logOperatorEvent(companyId, 'photo_attached', {
+      attached: prepared.length,
+      unreadable,
+      picked: files.length,
+    });
     setPending((prev) => [...prev, ...prepared]);
   };
 
@@ -379,6 +452,7 @@ export default function JobFeed({
         media.push(
           await addJobNoteMedia(companyId, jobId, note.id, prepared.file, {
             dims: prepared.dims,
+            thumbnail: prepared.thumbnail,
           }),
         );
       }
@@ -422,7 +496,7 @@ export default function JobFeed({
         </Box>
 
         {showComposer && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
+          <Box ref={composerRef} sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
             {offerOpen && (
               <Box
                 ref={offerRef}
@@ -562,6 +636,17 @@ export default function JobFeed({
             )}
 
             {composerError && <Alert severity="error">{composerError}</Alert>}
+
+            {/* Says the one thing the operator needs to know, in the one place
+                they are looking. A thumbnail alone reads as "done" — this is what
+                makes the difference between attached and saved visible. */}
+            {pending.length > 0 && (
+              <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
+                {pending.length === 1
+                  ? 'Photo not saved yet — tap Post.'
+                  : `${pending.length} photos not saved yet — tap Post.`}
+              </Alert>
+            )}
 
             {/* No `capture` attribute: on iOS/Android this makes the OS present
                 the full native sheet (Photo Library / Take Photo / Choose File),

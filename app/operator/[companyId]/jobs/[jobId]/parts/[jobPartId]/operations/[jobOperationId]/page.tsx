@@ -20,6 +20,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import {
   getOperatorOperationDetail,
   getCurrentMember,
@@ -84,6 +85,8 @@ export default function OperatorOperationActionPage() {
   // "add a photo/note?" offer. Bumped strictly AFTER the completion resolves,
   // so completion is already durable before any prompt appears.
   const [captureOfferSignal, setCaptureOfferSignal] = useState(0);
+  // Bumped by the above-the-fold "Add photo" button; JobFeed owns the picker.
+  const [photoPickSignal, setPhotoPickSignal] = useState(0);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -397,6 +400,28 @@ export default function OperatorOperationActionPage() {
         jobOperationId={jobOperationId}
       />
 
+      {/* Capture, above the fold.
+          The composer lives at the bottom of this page, below the job card, the
+          reference row and the completion block — off-screen on a phone. The
+          observed behaviour is that operators photograph setups with their phone's
+          camera app and the shots stay in the roll, so the way IN has to be
+          visible without scrolling, and it has to say that an existing photo is
+          fine. The picker itself already offers the photo library (no `capture`
+          attribute); what was missing was anything telling the operator so. */}
+      <Box sx={{ mb: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<PhotoCameraIcon />}
+          onClick={() => setPhotoPickSignal((n) => n + 1)}
+          sx={{ minHeight: 48 }}
+        >
+          Add photo
+        </Button>
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+          Take one now, or pick one you already took.
+        </Typography>
+      </Box>
+
       {isCompleted ? (
         // The completed state IS the undo control — one element shows the status
         // (green check + "complete"/"received") and doubles as the button that
@@ -576,6 +601,7 @@ export default function OperatorOperationActionPage() {
           jobId={jobId}
           companyId={companyId}
           captureOfferSignal={captureOfferSignal}
+          photoPickSignal={photoPickSignal}
           operationContext={{
             jobPartId,
             jobOperationId,

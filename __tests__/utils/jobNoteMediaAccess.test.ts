@@ -169,3 +169,75 @@ describe('deleteJobNote', () => {
     await expect(deleteJobNote('n1')).rejects.toBeTruthy();
   });
 });
+
+// thumbnail_path was never written, so every renderer fell back to storage_path —
+// a full 2048px JPEG behind a 76px tile. On shop wifi those tiles resolve slowly
+// or not at all, which is indistinguishable from a photo that failed to upload.
+describe('addJobNoteMedia — thumbnails', () => {
+  const rowWithThumb = {
+    id: 'media-1',
+    note_id: 'n1',
+    storage_path: 'c1/jobs/j1/abc_photo.jpg',
+    thumbnail_path: 'c1/jobs/j1/def_thumb-photo.jpg',
+    kind: 'photo',
+    mime_type: 'image/jpeg',
+    width: 1600,
+    height: 1200,
+  };
+
+  it('uploads the thumbnail too and records its path', async () => {
+    mockQueryBuilder.data = rowWithThumb;
+    mockGenerateStoragePath
+      .mockReturnValueOnce('c1/jobs/j1/abc_photo.jpg')
+      .mockReturnValueOnce('c1/jobs/j1/def_thumb-photo.jpg');
+
+    const result = await addJobNoteMedia('c1', 'j1', 'n1', makeFile('photo.jpg', 2048), {
+      thumbnail: makeFile('thumb-photo.jpg', 40),
+    });
+
+    expect(mockUploadFileToStorage).toHaveBeenCalledTimes(2);
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ thumbnail_path: 'c1/jobs/j1/def_thumb-photo.jpg' }),
+    );
+    expect(result.thumbnail_path).toBe('c1/jobs/j1/def_thumb-photo.jpg');
+  });
+
+  it('still stores the photo when the thumbnail upload fails', async () => {
+    // A thumbnail is an optimisation. Losing one must never cost the operator the
+    // photo — the row falls back to a null thumbnail_path, today's behaviour.
+    mockQueryBuilder.data = { ...rowWithThumb, thumbnail_path: null };
+    mockGenerateStoragePath
+      .mockReturnValueOnce('c1/jobs/j1/abc_photo.jpg')
+      .mockReturnValueOnce('c1/jobs/j1/def_thumb-photo.jpg');
+    mockUploadFileToStorage
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('thumb upload failed'));
+
+    const result = await addJobNoteMedia('c1', 'j1', 'n1', makeFile('photo.jpg', 2048), {
+      thumbnail: makeFile('thumb-photo.jpg', 40),
+    });
+
+    expect(result.id).toBe('media-1');
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ thumbnail_path: null }),
+    );
+  });
+
+  it('rolls back BOTH objects when the metadata insert fails', async () => {
+    // Otherwise a failed attach leaks an orphaned thumbnail as well as the photo.
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = { message: 'insert boom' };
+    mockGenerateStoragePath
+      .mockReturnValueOnce('c1/jobs/j1/abc_photo.jpg')
+      .mockReturnValueOnce('c1/jobs/j1/def_thumb-photo.jpg');
+
+    await expect(
+      addJobNoteMedia('c1', 'j1', 'n1', makeFile('photo.jpg', 2048), {
+        thumbnail: makeFile('thumb-photo.jpg', 40),
+      }),
+    ).rejects.toThrow(/Failed to attach/i);
+
+    expect(mockDeleteFileFromStorage).toHaveBeenCalledWith('c1/jobs/j1/abc_photo.jpg');
+    expect(mockDeleteFileFromStorage).toHaveBeenCalledWith('c1/jobs/j1/def_thumb-photo.jpg');
+  });
+});

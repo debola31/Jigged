@@ -334,3 +334,112 @@ describe('JobFeed — capture funnel events', () => {
     ).toBe(false);
   });
 });
+
+// The photo path. The reported failure — "took photos during the diary week and
+// none uploaded" — turned out to be the operator using their phone's camera app,
+// so the shots never entered Jigged at all. These cover the two adjacent defects
+// found while tracing that, both of which lose photos SILENTLY, plus the
+// above-the-fold way in.
+describe('JobFeed — photo path', () => {
+  it('says a pending photo is not saved yet', async () => {
+    // A thumbnail alone reads as "done". Nothing is stored until Post, and the
+    // gap between those two states is where photos go missing with no signal.
+    const user = userEvent.setup();
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'setup.jpg', { type: 'image/jpeg' }));
+
+    expect(await screen.findByText(/not saved yet — tap Post/i)).toBeInTheDocument();
+  });
+
+  it('reports photos dropped from a multi-pick instead of dropping them quietly', async () => {
+    // Was a bare `continue`: pick three, one reads back empty, two attach and
+    // nothing is said — because the error only fired when EVERY pick failed.
+    const user = userEvent.setup();
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [
+      new File(['x'], 'good.jpg', { type: 'image/jpeg' }),
+      new File([], 'empty.jpg', { type: 'image/jpeg' }),
+    ]);
+
+    expect(await screen.findByText(/1 of 2 photos could not be read/i)).toBeInTheDocument();
+    // ...and the readable one is still attached, not thrown away with it.
+    expect(screen.getByAltText('Pending photo')).toBeInTheDocument();
+  });
+
+  it('stores a thumbnail alongside the photo', async () => {
+    // thumbnail_path was never populated, so every 76px tile pulled a full
+    // 2048px JPEG. On shop wifi those tiles never resolve — which looks exactly
+    // like a photo that failed to upload.
+    const user = userEvent.setup();
+    const thumb = new File(['t'], 'thumb.jpg', { type: 'image/jpeg' });
+    mock(compressPhoto).mockResolvedValue({
+      file: new File(['f'], 'setup.jpg', { type: 'image/jpeg' }),
+      thumbnail: thumb,
+      dims: { width: 100, height: 80 },
+    });
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'n-photo', body: null }));
+    mock(addJobNoteMedia).mockResolvedValue({
+      id: 'm1',
+      note_id: 'n-photo',
+      storage_path: 'p',
+      thumbnail_path: 't',
+      kind: 'photo',
+      mime_type: 'image/jpeg',
+      width: 100,
+      height: 80,
+    });
+
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'setup.jpg', { type: 'image/jpeg' }));
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() =>
+      expect(addJobNoteMedia).toHaveBeenCalledWith(
+        'co1',
+        'job1',
+        'n-photo',
+        expect.any(File),
+        expect.objectContaining({ thumbnail: thumb }),
+      ),
+    );
+  });
+
+  it('opens the picker when the above-the-fold button signals', async () => {
+    // The composer sits below the job card, reference row and completion block —
+    // off-screen on a phone. The op card's button drives the picker from where
+    // the operator actually is.
+    const { container, rerender } = renderFeed({ photoPickSignal: 0 });
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const clickSpy = vi.spyOn(input, 'click').mockImplementation(() => {});
+
+    rerender(
+      <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} photoPickSignal={1} />,
+    );
+
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it('records photo_attached with what was picked versus attached', async () => {
+    const user = userEvent.setup();
+    const { container } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'setup.jpg', { type: 'image/jpeg' }));
+
+    expect(logOperatorEvent).toHaveBeenCalledWith(
+      'co1',
+      'photo_attached',
+      expect.objectContaining({ attached: 1, unreadable: 0, picked: 1 }),
+    );
+  });
+});

@@ -21,8 +21,28 @@ const PHOTO_COMPRESSION_OPTIONS = {
   fileType: 'image/jpeg' as const,
 };
 
+/**
+ * Thumbnail variant. Feed tiles render at 76px, so 320px covers a 3–4× DPR
+ * screen with room to spare.
+ *
+ * This exists because `job_note_media.thumbnail_path` was never populated, so
+ * every renderer fell back to `storage_path` — pulling a full 2048px JPEG for a
+ * 76px tile. On shop wifi those tiles resolve slowly or not at all, and a tile
+ * that never resolves is indistinguishable from a photo that failed to upload.
+ * That is the "my photos didn't upload" report, from the read side.
+ */
+const THUMBNAIL_COMPRESSION_OPTIONS = {
+  maxWidthOrHeight: 320,
+  maxSizeMB: 0.06,
+  initialQuality: 0.7,
+  useWebWorker: true,
+  fileType: 'image/jpeg' as const,
+};
+
 export interface PreparedPhoto {
   file: File;
+  /** Small variant for feed tiles. Undefined if generation failed — see below. */
+  thumbnail?: File;
   dims?: { width: number; height: number };
 }
 
@@ -53,5 +73,21 @@ export async function compressPhoto(input: File): Promise<PreparedPhoto> {
     dims = undefined;
   }
 
-  return { file, dims };
+  // Derived from the already-downscaled file rather than the original: cheaper,
+  // and it inherits the EXIF-orientation bake-in from the first pass.
+  //
+  // Best-effort by design. A thumbnail is an optimisation, and failing to make
+  // one must never cost the operator the actual photo — the caller falls back to
+  // the full image, which is exactly today's behaviour.
+  let thumbnail: File | undefined;
+  try {
+    const small = await imageCompression(file, THUMBNAIL_COMPRESSION_OPTIONS);
+    thumbnail = new File([small], renameToJpg(`thumb-${input.name}`), {
+      type: 'image/jpeg',
+    });
+  } catch {
+    thumbnail = undefined;
+  }
+
+  return { file, thumbnail, dims };
 }

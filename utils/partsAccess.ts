@@ -1724,7 +1724,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
   const supabase = getSupabase();
 
   const { data, error } = await supabase
-    .from('part_notes')
+    .from('part_comments')
     .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
     .eq('part_id', partId)
     .eq('company_id', companyId)
@@ -1778,7 +1778,7 @@ export async function addPartNote(
   if (!trimmed) throw new Error('Note cannot be empty.');
 
   const { data, error } = await supabase
-    .from('part_notes')
+    .from('part_comments')
     .insert({
       company_id: companyId,
       part_id: partId,
@@ -1836,7 +1836,7 @@ export async function addPartPricingNote(
  */
 export async function deletePartNote(noteId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('part_notes').delete().eq('id', noteId);
+  const { error } = await supabase.from('part_comments').delete().eq('id', noteId);
   if (error) {
     console.error('Error deleting part note:', error);
     throw error;

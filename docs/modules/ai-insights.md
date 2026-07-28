@@ -164,7 +164,9 @@ The `sql_validator.py` module enforces these rules before any query reaches the 
 
 Enforced by the `SENSITIVE_TABLES` denylist in `api/tools/schema_context.py` — rejected if referenced anywhere in a query:
 
-`user_company_access`, `user_preferences`, `system_admins`, `auth_audit_log`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`, `quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`
+`user_company_access`, `user_preferences`, `system_admins`, `auth_audit_log`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`, `quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`, `note_views`, `operator_events`
+
+**`note_views` and `operator_events` are excluded for a product reason, not just a privacy-hygiene one.** "Which operators read the setup notes?" is a natural question for a shop owner to type, and answering it is precisely what the notes feature forbids: if an owner can audit who reads notes, reading becomes an admission of ignorance and the read side dies. They are already blocked three ways — absent from `ALLOWED_TABLES`, no `GRANT` to `jigged_ai_readonly`, and no `ai_readonly_select` policy — and the denylist is the whole-word backstop. **Never** add them to `ALLOWED_TABLES` or grant them to `jigged_ai_readonly`. (`notes.viewer_count` / `usage_count` riding along if `notes` is ever allowlisted is fine: those are aggregate counts, never identities.)
 
 ### Adding a New Table to AI Scope
 

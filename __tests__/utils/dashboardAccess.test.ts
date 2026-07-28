@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Per-table Supabase mock: each supabase.from(table) returns its own thenable
 // builder that resolves to table-specific fixture data, so the UNION-on-read
-// across jobs/quotes/shipments/job_notes/job_operations can be exercised.
+// across jobs/quotes/shipments/notes/job_operations can be exercised.
 const DATA: Record<string, unknown[]> & { error?: unknown } = {
   jobsCreated: [],
   jobsCompleted: [],
@@ -21,7 +21,7 @@ function resolveData(state: { table: string; completedFilter: boolean }) {
       return { data: DATA.quotes, error: null };
     case 'shipments':
       return { data: DATA.shipments, error: null };
-    case 'job_notes':
+    case 'notes':
       return { data: DATA.notes, error: null };
     case 'job_operations':
       return { data: DATA.operations, error: null };

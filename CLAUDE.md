@@ -573,8 +573,55 @@ worktree:
   gen:db-types` introspects the shared `--local` stack, so it has the same
   hazard. Prefer letting **CI regenerate + diff-check** types on the PR (the
   backend job already fails on a mismatch), or regenerate against a throwaway
-  DB — don't `db reset` the shared stack mid-flight just to gen types. A
-  hand-edited `types/database.ts` is a valid stopgap that CI will validate.
+  DB — don't `db reset` the shared stack mid-flight just to gen types. Do **not**
+  hand-edit the file: the drift check diffs a byte-exact regen, so a hand-edit
+  fails CI even when every column is right.
+
+  The generator accepts `--db-url`, so a throwaway container works:
+
+  ```bash
+  docker run -d --rm --name migcheck -e POSTGRES_PASSWORD=x -p 55499:5432 postgres:17-alpine
+  # create the db, apply Supabase-platform stubs (roles anon/authenticated/
+  # service_role/jigged_ai_readonly, schemas auth/storage, auth.uid(),
+  # storage.objects + storage.foldername), then replay supabase/migrations/ in order
+  npx --yes supabase@2.109.0 gen types typescript \
+    --db-url "postgresql://postgres:x@127.0.0.1:55499/jigged" > types/database.ts
+  ```
+
+  **Gotcha that costs a red CI run:** a bare Postgres has no `pg_graphql`, so the
+  generator silently omits the `graphql_public` schema — in **two** places, the
+  schema block *and* the trailing `Constants` export. Splice both back from
+  `main` (this migration never touches them), then diff against `main` and
+  confirm only your intended tables/functions changed. Keep the generator version
+  matching the one pinned in `gen:db-types`.
+
+### Visual verification on a Vercel preview (worktrees, agents)
+
+Preview deployments sit behind Deployment Protection, so an agent gets a login
+page. The project has a **Protection Bypass for Automation** secret; it lives in
+`.env.local` as `VERCEL_AUTOMATION_BYPASS_SECRET` (gitignored — copy `.env.local`
+from the primary checkout in a fresh worktree, and re-copy if it was added after
+your worktree was created).
+
+Pass it as **headers**, not query params, so the secret never lands in a URL,
+shell history, or an agent transcript. `x-vercel-set-bypass-cookie` sets a cookie
+so in-app navigation after the first load keeps working:
+
+```bash
+export S=$(grep '^VERCEL_AUTOMATION_BYPASS_SECRET=' .env.local | cut -d= -f2- | tr -d '"'"'"' \r')
+export HDRS=$(python3 -c "import json,os;print(json.dumps({'x-vercel-protection-bypass':os.environ['S'],'x-vercel-set-bypass-cookie':'true'}))")
+agent-browser open "$PREVIEW_URL/login" --headers "$HDRS"
+```
+
+Then sign in with the seed account (`dev@jigged.test` / `jigged-dev-1234`) — the
+preview branch runs `supabase/seed.sql`, so it has the full Vanguard Precision
+Works data graph. Get `$PREVIEW_URL` from the PR's Vercel comment or
+`gh pr view <n> --json comments`.
+
+Notes: `agent-browser get text` needs a selector (`get text body`); prefer
+`snapshot -i -c` or `eval` since a not-yet-hydrated App Router page returns raw
+RSC payload. Docs:
+<https://vercel.com/docs/deployment-protection/automated-agent-access>
 - **Merge → local:** merging to `main` auto-applies the migration to **prod**
   (branching pipeline), but your **local** stack only picks it up when you
   `git pull` in the primary and `supabase db reset` again. Merge→prod is

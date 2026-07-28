@@ -8,11 +8,16 @@ import {
 import type { JobNoteMedia } from '@/types/operator';
 
 /**
- * Access layer for job-note media — photos (and, later, short videos) attached
- * to a job_notes entry. File bytes live in the private `attachments` storage
- * bucket under {companyId}/jobs/{jobId}/... (see utils/storageHelpers.ts, whose
- * bucket RLS already gates by the company folder); this module manages the
- * job_note_media metadata rows and ties the two together.
+ * Access layer for note media — photos (and, later, short videos) attached to a
+ * `notes` entry. File bytes live in the private `attachments` storage bucket
+ * under {companyId}/jobs/{jobId}/... (see utils/storageHelpers.ts, whose bucket
+ * RLS already gates by the company folder); this module manages the `note_media`
+ * metadata rows and ties the two together.
+ *
+ * The storage path still keys on the capturing job even for durable
+ * part-subject notes: it is only a folder layout, and the company segment (which
+ * is what the bucket RLS gates on) is unchanged. Repathing existing objects would
+ * be a data migration with no functional benefit.
  *
  * Mirrors partAttachmentsAccess.ts. Heavy media work (compression, EXIF fix,
  * dimension reading) happens in the browser BEFORE these calls — they only see
@@ -67,7 +72,7 @@ export async function addJobNoteMedia(
   await uploadFileToStorage(storagePath, file);
 
   const { data, error } = await supabase
-    .from('job_note_media')
+    .from('note_media')
     .insert({
       company_id: companyId,
       note_id: noteId,
@@ -107,7 +112,7 @@ export async function deleteJobNoteMedia(media: {
   storage_path: string;
 }): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('job_note_media').delete().eq('id', media.id);
+  const { error } = await supabase.from('note_media').delete().eq('id', media.id);
   if (error) {
     console.error('Error deleting job note media row:', error);
     throw error;
@@ -129,7 +134,7 @@ export async function deleteJobNote(noteId: string): Promise<void> {
   // Read media storage paths before the cascade removes the rows.
   let paths: string[] = [];
   const { data: mediaRows, error: listError } = await supabase
-    .from('job_note_media')
+    .from('note_media')
     .select('storage_path')
     .eq('note_id', noteId);
   if (listError) {
@@ -140,7 +145,7 @@ export async function deleteJobNote(noteId: string): Promise<void> {
       .filter(Boolean);
   }
 
-  const { error } = await supabase.from('job_notes').delete().eq('id', noteId);
+  const { error } = await supabase.from('notes').delete().eq('id', noteId);
   if (error) {
     console.error('Error deleting job note:', error);
     throw error;

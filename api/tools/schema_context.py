@@ -439,4 +439,15 @@ SENSITIVE_TABLES = frozenset({
     "quickbooks_connections",
     "quickbooks_customer_map",
     "quickbooks_invoice_links",
+    # Read-tracking and capture-funnel instrumentation. "Which operators read the
+    # setup notes?" is a natural question for a shop owner to type, and answering
+    # it is exactly what the product forbids: if an owner can audit who reads
+    # notes, reading becomes an admission of ignorance and the read side dies.
+    # These are already triple-blocked (absent from ALLOWED_TABLES, no grant to
+    # jigged_ai_readonly, no ai_readonly_select policy); this is the whole-word
+    # backstop. Never grant these to jigged_ai_readonly and never add them to
+    # ALLOWED_TABLES. notes.viewer_count / usage_count riding along if `notes` is
+    # ever allowlisted is fine — those are aggregate counts, not identities.
+    "note_views",
+    "operator_events",
 })

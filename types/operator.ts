@@ -263,6 +263,24 @@ export interface JobNote {
   created_at: string;
   /** Author display name (from user_company_access.name); null if unknown. */
   author_name: string | null;
+  /**
+   * What the note is ABOUT, which is not the same as where it was captured.
+   * 'part' is the durable subject — anchored to (part, routing step), so it
+   * outlives the job and is what the next person running the part reads.
+   * 'job' is either a legacy note or one genuinely about this run only.
+   */
+  subject_kind: 'job' | 'part' | 'work_center';
+  /**
+   * Distinct PEOPLE who have read this note, excluding the author and accounts
+   * excluded from metrics. Saturates near shop size — that is what it means.
+   */
+  viewer_count: number;
+  /**
+   * Distinct JOBS this note was consulted on. Uncapped, and the number that
+   * distinguishes a load-bearing note from one read once out of curiosity.
+   * Renders as "used on 11 jobs by 4 people".
+   */
+  usage_count: number;
   /** Attached photos/videos, in insertion order. */
   media: JobNoteMedia[];
 }

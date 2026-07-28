@@ -457,7 +457,7 @@ export async function getPinnedMetricValues(
 // ============== Activity feed ==============
 //
 // A cross-module "what happened" stream, built UNION-on-read over the
-// authoritative tables (jobs, quotes, shipments, job_notes, job_operations) —
+// authoritative tables (jobs, quotes, shipments, notes, job_operations) —
 // NOT a materialized/fan-out activity table. Per-tenant volume is tiny and the
 // status/timestamps already live on those rows, so a second source of truth
 // would only invite drift (mirrors the getPartActivity aggregate-on-read).
@@ -626,8 +626,12 @@ async function fetchShipmentActivity(
 type NoteActivityRow = {
   id: string;
   created_at: string;
-  job_id: string;
+  // Both nullable now: a job-subject note has job_id, a durable part-subject note has
+  // captured_job_id, and a work-center-subject note has neither.
+  job_id: string | null;
+  captured_job_id: string | null;
   job: { job_number: string } | { job_number: string }[] | null;
+  captured_job: { job_number: string } | { job_number: string }[] | null;
   author: { name: string | null } | { name: string | null }[] | null;
   media: { id: string }[] | null;
 };
@@ -638,9 +642,20 @@ async function fetchNoteActivity(
   perSource: number,
 ): Promise<ActivityItem[]> {
   const supabase = getSupabase();
+  // A note now resolves to a job one of two ways: job_id (a job-subject note) or
+  // captured_job_id (a DURABLE part-subject note, whose subject is the part but which
+  // was written while running a job). Both are embedded and coalesced below —
+  // PostgREST cannot COALESCE in a select, and keying only on job_id would silently
+  // drop every new operator capture from the activity feed.
+  // Two FKs point at `jobs`, so each embed must name its constraint to disambiguate.
   let q = supabase
-    .from('job_notes')
-    .select('id, created_at, job_id, job:jobs(job_number), author:user_company_access(name), media:job_note_media(id)')
+    .from('notes')
+    .select(
+      'id, created_at, job_id, captured_job_id, ' +
+        'job:jobs!notes_job_fk(job_number), ' +
+        'captured_job:jobs!notes_captured_job_fk(job_number), ' +
+        'author:user_company_access(name), media:note_media(id)',
+    )
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(perSource);
@@ -651,16 +666,23 @@ async function fetchNoteActivity(
   for (const r of (data ?? []) as unknown as NoteActivityRow[]) {
     if (!r.created_at) continue;
     const hasMedia = (r.media ?? []).length > 0;
+    const jobId = r.job_id ?? r.captured_job_id;
+    const jobNumber =
+      firstRel(r.job)?.job_number ?? firstRel(r.captured_job)?.job_number ?? '';
     items.push({
       id: `note-${r.id}`,
       // A note carrying photos surfaces as a 'photo' event so the /activity
       // filter can separate the two; text-only notes are 'note'.
       type: hasMedia ? 'photo' : 'note',
       action: hasMedia ? 'photo_added' : 'noted',
-      entityNumber: firstRel(r.job)?.job_number ?? '',
+      entityNumber: jobNumber,
       timestamp: r.created_at,
       authorName: firstRel(r.author)?.name ?? undefined,
-      href: `/dashboard/${companyId}/jobs/${r.job_id}`,
+      // A work-center-subject note has no job at all; link to the feed itself
+      // rather than emitting /jobs/undefined.
+      href: jobId
+        ? `/dashboard/${companyId}/jobs/${jobId}`
+        : `/dashboard/${companyId}/activity`,
     });
   }
   return items;
@@ -772,7 +794,7 @@ async function collectActivity(
   if (want('job')) tasks.push(fetchJobActivity(companyId, before, perSource));
   if (want('quote')) tasks.push(fetchQuoteActivity(companyId, before, perSource));
   if (want('shipment')) tasks.push(fetchShipmentActivity(companyId, before, perSource));
-  // 'note' and 'photo' both come from job_notes (one query yields both kinds).
+  // 'note' and 'photo' both come from notes (one query yields both kinds).
   if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
   if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));
 

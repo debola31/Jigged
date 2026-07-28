@@ -7,6 +7,7 @@ import Button from '@mui/material/Button';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import HistoryIcon from '@mui/icons-material/History';
 import { countPartAttachments } from '@/utils/partAttachmentsAccess';
+import { countPartPreviousNotes } from '@/utils/operatorAccess';
 import PartFilesSheet from '@/components/operator/PartFilesSheet';
 import PartNotesSheet from '@/components/operator/PartNotesSheet';
 
@@ -41,10 +42,24 @@ export default function PartReferenceRow({
   const [filesOpen, setFilesOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
 
-  // Eager count so the Files button can signal that a drawing exists. Notes stay
-  // lazy (optional reference, heavier query) — the sheet fetches them on open.
+  // Eager count so the Files button can signal that a drawing exists.
   const { data: fileCount } = useLoad(() => countPartAttachments(partId), [partId]);
   const hasFiles = (fileCount ?? 0) > 0;
+
+  // Notes now carry a count too. They used to be lazy on the grounds that they
+  // were an optional reference and a heavier query — but that left the affordance
+  // as a bare label, so an operator had NO WAY to tell whether anything was behind
+  // it. Files sat right beside it showing "Files · 3"; notes showed nothing
+  // whether the part had ten notes or none. Prior knowledge that nobody knows
+  // exists is not reachable, whatever the tap count says.
+  //
+  // The cost is one server-side count (head request, no rows transferred), which
+  // is what makes the eager fetch affordable now.
+  const { data: noteCount } = useLoad(
+    () => countPartPreviousNotes(partId, { excludeJobId }),
+    [partId, excludeJobId],
+  );
+  const hasNotes = (noteCount ?? 0) > 0;
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 3 }}>
@@ -63,9 +78,9 @@ export default function PartReferenceRow({
         variant="outlined"
         startIcon={<HistoryIcon />}
         onClick={() => setNotesOpen(true)}
-        sx={{ minHeight: 48 }}
+        sx={{ minHeight: 48, fontWeight: hasNotes ? 700 : 400 }}
       >
-        Previous notes
+        {hasNotes ? `Previous notes · ${noteCount}` : 'Previous notes'}
       </Button>
 
       {filesOpen && (

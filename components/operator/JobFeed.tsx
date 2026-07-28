@@ -21,6 +21,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
 import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -148,6 +149,13 @@ export default function JobFeed({
   // Date.now()+filename produced for rapid same-name camera captures.
   const pendingIdRef = useRef(0);
 
+  // Funnel state. Refs, not state: these are read once at unmount, and putting
+  // them in state would re-render the composer on every keystroke to record
+  // something the operator never sees.
+  const focusedRef = useRef(false);
+  const capturedRef = useRef(false);
+  const draftRef = useRef({ bodyLength: 0, photoCount: 0 });
+
   const showComposer = !readOnly && !!operationContext;
 
   const {
@@ -256,6 +264,30 @@ export default function JobFeed({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep the unmount snapshot current. In an effect, not during render: mutating
+  // a ref while rendering is unsafe under concurrent rendering (and StrictMode's
+  // double invoke), which the react-hooks lint rule correctly rejects.
+  useEffect(() => {
+    draftRef.current = { bodyLength: noteDraft.trim().length, photoCount: pending.length };
+  }, [noteDraft, pending]);
+
+  // Abandonment: they opened the composer and left without saving. This is the
+  // funnel step that separates "capture friction" from "container fit" — a high
+  // focus rate with a low save rate means they tried and gave up, which is a very
+  // different problem from never reaching for it at all.
+  //
+  // Fires on unmount, which is the only place that reliably catches leaving. The
+  // draft size rides along as context: focused-and-typed-nothing and
+  // typed-a-paragraph-then-bailed are both abandonment, but not the same story.
+  useEffect(() => {
+    return () => {
+      if (!showComposer) return;
+      if (!focusedRef.current || capturedRef.current) return;
+      logOperatorEvent(companyId, 'composer_abandoned', draftRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePickPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target;
     const files = Array.from(input.files ?? []);
@@ -355,6 +387,13 @@ export default function JobFeed({
       pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
       setPending([]);
       setNoteDraft('');
+      // After the write resolves, so a failed post is never counted as a save —
+      // the funnel's whole job is separating "tried" from "succeeded".
+      capturedRef.current = true;
+      logOperatorEvent(companyId, media.length > 0 ? 'note_saved_with_photo' : 'note_saved', {
+        photoCount: media.length,
+        bodyLength: body.length,
+      });
     } catch (err) {
       setComposerError(err instanceof Error ? err.message : 'Could not post. Please try again.');
       // The note may have been created with partial media — refresh to show truth.
@@ -434,6 +473,13 @@ export default function JobFeed({
               placeholder="Add a note or photo for this step…"
               value={noteDraft}
               onChange={(e) => setNoteDraft(e.target.value)}
+              onFocus={() => {
+                // Once per composer mount: this is the "started capture" step, and
+                // counting every refocus would inflate it past the save rate.
+                if (focusedRef.current) return;
+                focusedRef.current = true;
+                logOperatorEvent(companyId, 'composer_focused');
+              }}
               inputRef={noteFieldRef}
               fullWidth
               size="small"

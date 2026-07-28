@@ -4,6 +4,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // Mutable holder for the mocked ?station= param (hoisted above vi.mock).
 const nav = vi.hoisted(() => ({ station: null as string | null }));
 
+vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ companyId: 'c1' }),
   useSearchParams: () => new URLSearchParams(nav.station ? `station=${nav.station}` : ''),

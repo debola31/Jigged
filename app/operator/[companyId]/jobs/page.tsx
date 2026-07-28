@@ -22,6 +22,7 @@ import {
 } from '@/utils/operatorAccess';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
+import NoteUsageBanner from '@/components/operator/NoteUsageBanner';
 import { useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
 import type { OperatorJob, OperatorPlantJob } from '@/types/operator';
@@ -244,6 +245,13 @@ function OperatorJobsPageContent() {
 
   return (
     <Box>
+      {/* The return half of the loop, placed exactly where the brief asks: after
+          station selection, above the job list. This is the first thing an
+          operator sees when they start work, and the only moment in the day when
+          "somebody used what you wrote" can land before the job takes over.
+          Renders nothing when the count is zero. */}
+      {!showStationSelector && <NoteUsageBanner companyId={companyId} />}
+
       {/* Toolbar: scope segmented control (primary) + a "Show completed"
           checkbox (secondary — an explicit on/off so it's clear whether you're
           viewing completed vs. active work, which a single color-toggle chip

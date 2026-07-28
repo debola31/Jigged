@@ -64,15 +64,40 @@ the build the shop actually asked for — but they stop being the front door.
 
 ### Goal
 
-A shop can answer five questions without leaving Jigged:
+A shop can answer six questions about material without leaving Jigged:
 
 | Question | Journey |
 |---|---|
 | Do we have it? | [J4](#j4--job-kickoff-material-check) |
 | Where is it? | [J13](#j13--find-it) |
+| Whose is it? | [J14](#j14--customer-supplied-material) |
 | Did we buy it? | [J5](#j5--buy-it) / [J6](#j6--receive-it) |
 | Did we use it? | [J7](#j7--issue-material-to-a-job) / [J9](#j9--confirm-consumption-at-the-operation) |
-| Can we prove it? | [J12](#j12--prove-it-traceability--cut) — **cut**, no regulated customers |
+| Will we run out? | [J11](#j11--dont-run-out) |
+
+**And one question underneath all of them:**
+
+| | |
+|---|---|
+| **Can we trust any of the above?** | **[J10](#j10--count-it)** — the count session |
+
+J10 is deliberately not a seventh row. It isn't a lookup anyone performs; it is the ritual
+that keeps the other six true, and every one of them degrades to a guess without it. It is
+also **the first thing built** — for Contour the opening count *is* the opening balance, so
+the module has no numbers at all until J10 exists. Treating counting as a reporting feature
+that arrives later is how inventory modules rot; see
+[§5.11](#511-design-for-the-sustain-not-the-setup).
+
+The remaining journeys are the write side and the setup that keep those answers current —
+[J1](#j1--seed-the-item-master-and-opening-balances) seeding,
+[J2](#j2--say-where-something-lives) recording where things are,
+[J3](#j3--estimate-material-cost-on-a-quote) the quoting boundary, and
+[J8](#j8--cut-it-return-the-remnant) remnants.
+
+> **Considered and cut:** *"Can we prove it?"* — [J12](#j12--prove-it-traceability--cut)
+> traceability. Contour keeps no certs or heat numbers and serves no regulated customers, so
+> the whole lot layer went with it ([§5.6](#56-lots--resolved-dont-build-them)). It is listed
+> here so the omission reads as a decision rather than an oversight.
 
 ### Explicit non-goals (deliberate, decided)
 

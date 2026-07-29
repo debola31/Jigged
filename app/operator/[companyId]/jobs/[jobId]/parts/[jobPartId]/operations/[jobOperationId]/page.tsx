@@ -13,8 +13,12 @@ import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
+import Collapse from '@mui/material/Collapse';
+import IconButton from '@mui/material/IconButton';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import NoteAddIcon from '@mui/icons-material/NoteAdd';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
@@ -63,6 +67,19 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  * by a guide with a one-tap "switch & complete" (for legit cross-station work)
  * and a way back to the traveler.
  */
+const OP_DETAILS_KEY = 'jigged:op-details-expanded';
+
+/**
+ * Height of the operator shell's fixed bottom navigation.
+ *
+ * The sticky action bar has to clear it. The shell reserves the space with a
+ * margin on <main>, but that does NOT help a sticky child here: <main> is taller
+ * than the viewport and does not scroll internally, so the WINDOW is the scroll
+ * container and `bottom: 0` pins to the viewport edge — directly underneath the
+ * nav. Measured: main 48→720 on a 577px viewport, bar bottom 557, nav top 521.
+ */
+const BOTTOM_NAV_H = 56;
+
 export default function OperatorOperationActionPage() {
   const params = useParams();
   const companyId = params.companyId as string;
@@ -86,6 +103,29 @@ export default function OperatorOperationActionPage() {
   // it. Replaces the old capture-offer signal: there is no prompt any more,
   // because capture happens in the completion block itself.
   const [feedRefreshSignal, setFeedRefreshSignal] = useState(0);
+
+  // Job-card details, collapsed by default. STICKY across steps: an operator who
+  // wants the customer and the order quantity wants them on the next step too,
+  // and re-opening it every time is its own friction. sessionStorage rather than
+  // localStorage on purpose — this survives navigation, and whether it should
+  // survive across days (a remembered per-user preference) is a separate
+  // decision we have not made yet.
+  const [detailsOpen, setDetailsOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.sessionStorage.getItem(OP_DETAILS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(OP_DETAILS_KEY, detailsOpen ? '1' : '0');
+    } catch {
+      /* private mode / quota — the preference is best-effort */
+    }
+  }, [detailsOpen]);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -143,7 +183,31 @@ export default function OperatorOperationActionPage() {
   // like the shipment form's prefill) until the operator edits it — derived, not
   // an effect, so there's no setState-in-effect cascade. A successful record
   // clears the dirty flag, snapping the value back to the new remaining.
+  const isExternal = job?.operation_work_center_kind === 'external';
+  const isCompleted = job?.operation_status === 'completed';
+
+  // Capture belongs to the completion action, so it is enabled on exactly the
+  // branch that renders RECORD COMPLETION. A completed step and an outside step
+  // have no completion to attach a note to, so the feed keeps its own composer
+  // there (standaloneCapture below) — otherwise finishing a step would make it
+  // impossible to add the photo afterwards, and an outside step could never
+  // carry "sent to coater, back on the 16th".
+  const ownsCapture = !isCompleted && !isExternal;
+  const capture = useNoteCapture({
+    companyId,
+    jobId,
+    operatorId: currentOperatorId,
+    context: { jobPartId, jobOperationId },
+    enabled: ownsCapture,
+  });
+
   const qtyValue = qtyDirty ? qtyInput : remaining > 0 ? String(remaining) : '';
+
+  // What the single primary button will do. Completing takes precedence: a
+  // quantity in the field is a statement about production, and the note rides
+  // along with it.
+  const canComplete = Number(qtyValue) > 0;
+  const noteOnly = !canComplete && capture.hasContent;
 
   const reloadAll = async () => {
     await Promise.all([loadJob(), loadSummary()]);
@@ -203,6 +267,31 @@ export default function OperatorOperationActionPage() {
     }
   };
 
+  // Save a note with NO completion.
+  //
+  // Closes a hole B4 opened. Capture rides on RECORD COMPLETION, and that button
+  // requires qty > 0 — so an operator who finished ZERO pieces ("machine down",
+  // "waiting on material", "tool chipped") had two options and both were bad:
+  // say nothing, and lose exactly the knowledge this whole workstream exists to
+  // capture; or type a false quantity to get the note saved, corrupting the
+  // number that feeds costing and scheduling. Falsifying production data to
+  // satisfy a UI constraint is far worse than an extra code path.
+  //
+  // No second composer and no extra chrome: the SAME field, and the primary
+  // button says what it will actually do.
+  const handleSaveNoteOnly = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await capture.submit();
+      setFeedRefreshSignal((n) => n + 1);
+    } catch {
+      // useNoteCapture surfaces the message in the field itself.
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRevert = async () => {
     setActionLoading(true);
     setError(null);
@@ -245,23 +334,6 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  const isExternal = job?.operation_work_center_kind === 'external';
-  const isCompleted = job?.operation_status === 'completed';
-
-  // Capture belongs to the completion action, so it is enabled on exactly the
-  // branch that renders RECORD COMPLETION. A completed step and an outside step
-  // have no completion to attach a note to, so the feed keeps its own composer
-  // there (standaloneCapture below) — otherwise finishing a step would make it
-  // impossible to add the photo afterwards, and an outside step could never
-  // carry "sent to coater, back on the 16th".
-  const ownsCapture = !isCompleted && !isExternal;
-  const capture = useNoteCapture({
-    companyId,
-    jobId,
-    operatorId: currentOperatorId,
-    context: { jobPartId, jobOperationId },
-    enabled: ownsCapture,
-  });
   const isSent = job?.operation_status === 'sent';
   const consequence = operationCompletionConsequence(qtyValue, remaining);
 
@@ -308,7 +380,10 @@ export default function OperatorOperationActionPage() {
     job.operation_work_center_id !== stationId;
 
   return (
-    <Box>
+    // Bottom padding so the last of the feed can scroll clear of the sticky
+    // action bar instead of ending underneath it — the documented failure mode
+    // of sticky bars is obscuring the content or the error you need to read.
+    <Box sx={{ pb: `${BOTTOM_NAV_H + 88}px` }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -319,8 +394,15 @@ export default function OperatorOperationActionPage() {
         elevation={2}
         sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
       >
-        <CardContent>
-          <Box sx={{ mb: 2 }}>
+        <CardContent sx={{ py: 1.5 }}>
+          {/* ONE LINE BY DEFAULT: job number and part — what an operator needs to
+              confirm they have the right thing in hand. Everything else is
+              reference, and reference does not belong between someone and the
+              button they came to press (ISA-101: relevance over detail; a step
+              screen is a Level 1 action display, not a Level 3 detail display).
+              The rest expands IN PLACE rather than on another page, so nobody
+              loses their position mid-task. */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {/* The job number doubles as the link to this part's traveler — the
                 full step list. It's the way there for an operator who scanned
                 straight into one operation (no in-app history to pop back to);
@@ -336,22 +418,64 @@ export default function OperatorOperationActionPage() {
                 borderRadius: 1,
                 mx: -0.75,
                 px: 0.75,
+                flexShrink: 0,
               }}
             >
-              <Typography variant="h5" component="span" fontWeight={700}>
+              <Typography variant="h6" component="span" fontWeight={700}>
                 {job.job_number}
               </Typography>
               <FormatListBulletedIcon fontSize="small" sx={{ color: 'primary.light' }} />
             </ButtonBase>
-            <Typography variant="body2" color="text.secondary">
-              {job.customer_name || 'No customer'}
+            <Typography variant="h6" color="text.secondary" sx={{ flexShrink: 0 }}>
+              ·
             </Typography>
+            <Typography variant="h6" noWrap sx={{ minWidth: 0 }}>
+              {job.part_name || 'Part'}
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            <IconButton
+              onClick={() => setDetailsOpen((v) => !v)}
+              aria-label={detailsOpen ? 'Hide job details' : 'Show job details'}
+              aria-expanded={detailsOpen}
+              sx={{ width: 44, height: 44, flexShrink: 0 }}
+            >
+              <ExpandMoreIcon
+                sx={{
+                  transition: 'transform 150ms',
+                  transform: detailsOpen ? 'rotate(180deg)' : 'none',
+                }}
+              />
+            </IconButton>
           </Box>
 
-          {/* Lead with the part (what they're making). The operation's work
-              center is intentionally NOT repeated here — it's already shown as
-              the selected station in the header (and in the mismatch guard). */}
-          <Typography variant="h6">{job.part_name || 'Part'}</Typography>
+          {/* INSTRUCTIONS ARE NOT BEHIND THE CHEVRON. "Torque to 40, not 45" is
+              the most action-relevant thing on the screen, so hiding it would
+              invert the whole principle. It renders only when a shop has
+              actually written something. */}
+          {job.operation_instructions && (
+            <Box
+              sx={{
+                mt: 1.5,
+                p: 1.5,
+                borderRadius: 1,
+                bgcolor: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" display="block">
+                Instructions
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {job.operation_instructions}
+              </Typography>
+            </Box>
+          )}
+
+          <Collapse in={detailsOpen} unmountOnExit>
+          <Box sx={{ mt: 1.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            {job.customer_name || 'No customer'}
+          </Typography>
           {job.part_description && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
               {job.part_description}
@@ -377,25 +501,6 @@ export default function OperatorOperationActionPage() {
                     : 'Outside process'
                 }
               />
-            </Box>
-          )}
-
-          {job.operation_instructions && (
-            <Box
-              sx={{
-                mt: 1.5,
-                p: 1.5,
-                borderRadius: 1,
-                bgcolor: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <Typography variant="caption" color="text.secondary" display="block">
-                Instructions
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                {job.operation_instructions}
-              </Typography>
             </Box>
           )}
 
@@ -425,6 +530,8 @@ export default function OperatorOperationActionPage() {
               />
             </Box>
           )}
+          </Box>
+          </Collapse>
         </CardContent>
       </Card>
 
@@ -586,24 +693,62 @@ export default function OperatorOperationActionPage() {
             capture={capture}
             placeholder="Anything worth noting for next time? (optional)"
             disabled={actionLoading}
+            compact
           />
 
-          {/* Single action: the field defaults to the full remaining balance, so
-              this records a full completion by default and a partial when the
-              operator dials the number down (mirrors the shipment form — no
-              separate "complete all" button, which would just duplicate this). */}
-          <Button
-            fullWidth
-            variant="contained"
-            size="large"
-            color="primary"
-            startIcon={<CheckCircleIcon />}
-            onClick={handleRecord}
-            disabled={actionLoading || !(Number(qtyValue) > 0)}
-            sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
+          {/* STICKY, and that is the point. The action used to sit in normal flow
+              and fell below the fold on a 6.9" phone as soon as anything was added
+              above it — which B4 promptly did. Decluttering fixes that for today;
+              sticking it to the bottom makes it structurally impossible to break
+              again, and puts it in the thumb's green zone where the reachability
+              research says a primary action belongs. It sits inside the scrolling
+              region, so it lands directly above the bottom nav rather than over
+              it, and the errors above it stay visible. */}
+          <Box
+            sx={{
+              // FIXED, not sticky. `position: sticky` is inert here: the operator
+              // shell gives <main> `overflow: auto`, which makes main the nearest
+              // scrollport, and main never scrolls internally (it is simply taller
+              // than the viewport and the WINDOW does the scrolling). A sticky
+              // child of a non-scrolling scrollport never sticks — measured at
+              // bottom 557 with the nav top at 521, i.e. underneath the nav.
+              // Fixed escapes the overflow ancestor and pins to the viewport.
+              position: 'fixed',
+              left: 0,
+              right: 0,
+              bottom: BOTTOM_NAV_H,
+              px: 2,
+              pt: 1,
+              pb: 1.5,
+              bgcolor: 'background.default',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+              zIndex: 2,
+            }}
           >
-            {actionLoading ? <CircularProgress size={24} /> : 'RECORD COMPLETION'}
-          </Button>
+            {/* One button, and it says what it will do. The quantity field
+                defaults to the full remaining balance, so this records a full
+                completion by default and a partial when the number is dialled
+                down. With nothing finished but something typed it saves the note
+                alone — better than a dead button that does not explain itself. */}
+            <Button
+              fullWidth
+              variant="contained"
+              size="large"
+              color="primary"
+              startIcon={canComplete ? <CheckCircleIcon /> : <NoteAddIcon />}
+              onClick={canComplete ? handleRecord : handleSaveNoteOnly}
+              disabled={actionLoading || (!canComplete && !noteOnly)}
+              sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
+            >
+              {actionLoading ? (
+                <CircularProgress size={24} />
+              ) : canComplete ? (
+                'RECORD COMPLETION'
+              ) : (
+                'SAVE NOTE'
+              )}
+            </Button>
+          </Box>
 
           {qtyGood > 0 && (
             <Button

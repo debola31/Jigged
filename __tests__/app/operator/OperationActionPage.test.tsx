@@ -215,13 +215,64 @@ describe('operation action page — completion (characterisation)', () => {
   });
 
   it('cannot record zero', async () => {
+    // The floor is unchanged: no zero-quantity completion. What changed is the
+    // button's label when the quantity is empty — with nothing to record and
+    // nothing typed there is no action to offer, so it is disabled either way.
     const user = userEvent.setup();
     renderPage();
     const field = await screen.findByLabelText('Good pieces finished');
 
     await user.clear(field);
 
-    await waitFor(() => expect(recordButton()).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /save note/i })).toBeDisabled());
+    expect(screen.queryByRole('button', { name: /record completion/i })).not.toBeInTheDocument();
+  });
+
+  it('saves a note alone when nothing was finished', async () => {
+    // THE HOLE B4 OPENED. Capture rides on RECORD COMPLETION, which needs
+    // qty > 0 — so an operator who finished ZERO pieces ("machine down",
+    // "waiting on material") had to either say nothing, losing exactly the
+    // knowledge this workstream exists to capture, or type a false quantity to
+    // get the note saved. Falsifying production data to satisfy a UI constraint
+    // is much worse than an extra code path.
+    const user = userEvent.setup();
+    renderPage();
+    const field = await screen.findByLabelText('Good pieces finished');
+
+    await user.clear(field);
+    await user.type(screen.getByPlaceholderText(/worth noting/i), 'machine down, nothing run');
+
+    const save = screen.getByRole('button', { name: /save note/i });
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+
+    await waitFor(() =>
+      expect(mockAddNote).toHaveBeenCalledWith(
+        'job1',
+        'co1',
+        'acc1',
+        'machine down, nothing run',
+        { jobPartId: 'jp1', jobOperationId: 'op1' },
+      ),
+    );
+    // And crucially: NO completion was invented to carry it.
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('collapses the job details by default, and opens them in place', async () => {
+    // Reference detail does not belong between an operator and the button they
+    // came to press — but it should not cost a page navigation either.
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByLabelText('Good pieces finished');
+
+    expect(screen.queryByText('Cascade Robotics')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /show job details/i }));
+
+    expect(await screen.findByText('Cascade Robotics')).toBeInTheDocument();
+    // Still on the same screen — expanded, not navigated.
+    expect(screen.getByLabelText('Good pieces finished')).toBeInTheDocument();
   });
 
   it('allows over-completion — warned, never blocked', async () => {

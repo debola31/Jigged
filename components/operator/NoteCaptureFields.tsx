@@ -6,10 +6,8 @@ import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
-import MicNoneIcon from '@mui/icons-material/MicNone';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import type { NoteCapture } from '@/hooks/useNoteCapture';
 
@@ -49,6 +47,45 @@ function PendingThumbs({ capture }: { capture: NoteCapture }) {
           </IconButton>
         </Box>
       ))}
+    </Box>
+  );
+}
+
+/** The dictation tip. Capped and dismissible — see MIC_HINT_MAX_SHOWS. */
+function MicHint({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+        ※ Tip: tap the{' '}
+        {/* The iOS keyboard's dictation glyph (outlined mic + cradle + stem + base
+            bar), so it reads as the exact key operators tap — not a generic
+            emoji, and not something that looks tappable HERE. */}
+        <Box
+          component="svg"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          sx={{
+            width: '1.05em',
+            height: '1.05em',
+            verticalAlign: '-0.2em',
+            mx: '1px',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.6,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          }}
+        >
+          <rect x="9.5" y="3" width="5" height="10" rx="2.5" />
+          <path d="M6.5 11a5.5 5.5 0 0 0 11 0" />
+          <path d="M12 16.5V19" />
+          <path d="M8.5 19h7" />
+        </Box>{' '}
+        on your keyboard to talk instead of type.
+      </Typography>
+      <IconButton size="small" aria-label="Dismiss tip" onClick={onDismiss} sx={{ p: 0.25 }}>
+        <CloseIcon sx={{ fontSize: 14 }} />
+      </IconButton>
     </Box>
   );
 }
@@ -149,21 +186,13 @@ export default function NoteCaptureFields({
           >
             <PhotoCameraIcon />
           </IconButton>
-          {/* The dictation tip as an icon, not a sentence. It used to occupy a
-              full line above the primary action — a coach mark outranking the
-              button it sat above. */}
-          {capture.showMicHint && (
-            <Tooltip title="Tap the mic on your keyboard to talk instead of type">
-              <IconButton
-                aria-label="Tip: tap the mic on your keyboard to talk instead of type"
-                onClick={capture.dismissMicHint}
-                sx={{ width: 48, height: 48, flexShrink: 0, color: 'text.secondary' }}
-              >
-                <MicNoneIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
         </Box>
+        {/* A CAPTION, not an icon button. The icon version sat beside a real
+            camera button and read as "tap here to dictate" — but nothing can
+            invoke the OS keyboard's dictation from a web page, so tapping it only
+            dismissed the tip. A false affordance is worse than the line of text it
+            replaced, and this costs a line at most five times per device. */}
+        {capture.showMicHint && <MicHint onDismiss={capture.dismissMicHint} />}
         {capture.pending.length > 0 && <PendingThumbs capture={capture} />}
         {errorAlert}
       </Box>
@@ -174,46 +203,7 @@ export default function NoteCaptureFields({
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       {field}
 
-      {capture.showMicHint && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-            ※ Tip: tap the{' '}
-            {/* The iOS keyboard's dictation glyph (outlined mic + cradle + stem +
-                base bar), so it reads as the exact key operators tap — not a
-                generic emoji. */}
-            <Box
-              component="svg"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              sx={{
-                width: '1.05em',
-                height: '1.05em',
-                verticalAlign: '-0.2em',
-                mx: '1px',
-                fill: 'none',
-                stroke: 'currentColor',
-                strokeWidth: 1.6,
-                strokeLinecap: 'round',
-                strokeLinejoin: 'round',
-              }}
-            >
-              <rect x="9.5" y="3" width="5" height="10" rx="2.5" />
-              <path d="M6.5 11a5.5 5.5 0 0 0 11 0" />
-              <path d="M12 16.5V19" />
-              <path d="M8.5 19h7" />
-            </Box>{' '}
-            on your keyboard to talk instead of type.
-          </Typography>
-          <IconButton
-            size="small"
-            aria-label="Dismiss tip"
-            onClick={capture.dismissMicHint}
-            sx={{ p: 0.25 }}
-          >
-            <CloseIcon sx={{ fontSize: 14 }} />
-          </IconButton>
-        </Box>
-      )}
+      {capture.showMicHint && <MicHint onDismiss={capture.dismissMicHint} />}
 
       {capture.pending.length > 0 && <PendingThumbs capture={capture} />}
       {errorAlert}

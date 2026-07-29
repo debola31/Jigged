@@ -427,29 +427,42 @@ export default function OperatorOperationActionPage() {
             />
           </Box>
 
-          {/* Shop part descriptions frequently ARE the working instruction
-              ("Linear Actuator A-200, 6061, deburr all edges"), so this is
-              always visible rather than behind the expander. */}
+          {/* FULL STRENGTH, not dimmed. Shop part descriptions frequently ARE the
+              working instruction, because per-operation instructions are optional
+              and often left blank — so whichever field the engineer chose is the
+              one that matters, and the app cannot know which. Dimming this
+              asserted "reference, not instruction", which is false exactly when it
+              costs the most. Muted text draws less attention and raises the odds
+              of a skip (NN/G), and ISA-101 requires every emphasis to carry a
+              defined meaning — de-emphasis used as a guess carries none. */}
           {job.part_description && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
               {job.part_description}
             </Typography>
           )}
 
-          {/* INSTRUCTIONS ARE NOT BEHIND THE EXPANDER. "Torque to 40, not 45" is
-              the most action-relevant thing on the screen, so hiding it would
-              invert the whole principle. It renders only when a shop has actually
-              written something.
-              No box and no "Instructions" label — that chrome cost more attention
-              than it earned. Hierarchy comes from WEIGHT instead: the description
-              above is dimmed and this is full-strength, so the actionable line is
-              the brighter one. Making the two visually identical would have been
-              the real risk — an operator would read this as more description and
-              skim past it. */}
+          {/* Distinguished by a LABEL, not by weight or a box.
+              The two lines cannot be ranked: either may hold the engineer's
+              instruction, since per-operation text is optional and often blank.
+              So neither is dimmed — what is dimmed is the LABEL, which is chrome,
+              never the content. That tells the operator WHICH they are reading
+              (per-step vs per-part) without asserting which is more important,
+              and it keeps emphasis free for the states that genuinely mean "look
+              here now": the over-quantity error and the station mismatch.
+              The earlier problem was the tinted box, not the label. */}
           {job.operation_instructions && (
-            <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-              {job.operation_instructions}
-            </Typography>
+            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ flexShrink: 0, pt: '2px', textTransform: 'uppercase', letterSpacing: 0.4 }}
+              >
+                Step
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {job.operation_instructions}
+              </Typography>
+            </Box>
           )}
 
 

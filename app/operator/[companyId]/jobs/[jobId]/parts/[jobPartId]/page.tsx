@@ -228,9 +228,12 @@ export default function OperatorJobTravelerPage() {
           elevation={2}
           sx={{ ...cardSx, '&::before': { display: 'none' }, borderRadius: 1 }}
         >
+          {/* Deliberately not "Job feed" — JobFeed renders its own heading with that text,
+              so repeating it here duplicated the label on screen and made "Job Feed" an
+              ambiguous locator in e2e. */}
           <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 56 }}>
             <Typography variant="overline" color="text.secondary">
-              Job feed — notes &amp; photos
+              Notes &amp; photos
             </Typography>
           </AccordionSummary>
           <AccordionDetails sx={{ pt: 0 }}>

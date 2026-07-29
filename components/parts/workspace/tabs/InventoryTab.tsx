@@ -92,11 +92,10 @@ export default function InventoryTab({
               >
                 Add Stock
               </Button>
-              {/* At-rest trigger → `outlined error`, not a contained red fill; the contained
-                  variant belongs on the confirm inside the dialog. */}
+              {/* Not red — see the note in PartLocationInventory: reversible bookkeeping, not
+                  a destructive act. */}
               <Button
                 variant="outlined"
-                color="error"
                 size="large"
                 startIcon={<RemoveIcon />}
                 onClick={() => openTxnModal('depletion')}

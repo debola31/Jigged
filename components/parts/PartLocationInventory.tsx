@@ -114,16 +114,17 @@ export default function PartLocationInventory({
         <Button variant="contained" color="primary" startIcon={<AddIcon />} onClick={() => setAction('add')}>
           Add
         </Button>
-        {/* At-rest trigger, so `outlined error` — design-system.md reserves `contained error`
-            for the final confirm inside the dialog. This was a contained red fill on the most
-            frequently pressed control on the page. */}
-        <Button variant="outlined" color="error" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>
+        {/* Not red: removing stock is reversible and writes an append-only ledger row rather
+            than destroying one, so it isn't destructive. Add keeps the primary weight on THIS
+            surface — until receiving (J6) exists, the part page is how stock gets in, and an
+            owner here isn't the one consuming it. The operator bin view inverts that. */}
+        <Button variant="outlined" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>
           Remove
         </Button>
         <Button variant="outlined" startIcon={<SwapHorizIcon />} onClick={() => setAction('move')}>
           Move
         </Button>
-        <Button variant="outlined" color="info" startIcon={<TuneIcon />} onClick={() => setAction('adjust')}>
+        <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setAction('adjust')}>
           Adjust
         </Button>
       </Stack>

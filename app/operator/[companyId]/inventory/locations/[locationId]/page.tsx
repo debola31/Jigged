@@ -230,27 +230,28 @@ export default function OperatorBinViewPage() {
                       {part.primary_unit ?? ''}
                     </Typography>
                   </Box>
-                  {/* Same four verbs, same words, as the admin part page — this surface said
-                      "Set" for what that one calls "Adjust", so one action had two names.
-                      Remove is `outlined error`: design-system.md reserves the contained red
-                      fill for the confirm inside the dialog, not the at-rest trigger. */}
+                  {/* Same four verbs, same words, as the admin part page.
+                      REMOVE is the primary here, not Add. Stock arrives in bulk once at
+                      put-away — which is really receiving's job (J6), an admin task — and
+                      leaves in small amounts on every job, all shift. Emphasising Add put the
+                      weight on the rare end. None of the four is red: they are all reversible
+                      bookkeeping on one number, and red is reserved for destructive. */}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
                     <Button
                       variant="contained"
-                      startIcon={<AddIcon />}
-                      onClick={() => setModal({ action: 'add', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Add
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="error"
                       startIcon={<RemoveIcon />}
                       onClick={() => setModal({ action: 'deplete', part })}
                       sx={{ flex: 1, minWidth: 120 }}
                     >
                       Remove
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddIcon />}
+                      onClick={() => setModal({ action: 'add', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
+                    >
+                      Add
                     </Button>
                     <Button
                       variant="outlined"

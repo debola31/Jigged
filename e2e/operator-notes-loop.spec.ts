@@ -70,9 +70,18 @@ test.describe('operator read-back loop', () => {
     await expect(priorNotes).toBeVisible({ timeout: 30_000 });
 
     // 2. The knowledge itself, written against a DIFFERENT job for this part.
+    //
+    // Scoped to the sheet (a fullScreen Dialog) rather than the page. A bare
+    // getByText(...).first() matched whichever author name came first in DOM
+    // order — and the traveler's collapsed feed sits behind this dialog with its
+    // children MOUNTED BUT HIDDEN, so as soon as that job had any note the first
+    // match became an invisible one and this failed on `hidden`, not on absence.
+    // The count assertion above is deliberately left page-wide: the affordance is
+    // on the traveler, not in the sheet.
     await priorNotes.click();
-    await expect(page.getByText(DURABLE_NOTE_BODY)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText('E2E Test User').first()).toBeVisible();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByText(DURABLE_NOTE_BODY)).toBeVisible({ timeout: 30_000 });
+    await expect(sheet.getByText('E2E Test User').first()).toBeVisible();
   });
 
   test('the traveler feed renders without erroring on the notes query', async ({ page }) => {

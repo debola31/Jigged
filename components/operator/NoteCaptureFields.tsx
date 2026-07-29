@@ -97,8 +97,12 @@ export default function NoteCaptureFields({
         // fixed bars is covering the element the user is currently editing.
         // Centring the field on focus keeps it clear of both the bar and the
         // on-screen keyboard.
+        // Optional-call: jsdom does not implement scrollIntoView, and this is a
+        // progressive nicety rather than behaviour worth throwing over. The same
+        // `?.()` guard is used elsewhere in the operator components for exactly
+        // this reason.
         if (compact) {
-          e.currentTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          e.currentTarget.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
         }
       }}
       disabled={disabled || capture.saving}

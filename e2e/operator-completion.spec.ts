@@ -69,6 +69,7 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<v
 const qtyField = (page: Page) => page.getByLabel('Good pieces finished');
 const recordButton = (page: Page) => page.getByRole('button', { name: /record completion/i });
 const undoButton = (page: Page) => page.getByRole('button', { name: /undo all/i });
+const saveNoteButton = (page: Page) => page.getByRole('button', { name: /save note/i });
 const completeBanner = (page: Page) =>
   page.getByRole('button', { name: /this step is complete/i });
 
@@ -160,15 +161,50 @@ test.describe('operator completion', () => {
   });
 
   test('will not record nothing', async ({ page }) => {
-    // The only floor is > 0. Without it an empty tap would append a zero-quantity
-    // completion event and the step would read as worked-on when it was not.
+    // The floor is unchanged: no zero-quantity completion. What changed is the
+    // button's LABEL when the quantity is empty — with nothing to record there is
+    // no completion to offer, so it presents as SAVE NOTE and is disabled until
+    // something is typed. Asserting the old label here is what made this spec
+    // fail in CI while the component test (already updated) passed.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openStep(page);
 
     await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
     await qtyField(page).fill('0');
 
-    await expect(recordButton(page)).toBeDisabled();
+    await expect(recordButton(page)).toHaveCount(0);
+    await expect(saveNoteButton(page)).toBeDisabled();
+  });
+
+  test('saves a note alone when nothing was finished', async ({ page }) => {
+    // The hole B4 opened: capture rode on a button requiring qty > 0, so an
+    // operator who finished ZERO pieces had to stay silent or type a false
+    // quantity to get the note saved. Corrupting production data to satisfy a UI
+    // constraint is far worse than an extra path.
+    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    await openStep(page);
+
+    await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
+    await qtyField(page).fill('0');
+
+    // Unique per run. A fixed string accumulates in the shared local database and
+    // then matches several feed entries, and it also matches the textarea still
+    // holding the draft — three hits and a strict-mode violation. CI starts from a
+    // clean database so it would have hit only the two-element version of the
+    // same bug.
+    const body = `machine down, nothing run ${Date.now()}`;
+    await page.getByPlaceholder(/worth noting/i).fill(body);
+
+    await saveNoteButton(page).click();
+
+    // Scoped to the FEED, not the whole page, so the draft field cannot satisfy it.
+    await expect(
+      page.locator('p').filter({ hasText: body }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // And the step is still outstanding — no completion was invented to carry it.
+    await expect(qtyField(page)).toBeVisible();
+    await expect(completeBanner(page)).toHaveCount(0);
   });
 });
 

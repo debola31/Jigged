@@ -441,7 +441,7 @@ def test_digest_counts_people_not_rows(shop):
         ).execute()
 
     assert len(_rows(shop, note_id)) == 2
-    n = shop["author"]["client"].rpc("my_note_view_digest").execute().data
+    n = shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"]
     assert n == 1
 
 
@@ -451,7 +451,7 @@ def test_digest_is_scoped_to_the_callers_own_notes(shop):
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
 
-    n = shop["reader2"]["client"].rpc("my_note_view_digest").execute().data
+    n = shop["reader2"]["client"].rpc("my_note_digest").execute().data[0]["views"]
     assert n == 0
 
 
@@ -464,7 +464,7 @@ def test_digest_takes_no_time_window(shop):
     the wire."""
     with pytest.raises(Exception):
         shop["author"]["client"].rpc(
-            "my_note_view_digest", {"p_tz": "America/Detroit"}
+            "my_note_digest", {"p_tz": "America/Detroit"}
         ).execute()
 
 
@@ -473,17 +473,17 @@ def test_digest_is_a_running_total_not_a_window(shop):
     a view out — that is what makes "N new views since you last looked" work
     from a client-side subtraction alone."""
     note_id = _make_note(shop)
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 0
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 0
 
     shop["reader"]["client"].rpc(
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 1
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 1
 
     shop["reader2"]["client"].rpc(
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 2
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 2
 
 
 # ── the durable subject, and the constraints protecting it ───────────────────
@@ -733,6 +733,46 @@ def test_a_reaction_can_never_be_edited(shop):
         shop["reader"]["client"].table("note_reactions").update(
             {"kind": "confirmed"}
         ).eq("note_id", note_id).execute()
+
+
+def test_playbook_reactions_say_who_reacted(shop):
+    """THE BUG THIS EXISTS FOR. The array carried kind/name/created_at but not
+    reactor_id, so a reader could never be found in it: the thumbs-up rendered
+    un-pressed on a note they had already marked helpful, and a second tap just
+    re-inserted a duplicate. The reaction was persisting the whole time — it
+    simply could not be recognised as theirs. Component tests could not catch
+    this: they are handed the array directly."""
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    reactions = next(r["reactions"] for r in rows if r["id"] == note_id)
+    assert [x["reactor_id"] for x in reactions] == [shop["reader"]["access_id"]]
+
+
+def test_digest_reports_helpful_as_well_as_views(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+    _react(shop["reader2"]["client"], shop, note_id, shop["reader2"]["access_id"])
+
+    row = shop["author"]["client"].rpc("my_note_digest").execute().data[0]
+    assert row["views"] == 1
+    assert row["helpful"] == 1
+
+
+def test_digest_counts_only_the_callers_own_helpful(shop):
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    row = shop["reader2"]["client"].rpc("my_note_digest").execute().data[0]
+    assert row["helpful"] == 0
 
 
 def test_playbook_returns_author_id_so_the_ui_can_hide_the_control(shop):

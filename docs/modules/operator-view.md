@@ -171,10 +171,14 @@ see this", not "nobody can".
 
 ### What comes back to the author
 
-- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"N new views on your
-  notes"**. `my_note_view_digest()` returns a *running total* of views across the
-  caller's own notes (the sum of `viewer_count`, which is exactly the "views"
-  figure My work shows, so the two can never disagree). The component stores the
+- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"2 people found your
+  notes helpful · 3 new views."** `my_note_digest()` returns *running totals* of
+  both across the caller's own notes: views (the sum of `viewer_count`, exactly
+  the figure My work shows, so the two can never disagree) and helpful marks.
+  **Helpful leads when present** — a view is someone needing to look something
+  up; a helpful is a colleague choosing to say it was worth reading. Only the
+  signals that actually moved are mentioned. `helpful` is **not** monotonic (a
+  mark can be taken back), so its delta is clamped at zero. The component stores the
   total it last acknowledged in `localStorage` and renders the **difference**, so
   it appears only when something has genuinely happened and goes quiet once seen —
   no nag on the many jobs-list visits in a shift. Both the ✕ and a tap-through
@@ -239,7 +243,11 @@ endorsements are *reception*, the same category as the view count beside them.
   Sentry; there is no toast, because an operator mid-job does not need a dialog
   about a thumbs-up.
 - **Count and names derive from the same array**, so they can never disagree —
-  which is why no denormalized reaction counter exists.
+  which is why no denormalized reaction counter exists. That array must carry
+  `reactor_id`: without it a reader cannot be found in it, so the thumbs-up
+  renders un-pressed on a note they have already marked and a second tap just
+  re-inserts a duplicate. `part_playbook_notes` shipped without it and the bug
+  looked exactly like "likes are not persisting" — they were.
 - **No `operator_events` kind for reactions, deliberately.** `note_reactions`
   already records who reacted, to what, and when; a parallel funnel event would
   duplicate it and drift.

@@ -667,6 +667,35 @@ RSC payload. `agent-browser console` / `errors` are the fastest triage. Docs:
   extend `e2e/global-setup.ts` rather than runtime-skipping. Skips
   hide real regressions — see the `jobs.status` prod incident
   (May 2026) where a runtime-skipped spec masked a broken SELECT.
+- **From a worktree, Playwright will happily test the WRONG BRANCH.**
+  `playwright.config.ts` no longer launches a dev server — it trusts
+  whatever is already serving `localhost:3000`. Run E2E from a worktree
+  while the primary checkout's `pnpm dev` is up and the whole suite
+  exercises the primary's code against your branch's expectations. It
+  fails, or worse passes, for reasons unrelated to your change. The tell
+  is a stale string: renamed UI still showing its old label.
+
+  Serve your own port and point Playwright at it — no need to stop
+  anyone else's server:
+
+  ```bash
+  eval "$(supabase status -o env)"
+  export NEXT_PUBLIC_SUPABASE_URL=$API_URL NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY
+  pnpm next dev -p 3311 &                       # from the worktree
+  export TEST_SUPABASE_URL=$API_URL TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
+  export PLAYWRIGHT_TEST_BASE_URL=http://localhost:3311
+  pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list
+  ```
+
+  Confirm which checkout owns port 3000 before trusting a local E2E run:
+  `lsof -p $(lsof -ti:3000) -a -d cwd`.
+- **`global-setup` is find-or-insert, so an incomplete row STAYS
+  incomplete.** A seeder that early-returns on "the job exists" will
+  never backfill something added to it later — the local stack keeps
+  whatever the first run created until `supabase db reset`. When
+  extending a seeder, ensure each child record separately rather than
+  behind the parent's existence check, and remember CI always starts
+  clean while your machine does not.
 
 ### Where the detailed docs live
 

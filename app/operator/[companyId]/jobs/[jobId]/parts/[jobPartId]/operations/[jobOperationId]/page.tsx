@@ -169,6 +169,8 @@ export default function OperatorOperationActionPage() {
         quantityGood: qty,
       });
       setQtyDirty(false);
+      // After the write resolves — a failed completion is not a completion.
+      logOperatorEvent(companyId, 'completion_recorded', { jobOperationId, quantityGood: qty });
       await reloadAll();
       // Completion is now persisted. Offer capture last, so a client death at
       // the prompt cannot un-complete the step.

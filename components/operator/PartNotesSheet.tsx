@@ -17,6 +17,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CloseIcon from '@mui/icons-material/Close';
 import { getPartPreviousNotes } from '@/utils/operatorAccess';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+import { useNoteDwell } from '@/hooks/useNoteDwell';
 import NoteMediaGallery from '@/components/operator/NoteMediaGallery';
 import type { PartPreviousNote } from '@/types/operator';
 
@@ -45,7 +46,13 @@ function formatTimestamp(value: string): string {
   });
 }
 
-function NoteRow({ note }: { note: PartPreviousNote }) {
+function NoteRow({
+  note,
+  observe,
+}: {
+  note: PartPreviousNote;
+  observe: (id: string) => (el: HTMLElement | null) => void;
+}) {
   return (
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25, flexWrap: 'wrap' }}>
@@ -61,7 +68,7 @@ function NoteRow({ note }: { note: PartPreviousNote }) {
         </Typography>
       </Box>
       {note.body && (
-        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+        <Typography ref={observe(note.id)} variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
           {note.body}
         </Typography>
       )}
@@ -107,6 +114,11 @@ export default function PartNotesSheet({
   // decision is made on data from the shop rather than on a plausible story.
   const [scope, setScope] = useState<Scope>('part');
   const [toggled, setToggled] = useState(false);
+
+  // THE surface the read-back loop exists to measure: knowledge from a previous
+  // run, being read on a new one. excludeJobId is the job the operator is
+  // standing in, so it is the right read context for the per-job dedupe.
+  const { observe } = useNoteDwell(companyId, excludeJobId, open);
 
   const { data, loading, error } = useLoad(
     () =>
@@ -198,7 +210,7 @@ export default function PartNotesSheet({
             {notes.map((note, idx) => (
               <Box key={note.id}>
                 {idx > 0 && <Divider sx={{ my: 1.5 }} />}
-                <NoteRow note={note} />
+                <NoteRow note={note} observe={observe} />
               </Box>
             ))}
           </Box>

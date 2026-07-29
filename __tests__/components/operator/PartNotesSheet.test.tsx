@@ -10,6 +10,9 @@ import type { PartPreviousNote } from '@/types/operator';
 vi.mock('@/utils/operatorAccess', () => ({ getPartPreviousNotes: vi.fn() }));
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
 vi.mock('@/components/operator/NoteMediaGallery', () => ({ default: () => null }));
+// Dwell tracking imports the Supabase client at module scope; it has its own
+// suite in __tests__/hooks/useNoteDwell.test.tsx.
+vi.mock('@/hooks/useNoteDwell', () => ({ useNoteDwell: () => ({ observe: () => () => {} }) }));
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 

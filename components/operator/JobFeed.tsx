@@ -21,6 +21,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
 import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
+import { useNoteDwell } from '@/hooks/useNoteDwell';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
@@ -157,6 +158,10 @@ export default function JobFeed({
   const draftRef = useRef({ bodyLength: 0, photoCount: 0 });
 
   const showComposer = !readOnly && !!operationContext;
+
+  // Read tracking. The feed is where an operator encounters other people's notes
+  // in the course of a job, so it is the surface the whole loop is measuring.
+  const { observe } = useNoteDwell(companyId, jobId);
 
   const {
     data: loadedNotesData,
@@ -640,8 +645,14 @@ export default function JobFeed({
                   </Typography>
                 </Box>
 
+                {/* The observed element is the BODY, deliberately. Observing the
+                    card would count a header scrolling past as a read. */}
                 {note.body && (
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  <Typography
+                    ref={observe(note.id)}
+                    variant="body2"
+                    sx={{ whiteSpace: 'pre-wrap' }}
+                  >
                     {note.body}
                   </Typography>
                 )}

@@ -177,6 +177,19 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const sheetPath = useMemo(() => (sheetId ? nodePath(sheetId, byNodeId) : []), [sheetId, byNodeId]);
 
   /**
+   * Names already taken beside whatever the form is about to write.
+   *
+   * The DB refuses a duplicate sibling name outright, so the form warns before you can hit it.
+   * Editing scopes to the location's own parent; creating scopes to the chosen parent, and a
+   * top-level create compares against the roots.
+   */
+  const formSiblingNames = useMemo(() => {
+    const parentId = formState.location ? formState.location.parent_id : formState.parentId;
+    const siblings = parentId ? byNodeId.get(parentId)?.children ?? [] : tree;
+    return siblings.map((n) => n.name);
+  }, [formState.location, formState.parentId, byNodeId, tree]);
+
+  /**
    * "Nothing here yet" can't be `tree.length === 0`.
    *
    * `trg_auto_track_stocked_part` creates a top-level `('Unassigned', kind='system')` row the
@@ -398,6 +411,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         open={formState.open}
         location={formState.location}
         parentPath={formState.location ? undefined : formState.parentPath}
+        siblingNames={formSiblingNames}
         onClose={() => setFormState((s) => ({ ...s, open: false }))}
         onSubmit={submitForm}
       />

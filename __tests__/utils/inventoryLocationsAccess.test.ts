@@ -54,6 +54,7 @@ vi.mock('@/lib/supabase', () => ({
 import {
   buildLocationTree,
   createLocation,
+  updateLocation,
   deleteLocation,
   moveLocation,
   materializeLocationSpec,
@@ -574,5 +575,47 @@ describe('resolveScan', () => {
     expect(scan.contents).toHaveLength(1);
     expect(scan.contentsTotal).toBe(9428);
     expect(scan.path.map((p) => p.id)).toEqual(['cab', 'shelf-a']);
+  });
+});
+
+/**
+ * Duplicate sibling names, mapped.
+ *
+ * `inventory_locations_unique_sibling_name` is the only unique index a write from this module can
+ * trip, so the mapping is unambiguous — and raw PostgREST text ("duplicate key value violates
+ * unique constraint inventory_locations_unique_sibling_name") tells a shop owner nothing about
+ * which name to change.
+ */
+describe('duplicate sibling names', () => {
+  const UNIQUE_VIOLATION = { code: '23505', message: 'duplicate key value violates unique constraint' };
+
+  it('names the offending value when a create collides', async () => {
+    queueFrom({ data: null, error: UNIQUE_VIOLATION });
+    await expect(createLocation('co1', { name: 'Shelf A' })).rejects.toThrow(
+      /already a "Shelf A" in the same place/i,
+    );
+  });
+
+  it('maps a rename collision too, not just a create', async () => {
+    queueFrom({ data: null, error: UNIQUE_VIOLATION });
+    await expect(updateLocation('loc1', { name: 'Shelf A' })).rejects.toThrow(
+      /already a "Shelf A" in the same place/i,
+    );
+  });
+
+  it('leaves an unrelated write failure with its own message', async () => {
+    queueFrom({ data: null, error: { code: '42501', message: 'permission denied' } });
+    await expect(createLocation('co1', { name: 'Shelf A' })).rejects.toThrow(/permission denied/i);
+  });
+
+  // Every node the wizard generates goes through the same insert, so a collision mid-run surfaces
+  // the same actionable message rather than raw constraint text.
+  it('surfaces the same message from inside a generated spec', async () => {
+    queueFrom({ data: null, error: UNIQUE_VIOLATION });
+    await expect(
+      materializeLocationSpec('co1', null, [
+        { key: '0', name: 'Row 1', kind: 'row', code: 'R01', children: [] },
+      ]),
+    ).rejects.toThrow(/already a "Row 1" in the same place/i);
   });
 });

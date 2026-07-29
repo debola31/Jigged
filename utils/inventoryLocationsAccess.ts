@@ -166,6 +166,27 @@ async function assertParentInCompany(
   }
 }
 
+/** Postgres unique-violation. Here it can only be a duplicate sibling name. */
+const PG_UNIQUE_VIOLATION = '23505';
+
+/**
+ * Turn a duplicate-sibling-name violation into something a shop owner can act on.
+ *
+ * `inventory_locations_unique_sibling_name` is the only unique index a write from this module can
+ * trip, so the mapping is unambiguous. Raw PostgREST text ("duplicate key value violates unique
+ * constraint …") tells an owner nothing about which name to change.
+ */
+function mapLocationWriteError(error: { code?: string; message?: string }, name?: string): Error {
+  if (error.code === PG_UNIQUE_VIOLATION) {
+    return new Error(
+      name
+        ? `There's already a "${name}" in the same place. Pick a different name.`
+        : 'There\'s already a location with that name in the same place. Pick a different name.',
+    );
+  }
+  return new Error(error.message ?? 'Failed to save location.');
+}
+
 /**
  * The insert half of `createLocation`, with the parent check already done.
  *
@@ -195,7 +216,7 @@ async function insertLocation(
 
   if (error) {
     console.error('Error creating inventory location:', error);
-    throw error;
+    throw mapLocationWriteError(error, input.name.trim());
   }
   return data as InventoryLocation;
 }
@@ -222,7 +243,8 @@ export async function updateLocation(
     .single();
   if (error) {
     console.error('Error updating inventory location:', error);
-    throw error;
+    // A rename can collide with a sibling just as a create can.
+    throw mapLocationWriteError(error, patch.name);
   }
   return data as InventoryLocation;
 }

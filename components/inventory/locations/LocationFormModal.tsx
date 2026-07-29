@@ -30,6 +30,15 @@ interface LocationFormModalProps {
   location: InventoryLocation | null;
   /** Human path of the parent (for the "Adding under …" hint). */
   parentPath?: string[];
+  /**
+   * Names already used under the same parent.
+   *
+   * The DB now refuses a duplicate sibling name outright, so this is the half that keeps someone
+   * from *reaching* that error: the field warns while you type, and offers the existing names so
+   * "Shelf A" is picked rather than retyped as "shelf a". Nothing exact catches `ST0CK` for
+   * `STOCK` — a warning you read is the only defence against that one.
+   */
+  siblingNames?: string[];
   onClose: () => void;
   onSubmit: (values: LocationFormValues) => Promise<void>;
 }
@@ -38,6 +47,7 @@ export default function LocationFormModal({
   open,
   location,
   parentPath,
+  siblingNames,
   onClose,
   onSubmit,
 }: LocationFormModalProps) {
@@ -55,6 +65,23 @@ export default function LocationFormModal({
     setCode(location?.code ?? '');
     setError(null);
   };
+
+  /**
+   * Whether the typed name already belongs to a sibling.
+   *
+   * Matched the way the DB index does (case- and whitespace-insensitive) so the warning and the
+   * constraint agree — a warning that fires on names the DB accepts, or stays quiet on names it
+   * rejects, is worse than none. Editing a location doesn't warn about its own current name.
+   */
+  const trimmed = name.trim();
+  const duplicateOf = trimmed
+    ? (siblingNames ?? []).find(
+        (n) =>
+          n.trim().toLowerCase() === trimmed.toLowerCase() &&
+          n.trim().toLowerCase() !== (location?.name ?? '').trim().toLowerCase(),
+      )
+    : undefined;
+  const parentLabel = parentPath?.length ? parentPath[parentPath.length - 1] : 'This company';
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -93,14 +120,26 @@ export default function LocationFormModal({
               Adding under <strong>{parentPath.join(' › ')}</strong>
             </Alert>
           )}
-          <TextField
-            label="Name"
+          {/* freeSolo, so it stays a name field that happens to suggest — not a picker. Choosing
+              an existing name is how you avoid typing a second spelling of it. */}
+          <Autocomplete
+            freeSolo
+            options={siblingNames ?? []}
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Cabinet 1, Row 3, Left…"
-            autoFocus
-            fullWidth
-            required
+            onInputChange={(_, v) => setName(v)}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Name"
+                placeholder="Cabinet 1, Row 3, Left…"
+                autoFocus
+                required
+                error={Boolean(duplicateOf)}
+                helperText={
+                  duplicateOf ? `${parentLabel} already has a ${duplicateOf}.` : undefined
+                }
+              />
+            )}
           />
           <Autocomplete
             freeSolo

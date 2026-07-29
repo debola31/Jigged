@@ -32,6 +32,12 @@ Inventory is the one Jigged module that has not taken at the one shop we serve. 
 diagnosis is not "it needs more features" — it is that **we built the *where* layer first
 and the *why* layer never.**
 
+> **Status: the *why* layer shipped 2026-07-28.** Phase 1 — J1 import balances, J9 count sheet,
+> J4 material check, J7 issue-to-job — is complete, in zero new tables and zero migrations.
+> The diagnosis below is kept as written, because it is what the phase was built against and
+> because the failure mode it names (investment following the surface that is easiest to build
+> rather than the journey that was asked for) is not a one-off.
+
 Three facts, each verifiable:
 
 1. **All 2026 inventory investment went to a surface nobody asked for.** Six PRs between
@@ -320,9 +326,11 @@ calls to any stock function from `jobsAccess.ts`, `operatorAccess.ts`, `shipment
 `operationCompletionsAccess.ts`. **Every stock movement in Jigged is a deliberate human act of
 bookkeeping** — which is exactly the thing a busy shop stops doing.
 
-The single job linkage that exists: an operator at a scanned bin may optionally tag a removal
-with a job. That is a *label on a manual action*, not automation — and it is available only on
-the operator path, never to an owner in the dashboard.
+**Still true after J7 (2026-07-28), and deliberately.** The operator taking material on the
+traveler is a *deliberate act* — they tap TAKE — not a side effect of starting or completing
+anything. What changed is the ergonomics, not the principle: the job link is now made by
+construction rather than by remembering an optional field, and it is available on the owner
+path too (#59 restored). Nothing anywhere decrements stock on its own.
 
 ### UI surfaces
 
@@ -576,8 +584,30 @@ you can act — add to the buy list ([J5](#j5--buy-it)) or substitute.
 
 A shop-wide **"Short for this week"** view aggregates the same computation across open jobs.
 
-**Today: missing.** `JobPartMaterialsCard` shows a read-only BOM list with no quantities
-compared against stock. Nothing anywhere computes a shortage.
+> **Built 2026-07-28.** `JobPartMaterialsCard` (was a read-only BOM list with no stock in it)
+> now shows **Needs · On hand · Issued · Short by** per material, and
+> `/dashboard/{companyId}/inventory/shortages` aggregates the same computation across open
+> jobs. Everything is derived on read — no new table, no migration.
+>
+> **Three limitations, all stated on screen rather than left to be found in a wrong number:**
+>
+> 1. **Top-level materials only.** `parts_bom` is recursive but this compares one level, so a
+>    pump job reads *"needs 1 pump core"* and the aluminium inside it is invisible. Correct for
+>    [J7](#j7--issue-material-to-a-job) — the operator really does pull the sub-assembly off the
+>    shelf — and an incomplete answer to J4's own question. **Recursive explode is the immediate
+>    follow-up.**
+> 2. **No "on order" column.** Purchase orders don't exist until Phase 3 (#571). A permanently
+>    empty column trains people to ignore the row, so it is omitted rather than stubbed.
+> 3. **A job card compares one job to the whole shop's stock.** Two jobs each needing 10 against
+>    15 both read "not short" individually; only the shop-wide view sees the conflict. The card
+>    links to it so its number never reads as the whole truth.
+>
+> **Units that can't be converted are refused, not guessed.** `convertToBaseUnit` returns the
+> *unconverted* number with a `console.warn` when there is no route between two units — on this
+> screen that renders "you have plenty" for 4 ft against 120 in. The read path calls
+> `getConversionFactor` instead, which returns `undefined`, and the row shows a blank short-by
+> with a "Can't compare units" chip. **Blank, never zero** — a zero reads as "you're fine",
+> which is the one answer we must not give when we cannot compare.
 
 **Why this is Phase 1:** it is the highest-value read in the entire module, it needs **no
 new tables** (BOM × job quantity vs `parts.quantity`), and it is the thing that makes the
@@ -634,14 +664,28 @@ primary path and issue #59's ask.
 validation, and it reverses an assumption baked into both the current build and the earlier
 draft of this spec:
 
-- **Today the flow is bin-first** — scan a location QR → see contents → remove → *optionally*
+- **The old flow was bin-first** — scan a location QR → see contents → remove → *optionally*
   tag a job. That serves someone auditing a bin. It does not serve an operator whose context
   is *"I'm starting job 1047."*
-- **The flow should be job-first** — operator is on the job traveler → sees the material the
+- **The flow is now job-first** — operator is on the job traveler → sees the material the
   job needs → taps it → sees where it is → confirms taking it. The depletion is job-linked by
   construction rather than by an optional field the operator must remember.
 - Bin-first stays as the secondary path. It is the right shape for J9 counting and J11
   finding, and it already works.
+
+> **Built 2026-07-28** — a **Material** section on the traveler, above the steps, because
+> material comes before work. Two decisions worth recording:
+>
+> **A part in several bins asks the operator**, pre-selected to the fullest. That is deliberately
+> the opposite of [J9](#j9--count-it), which *excludes* multi-bin parts: at a count nobody is
+> present to say which bin a number came from, but here the operator is standing at the shelf
+> and knows which one they opened. Auto-choosing would make the ledger lie about where stock
+> left from, corrupting exactly the bin accuracy that counting and finding depend on. A take is
+> **never split across bins** — that is two ledger rows from one tap with no rollback if the
+> second fails.
+>
+> **The quantity prefills what's left to fetch and is not clamped to on-hand.** Clamping would
+> silently under-record when the bin is short; graceful depletion exists to record the truth.
 
 **Consequence for issue #59.** The March ask was a job selector in the owner's
 `PartTransactionModal`, and that regression is real — but it is **no longer the high-value
@@ -662,18 +706,26 @@ would re-state a fact already captured, and it would add friction to an operator
 deliberately complete-only, one tap
 ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2).
 
-The mechanics that were specced under J9 carry over unchanged:
+The mechanics that were specced under J9 carried over unchanged, and **shipped 2026-07-28**:
 
 - **No new table.** A consumption event is an `inventory_transactions` depletion row tagged
-  with `job_id` — every field already exists and is indexed. Expected comes from the live BOM
+  with `job_id` — every field already existed and was indexed. Expected comes from the live BOM
   (the same computation [J4](#j4--job-kickoff-material-check) needs), actual is the sum of
-  those rows, variance is computed on read. `job_materials` is not revived; see
+  those rows, variance is computed on read. `job_materials` was not revived; see
   [§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger).
 - **Graceful over-depletion is reused** — clamp to zero, flag `has_discrepancy`, stamp the
-  operator. That already works on the bin path and should behave identically here.
-- **Issue #550 resolves against this journey**, not a separate one. Note its premise has
-  shifted twice: it assumed an `inventory_transactions` feature flag that does not exist, and
-  it assumed the wrong actor.
+  operator. Behaves identically to the bin path, confirmed live.
+- **Issue #550 closed by being folded in, not by being built as written.** Worth stating
+  plainly, because the issue and the delivery do not match: #550 asked for a confirm-consumption
+  step at operation completion, gated behind an `inventory_transactions` feature flag. That flag
+  never existed, and the premise named the wrong actor. What shipped is the take-event on the
+  traveler. Anyone reading #550 as a spec would be reading a superseded one.
+
+> **Not delivered, and deliberately:** *"issued"* is job-level, not job-part-level, because
+> `inventory_transactions` has no `job_part_id`. A job with two parts drawing the same material
+> shows the same figure on both. Labelled "issued to this job" for exactly that reason. The fix
+> is one nullable column and an index, and it is cheap to add later — it was left out to keep
+> Phase 1 migration-free.
 
 **Reopen a distinct confirmation step only if** a real need appears for variance capture that
 the take-event can't express — for example a material consumed by one operator and reconciled
@@ -1012,6 +1064,19 @@ of divergence.
 "Unassigned"-only default for shops that don't want bins. That is a bigger migration than
 it looks and should be its own PR, not smuggled into a journey.
 
+> **⚠️ Re-date this after J7 (added 2026-07-28).** This sat in Phase 4's "quiet phase" when the
+> non-atomic path was only exercised by an owner doing occasional bookkeeping. **J7 made it the
+> highest-frequency write in the app, performed by operators who may be on the floor at the
+> same time.** The exposure is not only the known crash-between-round-trips case — it is a
+> **lost update**: two operators each read 100, each take 5, stock lands at 95 instead of 90,
+> silently, with two correct-looking ledger rows.
+>
+> Contour is not exposed (`inventory_locations` is on, so every part routes through the atomic
+> `FOR UPDATE` RPC). A flag-**off** shop with two operators is. Note the fix does **not** require
+> the full collapse above: a single `deplete_part_stock` SECURITY DEFINER RPC mirroring
+> `deplete_stock_at_location` would close it for one migration. Re-evaluate the phase once J7
+> has real usage, rather than leaving it parked here by default.
+
 ### 5.5 Locations: keep them visual, change *when* they appear
 
 > ⚠️ **Contour already had a locations feature, and we have the wreckage.** Their old ERP's
@@ -1258,9 +1323,18 @@ and place-scoped, not a one-off Adjust button.
 
 ## 6. Sequencing
 
-### Phase 1 — close the validated loop
+### Phase 1 — close the validated loop ✅ **COMPLETE 2026-07-28**
 
 Ordered by dependency, not value. **Get numbers in → use them → keep them true.**
+
+> All four journeys shipped, plus the #59 patch. **Zero new tables and zero migrations across
+> the whole phase** — which is not a coincidence: every figure J4 and J7 need already existed
+> on `parts_bom`, `parts` and `inventory_transactions`. The module's gap was never schema.
+>
+> Carried forward, each recorded where it belongs rather than as a general TODO: the recursive
+> BOM explode ([J4](#j4--job-kickoff-material-check)), `job_part_id` on the ledger
+> ([J7](#j7--issue-material-to-a-job)), and the re-dated atomicity debt
+> ([§5.4](#54-one-stock-engine)).
 
 1. **Get numbers in — two doors, both required.**
    - **[J1](#j1--seed-the-item-master-and-opening-balances) import**: `quantity` and
@@ -1337,10 +1411,10 @@ point of the exercise.
 | J1 opening balances | FR-16 `Should` — CSV upload for inventory items | silent | ✅ **built 2026-07-28** |
 | J2 where it lives | *(absent — no PRD requirement at all)* | AC only, no user story | ⚠️ inverted |
 | J3 quote cost | FR-11 | in parts/routings docs | ✅ |
-| J4 material check | Flow 3 step 2 | silent | ❌ |
+| J4 material check | Flow 3 step 2 | silent | ✅ 2026-07-28 (top level only) |
 | J5 buy it | Flow 3 steps 4–5 | silent | ❌ |
 | J6 receive it | Admin persona; Flow 3 step 6 | silent | ❌ |
-| J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ❌ regressed; consumption removed then re-intended |
+| J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ✅ 2026-07-28, job-first on the operator surface |
 | J8 remnants | *(absent)* | silent | ❌ |
 | J9 count | success metric: 100% accuracy | silent | ✅ **built 2026-07-28** |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
@@ -1479,15 +1553,51 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
 - [x] **Given** an unfinished sheet, **then** it can be resumed, and a draft from another
   company is ignored — *verified by `…InventoryCountPage.test.tsx > 'draft resume'`*.
 
-**Known-failing by design** (recorded so they are not mistaken for oversights)
+**Material check (J4)**
 
-- [ ] **Given** an owner in the dashboard, **when** they remove stock, **then** they can link it
-  to a job — **regressed**, see the `PartTransactionModal` note above. Issue #59. Demoted, not
-  forgotten: the operator moves material, so [J7](#j7--issue-material-to-a-job) is the fix.
-- [ ] **Given** a job, **when** it is viewed, **then** required material is compared to on-hand
-  — **not built** ([J4](#j4--job-kickoff-material-check), next in Phase 1).
-- [ ] **Given** a completed operation, **when** material was consumed, **then** stock depletes
-  — **not built** ([J7](#j7--issue-material-to-a-job), issue #550).
+- [x] **Given** a job, **when** it is viewed, **then** each material shows required · on hand ·
+  issued · short by — *verified by `__tests__/components/jobs/JobPartMaterialsCard.test.tsx`*.
+- [x] **Given** two open jobs needing the same material, **then** the shop-wide view counts
+  on-hand **once** and sums the requirements — *verified by
+  `__tests__/lib/materialRequirements.test.ts > 'counts on-hand once across jobs'` and
+  `__tests__/utils/materialCheckAccess.test.ts`*. This is the case a per-job card structurally
+  cannot show.
+- [x] **Given** a BOM unit with no route to the stock unit, **then** short-by is **blank, never
+  zero**, and the row says why — *verified by `…JobPartMaterialsCard.test.tsx > 'renders an em
+  dash, never a number'`; manually confirmed 2026-07-28 with a `pounds` BOM line against an
+  `each` part.*
+- [x] **Given** any number of open jobs, **then** the shop-wide query count stays constant —
+  *verified by `…materialCheckAccess.test.ts > 'does not scale its query count'` (4 queries at
+  20 jobs and at 200).*
+- [ ] **Given** a made sub-assembly on a BOM, **then** its own materials are exploded —
+  **not built, and captioned on screen.** Level 1 only; see the note in J4. Follow-up.
+
+**Issue to job (J7)**
+
+- [x] **Given** an operator on the traveler, **when** they take material, **then** a `depletion`
+  row carrying `job_id` is written and the balance drops — *verified by
+  `__tests__/components/operator/OperatorIssueMaterialModal.test.tsx`; manually confirmed
+  2026-07-28 on both engines.*
+  > Replaces an earlier bullet phrased *"Given a completed operation … then stock depletes."*
+  > That wording was **rewritten rather than ticked**: J7 deliberately does not auto-deplete on
+  > completion, and [§3](#nothing-decrements-automatically) says nothing decrements
+  > automatically. Ticking it would have asserted behaviour the spec explicitly rejects.
+- [x] **Given** a part in several bins, **then** the operator chooses which, pre-selected to the
+  fullest, and the ledger records that bin — *verified by `…OperatorIssueMaterialModal.test.tsx
+  > 'choosing a bin'`; manually confirmed by taking from the **non-default** bin and checking
+  the balance moved there.*
+- [x] **Given** more taken than is on hand, **then** it clamps to zero, flags `has_discrepancy`
+  and does **not** block — *manually confirmed 2026-07-28.*
+- [x] **Given** an untracked part, **then** the take routes to `removePartStockGraceful` and
+  never to a location RPC — *verified by `…'engine routing'`; manually confirmed by
+  un-tracking a part, since every seeded stocked part is location-tracked.*
+
+**Owner-side job link (#59)**
+
+- [x] **Given** an owner removing stock, **then** they can tag it to a job, on both engines —
+  *verified by `__tests__/components/parts/PartTransactionJobTag.test.tsx`.* Regressed May
+  2026 and unnoticed for two months **because nothing pinned it**; that is what these seven
+  cases are for.
 
 ---
 
@@ -1576,11 +1686,11 @@ Worth pulling; do not cite numbers from either until someone has read them.
 
 ## 10. Next steps
 
-**This spec is done, and Phase 1 is unblocked. Start building.**
+**Phase 1 is complete (2026-07-28). Next is Phase 2 — locations reshaped.**
 
-The structural questions are answered, [§5.2](#52-is-a-job-a-place--resolved-no) is resolved,
-and the legacy exports closed the two questions that were still worth waiting on. Nothing on
-the open list gates the first build.
+The *why* layer this spec was written to diagnose now exists: numbers get in (J1, J9), get used
+on a job (J4), and record themselves as work happens (J7). Phase 2 goes back to the *where*
+layer that was built first, and reshapes it around what we now know.
 
 **On the usability test: it is no longer a gate.** It was the right instrument when we had no
 evidence. We now have something better for the questions that mattered — 121 location rows and
@@ -1589,16 +1699,16 @@ self-report is weakest. What remains for it (their vocabulary, the bar rack, the
 spike) is **Phase 2 input and can run in parallel with Phase 1 development.** Do not hold the
 build for it.
 
-1. **Build [J9](#j9--count-it) first** — Phase 1's entry point. Blank-slate walk across ~12–18
-   places; the first commit *is* the opening balance. Self-served, since they've counted before.
-2. **Then [J4](#j4--job-kickoff-material-check)** — no new tables, and it's the rush-job payoff.
-3. **Then [J7](#j7--issue-material-to-a-job) job-first** — the largest build, and the
-   best-evidenced thing in the spec: they hand-built it in a location field 97 times.
+1. ~~**Build [J9](#j9--count-it) first**~~ · ~~**then [J4](#j4--job-kickoff-material-check)**~~ ·
+   ~~**then [J7](#j7--issue-material-to-a-job) job-first**~~ — **all shipped 2026-07-28**, with
+   [J1](#j1--seed-the-item-master-and-opening-balances) and the #59 patch. Phase 1 is closed;
+   [§6](#6-sequencing) carries what each left behind. **Next is Phase 2.**
 4. **Close #541** — answered: #496 means *beyond* locations; the gap is the material↔job loop.
    Re-scope **#496** from *"the use isn't validated"* to the phasing in [§6](#6-sequencing).
-5. **Fold #571 into Phase 3** and **#550 into Phase 1** (J7) and J9. #550's premise has shifted:
-   it assumed an `inventory_transactions` flag that does not exist, and the actor is the
-   operator, not the owner.
+5. **Fold #571 into Phase 3.** **#550 and #59 are ready to close** — both delivered
+   2026-07-28. Note #550 closed by being *folded into* J7, not built as written: it asked for a
+   confirm-consumption step behind an `inventory_transactions` feature flag that never existed,
+   and named the wrong actor. Anyone reading the issue as a spec is reading a superseded one.
 6. **Run the [discovery script](../usability-tests/inventory-discovery-script-v1.md) alongside**,
    for Phase 2 only. Trim it to the vocabulary walk, the bar-rack question and the scanning
    probes — the rest is answered.

@@ -454,12 +454,15 @@ Materials are **part-attached** (`parts_bom`), not routing-attached — the old
 `routing_materials` table was removed. A job part has a single materials list regardless of
 how many operations its routing has.
 
-> **There is no per-job consumption tracking today.** Marking materials consumed or skipped,
-> recording an actual quantity, and auto-depleting stock on completion were **removed** by
-> migration `20260614043526_retire_job_material_consumption`. Stock depletion is a deliberate
-> manual transaction. Rebuilding it is journey **J7 — Issue material to a job** in
-> [`inventory.md`](inventory.md) (issue #550), where consumption is recorded as an
-> `inventory_transactions` depletion tagged with `job_id` rather than on `job_materials`.
+> **Per-job consumption is tracked again as of 2026-07-28 — on the ledger, not here.** The old
+> model (mark consumed/skipped, an actual quantity, auto-deplete on completion) was removed by
+> migration `20260614043526_retire_job_material_consumption` and has **not** come back.
+> Journey **J7 — Issue material to a job** ([`inventory.md`](inventory.md)) rebuilt it as an
+> `inventory_transactions` depletion tagged with `job_id`, written when the operator takes the
+> material on the traveler. `job_materials` is untouched by it and remains write-only.
+>
+> Note stock still **never** decrements as a side effect of completing an operation — the take
+> is the event, not the completion.
 
 ### `job_materials` Table
 
@@ -493,9 +496,12 @@ reflects the current BOM. There is no mark-consumed or mark-skipped action.
 
 - Designer defines the materials a part consumes once, on the part's BOM (`parts_bom`).
 - Job-part creation snapshots those edges into `job_materials`.
-- The job page displays the **live BOM**. To decrement stock, someone records a Remove Stock
-  transaction against the material part — a deliberate action, not a side effect of
-  completing the job.
+- The job page displays the **live BOM**, now with required vs on-hand vs issued per material
+  (J4).
+- Stock decrements when someone records it deliberately — never as a side effect of completing
+  a job. The **primary** path is the operator taking material on the traveler, which tags the
+  depletion with the job (J7); an ad-hoc Remove Stock against the material part remains
+  available for everything else.
 
 > Note the unresolved contradiction: the snapshot is taken at creation, and the UI then
 > deliberately ignores it in favour of the live BOM. See

@@ -454,12 +454,17 @@ this table is the index, so keep it short and keep it pointing there.
 
 | Phase | Journeys | Delivers | Schema cost |
 |---|---|---|---|
-| **1 — close the loop** | **J1** import balances · **J9** count session · **J4** material check · **J7** issue-to-job (incl. consumption) | Numbers get in, get used on a job, and stay true. Closes FR-1/FR-13 gaps and delivers FR-16's inventory half. | One table (count session) |
+| **1 — close the loop** ✅ **done 2026-07-28** | **J1** import balances · **J9** count session · **J4** material check · **J7** issue-to-job (incl. consumption) | Numbers get in, get used on a job, and stay true. Closes FR-1/FR-13 gaps and delivers FR-16's inventory half. | **None** — no new tables, no migrations |
 | **2 — locations reshaped** | **J2** | Incremental places, permanent visual board, photos + fill state, retire the structure-first wizard. PWA basics + iOS scanner spike. | None expected |
 | **3 — purchasing** | **J5** POs · **J6** receiving · **J10** buy list + on-order | Completes **Flow 3 (Inventory Reorder)** below, and satisfies **FR-2** properly. **This is issue #571** — merge, don't run in parallel. | POs, receipts |
 | **4 — debt paydown** | **J8** remnants | Remnants, reconciliation, one-stock-engine collapse, `job_materials` drop. | Removals, mostly |
 
-**Already built:** J3 (material cost on a quote, FR-11), J11 (find it — QR scan → bin view).
+**Already built:** J3 (material cost on a quote, FR-11), J11 (find it — QR scan → bin view),
+and all of Phase 1 as of 2026-07-28.
+
+> Phase 1's schema cost was budgeted at one table and came in at zero: every figure J4 and J7
+> needed already existed on `parts_bom`, `parts` and `inventory_transactions`, and J9's count
+> sheet turned out not to need a session table. The module's gap was never schema.
 
 **Deliberately cut, with reasons recorded** so they are not re-proposed:
 

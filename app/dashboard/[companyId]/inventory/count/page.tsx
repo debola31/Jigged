@@ -49,7 +49,6 @@ import Stepper from '@mui/material/Stepper';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import CheckIcon from '@mui/icons-material/Check';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
@@ -526,12 +525,11 @@ export default function InventoryCountPage() {
                     const matches = delta === 0;
                     const bigChange = delta !== null && isBigDelta(c, delta);
 
+                    // No row-level "done" tint: the variance cell already says whether a row
+                    // has been actioned, and tinting the ground behind the figures only costs
+                    // them contrast.
                     return (
-                      <TableRow
-                        key={c.partId}
-                        // A counted row should read as done at a glance while scanning down.
-                        sx={{ bgcolor: isCounted ? 'action.hover' : 'transparent' }}
-                      >
+                      <TableRow key={c.partId}>
                         <TableCell sx={{ width: '99%' }}>
                           <Typography variant="body2" sx={{ fontWeight: 500 }}>
                             {c.partName}
@@ -572,16 +570,21 @@ export default function InventoryCountPage() {
                           </TableCell>
                         )}
 
+                        {/* Direction always owns the colour: green up, red down, neutral for
+                            no change. The big-change warning is a separate amber glyph rather
+                            than a third colour on the number — otherwise a large increase and
+                            a large decrease look identical, which is the one thing the
+                            variance column exists to distinguish. */}
                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                           {isCounted &&
                             (matches ? (
-                              <Chip
-                                size="small"
-                                icon={<CheckIcon />}
-                                label="Matches"
-                                color="success"
-                                variant="outlined"
-                              />
+                              <Typography
+                                component="span"
+                                variant="body2"
+                                sx={{ color: 'text.disabled' }}
+                              >
+                                No change
+                              </Typography>
                             ) : (
                               <Typography
                                 component="span"
@@ -589,17 +592,19 @@ export default function InventoryCountPage() {
                                 sx={{
                                   ...NUM_SX,
                                   fontWeight: 700,
-                                  color: bigChange
-                                    ? 'warning.main'
-                                    : (delta as number) > 0
-                                      ? 'success.main'
-                                      : 'error.main',
+                                  color: (delta as number) > 0 ? 'success.main' : 'error.main',
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: 0.5,
                                 }}
                               >
-                                {bigChange && <WarningAmberIcon fontSize="small" />}
+                                {bigChange && (
+                                  <WarningAmberIcon
+                                    fontSize="small"
+                                    sx={{ color: 'warning.main' }}
+                                    titleAccess="Large change — worth a re-count"
+                                  />
+                                )}
                                 {signed(delta as number)}
                               </Typography>
                             ))}

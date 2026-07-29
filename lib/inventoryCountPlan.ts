@@ -132,12 +132,11 @@ export function buildVariances(
       counted,
       delta,
       movedSinceOpened: opened !== undefined && opened !== candidate.systemQuantity,
+      // Proportional change, or 0 when there's no baseline. A change from zero has no
+      // percentage — and treating it as infinite would flag every row of an opening count,
+      // which is the one count where every part legitimately starts at zero.
       magnitude:
-        candidate.systemQuantity === 0
-          ? counted === 0
-            ? 0
-            : 1
-          : Math.abs(delta) / candidate.systemQuantity,
+        candidate.systemQuantity === 0 ? 0 : Math.abs(delta) / candidate.systemQuantity,
     });
   }
   return out;
@@ -154,12 +153,16 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
  * ~30% of large variances turn out to be count errors rather than real movement, so these get
  * a warning on the row and a callout in the save dialog — cheaper than gating every count
  * behind a review page.
+ *
+ * **Not flagged when the system had nothing.** Going 0 → 3 is what an opening count looks
+ * like, so treating it as extraordinary would put a warning on every row of the first count a
+ * shop ever runs. A warning on one row in forty is signal; on forty rows it's wallpaper.
  */
 export const BIG_VARIANCE_THRESHOLD = 0.5;
 
 export function isBigDelta(candidate: CountCandidate, delta: number): boolean {
   if (delta === 0) return false;
-  if (candidate.systemQuantity === 0) return true;
+  if (candidate.systemQuantity === 0) return false;
   return Math.abs(delta) / candidate.systemQuantity >= BIG_VARIANCE_THRESHOLD;
 }
 

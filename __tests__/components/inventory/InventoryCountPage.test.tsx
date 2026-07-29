@@ -168,7 +168,7 @@ describe('inline feedback', () => {
     const user = await onSheet();
     await user.type(inputFor('4140 bar'), '40');
     // Anchored: the footer also says "Everything matches so far".
-    expect(await screen.findByText(/^Matches$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^No change$/)).toBeInTheDocument();
   });
 
   it('tracks progress against the chosen scope, in plain language', async () => {

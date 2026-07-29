@@ -775,6 +775,16 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 > while the sheet was open — the commit is safe either way (adjust sets absolutes), but variance
 > against a stale snapshot would mislead. Changes over 50% get one confirm rather than a review
 > gate, since [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/).
+>
+> **Variance colour is direction, and only direction:** green up, red down, neutral for no
+> change. The large-change warning is a separate amber glyph beside the figure, never a third
+> colour on it — a big increase and a big decrease must not look alike in the one column whose
+> job is telling them apart.
+>
+> **A change from a zero baseline is not "large".** Proportional change is undefined against
+> zero, and an opening count starts every part there, so treating 0 → *n* as infinite would put
+> a warning on every row of the first count a shop ever runs. A warning on one row in forty is
+> signal; on forty rows it is wallpaper. Stock going *to* zero still flags.
 
 **Why this is Phase 1:** it is the ritual that keeps the other eleven journeys true, and
 the PRD's own success metric (*"100% inventory accuracy within 3 months"*) is unmeasurable

@@ -146,8 +146,15 @@ describe('isBigDelta', () => {
     expect(isBigDelta(c, 0)).toBe(false);
   });
 
-  it('treats any count against zero on-hand as big', () => {
-    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5)).toBe(true);
+  // An opening count starts every part at zero. If 0 → anything were "big", the first count a
+  // shop ever runs would be a solid wall of warnings, which is the same as no warnings at all.
+  it('does not flag a count against a zero baseline', () => {
+    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5)).toBe(false);
+    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5000)).toBe(false);
+  });
+
+  it('still flags stock that has gone entirely missing', () => {
+    expect(isBigDelta(candidate({ partId: 'g', systemQuantity: 12 }), -12)).toBe(true);
   });
 });
 
@@ -184,10 +191,10 @@ describe('buildVariances', () => {
     expect(buildVariances(candidates, { x: 3 }, new Map())).toEqual([]);
   });
 
-  it('treats any count against zero on-hand as a full-magnitude change', () => {
+  it('reports no magnitude against a zero baseline — a change from nothing has no percentage', () => {
     const zeroed = [candidate({ partId: 'z', systemQuantity: 0 })];
     const v = buildVariances(zeroed, { z: 5 }, new Map());
-    expect(v[0].magnitude).toBe(1);
+    expect(v[0].magnitude).toBe(0);
   });
 });
 

@@ -76,6 +76,19 @@ export function excludedCandidates(candidates: CountCandidate[]): CountCandidate
   return candidates.filter((c) => c.target.kind === 'excluded');
 }
 
+/**
+ * The unit shared by every part on the sheet, or null when they differ.
+ *
+ * When one unit covers the whole count it belongs in the footer, said once — repeating "each"
+ * down forty rows is noise in a column of numbers. When units are mixed the sheet needs a
+ * per-row unit instead, because a bare column of figures in different units is a trap.
+ */
+export function commonUnit(candidates: CountCandidate[]): string | null {
+  if (candidates.length === 0) return null;
+  const first = candidates[0].unit;
+  return candidates.every((c) => c.unit === first) ? first : null;
+}
+
 /** How many parts carry a number. Drives the footer's running tally. */
 export function countedTally(entries: CountEntries): number {
   return Object.keys(entries).length;

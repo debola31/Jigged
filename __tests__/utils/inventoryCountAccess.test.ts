@@ -35,7 +35,7 @@ const variance = (
   target: CountVariance['candidate']['target'],
   systemQuantity = 0,
 ): CountVariance => ({
-  candidate: { partId, partName: partId.toUpperCase(), unit: 'ft', systemQuantity, target },
+  candidate: { partId, partName: partId.toUpperCase(), description: null, unit: 'ft', systemQuantity, target },
   counted,
   delta: counted - systemQuantity,
   movedSinceOpened: false,

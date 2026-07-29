@@ -31,6 +31,8 @@ export type CountTarget =
 export interface CountCandidate {
   partId: string;
   partName: string;
+  /** Sub-line on the sheet — part numbers alone aren't recognisable at a shelf. */
+  description: string | null;
   /** Primary unit; counts are entered in it. */
   unit: string;
   /** What the system believes. Re-read at save so variances aren't against a stale snapshot. */

@@ -98,6 +98,7 @@ export async function loadCountCandidates(
     return {
       partId: part.id,
       partName: part.part_name,
+      description: part.description ?? null,
       // Every stocked part has one — parts_requires_unit CHECKs it — but the column is
       // nullable in the type, so fall back rather than render "null".
       unit: part.primary_unit ?? 'ea',

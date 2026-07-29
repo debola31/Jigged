@@ -34,10 +34,15 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
-import InputAdornment from '@mui/material/InputAdornment';
 import LinearProgress from '@mui/material/LinearProgress';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
@@ -56,6 +61,7 @@ import {
   clearDraft as clearStoredDraft,
   committableVariances,
   countableCandidates,
+  commonUnit,
   countedTally,
   excludedCandidates,
   isBigDelta,
@@ -78,6 +84,19 @@ import type {
 const STEPS = ['Choose what to count', 'Count'];
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+/** Column headers: quiet, so the figures carry the row. */
+const HEAD_SX = {
+  fontSize: 11,
+  letterSpacing: '0.09em',
+  textTransform: 'uppercase' as const,
+  color: 'text.secondary',
+  fontWeight: 600,
+  whiteSpace: 'nowrap' as const,
+};
+
+/** Digits must line up column-to-column — that alignment is the whole point of this layout. */
+const NUM_SX = { fontVariantNumeric: 'tabular-nums' as const };
 const signed = (n: number) => `${n > 0 ? '+' : ''}${num(n)}`;
 
 export default function InventoryCountPage() {
@@ -160,6 +179,9 @@ export default function InventoryCountPage() {
     () => countable.filter((c) => selectedIds.includes(c.partId)),
     [countable, selectedIds],
   );
+
+  /** One unit for the whole sheet, or null when mixed — decides footer vs per-row. */
+  const sheetUnit = useMemo(() => commonUnit(sheet), [sheet]);
 
   const counted = countedTally(entries);
   const changes = useMemo(
@@ -471,94 +493,123 @@ export default function InventoryCountPage() {
             Anything you leave blank stays exactly as it is. Nothing saves until you press Save.
           </Typography>
 
+          {/* A count sheet, with the columns every stocktake system converges on — and the
+              ones a shop already knows from a clipboard. Aligned tabular figures are what
+              makes an outlier visible without reading a single label; the old prose row
+              ("System says 5 each") buried the comparison inside a sentence. */}
           <Card elevation={2}>
-            <Stack divider={<Divider />}>
-              {sheet.map((c) => {
-                const delta = rowDelta(c, entries);
-                const isCounted = delta !== null;
-                const matches = delta === 0;
-                const bigChange = delta !== null && isBigDelta(c, delta);
+            <TableContainer>
+              <Table size="small" sx={{ minWidth: 560 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={HEAD_SX}>Part</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>
+                      On hand
+                    </TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>
+                      Counted
+                    </TableCell>
+                    {!sheetUnit && (
+                      <TableCell align="right" sx={HEAD_SX}>
+                        Unit
+                      </TableCell>
+                    )}
+                    <TableCell align="right" sx={HEAD_SX}>
+                      Variance
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sheet.map((c) => {
+                    const delta = rowDelta(c, entries);
+                    const isCounted = delta !== null;
+                    const matches = delta === 0;
+                    const bigChange = delta !== null && isBigDelta(c, delta);
 
-                return (
-                  <Box
-                    key={c.partId}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2,
-                      px: 2,
-                      py: 1.5,
-                      minHeight: 68,
-                      // A counted row should read as done at a glance while scanning the list.
-                      bgcolor: isCounted ? 'action.hover' : 'transparent',
-                    }}
-                  >
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body1" noWrap>
-                        {c.partName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        System says {num(c.systemQuantity)} {c.unit}
-                        {c.target.kind === 'location' ? ` · ${c.target.locationName}` : ''}
-                      </Typography>
-                    </Box>
-
-                    {/* The delta, the instant it's known — this is what the review page used
-                        to do a screen later. */}
-                    <Box sx={{ width: 108, textAlign: 'right' }}>
-                      {isCounted &&
-                        (matches ? (
-                          <Chip
-                            size="small"
-                            icon={<CheckIcon />}
-                            label="Matches"
-                            color="success"
-                            variant="outlined"
-                          />
-                        ) : (
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontWeight: 700,
-                              color: bigChange
-                                ? 'warning.main'
-                                : (delta as number) > 0
-                                  ? 'success.main'
-                                  : 'error.main',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'flex-end',
-                              gap: 0.5,
-                            }}
-                          >
-                            {bigChange && <WarningAmberIcon fontSize="small" />}
-                            {signed(delta as number)}
+                    return (
+                      <TableRow
+                        key={c.partId}
+                        // A counted row should read as done at a glance while scanning down.
+                        sx={{ bgcolor: isCounted ? 'action.hover' : 'transparent' }}
+                      >
+                        <TableCell sx={{ width: '99%' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {c.partName}
                           </Typography>
-                        ))}
-                    </Box>
+                          <Typography variant="caption" color="text.secondary">
+                            {c.description ??
+                              (c.target.kind === 'location' ? c.target.locationName : '')}
+                          </Typography>
+                        </TableCell>
 
-                    <TextField
-                      type="number"
-                      size="small"
-                      value={entries[c.partId] ?? ''}
-                      onChange={(e) => setCount(c.partId, e.target.value)}
-                      placeholder="—"
-                      inputProps={{
-                        min: 0,
-                        step: 'any',
-                        inputMode: 'decimal',
-                        'aria-label': `Counted quantity for ${c.partName}`,
-                        style: { textAlign: 'right' },
-                      }}
-                      InputProps={{
-                        endAdornment: <InputAdornment position="end">{c.unit}</InputAdornment>,
-                      }}
-                      sx={{ width: 132 }}
-                    />
-                  </Box>
-                );
-              })}
-            </Stack>
+                        <TableCell align="right" sx={{ ...NUM_SX, color: 'text.secondary' }}>
+                          {num(c.systemQuantity)}
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ py: 1 }}>
+                          <TextField
+                            type="number"
+                            size="small"
+                            value={entries[c.partId] ?? ''}
+                            onChange={(e) => setCount(c.partId, e.target.value)}
+                            placeholder="—"
+                            inputProps={{
+                              min: 0,
+                              step: 'any',
+                              inputMode: 'decimal',
+                              'aria-label': `Counted quantity for ${c.partName}`,
+                              style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
+                            }}
+                            sx={{ width: 108 }}
+                          />
+                        </TableCell>
+
+                        {/* Only when the sheet is mixed — otherwise the unit is said once, in
+                            the footer, instead of repeating down every row. */}
+                        {!sheetUnit && (
+                          <TableCell align="right" sx={{ color: 'text.secondary' }}>
+                            <Typography variant="caption">{c.unit}</Typography>
+                          </TableCell>
+                        )}
+
+                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                          {isCounted &&
+                            (matches ? (
+                              <Chip
+                                size="small"
+                                icon={<CheckIcon />}
+                                label="Matches"
+                                color="success"
+                                variant="outlined"
+                              />
+                            ) : (
+                              <Typography
+                                component="span"
+                                variant="body2"
+                                sx={{
+                                  ...NUM_SX,
+                                  fontWeight: 700,
+                                  color: bigChange
+                                    ? 'warning.main'
+                                    : (delta as number) > 0
+                                      ? 'success.main'
+                                      : 'error.main',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 0.5,
+                                }}
+                              >
+                                {bigChange && <WarningAmberIcon fontSize="small" />}
+                                {signed(delta as number)}
+                              </Typography>
+                            ))}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Card>
         </Box>
       )}
@@ -599,6 +650,7 @@ export default function InventoryCountPage() {
                 ? 'Nothing entered yet'
                 : 'Everything matches so far'
               : `${changes} will change`}
+            {sheetUnit ? ` · all in ${sheetUnit}` : ''}
           </Typography>
           <Box sx={{ flex: 1 }} />
           <Button

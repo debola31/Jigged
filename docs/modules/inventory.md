@@ -702,8 +702,25 @@ A **count sheet**: here is what we think is here, walk it, enter what you find, 
 variance, commit. Committing writes `adjustment` rows with a reason.
 
 > **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **two steps.** Choose the
-> parts you're counting, then count them; the delta appears on each row as you type, and Save
-> opens a confirm dialog. There is no third review step.
+> parts you're counting, then count them on a **count sheet**: proper columns for
+> *Part · On hand · Counted · Variance*, tabular figures so digits line up, and the variance
+> filled in as you type. Save opens a confirm dialog. There is no third review step.
+>
+> The column layout is the one [every stocktake system converges on](https://www.stockount.com/articles/how-to-do-a-cycle-count),
+> and the one a shop already knows from a clipboard — chosen over three alternatives (an
+> inline `5 → 7` transition, a one-at-a-time card with a number pad, and a tap-to-confirm
+> checklist) because it is the only one still scannable at forty rows. Aligned figures do the
+> comparison work that prose like *"System says 5 each"* was failing at.
+>
+> When every part on the sheet shares a unit it is stated **once** in the footer
+> (*"3 will change · all in each"*) rather than repeated down every row; a mixed sheet gets a
+> per-row unit column instead, because a bare column of figures in different units is a trap.
+>
+> Deferred, with reasons: the **one-at-a-time card** is right for a phone at the rack, but that
+> is the Phase 2 operator surface — building it now means two counting UIs before we know
+> anyone counts on a phone. **Tap-to-confirm** ("Still 180" as one tap) could halve a routine
+> re-count, but a one-tap confirm is easy to press without looking at the shelf; worth asking a
+> shop before committing.
 >
 > **The shape was arrived at by getting it wrong twice, and both errors are worth recording.**
 >

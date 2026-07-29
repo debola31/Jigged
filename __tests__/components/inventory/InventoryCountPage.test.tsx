@@ -52,6 +52,7 @@ Object.defineProperty(window, 'localStorage', { value: memoryStorage(), writable
 
 const cand = (over: Partial<CountCandidate> & { partId: string }): CountCandidate => ({
   partName: over.partId,
+  description: null,
   unit: 'ft',
   systemQuantity: 40,
   target: { kind: 'aggregate' },
@@ -179,7 +180,29 @@ describe('inline feedback', () => {
 
     await user.type(inputFor('6061 plate'), '9'); // changes
     expect(await screen.findByText('2 of 2 counted')).toBeInTheDocument();
-    expect(screen.getByText('1 will change')).toBeInTheDocument();
+    // Both parts are in 'ft', so the unit is stated once here rather than on every row.
+    expect(screen.getByText(/1 will change · all in ft/)).toBeInTheDocument();
+  });
+
+  it('gives the sheet proper columns, and no per-row unit when they all match', async () => {
+    await onSheet();
+    expect(screen.getByRole('columnheader', { name: /on hand/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /counted/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /variance/i })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /^unit$/i })).not.toBeInTheDocument();
+  });
+
+  it('adds a unit column when the sheet mixes units', async () => {
+    asMock(loadCountCandidates).mockResolvedValue([
+      cand({ partId: 'p1', partName: '4140 bar', unit: 'feet' }),
+      cand({ partId: 'p2', partName: '6061 plate', unit: 'each' }),
+    ]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+    await chooseParts(user, '4140 bar', '6061 plate');
+
+    expect(screen.getByRole('columnheader', { name: /^unit$/i })).toBeInTheDocument();
   });
 
   it('cannot save when nothing would change', async () => {

@@ -8,6 +8,7 @@ import {
   committableVariances,
   countNote,
   countableCandidates,
+  commonUnit,
   countedTally,
   draftKey,
   isBigDelta,
@@ -32,6 +33,7 @@ const UNASSIGNED = { id: 'loc-unassigned', name: 'Unassigned' };
 
 const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCandidate => ({
   partName: over.partId,
+  description: null,
   unit: 'ea',
   systemQuantity: 0,
   target: { kind: 'aggregate' },
@@ -97,6 +99,22 @@ describe('scope partitioning', () => {
   it('separates countable from excluded so excluded can be named, not dropped', () => {
     expect(countableCandidates(list).map((c) => c.partId)).toEqual(['a', 'c']);
     expect(excludedCandidates(list).map((c) => c.partId)).toEqual(['b']);
+  });
+});
+
+describe('commonUnit', () => {
+  it('returns the shared unit so it can be said once in the footer', () => {
+    expect(commonUnit([candidate({ partId: 'a' }), candidate({ partId: 'b' })])).toBe('ea');
+  });
+
+  it('returns null when units differ — a bare column of mixed units is a trap', () => {
+    expect(
+      commonUnit([candidate({ partId: 'a' }), candidate({ partId: 'b', unit: 'inches' })]),
+    ).toBeNull();
+  });
+
+  it('returns null for an empty sheet', () => {
+    expect(commonUnit([])).toBeNull();
   });
 });
 

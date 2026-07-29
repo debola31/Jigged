@@ -413,7 +413,7 @@ export default function InventoryPage() {
           startIcon={<FactCheckOutlinedIcon />}
           onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
         >
-          Count Stock
+          Count Inventory
         </Button>
 
         <Button

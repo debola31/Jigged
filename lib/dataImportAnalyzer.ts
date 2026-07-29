@@ -480,7 +480,7 @@ function quantityCoverage(files: AnalyzedFile[]): Finding[] {
       source_files: [af.filename],
       verified: true,
       recommended_action:
-        'Starting from zero is fine — you can set real balances with a stock count once the parts are in.',
+        'Starting from zero is fine — you can set real balances with an inventory count once the parts are in.',
     });
   }
   return out;

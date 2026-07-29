@@ -719,6 +719,13 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 > changes"*; *Variance* was the single place this page used a different — and less spoken —
 > word for the same number.
 >
+> **"Inventory count", never "stock count"** — in the button, the page title, the import
+> messages and the ledger note. The nav item is *Inventory*, so *stock* would be a second word
+> for the same thing, learned for no gain. The one exception is **"Stocked"**, the per-part
+> flag: that is a real distinct concept with its own switch on the part form, not a synonym.
+> Ledger rows written before 2026-07-28 keep the older phrasing — each is an accurate record of
+> what was said at the time.
+>
 > The column layout is the one [every stocktake system converges on](https://www.stockount.com/articles/how-to-do-a-cycle-count),
 > and the one a shop already knows from a clipboard — chosen over three alternatives (an
 > inline `5 → 7` transition, a one-at-a-time card with a number pad, and a tap-to-confirm

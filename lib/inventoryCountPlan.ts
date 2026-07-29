@@ -157,10 +157,17 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
  * guess from here. See docs/modules/inventory.md J9.
  */
 
-/** Note recorded on each adjustment, so the ledger says where the number came from. */
+/**
+ * Note stored on each adjustment, so the ledger says where the number came from.
+ *
+ * Wording tracks the sheet's own: "inventory count", not "stock count" (the nav says
+ * Inventory — "stock" would be a second word for the same thing), and "recorded", matching the
+ * column header. Rows written before 2026-07-28 carry the older phrasing; each is still an
+ * accurate record of what was said at the time, so they are left as they are.
+ */
 export function countNote(v: CountVariance): string {
   const unit = v.candidate.unit;
-  return `Stock count — counted ${v.counted} ${unit} (system said ${v.candidate.systemQuantity} ${unit})`;
+  return `Inventory count — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
 }
 
 // ── Draft persistence ────────────────────────────────────────────────────────

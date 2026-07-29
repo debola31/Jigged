@@ -1,7 +1,11 @@
 'use client';
 
 /**
- * Stock count sheet — journey J9 in docs/modules/inventory.md.
+ * Inventory count sheet — journey J9 in docs/modules/inventory.md.
+ *
+ * "Inventory", not "stock": the nav item is Inventory, so a second word for the same thing is
+ * one the user has to learn for no gain. ("Stocked" stays — that's the per-part flag, a real
+ * distinct concept with its own switch on the part form.)
  *
  * TWO steps: choose what you're counting, then count it. Save commits — nothing in between.
  *
@@ -102,7 +106,7 @@ export default function InventoryCountPage() {
   // /inventory/* route, which is both wrong and confusing mid-count.
   const { setTitle } = usePageTitle();
   useEffect(() => {
-    setTitle('Stock Count');
+    setTitle('Count Inventory');
     return () => setTitle(null);
   }, [setTitle]);
 

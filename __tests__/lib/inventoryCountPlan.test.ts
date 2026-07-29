@@ -203,7 +203,7 @@ describe('countNote', () => {
       { a: 38 },
       new Map(),
     )[0];
-    expect(countNote(v)).toBe('Stock count — counted 38 ft (system said 40 ft)');
+    expect(countNote(v)).toBe('Inventory count — counted 38 ft (recorded as 40 ft)');
   });
 });
 

@@ -742,7 +742,7 @@ function ImportStep({
                       </Box>{' '}
                       {e.locationTrackedSkipped.length === 1 ? 'part is' : 'parts are'} tracked by
                       location, so the quantity from your file wasn&apos;t applied — set those
-                      balances with a stock count, or at a location.
+                      balances with an inventory count, or at a location.
                     </Typography>
                     <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                       {e.locationTrackedSkipped.slice(0, 6).map((name, i) => (

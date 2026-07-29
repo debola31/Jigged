@@ -56,7 +56,7 @@ describe('commitCount routing', () => {
       'p1',
       38,
       'ft',
-      'Stock count — counted 38 ft (system said 40 ft)',
+      'Inventory count — counted 38 ft (recorded as 40 ft)',
     );
     expect(adjustStockAtLocation).not.toHaveBeenCalled();
   });
@@ -71,7 +71,7 @@ describe('commitCount routing', () => {
       'loc-a',
       12,
       'ft',
-      'Stock count — counted 12 ft (system said 10 ft)',
+      'Inventory count — counted 12 ft (recorded as 10 ft)',
     );
     // The direct write would be rejected by enforce_tracked_part_quantity — we must not try.
     expect(adjustPartStock).not.toHaveBeenCalled();

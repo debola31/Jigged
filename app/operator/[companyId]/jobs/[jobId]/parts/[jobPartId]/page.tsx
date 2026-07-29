@@ -21,6 +21,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JobFeed from '@/components/operator/JobFeed';
+import OperatorJobMaterials from '@/components/operator/OperatorJobMaterials';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import JobHotBadge from '@/components/jobs/JobHotBadge';
 import type { JobTravelerOperation } from '@/types/operator';
@@ -218,6 +219,18 @@ export default function OperatorJobTravelerPage() {
       <Box sx={{ mb: 3 }}>
         <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
       </Box>
+
+      {/* Material before work — the operator's first act on a job is fetching what it takes,
+          and taking it here links the depletion to the job by construction (J7). */}
+      <OperatorJobMaterials
+        companyId={companyId}
+        jobId={traveler.job_id}
+        jobNumber={traveler.job_number}
+        jobPartId={traveler.job_part_id}
+        madePartId={traveler.part_id}
+        madePartName={traveler.part_name}
+        orderQuantity={traveler.quantity}
+      />
 
       {/* Operations / steps — tap one to action it */}
       <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>

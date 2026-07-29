@@ -14,6 +14,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import type { MyNote, NoteViewer } from '@/types/operator';
@@ -27,24 +28,37 @@ function formatDate(value: string): string {
 }
 
 /**
- * How far one note travelled. Two numbers because they mean different things:
- * people saturates near shop size, jobs does not — a note used on eleven jobs is
- * load-bearing, one read by eleven people once is curiosity.
+ * How far one note travelled, as a number rather than a sentence.
+ *
+ * An earlier pass rendered "Not used yet" under every unread note, which on a
+ * real screen is a column of seven identical apologies. A view count reads the
+ * same at zero as at four — the number just hasn't moved yet — and it says
+ * exactly what viewer_count means without editorialising about it.
+ *
+ * The jobs figure stays alongside because the two mean different things: people
+ * saturates near shop size, jobs does not. A note used on eleven jobs is
+ * load-bearing; one read by eleven people once is curiosity.
  */
-function reach(note: MyNote): string | null {
-  if (note.viewer_count === 0) return null;
-  const people = note.viewer_count === 1 ? '1 person' : `${note.viewer_count} people`;
-  if (note.usage_count === 0) return `Used by ${people}`;
-  const jobs = note.usage_count === 1 ? '1 job' : `${note.usage_count} jobs`;
-  return `Used on ${jobs} by ${people}`;
+function ReachRow({ note }: { note: MyNote }) {
+  const read = note.viewer_count > 0;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <VisibilityOutlinedIcon
+        sx={{ fontSize: 16, color: read ? 'success.light' : 'text.secondary' }}
+      />
+      <Typography variant="caption" sx={{ color: read ? 'success.light' : 'text.secondary' }}>
+        {note.viewer_count}
+        {note.usage_count > 0 &&
+          ` · used on ${note.usage_count === 1 ? '1 job' : `${note.usage_count} jobs`}`}
+      </Typography>
+    </Box>
+  );
 }
 
 function NoteRow({ note }: { note: MyNote }) {
   const [open, setOpen] = useState(false);
   const [viewers, setViewers] = useState<NoteViewer[] | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const summary = reach(note);
 
   // Names are fetched only when the author asks for them. note_viewers() is the
   // one narrow window through which any reader's name is ever exposed — it is
@@ -66,6 +80,10 @@ function NoteRow({ note }: { note: MyNote }) {
       <CardActionArea onClick={toggle} disabled={note.viewer_count === 0} sx={{ p: 0 }}>
         <CardContent sx={{ py: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+            {/* Leads the row so every card has a number in the same place — a
+                stable column to scan down, present whether or not the note
+                carries a part or a step. */}
+            <ReachRow note={note} />
             {note.part_name && (
               <Typography variant="subtitle2" fontWeight={700} noWrap>
                 {note.part_name}
@@ -93,15 +111,6 @@ function NoteRow({ note }: { note: MyNote }) {
               {note.body}
             </Typography>
           )}
-
-          <Typography
-            variant="caption"
-            sx={{ display: 'block', mt: 1, color: summary ? 'success.light' : 'text.secondary' }}
-          >
-            {/* An honest zero, not silence: "nobody yet" is information, and it is
-                also true of every note on the day it is written. */}
-            {summary ?? 'Not used yet'}
-          </Typography>
         </CardContent>
       </CardActionArea>
 
@@ -205,16 +214,31 @@ export default function MyWorkPage() {
                 {c.photoCount === 1 ? 'photo' : 'photos'}
               </Typography>
             </Box>
+            {/* "views", not "people". This sums each note's viewer_count, so one
+                colleague who read three of your notes contributes three — which
+                is a view total, not a headcount. A distinct-people figure would
+                need the note_views rows, which no browser role can read by
+                design. The per-note numbers below are exact. */}
+            <Box>
+              <Typography
+                variant="h4"
+                fontWeight={700}
+                sx={{ color: c.peopleReached > 0 ? 'success.light' : 'text.primary' }}
+              >
+                {c.peopleReached}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {c.peopleReached === 1 ? 'view' : 'views'}
+              </Typography>
+            </Box>
           </Box>
 
-          {c.peopleReached > 0 && (
+          {c.jobsReached > 0 && (
             <Typography variant="body2" sx={{ mt: 2, color: 'success.light' }}>
-              {c.peopleReached === 1
-                ? 'Someone has used your work'
-                : `${c.peopleReached} people have used your work`}
-              {c.jobsReached > 0 &&
-                ` — on ${c.jobsReached === 1 ? '1 job' : `${c.jobsReached} jobs`}`}
-              .
+              {/* The load-bearing signal, and the only one worth a sentence: a note
+                  consulted while someone was actually doing the work. */}
+              Your notes have been used on{' '}
+              {c.jobsReached === 1 ? '1 job' : `${c.jobsReached} jobs`}.
             </Typography>
           )}
         </CardContent>

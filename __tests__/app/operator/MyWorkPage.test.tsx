@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@/__tests__/test-utils';
+import { render, screen, waitFor, within } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 import MyWorkPage from '@/app/operator/[companyId]/my-work/page';
@@ -56,6 +56,21 @@ describe('My Work', () => {
     expect(screen.getByText('Op 20 · Mill')).toBeInTheDocument();
   });
 
+  it('counts VIEWS in the summary, not people', async () => {
+    // peopleReached sums each note's viewer_count, so one colleague who read
+    // three of your notes contributes three. Labelling that "people" overstates
+    // it; a distinct-people figure would need the note_views rows, which no
+    // browser role can read by design.
+    mockGetMyContribution.mockResolvedValue(
+      contribution({ peopleReached: 5, jobsReached: 9 }),
+    );
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText('views')).toBeInTheDocument();
+    expect(screen.queryByText(/people have used/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Your notes have been used on 9 jobs.')).toBeInTheDocument();
+  });
+
   it('reports reach as people AND jobs, because they mean different things', async () => {
     // A note read by 11 people once is curiosity; one used on 11 jobs is
     // load-bearing. Collapsing them into a single number loses the distinction
@@ -65,16 +80,20 @@ describe('My Work', () => {
     );
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('Used on 11 jobs by 4 people')).toBeInTheDocument();
+    expect(await screen.findByText('4 · used on 11 jobs')).toBeInTheDocument();
   });
 
-  it('says so plainly when nobody has used a note yet', async () => {
-    // Silence would read as a bug. "Not used yet" is true of every note on the
-    // day it is written, and the operator can tell the difference.
+  it('shows an unread note as a zero, not as a sentence about being unread', async () => {
+    // An earlier pass rendered "Not used yet" under every note; seven of those
+    // down a real screen is a column of apologies. A count reads the same at
+    // zero as at four — it just hasn't moved yet.
     mockGetMyContribution.mockResolvedValue(contribution());
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('Not used yet')).toBeInTheDocument();
+    await screen.findByText(/Clamp on the boss/);
+    // Scoped to the note card — the summary block carries its own "0 views".
+    expect(within(screen.getByRole('button')).getByText('0')).toBeInTheDocument();
+    expect(screen.queryByText(/not used/i)).not.toBeInTheDocument();
   });
 
   it('names the readers only when the author asks', async () => {
@@ -152,6 +171,7 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     expect(await screen.findByText('Nothing written yet')).toBeInTheDocument();
+    // No zeroed scoreboard on a screen the operator has never used.
     expect(screen.queryByText('0')).not.toBeInTheDocument();
   });
 

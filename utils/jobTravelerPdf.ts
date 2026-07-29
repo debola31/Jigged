@@ -32,6 +32,7 @@ import QRCode from 'qrcode';
 import type { Company } from '@/utils/companyAccess';
 import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 import type { BomLineWithChildPart } from '@/types/bom';
+import { requiredQuantity } from '@/lib/materialRequirements';
 import {
   buildShopHeaderLines,
   formatDate,
@@ -420,16 +421,13 @@ export async function generateJobTravelerPdf(
       margin: { left: MARGIN, right: MARGIN },
       head: [['Material', 'Description', 'Qty / unit', 'Unit', 'Job needs']],
       body: bom.map((line) => {
-        // Whole-order draw for the shop floor: ceil for discrete stock (a strip
-        // you can't cut a fraction of), else the fractional total. Avoids
-        // printing a bare "0.05 strips" that means nothing to someone pulling
-        // material.
+        // Whole-order draw for the shop floor. The rule (ceil for discrete stock, so nobody
+        // reads "0.05 strips") lives in lib/materialRequirements so the printout and the
+        // screen can't drift apart.
         const orderQty = traveler.quantity;
         let jobNeeds = '—';
         if (orderQty != null && orderQty > 0) {
-          const needed = line.consume_whole_units
-            ? Math.ceil(orderQty * line.quantity)
-            : orderQty * line.quantity;
+          const needed = requiredQuantity(orderQty, line.quantity, line.consume_whole_units);
           jobNeeds = `${formatQty(needed)} ${line.unit ?? ''}`.trim();
         }
         return [

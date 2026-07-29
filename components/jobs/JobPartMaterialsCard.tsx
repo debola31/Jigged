@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import { getBomForPart } from '@/utils/bomAccess';
+import { requiredQuantity } from '@/lib/materialRequirements';
 import type { BomLineWithChildPart } from '@/types/bom';
 
 interface JobPartMaterialsCardProps {
@@ -85,14 +86,11 @@ export default function JobPartMaterialsCard({ partId, orderQuantity }: JobPartM
           <List dense disablePadding>
             {lines.map((line, idx) => {
               const childPartId = line.child_part?.id;
-              // Whole-order draw: ceil for discrete stock (a strip you can't cut
-              // a fraction of), else the fractional total. Shown so "0.05 strips
-              // per unit" is never the only number on the floor.
+              // Whole-order draw. The rule lives in lib/materialRequirements — shared with
+              // the traveler PDF so a job's screen and its printout can't disagree.
               const jobNeeds =
                 orderQuantity && orderQuantity > 0
-                  ? line.consume_whole_units
-                    ? Math.ceil(orderQuantity * line.quantity)
-                    : orderQuantity * line.quantity
+                  ? requiredQuantity(orderQuantity, line.quantity, line.consume_whole_units)
                   : null;
               const text = (
                 <ListItemText

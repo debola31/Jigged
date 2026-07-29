@@ -95,9 +95,23 @@ function NoteRow({
 }
 
 /**
- * Full-screen "previous notes for this part" sheet. A flat, newest-first stream
- * of notes captured on PRIOR completed runs of the part — the accumulated shop
- * wisdom (setup tips, gotchas, photos) — rather than a list of past jobs. Each
+ * The part's Playbook: everything the shop has learned about running it, ranked
+ * so the useful thing is first — not a list of past jobs.
+ *
+ * ORDERING lives in part_playbook_notes, and is usefulness-first with a recency
+ * guard: anything from the last 14 days stays newest-first at the top, and
+ * everything older ranks by usage_count (distinct jobs it was consulted on) then
+ * helpful marks. Newest-first alone buried the load-bearing note on any part with
+ * several; pure usefulness would bury a correction written this morning, which on
+ * a shop floor is the dangerous direction.
+ *
+ * WHY THIS IS A SHEET AND NOT A PAGE. Operators already carry an annotated paper
+ * print, and paper wins on always-there and on spatial indexing — a margin note
+ * points AT a feature, which a text list cannot reproduce. What digital adds is
+ * that the knowledge survives the sheet being lost or superseded, exists in more
+ * than one place, and carries attribution and reception. All of that lands at the
+ * machine, one tap from the step. A browsable page would have asked an operator to
+ * go LOOKING for knowledge while off a job, which is exactly when they will not. Each
  * note shows its author, the step it was tagged to, a light source-job
  * reference, and its photos. When opened from an operation (jobOperationId set),
  * a "This step / All part" toggle narrows to the same step. Read-only, part-
@@ -180,7 +194,7 @@ export default function PartNotesSheet({
         <Toolbar>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="h6" noWrap>
-              Previous notes
+              Playbook
             </Typography>
             {partName && (
               <Typography variant="caption" color="text.secondary" noWrap component="div">

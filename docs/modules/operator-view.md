@@ -212,6 +212,43 @@ see this", not "nobody can".
 a note and stayed on it. Whether they acted on it is not measured, and claiming it
 makes every number a small lie the author can personally disprove by asking.
 
+### The Playbook (previous notes)
+
+`PartNotesSheet`, opened from the op card's **Playbook · N**. Everything the shop
+has learned about running this part, ranked so the useful thing is first.
+
+**Ordering** lives in `part_playbook_notes`: usefulness-first with a recency
+guard.
+
+1. Anything from the **last 14 days**, newest-first
+2. Then `usage_count` — distinct jobs it was consulted on, the strongest signal
+   we have because it records someone reaching for the note *while doing the
+   work*, not an opinion offered afterwards
+3. Then helpful marks, then recency
+
+Newest-first alone buried the load-bearing note on any part with several. Pure
+usefulness would bury a correction written this morning below an old note with a
+long history, which on a shop floor is the dangerous direction — the original
+plan handled that with a `confirmed` reaction and visual decay of stale entries,
+and both were dropped, so the 14-day guard carries it alone. The window is a
+judgement, not a finding; revisit it with real data.
+
+**Why this is a sheet and not a page.** Operators already carry an annotated
+paper print, and paper wins on two things we cannot match: it is always at the
+machine, and its annotations are *spatially indexed* — a margin note points AT a
+feature, which a text list cannot reproduce. What digital adds is narrower and
+real: the knowledge survives the sheet being lost or superseded by a revision, it
+exists in more than one place (one annotated print sits at one machine), and it
+carries attribution and reception. All three land one tap from the step. A
+browsable `/parts/{partId}/playbook` route was planned and **deliberately not
+built**: it would have asked an operator to go *looking* for knowledge while off
+a job, which is exactly when they will not. If a part ever needs a destination of
+its own, that is the moment to add one — not before.
+
+**Corrections are not built either.** `corrects_note_id` exists in the schema
+with no writer anywhere, so a corrections section would be a display for
+something nothing can create.
+
 ### Reactions (`helpful`)
 
 The **voluntary** half of the loop, and the deliberate opposite of view logging.
@@ -406,6 +443,12 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a non-zero banner, **when** the operator taps it, **then** it navigates to My work AND banks the whole total; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
 - [ ] **Given** My work, **when** it renders with any data, **then** no completion count, streak, average, pace or rank appears anywhere on the page — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'shows no completion count, streak, average or pace'`*.
 - [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives and only the job link is absent — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
+
+**Playbook ordering**
+
+- [ ] **Given** two notes both older than the recency window, **when** the Playbook loads, **then** the one consulted on more jobs comes first even if it is the older — *verified by `api/tests/integration/test_note_views_rls.py > test_playbook_ranks_the_load_bearing_note_first`*.
+- [ ] **Given** a note written today with zero usage and a veteran with several jobs, **when** the Playbook loads, **then** the fresh note is above it — a correction must never be buried — *verified by `api/tests/integration/test_note_views_rls.py > test_a_fresh_note_is_never_buried_by_a_veteran`*.
+- [ ] **Given** two equally-used notes, **when** one carries a helpful mark, **then** it ranks first — *verified by `api/tests/integration/test_note_views_rls.py > test_helpful_breaks_a_usage_tie`*.
 
 **Reactions**
 

@@ -19,6 +19,7 @@ TEST_SUPABASE_PUBLISHABLE_KEY / TEST_SUPABASE_SECRET_KEY). Skipped without it.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from supabase import create_client
@@ -161,25 +162,30 @@ def shop(supabase_admin):
             pass
 
 
-def _make_note(shop, body: str = "back the feed off on the last pass") -> str:
-    """A DURABLE part-subject note authored by `author`, captured on job A."""
-    return (
-        shop["admin"]
-        .table("notes")
-        .insert(
-            {
-                "company_id": shop["company_id"],
-                "subject_kind": "part",
-                "part_id": shop["part_id"],
-                "routing_operation_id": shop["routing_operation_id"],
-                "captured_job_id": shop["job_a"],
-                "author_id": shop["author"]["access_id"],
-                "body": body,
-            }
-        )
-        .execute()
-        .data[0]["id"]
-    )
+def _make_note(
+    shop, body: str = "back the feed off on the last pass", days_ago: int | None = None
+) -> str:
+    """A DURABLE part-subject note authored by `author`, captured on job A.
+
+    `days_ago` matters for the ranking tests: the Playbook pins anything from the
+    last 14 days newest-first, so a note created NOW is ordered by recency and
+    tells you nothing about usefulness ranking. Age it past the window to exercise
+    that half.
+    """
+    row = {
+        "company_id": shop["company_id"],
+        "subject_kind": "part",
+        "part_id": shop["part_id"],
+        "routing_operation_id": shop["routing_operation_id"],
+        "captured_job_id": shop["job_a"],
+        "author_id": shop["author"]["access_id"],
+        "body": body,
+    }
+    if days_ago is not None:
+        row["created_at"] = (
+            datetime.now(timezone.utc) - timedelta(days=days_ago)
+        ).isoformat()
+    return shop["admin"].table("notes").insert(row).execute().data[0]["id"]
 
 
 def _counts(shop, note_id: str) -> tuple[int, int]:
@@ -733,6 +739,72 @@ def test_a_reaction_can_never_be_edited(shop):
         shop["reader"]["client"].table("note_reactions").update(
             {"kind": "confirmed"}
         ).eq("note_id", note_id).execute()
+
+
+def test_playbook_ranks_the_load_bearing_note_first(shop):
+    """Newest-first buried the note that had actually been consulted. usage_count
+    is behavioural — someone reached for it while doing the work — so it outranks
+    both recency and an opinion offered afterwards."""
+    # Both aged past the 14-day guard, and the VETERAN is the OLDER of the two —
+    # so if ordering were still recency-based this would fail.
+    veteran = _make_note(shop, "seat the bearings with the arbor fixture", days_ago=90)
+    curiosity = _make_note(shop, "read this once, never again", days_ago=30)
+
+    # The veteran is consulted on two jobs; the other on none.
+    for job in (shop["job_a"], shop["job_b"]):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [veteran], "p_job_id": job}
+        ).execute()
+
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    ids = [r["id"] for r in rows]
+    assert ids.index(veteran) < ids.index(curiosity)
+
+
+def test_a_fresh_note_is_never_buried_by_a_veteran(shop):
+    """THE GUARD. Pure usefulness ranking sinks a correction written this morning
+    below an old note with a long history — and on a shop floor the fresh warning
+    is the one that must be seen. The original plan solved this with a 'confirmed'
+    reaction and visual decay; both were dropped, so this carries it alone."""
+    veteran = _make_note(shop, "the long-standing way we run this", days_ago=90)
+    for job in (shop["job_a"], shop["job_b"]):
+        shop["reader"]["client"].rpc(
+            "log_note_views", {"p_note_ids": [veteran], "p_job_id": job}
+        ).execute()
+
+    # Written today, never consulted: usage_count 0. Usefulness alone would sink it.
+    fresh = _make_note(shop, "FIXTURE CHANGED - the old arbor is scrapped")
+
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    ids = [r["id"] for r in rows]
+    assert ids.index(fresh) < ids.index(veteran)
+
+
+def test_helpful_breaks_a_usage_tie(shop):
+    # Aged past the guard, and the ENDORSED one is older, so recency cannot be
+    # what puts it first.
+    b = _make_note(shop, "equally used, endorsed", days_ago=90)
+    a = _make_note(shop, "equally used, unendorsed", days_ago=30)
+    _react(shop["reader"]["client"], shop, b, shop["reader"]["access_id"])
+
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    ids = [r["id"] for r in rows]
+    assert ids.index(b) < ids.index(a)
 
 
 def test_playbook_reactions_say_who_reacted(shop):

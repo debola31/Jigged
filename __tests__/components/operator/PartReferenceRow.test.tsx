@@ -32,7 +32,7 @@ beforeEach(() => {
   mock(countPartPreviousNotes).mockResolvedValue(0);
 });
 
-// The read-back gap this fixes: the affordance used to be a bare "Previous notes"
+// The read-back gap this fixes: the affordance used to be a bare "Playbook"
 // label, so an operator had no way to tell whether anything was behind it — while
 // Files sat right next to it showing a count. Knowledge nobody knows exists is not
 // reachable, whatever the tap count says.
@@ -41,7 +41,7 @@ describe('PartReferenceRow — previous-notes count', () => {
     mock(countPartPreviousNotes).mockResolvedValue(3);
     renderRow();
 
-    expect(await screen.findByRole('button', { name: 'Previous notes · 3' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Playbook · 3' })).toBeInTheDocument();
   });
 
   it('stays a bare label when there is nothing to read', async () => {
@@ -50,7 +50,7 @@ describe('PartReferenceRow — previous-notes count', () => {
     renderRow();
 
     await waitFor(() => expect(countPartPreviousNotes).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: 'Previous notes' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Playbook' })).toBeInTheDocument();
   });
 
   it('excludes the current job, so a note is never "previous" to itself', async () => {
@@ -70,6 +70,6 @@ describe('PartReferenceRow — previous-notes count', () => {
     mock(countPartPreviousNotes).mockRejectedValue(new Error('offline'));
     renderRow();
 
-    expect(await screen.findByRole('button', { name: 'Previous notes' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Playbook' })).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within, routerMocks } from '@/__tests__/test-utils';
+import { render, screen, within, routerMocks } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 import MyWorkPage from '@/app/operator/[companyId]/my-work/page';
@@ -56,35 +56,40 @@ describe('My Work', () => {
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
     expect(screen.getByText('BRKT-1042')).toBeInTheDocument();
     expect(screen.getByText('Op 20 · Mill')).toBeInTheDocument();
-    expect(screen.getByText('J-0042')).toBeInTheDocument();
+    // Where it came from, beside the date — visible without expanding anything.
+    expect(screen.getByText(/J-0042 · Jul 20, 2026/)).toBeInTheDocument();
   });
 
   it('leads back to the job the note was written on', async () => {
     // A note with no context is an orphan: the author cannot tell what they were
-    // looking at when they wrote it, let alone go and check.
+    // looking at when they wrote it, let alone go and check. The link lives in
+    // the expanded state so the row itself stays one compact tap target.
     const user = userEvent.setup();
     mockGetMyContribution.mockResolvedValue(contribution());
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByText('J-0042'));
+    await user.click(await screen.findByText(/Clamp on the boss/));
+    await user.click(await screen.findByRole('button', { name: /Open J-0042/ }));
 
     expect(routerMocks.push).toHaveBeenCalledWith(
       '/operator/test-company-id/jobs/job-1',
     );
   });
 
-  it('does not open the note when the job chip is tapped', async () => {
-    // The chip sits in the header for exactly this reason — nested inside the
-    // card's action area it would both navigate AND expand, or swallow one.
+  it('opens on a note nobody has read, so its job is still reachable', async () => {
+    // The card used to be inert at zero views. That stranded exactly the notes an
+    // author is most likely to be checking up on — no viewers AND no way back to
+    // the job. There is always something behind the tap now.
     const user = userEvent.setup();
-    mockGetMyContribution.mockResolvedValue(
-      contribution({ notes: [note({ viewer_count: 2 })] }),
-    );
+    mockGetMyContribution.mockResolvedValue(contribution());
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByText('J-0042'));
+    await user.click(await screen.findByText(/Clamp on the boss/));
 
+    expect(await screen.findByRole('button', { name: /Open J-0042/ })).toBeInTheDocument();
+    // Still no pointless RPC: there are no names to fetch.
     expect(mockGetNoteViewers).not.toHaveBeenCalled();
+    expect(screen.queryByText('Viewed by')).not.toBeInTheDocument();
   });
 
   it('survives a note whose job has been deleted', async () => {
@@ -96,7 +101,7 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
-    expect(screen.queryByText('J-0042')).not.toBeInTheDocument();
+    expect(screen.queryByText(/J-0042/)).not.toBeInTheDocument();
   });
 
   it('counts VIEWS in the summary, not people', async () => {
@@ -123,7 +128,7 @@ describe('My Work', () => {
     await screen.findByText(/Clamp on the boss/);
     expect(within(screen.getAllByRole('listitem')[0]).getByText('4')).toBeInTheDocument();
     expect(screen.queryByText(/11/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/\d+ jobs?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ jobs?\b/)).not.toBeInTheDocument();
   });
 
   it('shows an unread note as a zero, not as a sentence about being unread', async () => {
@@ -161,21 +166,6 @@ describe('My Work', () => {
     expect(screen.getByText('Priya · J-0006')).toBeInTheDocument();
     expect(mockGetNoteViewers).toHaveBeenCalledTimes(1);
     expect(mockGetNoteViewers).toHaveBeenCalledWith('n1');
-  });
-
-  it('is not tappable at all on a note nobody has read', async () => {
-    // Nothing to reveal, so the card must not offer the gesture — an expand that
-    // opens onto an empty list reads as a failed load.
-    const user = userEvent.setup({ pointerEventsCheck: 0 });
-    mockGetMyContribution.mockResolvedValue(contribution());
-    render(<MyWorkPage />);
-
-    await screen.findByText(/Clamp on the boss/);
-    const card = screen.getByRole('button', { name: /Clamp on the boss/ });
-    expect(card).toBeDisabled();
-
-    await user.click(card);
-    await waitFor(() => expect(mockGetNoteViewers).not.toHaveBeenCalled());
   });
 
   it('shows no completion count, streak, average or pace', async () => {

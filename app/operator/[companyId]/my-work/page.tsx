@@ -7,6 +7,7 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
+import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
@@ -83,55 +84,42 @@ function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
 
   return (
     <Card component="li" elevation={2} sx={{ ...cardSx, mb: 1.5 }}>
-      {/* The header sits OUTSIDE the action area on purpose: the job chip is a
-          real navigation control, and a button nested inside a button is invalid
-          markup that swallows one of the two taps. */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          flexWrap: 'wrap',
-          px: 2,
-          pt: 1.5,
-        }}
-      >
-        {/* Leads the row so every card has a number in the same place — a stable
-            column to scan down, present whether or not the note carries a part. */}
-        <ReachRow note={note} />
-        {note.part_name && (
-          <Typography variant="subtitle2" fontWeight={700} noWrap>
-            {note.part_name}
-          </Typography>
-        )}
-        {note.operation_label && (
-          <Chip size="small" label={note.operation_label} variant="outlined" />
-        )}
-        {note.photo_count > 0 && (
-          <Chip size="small" variant="outlined" icon={<PhotoCameraIcon />} label={note.photo_count} />
-        )}
-        {/* What the note is about, and the way back to it. Filled rather than
-            outlined so it reads as the one actionable thing in a row of labels.
-            For a durable part-subject note this is where it was WRITTEN, not what
-            it is about — the part name beside it carries that. */}
-        {note.job_id && note.job_number && (
-          <Chip
-            label={note.job_number}
-            color="primary"
-            size="small"
-            onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
-            icon={<LaunchIcon />}
-            sx={{ height: 32, fontWeight: 700 }}
-          />
-        )}
-        <Box sx={{ flex: 1 }} />
-        <Typography variant="caption" color="text.secondary">
-          {formatDate(note.created_at)}
-        </Typography>
-      </Box>
+      {/* The whole row expands. Navigation lives inside the expanded state
+          instead of on the card, so the list stays compact and there is only one
+          tap target per row — a chip up here both bloated the card and stole the
+          row's tap, because a button cannot nest inside a button. */}
+      <CardActionArea onClick={toggle} sx={{ p: 0 }}>
+        <CardContent sx={{ py: 1.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+            {/* Leads the row so every card has a number in the same place — a
+                stable column to scan down, present whether or not the note
+                carries a part. */}
+            <ReachRow note={note} />
+            {note.part_name && (
+              <Typography variant="subtitle2" fontWeight={700} noWrap>
+                {note.part_name}
+              </Typography>
+            )}
+            {note.operation_label && (
+              <Chip size="small" label={note.operation_label} variant="outlined" />
+            )}
+            {note.photo_count > 0 && (
+              <Chip
+                size="small"
+                variant="outlined"
+                icon={<PhotoCameraIcon />}
+                label={note.photo_count}
+              />
+            )}
+            <Box sx={{ flex: 1 }} />
+            {/* Where it came from, sat quietly beside the date — an indication,
+                not an action. The action is one tap away, inside the card. */}
+            <Typography variant="caption" color="text.secondary">
+              {note.job_number ? `${note.job_number} · ` : ''}
+              {formatDate(note.created_at)}
+            </Typography>
+          </Box>
 
-      <CardActionArea onClick={toggle} disabled={note.viewer_count === 0} sx={{ p: 0 }}>
-        <CardContent sx={{ pt: 1, pb: 1.5 }}>
           {note.body && (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
               {note.body}
@@ -143,21 +131,38 @@ function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
       <Collapse in={open} unmountOnExit>
         <Box sx={{ px: 2, pb: 2 }}>
           <Divider sx={{ mb: 1 }} />
-          {/* Explicitly labelled: the job beside a viewer's name is the job THEY
-              consulted it on, which is not the job chip in the header (where the
-              note was written). Same format, different meaning — so say which. */}
-          <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
-            Viewed by
-          </Typography>
-          {loading ? (
-            <CircularProgress size={16} />
-          ) : (
-            (viewers ?? []).map((v, i) => (
-              <Typography key={`${v.viewer_name}-${i}`} variant="body2" color="text.secondary">
-                {v.viewer_name ?? 'Unknown'}
-                {v.job_number ? ` · ${v.job_number}` : ''}
+
+          {note.viewer_count > 0 && (
+            <>
+              {/* Explicitly labelled: the job beside a viewer's name is the job
+                  THEY consulted it on, not the job in the header where the note
+                  was written. Same format, different meaning — so say which. */}
+              <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+                Viewed by
               </Typography>
-            ))
+              {loading ? (
+                <CircularProgress size={16} />
+              ) : (
+                (viewers ?? []).map((v, i) => (
+                  <Typography key={`${v.viewer_name}-${i}`} variant="body2" color="text.secondary">
+                    {v.viewer_name ?? 'Unknown'}
+                    {v.job_number ? ` · ${v.job_number}` : ''}
+                  </Typography>
+                ))
+              )}
+            </>
+          )}
+
+          {note.job_id && note.job_number && (
+            <Button
+              variant="outlined"
+              fullWidth
+              startIcon={<LaunchIcon />}
+              onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
+              sx={{ minHeight: 48, mt: note.viewer_count > 0 ? 1.5 : 0 }}
+            >
+              Open {note.job_number}
+            </Button>
           )}
         </Box>
       </Collapse>

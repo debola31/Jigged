@@ -10,6 +10,8 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => ({ rpc }),
 }));
 
+const SEEN_KEY = 'jigged:note-views-acknowledged';
+
 class MemoryStorage {
   private store = new Map<string, string>();
   get length() {
@@ -32,16 +34,6 @@ class MemoryStorage {
   }
 }
 
-/** The ISO week key the component will compute for "now". */
-function isoWeekKeyNow(): string {
-  const d = new Date();
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-}
-
 beforeEach(() => {
   vi.stubGlobal('localStorage', new MemoryStorage());
   rpc.mockReset();
@@ -49,9 +41,9 @@ beforeEach(() => {
 });
 
 describe('NoteUsageBanner', () => {
-  it('renders nothing at zero', async () => {
-    // "0 people viewed your notes this week" is a weekly reminder that nobody
-    // cares. Silence is better.
+  it('renders nothing when nothing has happened', async () => {
+    // A standing "0 views" is a permanent reminder that nobody cares. Silence
+    // is better.
     rpc.mockResolvedValue({ data: 0, error: null });
     const { container } = render(<NoteUsageBanner companyId="c1" />);
 
@@ -59,36 +51,51 @@ describe('NoteUsageBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('counts PEOPLE, and says so', async () => {
-    // Three must mean three colleagues, not one person opening a note three
-    // times. The author can just ask, so an inflated number discredits the loop.
-    rpc.mockResolvedValue({ data: 3, error: null });
+  it('shows only what is NEW since the operator last looked', async () => {
+    // The running total is 9, but 6 of those were already seen — showing "9"
+    // would claim six things happened that did not.
+    localStorage.setItem(SEEN_KEY, '6');
+    rpc.mockResolvedValue({ data: 9, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(await screen.findByText('3 people viewed your notes this week.')).toBeInTheDocument();
+    expect(await screen.findByText('3 new views on your notes.')).toBeInTheDocument();
   });
 
   it('reads naturally at one', async () => {
     rpc.mockResolvedValue({ data: 1, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(
-      await screen.findByText('Someone viewed one of your notes this week.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('1 new view on your notes.')).toBeInTheDocument();
   });
 
-  it('asks Postgres for the week boundary in the viewer’s own timezone', async () => {
-    // A UTC cutoff would flip mid-shift for a US shop, so Monday's banner would
-    // be reporting part of Sunday night.
+  it('asks for the total with no arguments at all', async () => {
+    // The permanent rule: a caller-supplied time window would be a bisection
+    // oracle for WHEN a note was read. The delta is computed here instead,
+    // from a number the server already gave us.
     rpc.mockResolvedValue({ data: 2, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    await waitFor(() =>
-      expect(rpc).toHaveBeenCalledWith(
-        'my_note_view_digest',
-        expect.objectContaining({ p_tz: expect.any(String) }),
-      ),
-    );
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith('my_note_view_digest'));
+  });
+
+  it('stays quiet once the total has been seen', async () => {
+    // No nag on every single visit to the jobs list — an operator lands there
+    // many times a shift.
+    localStorage.setItem(SEEN_KEY, '4');
+    rpc.mockResolvedValue({ data: 4, error: null });
+    const { container } = render(<NoteUsageBanner companyId="c1" />);
+
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('comes back the moment the total grows again', async () => {
+    // The whole loop: silence until something genuinely new happens.
+    localStorage.setItem(SEEN_KEY, '4');
+    rpc.mockResolvedValue({ data: 5, error: null });
+    render(<NoteUsageBanner companyId="c1" />);
+
+    expect(await screen.findByText('1 new view on your notes.')).toBeInTheDocument();
   });
 
   it('stays silent when the digest fails', async () => {
@@ -100,73 +107,34 @@ describe('NoteUsageBanner', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('dismissing acknowledges the NUMBER, not the week', async () => {
-    // A permanent dismissal would end the loop the first time it is
-    // inconvenient, so what is stored is the count already seen.
+  it('dismissing banks the whole total, not just the new part', async () => {
+    // Banking only the delta would re-show the same news forever.
     const user = userEvent.setup();
-    rpc.mockResolvedValue({ data: 4, error: null });
+    localStorage.setItem(SEEN_KEY, '2');
+    rpc.mockResolvedValue({ data: 6, error: null });
     render(<NoteUsageBanner companyId="c1" />);
-    await screen.findByText('4 people viewed your notes this week.');
+    await screen.findByText('4 new views on your notes.');
 
     await user.click(screen.getByRole('button', { name: /close/i }));
 
     await waitFor(() =>
-      expect(screen.queryByText('4 people viewed your notes this week.')).not.toBeInTheDocument(),
+      expect(screen.queryByText('4 new views on your notes.')).not.toBeInTheDocument(),
     );
-    const stored = JSON.parse(localStorage.getItem('jigged:note-usage-banner-seen')!);
-    expect(stored).toMatchObject({ count: 4, week: expect.stringMatching(/^\d{4}-W\d{2}$/) });
+    expect(localStorage.getItem(SEEN_KEY)).toBe('6');
   });
 
-  it('comes back when the number grows, so Friday is not swallowed by Monday', async () => {
-    // THE BUG THIS EXISTS FOR: the count climbs all week. Under a plain
-    // week-dismissal, someone who found the repetition annoying on Monday and
-    // dismissed at "1 person" never saw Friday's "6 people" — the largest and
-    // most motivating number of the week, silently suppressed.
-    localStorage.setItem(
-      'jigged:note-usage-banner-seen',
-      JSON.stringify({ week: isoWeekKeyNow(), count: 1 }),
-    );
-    rpc.mockResolvedValue({ data: 6, error: null });
-    render(<NoteUsageBanner companyId="c1" />);
-
-    expect(await screen.findByText('6 people viewed your notes this week.')).toBeInTheDocument();
-  });
-
-  it('stays quiet while the number has not moved', async () => {
-    // The other half: no nag on every single visit to the jobs list once the
-    // operator has already seen that number.
-    localStorage.setItem(
-      'jigged:note-usage-banner-seen',
-      JSON.stringify({ week: isoWeekKeyNow(), count: 4 }),
-    );
-    rpc.mockResolvedValue({ data: 4, error: null });
-    const { container } = render(<NoteUsageBanner companyId="c1" />);
-
-    await waitFor(() => expect(rpc).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('shows the banner again rather than hiding it when storage is unreadable', async () => {
-    // Failing open is the safe direction: at worst one extra impression, versus
-    // silently ending the feedback loop.
-    localStorage.setItem('jigged:note-usage-banner-seen', 'not json');
-    rpc.mockResolvedValue({ data: 2, error: null });
-    render(<NoteUsageBanner companyId="c1" />);
-
-    expect(await screen.findByText('2 people viewed your notes this week.')).toBeInTheDocument();
-  });
-
-  it('opens the detail it promises, instead of being a dead end', async () => {
-    // "3 people viewed your notes" with nowhere to go is the void this whole
-    // workstream exists to close. Tapping must land on the author's own notes.
+  it('a tap-through banks it too, and opens the detail', async () => {
+    // Coming back from My work to the same banner you just acted on reads as if
+    // nothing happened.
     const user = userEvent.setup();
     const onOpenDetail = vi.fn();
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
 
-    await user.click(await screen.findByText('3 people viewed your notes this week.'));
+    await user.click(await screen.findByText('3 new views on your notes.'));
 
     expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(SEEN_KEY)).toBe('3');
   });
 
   it('dismissing does not count as opening the detail', async () => {
@@ -176,35 +144,20 @@ describe('NoteUsageBanner', () => {
     const onOpenDetail = vi.fn();
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
-    await screen.findByText('3 people viewed your notes this week.');
+    await screen.findByText('3 new views on your notes.');
 
     await user.click(screen.getByRole('button', { name: /close/i }));
 
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
-  it('comes back next week after being acknowledged', async () => {
-    localStorage.setItem(
-      'jigged:note-usage-banner-seen',
-      JSON.stringify({ week: '1999-W01', count: 99 }),
-    );
+  it('shows rather than hides when storage is unreadable', async () => {
+    // Failing open is the safe direction: at worst one extra impression, versus
+    // silently ending the feedback loop.
+    localStorage.setItem(SEEN_KEY, 'not a number');
     rpc.mockResolvedValue({ data: 2, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(await screen.findByText('2 people viewed your notes this week.')).toBeInTheDocument();
-  });
-
-  it('a tap-through acknowledges it too', async () => {
-    // Coming back from My work to the same banner you just acted on reads as if
-    // nothing happened.
-    const user = userEvent.setup();
-    rpc.mockResolvedValue({ data: 3, error: null });
-    render(<NoteUsageBanner companyId="c1" onOpenDetail={vi.fn()} />);
-
-    await user.click(await screen.findByText('3 people viewed your notes this week.'));
-
-    expect(JSON.parse(localStorage.getItem('jigged:note-usage-banner-seen')!)).toMatchObject({
-      count: 3,
-    });
+    expect(await screen.findByText('2 new views on your notes.')).toBeInTheDocument();
   });
 });

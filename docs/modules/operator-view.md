@@ -135,9 +135,11 @@ against a count computed over exactly the rows it admitted. So:
 - **No function touching `note_views` may accept a viewer parameter.** The three
   that touch it: `log_note_views` (returns `void` — a duplicate must be
   indistinguishable from a first view), `note_viewers(note_id)` (authors only, one
-  row per person, ordered by name, **no timestamps**), and
-  `my_note_view_digest(tz)` (the caller's own notes, one server-computed week
-  boundary — a caller-supplied window would be a bisection oracle for read times).
+  row per person, ordered by name, **no timestamps**). `my_note_view_digest()`
+  used to be the third but no longer touches the table at all — it sums
+  `notes.viewer_count`, so it is now `SECURITY INVOKER`. **It takes no arguments,
+  permanently**: a caller-supplied time window would be a bisection oracle for
+  when a note was read.
 - **`authenticated` has no UPDATE on `notes` at all** — notes are append-only today,
   so the whole privilege is revoked. Otherwise setting `viewer_count = 0` and
   returning later to read the delta is a one-bit read oracle per note. If note
@@ -169,22 +171,30 @@ see this", not "nobody can".
 
 ### What comes back to the author
 
-- **Login banner** (`NoteUsageBanner`, on the jobs list) — "N people viewed your
-  notes this week", from `my_note_view_digest` with the **browser's own timezone**
-  so the week boundary is the shop's, not UTC. Renders `null` at zero (a weekly
-  "nobody cares" is worse than silence). Taps through to My work.
-  **Dismissing acknowledges the number, not the week** — localStorage holds
-  `{week, count}` and the banner returns as soon as the count grows past it. A
-  plain week-dismissal silently swallowed the best news of the week: the count
-  climbs, so dismissing at "1 person" on Monday hid Friday's "6". Storing the
-  count rather than a "last opened" timestamp is deliberate — a stored instant
-  would have to be sent back as a query window, and a caller-supplied window is a
-  bisection oracle for *when* a note was read.
+- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"N new views on your
+  notes"**. `my_note_view_digest()` returns a *running total* of views across the
+  caller's own notes (the sum of `viewer_count`, which is exactly the "views"
+  figure My work shows, so the two can never disagree). The component stores the
+  total it last acknowledged in `localStorage` and renders the **difference**, so
+  it appears only when something has genuinely happened and goes quiet once seen —
+  no nag on the many jobs-list visits in a shift. Both the ✕ and a tap-through
+  bank the total. Renders `null` at zero. Unreadable storage fails **open**: one
+  extra impression beats silently ending the loop.
+
+  Two earlier designs are recorded here because both are tempting and both are
+  wrong. A **weekly window** (the first version) let the count climb all week
+  while dismissal was all-or-nothing, so dismissing at "1 person" on Monday
+  silently swallowed Friday's "6" — the nag and the reward were the same object.
+  A **"last opened" timestamp** would have to travel back as a query window, and a
+  caller-supplied window is a bisection oracle: narrow it repeatedly and you
+  recover *when* a note was read, which combined with `note_viewers()` naming the
+  reader reconstructs "Kurtis had to look this up on Tuesday". A count is a number
+  the server already told us, so subtracting on the client leaks nothing.
 - **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then each
   note with its view count, the job it was written on beside the date, and on tap
   the named viewers plus an **Open J-NNNN** link back to the source.
 
-**The word is "viewed", never "used".** All that is recorded is that someone opened
+**The word is "views", never "uses".** All that is recorded is that someone opened
 a note and stayed on it. Whether they acted on it is not measured, and claiming it
 makes every number a small lie the author can personally disprove by asking.
 
@@ -329,8 +339,11 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** any non-author, **when** they SELECT `note_views`, embed it, or probe it with `Prefer: count=exact`, **then** they get `42501` / no count — *verified by `api/tests/integration/test_note_views_rls.py`*.
 - [ ] **Given** an author, **when** they open one of their own notes in My work, **then** `note_viewers()` returns one row per person with a representative job number and **no timestamp**, ordered by name — *verified by `api/tests/integration/test_note_views_rls.py`*.
 - [ ] **Given** a member is deleted, **when** their view rows cascade, **then** neither counter moves — monotonic, so delete-and-difference cannot reconstruct what they read — *verified by `api/tests/integration/test_note_views_rls.py`*.
-- [ ] **Given** a digest count of zero, **when** the jobs list renders, **then** the banner renders nothing — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
-- [ ] **Given** a non-zero digest, **when** the operator taps the banner, **then** it navigates to My work; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** nothing new since the operator last looked, **when** the jobs list renders, **then** the banner renders nothing — no nag on the many jobs-list visits in a shift — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** a running total of 9 of which 6 were already acknowledged, **when** the banner renders, **then** it says **3** new views, not 9 — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** the digest RPC, **when** it is called with any argument at all, **then** it fails — the function is permanently argument-free so no time window can be probed — *verified by `api/tests/integration/test_note_views_rls.py > test_digest_takes_no_time_window`*.
+- [ ] **Given** a new reader, **when** the digest is called again, **then** the running total has climbed — it is a total, not a window, which is what makes a client-side subtraction correct — *verified by `api/tests/integration/test_note_views_rls.py > test_digest_is_a_running_total_not_a_window`*.
+- [ ] **Given** a non-zero banner, **when** the operator taps it, **then** it navigates to My work AND banks the whole total; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
 - [ ] **Given** My work, **when** it renders with any data, **then** no completion count, streak, average, pace or rank appears anywhere on the page — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'shows no completion count, streak, average or pace'`*.
 - [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives and only the job link is absent — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
 

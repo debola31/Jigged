@@ -39,7 +39,7 @@ import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
-import LocationBoard from './board/LocationBoard';
+import LocationBoard, { boardOrder } from './board/LocationBoard';
 import LocationDetailSheet from './board/LocationDetailSheet';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
@@ -120,10 +120,25 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     parentCode: string | null;
     parentPath: string[];
     existingSiblingNames: string[];
-  }>({ open: false, parentId: null, parentCode: null, parentPath: [], existingSiblingNames: [] });
+    startSortOrder: number;
+  }>({
+    open: false,
+    parentId: null,
+    parentCode: null,
+    parentPath: [],
+    existingSiblingNames: [],
+    startSortOrder: 0,
+  });
 
   const openTopLevelBuilder = () =>
-    setBuilder({ open: true, parentId: null, parentCode: null, parentPath: [], existingSiblingNames: [] });
+    setBuilder({
+      open: true,
+      parentId: null,
+      parentCode: null,
+      parentPath: [],
+      existingSiblingNames: [],
+      startSortOrder: 0,
+    });
 
   /**
    * Board is always the default, and the choice is deliberately NOT persisted.
@@ -168,7 +183,10 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const directPartCounts = boardData?.directPartCounts ?? EMPTY_COUNTS;
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
-  const tree = useMemo(() => buildLocationTree(locations), [locations]);
+  // Sorted once here so the board and the list agree — `Unassigned` last in both. Sorting only
+  // inside the board left the list leading with the put-away pile, which is the impression the
+  // board's ordering exists to avoid.
+  const tree = useMemo(() => buildLocationTree(locations).sort(boardOrder), [locations]);
   const byNodeId = useMemo(() => indexTree(tree), [tree]);
   const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
@@ -219,6 +237,9 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         // What's already inside, so a second subdivide continues the run (Row 4–6) rather than
         // regenerating Row 1–3 and colliding partway through the sequential inserts.
         existingSiblingNames: node.children.map((c) => c.name),
+        // …and sort the new children AFTER them, or they interleave: subdividing a cabinet that
+        // holds Shelf A/B into Rows drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`.
+        startSortOrder: node.children.reduce((max, c) => Math.max(max, c.sort_order), -1) + 1,
       });
     },
     onEdit: (node: InventoryLocationNode) => {
@@ -431,6 +452,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         parentCode={builder.parentCode}
         parentPath={builder.parentPath}
         existingSiblingNames={builder.existingSiblingNames}
+        startSortOrder={builder.startSortOrder}
         onClose={() => setBuilder((s) => ({ ...s, open: false }))}
         onCreated={(n) => {
           void reload();

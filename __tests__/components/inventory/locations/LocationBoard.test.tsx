@@ -40,7 +40,7 @@ const renderBoard = (
 ) => {
   const onOpen = overrides.onOpen ?? vi.fn();
   const onAddStorage = overrides.onAddStorage ?? vi.fn();
-  render(
+  const { container } = render(
     <LocationBoard
       tree={tree}
       occupancy={rollUpOccupancy(tree, new Map(counts))}
@@ -48,7 +48,7 @@ const renderBoard = (
       onAddStorage={onAddStorage}
     />,
   );
-  return { onOpen, onAddStorage };
+  return { onOpen, onAddStorage, container };
 };
 
 const cabinetWithShelves = () => {
@@ -99,6 +99,27 @@ describe('LocationBoard', () => {
     expect(units[0]).toBe('Cabinet 3 — empty');
     expect(units[1]).toBe('Unassigned — 9,428 parts');
     expect(screen.getByText(/put-away list, not a shelf/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The dot rendered with the right colour and **zero width** for a while, because a bare `<span>`
+   * is `display: inline` and inline elements ignore width/height. jsdom has no layout engine, so
+   * this can only assert the property that fixes it — the browser is what caught the bug, and this
+   * is what stops it coming back.
+   */
+  it('gives each compartment a fill dot that can actually take a size', () => {
+    const { container } = renderBoard([cabinetWithShelves()], [['shelf-a', 2]]);
+
+    const dots = [...container.querySelectorAll('span')].filter((el) => {
+      const s = window.getComputedStyle(el);
+      return s.borderRadius === '50%' && (s.width === '7px' || s.height === '7px');
+    });
+
+    expect(dots.length).toBeGreaterThanOrEqual(2); // one per compartment
+    for (const dot of dots) {
+      // `inline` here means invisible, whatever the colour says.
+      expect(window.getComputedStyle(dot).display).toBe('inline-block');
+    }
   });
 
   it('opens the sheet for the whole unit, not for a compartment', async () => {

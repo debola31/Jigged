@@ -49,6 +49,15 @@ interface VisualLocationBuilderProps {
    * instead of regenerating Row 1–3 and colliding.
    */
   existingSiblingNames?: string[];
+  /**
+   * Where the new children's `sort_order` should start.
+   *
+   * Without it they default to 0 and **interleave** with what's already inside: subdividing a
+   * cabinet holding Shelf A/B into three Rows drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`,
+   * because `getLocations` orders by `sort_order` then `name`. Same fix `duplicateLocation`
+   * already applies to a copied sibling (max + 1).
+   */
+  startSortOrder?: number;
   onClose: () => void;
   onCreated: (count: number) => void;
 }
@@ -60,6 +69,7 @@ export default function VisualLocationBuilder({
   parentCode = null,
   parentPath,
   existingSiblingNames,
+  startSortOrder = 0,
   onClose,
   onCreated,
 }: VisualLocationBuilderProps) {
@@ -132,7 +142,7 @@ export default function VisualLocationBuilder({
     setCreating(true);
     setError(null);
     try {
-      const created = await materializeLocationSpec(companyId, parentId, tree);
+      const created = await materializeLocationSpec(companyId, parentId, tree, startSortOrder);
       onCreated(created.length);
       onClose();
     } catch (e) {
@@ -199,6 +209,7 @@ export default function VisualLocationBuilder({
                 onAdd={editAdd}
                 onDuplicate={editDuplicate}
                 onStartOver={() => setStartOverOpen(true)}
+                existingSiblingNames={existingSiblingNames}
               />
             </Box>
 

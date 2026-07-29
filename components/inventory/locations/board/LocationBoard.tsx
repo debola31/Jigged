@@ -35,21 +35,33 @@ const parts = (n: number) => `${num(n)} part${n === 1 ? '' : 's'}`;
  * position would make the whole page read as "one giant tile is my inventory"; last position
  * reads as "here is my storage; separately, here is the pile to put away."
  */
-function boardOrder(a: InventoryLocationNode, b: InventoryLocationNode): number {
+export function boardOrder(a: InventoryLocationNode, b: InventoryLocationNode): number {
   const aSys = a.kind === 'system' ? 1 : 0;
   const bSys = b.kind === 'system' ? 1 : 0;
   if (aSys !== bSys) return aSys - bSys;
   return a.sort_order - b.sort_order || a.name.localeCompare(b.name);
 }
 
-/** Empty vs has-stock, as a dot. Nothing here claims to know capacity. */
+/**
+ * Empty vs has-stock, as a dot. Nothing here claims to know capacity.
+ *
+ * `display: inline-block` is load-bearing, not styling. A bare `<span>` is `display: inline`,
+ * which **ignores width and height** — the dot rendered with the right colour and zero width, so
+ * fill state was invisible on the board while every unit test passed. jsdom has no layout engine,
+ * so only a browser could catch it. Setting the display here rather than on the parent keeps it
+ * correct in both `CompartmentGrid` branches (the even-fill cells wrap in an inline span; the
+ * wrapped chips are already flex).
+ */
 function FillDot({ filled }: { filled: boolean }) {
   return (
     <Box
       component="span"
       sx={{
-        width: 6,
-        height: 6,
+        display: 'inline-block',
+        verticalAlign: 'middle',
+        width: 7,
+        height: 7,
+        mr: 0.5,
         flexShrink: 0,
         borderRadius: '50%',
         border: filled ? 0 : '1px solid',
@@ -88,6 +100,11 @@ export default function LocationBoard({
       sx={{
         display: 'grid',
         gap: 2,
+        // `start`, not the default `stretch`: a flat location has no body, and stretching it to
+        // match a neighbouring cabinet's height drew an empty rectangle that read as "something
+        // is missing here". Most real locations are flat (118 of 121 in their legacy export), so
+        // that was the common case looking broken. Ragged heights are the honest shape.
+        alignItems: 'start',
         gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
       }}
     >

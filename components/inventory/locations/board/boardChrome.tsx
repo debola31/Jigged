@@ -310,8 +310,12 @@ export function StorageUnitShell({
         {headerRight}
       </Box>
 
+      {/* A unit with nothing inside it gets no body at all. It used to render an empty padded box,
+          which drew a blank rectangle under every flat location — and most real locations are
+          flat (118 of 121 in their legacy export), so that was the common case looking broken. */}
+      {children.length > 0 && (
       <Box sx={{ p: 1 }}>
-        {children.length === 0 ? null : allLeaves ? (
+        {allLeaves ? (
           <CompartmentGrid nodes={children} renderCell={renderCell} />
         ) : kind === 'aisle' ? (
           <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -356,6 +360,7 @@ export function StorageUnitShell({
           </Stack>
         )}
       </Box>
+      )}
     </Box>
   );
 }

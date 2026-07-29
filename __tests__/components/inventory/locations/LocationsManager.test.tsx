@@ -141,6 +141,21 @@ describe('LocationsManager', () => {
     expect(screen.queryByRole('button', { name: /add storage/i })).not.toBeInTheDocument();
   });
 
+  /** The board sorts the put-away pile last; the list has to agree, or the demoted view undoes it. */
+  it('sorts Unassigned last in the list too, not only on the board', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    await user.click(screen.getByRole('button', { name: 'List' }));
+    await screen.findByText('2 inside');
+
+    const rows = screen.getAllByRole('button').map((b) => b.textContent ?? '');
+    const unassigned = rows.findIndex((t) => t.includes('Unassigned'));
+    const cabinet = rows.findIndex((t) => t.includes('Cabinet 3'));
+    expect(cabinet).toBeLessThan(unassigned);
+  });
+
   it('opens the sheet from a list row too', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
@@ -190,6 +205,38 @@ describe('LocationsManager', () => {
     // Cabinet 3 already holds Shelf A/B — a different series, so Rows start at 1.
     expect(spec.map((n) => n.name)).toEqual(['Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5']);
     expect(spec[0].code).toBe('CAB3-R01');
+  });
+
+  /**
+   * Found in the browser, not by a test: subdividing Cabinet 3 (holding Shelf A/B) into three Rows
+   * drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`, because `getLocations` orders by
+   * `sort_order` then `name` and new children defaulted to `sort_order = 0`.
+   */
+  it('sorts new children after the ones already inside, not interleaved with them', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
+    await user.click(screen.getByText('Rows'));
+    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+
+    // Shelf A and Shelf B carry sort_order 0 in the fixture, so the run must start at 1.
+    const startSortOrder = vi.mocked(materializeLocationSpec).mock.calls[0][3];
+    expect(startSortOrder).toBe(1);
+  });
+
+  it('starts a top-level build at zero — there is nothing to sort after', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    await user.click(screen.getByRole('button', { name: /build visually/i }));
+    await user.click(screen.getByText('Cabinet'));
+    await user.click(await screen.findByRole('button', { name: /create 16 locations/i }));
+
+    expect(vi.mocked(materializeLocationSpec).mock.calls[0][1]).toBeNull();
+    expect(vi.mocked(materializeLocationSpec).mock.calls[0][3]).toBe(0);
   });
 
   it('continues the numbering on a repeat subdivide', async () => {

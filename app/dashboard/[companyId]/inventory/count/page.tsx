@@ -517,7 +517,7 @@ export default function InventoryCountPage() {
           <Card elevation={2}>
             <TableContainer>
               <Table size="small" sx={{ minWidth: 560 }}>
-                {/* "System" and "Counted", not "On hand" and "Counted". Both columns are
+                {/* "Recorded" and "Counted", not "On hand" and "Counted". Both columns are
                     quantities on hand — the only thing separating them is where the number came
                     from, so that is what the headers have to say. "On hand" read as the physical
                     count, which is the neighbouring column.
@@ -528,7 +528,7 @@ export default function InventoryCountPage() {
                   <TableRow>
                     <TableCell sx={HEAD_SX}>Part</TableCell>
                     <TableCell align="right" sx={HEAD_SX}>
-                      System
+                      Recorded
                     </TableCell>
                     <TableCell align="right" sx={HEAD_SX}>
                       Counted

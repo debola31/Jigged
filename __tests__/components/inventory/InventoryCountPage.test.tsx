@@ -188,7 +188,7 @@ describe('inline feedback', () => {
   // "On hand" next to "Counted" read as the physical count, which is the other column.
   it('gives the sheet proper columns, and no per-row unit when they all match', async () => {
     await onSheet();
-    expect(screen.getByRole('columnheader', { name: /^system$/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^recorded$/i })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /counted/i })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /^change$/i })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^unit$/i })).not.toBeInTheDocument();

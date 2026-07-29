@@ -703,15 +703,17 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 
 > **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **two steps.** Choose the
 > parts you're counting, then count them on a **count sheet**: proper columns for
-> *Part · System · Counted · Change*, tabular figures so digits line up, and the change filled
+> *Part · Recorded · Counted · Change*, tabular figures so digits line up, and the change filled
 > in as you type. Save commits — there is no confirm and no review step.
 >
 > **The headers name the number's source, not the number.** "On hand" and "Counted" were the
 > first attempt and they collided: both columns are quantities on hand, and "on hand" reads as
-> the one you just physically counted — which is the *next* column. **System** vs **Counted**
-> says the only thing that actually distinguishes them. *Expected* was the alternative (it is
-> what Sortly and most count apps use) and was rejected for priming the counter toward
-> confirming the record — the count is not blind, so it does not need the extra nudge.
+> the one you just physically counted — which is the *next* column. **Recorded** vs **Counted**
+> says the only thing that actually distinguishes them, in the two words a person would use.
+> Two alternatives were rejected: *System* (accurate, but names the software rather than the
+> fact, and reads as product-speak on a shop floor) and *Expected* — what Sortly and most count
+> apps use — for priming the counter toward confirming the record, which a non-blind count
+> does not need.
 >
 > **Change, not Variance.** The footer already reads *"2 will change"* and the button *"Save 2
 > changes"*; *Variance* was the single place this page used a different — and less spoken —

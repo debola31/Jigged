@@ -64,9 +64,9 @@ test.describe('operator read-back loop', () => {
     await openTravelerFor(page, 'E2E-JS-NOTSTARTED');
 
     // 1. The affordance advertises that there is something to read. This is the
-    //    discoverability half — it used to be a bare "Previous notes" label while
+    //    discoverability half — it used to be a bare "Playbook" label while
     //    Files beside it showed a count.
-    const priorNotes = page.getByRole('button', { name: /^Previous notes · \d+$/ });
+    const priorNotes = page.getByRole('button', { name: /^Playbook · \d+$/ });
     await expect(priorNotes).toBeVisible({ timeout: 30_000 });
 
     // 2. The knowledge itself, written against a DIFFERENT job for this part.

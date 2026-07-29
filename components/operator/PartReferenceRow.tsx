@@ -26,7 +26,7 @@ interface PartReferenceRowProps {
  *
  * Files (drawings / STEP models) lead and show a count, because they're often
  * required to actually do the job — an operator shouldn't have to discover a
- * drawing exists by tapping a bare icon. Previous notes is a lighter, optional
+ * drawing exists by tapping a bare icon. The Playbook is a lighter, optional
  * reference. Both live in the content, deliberately apart from the header's
  * navigation and the account logout (which lives on the Profile tab), so a
  * frequent job-reference tap is never next to a destructive one — the mis-tap
@@ -80,7 +80,7 @@ export default function PartReferenceRow({
         onClick={() => setNotesOpen(true)}
         sx={{ minHeight: 48, fontWeight: hasNotes ? 700 : 400 }}
       >
-        {hasNotes ? `Previous notes · ${noteCount}` : 'Previous notes'}
+        {hasNotes ? `Playbook · ${noteCount}` : 'Playbook'}
       </Button>
 
       {filesOpen && (

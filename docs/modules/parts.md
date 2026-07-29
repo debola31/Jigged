@@ -16,7 +16,7 @@ This three-layer split mirrors how real shops already think: cost the part once,
 
 **Dependencies:** None (parts are independent company-wide entities)
 
-**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, and `part_comments`
+**Database Tables:** `parts`, `part_pricing_tiers`, `part_attachments`, plus `parts_bom` (the part BOM), `part_procurement_tiers` (bought-part vendor costs), `parts_unit_conversions`, and `part_comments` (renamed from `part_notes` in [`20260728040701`](../../supabase/migrations/20260728040701_notes_subjects_and_view_logging.sql) to free the `notes` name for shop-floor knowledge — the table itself is unchanged, and is **not** the operator notes feed; see [operator-view.md](operator-view.md#data-model))
 
 ---
 

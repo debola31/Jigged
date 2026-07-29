@@ -5,7 +5,7 @@
 Jigged already lets a shop ship a subset of a job's quantity and invoice a subset,
 but **operations can only be completed whole**. A real case from our design partner:
 order quantity 12, material for 5, 2 came out wrong, 3 completed. The operator's only
-way to record "3 done, 9 to go" was a free-text note (`notes`): *"3 are complete
+way to record "3 done, 9 to go" was a free-text note (`notes`, then named `job_notes`): *"3 are complete
 need 9 more."* That fact lives in prose instead of data — nothing rolls it up, nothing
 shows it to the admin, and the next run has to re-read the note.
 
@@ -55,7 +55,7 @@ event + trigger-derived-status pattern the codebase already uses twice.
   ([`recomputeJobPartStatus`](utils/jobsAccess.ts#L1206) / inline in
   `operatorAccess.completeOperation`); job_part→job is a **DB trigger**
   (`compute_job_production_status`).
-- **No scrap is modeled anywhere.** `job_notes.note_type = 'event'` is a reserved,
+- **No scrap is modeled anywhere.** `notes.note_type = 'event'` is a reserved,
   unused hook for auto-logged feed entries.
 
 ### Decisions taken with the user (2026-07-20)

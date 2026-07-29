@@ -58,8 +58,228 @@ step, and record progress with a single **Mark Complete**.
 - **No actual-time columns and no `operator_sessions` table** — both were removed. There is no
   start/stop, no timer, no shift/clock-in. See [prd.md](../prd.md) §4.3 (Complete-Only).
 
-**Job feed** — `notes` (+ `note_media`): one append-only stream per job; a note may be
-tagged to a step via `job_operation_id`. Captured on the operation page (text + photo/video).
+**Notes** — `notes` (+ `note_media`). Renamed from `job_notes` / `job_note_media` in
+[`20260728040701`](../../supabase/migrations/20260728040701_notes_subjects_and_view_logging.sql).
+Not to be confused with **`part_comments`** (renamed from `part_notes` in the same
+migration) — that is the office-side part activity feed carrying manual comments
+alongside system-generated pricing/stock events, and it is a different domain
+entirely. Operators never see it; it has no view logging, no subjects, no media.
+
+A note carries a **subject** (`subject_kind`), which is what it is *about* — not
+where it was captured:
+
+| `subject_kind` | Required | Optional refinement |
+|---|---|---|
+| `job` | `job_id` | `job_part_id`, then `job_operation_id` |
+| **`part`** | **`part_id`** | **`routing_operation_id`** — the routing step |
+| `work_center` | `work_center_id` | — |
+
+Enforced by the `notes_subject_valid` CHECK, plus a `notes_validate_subject`
+trigger that Postgres CHECKs cannot express: every subject FK must belong to the
+note's own `company_id`, and `routing_operation_id` must belong to `part_id`.
+
+**Why `part` matters.** Before this, `job_notes.job_id` was NOT NULL, so every
+note in the system died with its job and "what we learned running this part" had
+to be *reconstructed at read time* by walking prior completed jobs. A note
+anchored to `(part_id, routing_operation_id)` has no job in it at all, so the next
+person running that part reads the same row the last person wrote.
+
+`captured_job_id` / `captured_job_operation_id` are **provenance, not subject** —
+where a durable note was written, so it still appears in that job's feed. Both are
+`ON DELETE SET NULL`: the knowledge outlives its origin.
+
+Which subject the composer writes is never an operator decision — if the current
+`job_operation` has a `routing_operation_id`, `addJobNote` writes a `part` subject
+with provenance; otherwise (an ad-hoc step with no routing link) a `job` subject.
+So **new operator captures are durable by default.**
+
+## The read-back loop (attribution)
+
+A note that goes into a void is not worth writing. `note_views` closes the loop:
+reads are logged, counted, and reflected back **to the author only**.
+
+**What is logged.** `useNoteDwell` observes note *bodies* (never a header, never a
+count badge) and logs a view after **2 seconds visible**, gated on
+`document.visibilityState === 'visible'` — an IntersectionObserver reports
+intersecting in a backgrounded tab, and a count that exceeds reality is worse than
+no count. Dwell completions are batched into one `log_note_views(ids, jobId)` RPC
+per screenful, fire-and-forget, Sentry on failure and never a user-visible error.
+
+**Dedupe:** `UNIQUE NULLS NOT DISTINCT (note_id, viewer_id, job_id)` — one row per
+person per note per job, forever. Re-reading the same note on the same job is one
+row. `NULLS NOT DISTINCT` is load-bearing: `job_id` is nullable, and the SQL
+default would treat every NULL as unequal, so repeat Playbook reads would insert
+unbounded rows.
+
+Two counters on `notes`, maintained only by the `note_views_bump_counts` trigger
+and **monotonic** (`GREATEST`, no decrement):
+
+- `viewer_count` — distinct **people**. Saturates near shop size; that is its meaning.
+- `usage_count` — distinct **jobs**. Uncapped, and the signal that separates a
+  load-bearing note from one read once out of curiosity. It ranks the Playbook.
+
+**Never logged:** the author's own reads, or anyone with
+`user_company_access.excluded_from_metrics` / in `system_admins`. Both are enforced
+in `log_note_views` itself, because the browser has no INSERT grant to opt out of.
+
+### Privacy — the rules that must not be relaxed
+
+`note_views` has **no client-readable path at all**. Not a narrow policy — none.
+Any row-returning SELECT policy is probeable into a per-viewer oracle via
+`HEAD ?note_id=eq.X&viewer_id=eq.Y` with `Prefer: count=exact`, and RLS is powerless
+against a count computed over exactly the rows it admitted. So:
+
+- No grant to `anon`, `authenticated`, or `jigged_ai_readonly` — **ever**. A
+  RESTRICTIVE deny-all policy names all three, so a future permissive policy still
+  ANDs to false.
+- **No function touching `note_views` may accept a viewer parameter.** The three
+  that touch it: `log_note_views` (returns `void` — a duplicate must be
+  indistinguishable from a first view), `note_viewers(note_id)` (authors only, one
+  row per person, ordered by name, **no timestamps**). `my_note_view_digest()`
+  used to be the third but no longer touches the table at all — it sums
+  `notes.viewer_count`, so it is now `SECURITY INVOKER`. **It takes no arguments,
+  permanently**: a caller-supplied time window would be a bisection oracle for
+  when a note was read.
+- **`authenticated` has no UPDATE on `notes` at all** — notes are append-only today,
+  so the whole privilege is revoked. Otherwise setting `viewer_count = 0` and
+  returning later to read the delta is a one-bit read oracle per note. If note
+  editing is ever added it needs a permissive policy **and** a column-scoped grant
+  that excludes `viewer_count`, `usage_count`, `company_id`, `author_id` and every
+  subject column.
+- `user_company_access` UPDATE/INSERT **are** column-scoped, to
+  `(name, role, email, pin_hash)`. Without that, an admin flags everyone-but-one
+  with `excluded_from_metrics`, watches whose reads still count, and has a full
+  deanonymization — or deletes and re-inserts a membership to the same end.
+- Counters are **monotonic** so deleting a member and differencing the counts
+  cannot reconstruct what they read.
+- Never add `note_views` to `supabase_realtime`, `ALLOWED_TABLES`, or
+  `SENSITIVE_TABLES`' opposite. Never add a constraint requiring a `note_views` row
+  before a reaction — that turns the reaction endpoint into a "has X viewed N" oracle.
+
+**There is no owner-facing report of who read what.** The rule is one sentence with
+no role branch: *you see who viewed your own notes; nobody sees who viewed anyone
+else's.* `note_viewers()` deliberately has no admin exclusion — roles move up and
+down in a small shop, and an operator promoted to lead must not silently lose the
+feedback loop on notes they already wrote.
+
+**Residual, stated rather than hidden:** an admin can read `viewer_count` (by
+design), poll it, and correlate an increment with who was on shift. That is inherent
+to publishing any count. The design denies every amplifier — no per-job breakdown,
+no timestamps in the named list, no read timeline, no realtime stream. Jigged staff
+with prod access can read the table as `postgres`; the promise is "your boss cannot
+see this", not "nobody can".
+
+### What comes back to the author
+
+- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"2 people found your
+  notes helpful · 3 new views."** `my_note_digest()` returns *running totals* of
+  both across the caller's own notes: views (the sum of `viewer_count`, exactly
+  the figure My work shows, so the two can never disagree) and helpful marks.
+  **Helpful leads when present** — a view is someone needing to look something
+  up; a helpful is a colleague choosing to say it was worth reading. Only the
+  signals that actually moved are mentioned. `helpful` is **not** monotonic (a
+  mark can be taken back), so its delta is clamped at zero. The component stores the
+  total it last acknowledged in `localStorage` and renders the **difference**, so
+  it appears only when something has genuinely happened and goes quiet once seen —
+  no nag on the many jobs-list visits in a shift. Both the ✕ and a tap-through
+  bank the total. Renders `null` at zero.
+
+  **First run on a device announces nothing.** The mark lives in `localStorage`,
+  so it follows the *device*, not the person — a shop tablet, a replacement
+  phone, a second browser or cleared site data all start empty. Defaulting to
+  zero would render the whole history as new ("312 new views" after a year), and
+  the banner's only asset is that its number is true. Instead the current total
+  is adopted silently, so the *next* view is announced correctly. The cost is one
+  missed announcement: views that accrued while that device was away are never
+  banner-announced. Information delayed, not lost — the full picture is on My
+  work, one tap down. A mangled stored value is treated as **absent** for the
+  same reason (zero would announce everything).
+
+  Two earlier designs are recorded here because both are tempting and both are
+  wrong. A **weekly window** (the first version) let the count climb all week
+  while dismissal was all-or-nothing, so dismissing at "1 person" on Monday
+  silently swallowed Friday's "6" — the nag and the reward were the same object.
+  A **"last opened" timestamp** would have to travel back as a query window, and a
+  caller-supplied window is a bisection oracle: narrow it repeatedly and you
+  recover *when* a note was read, which combined with `note_viewers()` naming the
+  reader reconstructs "Kurtis had to look this up on Tuesday". A count is a number
+  the server already told us, so subtracting on the client leaks nothing.
+- **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then each
+  note with its view count, the job it was written on beside the date, and on tap
+  the named viewers plus an **Open J-NNNN** link back to the source.
+
+**The word is "views", never "uses".** All that is recorded is that someone opened
+a note and stayed on it. Whether they acted on it is not measured, and claiming it
+makes every number a small lie the author can personally disprove by asking.
+
+### Reactions (`helpful`)
+
+The **voluntary** half of the loop, and the deliberate opposite of view logging.
+A view is involuntary and private — a record that someone needed to look
+something up — which is why `note_views` has no client read path at any level. A
+reaction is a claim someone chose to make, so it is public inside the shop,
+carries the reactor's name, and is removable only by the person who made it
+(admins deliberately **cannot** delete someone else's: a boss who can curate the
+public record of what the shop found useful is worse than a stale reaction).
+
+Rendered by `NoteReactions` on three surfaces: the job feed, the previous-notes
+sheet (where prior knowledge is actually read, so the most important one), and
+**My work read-only** — RLS forbids reacting to your own note, so there
+endorsements are *reception*, the same category as the view count beside them.
+
+- **There is no thumbs down, and this is not a deferral.** `kind` is
+  CHECK-limited to `('helpful','confirmed')`, so there is no schema slot for a
+  negative. An inaccurate note is corrected (`corrects_note_id`) or superseded,
+  never publicly judged — nobody on a fifteen-person floor writes a second note
+  after being downvoted by a colleague they see every morning.
+- **`confirmed` has no UI.** It stays in the CHECK; nothing writes or renders it,
+  and the helpful count filters it out so a stray row cannot inflate anything.
+- **The control is hidden on your own notes.** The INSERT policy refuses
+  self-reaction, so rendering it there makes every tap a guaranteed `42501` that
+  reads as a broken button. This is why `part_playbook_notes` returns `author_id`
+  as well as `author_name` — matching on a display name breaks on two Daves.
+- **Optimistic with rollback.** On shop wifi a thumbs-up that waits for a round
+  trip before moving reads as broken. A failure rolls the button back and goes to
+  Sentry; there is no toast, because an operator mid-job does not need a dialog
+  about a thumbs-up.
+- **Count and names derive from the same array**, so they can never disagree —
+  which is why no denormalized reaction counter exists. That array must carry
+  `reactor_id`: without it a reader cannot be found in it, so the thumbs-up
+  renders un-pressed on a note they have already marked and a second tap just
+  re-inserts a duplicate. `part_playbook_notes` shipped without it and the bug
+  looked exactly like "likes are not persisting" — they were.
+- **No `operator_events` kind for reactions, deliberately.** `note_reactions`
+  already records who reacted, to what, and when; a parallel funnel event would
+  duplicate it and drift.
+
+**What this must never become: a per-person total.** Reactions are safe because
+they attach to a *note*. "Diego has 47 thumbs-ups" is a leaderboard and "Priya
+gave 3" is a participation score — both are the operator-comparative metrics this
+module refuses. Nothing sums them by person, including My work, which shows
+endorsements received *on a note*.
+
+### Surveillance guardrail (non-negotiable)
+
+No operator-facing surface may reflect an operator's pace or standing back at them.
+Concretely, **My work must never grow** a completion count, streak, average, or
+anything comparable against another person — it is exactly where a leaderboard wants
+to grow, and a test asserts the absence. No points, badges, or leaderboards anywhere.
+There is no settings toggle for this.
+
+Actual time is **structurally unrepresentable** — `operator_sessions` and
+`job_operations.actual_*` were dropped ([`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql)) —
+so "actual vs quoted" cannot be built without a migration. The quoted
+`estimated_setup_minutes` / `estimated_run_minutes_per_unit` shown on the traveler
+and operation page stay: they are the engineer's routing estimate (an input to the
+job), the printed traveler carries the identical figures, and there is no actual to
+compare against. **Capturing actual time and showing it to the operator is the
+trigger that reverses that decision.**
+
+`operator_events` (funnel instrumentation: `app_opened`, `op_card_opened`,
+`prior_notes_opened`, `composer_focused`, `note_saved`, …) is **service-role only**
+and carries no note ids of what the actor read. A per-operator event log readable by
+the shop's own admin would reconstruct exactly the reading behaviour the above exists
+to protect.
 
 ## Routing & readiness
 
@@ -84,6 +304,7 @@ tagged to a step via `job_operation_id`. Captured on the operation page (text + 
 | Job parts hub | `/operator/{companyId}/jobs/{jobId}` | For multi-part jobs, lists the job's parts with progress; single-part jobs redirect straight to the traveler. |
 | Part traveler | `…/jobs/{jobId}/parts/{jobPartId}` | All steps for one part (read-only), with a back-link to the parts hub on multi-part jobs. |
 | Operation action | `…/parts/{jobPartId}/operations/{jobOperationId}` | Internal step: **Mark Complete** / **Undo**. Outside step: an "Outside process" banner (+ vendor) and **Mark Sent Out** / **Mark Received** (station-mismatch guard suppressed — outside steps have no operator station). Both: notes + photos, "last time we ran this part" guidance. |
+| My work | `/operator/{companyId}/my-work` | The author's own contribution and its reception: notes / photos / views, each note's view count, the job it was written on, and on tap the named viewers + a link back to that job. Bottom-nav tab; also the login banner's tap-through. **No completion count, streak or average — see the guardrail above.** |
 | Inventory (optional) | `/operator/{companyId}/inventory[/locations/{id}]` | Feature-gated bin browse + add/remove/adjust stock. |
 | Profile | `/operator/{companyId}/profile` | Operator name, email, company name, **Logout**, and **Give Feedback**. (The current station lives in the header selector, not on this page.) |
 
@@ -158,14 +379,43 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Job feed (notes + media)**
 
+- [ ] **Given** the operation page and a step WITH a `routing_operation_id`, **when** the operator saves a note, **then** it is written as a **durable `part` subject** (`part_id` + `routing_operation_id`) with the job recorded only as provenance — so the next run of that part surfaces it with no prior-job traversal — *verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote'*.
+- [ ] **Given** an ad-hoc step with NO routing link, **when** the operator saves a note, **then** it falls back to a `job` subject (a genuine subject difference, not a silent fallback) — *verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote'*.
 - [ ] **Given** the operation page, **when** the operator adds a note (optionally media-only) with a step tag, **then** it inserts into `notes` with the trimmed body, `job_part_id`, and `job_operation_id`, then reloads into the feed with a readable "Op N · Name" label — *edit->save->reload verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote' > 'inserts the step tag + trimmed body and returns the mapped note'` AND `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
 - [ ] **Given** a blank-text note, **when** it is saved, **then** `body` is stored as null so a media-only note is valid — *verified by `__tests__/utils/operatorAccess.test.ts > 'addJobNote' > 'stores a null body for a media-only (blank text) note'`*.
-- [ ] **Given** the job feed, **when** it loads, **then** both job-level and operation-scoped notes roll up together (newest first) because operation notes still carry `job_id` — *verified by `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
+- [ ] **Given** the job feed, **when** it loads, **then** job-subject notes AND durable part-subject notes captured on this job roll up together (newest first), via `or=(job_id.eq.X,captured_job_id.eq.X)` — *verified by `__tests__/utils/operatorAccess.test.ts > 'getJobNotes' > 'maps author, step-tag label, and media; rolls up the whole job by job_id'`*.
 
 **"Last time we ran this part" guidance**
 
 - [ ] **Given** a part with a prior completed run, **when** the traveler/operation page loads guidance, **then** it shows the newest completed prior run (excluding the current job) with that run's notes — *verified by `__tests__/utils/operatorPreviousRun.test.ts > 'getPreviousRunForPart' > 'returns the newest completed prior run, excluding the current job'`*.
 - [ ] **Given** a specific operation, **when** guidance is scoped to that step, **then** the prior run's notes are filtered to the same step across runs (by `routing_operation_id`, falling back to `operation_name`) — *verified by `__tests__/utils/operatorPreviousRun.test.ts > 'getPreviousRunForPart' > 'filters notes to the same step across runs via routing_operation_id'`*.
+
+**Read-back loop (attribution)**
+
+- [ ] **Given** a note body scrolled past in under 2 seconds, **when** it leaves the viewport, **then** no view is logged — *verified by `__tests__/hooks/useNoteDwell.test.tsx`*.
+- [ ] **Given** a note visible for 2+ seconds while the tab is **hidden**, **when** the timer would fire, **then** no view is logged — the count must never exceed reality — *verified by `__tests__/hooks/useNoteDwell.test.tsx`*.
+- [ ] **Given** five notes dwelled within the debounce window, **when** they flush, **then** it is **one** `log_note_views` call — a read N+1 must not become a write N+1 — *verified by `__tests__/hooks/useNoteDwell.test.tsx`*.
+- [ ] **Given** an author reading their own note, **when** the view is logged, **then** no row is written and `viewer_count` does not move — enforced in `log_note_views`, not the client — *verified by `api/tests/integration/test_note_views_rls.py`*.
+- [ ] **Given** any non-author, **when** they SELECT `note_views`, embed it, or probe it with `Prefer: count=exact`, **then** they get `42501` / no count — *verified by `api/tests/integration/test_note_views_rls.py`*.
+- [ ] **Given** an author, **when** they open one of their own notes in My work, **then** `note_viewers()` returns one row per person with a representative job number and **no timestamp**, ordered by name — *verified by `api/tests/integration/test_note_views_rls.py`*.
+- [ ] **Given** a member is deleted, **when** their view rows cascade, **then** neither counter moves — monotonic, so delete-and-difference cannot reconstruct what they read — *verified by `api/tests/integration/test_note_views_rls.py`*.
+- [ ] **Given** nothing new since the operator last looked, **when** the jobs list renders, **then** the banner renders nothing — no nag on the many jobs-list visits in a shift — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** a running total of 9 of which 6 were already acknowledged, **when** the banner renders, **then** it says **3** new views, not 9 — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** the digest RPC, **when** it is called with any argument at all, **then** it fails — the function is permanently argument-free so no time window can be probed — *verified by `api/tests/integration/test_note_views_rls.py > test_digest_takes_no_time_window`*.
+- [ ] **Given** a new reader, **when** the digest is called again, **then** the running total has climbed — it is a total, not a window, which is what makes a client-side subtraction correct — *verified by `api/tests/integration/test_note_views_rls.py > test_digest_is_a_running_total_not_a_window`*.
+- [ ] **Given** a non-zero banner, **when** the operator taps it, **then** it navigates to My work AND banks the whole total; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
+- [ ] **Given** My work, **when** it renders with any data, **then** no completion count, streak, average, pace or rank appears anywhere on the page — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'shows no completion count, streak, average or pace'`*.
+- [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives and only the job link is absent — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
+
+**Reactions**
+
+- [ ] **Given** a colleague's note, **when** the operator taps Helpful, **then** the count moves immediately and the write follows — an optimistic toggle, because a thumbs-up that waits for shop wifi reads as broken — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a failed write, **when** it rejects, **then** the button rolls back rather than leaving a lie on screen, with no toast — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** the operator's OWN note, **when** it renders, **then** no control is offered — RLS forbids self-reaction, so the tap would be a guaranteed `42501` — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a `confirmed` row, **when** the card renders, **then** it is excluded from the helpful count and its reactor is not named — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** any note, **when** looking for a negative option, **then** none exists on screen or in the schema — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a duplicate insert (two taps racing, or a second device), **when** the unique constraint fires, **then** it is treated as success — the end state is what the caller asked for — *verified by `__tests__/utils/operatorAccess.test.ts`*.
+- [ ] **Given** an un-react, **when** it is issued, **then** it is scoped to the caller's own row — *verified by `__tests__/utils/operatorAccess.test.ts`*.
 
 **Inventory (feature-gated by `inventory_locations`)**
 

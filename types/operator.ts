@@ -264,6 +264,13 @@ export interface JobNote {
   /** Author display name (from user_company_access.name); null if unknown. */
   author_name: string | null;
   /**
+   * Author's user_company_access id. Needed because note_reactions' INSERT policy
+   * forbids reacting to your OWN note, so the thumbs-up must be hidden there —
+   * otherwise the tap is a guaranteed 42501 that reads as a broken button.
+   * Matching on author_name instead breaks on two people with the same name.
+   */
+  author_id: string | null;
+  /**
    * What the note is ABOUT, which is not the same as where it was captured.
    * 'part' is the durable subject — anchored to (part, routing step), so it
    * outlives the job and is what the next person running the part reads.
@@ -283,6 +290,25 @@ export interface JobNote {
   usage_count: number;
   /** Attached photos/videos, in insertion order. */
   media: JobNoteMedia[];
+  /**
+   * Public, attributable endorsements — the deliberate opposite of note_views.
+   * Count and names both derive from this one array, so they can never disagree;
+   * that is why there is no denormalized reaction counter anywhere.
+   */
+  reactions: NoteReaction[];
+}
+
+/**
+ * One reaction on a note. `kind` is CHECK-limited to 'helpful' | 'confirmed' in
+ * the database and there is no negative option — not deferred, structurally
+ * absent. Only 'helpful' has a UI today.
+ */
+export interface NoteReaction {
+  kind: 'helpful' | 'confirmed';
+  /** Reactor's user_company_access id — drives "have I already reacted?". */
+  reactor_id: string;
+  /** Reactor's display name. Reactions are public inside the shop. */
+  name: string | null;
 }
 
 /**
@@ -320,4 +346,63 @@ export interface JobCompleteResponse {
 export interface Station {
   id: string;
   name: string;
+}
+
+/** One of the caller's own notes, with how far it has travelled. */
+export interface MyNote {
+  id: string;
+  body: string | null;
+  created_at: string;
+  /** "Op 20 · Mill" when the note carries a step, else null. */
+  operation_label: string | null;
+  /** Part the note is durably attached to, when it has one. */
+  part_name: string | null;
+  /**
+   * The job this note was written on — job_id for a job-subject note,
+   * captured_job_id for a durable part-subject one. Null once that job is
+   * deleted (provenance is ON DELETE SET NULL: the knowledge outlives its
+   * origin, so losing the link must never lose the note).
+   */
+  job_id: string | null;
+  job_number: string | null;
+  photo_count: number;
+  /**
+   * Endorsements RECEIVED. My work shows these read-only: you cannot react to
+   * your own note, so here they are reception, not an available action.
+   */
+  reactions: NoteReaction[];
+  /** Distinct PEOPLE who read it. Saturates near shop size — that is its meaning. */
+  viewer_count: number;
+  /**
+   * Distinct JOBS it was viewed on. Uncapped, and the quality signal the Playbook
+   * ranks by — but NOT shown on My Work: next to a view count it reads as a
+   * puzzle rather than a signal, and both numbers mean "somebody opened this".
+   */
+  usage_count: number;
+}
+
+/**
+ * The operator's own contribution and its reception.
+ *
+ * Deliberately carries no completion count, streak, average or anything
+ * comparable against another person — see the surveillance guardrail in
+ * docs. This screen is where a leaderboard would want to grow, and it must not.
+ */
+export interface MyContribution {
+  noteCount: number;
+  photoCount: number;
+  /**
+   * Total VIEWS across their notes — the sum of each note's viewer_count, so one
+   * colleague who read three of them contributes three. Not a headcount: a
+   * distinct-people figure would need the note_views rows, which no browser role
+   * can read by design.
+   */
+  peopleReached: number;
+  notes: MyNote[];
+}
+
+/** A named reader of one of your own notes. Authors only — see note_viewers(). */
+export interface NoteViewer {
+  viewer_name: string | null;
+  job_number: string | null;
 }

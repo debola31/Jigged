@@ -241,6 +241,6 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - The canonical refresh model (manual refresh button + last-updated timestamp, optional opt-in slow refresh for a wall display, SSE only for a time-critical board) is tracked separately — see the **Data Refresh** section above and **#550**. The old "auto-refresh every 60s / pull-to-refresh on mobile" idea is superseded by that model and is not planned as written.
 
 > **Note:** activity is served UNION-on-read over the source tables (jobs,
-> quotes, shipments, job_notes, job_operations) — a deliberate design choice, not
+> quotes, shipments, notes, job_operations) — a deliberate design choice, not
 > a pending "activity log table." See `getActivityStream` in
 > `utils/dashboardAccess.ts`.

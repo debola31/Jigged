@@ -232,27 +232,27 @@ on conflict (id) do nothing;
 -- part uuid: 60000000-…-0000000000NN  (NN 01..18). Made-part routing uuid: 70000000-…-NN.
 -- Bought parts (raw blanks + components), stocked, with a preferred vendor.
 insert into public.parts (id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id) values
-  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought',true,'each',240,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought',true,'each',180,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought',true,'each',120,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought',true,'each',600,10,'30000000-0000-0000-0000-000000000004'),
-  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought',true,'each',1500,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought',true,'each',5000,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought',true,'each',2200,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought',true,'each',60,10,'30000000-0000-0000-0000-000000000005'),
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought',true,'ea',240,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought',true,'ea',180,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought',true,'ea',120,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought',true,'ea',600,10,'30000000-0000-0000-0000-000000000004'),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought',true,'ea',1500,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought',true,'ea',5000,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought',true,'ea',2200,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought',true,'ea',60,10,'30000000-0000-0000-0000-000000000005'),
   -- Machined sub-components (made, stocked).
-  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made',true,'each',25,10,null),
-  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made',true,'each',40,10,null),
-  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made',true,'each',30,10,null),
-  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made',true,'each',35,10,null),
+  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made',true,'ea',25,10,null),
+  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made',true,'ea',40,10,null),
+  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made',true,'ea',30,10,null),
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made',true,'ea',35,10,null),
   -- Sub-assemblies (made, stocked).
-  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made',true,'each',12,10,null),
-  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made',true,'each',8,10,null),
+  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made',true,'ea',12,10,null),
+  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made',true,'ea',8,10,null),
   -- Top-level sellable products (made, not stocked).
-  ('60000000-0000-0000-0000-000000000015','22222222-2222-2222-2222-222222222222','PROD-PUMP-100','Hydraulic Pump P-100','made',false,'each',0,null,null),
-  ('60000000-0000-0000-0000-000000000016','22222222-2222-2222-2222-222222222222','PROD-ACTUATOR-200','Linear Actuator A-200','made',false,'each',0,null,null),
-  ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222','PROD-MANIFOLD-300','Valve Manifold M-300','made',false,'each',0,null,null),
-  ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'inches',0,null,null)
+  ('60000000-0000-0000-0000-000000000015','22222222-2222-2222-2222-222222222222','PROD-PUMP-100','Hydraulic Pump P-100','made',false,'ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000016','22222222-2222-2222-2222-222222222222','PROD-ACTUATOR-200','Linear Actuator A-200','made',false,'ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222','PROD-MANIFOLD-300','Valve Manifold M-300','made',false,'ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'in',0,null,null)
 on conflict (id) do nothing;
 
 -- Part-level procurement tiers for bought parts (so compute_part_cost_at_qty
@@ -269,30 +269,30 @@ insert into public.part_procurement_tiers (part_id, min_quantity, cost_per_unit)
   ('60000000-0000-0000-0000-000000000008',1,14.5)
 on conflict do nothing;
 
--- BOM edges (parent_part_id → child_part_id, qty, sequence 10/20/…; unit 'each').
+-- BOM edges (parent_part_id → child_part_id, qty, sequence 10/20/…; unit 'ea').
 insert into public.parts_bom (parent_part_id, child_part_id, quantity, unit, sequence) values
-  ('60000000-0000-0000-0000-000000000009','60000000-0000-0000-0000-000000000001',1,'each',10),
-  ('60000000-0000-0000-0000-000000000010','60000000-0000-0000-0000-000000000003',1,'each',10),
-  ('60000000-0000-0000-0000-000000000011','60000000-0000-0000-0000-000000000002',1,'each',10),
-  ('60000000-0000-0000-0000-000000000012','60000000-0000-0000-0000-000000000002',1,'each',10),
-  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000009',1,'each',10),
-  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000010',1,'each',20),
-  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000004',2,'each',30),
-  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000005',2,'each',40),
-  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000012',1,'each',10),
-  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000008',1,'each',20),
-  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000006',4,'each',30),
-  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000013',1,'each',10),
-  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000011',2,'each',20),
-  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000006',8,'each',30),
-  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000007',4,'each',40),
-  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000014',1,'each',10),
-  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000010',1,'each',20),
-  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000004',1,'each',30),
-  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000009',1,'each',10),
-  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000011',1,'each',20),
-  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000005',4,'each',30),
-  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000006',6,'each',40)
+  ('60000000-0000-0000-0000-000000000009','60000000-0000-0000-0000-000000000001',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000010','60000000-0000-0000-0000-000000000003',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000011','60000000-0000-0000-0000-000000000002',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000012','60000000-0000-0000-0000-000000000002',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000009',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000010',1,'ea',20),
+  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000004',2,'ea',30),
+  ('60000000-0000-0000-0000-000000000013','60000000-0000-0000-0000-000000000005',2,'ea',40),
+  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000012',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000008',1,'ea',20),
+  ('60000000-0000-0000-0000-000000000014','60000000-0000-0000-0000-000000000006',4,'ea',30),
+  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000013',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000011',2,'ea',20),
+  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000006',8,'ea',30),
+  ('60000000-0000-0000-0000-000000000015','60000000-0000-0000-0000-000000000007',4,'ea',40),
+  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000014',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000010',1,'ea',20),
+  ('60000000-0000-0000-0000-000000000016','60000000-0000-0000-0000-000000000004',1,'ea',30),
+  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000009',1,'ea',10),
+  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000011',1,'ea',20),
+  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000005',4,'ea',30),
+  ('60000000-0000-0000-0000-000000000017','60000000-0000-0000-0000-000000000006',6,'ea',40)
 on conflict do nothing;
 
 -- Routings + operations for made parts.
@@ -832,6 +832,171 @@ do $$ declare q uuid; begin
   perform pg_temp.add_quote_line(q, '60000000-0000-0000-0000-000000000016', 10, 8);
   update public.part_pricing_tiers set markup_percent = 72
    where part_id = '60000000-0000-0000-0000-000000000016' and quantity >= 5;
+end $$;
+
+-- ═══ The read-back loop: who has actually read these notes ═══════════════════
+-- A note means nothing until somebody reads it, so the seed logs reads. Without
+-- these rows every note renders 0 views, the login banner never fires, and
+-- My Work looks like a feature that does not work — which is exactly how the
+-- seeded app presented before this block existed.
+--
+-- Inserted directly rather than through log_note_views(): that RPC derives the
+-- viewer from auth.uid(), which has no meaning in a seed. The counter trigger on
+-- note_views still fires, so notes.viewer_count / usage_count are maintained by
+-- the same code path the app uses — nothing here hand-sets a counter.
+--
+-- Two rules the app enforces in SQL that the seed must not break: a view is
+-- never logged for the note's own author, and there is one row per
+-- (note, viewer, job).
+do $$
+declare
+  v_co   uuid := '22222222-2222-2222-2222-222222222222';
+  v_pool uuid[] := array[
+    '23000000-0000-0000-0000-000000000005',   -- Diego Alvarez  (operator)
+    '23000000-0000-0000-0000-000000000006',   -- Priya Nair     (operator)
+    '23000000-0000-0000-0000-000000000003',   -- Sam Carter     (user)
+    '23000000-0000-0000-0000-000000000004'    -- Jamie Lin      (user)
+  ];
+  n        record;
+  v_reader uuid;
+  v_take   int;
+  i        int;
+begin
+  for n in
+    select id, author_id, coalesce(job_id, captured_job_id) as ctx_job,
+           (row_number() over (order by created_at, id))::int as rn
+    from public.notes
+    where company_id = v_co and note_type = 'user' and author_id is not null
+  loop
+    -- 0, 1, 2 or 3 readers, rotating. Every fourth note is left unread on
+    -- purpose: a seed in which everything has been read hides the zero state,
+    -- and the zero state is the one a real operator sees most often.
+    v_take := n.rn % 4;
+    for i in 1 .. v_take loop
+      v_reader := v_pool[1 + ((n.rn + i) % array_length(v_pool, 1))];
+      continue when v_reader = n.author_id;
+      -- Kept within a few hours of now so the reads land inside the current
+      -- ISO week and the login banner ("N people used your notes this week")
+      -- actually appears. Read times are never displayed anywhere — by design —
+      -- so the spread is only here to avoid a wall of identical timestamps.
+      insert into public.note_views (company_id, note_id, viewer_id, job_id, created_at)
+      values (v_co, n.id, v_reader, n.ctx_job, now() - ((n.rn % 4) || ' hours')::interval)
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;
+
+-- One note consulted across several jobs — the load-bearing signal, and the only
+-- way usage_count is ever non-zero. Deliberately uses the durable part-subject
+-- notes, because those are the ones a later run of the same part surfaces
+-- without any prior-job traversal. This is the whole thesis in one query: the
+-- knowledge outlived the job it was written on.
+do $$
+declare
+  v_co uuid := '22222222-2222-2222-2222-222222222222';
+  n record;
+  j record;
+  v_reader uuid;
+begin
+  for n in
+    select id, author_id, part_id, captured_job_id
+    from public.notes
+    where company_id = v_co and subject_kind = 'part' and note_type = 'user'
+      and part_id is not null
+  loop
+    -- Anyone but the author; the two operators cover each other's notes.
+    v_reader := case
+      when n.author_id = '23000000-0000-0000-0000-000000000006'
+        then '23000000-0000-0000-0000-000000000005'
+      else '23000000-0000-0000-0000-000000000006'
+    end;
+    for j in
+      select distinct jp.job_id
+      from public.job_parts jp
+      where jp.part_id = n.part_id
+        and jp.job_id is distinct from n.captured_job_id
+      order by jp.job_id
+      limit 3
+    loop
+      insert into public.note_views (company_id, note_id, viewer_id, job_id, created_at)
+      values (v_co, n.id, v_reader, j.job_id, now() - interval '2 hours')
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;
+
+-- ═══ Endorsements ════════════════════════════════════════════════════════════
+-- The voluntary half of the loop. Without these every note reads as unendorsed
+-- and the thumbs-up looks like a feature nobody uses — the same reason the seed
+-- logs reads above.
+--
+-- Two rules the app enforces in SQL and the seed must not break: never your own
+-- note (self-endorsement is noise, and the INSERT policy refuses it), and one row
+-- per (note, reactor, kind).
+--
+-- Only 'helpful' is written. 'confirmed' remains in the CHECK constraint with no
+-- UI and nothing that writes it; seeding it would put rows on screen that no
+-- operator could have produced.
+do $$
+declare
+  v_co   uuid := '22222222-2222-2222-2222-222222222222';
+  v_pool uuid[] := array[
+    '23000000-0000-0000-0000-000000000005',   -- Diego Alvarez  (operator)
+    '23000000-0000-0000-0000-000000000006',   -- Priya Nair     (operator)
+    '23000000-0000-0000-0000-000000000003'    -- Sam Carter     (user)
+  ];
+  n        record;
+  v_reactor uuid;
+  v_take   int;
+  i        int;
+begin
+  for n in
+    select id, author_id,
+           (row_number() over (order by created_at, id))::int as rn
+    from public.notes
+    where company_id = v_co and note_type = 'user' and author_id is not null
+  loop
+    -- Endorsement is rarer than reading, and deliberately so: most notes carry
+    -- none. A seed where everything is endorsed would make the signal worthless
+    -- and hide the ordinary state.
+    v_take := case when n.rn % 3 = 0 then 2 when n.rn % 3 = 1 then 1 else 0 end;
+    for i in 1 .. v_take loop
+      v_reactor := v_pool[1 + ((n.rn + i) % array_length(v_pool, 1))];
+      continue when v_reactor = n.author_id;
+      insert into public.note_reactions (company_id, note_id, reactor_id, kind, created_at)
+      values (v_co, n.id, v_reactor, 'helpful', now() - ((n.rn % 6) || ' days')::interval)
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;
+
+-- The durable part-subject notes are the ones people actually consult on a later
+-- run, so endorsement follows reading: give each at least one. The rotation above
+-- is a modulo lottery and left both of them at zero, which would have made the
+-- read-back surface — the Playbook and "previous notes" — look like the one place
+-- nobody found anything useful.
+do $$
+declare
+  v_co uuid := '22222222-2222-2222-2222-222222222222';
+  n record;
+  v_reactor uuid;
+begin
+  for n in
+    select id, author_id
+    from public.notes
+    where company_id = v_co and subject_kind = 'part' and note_type = 'user'
+      and author_id is not null
+  loop
+    -- Anyone but the author; the two operators cover each other's notes.
+    v_reactor := case
+      when n.author_id = '23000000-0000-0000-0000-000000000006'
+        then '23000000-0000-0000-0000-000000000005'
+      else '23000000-0000-0000-0000-000000000006'
+    end;
+    insert into public.note_reactions (company_id, note_id, reactor_id, kind, created_at)
+    values (v_co, n.id, v_reactor, 'helpful', now() - interval '3 days')
+    on conflict do nothing;
+  end loop;
 end $$;
 
 -- ── Inventory locations (feature-flagged) ────────────────────────────────────

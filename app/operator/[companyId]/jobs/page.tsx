@@ -250,7 +250,12 @@ function OperatorJobsPageContent() {
           operator sees when they start work, and the only moment in the day when
           "somebody used what you wrote" can land before the job takes over.
           Renders nothing when the count is zero. */}
-      {!showStationSelector && <NoteUsageBanner companyId={companyId} />}
+      {!showStationSelector && (
+        <NoteUsageBanner
+          companyId={companyId}
+          onOpenDetail={() => router.push(`/operator/${companyId}/my-work`)}
+        />
+      )}
 
       {/* Toolbar: scope segmented control (primary) + a "Show completed"
           checkbox (secondary — an explicit on/off so it's clear whether you're

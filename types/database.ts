@@ -3513,6 +3513,7 @@ export type Database = {
           p_routing_operation_id?: string
         }
         Returns: {
+          author_id: string
           author_name: string
           body: string
           corrects_note_id: string

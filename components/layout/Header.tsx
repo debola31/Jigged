@@ -80,6 +80,10 @@ function getPageTitle(pathname: string): string {
     if (segments.includes('new')) return 'New Inventory Item';
     if (segments.includes('edit')) return 'Edit Inventory Item';
     if (segments.includes('import')) return 'Import Inventory';
+    // Named sub-routes. Without these the "is there a segment after /inventory?" check below
+    // reads them as an item id and titles them "Inventory Details", which is simply wrong.
+    if (segments.includes('count')) return 'Count Inventory';
+    if (segments.includes('shortages')) return 'Material Shortages';
     // Check if there's an itemId (detail page)
     const inventoryIndex = segments.indexOf('inventory');
     if (inventoryIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[inventoryIndex + 1])) {

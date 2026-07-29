@@ -40,7 +40,7 @@ beforeEach(() => {
 
 describe('NoteUsageBanner', () => {
   it('renders nothing at zero', async () => {
-    // "0 people used your notes this week" is a weekly reminder that nobody
+    // "0 people viewed your notes this week" is a weekly reminder that nobody
     // cares. Silence is better.
     rpc.mockResolvedValue({ data: 0, error: null });
     const { container } = render(<NoteUsageBanner companyId="c1" />);
@@ -55,7 +55,7 @@ describe('NoteUsageBanner', () => {
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(await screen.findByText('3 people used your notes this week.')).toBeInTheDocument();
+    expect(await screen.findByText('3 people viewed your notes this week.')).toBeInTheDocument();
   });
 
   it('reads naturally at one', async () => {
@@ -63,7 +63,7 @@ describe('NoteUsageBanner', () => {
     render(<NoteUsageBanner companyId="c1" />);
 
     expect(
-      await screen.findByText('Someone used one of your notes this week.'),
+      await screen.findByText('Someone viewed one of your notes this week.'),
     ).toBeInTheDocument();
   });
 
@@ -96,26 +96,26 @@ describe('NoteUsageBanner', () => {
     const user = userEvent.setup();
     rpc.mockResolvedValue({ data: 4, error: null });
     render(<NoteUsageBanner companyId="c1" />);
-    await screen.findByText('4 people used your notes this week.');
+    await screen.findByText('4 people viewed your notes this week.');
 
     await user.click(screen.getByRole('button', { name: /close/i }));
 
     await waitFor(() =>
-      expect(screen.queryByText('4 people used your notes this week.')).not.toBeInTheDocument(),
+      expect(screen.queryByText('4 people viewed your notes this week.')).not.toBeInTheDocument(),
     );
     const stored = localStorage.getItem('jigged:note-usage-banner-dismissed');
     expect(stored).toMatch(/^\d{4}-W\d{2}$/);
   });
 
   it('opens the detail it promises, instead of being a dead end', async () => {
-    // "3 people used your notes" with nowhere to go is the void this whole
+    // "3 people viewed your notes" with nowhere to go is the void this whole
     // workstream exists to close. Tapping must land on the author's own notes.
     const user = userEvent.setup();
     const onOpenDetail = vi.fn();
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
 
-    await user.click(await screen.findByText('3 people used your notes this week.'));
+    await user.click(await screen.findByText('3 people viewed your notes this week.'));
 
     expect(onOpenDetail).toHaveBeenCalledTimes(1);
   });
@@ -127,7 +127,7 @@ describe('NoteUsageBanner', () => {
     const onOpenDetail = vi.fn();
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
-    await screen.findByText('3 people used your notes this week.');
+    await screen.findByText('3 people viewed your notes this week.');
 
     await user.click(screen.getByRole('button', { name: /close/i }));
 
@@ -139,6 +139,6 @@ describe('NoteUsageBanner', () => {
     rpc.mockResolvedValue({ data: 2, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(await screen.findByText('2 people used your notes this week.')).toBeInTheDocument();
+    expect(await screen.findByText('2 people viewed your notes this week.')).toBeInTheDocument();
   });
 });

@@ -28,16 +28,22 @@ function formatDate(value: string): string {
 }
 
 /**
- * How far one note travelled, as a number rather than a sentence.
+ * How far one note travelled: one number, one icon.
  *
  * An earlier pass rendered "Not used yet" under every unread note, which on a
  * real screen is a column of seven identical apologies. A view count reads the
- * same at zero as at four — the number just hasn't moved yet — and it says
- * exactly what viewer_count means without editorialising about it.
+ * same at zero as at four — the number just hasn't moved yet.
  *
- * The jobs figure stays alongside because the two mean different things: people
- * saturates near shop size, jobs does not. A note used on eleven jobs is
- * load-bearing; one read by eleven people once is curiosity.
+ * The word is "viewed", never "used". All that was recorded is that someone
+ * opened the note and stayed on it; whether they acted on it is not something
+ * this product measures, and claiming it would make every number here a small
+ * lie the author can personally disprove.
+ *
+ * usage_count (distinct jobs) is deliberately NOT shown alongside. Once both
+ * numbers are honestly labelled "viewed", a second one earns nothing — it reads
+ * as a puzzle rather than a signal. It stays on the row because it is the
+ * quality signal the Playbook ranks by; it is just not the operator's business
+ * on this screen.
  */
 function ReachRow({ note }: { note: MyNote }) {
   const read = note.viewer_count > 0;
@@ -48,8 +54,6 @@ function ReachRow({ note }: { note: MyNote }) {
       />
       <Typography variant="caption" sx={{ color: read ? 'success.light' : 'text.secondary' }}>
         {note.viewer_count}
-        {note.usage_count > 0 &&
-          ` · used on ${note.usage_count === 1 ? '1 job' : `${note.usage_count} jobs`}`}
       </Typography>
     </Box>
   );
@@ -137,7 +141,7 @@ function NoteRow({ note }: { note: MyNote }) {
  * My Work — the operator's own contribution and its reception.
  *
  * The destination the login banner has been pointing at with nowhere to go:
- * "3 people used your notes this week" now opens onto which notes, and who.
+ * "3 people viewed your notes this week" now opens onto which notes, and who.
  *
  * WHAT IS DELIBERATELY ABSENT. No completion count, no streak, no average,
  * nothing comparable against another operator. This screen is exactly where a
@@ -182,7 +186,7 @@ export default function MyWorkPage() {
           Nothing written yet
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Notes and photos you add on a step show up here, along with who used them.
+          Notes and photos you add on a step show up here, along with who has viewed them.
         </Typography>
       </Box>
     );
@@ -233,14 +237,6 @@ export default function MyWorkPage() {
             </Box>
           </Box>
 
-          {c.jobsReached > 0 && (
-            <Typography variant="body2" sx={{ mt: 2, color: 'success.light' }}>
-              {/* The load-bearing signal, and the only one worth a sentence: a note
-                  consulted while someone was actually doing the work. */}
-              Your notes have been used on{' '}
-              {c.jobsReached === 1 ? '1 job' : `${c.jobsReached} jobs`}.
-            </Typography>
-          )}
         </CardContent>
       </Card>
 

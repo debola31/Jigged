@@ -334,7 +334,11 @@ export interface MyNote {
   photo_count: number;
   /** Distinct PEOPLE who read it. Saturates near shop size — that is its meaning. */
   viewer_count: number;
-  /** Distinct JOBS it was consulted on. Uncapped; the load-bearing signal. */
+  /**
+   * Distinct JOBS it was viewed on. Uncapped, and the quality signal the Playbook
+   * ranks by — but NOT shown on My Work: next to a view count it reads as a
+   * puzzle rather than a signal, and both numbers mean "somebody opened this".
+   */
   usage_count: number;
 }
 
@@ -348,10 +352,13 @@ export interface MyNote {
 export interface MyContribution {
   noteCount: number;
   photoCount: number;
-  /** People who have read any of their notes. */
+  /**
+   * Total VIEWS across their notes — the sum of each note's viewer_count, so one
+   * colleague who read three of them contributes three. Not a headcount: a
+   * distinct-people figure would need the note_views rows, which no browser role
+   * can read by design.
+   */
   peopleReached: number;
-  /** Jobs their notes have been consulted on. */
-  jobsReached: number;
   notes: MyNote[];
 }
 

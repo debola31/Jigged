@@ -1661,7 +1661,6 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     noteCount: 0,
     photoCount: 0,
     peopleReached: 0,
-    jobsReached: 0,
     notes: [],
   };
   if (!member) return empty;
@@ -1714,12 +1713,11 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
   return {
     noteCount: notes.length,
     photoCount: notes.reduce((n, x) => n + x.photo_count, 0),
-    // Summed rather than distinct: this is "reach across your notes", and the
-    // per-note numbers it adds up are visible right below it. Distinct people
-    // across all notes would need the view rows, which are deliberately
-    // unreadable by any browser role.
+    // Summed rather than distinct, and labelled "views" in the UI for exactly
+    // that reason: the per-note numbers it adds up are visible right below it.
+    // Distinct people across all notes would need the view rows, which are
+    // deliberately unreadable by any browser role.
     peopleReached: notes.reduce((n, x) => n + x.viewer_count, 0),
-    jobsReached: notes.reduce((n, x) => n + x.usage_count, 0),
     notes,
   };
 }

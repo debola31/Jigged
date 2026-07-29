@@ -34,7 +34,6 @@ function contribution(over: Partial<MyContribution> = {}): MyContribution {
     noteCount: notes.length,
     photoCount: 0,
     peopleReached: 0,
-    jobsReached: 0,
     ...over,
     notes,
   };
@@ -61,26 +60,26 @@ describe('My Work', () => {
     // three of your notes contributes three. Labelling that "people" overstates
     // it; a distinct-people figure would need the note_views rows, which no
     // browser role can read by design.
-    mockGetMyContribution.mockResolvedValue(
-      contribution({ peopleReached: 5, jobsReached: 9 }),
-    );
+    mockGetMyContribution.mockResolvedValue(contribution({ peopleReached: 5 }));
     render(<MyWorkPage />);
 
     expect(await screen.findByText('views')).toBeInTheDocument();
-    expect(screen.queryByText(/people have used/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Your notes have been used on 9 jobs.')).toBeInTheDocument();
+    expect(screen.queryByText(/people have (used|viewed)/i)).not.toBeInTheDocument();
   });
 
-  it('reports reach as people AND jobs, because they mean different things', async () => {
-    // A note read by 11 people once is curiosity; one used on 11 jobs is
-    // load-bearing. Collapsing them into a single number loses the distinction
-    // the whole two-counter schema exists to preserve.
+  it('shows the view count alone, never a second job figure beside it', async () => {
+    // Once both numbers are honestly labelled "viewed", a second one earns
+    // nothing — it reads as a puzzle rather than a signal. usage_count stays on
+    // the row for the Playbook to rank by; it is not the operator's business here.
     mockGetMyContribution.mockResolvedValue(
       contribution({ notes: [note({ viewer_count: 4, usage_count: 11 })] }),
     );
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('4 · used on 11 jobs')).toBeInTheDocument();
+    await screen.findByText(/Clamp on the boss/);
+    expect(within(screen.getByRole('button')).getByText('4')).toBeInTheDocument();
+    expect(screen.queryByText(/11/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/job/i)).not.toBeInTheDocument();
   });
 
   it('shows an unread note as a zero, not as a sentence about being unread', async () => {
@@ -143,7 +142,6 @@ describe('My Work', () => {
       contribution({
         photoCount: 3,
         peopleReached: 5,
-        jobsReached: 9,
         notes: [note({ viewer_count: 5, usage_count: 9 })],
       }),
     );

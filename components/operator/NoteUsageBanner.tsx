@@ -7,7 +7,7 @@ import Box from '@mui/material/Box';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 /**
- * "3 people used your notes this week."
+ * "3 people viewed your notes this week."
  *
  * The return half of the loop. An operator writes something down and, today,
  * nothing comes back — no way to know whether it was read, no reason to believe
@@ -19,7 +19,7 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
  *   the author can simply ask, so an inflated number is not a rounding error, it
  *   discredits the whole mechanism.
  *
- *   Nothing at zero. A "0 people used your notes" banner is a weekly reminder
+ *   Nothing at zero. A "0 people viewed your notes" banner is a weekly reminder
  *   that nobody cares, which is worse than silence. It renders null.
  *
  *   No names here. Who read what is the author's alone and lives behind
@@ -109,8 +109,8 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
           : { sx: { minHeight: 48 } })}
       >
         {n === 1
-          ? 'Someone used one of your notes this week.'
-          : `${n} people used your notes this week.`}
+          ? 'Someone viewed one of your notes this week.'
+          : `${n} people viewed your notes this week.`}
       </Alert>
     </Box>
   );

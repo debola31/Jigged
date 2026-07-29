@@ -12,8 +12,11 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import type { InventoryLocation } from '@/types/inventoryLocations';
+import { LOCATION_KINDS } from '@/lib/locationKinds';
 
-const KIND_SUGGESTIONS = ['cabinet', 'shelf', 'rack', 'row', 'drawer', 'side', 'bin', 'zone', 'aisle'];
+// One vocabulary, shared with the builder's templates — see lib/locationKinds.ts for why the two
+// lists having nothing in common was a real problem and not just untidiness.
+const KIND_SUGGESTIONS: readonly string[] = LOCATION_KINDS;
 
 export interface LocationFormValues {
   name: string;

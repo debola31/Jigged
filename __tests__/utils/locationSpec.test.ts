@@ -8,6 +8,7 @@ import {
   duplicateSubtreeAsSibling,
   generatedCode,
   explicitCode,
+  explicitCodeIn,
 } from '@/utils/locationSpec';
 import type { LevelSpec } from '@/types/inventoryLocations';
 
@@ -182,5 +183,128 @@ describe('non-uniform editing', () => {
     expect(clone.name).toBe('Row 2');
     expect(clone.code).toBe('C01-R02');
     expect(clone.children.map((s) => s.code)).toEqual(['C01-R02-L', 'C01-R02-R']);
+  });
+});
+
+/**
+ * Repeat subdivision.
+ *
+ * `materializeLocationSpec` inserts sequentially and is not transactional, so once the
+ * sibling-name unique index exists a mid-run `23505` leaves a partial tree behind an opaque
+ * error. The trigger isn't exotic — it's the feature being added: subdivide Cabinet 3 into Rows,
+ * then do it again. Continuing the numbering is also what the operator meant: subdividing twice
+ * means *more* rows, not a duplicate set.
+ */
+describe('buildSpecFromLevels — continuing past existing siblings', () => {
+  it('generates Row 4-6 when the parent already holds Row 1-3', () => {
+    const roots = buildSpecFromLevels([{ kind: 'row', count: 3, namePattern: 'Row {n}' }], {
+      parentCode: 'CAB3',
+      existingSiblingNames: ['Row 1', 'Row 2', 'Row 3'],
+    });
+    expect(roots.map((n) => n.name)).toEqual(['Row 4', 'Row 5', 'Row 6']);
+  });
+
+  it('carries the shift into the codes, so they stay unique and sortable', () => {
+    const roots = buildSpecFromLevels([{ kind: 'row', count: 3, namePattern: 'Row {n}' }], {
+      parentCode: 'CAB3',
+      existingSiblingNames: ['Row 1', 'Row 2', 'Row 3'],
+    });
+    expect(roots.map((n) => n.code)).toEqual(['CAB3-R04', 'CAB3-R05', 'CAB3-R06']);
+  });
+
+  it('resumes past a gap rather than filling it', () => {
+    // Row 2 was deleted. Reusing "Row 2" would collide with nothing, but it would also renumber
+    // a shelf someone has already labelled — continuing past the highest is the safe read.
+    const roots = buildSpecFromLevels([{ kind: 'row', count: 2, namePattern: 'Row {n}' }], {
+      existingSiblingNames: ['Row 1', 'Row 3'],
+    });
+    expect(roots.map((n) => n.name)).toEqual(['Row 4', 'Row 5']);
+  });
+
+  it('only shifts for siblings of the same series', () => {
+    // An existing "Shelf 7" must not push a fresh set of Rows to Row 8.
+    const roots = buildSpecFromLevels([{ kind: 'row', count: 2, namePattern: 'Row {n}' }], {
+      existingSiblingNames: ['Shelf 7', 'Bin 12'],
+    });
+    expect(roots.map((n) => n.name)).toEqual(['Row 1', 'Row 2']);
+  });
+
+  it('bumps an explicitly-named level that collides, since it cannot count', () => {
+    const roots = buildSpecFromLevels([{ kind: 'side', names: ['Left', 'Right'] }], {
+      existingSiblingNames: ['Left'],
+    });
+    expect(roots.map((n) => n.name)).toEqual(['Left 2', 'Right']);
+  });
+
+  it('matches names case- and space-insensitively, the way a human would', () => {
+    const roots = buildSpecFromLevels([{ kind: 'side', names: ['Left'] }], {
+      existingSiblingNames: ['  left  '],
+    });
+    expect(roots[0].name).toBe('Left 2');
+  });
+
+  it('is a no-op when the parent is empty (the first subdivide)', () => {
+    const roots = buildSpecFromLevels([{ kind: 'row', count: 3, namePattern: 'Row {n}' }], {
+      parentCode: 'CAB3',
+      existingSiblingNames: [],
+    });
+    expect(roots.map((n) => n.name)).toEqual(['Row 1', 'Row 2', 'Row 3']);
+    expect(roots.map((n) => n.code)).toEqual(['CAB3-R01', 'CAB3-R02', 'CAB3-R03']);
+  });
+
+  /**
+   * Only the TOP level continues. Deeper levels sit under containers this spec is creating fresh,
+   * so they have no pre-existing siblings — and shifting them would be wrong.
+   */
+  it('does not shift the levels below the top one', () => {
+    const roots = buildSpecFromLevels(
+      [
+        { kind: 'row', count: 2, namePattern: 'Row {n}' },
+        { kind: 'bin', count: 2, namePattern: 'Bin {n}' },
+      ],
+      { existingSiblingNames: ['Row 1', 'Row 2', 'Row 3'] },
+    );
+    expect(roots.map((n) => n.name)).toEqual(['Row 4', 'Row 5']);
+    expect(roots[0].children.map((n) => n.name)).toEqual(['Bin 1', 'Bin 2']);
+  });
+});
+
+/**
+ * Codes that a human can tell apart.
+ *
+ * `explicitCode` takes one initial, so ['Left', 'Lower'] both derive `…-L` — two shelves wearing
+ * the same printed sticker. Deliberately NOT enforced by a unique index: a duplicate code has no
+ * functional consequence (QR payloads are UUIDs; nothing resolves by code), so an index would buy
+ * nothing while risking a mid-flight failure inside the sequential `materializeLocationSpec`.
+ */
+describe('explicitCodeIn', () => {
+  it('grows the prefix only as far as needed, first-come keeping the short code', () => {
+    expect(explicitCodeIn('CAB3-R01', 'Left', [])).toBe('CAB3-R01-L');
+    expect(explicitCodeIn('CAB3-R01', 'Lower', ['Left'])).toBe('CAB3-R01-LO');
+  });
+
+  it('leaves non-colliding names on a single initial', () => {
+    expect(explicitCodeIn(null, 'Right', ['Left'])).toBe('R');
+  });
+
+  it('keeps going for a three-way collision', () => {
+    expect(explicitCodeIn(null, 'Loft', ['Left', 'Lower'])).toBe('LOF');
+  });
+
+  it('still separates two identical names', () => {
+    expect(explicitCodeIn(null, 'Left', ['Left'])).toBe('LE');
+  });
+
+  it('falls back to a suffix only once every prefix is spoken for', () => {
+    // L, LE, LEF, LEFT are all taken by the four preceding copies.
+    expect(explicitCodeIn(null, 'Left', ['Left', 'Left', 'Left', 'Left'])).toBe('LEFT2');
+  });
+
+  it('is what buildSpecFromLevels uses, so a generated set never doubles up', () => {
+    const [root] = buildSpecFromLevels([
+      { kind: 'row', count: 1, namePattern: 'Row {n}' },
+      { kind: 'side', names: ['Left', 'Lower'] },
+    ]);
+    expect(root.children.map((c) => c.code)).toEqual(['R01-L', 'R01-LO']);
   });
 });

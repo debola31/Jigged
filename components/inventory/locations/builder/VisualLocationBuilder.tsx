@@ -27,16 +27,28 @@ import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
 import StorageTypePalette from './StorageTypePalette';
 import LevelConfigStep from './LevelConfigStep';
 import LocationBoardPreview from './LocationBoardPreview';
-import { cloneLevels, type StorageType } from './storageTypes';
+import { cloneLevels, STORAGE_TYPES, SUBDIVISION_TYPES, type StorageType } from './storageTypes';
 
 const STEPS = ['Type', 'Build'];
 
 interface VisualLocationBuilderProps {
   open: boolean;
   companyId: string;
-  /** Build under this node (null = top-level). */
+  /**
+   * Build under this node (null = top-level).
+   *
+   * The whole nested-create path existed and was never called — the wizard only ever built at the
+   * top level. Passing a parent is what turns the wizard into "Subdivide this unit".
+   */
   parentId?: string | null;
   parentCode?: string | null;
+  /** Human path of the parent, for the dialog title. */
+  parentPath?: string[];
+  /**
+   * Names the parent already holds, so a repeat subdivide continues the numbering (Row 4–6)
+   * instead of regenerating Row 1–3 and colliding.
+   */
+  existingSiblingNames?: string[];
   onClose: () => void;
   onCreated: (count: number) => void;
 }
@@ -46,9 +58,15 @@ export default function VisualLocationBuilder({
   companyId,
   parentId = null,
   parentCode = null,
+  parentPath,
+  existingSiblingNames,
   onClose,
   onCreated,
 }: VisualLocationBuilderProps) {
+  // Subdividing offers a different palette: level 0 must be what goes INSIDE the container, or
+  // "Cabinet" while subdividing Cabinet 3 creates Cabinet 3 › Cabinet 1 › Row 1 › Left.
+  const subdividing = parentId !== null;
+  const types = subdividing ? SUBDIVISION_TYPES : STORAGE_TYPES;
   const [activeStep, setActiveStep] = useState(0);
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [levels, setLevels] = useState<LevelSpec[]>([]);
@@ -72,8 +90,8 @@ export default function VisualLocationBuilder({
   };
 
   const uniformTree = useMemo(
-    () => buildSpecFromLevels(levels, { parentCode }),
-    [levels, parentCode],
+    () => buildSpecFromLevels(levels, { parentCode, existingSiblingNames }),
+    [levels, parentCode, existingSiblingNames],
   );
   const tree = customized ? editedTree : uniformTree;
   const total = countSpecNodes(tree);
@@ -132,7 +150,11 @@ export default function VisualLocationBuilder({
       fullWidth
       TransitionProps={{ onEnter: reset }}
     >
-      <DialogTitle>Build storage visually</DialogTitle>
+      <DialogTitle>
+        {subdividing
+          ? `Subdivide ${parentPath?.length ? parentPath.join(' › ') : 'this unit'}`
+          : 'Build storage visually'}
+      </DialogTitle>
       <DialogContent dividers sx={{ minHeight: 460 }}>
         <Stepper activeStep={activeStep} sx={{ mb: 3, maxWidth: 360 }}>
           {STEPS.map((label) => (
@@ -142,7 +164,18 @@ export default function VisualLocationBuilder({
           ))}
         </Stepper>
 
-        {activeStep === 0 && <StorageTypePalette selectedId={selectedTypeId} onSelect={pickType} />}
+        {activeStep === 0 && (
+          <StorageTypePalette
+            selectedId={selectedTypeId}
+            onSelect={pickType}
+            types={types}
+            prompt={
+              subdividing
+                ? 'How is this unit divided up inside?'
+                : 'What kind of storage are you setting up?'
+            }
+          />
+        )}
 
         {activeStep === 1 && (
           <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3 }}>

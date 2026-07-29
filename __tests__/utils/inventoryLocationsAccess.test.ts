@@ -53,7 +53,6 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   buildLocationTree,
-  buildLocationUrl,
   createLocation,
   deleteLocation,
   moveLocation,
@@ -123,12 +122,9 @@ describe('buildLocationTree (pure)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-describe('buildLocationUrl', () => {
-  it('encodes the location UUID against the operator login route', () => {
-    expect(buildLocationUrl('co1', 'loc-abc')).toContain('/operator/co1/login?location=loc-abc');
-  });
-});
+// `buildLocationUrl` was deleted: it duplicated `locationLabelPdf`'s `buildLocationScanUrl`
+// (which is what actually encodes the printed QR) and had no caller. That function's own test
+// covers the route shape.
 
 // ---------------------------------------------------------------------------
 describe('createLocation', () => {
@@ -345,10 +341,8 @@ describe('materializeLocationSpec', () => {
         ],
       },
     ];
-    // createLocation(A): insert (no parent check, parent_id null)
+    // One insert per node, and nothing else — see the request-budget test below.
     queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1', code: 'C01' }), error: null });
-    // createLocation(B): assertParentInCompany('a') -> getLocation, then insert
-    queueFrom({ data: loc({ id: 'a', company_id: 'co1' }), error: null });
     queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a', code: 'C01-R01' }), error: null });
 
     const created = await materializeLocationSpec('co1', null, spec);
@@ -365,6 +359,46 @@ describe('materializeLocationSpec', () => {
       }),
     );
   });
+
+  /**
+   * The nested parents this function inserts are rows it created moments earlier in the same
+   * company, so re-fetching each one to prove it belongs there bought nothing and cost a request
+   * per node — a 16-node cabinet paid ~31 requests for 16 inserts. Only the caller's `parentId`
+   * is unverified, and it's checked once.
+   */
+  it('validates the caller-supplied parent once, not once per node', async () => {
+    const spec = [
+      {
+        key: '0',
+        name: 'Row 1',
+        kind: 'row',
+        code: 'C01-R01',
+        children: [
+          { key: '0/0', name: 'Left', kind: 'bin', code: 'C01-R01-L', children: [] },
+          { key: '0/1', name: 'Right', kind: 'bin', code: 'C01-R01-R', children: [] },
+        ],
+      },
+    ];
+    queueFrom({ data: loc({ id: 'cab', company_id: 'co1' }), error: null }); // the ONE parent check
+    queueFrom({ data: loc({ id: 'r1' }), error: null });
+    queueFrom({ data: loc({ id: 'l' }), error: null });
+    queueFrom({ data: loc({ id: 'r' }), error: null });
+
+    const created = await materializeLocationSpec('co1', 'cab', spec);
+
+    expect(created).toHaveLength(3);
+    // 1 parent check + 3 inserts. The old shape spent 3 extra getLocation calls on parents it
+    // had just created itself.
+    expect(mockSupabase.from).toHaveBeenCalledTimes(4);
+  });
+
+  it('still rejects a parent from another company, before writing anything', async () => {
+    queueFrom({ data: loc({ id: 'cab', company_id: 'OTHER' }), error: null });
+    await expect(
+      materializeLocationSpec('co1', 'cab', [{ key: '0', name: 'Row 1', kind: 'row', code: 'R01', children: [] }]),
+    ).rejects.toThrow(/same company/i);
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('duplicateLocation', () => {
@@ -377,10 +411,9 @@ describe('duplicateLocation', () => {
       ],
       error: null,
     });
-    // materialize → new cabinet insert (parent_id null, no parent check)
+    // materialize → new cabinet insert, then the copied bin under it. No per-node parent check:
+    // the bin's parent is the cabinet this call just created.
     queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2', code: 'C02' }), error: null });
-    // copied bin → assertParentInCompany('cab2') getLocation, then insert
-    queueFrom({ data: loc({ id: 'cab2', company_id: 'co1' }), error: null });
     queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2', code: 'C02-B01' }), error: null });
 
     const created = await duplicateLocation('co1', 'cab');
@@ -392,8 +425,8 @@ describe('duplicateLocation', () => {
     expect(cabInsert.insert).toHaveBeenCalledWith(
       expect.objectContaining({ parent_id: null, name: 'Cabinet 2', code: 'C02', sort_order: 1 }),
     );
-    // #3 = copied bin insert, code re-derived under the new cabinet
-    const binInsert = mockSupabase.from.mock.results[3].value as Record<string, ReturnType<typeof vi.fn>>;
+    // #2 = copied bin insert, code re-derived under the new cabinet
+    const binInsert = mockSupabase.from.mock.results[2].value as Record<string, ReturnType<typeof vi.fn>>;
     expect(binInsert.insert).toHaveBeenCalledWith(
       expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1', code: 'C02-B01' }),
     );

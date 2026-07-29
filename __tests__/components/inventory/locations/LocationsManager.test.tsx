@@ -28,9 +28,10 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
     getLocationContents: vi.fn(async () => ({ contents: [], total: 0 })),
     createLocation: vi.fn(),
     updateLocation: vi.fn(),
-    bulkGenerateChildren: vi.fn(),
     duplicateLocation: vi.fn(async () => [{ id: 'dup' }]),
     deleteLocation: vi.fn(),
+    // Subdivide runs the real builder, so its write has to be stubbed here too.
+    materializeLocationSpec: vi.fn(async () => [{ id: 'new' }]),
   };
 });
 
@@ -39,7 +40,11 @@ vi.mock('@/utils/locationLabelPdf', () => ({
 }));
 
 import LocationsManager from '@/components/inventory/locations/LocationsManager';
-import { getLocationBoard, deleteLocation } from '@/utils/inventoryLocationsAccess';
+import {
+  getLocationBoard,
+  deleteLocation,
+  materializeLocationSpec,
+} from '@/utils/inventoryLocationsAccess';
 import { generateLocationLabelSheet } from '@/utils/locationLabelPdf';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
@@ -160,6 +165,52 @@ describe('LocationsManager', () => {
 
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
     expect(deleteLocation).toHaveBeenCalledWith('yard');
+  });
+
+  /**
+   * The sheet is the only launcher for Subdivide, and it has to hand over what's already inside
+   * so a second subdivide continues the numbering rather than colliding mid-insert.
+   */
+  it('launches Subdivide aimed at the unit, carrying its code and existing children', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
+
+    // Title proves parentPath; the absence of container cards proves the palette swap.
+    expect(await screen.findByText('Subdivide Cabinet 3')).toBeInTheDocument();
+    expect(screen.queryByText('Cabinet')).not.toBeInTheDocument();
+
+    await user.click(screen.getByText('Rows'));
+    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+
+    const [, parentId, spec] = vi.mocked(materializeLocationSpec).mock.calls[0];
+    expect(parentId).toBe('cab3');
+    // Cabinet 3 already holds Shelf A/B — a different series, so Rows start at 1.
+    expect(spec.map((n) => n.name)).toEqual(['Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5']);
+    expect(spec[0].code).toBe('CAB3-R01');
+  });
+
+  it('continues the numbering on a repeat subdivide', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLocationBoard).mockResolvedValue(
+      board([
+        loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', code: 'CAB3' }),
+        loc({ id: 'r1', name: 'Row 1', parent_id: 'cab3', code: 'CAB3-R01' }),
+        loc({ id: 'r2', name: 'Row 2', parent_id: 'cab3', code: 'CAB3-R02' }),
+        loc({ id: 'r3', name: 'Row 3', parent_id: 'cab3', code: 'CAB3-R03' }),
+      ]),
+    );
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
+    await user.click(screen.getByText('Rows'));
+    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+
+    const spec = vi.mocked(materializeLocationSpec).mock.calls[0][2];
+    expect(spec.map((n) => n.name)).toEqual(['Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8']);
   });
 
   /**

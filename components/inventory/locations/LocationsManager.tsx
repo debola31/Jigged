@@ -24,17 +24,12 @@ import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaic
 import GridViewIcon from '@mui/icons-material/GridView';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 
-import type {
-  BulkGenerateSpec,
-  InventoryLocation,
-  InventoryLocationNode,
-} from '@/types/inventoryLocations';
+import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 import {
   buildLocationTree,
   getLocationBoard,
   createLocation,
   updateLocation,
-  bulkGenerateChildren,
   duplicateLocation,
   deleteLocation,
 } from '@/utils/inventoryLocationsAccess';
@@ -42,7 +37,6 @@ import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
-import BulkGenerateModal from './BulkGenerateModal';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import LocationBoard from './board/LocationBoard';
@@ -114,7 +108,22 @@ interface LocationsManagerProps {
 export default function LocationsManager({ companyId, companyName }: LocationsManagerProps) {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [builderOpen, setBuilderOpen] = useState(false);
+  /**
+   * The builder, aimed either at the top level or at an existing unit.
+   *
+   * A non-null `parentId` is what makes it "Subdivide this unit" — the nested-create path was
+   * fully built and had no caller until now.
+   */
+  const [builder, setBuilder] = useState<{
+    open: boolean;
+    parentId: string | null;
+    parentCode: string | null;
+    parentPath: string[];
+    existingSiblingNames: string[];
+  }>({ open: false, parentId: null, parentCode: null, parentPath: [], existingSiblingNames: [] });
+
+  const openTopLevelBuilder = () =>
+    setBuilder({ open: true, parentId: null, parentCode: null, parentPath: [], existingSiblingNames: [] });
 
   /**
    * Board is always the default, and the choice is deliberately NOT persisted.
@@ -133,12 +142,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     parentId: string | null;
     parentPath: string[];
   }>({ open: false, location: null, parentId: null, parentPath: [] });
-
-  const [bulkState, setBulkState] = useState<{ open: boolean; parentId: string; parentPath: string[] }>({
-    open: false,
-    parentId: '',
-    parentPath: [],
-  });
 
   const [qrState, setQrState] = useState<{
     open: boolean;
@@ -195,7 +198,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     },
     onSubdivide: (node: InventoryLocationNode) => {
       setSheetId(null);
-      setBulkState({ open: true, parentId: node.id, parentPath: computePath(node.id, byId) });
+      setBuilder({
+        open: true,
+        parentId: node.id,
+        parentCode: node.code,
+        parentPath: computePath(node.id, byId),
+        // What's already inside, so a second subdivide continues the run (Row 4–6) rather than
+        // regenerating Row 1–3 and colliding partway through the sequential inserts.
+        existingSiblingNames: node.children.map((c) => c.name),
+      });
     },
     onEdit: (node: InventoryLocationNode) => {
       setSheetId(null);
@@ -233,12 +244,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       await createLocation(companyId, { ...values, parent_id: formState.parentId });
     }
     await reload();
-  };
-
-  const submitBulk = async (spec: BulkGenerateSpec) => {
-    const created = await bulkGenerateChildren(companyId, bulkState.parentId, spec);
-    await reload();
-    setToast(`Created ${created.length} locations.`);
   };
 
   const confirmDelete = async () => {
@@ -309,7 +314,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         <Button
           variant="contained"
           startIcon={<AutoAwesomeMosaicOutlinedIcon />}
-          onClick={() => setBuilderOpen(true)}
+          onClick={openTopLevelBuilder}
         >
           Build visually
         </Button>
@@ -332,7 +337,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
               <Button
                 variant="contained"
                 startIcon={<AutoAwesomeMosaicOutlinedIcon />}
-                onClick={() => setBuilderOpen(true)}
+                onClick={openTopLevelBuilder}
               >
                 Build visually
               </Button>
@@ -363,7 +368,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
               tree={tree}
               occupancy={occupancy}
               onOpen={openSheet}
-              onAddStorage={() => setBuilderOpen(true)}
+              onAddStorage={openTopLevelBuilder}
             />
           ) : (
             <Card elevation={2}>
@@ -396,12 +401,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         onClose={() => setFormState((s) => ({ ...s, open: false }))}
         onSubmit={submitForm}
       />
-      <BulkGenerateModal
-        open={bulkState.open}
-        parentPath={bulkState.parentPath}
-        onClose={() => setBulkState((s) => ({ ...s, open: false }))}
-        onSubmit={submitBulk}
-      />
       <LocationQRModal
         open={qrState.open}
         companyId={companyId}
@@ -412,9 +411,13 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         onClose={() => setQrState((s) => ({ ...s, open: false }))}
       />
       <VisualLocationBuilder
-        open={builderOpen}
+        open={builder.open}
         companyId={companyId}
-        onClose={() => setBuilderOpen(false)}
+        parentId={builder.parentId}
+        parentCode={builder.parentCode}
+        parentPath={builder.parentPath}
+        existingSiblingNames={builder.existingSiblingNames}
+        onClose={() => setBuilder((s) => ({ ...s, open: false }))}
         onCreated={(n) => {
           void reload();
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);

@@ -54,23 +54,6 @@ export type UpdateLocationInput = Partial<
 >;
 
 /**
- * Spec for the bulk generator, e.g. { count: 10, kind: 'row',
- * namePattern: 'Row {n}', leaves: ['Left', 'Right'] } → 10 rows each with a
- * Left and Right leaf.
- */
-export interface BulkGenerateSpec {
-  count: number;
-  kind?: string;
-  /** `{n}` is replaced with the (zero-padded for code) index. Default `'{n}'`. */
-  namePattern?: string;
-  /** First index. Default 1. */
-  startAt?: number;
-  /** Optional leaf children created under each generated node. */
-  leaves?: string[];
-  leafKind?: string;
-}
-
-/**
  * One configured division level in the visual builder, e.g. "10 rows named
  * Row {n}" or "{Left, Right}". Either a generated count+pattern OR explicit
  * names. Levels are ordered shallow → deep.
@@ -98,15 +81,6 @@ export interface LocationSpecNode {
   kind: string | null;
   code: string | null;
   children: LocationSpecNode[];
-}
-
-export interface PartLocationBalance {
-  id: string;
-  company_id: string;
-  part_id: string;
-  location_id: string;
-  quantity: number;
-  created_at: string;
 }
 
 /** A part's balance at a location, with the location's full path for display. */

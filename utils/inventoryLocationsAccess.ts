@@ -11,9 +11,8 @@
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
-import { generatedCode, explicitCode, duplicateSubtreeAsSibling } from '@/utils/locationSpec';
+import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
 import type {
-  BulkGenerateSpec,
   CreateLocationInput,
   DepleteOptions,
   InventoryLocation,
@@ -140,10 +139,6 @@ export function buildLocationTree(locations: InventoryLocation[]): InventoryLoca
   return roots;
 }
 
-export async function getLocationTree(companyId: string): Promise<InventoryLocationNode[]> {
-  return buildLocationTree(await getLocations(companyId));
-}
-
 export async function getLocation(id: string): Promise<InventoryLocation | null> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -171,12 +166,18 @@ async function assertParentInCompany(
   }
 }
 
-export async function createLocation(
+/**
+ * The insert half of `createLocation`, with the parent check already done.
+ *
+ * Split out for `materializeLocationSpec`, whose nested parents are rows it created moments ago
+ * in this same company — re-fetching each one to prove that costs a request per node for no
+ * information. A 16-node cabinet went from ~31 requests to ~17.
+ */
+async function insertLocation(
   companyId: string,
   input: CreateLocationInput,
 ): Promise<InventoryLocation> {
   if (!input.name?.trim()) throw new Error('Location name is required');
-  await assertParentInCompany(input.parent_id, companyId);
 
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -197,6 +198,15 @@ export async function createLocation(
     throw error;
   }
   return data as InventoryLocation;
+}
+
+export async function createLocation(
+  companyId: string,
+  input: CreateLocationInput,
+): Promise<InventoryLocation> {
+  if (!input.name?.trim()) throw new Error('Location name is required');
+  await assertParentInCompany(input.parent_id, companyId);
+  return insertLocation(companyId, input);
 }
 
 export async function updateLocation(
@@ -273,73 +283,17 @@ export async function deleteLocation(id: string): Promise<void> {
   }
 }
 
-/**
- * Bulk-generate repetitive structure under a parent — e.g. 10 rows × {Left,
- * Right}. Names follow `namePattern` ('{n}' → index); codes are zero-padded
- * for sortability (shared scheme with the visual builder via locationSpec).
- * Created sequentially so leaves can attach to their row.
- */
-export async function bulkGenerateChildren(
-  companyId: string,
-  parentId: string,
-  spec: BulkGenerateSpec,
-): Promise<InventoryLocation[]> {
-  if (spec.count <= 0) throw new Error('Count must be positive');
-  await assertParentInCompany(parentId, companyId);
-
-  const parent = await getLocation(parentId);
-  const start = spec.startAt ?? 1;
-  const width = Math.max(2, String(start + spec.count - 1).length);
-  const pattern = spec.namePattern ?? '{n}';
-  const created: InventoryLocation[] = [];
-
-  for (let i = 0; i < spec.count; i++) {
-    const idx = start + i;
-    const node = await createLocation(companyId, {
-      parent_id: parentId,
-      name: pattern.replace('{n}', String(idx)),
-      kind: spec.kind ?? null,
-      code: generatedCode(parent?.code ?? null, spec.kind ?? '', idx, width),
-      sort_order: idx,
-    });
-    created.push(node);
-
-    for (let j = 0; j < (spec.leaves?.length ?? 0); j++) {
-      const leafName = spec.leaves![j];
-      const leaf = await createLocation(companyId, {
-        parent_id: node.id,
-        name: leafName,
-        kind: spec.leafKind ?? 'side',
-        code: explicitCode(node.code, leafName),
-        sort_order: j,
-      });
-      created.push(leaf);
-    }
-  }
-  return created;
-}
-
-/**
- * Materialize a LocationSpecNode forest (built client-side by the visual
- * builder) into inventory_locations. Recursively composes the existing
- * `createLocation` — parent before children — so all the company/parent
- * validation and code handling is shared with the manual flow. Names and codes
- * come straight from the precomputed spec; every location is stockable +
- * printable (createLocation defaults).
- *
- * Sequential inserts mirror bulkGenerateChildren; a single multi-row insert is
- * a cheap future optimization if specs ever get large.
- */
-export async function materializeLocationSpec(
+/** Insert a spec forest under a parent already proven to be in `companyId`. */
+async function insertSpecForest(
   companyId: string,
   parentId: string | null,
   nodes: LocationSpecNode[],
-  startSortOrder = 0,
+  startSortOrder: number,
 ): Promise<InventoryLocation[]> {
   const created: InventoryLocation[] = [];
   let sortOrder = startSortOrder;
   for (const node of nodes) {
-    const row = await createLocation(companyId, {
+    const row = await insertLocation(companyId, {
       parent_id: parentId,
       name: node.name,
       kind: node.kind,
@@ -348,10 +302,36 @@ export async function materializeLocationSpec(
     });
     created.push(row);
     if (node.children.length > 0) {
-      created.push(...(await materializeLocationSpec(companyId, row.id, node.children)));
+      // `row` was just inserted with company_id = companyId, so its children need no re-check.
+      created.push(...(await insertSpecForest(companyId, row.id, node.children, 0)));
     }
   }
   return created;
+}
+
+/**
+ * Materialize a LocationSpecNode forest (built client-side by the visual builder) into
+ * inventory_locations. Parent before children; names and codes come straight from the precomputed
+ * spec. Every location is stockable and printable.
+ *
+ * The caller-supplied `parentId` is validated ONCE here. It used to be re-validated inside
+ * `createLocation` for every node, including nodes whose parent this function had just created —
+ * a wasted `getLocation` per node (a 16-node cabinet cost ~31 requests instead of ~17).
+ *
+ * Still sequential and still **not transactional**: a failure partway leaves the nodes created
+ * before it. That's why `buildSpecFromLevels` takes the parent's existing sibling names — a
+ * repeat subdivide continues the numbering instead of colliding, so the sibling-name unique
+ * index can't kill a run halfway. A single multi-row insert (or an RPC) is the real fix and is
+ * tracked separately.
+ */
+export async function materializeLocationSpec(
+  companyId: string,
+  parentId: string | null,
+  nodes: LocationSpecNode[],
+  startSortOrder = 0,
+): Promise<InventoryLocation[]> {
+  await assertParentInCompany(parentId, companyId);
+  return insertSpecForest(companyId, parentId, nodes, startSortOrder);
 }
 
 /**
@@ -766,13 +746,3 @@ export async function transferStock(
   return data as unknown as TransferResult;
 }
 
-// ===========================================================================
-// QR
-// ===========================================================================
-
-/** Deep-link a location scan to the operator login, which routes to the bin
- * view post-login (payload is the UUID, never the human code). */
-export function buildLocationUrl(companyId: string, locationId: string): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `${origin}/operator/${companyId}/login?location=${locationId}`;
-}

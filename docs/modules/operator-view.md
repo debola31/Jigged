@@ -299,6 +299,71 @@ gave 3" is a participation score — both are the operator-comparative metrics t
 module refuses. Nothing sums them by person, including My work, which shows
 endorsements received *on a note*.
 
+### Capture is part of completing (B4)
+
+Finishing a step and writing down what you learned are **one act, one button, one
+commit**. The completion block carries the quantity field, an optional "Anything
+worth noting for next time?" with photo attach, and `RECORD COMPLETION` submits
+all of it.
+
+It used to be three separate things: record the completion, then a prompt
+offering to add a photo, then a *separate* Post. The middle of that had no
+durability — attaching a photo showed a thumbnail, the flow read as finished, and
+a back tap discarded it silently. There was no `beforeunload` guard and no draft
+persistence, so the only real fix was to stop having two commits. **The
+post-completion offer is deleted, not relocated.**
+
+**Submit order is load-bearing and deliberately NOT atomic:**
+
+1. `createOperationCompletion` — lands first, durably
+2. `addJobNote`, if there is text or a photo
+3. `addJobNoteMedia` per photo
+
+A transaction would be *worse*: it would roll back real finished work because an
+image failed to upload on shop wifi. So if the note fails the completion stands,
+and the note error surfaces on its own next to the text the operator still has.
+Asserted by `OperationActionPage.test.tsx > 'writes the note only AFTER the
+completion has landed'` and `'keeps the completion when the note fails'`.
+
+**Capture is always optional.** Completion works with the field empty.
+
+**Where the feed keeps its own composer.** Three of the four branches of the
+operation page have no completion block, so capture cannot live only there:
+
+| Branch | Capture |
+|---|---|
+| Internal, incomplete | **In the completion block**, one button |
+| Internal, **complete** | Feed composer — otherwise a photo could never be added after finishing, which is how photos actually arrive (taken on the phone's camera, attached later) |
+| **Outside** step (send/receive) | Feed composer — `operator-paperless-flow.md` calls *"sent to coater 7/9, expected back 7/16"* the highest-value note in the system |
+| No station selected | Neither: the page is only a station picker |
+
+`JobFeed`'s `standaloneCapture` prop is that switch, and it is false on the normal
+path so there is never more than one composer on screen. This is a deliberate
+deviation from the plan's *"the note cannot be saved without completing"*, forced
+by the render branches rather than by preference.
+
+One implementation, two hosts: [`useNoteCapture`](../../hooks/useNoteCapture.ts)
+owns the draft, the photo pipeline (including the iOS unreadable-`File`
+mitigation) and the funnel events; [`NoteCaptureFields`](../../components/operator/NoteCaptureFields.tsx)
+renders them and deliberately owns **no** submit button, because the surface it
+sits in decides what "save" means.
+
+### Triangularity (B5)
+
+The asymmetry that makes writing something down worth the extra taps:
+
+| | Effort | What comes back |
+|---|---|---|
+| Completion alone | one tap | **Nothing.** The step turns green |
+| Completion + a note | ~4 more taps | A Playbook entry with their name, a view count that grows, named readers, a login-banner line |
+
+**Do not equalise it.** If completing were rewarded on its own, the note would be
+pure cost and nobody would write one. So "nothing comes back from a bare
+completion" is a feature with a test —
+`e2e/operator-completion.spec.ts > 'a bare completion adds no note and no My work
+row'` — which also scans My work for `completed`, `streak`, `average` and `pace`,
+because a contribution screen is exactly where a completion count wants to appear.
+
 ### Surveillance guardrail (non-negotiable)
 
 No operator-facing surface may reflect an operator's pace or standing back at them.

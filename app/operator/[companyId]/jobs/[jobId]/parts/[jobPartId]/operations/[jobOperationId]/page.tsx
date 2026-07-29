@@ -40,6 +40,8 @@ import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/Oper
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
+import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
+import { useNoteCapture } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 
 /**
@@ -80,10 +82,10 @@ export default function OperatorOperationActionPage() {
   // then defaults to the remaining balance (dialled down for a partial).
   const [qtyInput, setQtyInput] = useState('');
   const [qtyDirty, setQtyDirty] = useState(false);
-  // Bumped after each successful completion to trigger JobFeed's one-time
-  // "add a photo/note?" offer. Bumped strictly AFTER the completion resolves,
-  // so completion is already durable before any prompt appears.
-  const [captureOfferSignal, setCaptureOfferSignal] = useState(0);
+  // Bumped after this page writes a note, so the feed below reloads and shows
+  // it. Replaces the old capture-offer signal: there is no prompt any more,
+  // because capture happens in the completion block itself.
+  const [feedRefreshSignal, setFeedRefreshSignal] = useState(0);
 
   // Header back pops in-app history (nav.goBack). This href is only the deep-link
   // fallback — the part's traveler — for an operation scanned into directly.
@@ -171,10 +173,29 @@ export default function OperatorOperationActionPage() {
       setQtyDirty(false);
       // After the write resolves — a failed completion is not a completion.
       logOperatorEvent(companyId, 'completion_recorded', { jobOperationId, quantityGood: qty });
+
+      // ORDER IS LOAD-BEARING, AND DELIBERATELY NOT ATOMIC.
+      //
+      // The completion is already durable by the time we get here. The note is
+      // attempted second so that a failed photo upload — the slowest, most
+      // failure-prone part of the whole flow on shop wifi — can never un-complete
+      // a finished step. Wrapping both in a transaction would be worse, not
+      // better: it would roll back real work because an image did not upload.
+      //
+      // So a note failure surfaces on its own and the step stays complete. The
+      // operator can retype it; they cannot un-finish the part they finished.
+      if (capture.hasContent) {
+        try {
+          await capture.submit();
+          setFeedRefreshSignal((n) => n + 1);
+        } catch {
+          // useNoteCapture puts the message in the fields, next to the text the
+          // operator still has. Do not overwrite the page-level error with it —
+          // "the completion worked, the note did not" is the accurate reading.
+        }
+      }
+
       await reloadAll();
-      // Completion is now persisted. Offer capture last, so a client death at
-      // the prompt cannot un-complete the step.
-      setCaptureOfferSignal((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to record completion');
     } finally {
@@ -226,6 +247,21 @@ export default function OperatorOperationActionPage() {
 
   const isExternal = job?.operation_work_center_kind === 'external';
   const isCompleted = job?.operation_status === 'completed';
+
+  // Capture belongs to the completion action, so it is enabled on exactly the
+  // branch that renders RECORD COMPLETION. A completed step and an outside step
+  // have no completion to attach a note to, so the feed keeps its own composer
+  // there (standaloneCapture below) — otherwise finishing a step would make it
+  // impossible to add the photo afterwards, and an outside step could never
+  // carry "sent to coater, back on the 16th".
+  const ownsCapture = !isCompleted && !isExternal;
+  const capture = useNoteCapture({
+    companyId,
+    jobId,
+    operatorId: currentOperatorId,
+    context: { jobPartId, jobOperationId },
+    enabled: ownsCapture,
+  });
   const isSent = job?.operation_status === 'sent';
   const consequence = operationCompletionConsequence(qtyValue, remaining);
 
@@ -538,6 +574,20 @@ export default function OperatorOperationActionPage() {
             }}
           />
 
+          {/* CAPTURE, MERGED INTO COMPLETION.
+              Finishing a step and writing down what you learned are one act, one
+              button, one commit. It used to be two: RECORD COMPLETION, then a
+              separate offer, then a separate Post — and the middle of that had no
+              durability, so attaching a photo showed a thumbnail, read as
+              finished, and was discarded by a back tap. There is no second Post
+              to forget now.
+              Optional, always: completion works with the field left empty. */}
+          <NoteCaptureFields
+            capture={capture}
+            placeholder="Anything worth noting for next time? (optional)"
+            disabled={actionLoading}
+          />
+
           {/* Single action: the field defaults to the full remaining balance, so
               this records a full completion by default and a partial when the
               operator dials the number down (mirrors the shipment form — no
@@ -578,7 +628,11 @@ export default function OperatorOperationActionPage() {
         <JobFeed
           jobId={jobId}
           companyId={companyId}
-          captureOfferSignal={captureOfferSignal}
+          refreshSignal={feedRefreshSignal}
+          // Only where this page's completion block is not rendered — see
+          // ownsCapture. Two composers on one screen would be a bug, and none
+          // would strand a finished or outside step with no way to add a photo.
+          standaloneCapture={!ownsCapture}
           operationContext={{
             jobPartId,
             jobOperationId,

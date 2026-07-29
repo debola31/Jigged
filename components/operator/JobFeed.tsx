@@ -7,7 +7,6 @@ import CardContent from '@mui/material/CardContent';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
@@ -16,14 +15,13 @@ import Alert from '@mui/material/Alert';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CloseIcon from '@mui/icons-material/Close';
-import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
+import { getJobNotes, getCurrentMember } from '@/utils/operatorAccess';
 import NoteReactions from '@/components/operator/NoteReactions';
-import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
-import { compressPhoto } from '@/utils/imageCompression';
+import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
-import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+import { useNoteCapture } from '@/hooks/useNoteCapture';
+import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -47,50 +45,31 @@ interface JobFeedProps {
   companyId: string;
   /** Read-only feed (traveler). When true, no composer is shown. */
   readOnly?: boolean;
-  /** Set on the operation page to show the composer + auto-tag captures. */
+  /** Set on the operation page to auto-tag captures to the step. */
   operationContext?: JobFeedOperationContext;
   /**
-   * Bumped by the operation page each time a step is completed. On a *new*
-   * value, if the composer is active and the operator hasn't captured anything
-   * on this job yet, we show a one-time "add a photo/note?" offer. Completion
-   * has already been persisted before this changes, so the offer is purely
-   * additive and never blocks or risks the completion. Ignored when 0/undefined.
+   * Bumped by the parent after IT writes a note, so the feed reloads and shows
+   * it. Replaces captureOfferSignal: capture now happens inside the completion
+   * block, so the feed's job is to reflect a write rather than to prompt for one.
    */
-  captureOfferSignal?: number;
+  refreshSignal?: number;
+  /**
+   * Show the feed's OWN composer + Post button.
+   *
+   * False on the normal path, where the operation page renders the same capture
+   * fields inside the completion block and one button commits both — the whole
+   * point of merging them. True only where no completion block is left to attach
+   * a note to: an already-complete step (so a photo can still be added
+   * afterwards, which is the phone-camera-then-attach flow the audit found) and
+   * an outside step, whose "sent to coater, back on the 16th" note the paperless
+   * doc calls the highest-value note in the system.
+   */
+  standaloneCapture?: boolean;
 }
 
-// --- Dictation (keyboard-mic) hint: a quiet, contextual, capped one-liner. ---
-// Shown in the composer where operators type notes; capped so repeat users don't
-// get nagged (the documented failure mode of built-in tips). Per-device, since
-// the subject is the device's own keyboard mic.
-const MIC_HINT_KEY = 'jigged:composer-mic-hint';
-const MIC_HINT_MAX_SHOWS = 5;
-
-interface MicHintState {
-  shows: number;
-  dismissed: boolean;
-}
-
-function readMicHint(): MicHintState {
-  if (typeof window === 'undefined') return { shows: 0, dismissed: true };
-  try {
-    const raw = window.localStorage.getItem(MIC_HINT_KEY);
-    if (!raw) return { shows: 0, dismissed: false };
-    const parsed = JSON.parse(raw) as Partial<MicHintState>;
-    return { shows: Number(parsed.shows) || 0, dismissed: !!parsed.dismissed };
-  } catch {
-    return { shows: 0, dismissed: false };
-  }
-}
-
-function writeMicHint(state: MicHintState): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(MIC_HINT_KEY, JSON.stringify(state));
-  } catch {
-    /* private mode / quota — the hint is best-effort, never block on it */
-  }
-}
+// The dictation hint and the pending-photo pipeline moved into
+// hooks/useNoteCapture.ts, so the completion block and this feed render one
+// implementation rather than two.
 
 function formatTimestamp(value: string): string {
   const d = new Date(value);
@@ -104,12 +83,6 @@ function formatTimestamp(value: string): string {
 }
 
 /** A pending photo the operator picked but hasn't posted yet. */
-interface PendingPhoto {
-  id: string;
-  file: File;
-  previewUrl: string;
-}
-
 /**
  * The job feed: one append-only stream per job (job-level + operation-tagged
  * notes, each with optional photos). Captured on the operation page (composer
@@ -121,7 +94,8 @@ export default function JobFeed({
   companyId,
   readOnly,
   operationContext,
-  captureOfferSignal,
+  refreshSignal,
+  standaloneCapture = false,
 }: JobFeedProps) {
   const [error, setError] = useState<string | null>(null);
   // Notes posted optimistically (prepended before the next full load). Deduped
@@ -129,36 +103,23 @@ export default function JobFeed({
   const [pendingNotes, setPendingNotes] = useState<JobNote[]>([]);
 
   const [operatorId, setOperatorId] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState('');
-  const [pending, setPending] = useState<PendingPhoto[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [composerError, setComposerError] = useState<string | null>(null);
 
   // Signed URLs for media thumbnails, keyed by media id (fetched on demand).
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   // Full-size viewer.
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
-  // Post-completion "add a photo/note?" offer + the dictation hint.
-  const [offerOpen, setOfferOpen] = useState(false);
-  const [showMicHint, setShowMicHint] = useState(false);
-  const offerRef = useRef<HTMLDivElement | null>(null);
-  const lastOfferSignal = useRef<number | undefined>(undefined);
+  // The feed's own composer, only where nothing else owns capture — see the
+  // standaloneCapture prop.
+  const showComposer = !readOnly && !!operationContext && standaloneCapture;
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const noteFieldRef = useRef<HTMLInputElement | null>(null);
-  // Monotonic id source for pending picks — avoids the id collisions that
-  // Date.now()+filename produced for rapid same-name camera captures.
-  const pendingIdRef = useRef(0);
-
-  // Funnel state. Refs, not state: these are read once at unmount, and putting
-  // them in state would re-render the composer on every keystroke to record
-  // something the operator never sees.
-  const focusedRef = useRef(false);
-  const capturedRef = useRef(false);
-  const draftRef = useRef({ bodyLength: 0, photoCount: 0 });
-
-  const showComposer = !readOnly && !!operationContext;
+  const capture = useNoteCapture({
+    companyId,
+    jobId,
+    operatorId,
+    context: operationContext ?? null,
+    enabled: showComposer,
+  });
 
   // Read tracking. The feed is where an operator encounters other people's notes
   // in the course of a job, so it is the surface the whole loop is measuring.
@@ -184,19 +145,6 @@ export default function JobFeed({
     return [...stillPending, ...loadedNotes];
   }, [loadedNotes, pendingNotes]);
 
-  // Has the operator captured anything real on this job yet? Only human 'user'
-  // notes with text or a photo count — auto-logged 'event' notes (e.g. the
-  // order-qty audit trail) must NOT suppress the offer.
-  const hasUserCapture = useMemo(
-    () =>
-      notes.some(
-        (n) =>
-          n.note_type === 'user' &&
-          ((n.body?.trim().length ?? 0) > 0 || n.media.length > 0),
-      ),
-    [notes],
-  );
-
   // Resolved unconditionally, not just when the composer is shown: reactions need
   // the member id on the read-only traveler feed too, both to know whether the
   // reader has already reacted and to hide the control on their own notes.
@@ -210,33 +158,17 @@ export default function JobFeed({
     };
   }, [companyId]);
 
-  // Post-completion capture offer: fire ONCE per completion event. Only react to
-  // a *new* signal value (ignore the initial undefined/0), and only offer when
-  // the composer is active and nothing has been captured yet. The parent bumps
-  // the signal strictly after completeOperation resolves, so completion is
-  // already durable — a client death while this is open loses nothing.
+  // Reflect a write the PARENT made. The completion block now owns capture on the
+  // normal path, so when it posts a note this feed has to reload to show it —
+  // which is all that is left of the old captureOfferSignal. Ignores the initial
+  // undefined/0 so a mount does not double-load.
+  const lastRefresh = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!captureOfferSignal) return;
-    if (captureOfferSignal === lastOfferSignal.current) return;
-    lastOfferSignal.current = captureOfferSignal;
-    if (showComposer && !hasUserCapture) setOfferOpen(true);
-  }, [captureOfferSignal, showComposer, hasUserCapture]);
-
-  // Scroll the offer into view when it opens (it sits above a composer that may
-  // be below the fold on a phone).
-  useEffect(() => {
-    if (offerOpen) offerRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
-  }, [offerOpen]);
-
-  // Decide the dictation hint once per composer mount, counting the show. Shown
-  // while not dismissed and under the cap; increments the stored show count.
-  useEffect(() => {
-    if (!showComposer) return;
-    const state = readMicHint();
-    if (state.dismissed || state.shows >= MIC_HINT_MAX_SHOWS) return;
-    setShowMicHint(true);
-    writeMicHint({ shows: state.shows + 1, dismissed: false });
-  }, [showComposer]);
+    if (!refreshSignal) return;
+    if (refreshSignal === lastRefresh.current) return;
+    lastRefresh.current = refreshSignal;
+    load();
+  }, [refreshSignal, load]);
 
   // Fetch signed URLs for any media we don't already have a URL for.
   useEffect(() => {
@@ -264,150 +196,22 @@ export default function JobFeed({
     };
   }, [notes, mediaUrls]);
 
-  // Revoke object URLs for pending previews on unmount.
-  useEffect(() => {
-    return () => {
-      pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Preview-URL cleanup, the draft snapshot and composer_abandoned all moved into
+  // useNoteCapture, so they fire for whichever surface owns capture.
 
-  // Keep the unmount snapshot current. In an effect, not during render: mutating
-  // a ref while rendering is unsafe under concurrent rendering (and StrictMode's
-  // double invoke), which the react-hooks lint rule correctly rejects.
-  useEffect(() => {
-    draftRef.current = { bodyLength: noteDraft.trim().length, photoCount: pending.length };
-  }, [noteDraft, pending]);
-
-  // Abandonment: they opened the composer and left without saving. This is the
-  // funnel step that separates "capture friction" from "container fit" — a high
-  // focus rate with a low save rate means they tried and gave up, which is a very
-  // different problem from never reaching for it at all.
-  //
-  // Fires on unmount, which is the only place that reliably catches leaving. The
-  // draft size rides along as context: focused-and-typed-nothing and
-  // typed-a-paragraph-then-bailed are both abandonment, but not the same story.
-  useEffect(() => {
-    return () => {
-      if (!showComposer) return;
-      if (!focusedRef.current || capturedRef.current) return;
-      logOperatorEvent(companyId, 'composer_abandoned', draftRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handlePickPhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const input = e.target;
-    const files = Array.from(input.files ?? []);
-    input.value = '';
-    if (files.length === 0) return;
-    setComposerError(null);
-
-    // iOS "new photo → nothing attached" mitigation (UNCONFIRMED — see PR notes;
-    // not reproducible on desktop). A camera-origin `File` can become unreadable
-    // by the time it's compressed/uploaded at Post, yielding a zero-byte blob.
-    // Copy the bytes into a stable File *now*, while the reference is fresh, and
-    // drop any pick that reads back empty rather than silently posting nothing.
-    const prepared: PendingPhoto[] = [];
-    for (const file of files) {
-      let stable = file;
-      try {
-        const buf = await file.arrayBuffer();
-        stable = new File([buf], file.name || 'photo.jpg', {
-          type: file.type || 'image/jpeg',
-          lastModified: file.lastModified,
-        });
-      } catch {
-        // Copy failed — fall through with the original reference and the size
-        // guard below decides whether it's usable.
-      }
-      if (stable.size === 0) continue;
-      prepared.push({
-        id: `pp-${pendingIdRef.current++}`,
-        file: stable,
-        previewUrl: URL.createObjectURL(stable),
-      });
-    }
-
-    if (prepared.length === 0) {
-      setComposerError('That photo could not be read. Please try taking or picking it again.');
-      return;
-    }
-    setPending((prev) => [...prev, ...prepared]);
-  };
-
-  const removePending = (id: string) => {
-    setPending((prev) => {
-      const target = prev.find((p) => p.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((p) => p.id !== id);
-    });
-  };
-
-  // Offer actions. "Add photo" is the prominent path (the observed failure was
-  // photos stuck in the camera roll): close the offer and open the picker, which
-  // now surfaces the photo library too. "Add note" focuses the composer; "Skip"
-  // just dismisses. All three are terminal for this completion event.
-  const handleOfferAddPhoto = () => {
-    setOfferOpen(false);
-    fileInputRef.current?.click();
-  };
-  const handleOfferAddNote = () => {
-    setOfferOpen(false);
-    noteFieldRef.current?.focus();
-  };
-  const handleOfferSkip = () => setOfferOpen(false);
-
-  const dismissMicHint = () => {
-    setShowMicHint(false);
-    writeMicHint({ ...readMicHint(), dismissed: true });
-  };
-
-  const canPost = (noteDraft.trim().length > 0 || pending.length > 0) && !saving;
-
+  // The photo pipeline, the dictation hint and the note+media write now live in
+  // useNoteCapture, so this feed and the completion block share one
+  // implementation. All that is left here is what "Post" means on THIS surface:
+  // write it, then show it optimistically.
   const handlePost = async () => {
-    if (!operationContext) return;
-    const body = noteDraft.trim();
-    if (!body && pending.length === 0) return;
-    if (!operatorId) {
-      setComposerError('Could not identify your account — reload and try again.');
-      return;
-    }
-    setSaving(true);
-    setComposerError(null);
     try {
-      const note = await addJobNote(jobId, companyId, operatorId, body || null, {
-        jobPartId: operationContext.jobPartId,
-        jobOperationId: operationContext.jobOperationId,
-      });
-
-      const media: JobNoteMedia[] = [];
-      for (const p of pending) {
-        const prepared = await compressPhoto(p.file);
-        media.push(
-          await addJobNoteMedia(companyId, jobId, note.id, prepared.file, {
-            dims: prepared.dims,
-          }),
-        );
-      }
-
-      setPendingNotes((prev) => [{ ...note, media }, ...prev]);
-      pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
-      setPending([]);
-      setNoteDraft('');
-      // After the write resolves, so a failed post is never counted as a save —
-      // the funnel's whole job is separating "tried" from "succeeded".
-      capturedRef.current = true;
-      logOperatorEvent(companyId, media.length > 0 ? 'note_saved_with_photo' : 'note_saved', {
-        photoCount: media.length,
-        bodyLength: body.length,
-      });
-    } catch (err) {
-      setComposerError(err instanceof Error ? err.message : 'Could not post. Please try again.');
-      // The note may have been created with partial media — refresh to show truth.
+      const note = await capture.submit();
+      if (note) setPendingNotes((prev) => [note, ...prev]);
+    } catch {
+      // useNoteCapture surfaces the message in the fields. A note may exist with
+      // partial media, so reload to show what is actually there rather than the
+      // optimistic guess.
       load();
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -431,177 +235,23 @@ export default function JobFeed({
 
         {showComposer && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-            {offerOpen && (
-              <Box
-                ref={offerRef}
-                sx={{
-                  p: 1.5,
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'primary.main',
-                  bgcolor: 'rgba(99, 102, 241, 0.10)',
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    Step complete. Got a setup photo or a note? Add it before you go —
-                    it stays with the job.
-                  </Typography>
-                  <IconButton
-                    size="small"
-                    aria-label="Dismiss"
-                    onClick={handleOfferSkip}
-                    sx={{ mt: -0.5, mr: -0.5 }}
-                  >
-                    <CloseIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                  <Button
-                    variant="contained"
-                    startIcon={<PhotoCameraIcon />}
-                    onClick={handleOfferAddPhoto}
-                    sx={{ minHeight: 44 }}
-                  >
-                    Add photo
-                  </Button>
-                  <Button variant="text" onClick={handleOfferAddNote} sx={{ minHeight: 44 }}>
-                    Add note
-                  </Button>
-                  <Box sx={{ flex: 1 }} />
-                  <Button variant="text" color="inherit" onClick={handleOfferSkip} sx={{ minHeight: 44 }}>
-                    Skip
-                  </Button>
-                </Box>
-              </Box>
-            )}
-            <TextField
-              multiline
-              minRows={2}
+            {/* The post-completion "add a photo?" offer is gone. It existed to
+                chase a note AFTER the fact, which is exactly the two-stage commit
+                that lost photos; capture now sits inside the completion block and
+                lands with it. This composer survives only on surfaces with no
+                completion left to attach to. */}
+            <NoteCaptureFields
+              capture={capture}
               placeholder="Add a note or photo for this step…"
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              onFocus={() => {
-                // Once per composer mount: this is the "started capture" step, and
-                // counting every refocus would inflate it past the save rate.
-                if (focusedRef.current) return;
-                focusedRef.current = true;
-                logOperatorEvent(companyId, 'composer_focused');
-              }}
-              inputRef={noteFieldRef}
-              fullWidth
-              size="small"
             />
-
-            {showMicHint && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
-                  ※ Tip: tap the{' '}
-                  {/* The iOS keyboard's dictation glyph (outlined mic + cradle +
-                      stem + base bar), so it reads as the exact key operators
-                      tap — not a generic emoji. */}
-                  <Box
-                    component="svg"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                    sx={{
-                      width: '1.05em',
-                      height: '1.05em',
-                      verticalAlign: '-0.2em',
-                      mx: '1px',
-                      fill: 'none',
-                      stroke: 'currentColor',
-                      strokeWidth: 1.6,
-                      strokeLinecap: 'round',
-                      strokeLinejoin: 'round',
-                    }}
-                  >
-                    <rect x="9.5" y="3" width="5" height="10" rx="2.5" />
-                    <path d="M6.5 11a5.5 5.5 0 0 0 11 0" />
-                    <path d="M12 16.5V19" />
-                    <path d="M8.5 19h7" />
-                  </Box>{' '}
-                  on your keyboard to talk instead of type.
-                </Typography>
-                <IconButton
-                  size="small"
-                  aria-label="Dismiss tip"
-                  onClick={dismissMicHint}
-                  sx={{ p: 0.25 }}
-                >
-                  <CloseIcon sx={{ fontSize: 14 }} />
-                </IconButton>
-              </Box>
-            )}
-
-            {pending.length > 0 && (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {pending.map((p) => (
-                  <Box key={p.id} sx={{ position: 'relative' }}>
-                    <Box
-                      component="img"
-                      src={p.previewUrl}
-                      alt="Pending photo"
-                      sx={{
-                        width: THUMB,
-                        height: THUMB,
-                        objectFit: 'cover',
-                        borderRadius: 1,
-                        display: 'block',
-                      }}
-                    />
-                    <IconButton
-                      size="small"
-                      aria-label="Remove photo"
-                      onClick={() => removePending(p.id)}
-                      sx={{
-                        position: 'absolute',
-                        top: -8,
-                        right: -8,
-                        bgcolor: 'background.paper',
-                        '&:hover': { bgcolor: 'background.paper' },
-                      }}
-                    >
-                      <CloseIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                ))}
-              </Box>
-            )}
-
-            {composerError && <Alert severity="error">{composerError}</Alert>}
-
-            {/* No `capture` attribute: on iOS/Android this makes the OS present
-                the full native sheet (Photo Library / Take Photo / Choose File),
-                so operators can attach an EXISTING photo from the camera roll —
-                the observed failure mode was setup photos stuck in the roll —
-                not only shoot a new one. `capture="environment"` would force the
-                camera and hide the library. */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={handlePickPhotos}
-            />
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between' }}>
-              <Button
-                variant="outlined"
-                startIcon={<PhotoCameraIcon />}
-                onClick={() => fileInputRef.current?.click()}
-                disabled={saving}
-                sx={{ minHeight: 48 }}
-              >
-                Add photo
-              </Button>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
               <Button
                 variant="contained"
                 onClick={handlePost}
-                disabled={!canPost}
+                disabled={!capture.hasContent || capture.saving}
                 sx={{ minHeight: 48 }}
               >
-                {saving ? <CircularProgress size={20} /> : 'Post'}
+                {capture.saving ? <CircularProgress size={20} /> : 'Post'}
               </Button>
             </Box>
           </Box>

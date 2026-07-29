@@ -321,3 +321,42 @@ export interface Station {
   id: string;
   name: string;
 }
+
+/** One of the caller's own notes, with how far it has travelled. */
+export interface MyNote {
+  id: string;
+  body: string | null;
+  created_at: string;
+  /** "Op 20 · Mill" when the note carries a step, else null. */
+  operation_label: string | null;
+  /** Part the note is durably attached to, when it has one. */
+  part_name: string | null;
+  photo_count: number;
+  /** Distinct PEOPLE who read it. Saturates near shop size — that is its meaning. */
+  viewer_count: number;
+  /** Distinct JOBS it was consulted on. Uncapped; the load-bearing signal. */
+  usage_count: number;
+}
+
+/**
+ * The operator's own contribution and its reception.
+ *
+ * Deliberately carries no completion count, streak, average or anything
+ * comparable against another person — see the surveillance guardrail in
+ * docs. This screen is where a leaderboard would want to grow, and it must not.
+ */
+export interface MyContribution {
+  noteCount: number;
+  photoCount: number;
+  /** People who have read any of their notes. */
+  peopleReached: number;
+  /** Jobs their notes have been consulted on. */
+  jobsReached: number;
+  notes: MyNote[];
+}
+
+/** A named reader of one of your own notes. Authors only — see note_viewers(). */
+export interface NoteViewer {
+  viewer_name: string | null;
+  job_number: string | null;
+}

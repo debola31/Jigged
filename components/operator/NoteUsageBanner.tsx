@@ -96,7 +96,11 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
     <Box sx={{ mb: 2 }}>
       <Alert
         severity="success"
-        onClose={() => {
+        onClose={(e) => {
+          // The close button sits INSIDE the tappable Alert, so without this the
+          // click bubbles to onOpenDetail and dismissing navigates the operator
+          // away from the screen they were trying to clear.
+          e.stopPropagation();
           writeDismissed(weekKey);
           setDismissed(true);
         }}

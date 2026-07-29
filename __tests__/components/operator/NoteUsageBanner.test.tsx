@@ -107,6 +107,33 @@ describe('NoteUsageBanner', () => {
     expect(stored).toMatch(/^\d{4}-W\d{2}$/);
   });
 
+  it('opens the detail it promises, instead of being a dead end', async () => {
+    // "3 people used your notes" with nowhere to go is the void this whole
+    // workstream exists to close. Tapping must land on the author's own notes.
+    const user = userEvent.setup();
+    const onOpenDetail = vi.fn();
+    rpc.mockResolvedValue({ data: 3, error: null });
+    render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
+
+    await user.click(await screen.findByText('3 people used your notes this week.'));
+
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('dismissing does not count as opening the detail', async () => {
+    // The close button sits inside the tappable Alert; a bubbled click would
+    // navigate the operator away from the screen they were dismissing.
+    const user = userEvent.setup();
+    const onOpenDetail = vi.fn();
+    rpc.mockResolvedValue({ data: 3, error: null });
+    render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
+    await screen.findByText('3 people used your notes this week.');
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
   it('comes back next week after being dismissed', async () => {
     localStorage.setItem('jigged:note-usage-banner-dismissed', '1999-W01');
     rpc.mockResolvedValue({ data: 2, error: null });

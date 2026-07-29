@@ -441,7 +441,7 @@ def test_digest_counts_people_not_rows(shop):
         ).execute()
 
     assert len(_rows(shop, note_id)) == 2
-    n = shop["author"]["client"].rpc("my_note_view_digest").execute().data
+    n = shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"]
     assert n == 1
 
 
@@ -451,7 +451,7 @@ def test_digest_is_scoped_to_the_callers_own_notes(shop):
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
 
-    n = shop["reader2"]["client"].rpc("my_note_view_digest").execute().data
+    n = shop["reader2"]["client"].rpc("my_note_digest").execute().data[0]["views"]
     assert n == 0
 
 
@@ -464,7 +464,7 @@ def test_digest_takes_no_time_window(shop):
     the wire."""
     with pytest.raises(Exception):
         shop["author"]["client"].rpc(
-            "my_note_view_digest", {"p_tz": "America/Detroit"}
+            "my_note_digest", {"p_tz": "America/Detroit"}
         ).execute()
 
 
@@ -473,17 +473,17 @@ def test_digest_is_a_running_total_not_a_window(shop):
     a view out — that is what makes "N new views since you last looked" work
     from a client-side subtraction alone."""
     note_id = _make_note(shop)
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 0
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 0
 
     shop["reader"]["client"].rpc(
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 1
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 1
 
     shop["reader2"]["client"].rpc(
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
-    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 2
+    assert shop["author"]["client"].rpc("my_note_digest").execute().data[0]["views"] == 2
 
 
 # ── the durable subject, and the constraints protecting it ───────────────────
@@ -610,3 +610,180 @@ def test_read_log_is_not_granted_to_the_ai_sql_role(shop):
     """
     leaks = shop["admin"].rpc("no_client_access_grant_leaks", {}).execute().data
     assert leaks == [], f"no-client-access tables are granted to: {leaks}"
+
+
+# ── note_reactions: the voluntary half, and its policies ─────────────────────
+# The UI hides the thumbs-up on your own notes and offers no negative option,
+# but the UI is not the enforcement. These assert the database refuses on its
+# own, because a future surface (an API client, a bulk import, a different
+# screen) will not inherit the component's good manners.
+
+
+def _react(client, shop, note_id, reactor_access_id, kind="helpful"):
+    return (
+        client.table("note_reactions")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "note_id": note_id,
+                "reactor_id": reactor_access_id,
+                "kind": kind,
+            }
+        )
+        .execute()
+    )
+
+
+def test_a_colleague_can_mark_a_note_helpful(shop):
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    rows = (
+        shop["author"]["client"]
+        .table("note_reactions")
+        .select("kind, reactor_id")
+        .eq("note_id", note_id)
+        .execute()
+        .data
+    )
+    assert [r["kind"] for r in rows] == ["helpful"]
+
+
+def test_you_cannot_endorse_your_own_note(shop):
+    """Self-endorsement is noise, and the UI hides the control — but the policy
+    is what actually refuses it."""
+    note_id = _make_note(shop)
+    with pytest.raises(Exception):
+        _react(shop["author"]["client"], shop, note_id, shop["author"]["access_id"])
+
+
+def test_you_cannot_react_as_someone_else(shop):
+    """"Kurtis confirmed this" must not be expressible by anyone but Kurtis."""
+    note_id = _make_note(shop)
+    with pytest.raises(Exception):
+        _react(
+            shop["reader"]["client"], shop, note_id, shop["reader2"]["access_id"]
+        )
+
+
+def test_there_is_no_negative_reaction(shop):
+    """Not a UI omission — the CHECK constraint has no slot for one. An
+    inaccurate note is corrected or superseded, never publicly judged."""
+    note_id = _make_note(shop)
+    for kind in ("unhelpful", "disputed", "wrong"):
+        with pytest.raises(Exception):
+            _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"], kind)
+
+
+def test_reacting_twice_is_blocked_by_the_unique_constraint(shop):
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+    with pytest.raises(Exception):
+        _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+
+def test_an_admin_cannot_delete_someone_elses_reaction(shop):
+    """A boss who can curate the public record of what the shop found useful is
+    a worse problem than a stale reaction. The DELETE policy is scoped to the
+    reactor, with no admin branch."""
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    shop["boss"]["client"].table("note_reactions").delete().eq(
+        "note_id", note_id
+    ).execute()
+
+    still_there = (
+        shop["admin"]
+        .table("note_reactions")
+        .select("id")
+        .eq("note_id", note_id)
+        .execute()
+        .data
+    )
+    assert len(still_there) == 1
+
+
+def test_you_can_take_your_own_reaction_back(shop):
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    shop["reader"]["client"].table("note_reactions").delete().eq(
+        "note_id", note_id
+    ).eq("reactor_id", shop["reader"]["access_id"]).execute()
+
+    assert (
+        shop["admin"]
+        .table("note_reactions")
+        .select("id")
+        .eq("note_id", note_id)
+        .execute()
+        .data
+        == []
+    )
+
+
+def test_a_reaction_can_never_be_edited(shop):
+    """No UPDATE policy and no UPDATE grant, so 'helpful' cannot silently become
+    'confirmed'. A reaction is created or removed, never amended."""
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    with pytest.raises(Exception):
+        shop["reader"]["client"].table("note_reactions").update(
+            {"kind": "confirmed"}
+        ).eq("note_id", note_id).execute()
+
+
+def test_playbook_reactions_say_who_reacted(shop):
+    """THE BUG THIS EXISTS FOR. The array carried kind/name/created_at but not
+    reactor_id, so a reader could never be found in it: the thumbs-up rendered
+    un-pressed on a note they had already marked helpful, and a second tap just
+    re-inserted a duplicate. The reaction was persisting the whole time — it
+    simply could not be recognised as theirs. Component tests could not catch
+    this: they are handed the array directly."""
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    reactions = next(r["reactions"] for r in rows if r["id"] == note_id)
+    assert [x["reactor_id"] for x in reactions] == [shop["reader"]["access_id"]]
+
+
+def test_digest_reports_helpful_as_well_as_views(shop):
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+    _react(shop["reader2"]["client"], shop, note_id, shop["reader2"]["access_id"])
+
+    row = shop["author"]["client"].rpc("my_note_digest").execute().data[0]
+    assert row["views"] == 1
+    assert row["helpful"] == 1
+
+
+def test_digest_counts_only_the_callers_own_helpful(shop):
+    note_id = _make_note(shop)
+    _react(shop["reader"]["client"], shop, note_id, shop["reader"]["access_id"])
+
+    row = shop["reader2"]["client"].rpc("my_note_digest").execute().data[0]
+    assert row["helpful"] == 0
+
+
+def test_playbook_returns_author_id_so_the_ui_can_hide_the_control(shop):
+    """Without it the reaction UI cannot tell whose note it is, and every tap on
+    your own note would be a guaranteed 42501 that reads as a broken button.
+    Matching on author_name instead breaks on two people with the same name."""
+    _make_note(shop)
+    rows = (
+        shop["reader"]["client"]
+        .rpc("part_playbook_notes", {"p_part_id": shop["part_id"]})
+        .execute()
+        .data
+    )
+    assert rows and rows[0]["author_id"] == shop["author"]["access_id"]

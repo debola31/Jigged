@@ -28,6 +28,8 @@ function note(over: Partial<PartPreviousNote> = {}): PartPreviousNote {
     author_name: 'Diego Alvarez',
     subject_kind: 'part',
     viewer_count: 0,
+    author_id: 'them',
+    reactions: [],
     usage_count: 0,
     media: [],
     job_number: 'J-0004',

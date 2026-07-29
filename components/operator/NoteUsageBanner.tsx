@@ -5,19 +5,26 @@ import { useLoad } from '@/hooks/useLoad';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import ThumbUpAltIcon from '@mui/icons-material/ThumbUpAlt';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 /**
- * "3 new views on your notes."
+ * "2 people found your notes helpful · 3 new views."
  *
  * The return half of the loop. An operator writes something down and, without
  * this, nothing comes back — no way to know whether it was read, no reason to
  * believe writing it did anything. This is the smallest honest signal that it did.
  *
+ * TWO SIGNALS, AND HELPFUL LEADS
+ *   A view is someone needing to look something up. A helpful is a colleague
+ *   choosing to say it was worth reading. The second is the stronger claim, so it
+ *   goes first when both are present. Whether views earn their place at all is an
+ *   open question for the shop, not one to settle by argument — both are shown
+ *   until a usability session says otherwise.
+ *
  * NEW SINCE YOU LAST LOOKED, NOT "THIS WEEK"
- *   my_note_view_digest() returns a RUNNING TOTAL of views across the caller's
- *   own notes. This component stores the total it last acknowledged and renders
- *   the difference. So the banner appears exactly when something has happened and
+ *   my_note_digest() returns RUNNING TOTALS across the caller's own notes. This
+ *   component stores the totals it last acknowledged and renders the differences. So the banner appears exactly when something has happened and
  *   goes quiet the moment it has been seen — no weekly window, which was always
  *   arbitrary, and no nag on every visit to the jobs list.
  *
@@ -43,37 +50,59 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
  *   cares, which is worse than silence. It renders null.
  */
 
-// The running total this device has already shown the operator. A fresh key each
+// The running totals this device has already shown the operator. A fresh key each
 // time the stored shape changes, so a value written by an older preview build is
 // simply ignored rather than needing a parse fallback.
-const SEEN_KEY = 'jigged:note-views-acknowledged';
+const SEEN_KEY = 'jigged:note-digest-acknowledged';
+
+interface Totals {
+  views: number;
+  helpful: number;
+}
 
 /**
- * The running total already shown on THIS device, or null if it has never shown
- * one — a distinction that matters, because null means "adopt the total
- * silently", not "everything is new". See the first-run note in the component.
+ * The totals already shown on THIS device, or null if it has never shown any —
+ * a distinction that matters, because null means "adopt them silently", not
+ * "everything is new". See the first-run note in the component.
  */
-function readAcknowledged(): number | null {
+function readAcknowledged(): Totals | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(SEEN_KEY);
     if (raw === null) return null;
-    const n = Number(raw);
-    // A mangled value is treated as absent rather than as zero: zero would
+    const parsed = JSON.parse(raw) as Partial<Totals>;
+    // A mangled value is treated as absent rather than as zeros: zeros would
     // announce the entire history as new.
-    return Number.isFinite(n) && n >= 0 ? n : null;
+    if (typeof parsed?.views !== 'number' || typeof parsed?.helpful !== 'number') return null;
+    return { views: parsed.views, helpful: parsed.helpful };
   } catch {
     return null; // private mode / quota — the banner is best-effort
   }
 }
 
-function writeAcknowledged(total: number): void {
+function writeAcknowledged(t: Totals): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(SEEN_KEY, String(total));
+    window.localStorage.setItem(SEEN_KEY, JSON.stringify(t));
   } catch {
     /* ignore */
   }
+}
+
+/** Helpful leads: it is the stronger claim of the two. */
+function summarise(freshHelpful: number, freshViews: number): string {
+  const parts: string[] = [];
+  if (freshHelpful > 0) {
+    parts.push(
+      freshHelpful === 1
+        ? 'Someone found one of your notes helpful'
+        : `${freshHelpful} people found your notes helpful`,
+    );
+  }
+  if (freshViews > 0) {
+    parts.push(freshViews === 1 ? '1 new view' : `${freshViews} new views`);
+  }
+  return `${parts.join(' · ')}.`;
 }
 
 interface NoteUsageBannerProps {
@@ -86,11 +115,13 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
   const [banked, setBanked] = useState(false);
 
   const { data } = useLoad(async () => {
-    const { data: total, error } = await getSupabase().rpc('my_note_view_digest');
+    const empty = { totals: { views: 0, helpful: 0 }, fresh: { views: 0, helpful: 0 } };
+    const { data: rows, error } = await getSupabase().rpc('my_note_digest');
     // Silent on failure: a broken digest must not put an error in front of an
     // operator who was only trying to start work.
-    if (error) return { total: 0, fresh: 0 };
-    const runningTotal = (total as number | null) ?? 0;
+    if (error) return empty;
+    const row = (rows as Totals[] | null)?.[0];
+    const totals: Totals = { views: row?.views ?? 0, helpful: row?.helpful ?? 0 };
 
     const prior = readAcknowledged();
     if (prior === null) {
@@ -106,25 +137,33 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
       // device was away are never banner-announced. That is information delayed,
       // not lost — the full picture is on My work, one tap down. Announcing a
       // falsehood is worse than staying quiet.
-      writeAcknowledged(runningTotal);
-      return { total: runningTotal, fresh: 0 };
+      writeAcknowledged(totals);
+      return { totals, fresh: { views: 0, helpful: 0 } };
     }
-    // Both counters are monotonic, so this can never go negative.
-    return { total: runningTotal, fresh: runningTotal - prior };
+    // viewer_count is monotonic. helpful is NOT — a colleague can take a mark
+    // back — so clamp at zero rather than rendering a negative "new" count.
+    return {
+      totals,
+      fresh: {
+        views: Math.max(0, totals.views - prior.views),
+        helpful: Math.max(0, totals.helpful - prior.helpful),
+      },
+    };
   }, [companyId]);
 
-  const runningTotal = data?.total ?? 0;
-  const fresh = data?.fresh ?? 0;
+  const totals = data?.totals ?? { views: 0, helpful: 0 };
+  const fresh = data?.fresh ?? { views: 0, helpful: 0 };
+  const anything = fresh.helpful + fresh.views;
 
   // Both the ✕ and a tap-through count as "I have seen this". Tapping through
   // especially: coming back from My work to the same banner you just acted on
   // reads as if nothing happened.
   const acknowledge = () => {
-    writeAcknowledged(runningTotal);
+    writeAcknowledged(totals);
     setBanked(true);
   };
 
-  if (banked || fresh <= 0) return null;
+  if (banked || anything <= 0) return null;
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -136,7 +175,15 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
         // which is where tapping it lands, and stops the banner reading as a
         // confirmation of an action. Green stays: it is doing real work as the
         // reward signal, and that is the whole point of the banner.
-        icon={<VisibilityOutlinedIcon fontSize="inherit" />}
+        // Matches whichever signal leads the sentence, so the icon is never
+        // describing something the text does not say.
+        icon={
+          fresh.helpful > 0 ? (
+            <ThumbUpAltIcon fontSize="inherit" />
+          ) : (
+            <VisibilityOutlinedIcon fontSize="inherit" />
+          )
+        }
         onClose={(e) => {
           // The close button sits INSIDE the tappable Alert, so without this the
           // click bubbles to onOpenDetail and dismissing navigates the operator
@@ -154,7 +201,7 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
             }
           : { sx: { minHeight: 48 } })}
       >
-        {fresh === 1 ? '1 new view on your notes.' : `${fresh} new views on your notes.`}
+        {summarise(fresh.helpful, fresh.views)}
       </Alert>
     </Box>
   );

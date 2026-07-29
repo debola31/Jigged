@@ -15,7 +15,8 @@ import CircularProgress from '@mui/material/CircularProgress';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CloseIcon from '@mui/icons-material/Close';
-import { getPartPreviousNotes } from '@/utils/operatorAccess';
+import { getPartPreviousNotes, getCurrentMember } from '@/utils/operatorAccess';
+import NoteReactions from '@/components/operator/NoteReactions';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
 import NoteMediaGallery from '@/components/operator/NoteMediaGallery';
@@ -49,9 +50,13 @@ function formatTimestamp(value: string): string {
 function NoteRow({
   note,
   observe,
+  companyId,
+  memberId,
 }: {
   note: PartPreviousNote;
   observe: (id: string) => (el: HTMLElement | null) => void;
+  companyId: string;
+  memberId: string | null;
 }) {
   return (
     <Box>
@@ -73,6 +78,18 @@ function NoteRow({
         </Typography>
       )}
       <NoteMediaGallery media={note.media} />
+      {/* This is the surface reactions matter most on: knowledge from a previous
+          run, being read while doing the work. Auto-logged 'event' rows are audit
+          entries, not somebody's contribution — nothing to endorse. */}
+      {note.note_type === 'user' && (
+        <NoteReactions
+          companyId={companyId}
+          noteId={note.id}
+          authorId={note.author_id}
+          reactions={note.reactions}
+          memberId={memberId}
+        />
+      )}
     </Box>
   );
 }
@@ -114,6 +131,14 @@ export default function PartNotesSheet({
   // decision is made on data from the shop rather than on a plausible story.
   const [scope, setScope] = useState<Scope>('part');
   const [toggled, setToggled] = useState(false);
+
+  // Who is reading. Needed to know whether they have already marked a note
+  // helpful, and to hide the control on their own notes (RLS forbids reacting to
+  // them, so the button would be a guaranteed failure).
+  const { data: memberId } = useLoad(
+    async () => (open ? ((await getCurrentMember(companyId))?.id ?? null) : null),
+    [companyId, open],
+  );
 
   // THE surface the read-back loop exists to measure: knowledge from a previous
   // run, being read on a new one. excludeJobId is the job the operator is
@@ -210,7 +235,7 @@ export default function PartNotesSheet({
             {notes.map((note, idx) => (
               <Box key={note.id}>
                 {idx > 0 && <Divider sx={{ my: 1.5 }} />}
-                <NoteRow note={note} observe={observe} />
+                <NoteRow note={note} observe={observe} companyId={companyId} memberId={memberId} />
               </Box>
             ))}
           </Box>

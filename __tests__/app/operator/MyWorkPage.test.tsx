@@ -24,6 +24,7 @@ function note(over: Partial<MyNote> = {}): MyNote {
     job_id: 'job-1',
     job_number: 'J-0042',
     photo_count: 0,
+    reactions: [],
     viewer_count: 0,
     usage_count: 0,
     ...over,

@@ -171,10 +171,14 @@ see this", not "nobody can".
 
 ### What comes back to the author
 
-- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"N new views on your
-  notes"**. `my_note_view_digest()` returns a *running total* of views across the
-  caller's own notes (the sum of `viewer_count`, which is exactly the "views"
-  figure My work shows, so the two can never disagree). The component stores the
+- **Login banner** (`NoteUsageBanner`, on the jobs list) — **"2 people found your
+  notes helpful · 3 new views."** `my_note_digest()` returns *running totals* of
+  both across the caller's own notes: views (the sum of `viewer_count`, exactly
+  the figure My work shows, so the two can never disagree) and helpful marks.
+  **Helpful leads when present** — a view is someone needing to look something
+  up; a helpful is a colleague choosing to say it was worth reading. Only the
+  signals that actually moved are mentioned. `helpful` is **not** monotonic (a
+  mark can be taken back), so its delta is clamped at zero. The component stores the
   total it last acknowledged in `localStorage` and renders the **difference**, so
   it appears only when something has genuinely happened and goes quiet once seen —
   no nag on the many jobs-list visits in a shift. Both the ✕ and a tap-through
@@ -207,6 +211,52 @@ see this", not "nobody can".
 **The word is "views", never "uses".** All that is recorded is that someone opened
 a note and stayed on it. Whether they acted on it is not measured, and claiming it
 makes every number a small lie the author can personally disprove by asking.
+
+### Reactions (`helpful`)
+
+The **voluntary** half of the loop, and the deliberate opposite of view logging.
+A view is involuntary and private — a record that someone needed to look
+something up — which is why `note_views` has no client read path at any level. A
+reaction is a claim someone chose to make, so it is public inside the shop,
+carries the reactor's name, and is removable only by the person who made it
+(admins deliberately **cannot** delete someone else's: a boss who can curate the
+public record of what the shop found useful is worse than a stale reaction).
+
+Rendered by `NoteReactions` on three surfaces: the job feed, the previous-notes
+sheet (where prior knowledge is actually read, so the most important one), and
+**My work read-only** — RLS forbids reacting to your own note, so there
+endorsements are *reception*, the same category as the view count beside them.
+
+- **There is no thumbs down, and this is not a deferral.** `kind` is
+  CHECK-limited to `('helpful','confirmed')`, so there is no schema slot for a
+  negative. An inaccurate note is corrected (`corrects_note_id`) or superseded,
+  never publicly judged — nobody on a fifteen-person floor writes a second note
+  after being downvoted by a colleague they see every morning.
+- **`confirmed` has no UI.** It stays in the CHECK; nothing writes or renders it,
+  and the helpful count filters it out so a stray row cannot inflate anything.
+- **The control is hidden on your own notes.** The INSERT policy refuses
+  self-reaction, so rendering it there makes every tap a guaranteed `42501` that
+  reads as a broken button. This is why `part_playbook_notes` returns `author_id`
+  as well as `author_name` — matching on a display name breaks on two Daves.
+- **Optimistic with rollback.** On shop wifi a thumbs-up that waits for a round
+  trip before moving reads as broken. A failure rolls the button back and goes to
+  Sentry; there is no toast, because an operator mid-job does not need a dialog
+  about a thumbs-up.
+- **Count and names derive from the same array**, so they can never disagree —
+  which is why no denormalized reaction counter exists. That array must carry
+  `reactor_id`: without it a reader cannot be found in it, so the thumbs-up
+  renders un-pressed on a note they have already marked and a second tap just
+  re-inserts a duplicate. `part_playbook_notes` shipped without it and the bug
+  looked exactly like "likes are not persisting" — they were.
+- **No `operator_events` kind for reactions, deliberately.** `note_reactions`
+  already records who reacted, to what, and when; a parallel funnel event would
+  duplicate it and drift.
+
+**What this must never become: a per-person total.** Reactions are safe because
+they attach to a *note*. "Diego has 47 thumbs-ups" is a leaderboard and "Priya
+gave 3" is a participation score — both are the operator-comparative metrics this
+module refuses. Nothing sums them by person, including My work, which shows
+endorsements received *on a note*.
 
 ### Surveillance guardrail (non-negotiable)
 
@@ -356,6 +406,16 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a non-zero banner, **when** the operator taps it, **then** it navigates to My work AND banks the whole total; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
 - [ ] **Given** My work, **when** it renders with any data, **then** no completion count, streak, average, pace or rank appears anywhere on the page — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'shows no completion count, streak, average or pace'`*.
 - [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives and only the job link is absent — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
+
+**Reactions**
+
+- [ ] **Given** a colleague's note, **when** the operator taps Helpful, **then** the count moves immediately and the write follows — an optimistic toggle, because a thumbs-up that waits for shop wifi reads as broken — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a failed write, **when** it rejects, **then** the button rolls back rather than leaving a lie on screen, with no toast — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** the operator's OWN note, **when** it renders, **then** no control is offered — RLS forbids self-reaction, so the tap would be a guaranteed `42501` — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a `confirmed` row, **when** the card renders, **then** it is excluded from the helpful count and its reactor is not named — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** any note, **when** looking for a negative option, **then** none exists on screen or in the schema — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** a duplicate insert (two taps racing, or a second device), **when** the unique constraint fires, **then** it is treated as success — the end state is what the caller asked for — *verified by `__tests__/utils/operatorAccess.test.ts`*.
+- [ ] **Given** an un-react, **when** it is issued, **then** it is scoped to the caller's own row — *verified by `__tests__/utils/operatorAccess.test.ts`*.
 
 **Inventory (feature-gated by `inventory_locations`)**
 

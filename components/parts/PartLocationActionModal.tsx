@@ -19,6 +19,8 @@ import {
   adjustStockAtLocation,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
@@ -44,6 +46,8 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 interface PartLocationActionModalProps {
   open: boolean;
   action: LocationAction;
+  /** Needed to load the job list for the Remove job tag (issue #59). */
+  companyId: string;
   partId: string;
   primaryUnit: string;
   unitOptions: string[];
@@ -58,6 +62,7 @@ interface PartLocationActionModalProps {
 export default function PartLocationActionModal({
   open,
   action,
+  companyId,
   partId,
   primaryUnit,
   unitOptions,
@@ -76,7 +81,13 @@ export default function PartLocationActionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleEnter = () => {
+  // Optional job tag on a removal — issue #59. The operator path has always had this; the
+  // owner path lost it in the May parts unification.
+  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [job, setJob] = useState<JobWithRelations | null>(null);
+
+  const handleEnter = async () => {
     setLocation(null);
     // Only one place to move from → pick it; no source picker needed.
     setSourceLoc(action === 'move' && sourceBalances.length === 1 ? sourceBalances[0] : null);
@@ -85,6 +96,11 @@ export default function PartLocationActionModal({
     setUnit(primaryUnit);
     setNotes('');
     setError(null);
+    setJob(null);
+    if (action !== 'deplete') return;
+    setLoadingJobs(true);
+    setJobs(await loadTaggableJobs(companyId));
+    setLoadingJobs(false);
   };
 
   const qtyLabel = action === 'adjust' ? 'New quantity at location' : 'Quantity';
@@ -126,7 +142,10 @@ export default function PartLocationActionModal({
       if (action === 'add') {
         await addStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
       } else if (action === 'deplete') {
-        await depleteStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
+        await depleteStockAtLocation(partId, location!.id, qty, unit, {
+          notes: notes || undefined,
+          jobId: job?.id || undefined,
+        });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
       } else {
@@ -215,6 +234,11 @@ export default function PartLocationActionModal({
               ))}
             </TextField>
           </Stack>
+          {/* Removals only — an addition or a move isn't consumption, so a job tag on it
+              would mean nothing. Issue #59. */}
+          {action === 'deplete' && (
+            <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+          )}
           <TextField
             label="Notes (optional)"
             value={notes}

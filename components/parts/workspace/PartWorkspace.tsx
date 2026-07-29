@@ -431,6 +431,7 @@ export default function PartWorkspace({
         <PartTransactionModal
           open={txnModalOpen}
           onClose={() => setTxnModalOpen(false)}
+          companyId={companyId}
           part={part}
           unitConversions={unitConversions}
           defaultType={txnModalType}

@@ -17,6 +17,10 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   transferStock: vi.fn(),
 }));
 
+// The Remove action embeds JobTagPicker, which imports jobsAccess -> lib/supabase. Stubbed so
+// the module graph never evaluates a real Supabase client.
+vi.mock('@/utils/jobsAccess', () => ({ getAllJobs: vi.fn(async () => []) }));
+
 const ALL: LocationOption[] = [
   { id: 'l1', label: 'Left' },
   { id: 'l2', label: 'Right' },
@@ -28,6 +32,7 @@ const renderMove = (sourceBalances: LocationBalanceOption[]) =>
     <PartLocationActionModal
       open
       action="move"
+      companyId="co1"
       partId="p1"
       primaryUnit="ea"
       unitOptions={['ea']}

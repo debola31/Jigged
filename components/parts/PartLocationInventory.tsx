@@ -159,6 +159,7 @@ export default function PartLocationInventory({
         <PartLocationActionModal
           open={Boolean(action)}
           action={action}
+          companyId={companyId}
           partId={partId}
           primaryUnit={primaryUnit}
           unitOptions={unitOptions}

@@ -9,9 +9,7 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
-import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import {
@@ -19,18 +17,8 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
 } from '@/utils/inventoryLocationsAccess';
-import { getAllJobs } from '@/utils/jobsAccess';
-import type { JobWithRelations, ProductionStatus } from '@/types/job';
-
-// Active jobs an operator could be consuming material for.
-const ACTIVE_STATUSES: ProductionStatus[] = ['not_started', 'in_progress'];
-
-/** "Part A, Part B" — the job's parts, to disambiguate look-alike job numbers. */
-const jobPartsLabel = (j: JobWithRelations): string =>
-  (j.job_parts ?? [])
-    .map((jp) => jp.parts?.part_name)
-    .filter((n): n is string => Boolean(n))
-    .join(', ');
+import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import type { JobWithRelations } from '@/types/job';
 
 export type OperatorLocationAction = 'add' | 'deplete' | 'adjust';
 
@@ -106,13 +94,9 @@ export default function OperatorLocationActionModal({
     setJob(null);
     if (action !== 'deplete') return;
     setLoadingJobs(true);
-    try {
-      setJobs(await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES }));
-    } catch {
-      setJobs([]); // job tag is optional — never block the removal
-    } finally {
-      setLoadingJobs(false);
-    }
+    // loadTaggableJobs swallows failures — the tag is optional and must never block a removal.
+    setJobs(await loadTaggableJobs(companyId));
+    setLoadingJobs(false);
   };
 
   const qtyLabel = action === 'adjust' ? 'New quantity here' : 'Quantity';
@@ -193,32 +177,7 @@ export default function OperatorLocationActionModal({
             </Typography>
           )}
           {action === 'deplete' && (
-            <Autocomplete
-              options={jobs}
-              loading={loadingJobs}
-              value={job}
-              onChange={(_, v) => setJob(v)}
-              getOptionLabel={(j) => j.job_number}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
-              renderOption={(props, j) => {
-                const { key, ...rest } = props;
-                return (
-                  <Box component="li" key={key} {...rest}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                      <Typography variant="body2">{j.job_number}</Typography>
-                      {jobPartsLabel(j) && (
-                        <Typography variant="caption" color="text.secondary">
-                          {jobPartsLabel(j)}
-                        </Typography>
-                      )}
-                    </Box>
-                  </Box>
-                );
-              }}
-              renderInput={(params) => <TextField {...params} label="Tag to a job (optional)" />}
-              noOptionsText="No active jobs"
-              loadingText="Loading jobs…"
-            />
+            <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           )}
           <TextField
             label="Notes (optional)"

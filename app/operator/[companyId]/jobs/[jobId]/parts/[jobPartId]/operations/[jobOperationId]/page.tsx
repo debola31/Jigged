@@ -438,25 +438,18 @@ export default function OperatorOperationActionPage() {
 
           {/* INSTRUCTIONS ARE NOT BEHIND THE EXPANDER. "Torque to 40, not 45" is
               the most action-relevant thing on the screen, so hiding it would
-              invert the whole principle. It renders only when a shop has
-              actually written something. */}
+              invert the whole principle. It renders only when a shop has actually
+              written something.
+              No box and no "Instructions" label — that chrome cost more attention
+              than it earned. Hierarchy comes from WEIGHT instead: the description
+              above is dimmed and this is full-strength, so the actionable line is
+              the brighter one. Making the two visually identical would have been
+              the real risk — an operator would read this as more description and
+              skim past it. */}
           {job.operation_instructions && (
-            <Box
-              sx={{
-                mt: 1.5,
-                p: 1.5,
-                borderRadius: 1,
-                bgcolor: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <Typography variant="caption" color="text.secondary" display="block">
-                Instructions
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                {job.operation_instructions}
-              </Typography>
-            </Box>
+            <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+              {job.operation_instructions}
+            </Typography>
           )}
 
 
@@ -546,9 +539,10 @@ export default function OperatorOperationActionPage() {
         excludeJobId={jobId}
         jobOperationId={jobOperationId}
         // The quantity shares the reference row rather than taking a line of its
-        // own. Three controls on one line is what buys back the vertical space
-        // that used to require pinning the action to the bottom.
-        trailing={
+        // own, and LEADS it: it is the input for this screen's primary action,
+        // while Files and Playbook are reference. Three controls on one line is
+        // what buys back the vertical space that pinning used to provide.
+        leading={
           !isCompleted && !isExternal ? (
         <TextField
           label="Parts finished"
@@ -560,7 +554,10 @@ export default function OperatorOperationActionPage() {
           }}
           inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Parts finished' }}
           fullWidth
-          size="medium"
+          size="small"
+          // Matched to the 48px reference buttons beside it: a taller control
+          // reads as a different KIND of thing and pulls the eye for no reason.
+          sx={{ '& .MuiOutlinedInput-root': { minHeight: 48 } }}
           error={consequence.kind === 'over'}
           helperText={
             consequence.kind === 'none'

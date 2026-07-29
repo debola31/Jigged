@@ -22,12 +22,17 @@ interface PartReferenceRowProps {
   /** Present on the operation page → enables the notes "This step" filter. */
   jobOperationId?: string;
   /**
-   * Rendered on the SAME row, after the reference buttons, taking the remaining
-   * width. The operation page puts the quantity field here: three controls on one
-   * line instead of three lines, which is what keeps RECORD COMPLETION above the
-   * fold on a tall phone now that it is no longer pinned.
+   * Rendered FIRST on the same row, taking the remaining width. The operation page
+   * puts the quantity field here: three controls on one line instead of three
+   * lines, which is what keeps RECORD COMPLETION above the fold now that it is no
+   * longer pinned.
+   *
+   * It leads because it is the input for the screen's primary action, while Files
+   * and Playbook are reference. Those keep their counts, which is what actually
+   * advertises them — the original reason Files led was its count, not its
+   * position.
    */
-  trailing?: ReactNode;
+  leading?: ReactNode;
 }
 
 /**
@@ -47,7 +52,7 @@ export default function PartReferenceRow({
   partName,
   excludeJobId,
   jobOperationId,
-  trailing,
+  leading,
 }: PartReferenceRowProps) {
   const [filesOpen, setFilesOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -78,12 +83,16 @@ export default function PartReferenceRow({
         alignItems: 'flex-start',
         gap: 1,
         flexWrap: 'nowrap',
-        mb: trailing ? 1 : 3,
+        mb: leading ? 1 : 3,
       }}
     >
+      {/* Takes whatever width is left, so the field shrinks rather than wrapping
+          the buttons onto a second line. */}
+      {leading && <Box sx={{ flex: 1, minWidth: 0 }}>{leading}</Box>}
+
       {/* Both outlined so they read as one family (per the design system —
-          grouped actions share a variant). Files leads via bolder weight + a
-          count, not by being the only one with a border. */}
+          grouped actions share a variant). Files leads its pair via bolder weight
+          + a count, not by being the only one with a border. */}
       <Button
         variant="outlined"
         startIcon={<FolderOpenIcon />}
@@ -105,10 +114,6 @@ export default function PartReferenceRow({
       >
         {hasNotes ? `Playbook · ${noteCount}` : 'Playbook'}
       </Button>
-
-      {/* Takes whatever width is left, so the field shrinks rather than wrapping
-          the buttons onto a second line. */}
-      {trailing && <Box sx={{ flex: 1, minWidth: 0 }}>{trailing}</Box>}
 
       {filesOpen && (
         <PartFilesSheet

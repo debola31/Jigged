@@ -92,10 +92,10 @@ vi.mock('@/components/operator/JobFeed', () => ({
     />
   ),
 }));
-// Must render `trailing`: the quantity field now shares this row, so a mock that
+// Must render `leading`: the quantity field now shares this row, so a mock that
 // drops the slot silently removes the control every completion test drives.
 vi.mock('@/components/operator/PartReferenceRow', () => ({
-  default: ({ trailing }: { trailing?: React.ReactNode }) => <div>{trailing}</div>,
+  default: ({ leading }: { leading?: React.ReactNode }) => <div>{leading}</div>,
 }));
 
 // A station is selected and MATCHES the step, so the guard is out of the way

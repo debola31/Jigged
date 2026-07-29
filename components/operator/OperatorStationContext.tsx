@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { getStationOperationTypes, getStationName } from '@/utils/operatorAccess';
 import type { Station } from '@/types/operator';
 
@@ -10,7 +10,7 @@ import type { Station } from '@/types/operator';
 // default. We persist it in localStorage (NOT sessionStorage) so it survives a
 // backgrounded-tab eviction / browser restart — the shop-floor reality that had
 // operators landing on a job with the station picker stacked underneath it every
-// morning. A QR deep-link (?station=) always overrides the stored value.
+// morning.
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 
 const STORAGE_KEY = 'jigged_operator_station';
@@ -54,10 +54,10 @@ interface StationContextValue {
   /** Station-name / stations-list resolution (drives the picker spinner). */
   loading: boolean;
   /**
-   * True until the URL param + stored station have been read exactly once.
-   * Consumers must wait for this before deciding "no station is selected", or a
-   * returning operator flashes the station picker for one paint before the
-   * stored station hydrates.
+   * True until the stored station has been read exactly once. Consumers must
+   * wait for this before deciding "no station is selected", or a returning
+   * operator flashes the station picker for one paint before the stored station
+   * hydrates.
    */
   initializing: boolean;
 }
@@ -77,7 +77,6 @@ export function useStationContext() {
 
 export function OperatorStationProvider({ children }: { children: ReactNode }) {
   const params = useParams();
-  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
 
   const [stationId, setStationId] = useState<string | null>(null);
@@ -86,21 +85,14 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [initializing, setInitializing] = useState(true);
 
-  // Seed the station from the URL param (QR scan) or the stored default, exactly
-  // once on mount. Running once — not on every searchParams change — is
-  // deliberate: a QR deep-link is always a fresh mount, and re-running on
-  // unrelated param changes could re-seed a stale station. `initializing` flips
-  // false here so consumers know the "no station" decision is now trustworthy.
+  // Seed the station from the stored default, exactly once on mount (the effect
+  // has no reactive inputs — localStorage is read, not subscribed).
+  // `initializing` flips false here so consumers know the "no station" decision
+  // is now trustworthy.
   useEffect(() => {
-    const urlStation = searchParams.get('station');
-    const initialStation = urlStation || readStoredStation();
-    if (initialStation) {
-      setStationId(initialStation);
-      writeStoredStation(initialStation);
-    }
+    const storedStation = readStoredStation();
+    if (storedStation) setStationId(storedStation);
     setInitializing(false);
-    // Run once on mount — see comment above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch all stations for the company
@@ -145,8 +137,8 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
     resolveName();
   }, [stationId, stations]);
 
-  // One call site covers every route in: the station picker, the header
-  // dropdown, and a station-placard QR — they all land here.
+  // One call site covers every route in: the station picker and the header
+  // dropdown both land here.
   const setStation = useCallback(
     (id: string) => {
       setStationId(id);

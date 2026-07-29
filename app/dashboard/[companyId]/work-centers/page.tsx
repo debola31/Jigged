@@ -11,7 +11,6 @@ import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
@@ -22,7 +21,6 @@ import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -43,8 +41,6 @@ import {
   bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
 import { getAllVendors } from '@/utils/vendorsAccess';
-import { getCompany } from '@/utils/companyAccess';
-import { generateStationPlacards } from '@/utils/stationPlacardPdf';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
@@ -87,7 +83,6 @@ export default function WorkCentersPage() {
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
-  const [generatingPlacards, setGeneratingPlacards] = useState(false);
 
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -184,37 +179,6 @@ export default function WorkCentersPage() {
   };
 
   const handleBulkDeleteClick = () => setDeleteDialog({ open: true });
-
-  // Print one A4 station-QR placard per internal work center, in a single PDF,
-  // so a shop can deploy the whole floor in one pass (vs. one download per
-  // station on each detail page). Reuses the single-placard layout + scan URL.
-  const handlePrintPlacards = async () => {
-    if (rows.length === 0) return;
-    setGeneratingPlacards(true);
-    try {
-      const company = await getCompany(companyId);
-      const placards = rows.map((wc) => ({
-        id: wc.id,
-        name: wc.name,
-        code: typeof wc.metadata?.code === 'string' ? (wc.metadata.code as string) : null,
-      }));
-      const doc = await generateStationPlacards({
-        companyId,
-        baseUrl: window.location.origin,
-        placards,
-        companyName: company?.name,
-      });
-      doc.save('station-placards.pdf');
-    } catch (err) {
-      setSnackbar({
-        open: true,
-        message: err instanceof Error ? err.message : 'Failed to generate placards',
-        severity: 'error',
-      });
-    } finally {
-      setGeneratingPlacards(false);
-    }
-  };
 
   const handleDeleteConfirm = async () => {
     setDeleting(true);
@@ -367,23 +331,6 @@ export default function WorkCentersPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
-
-        {activeKind === 'internal' && (
-          <Button
-            variant="outlined"
-            startIcon={
-              generatingPlacards ? (
-                <CircularProgress size={16} color="inherit" />
-              ) : (
-                <QrCode2Icon />
-              )
-            }
-            onClick={handlePrintPlacards}
-            disabled={loading || generatingPlacards || rows.length === 0}
-          >
-            {generatingPlacards ? 'Generating...' : `Print Placards (${rows.length})`}
-          </Button>
-        )}
 
         <Button
           variant="outlined"

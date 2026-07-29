@@ -54,7 +54,7 @@ The list is split by kind into two **tabs** — **Internal** and **External** (t
 
 The external tab shows no Cost column; instead a caption above the grid reads "External work centers are priced per routing operation, not by an hourly rate." (There is no cross-kind Cost cell and no comparator pinning external rows — the two kinds never share a grid.)
 
-Search filters across name (300ms debounce). Default sort: name asc. Pagination: 25 / 50 / 100. Toolbar actions: bulk export CSV and bulk delete (shown once rows are selected), **Import**, and **New Work Center**. The internal tab additionally shows a **Print Placards ({count})** button that generates one A4 station-QR placard per internal work center in a single PDF (`generateStationPlacards`).
+Search filters across name (300ms debounce). Default sort: name asc. Pagination: 25 / 50 / 100. Toolbar actions: bulk export CSV and bulk delete (shown once rows are selected), **Import**, and **New Work Center**.
 
 ### Detail — `/dashboard/{companyId}/work-centers/{workCenterId}`
 
@@ -62,7 +62,8 @@ Sections:
 
 - **Header card** — name, kind chip (icon + text), "via {vendor}" link (external only).
 - **Details card** — labor rate (internal) **or** vendor link + "Pricing per routing operation" note (external); description; "Used in routing operations" count; created/updated timestamps.
-- **Station QR Code card** (internal only) — `StationQRCode` component. The scan URL is keyed off the work-center **id** (there is no station-code field: `StationQRCode`'s optional `operationCode` caption prop is left unset, so no code prints under the QR).
+
+There is no station-QR card. Posted station-QR placards (per-work-center download + a bulk **Print Placards** action on the list) were removed in July 2026: they were never deployed to a shop floor, and operators reach their station by signing into the operator view and picking it from the station selector — see [Operator View](operator-view.md#stations-work-centers).
 
 The **Delete** button archives the work center (sets `deleted_at`) and is **never disabled or blocked** — even when `routing_operations_count > 0`. The row survives the archive, so every referencing routing operation still resolves it; the work center just disappears from the list tabs and routing pickers (which filter `deleted_at IS NULL`). Reusing the name later revives it. (The `routing_operations_count` shown here still drives the **Kind-toggle lock in edit mode** — see Edit below — but no longer gates deletion.) See [architecture.md §16](../architecture.md) for the universal archive (soft-delete) policy.
 
@@ -121,7 +122,6 @@ The only editable entity in this module is the **work center** (`name`, `kind`, 
 - [ ] **Given** the Internal / External tabs, **when** the user switches tabs, **then** the grid re-queries that kind, shows kind-specific columns (Internal → Cost; External → Vendor), clears the search box, and clears the selection — *manual: toggle the two tabs on `/dashboard/{companyId}/work-centers` and confirm columns + cleared search/selection (UI in `app/dashboard/[companyId]/work-centers/page.tsx`; automation-pending)*.
 - [ ] **Given** a non-empty search term, **when** the list queries, **then** a `name.ilike.%term%` filter is applied, and a whitespace-only term applies no filter — *the name-ilike / whitespace behavior is currently tested only on the soon-pruned `getAllWorkCenters` (see #550); search coverage for the live per-kind query is automation-pending*.
 - [ ] **Given** the External tab, **when** it renders, **then** no Cost column appears and a caption states external work centers are priced per routing operation — *manual: open the External tab and confirm the caption + absence of a Cost column (automation-pending)*.
-- [ ] **Given** the Internal tab, **when** the user clicks **Print Placards**, **then** a single PDF with one A4 station-QR placard per internal work center downloads — *manual: click Print Placards on the Internal tab (calls `generateStationPlacards`); automation-pending*.
 
 **Create**
 

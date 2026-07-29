@@ -23,15 +23,14 @@ import { getCompany } from '@/utils/companyAccess';
 /**
  * Operator Login Page.
  *
- * Mobile-first email/password login using Supabase Auth.
- * Reads the station (work center id) from the ?station= URL query param.
+ * Mobile-first email/password login using Supabase Auth. The station is chosen
+ * in-app after login (header dropdown / StationSelector), not via the URL.
  */
 export default function OperatorLoginPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
-  const stationId = searchParams.get('station') || undefined;
   const jobId = searchParams.get('job') || undefined;
   const partId = searchParams.get('part') || undefined;
   const operationId = searchParams.get('operation') || undefined;
@@ -85,11 +84,6 @@ export default function OperatorLoginPage() {
           .single();
 
         if (operatorAccess) {
-          // Persist station from QR code to sessionStorage for the context to pick up
-          if (stationId && typeof window !== 'undefined') {
-            sessionStorage.setItem('jigged_operator_station', stationId);
-          }
-
           router.push(postLoginPath());
           return;
         }
@@ -100,7 +94,7 @@ export default function OperatorLoginPage() {
 
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, router, stationId, jobId, partId, operationId, locationId, supabase]);
+  }, [companyId, router, jobId, partId, operationId, locationId, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,12 +147,7 @@ export default function OperatorLoginPage() {
 
       // Note: Supabase auth automatically tracks last_sign_in_at
 
-      // 4. Persist station to sessionStorage for station context
-      if (stationId && typeof window !== 'undefined') {
-        sessionStorage.setItem('jigged_operator_station', stationId);
-      }
-
-      // 5. Redirect to wherever the scanned QR points (per-operation step,
+      // 4. Redirect to wherever the scanned QR points (per-operation step,
       // per-part traveler, per-job parts hub, or the jobs list).
       router.push(postLoginPath());
     } catch (err) {
@@ -300,14 +289,9 @@ export default function OperatorLoginPage() {
           </Button>
         </Box>
 
-        {/* Station / Job Info */}
-        {stationId && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
-            Station: {stationId.slice(0, 8)}...
-          </Typography>
-        )}
+        {/* Job Info */}
         {jobId && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: stationId ? 1 : 3, display: 'block' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
             Job: {jobId.slice(0, 8)}...
           </Typography>
         )}

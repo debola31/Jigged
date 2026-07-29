@@ -249,10 +249,10 @@ export default function OperatorOperationActionPage() {
   }
 
   // No station selected yet — show ONLY a focused picker, never stacked beneath
-  // the job card. Reaching this with a job loaded means neither the QR (?station=)
-  // nor the stored default supplied a station — e.g. a returning operator whose
-  // tab was evicted overnight. Gated on `initializing` above so it can't flash
-  // for an operator who does have a stored station.
+  // the job card. Reaching this with a job loaded means the stored default
+  // supplied no station — e.g. a first-time operator, or one who cleared it on
+  // logout. Gated on `initializing` above so it can't flash for an operator who
+  // does have a stored station.
   // Outside ops have no operator station (they run at a vendor), so they never
   // require a selected station and never trigger the station-match guard.
   if (!isCompleted && !isExternal && !stationId) {
@@ -260,9 +260,10 @@ export default function OperatorOperationActionPage() {
   }
 
   // Station guard: a step whose work center differs from the operator's selected
-  // station is the likely signature of a wrong QR scan. (Can't catch a mis-scan
-  // between two steps sharing one work center — the on-screen step name + Undo
-  // are the backstop there.)
+  // station is the likely signature of a wrong traveler-QR scan, or of an
+  // operator who never switched stations. (Can't catch a mis-scan between two
+  // steps sharing one work center — the on-screen step name + Undo are the
+  // backstop there.)
   const stationMismatch =
     !isCompleted &&
     !isExternal &&

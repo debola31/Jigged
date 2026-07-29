@@ -11,27 +11,34 @@ import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
+import Autocomplete from '@mui/material/Autocomplete';
 
 import {
   addStockAtLocation,
   depleteStockAtLocation,
   adjustStockAtLocation,
+  transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import type { JobWithRelations } from '@/types/job';
 
-export type OperatorLocationAction = 'add' | 'deplete' | 'adjust';
+export type OperatorLocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
+// Same verbs as the admin part page. This surface used to say "Set" where that one says
+// "Adjust" — one action, two names, learned twice.
 const TITLES: Record<OperatorLocationAction, string> = {
   add: 'Add stock',
   deplete: 'Remove stock',
-  adjust: 'Set stock (cycle count)',
+  adjust: 'Adjust stock (cycle count)',
+  move: 'Move stock to another location',
 };
 
 const CONFIRM: Record<OperatorLocationAction, string> = {
   add: 'Add',
   deplete: 'Remove',
-  adjust: 'Set',
+  adjust: 'Adjust',
+  move: 'Move',
 };
 
 interface OperatorLocationActionModalProps {
@@ -46,6 +53,8 @@ interface OperatorLocationActionModalProps {
   unitOptions: string[];
   locationId: string;
   locationName: string;
+  /** Where a Move can go. Loaded by the parent; empty for the other actions. */
+  moveDestinations?: Array<{ id: string; label: string }>;
   /** user_company_access.id of the signed-in operator (for the ledger). */
   operatorId: string | null;
   onClose: () => void;
@@ -70,6 +79,7 @@ export default function OperatorLocationActionModal({
   unitOptions,
   locationId,
   locationName,
+  moveDestinations = [],
   operatorId,
   onClose,
   onDone,
@@ -85,6 +95,7 @@ export default function OperatorLocationActionModal({
   const [jobs, setJobs] = useState<JobWithRelations[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
+  const [destination, setDestination] = useState<{ id: string; label: string } | null>(null);
 
   const handleEnter = async () => {
     setQuantity('');
@@ -92,6 +103,7 @@ export default function OperatorLocationActionModal({
     setNotes('');
     setError(null);
     setJob(null);
+    setDestination(null);
     if (action !== 'deplete') return;
     setLoadingJobs(true);
     // loadTaggableJobs swallows failures — the tag is optional and must never block a removal.
@@ -107,6 +119,10 @@ export default function OperatorLocationActionModal({
       setError(action === 'adjust' ? 'Quantity cannot be negative.' : 'Quantity must be positive.');
       return;
     }
+    if (action === 'move' && !destination) {
+      setError('Choose where it\'s going.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -119,13 +135,17 @@ export default function OperatorLocationActionModal({
           operatorId: operatorId || undefined,
           jobId: job?.id || undefined, // tie to the job, not an operation
         });
-      } else {
+      } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, locationId, qty, unit, notes || undefined);
+      } else {
+        await transferStock(partId, locationId, destination!.id, qty, unit, notes || undefined);
       }
       await onDone();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update stock.');
+      // Supabase errors are plain objects, not Error instances — `instanceof` would drop the
+      // reason the database gave us.
+      setError(friendlyErrorMessage(e, { entity: 'stock', fallback: 'Failed to update stock.' }));
     } finally {
       setSaving(false);
     }
@@ -175,6 +195,17 @@ export default function OperatorLocationActionModal({
               Removing more than is here records the shortfall and sets the count to zero — it
               won&apos;t block you.
             </Typography>
+          )}
+          {action === 'move' && (
+            <Autocomplete
+              options={moveDestinations}
+              value={destination}
+              onChange={(_, v) => setDestination(v)}
+              getOptionLabel={(o) => o.label}
+              isOptionEqualToValue={(o, v) => o.id === v.id}
+              renderInput={(params) => <TextField {...params} label="Move to" required />}
+              noOptionsText="No other locations"
+            />
           )}
           {action === 'deplete' && (
             <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />

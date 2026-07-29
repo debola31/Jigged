@@ -55,6 +55,8 @@ import {
   transferStock,
   enableLocationTracking,
   disableLocationTracking,
+  getLocationOccupancy,
+  getLocationBoard,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
@@ -380,5 +382,77 @@ describe('duplicateLocation', () => {
     expect(binInsert.insert).toHaveBeenCalledWith(
       expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1', code: 'C02-B01' }),
     );
+  });
+});
+
+/**
+ * The board's read budget.
+ *
+ * A storage board is exactly the shape that becomes an N+1 — loop the tree, ask each location
+ * what's in it. This pins that it does not: two requests, whatever the tree size. A comment
+ * saying "don't N+1 this" is not a guarantee; counting `.from()` calls is.
+ */
+describe('getLocationBoard — request budget', () => {
+  const manyLocations = Array.from({ length: 40 }, (_, i) => loc({ id: `l${i}` }));
+  const manyOccupied = Array.from({ length: 40 }, (_, i) => ({
+    location_id: `l${i}`,
+    part_count: i + 1,
+  }));
+
+  it('reads locations and occupancy in exactly two requests', async () => {
+    state.fromQueue = [
+      { data: manyLocations, error: null },
+      { data: manyOccupied, error: null },
+    ];
+
+    const board = await getLocationBoard('co1');
+
+    expect(mockSupabase.from).toHaveBeenCalledTimes(2);
+    expect(mockSupabase.from.mock.calls.map((c) => c[0])).toEqual([
+      'inventory_locations',
+      'inventory_location_occupancy',
+    ]);
+    expect(board.locations).toHaveLength(40);
+    expect(board.directPartCounts.get('l39')).toBe(40);
+  });
+
+  it('holds that budget as the tree grows', async () => {
+    state.fromQueue = [
+      { data: Array.from({ length: 400 }, (_, i) => loc({ id: `l${i}` })), error: null },
+      { data: manyOccupied, error: null },
+    ];
+    await getLocationBoard('co1');
+    expect(mockSupabase.from).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('getLocationOccupancy', () => {
+  it('returns a map of only the occupied locations', async () => {
+    state.fromQueue = [{
+      data: [{ location_id: 'shelf-a', part_count: 2 }, { location_id: 'yard', part_count: 1 }],
+      error: null,
+    }];
+
+    const map = await getLocationOccupancy('co1');
+
+    expect([...map.entries()].sort()).toEqual([['shelf-a', 2], ['yard', 1]]);
+    // Absent = empty. Callers go through occupancyFor rather than reading this directly.
+    expect(map.has('cabinet')).toBe(false);
+  });
+
+  // The generated type marks view columns nullable; a null key would poison the map.
+  it('skips a row with no location id rather than keying on null', async () => {
+    state.fromQueue = [{
+      data: [{ location_id: null, part_count: 9 }, { location_id: 'shelf-a', part_count: 2 }],
+      error: null,
+    }];
+    const map = await getLocationOccupancy('co1');
+    expect(map.size).toBe(1);
+    expect(map.get('shelf-a')).toBe(2);
+  });
+
+  it('propagates a read failure instead of silently reporting an empty warehouse', async () => {
+    state.fromQueue = [{ data: null, error: { message: 'boom' } }];
+    await expect(getLocationOccupancy('co1')).rejects.toBeTruthy();
   });
 });

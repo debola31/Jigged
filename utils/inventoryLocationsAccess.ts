@@ -40,6 +40,64 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 // ===========================================================================
+// Occupancy — "is there anything in this bin?"
+// ===========================================================================
+
+/**
+ * Distinct live parts held DIRECTLY at each location, keyed by location id.
+ *
+ * Reads the `inventory_location_occupancy` view rather than counting
+ * `part_location_stock` client-side. That is not an optimisation: PostgREST caps responses at
+ * `max_rows` (1000 locally), and every stocked part gets an Unassigned balance row from
+ * `trg_auto_track_stocked_part` — so a flat read on a few-thousand-part shop would **silently
+ * truncate** and render wrong fill state with no error. The view returns one row per occupied
+ * location instead.
+ *
+ * **Occupied locations only.** An absent key means empty; go through
+ * `occupancyFor` in `utils/locationOccupancy.ts` rather than reading the map directly.
+ */
+export async function getLocationOccupancy(companyId: string): Promise<Map<string, number>> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('inventory_location_occupancy')
+    .select('location_id, part_count')
+    .eq('company_id', companyId);
+
+  if (error) {
+    console.error('Error fetching location occupancy:', error);
+    throw error;
+  }
+
+  const out = new Map<string, number>();
+  for (const row of data ?? []) {
+    if (row.location_id === null) continue; // view columns are nullable in the generated type
+    out.set(row.location_id, Number(row.part_count) || 0);
+  }
+  return out;
+}
+
+export interface LocationBoardData {
+  locations: InventoryLocation[];
+  /** Direct counts only — roll up with `rollUpOccupancy` before rendering. */
+  directPartCounts: ReadonlyMap<string, number>;
+}
+
+/**
+ * Everything the storage board needs, in **exactly two requests** whatever the tree size.
+ *
+ * Deliberately one function rather than two calls at the call site: it gives the manager a
+ * single `useLoad` and gives the test a single thing to pin. A board that grew a request per
+ * location would be the N+1 this shape exists to prevent — see the request-count test.
+ */
+export async function getLocationBoard(companyId: string): Promise<LocationBoardData> {
+  const [locations, directPartCounts] = await Promise.all([
+    getLocations(companyId),
+    getLocationOccupancy(companyId),
+  ]);
+  return { locations, directPartCounts };
+}
+
+// ===========================================================================
 // Tree CRUD
 // ===========================================================================
 

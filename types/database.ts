@@ -3250,7 +3250,29 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      inventory_location_occupancy: {
+        Row: {
+          company_id: string | null
+          location_id: string | null
+          part_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       _migrate_legacy_shipment_for_job: {

@@ -7,7 +7,7 @@
  * scheme is shared with bulkGenerateChildren so the visual and manual builders
  * agree. Every location can hold stock and be printed — no per-node flags.
  */
-import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
+import type { BoardNode, LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
 /** Zero-pad a 1-based index to a uniform width (warehouse naming discipline). */
 export function pad(n: number, width: number): string {
@@ -222,4 +222,21 @@ export function duplicateSubtreeAsSibling(
   const siblings = existingSiblingNames.map((name) => ({ ...rootNode, name, children: [] }));
   const name = nextSiblingName(siblings, rootNode);
   return cloneSubtree(rootNode, parentCode, name);
+}
+
+/**
+ * Adapt an unsaved spec tree for the shared board drawing.
+ *
+ * A spec node has a client-only `key` and no database id; the board chrome only ever uses the
+ * identifier to key React children, so the key stands in. Nothing downstream may treat a
+ * `BoardNode.id` from this function as a real location id.
+ */
+export function specToBoard(nodes: LocationSpecNode[]): BoardNode[] {
+  return nodes.map((n) => ({
+    id: n.key,
+    name: n.name,
+    kind: n.kind,
+    code: n.code,
+    children: specToBoard(n.children),
+  }));
 }

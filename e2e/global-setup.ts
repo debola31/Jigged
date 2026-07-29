@@ -334,7 +334,7 @@ async function ensureRouting(
   companyId: string,
   partId: string,
   workCenterId: string,
-): Promise<void> {
+): Promise<string> {
   const { data: existing, error: lookupErr } = await supabase
     .from('routings')
     .select('id')
@@ -367,7 +367,7 @@ async function ensureRouting(
     .eq('sequence', 10)
     .maybeSingle();
   if (opLookupErr) throw new Error(`routing op lookup failed: ${opLookupErr.message}`);
-  if (existingOp) return;
+  if (existingOp) return routingId;
 
   const { error: opErr } = await supabase.from('routing_operations').insert({
     routing_id: routingId,
@@ -378,6 +378,7 @@ async function ensureRouting(
     labor_rate_override: 100,
   });
   if (opErr) throw new Error(`routing op insert failed: ${opErr.message}`);
+  return routingId;
 }
 
 async function ensurePricingTier(
@@ -435,6 +436,15 @@ interface JobStageSpec {
   jobNumber: string;
   productionStatus: 'not_started' | 'in_progress' | 'completed' | 'cancelled';
   fulfillmentStatus: 'unshipped' | 'partially_shipped' | 'fully_shipped';
+  /**
+   * Order quantity on the job_part. Defaults to 1.
+   *
+   * operator-completion.spec.ts needs > 1 on the job it drives: recording the
+   * whole remaining balance is a FULL completion, so with a quantity of 1 a
+   * PARTIAL is not expressible at all and that half of the flow cannot be
+   * covered.
+   */
+  quantity?: number;
 }
 
 /**
@@ -529,6 +539,7 @@ async function ensureJobAtStage(
   companyId: string,
   customerId: string,
   partId: string,
+  routingId: string,
   spec: JobStageSpec,
 ): Promise<void> {
   const { data: existing, error: lookupErr } = await supabase
@@ -538,7 +549,16 @@ async function ensureJobAtStage(
     .eq('job_number', spec.jobNumber)
     .maybeSingle();
   if (lookupErr) throw new Error(`job lookup failed (${spec.jobNumber}): ${lookupErr.message}`);
-  if (existing) return;
+
+  if (existing) {
+    // The job is already here, but a run seeded before this function created
+    // job_operations would have left it with no steps — and a job_part with no
+    // steps renders "This part has no operations", so there is nothing to open
+    // and nothing to complete. Ensure the step separately rather than returning:
+    // every other seeder in this file is find-or-insert, and this one was not.
+    await ensureJobOperation(supabase, existing.id, routingId, spec);
+    return;
+  }
 
   const { data: job, error: jobErr } = await supabase
     .from('jobs')
@@ -558,13 +578,74 @@ async function ensureJobAtStage(
     company_id: companyId,
     part_id: partId,
     sequence: 1,
-    quantity: 1,
+    quantity: spec.quantity ?? 1,
     unit_price: 10,
-    total_price: 10,
+    total_price: 10 * (spec.quantity ?? 1),
     production_status: spec.productionStatus,
     fulfillment_status: spec.fulfillmentStatus,
   });
   if (partErr) throw new Error(`job_part insert failed (${spec.jobNumber}): ${partErr.message}`);
+
+  await ensureJobOperation(supabase, job.id, routingId, spec);
+}
+
+/**
+ * The step an operator actually opens and completes.
+ *
+ * These jobs are inserted directly rather than converted from a quote, and it is
+ * conversion that normally snapshots routing_operations into job_operations — so
+ * without this a job_part has no steps, the traveler renders "This part has no
+ * operations", and there is nothing to complete.
+ *
+ * Carries routing_operation_id so a note captured on this step gets the DURABLE
+ * (part, routing step) subject rather than falling back to a job subject.
+ */
+async function ensureJobOperation(
+  supabase: SupabaseClient,
+  jobId: string,
+  routingId: string,
+  spec: JobStageSpec,
+): Promise<void> {
+  const { data: existingOp, error: opLookupErr } = await supabase
+    .from('job_operations')
+    .select('id')
+    .eq('job_id', jobId)
+    .maybeSingle();
+  if (opLookupErr) {
+    throw new Error(`job_operation lookup failed (${spec.jobNumber}): ${opLookupErr.message}`);
+  }
+  if (existingOp) return;
+
+  const { data: jobPart, error: jpErr } = await supabase
+    .from('job_parts')
+    .select('id')
+    .eq('job_id', jobId)
+    .single();
+  if (jpErr || !jobPart) {
+    throw new Error(`job_part lookup failed (${spec.jobNumber}): ${jpErr?.message}`);
+  }
+
+  const { data: routingOp } = await supabase
+    .from('routing_operations')
+    .select('id, work_center_id')
+    .eq('routing_id', routingId)
+    .eq('sequence', 10)
+    .maybeSingle();
+
+  const { error: opErr } = await supabase.from('job_operations').insert({
+    job_id: jobId,
+    job_part_id: jobPart.id,
+    // No company_id here: job_operations has none, tenancy resolves through the job.
+    sequence: 10,
+    operation_name: WC_INTERNAL_NAME,
+    work_center_id: routingOp?.work_center_id ?? null,
+    routing_operation_id: routingOp?.id ?? null,
+    estimated_setup_minutes: 15,
+    estimated_run_minutes_per_unit: 2.5,
+    // Mirrors the job: a completed job's step must not read as outstanding.
+    status: spec.productionStatus === 'completed' ? 'completed' : 'pending',
+  });
+  if (opErr) throw new Error(`job_operation insert failed (${spec.jobNumber}): ${opErr.message}`);
 }
 
 export default async function globalSetup(): Promise<void> {
@@ -630,7 +711,7 @@ export default async function globalSetup(): Promise<void> {
     cost_per_unit: null,
   });
 
-  await ensureRouting(supabase, companyId, mfgPartId, wcInternalId);
+  const mfgRoutingId = await ensureRouting(supabase, companyId, mfgPartId, wcInternalId);
   await ensureRouting(supabase, companyId, lengthPartId, wcInternalId);
   await ensureBomEdge(supabase, mfgPartId, subPartId);
   // Two pricing tiers so QuoteForm can resolve a tier on the seeded MFG part.
@@ -643,22 +724,26 @@ export default async function globalSetup(): Promise<void> {
   // Jobs at distinct lifecycle stages for jobs-list-status.spec.ts. Shared
   // "E2E-JS-" job-number prefix so the spec can isolate them by search from
   // whatever jobs other specs create in the same shared company.
-  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, mfgRoutingId, {
     jobNumber: 'E2E-JS-NOTSTARTED',
     productionStatus: 'not_started',
     fulfillmentStatus: 'unshipped',
+    // > 1 so operator-completion.spec.ts can record a PARTIAL. Safe to change:
+    // no spec asserts this quantity — the status specs assert statuses, and the
+    // notes spec asserts note bodies.
+    quantity: 5,
   });
-  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, mfgRoutingId, {
     jobNumber: 'E2E-JS-READY',
     productionStatus: 'completed',
     fulfillmentStatus: 'unshipped',
   });
-  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, mfgRoutingId, {
     jobNumber: 'E2E-JS-DONE',
     productionStatus: 'completed',
     fulfillmentStatus: 'fully_shipped',
   });
-  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, {
+  await ensureJobAtStage(supabase, companyId, customerId, mfgPartId, mfgRoutingId, {
     jobNumber: 'E2E-JS-CANCELLED',
     productionStatus: 'cancelled',
     fulfillmentStatus: 'unshipped',

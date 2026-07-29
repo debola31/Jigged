@@ -207,12 +207,21 @@ only sanctioned exceptions:
   module red spent the danger signal on a routine act — the same way an alert that fires on
   every row stops being an alert.
 
-  **Which one is `contained` is decided by frequency, per surface.** Not by the verb:
+  **Order is fixed; weight varies.** The four always appear in the same sequence —
+  **Add, Remove, Move, Adjust** — on every surface. Which one is `contained` is decided by
+  frequency, per surface, and is *not* a property of the verb:
 
   | Surface | Primary | Why |
   |---|---|---|
   | Operator bin view | **Remove** | Stock arrives in bulk once (really receiving's job, J6) and leaves in small amounts on every job, all shift |
   | Admin part page | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it |
+
+  **Do not reorder to emphasise.** Consistency governs *recognition* — where a control is, what
+  it's called, what it does — and those must not move. Emphasis governs *intent*, which is
+  legitimately different for an operator at a shelf and an owner at a desk. Splitting the two
+  serves both users: stable position is what a daily user's hand learns, and the filled button
+  is what a first-timer's eye finds. Moving the control to emphasise it would break the first
+  to serve the second.
 
   Red still means destructive on these pages: the part's Delete (archive) affordance.
 - **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically

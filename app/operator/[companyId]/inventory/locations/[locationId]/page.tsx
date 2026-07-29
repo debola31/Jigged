@@ -231,20 +231,14 @@ export default function OperatorBinViewPage() {
                     </Typography>
                   </Box>
                   {/* Same four verbs, same words, as the admin part page.
-                      REMOVE is the primary here, not Add. Stock arrives in bulk once at
-                      put-away — which is really receiving's job (J6), an admin task — and
-                      leaves in small amounts on every job, all shift. Emphasising Add put the
-                      weight on the rare end. None of the four is red: they are all reversible
-                      bookkeeping on one number, and red is reserved for destructive. */}
+                      ORDER is fixed across both surfaces — Add, Remove, Move, Adjust — so a
+                      control is always in the same place. WEIGHT is what varies: Remove is the
+                      primary here (stock arrives in bulk once, and put-away is really
+                      receiving's job; it leaves in small amounts every job, all shift), while
+                      the admin page emphasises Add. Position serves the operator who knows
+                      where to reach; fill serves the one who doesn't yet.
+                      None of the four is red — reversible bookkeeping, not destruction. */}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
-                    <Button
-                      variant="contained"
-                      startIcon={<RemoveIcon />}
-                      onClick={() => setModal({ action: 'deplete', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Remove
-                    </Button>
                     <Button
                       variant="outlined"
                       startIcon={<AddIcon />}
@@ -252,6 +246,14 @@ export default function OperatorBinViewPage() {
                       sx={{ flex: 1, minWidth: 120 }}
                     >
                       Add
+                    </Button>
+                    <Button
+                      variant="contained"
+                      startIcon={<RemoveIcon />}
+                      onClick={() => setModal({ action: 'deplete', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
+                    >
+                      Remove
                     </Button>
                     <Button
                       variant="outlined"

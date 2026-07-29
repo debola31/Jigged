@@ -1464,8 +1464,16 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
 - [x] **Given** a counted line, **then** it routes to `adjustPartStock` or
   `adjustStockAtLocation` per its target, and never writes `parts.quantity` for a tracked part
   — *verified by `__tests__/utils/inventoryCountAccess.test.ts > 'commitCount routing'`*.
-- [x] **Given** entering Review, **then** system quantities are re-read and anything that moved
-  is flagged — *verified by `__tests__/components/inventory/InventoryCountPage.test.tsx`*.
+- [x] **Given** pressing Save, **then** quantities are re-read first and anything that moved is
+  named in the confirmation message — *verified by
+  `__tests__/components/inventory/InventoryCountPage.test.tsx`*. (Was "entering Review"; there
+  is no Review step, and the re-read is now for the ledger note's accuracy rather than a gate.)
+- [x] **Given** the `inventory_locations` flag is ON, **then** a count writes to the part's own
+  bin rather than defaulting to Unassigned — *verified live against the local stack, 2026-07-28:
+  `BUY-BEARING-608ZZ` 580→575 landed on **Shelf A**, `RAW-STEEL-BLANK` 180→178 on **Yard**,
+  `ASM-GEARBOX` 0→4 on **Unassigned**, each ledger row carrying its `location_id`;
+  `BUY-ORING-214` (split 828/552) stayed excluded and untouched; zero rollup mismatches
+  company-wide.* This branch had been unit-tested only until the seed enabled the flag.
 - [x] **Given** an uncounted line, **then** its balance is left untouched — *verified by
   `__tests__/lib/inventoryCountPlan.test.ts > 'buildVariances'`*.
 - [x] **Given** an unfinished sheet, **then** it can be resumed, and a draft from another

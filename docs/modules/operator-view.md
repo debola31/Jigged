@@ -172,8 +172,14 @@ see this", not "nobody can".
 - **Login banner** (`NoteUsageBanner`, on the jobs list) — "N people viewed your
   notes this week", from `my_note_view_digest` with the **browser's own timezone**
   so the week boundary is the shop's, not UTC. Renders `null` at zero (a weekly
-  "nobody cares" is worse than silence). Dismissal key carries the ISO week, so it
-  returns next week. Taps through to My work.
+  "nobody cares" is worse than silence). Taps through to My work.
+  **Dismissing acknowledges the number, not the week** — localStorage holds
+  `{week, count}` and the banner returns as soon as the count grows past it. A
+  plain week-dismissal silently swallowed the best news of the week: the count
+  climbs, so dismissing at "1 person" on Monday hid Friday's "6". Storing the
+  count rather than a "last opened" timestamp is deliberate — a stored instant
+  would have to be sent back as a query window, and a caller-supplied window is a
+  bisection oracle for *when* a note was read.
 - **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then each
   note with its view count, the job it was written on beside the date, and on tap
   the named viewers plus an **Open J-NNNN** link back to the source.

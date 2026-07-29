@@ -31,12 +31,35 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
  *   boundary. "This week" has to mean the shop's week — a UTC cutoff would flip
  *   mid-shift for a US shop and make Monday morning's banner cover Sunday night.
  *
- * DISMISSAL IS PER WEEK
- *   Permanent dismissal would kill the loop after one tap. The key carries the
- *   ISO week, so dismissing this week's banner leaves next week's intact.
+ * DISMISSAL ACKNOWLEDGES A NUMBER, NOT THE WEEK
+ *   Permanent dismissal would kill the loop after one tap, so what gets stored
+ *   is the count the operator has already seen. The banner returns as soon as
+ *   the number GROWS past it.
+ *
+ *   The earlier version stored only the week, which had a suppression bug worth
+ *   remembering: the count climbs all week, so someone who found the repetition
+ *   annoying on Monday and dismissed at "1 person" would never see Friday's
+ *   "6 people" — the largest and most motivating number of the week, silently
+ *   swallowed. The nag and the reward were the same object, so killing one
+ *   killed the other.
+ *
+ *   Storing the COUNT rather than a timestamp is deliberate. A stored "last
+ *   opened" instant would have to be sent back as a query window, and a
+ *   caller-supplied window is a bisection oracle — narrow it repeatedly and you
+ *   recover WHEN someone read your note, which combined with note_viewers()
+ *   naming them reconstructs "Kurtis had to look this up on Tuesday". The count
+ *   is a number the server already told us; sending nothing back keeps the RPC's
+ *   single server-computed boundary intact.
  */
 
-const DISMISS_KEY = 'jigged:note-usage-banner-dismissed';
+// New key (not the old …-dismissed) so a stored week-string from a preview build
+// is simply ignored rather than needing a parse fallback.
+const SEEN_KEY = 'jigged:note-usage-banner-seen';
+
+interface Seen {
+  week: string;
+  count: number;
+}
 
 /** ISO-8601 week key (YYYY-Www) in the viewer's own timezone. */
 function isoWeekKey(d: Date): string {
@@ -48,19 +71,26 @@ function isoWeekKey(d: Date): string {
   return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-function readDismissed(): string | null {
-  if (typeof window === 'undefined') return null;
+/** The count already acknowledged this week; 0 if none, or on any bad/absent value. */
+function readSeenCount(weekKey: string): number {
+  if (typeof window === 'undefined') return 0;
   try {
-    return window.localStorage.getItem(DISMISS_KEY);
+    const raw = window.localStorage.getItem(SEEN_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as Partial<Seen>;
+    if (parsed?.week !== weekKey || typeof parsed.count !== 'number') return 0;
+    return parsed.count;
   } catch {
-    return null; // private mode / quota — the banner is best-effort
+    // Private mode, quota, or a hand-mangled value. Showing the banner is the
+    // safe failure: the loop survives, at worst one extra impression.
+    return 0;
   }
 }
 
-function writeDismissed(weekKey: string): void {
+function writeSeenCount(weekKey: string, count: number): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(DISMISS_KEY, weekKey);
+    window.localStorage.setItem(SEEN_KEY, JSON.stringify({ week: weekKey, count } satisfies Seen));
   } catch {
     /* ignore */
   }
@@ -74,7 +104,15 @@ interface NoteUsageBannerProps {
 
 export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBannerProps) {
   const weekKey = isoWeekKey(new Date());
-  const [dismissed, setDismissed] = useState(() => readDismissed() === weekKey);
+  const [seenCount, setSeenCount] = useState(() => readSeenCount(weekKey));
+
+  // Both the ✕ and a tap-through count as "I have seen this number". Tapping
+  // through especially: coming back from My work to the same banner you just
+  // acted on reads as if nothing happened.
+  const acknowledge = (n: number) => {
+    writeSeenCount(weekKey, n);
+    setSeenCount(n);
+  };
 
   const { data: count } = useLoad(async () => {
     const tz =
@@ -91,7 +129,7 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
   }, [companyId]);
 
   const n = count ?? 0;
-  if (dismissed || n <= 0) return null;
+  if (n <= 0 || n <= seenCount) return null;
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -109,11 +147,16 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
           // click bubbles to onOpenDetail and dismissing navigates the operator
           // away from the screen they were trying to clear.
           e.stopPropagation();
-          writeDismissed(weekKey);
-          setDismissed(true);
+          acknowledge(n);
         }}
         {...(onOpenDetail
-          ? { onClick: onOpenDetail, sx: { cursor: 'pointer', minHeight: 48 } }
+          ? {
+              onClick: () => {
+                acknowledge(n);
+                onOpenDetail();
+              },
+              sx: { cursor: 'pointer', minHeight: 48 },
+            }
           : { sx: { minHeight: 48 } })}
       >
         {n === 1

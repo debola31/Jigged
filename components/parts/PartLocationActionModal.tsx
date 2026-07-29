@@ -20,6 +20,7 @@ import {
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
@@ -108,6 +109,29 @@ export default function PartLocationActionModal({
   // primary unit — a different unit can't be capped client-side).
   const available = isMove && sourceLoc && unit === primaryUnit ? sourceLoc.quantity : null;
 
+  /**
+   * What's actually at the chosen location, for a Remove.
+   *
+   * `sourceBalances` was already passed in but only consulted for Move, so Remove offered
+   * every location — including parent nodes holding nothing — with no indication of what was
+   * there. Typing a number against an empty shelf then failed at the database with no clue
+   * why. Only meaningful in the primary unit; a different unit can't be compared client-side.
+   */
+  const hereNow =
+    action === 'deplete' && location && unit === primaryUnit
+      ? (sourceBalances.find((b) => b.id === location.id)?.quantity ?? 0)
+      : null;
+  const overdrawing = hereNow !== null && Number.isFinite(parseFloat(quantity))
+    && parseFloat(quantity) > hereNow;
+  /** Built as one string rather than interleaved JSX — mixing text and expressions across
+   *  lines silently swallowed a space ("0 eachrecorded here"). */
+  const overdrawMessage =
+    hereNow === 0
+      ? `Nothing is recorded at this location, so all ${num(parseFloat(quantity) || 0)} `
+        + `${primaryUnit} will be logged as a difference. It won't be blocked.`
+      : `That's more than the ${num(hereNow ?? 0)} ${primaryUnit} recorded here. Saving sets `
+        + `this location to zero and flags the difference — it won't be blocked.`;
+
   const handleSubmit = async () => {
     const qty = parseFloat(quantity);
     if (isMove) {
@@ -142,7 +166,12 @@ export default function PartLocationActionModal({
       if (action === 'add') {
         await addStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
       } else if (action === 'deplete') {
+        // Graceful, like the operator path: taking more than the system shows clamps the
+        // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
+        // the shelf whether or not our number agreed — blocking the record doesn't put it
+        // back, it just loses the fact. The warning above the button is what stops a typo.
         await depleteStockAtLocation(partId, location!.id, qty, unit, {
+          graceful: true,
           notes: notes || undefined,
           jobId: job?.id || undefined,
         });
@@ -154,7 +183,9 @@ export default function PartLocationActionModal({
       await onDone();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update stock.');
+      // Supabase errors are plain objects, not Error instances, so `instanceof` fell through
+      // to the generic string and threw away the reason the database gave us.
+      setError(friendlyErrorMessage(e, { entity: 'stock', fallback: 'Failed to update stock.' }));
     } finally {
       setSaving(false);
     }
@@ -234,6 +265,19 @@ export default function PartLocationActionModal({
               ))}
             </TextField>
           </Stack>
+          {/* What's actually here, so a number is typed against a fact rather than a guess. */}
+          {hereNow !== null && (
+            <Typography variant="body2" color="text.secondary">
+              {hereNow > 0
+                ? `${num(hereNow)} ${primaryUnit} at this location now.`
+                : 'Nothing recorded at this location.'}
+            </Typography>
+          )}
+
+          {/* Warn, don't block. An over-removal is recorded at zero with a discrepancy flag —
+              the same behaviour the operator path has always had. */}
+          {overdrawing && <Alert severity="warning">{overdrawMessage}</Alert>}
+
           {/* Removals only — an addition or a move isn't consumption, so a job tag on it
               would mean nothing. Issue #59. */}
           {action === 'deplete' && (

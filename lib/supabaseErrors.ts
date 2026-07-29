@@ -83,6 +83,13 @@ export function isAuthError(error: unknown): boolean {
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 const PG_UNIQUE_VIOLATION = '23505';
 const PG_INSUFFICIENT_PRIVILEGE = '42501';
+/**
+ * `raise_exception` — what a bare `RAISE EXCEPTION` in one of our own SECURITY DEFINER
+ * functions produces. Unlike a constraint code, this means *we* wrote the message deliberately
+ * for a human ("Insufficient stock at location (have 0, need 999)"), so passing it through beats
+ * replacing it with a generic apology.
+ */
+const PG_RAISED_BY_US = 'P0001';
 
 export interface FriendlyErrorOptions {
   /** What the user was acting on, e.g. "address", "part", "job". Default "item". */
@@ -159,6 +166,12 @@ export function friendlyErrorMessage(
 
   if (isAuthError(error)) {
     return 'Your session has expired. Please sign in again.';
+  }
+
+  // Checked last: permission and auth classes above are more actionable than whatever text
+  // the function happened to raise.
+  if (code === PG_RAISED_BY_US && message) {
+    return message;
   }
 
   return options.fallback ?? 'Something went wrong. Please try again.';

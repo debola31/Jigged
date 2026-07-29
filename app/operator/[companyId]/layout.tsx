@@ -402,11 +402,12 @@ function OperatorShell({
                 sx={{ minHeight: 56 }}
               />
             )}
-            {/* Labelled "My notes", not "My work" — to an operator "my work"
-                reads as the jobs assigned to them, which is the tab next door.
-                The route stays /my-work; the label says what's actually there. */}
+            {/* "My work" is the operator's own contribution surface. Today that
+                is notes and photos; it is named for what it will hold, not only
+                for what is in it now. What it must NOT grow into is a record of
+                completions — see the header of the my-work page. */}
             <BottomNavigationAction
-              label="My notes"
+              label="My work"
               value="my-work"
               icon={<StickyNote2OutlinedIcon />}
               sx={{ minHeight: 56 }}

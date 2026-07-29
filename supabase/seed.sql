@@ -833,3 +833,94 @@ do $$ declare q uuid; begin
   update public.part_pricing_tiers set markup_percent = 72
    where part_id = '60000000-0000-0000-0000-000000000016' and quantity >= 5;
 end $$;
+
+-- ═══ The read-back loop: who has actually read these notes ═══════════════════
+-- A note means nothing until somebody reads it, so the seed logs reads. Without
+-- these rows every note renders 0 views, the login banner never fires, and
+-- My Work looks like a feature that does not work — which is exactly how the
+-- seeded app presented before this block existed.
+--
+-- Inserted directly rather than through log_note_views(): that RPC derives the
+-- viewer from auth.uid(), which has no meaning in a seed. The counter trigger on
+-- note_views still fires, so notes.viewer_count / usage_count are maintained by
+-- the same code path the app uses — nothing here hand-sets a counter.
+--
+-- Two rules the app enforces in SQL that the seed must not break: a view is
+-- never logged for the note's own author, and there is one row per
+-- (note, viewer, job).
+do $$
+declare
+  v_co   uuid := '22222222-2222-2222-2222-222222222222';
+  v_pool uuid[] := array[
+    '23000000-0000-0000-0000-000000000005',   -- Diego Alvarez  (operator)
+    '23000000-0000-0000-0000-000000000006',   -- Priya Nair     (operator)
+    '23000000-0000-0000-0000-000000000003',   -- Sam Carter     (user)
+    '23000000-0000-0000-0000-000000000004'    -- Jamie Lin      (user)
+  ];
+  n        record;
+  v_reader uuid;
+  v_take   int;
+  i        int;
+begin
+  for n in
+    select id, author_id, coalesce(job_id, captured_job_id) as ctx_job,
+           (row_number() over (order by created_at, id))::int as rn
+    from public.notes
+    where company_id = v_co and note_type = 'user' and author_id is not null
+  loop
+    -- 0, 1, 2 or 3 readers, rotating. Every fourth note is left unread on
+    -- purpose: a seed in which everything has been read hides the zero state,
+    -- and the zero state is the one a real operator sees most often.
+    v_take := n.rn % 4;
+    for i in 1 .. v_take loop
+      v_reader := v_pool[1 + ((n.rn + i) % array_length(v_pool, 1))];
+      continue when v_reader = n.author_id;
+      -- Kept within a few hours of now so the reads land inside the current
+      -- ISO week and the login banner ("N people used your notes this week")
+      -- actually appears. Read times are never displayed anywhere — by design —
+      -- so the spread is only here to avoid a wall of identical timestamps.
+      insert into public.note_views (company_id, note_id, viewer_id, job_id, created_at)
+      values (v_co, n.id, v_reader, n.ctx_job, now() - ((n.rn % 4) || ' hours')::interval)
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;
+
+-- One note consulted across several jobs — the load-bearing signal, and the only
+-- way usage_count is ever non-zero. Deliberately uses the durable part-subject
+-- notes, because those are the ones a later run of the same part surfaces
+-- without any prior-job traversal. This is the whole thesis in one query: the
+-- knowledge outlived the job it was written on.
+do $$
+declare
+  v_co uuid := '22222222-2222-2222-2222-222222222222';
+  n record;
+  j record;
+  v_reader uuid;
+begin
+  for n in
+    select id, author_id, part_id, captured_job_id
+    from public.notes
+    where company_id = v_co and subject_kind = 'part' and note_type = 'user'
+      and part_id is not null
+  loop
+    -- Anyone but the author; the two operators cover each other's notes.
+    v_reader := case
+      when n.author_id = '23000000-0000-0000-0000-000000000006'
+        then '23000000-0000-0000-0000-000000000005'
+      else '23000000-0000-0000-0000-000000000006'
+    end;
+    for j in
+      select distinct jp.job_id
+      from public.job_parts jp
+      where jp.part_id = n.part_id
+        and jp.job_id is distinct from n.captured_job_id
+      order by jp.job_id
+      limit 3
+    loop
+      insert into public.note_views (company_id, note_id, viewer_id, job_id, created_at)
+      values (v_co, n.id, v_reader, j.job_id, now() - interval '2 hours')
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;

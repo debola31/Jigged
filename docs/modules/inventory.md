@@ -376,18 +376,40 @@ add / remove / adjust / **move**.
 #### Locations manager — `/dashboard/{companyId}/inventory/locations`
 
 Feature-gated. [`LocationsManager.tsx`](../../components/inventory/locations/LocationsManager.tsx)
-renders a recursive indented tree (`LocationTreeView`) with per-node actions: add sub-location,
-bulk-generate, print QR, duplicate, edit, delete. All actions are suppressed for
-`kind === 'system'`. Toolbar: **Print all labels** · **New top-level location** ·
-**Build visually**.
+loads locations and occupancy in **one pair of requests** (`getLocationBoard`), rolls occupancy
+onto the tree (`rollUpOccupancy`), and renders one of two views — segmented **Board | List**,
+board always default, the choice deliberately not persisted.
 
-**Build visually**
+**The board** ([`LocationBoard.tsx`](../../components/inventory/locations/board/LocationBoard.tsx))
+draws one tile per top-level unit with the same chrome as the builder's preview
+([`board/boardChrome.tsx`](../../components/inventory/locations/board/boardChrome.tsx)), so what
+you preview is what you live with. Each tile carries a rolled-up occupancy chip and per-compartment
+fill dots; the **whole tile** is the tap target. Not truncated. `Unassigned` sorts last, muted and
+explained. An **Add storage** tile lives permanently in the grid.
+
+**The detail sheet**
+([`LocationDetailSheet.tsx`](../../components/inventory/locations/board/LocationDetailSheet.tsx))
+owns every action — Subdivide, Add one inside, Print QR, Rename, Duplicate, Delete — plus the
+fill line, the child list (each with its own fill state), and a lazily-loaded, explicitly-capped
+list of what's stored there. It navigates within itself via child rows and breadcrumb. All
+structural actions are suppressed for `kind === 'system'`.
+
+**The list** (`LocationTreeView`) survives as a finding aid: rows are navigators only, and they
+finally carry a child count and a fill chip.
+
+Toolbar: **Board|List** · **Print all labels** · **New top-level location** · **Build visually**.
+
+**Build visually / Subdivide**
 ([`VisualLocationBuilder.tsx`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx))
-is a two-step modal: pick one of seven storage types, then configure levels (*"Call them" /
-"A set number" vs "Specific names" / "How many?"*, max 4 levels) against a read-only 2D preview,
-and press *"Create N locations"*. Per-branch fine-tuning is available after the uniform layout
-is set. It builds the whole tree client-side and materialises it in one action via
-`materializeLocationSpec`.
+is one two-step modal serving both: pick a storage type, then configure levels (*"Call them" /
+"A set number" vs "Specific names" / "How many?"*, max 4 levels) against a read-only preview, and
+press *"Create N locations"*. Per-branch fine-tuning is available after the uniform layout is set.
+It builds the whole tree client-side and materialises it via `materializeLocationSpec`.
+
+Passing a `parentId` turns it into **Subdivide this unit**, which swaps the palette to
+`SUBDIVISION_TYPES` (levels that start *below* the container — otherwise picking "Cabinet" while
+subdividing Cabinet 3 would create `Cabinet 3 › Cabinet 1`) and continues the sibling numbering,
+so a second Rows subdivide yields Row 4–6.
 
 > **Known gap:** this is a *structure-first* setup flow — a shop must model its storage
 > abstractly before any item exists. The redesign is [§5.5](#55-locations-keep-them-visual-change-when-they-appear).
@@ -422,11 +444,23 @@ Both access files use `getTypedSupabase()`.
 
 **`utils/inventoryLocationsAccess.ts`** — tree CRUD (`getLocations`, `buildLocationTree`,
 `getLocation`, `createLocation`, `updateLocation`, `deleteLocation` → `delete_location` RPC,
-`bulkGenerateChildren`, `materializeLocationSpec`, `duplicateLocation`); reads
-(`getBalancesForPart`, `getLocationContents`, `resolveScan`); and RPC wrappers
-(`addStockAtLocation`, `depleteStockAtLocation`, `adjustStockAtLocation`, `transferStock`), each
-of which first loads the part's conversion context and passes both display and converted
-quantities.
+`materializeLocationSpec`, `duplicateLocation`); reads (`getBalancesForPart`,
+`getBalancesForParts`, `getLocationContents`, `resolveScan`, `getLocationOccupancy`,
+`getLocationBoard`); and RPC wrappers (`addStockAtLocation`, `depleteStockAtLocation`,
+`adjustStockAtLocation`, `transferStock`), each of which first loads the part's conversion context
+and passes both display and converted quantities.
+
+`getLocationContents` is **explicitly capped** (`LOCATION_CONTENTS_LIMIT`) and returns the exact
+total beside the page, because it had no limit at all and was silently clipped by PostgREST's
+`max_rows` — invisible on a seed with 14 balance rows, wrong on a 9,428-part shop. It also
+excludes archived parts, which is what keeps it consistent with `inventory_location_occupancy`.
+
+**`utils/locationOccupancy.ts`** (pure) — `rollUpOccupancy` / `occupancyFor`. The
+`inventory_location_occupancy` view reports what sits *directly* at each location; this rolls it
+up the tree so a cabinet whose shelves are full is never reported empty. `occupancyFor`
+zero-defaults, so render code never branches on `undefined` — an unknown location and an empty one
+are the same thing to a board, and making callers remember that is how a `?.hasStock` slips
+through reading as "empty".
 
 **`utils/alertsAccess.ts`** — `getLowStockPartsAlerts`: stocked, non-deleted parts with a
 non-null `reorder_point`, filtered in JS to `quantity <= reorder_point`. Severity: `critical` at
@@ -477,16 +511,20 @@ Useful as evidence of where the model drifted:
 | Item | Status |
 |---|---|
 | `removePartStockGraceful` | Zero call sites. The graceful path lives in the RPC now. |
-| `getLocationTree` | Zero references, not even a test. |
-| `moveLocation` | Access layer + tests only. **No re-parent UI exists.** |
+| ~~`getLocationTree`~~ | ⛔ **Deleted 2026-07-29.** Zero references, not even a test. |
+| ~~`buildLocationUrl`~~ | ⛔ **Deleted 2026-07-29.** Duplicated `locationLabelPdf.buildLocationScanUrl`, which is what actually encodes the printed QR. |
+| ~~`bulkGenerateChildren` / `BulkGenerateModal` / `BulkGenerateSpec.startAt`~~ | ⛔ **Deleted 2026-07-29.** Subdivide is a strict superset with a live preview, and the generator had **zero tests** — so deleting was safer than porting. |
+| ~~`PartLocationBalance`~~ | ⛔ **Deleted 2026-07-29.** Unused type; `PartLocationBalanceWithLocation` is the live one. |
+| ~~`VisualLocationBuilder` `parentId` / `parentCode` props~~ | ✅ **Reachable since 2026-07-29** — this is what Subdivide passes. |
+| `moveLocation` | Access layer + tests only. **No re-parent UI exists**, and drag-to-reparent was considered and cut — see [§5.5](#55-locations-keep-them-visual-change-when-they-appear). |
 | `enableLocationTracking` / `disableLocationTracking` | Superseded by the auto-track trigger. No UI. |
-| `buildLocationUrl` | Duplicate of `locationLabelPdf.buildLocationScanUrl`. |
 | `enable_location_tracking_for_company`, `inv_location_path_label` | RPCs with no caller. |
-| `VisualLocationBuilder` `parentId` / `parentCode` props | Always `null` — unreachable from the UI. |
 | `job_materials` | Written at job creation, read by nothing. **Scheduled for drop** — [§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger). |
 
-Path-walking (`parent_id` → names array with a cycle guard) is reimplemented **four times** in
-TypeScript, plus once in unused SQL.
+Path-walking (`parent_id` → ancestors, with a cycle guard) is reimplemented **five times** in
+TypeScript, plus once in unused SQL. Phase 2 added the fifth (`LocationsManager`'s `nodePath`,
+which returns nodes where the neighbouring `computePath` returns names) — worth extracting, and
+noted here rather than quietly left at "four".
 
 ---
 
@@ -554,12 +592,20 @@ contradicting PRD **FR-16** (*"System supports CSV upload for inventory items"*)
 You are adding or moving material and you say where it is. The place is created **at that
 moment** if it doesn't exist yet.
 
-**Today:** inverted. Storage must be modelled up front through the visual builder — pick a
-type, declare levels, counts and name patterns, press *"Create 16 locations"* — before a
-single item exists. See [§5.5](#55-locations-keep-them-visual-change-when-they-appear).
+**Today (after Phase 2):** the **board is permanent** — real places, rolled-up fill state, one
+tap into a detail sheet, an "Add storage" tile always in the grid, and the wizard demoted to an
+optional *"Subdivide this unit"*. Sibling names can no longer collide.
 
-**Missing:** inline place-creation from a "where is it?" field; a permanent visual board;
-photos; fill state.
+**Still missing, so J2 is NOT closed:**
+
+- **Inline place-creation from a "where is it?" field.** Now unblocked — it was deliberately held
+  behind dedupe, since a freeSolo create field is exactly what produced `ST0CK`/`STOCK`.
+- **Batch "put these away"** — see [§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear).
+  Without it, a real shop's board is one `Unassigned` tile holding everything, which is why the
+  feature flag stays off for Contour.
+- **Photos** of the actual storage.
+
+See [§5.5](#55-locations-keep-them-visual-change-when-they-appear).
 
 ### J3 — Estimate material cost on a quote
 
@@ -1179,34 +1225,126 @@ boards, floor marking, *a place for everything*. Visual is their native language
 
 It is **against** the current timing and target:
 
-1. **The board becomes permanent.** Today `LocationBoardPreview` draws something that does
-   not exist yet and is never seen again; what you live with afterwards is
+1. **The board becomes permanent.** ✅ **BUILT (Phase 2).** Today `LocationBoardPreview` draws
+   something that does not exist yet and is never seen again; what you live with afterwards is
    [`LocationTreeView.tsx`](../../components/inventory/locations/LocationTreeView.tsx), an
    indented text list. Invert it — the board is the storage home screen, showing real places
    with real contents and fill state.
-2. **Setup goes incremental.** A place is created inline from a "where is it?" field while
-   recording stock, or by adding one piece of furniture to the board. No mandatory
-   pre-modelling.
-3. **The wizard survives, demoted.** Count + name-pattern is genuinely right for *"this
-   cabinet has 5 rows"* — keep `LevelConfigStep` as an optional **"subdivide this unit"**
-   action on a unit already on the board. That also makes `VisualLocationBuilder`'s dormant
-   `parentId` path reachable.
-4. **Fix the palette.** [`storageTypes.tsx`](../../components/inventory/locations/builder/storageTypes.tsx)
-   has seven types and is missing **bar rack / vertical material rack** — the defining
-   storage object in a machine shop. Compare against real shop vocabulary
-   ([McMaster](https://www.mcmaster.com/products/storage-racks/): shelving units, storage
-   racks, mobile racks, bin racks, storage cabinets, drawer units, workbenches, bins, chests,
-   pegboard). Allow the honest ones too: *floor*, *outside*, *under the bench*.
-5. **Add photos and fill state.** A photo of the actual rack beats any icon. A visibly-empty
-   bin is the [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal
-   expressed in software. Reuse the existing media infrastructure (`PartFilesSheet`,
-   `NoteMediaGallery`).
-6. **Revisit the flat-vs-tree default.** [MRPeasy](https://www.mrpeasy.com/resources/user-manual/stock/settings/locations/)
-   has no nesting at all and tells users to name locations `"Room 1, A1"`;
-   [Katana](https://support.katanamrp.com/en/articles/8340252-basics-of-storage-bins) makes
-   bins opt-in inside a location. `parent_id` is nullable, so flat is a default and a UI
-   decision — **not a migration**.
-7. **Thing-first is what the visual-inventory leader itself prescribes.** Sortly's
+
+   Shipped as [`LocationBoard`](../../components/inventory/locations/board/LocationBoard.tsx) +
+   [`LocationDetailSheet`](../../components/inventory/locations/board/LocationDetailSheet.tsx),
+   drawn with the same chrome as the preview so this decision's promise — *what you preview is
+   what you live with* — is structurally enforced rather than maintained by hand. The tree list
+   survives, demoted to a Board|List toggle, and finally carries a child count and fill state.
+
+   Three things this decision did **not** anticipate, all found while building it:
+
+   - **It never mentioned `Unassigned`** — see decision 8 below. The single biggest omission.
+   - **A compartment cannot be a tap target.** Cells are ~6px tall; at the 48px touch floor a
+     5-row × 2-side cabinet becomes a ~500px tile and the drawing, which is the entire point, is
+     destroyed. So the whole unit is one tap target and the sheet owns every action. Two taps to
+     reach Shelf A, which also mirrors the operator bin view's drill-down.
+   - **Fill state must roll up.** The occupancy view reports what sits *directly* at a location,
+     so a cabinet whose shelves are full has no row at all. Reporting it empty would be worse
+     than showing no fill state: it would send someone to fill an occupied shelf.
+2. **Setup goes incremental.** **NOT built, and that ordering is correct.** A place created
+   inline from a "where is it?" field is a freeSolo create field — exactly the mechanism that
+   produced `ST0CK`/`STOCK` in finding 2. It should land *after* dedupe (decision 7 below,
+   shipped in Phase 2), not before. Adding one piece of furniture to the board *is* built: an
+   "Add storage" tile lives permanently in the grid.
+3. **The wizard survives, demoted.** ✅ **BUILT (Phase 2).** Count + name-pattern is genuinely
+   right for *"this cabinet has 5 rows"* — keep `LevelConfigStep` as an optional **"subdivide
+   this unit"** action on a unit already on the board. That also makes `VisualLocationBuilder`'s
+   dormant `parentId` path reachable.
+
+   Two traps the plumbing hid, both now covered by tests:
+   - **Every `STORAGE_TYPES` entry's level 0 *is* the container**, so reusing that palette while
+     subdividing Cabinet 3 creates `Cabinet 3 › Cabinet 1 › Row 1 › Left`. Fixed with a separate
+     `SUBDIVISION_TYPES` whose levels start *below* the container. `slice(1)` is not a fix — a
+     sliced `Bins` or `Single shelf` is an empty spec.
+   - **Subdividing twice must continue the numbering** (Row 4–6), not regenerate Row 1–3.
+     `materializeLocationSpec` inserts sequentially and is not transactional, so with decision 7's
+     index in place a collision mid-run would leave a partial tree behind an opaque `23505`.
+4. **Fix the palette.** ✅ **BUILT (Phase 2), with the bar rack deliberately left out.**
+   [`storageTypes.tsx`](../../components/inventory/locations/builder/storageTypes.tsx) has seven
+   types. Real shop vocabulary ([McMaster](https://www.mcmaster.com/products/storage-racks/):
+   shelving units, storage racks, mobile racks, bin racks, storage cabinets, drawer units,
+   workbenches, bins, chests, pegboard) suggests more. Added the honest single-level ones —
+   *floor space*, *outside/yard*, *bench* — which matters because 118 of 121 legacy locations were
+   flat and a palette of only structures forces "on the floor by the saw" to be modelled as a
+   cabinet.
+
+   > **Amended.** This decision originally asserted a **bar rack / vertical material rack** is
+   > "the defining storage object in a machine shop". §9 of this same document records that
+   > Contour's 22 real places contain **no rack of any kind** and marks the claim *weakly
+   > refuted* — so the document contradicted itself. The honest status is an **open question**,
+   > not an assertion, and the card stays out until a pilot shop asks for it. A code comment in
+   > `storageTypes.tsx` records this, because without it someone re-adds the card in three months
+   > on the same intuition.
+5. **Fill state.** ✅ **BUILT (Phase 2).** A visibly-empty bin is the
+   [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal expressed in
+   software. Deliberately **empty-vs-has-stock only, never a percentage**: we don't know a
+   shelf's capacity, and a confident "72% full" would be exactly the invented number that costs
+   the feature its credibility. Rolled up (see decision 1). Zero-quantity balance rows persist
+   after depletion, and the view's `quantity > 0` matches `getLocationContents` exactly — so a
+   just-depleted shelf flipping to empty is the *desired* signal, not drift.
+
+   > **Amended: split from photos.** This decision originally bundled fill state with *"a photo
+   > of the actual rack beats any icon"*. The two have wildly different cost — fill state is one
+   > view plus a pure function; photos are a bucket, an upload UI, thumbnails and mobile capture.
+   > Bundled, fill state would have been delayed behind media work for no reason. **Photos are
+   > now a separate, unscheduled item** (reuse `PartFilesSheet` / `NoteMediaGallery` when it
+   > comes).
+6. **Flat-vs-tree default — CLOSED, answered by decision 3.**
+   [MRPeasy](https://www.mrpeasy.com/resources/user-manual/stock/settings/locations/) has no
+   nesting at all and tells users to name locations `"Room 1, A1"`;
+   [Katana](https://support.katanamrp.com/en/articles/8340252-basics-of-storage-bins) makes bins
+   opt-in inside a location. `parent_id` is nullable, so flat is a default and a UI decision —
+   **not a migration**.
+
+   > **Amended: not "revisit" — resolved.** Subdivide-on-demand *is* the opt-in-bins model this
+   > decision was pointing at. Adding storage now creates a flat unit; nesting appears only when
+   > someone explicitly subdivides. Nothing further to decide.
+7. **Names must dedupe, and codes must not.** ✅ **BUILT (Phase 2).**
+
+   > **Amended: finding 2 conflated two different problems.** Its evidence — `STOCK`/`ST0CK`,
+   > `JEFF'S DESK`/`JEFFS DESK` — is entirely about **names**. Separating names from codes
+   > changes the answer, in opposite directions:
+   >
+   > - **Names:** a unique index on
+   >   `(company_id, coalesce(parent_id, sentinel), lower(btrim(name)))`, with a backfill in the
+   >   same migration ahead of it. A plain `UNIQUE (company_id, parent_id, name)` would not have
+   >   constrained top-level locations at all, since NULLs compare distinct. Paired with a live
+   >   *"Cabinet 3 already has a Shelf A"* warning in the form, because nothing exact catches
+   >   `ST0CK`.
+   > - **Codes: deliberately unconstrained.** A duplicate `code` has **no functional
+   >   consequence** — QR payloads carry the location UUID and nothing in the app resolves by
+   >   code. An index would buy nothing while risking a mid-flight insert failure inside the
+   >   sequential, non-transactional `materializeLocationSpec`, leaving a partial tree — far
+   >   worse than a duplicate sticker. What *is* worth fixing is the collision a human confuses:
+   >   `['Left','Lower']` both derived `…-L`, and `explicitCodeIn` now yields `L`/`LO`.
+8. **"Put these away" — the batched move out of `Unassigned`. NOT BUILT; gates the rollout.**
+
+   > **New decision, added in Phase 2.** Decision 1 never mentioned `Unassigned`, which is the
+   > largest omission in this section. `trg_auto_track_stocked_part` guarantees a top-level
+   > `('Unassigned', kind='system')` row the moment any stocked part exists, so for Contour it
+   > holds **every part they own** — one tile with 9,428 parts beside four holding nothing. That
+   > board is truthful but not yet useful, and it is **the most likely way the second attempt
+   > fails like the first** (§9.3).
+   >
+   > Phase 2 does what it honestly can: the tile is muted, sorted last, explained as *"your
+   > put-away list, not a shelf"*, and carries its rolled-up count — because *"9,428 parts,
+   > nowhere in particular"* is precisely the diagnosis that motivates adding a cabinet.
+   >
+   > A **batched** move is a real feature (does it move all of part X to one bin? bulk-assign a
+   > selection? a picker per part?) and deserves its own design pass. The per-part path exists,
+   > but nobody empties thousands of parts through it.
+   >
+   > **So the gate is written down here: `inventory_locations` stays OFF for Contour until batch
+   > put-away exists.** The flag is already the mechanism, so this costs nothing — and it is the
+   > difference between a decision and a hope. Phase 2 ships the board; we test it internally and
+   > on the seed; the shop sees it when the board can actually be emptied into.
+9. **Thing-first is what the visual-inventory leader itself prescribes.** Sortly's
    [stockroom method](https://www.sortly.com/blog/how-to-organize-a-stockroom/) is ordered
    *"1. Create an inventory list → 2. Optimize storage space"* — storage is step **two** —
    and it explicitly says not to map everything up front. Their
@@ -1219,6 +1357,13 @@ physical thing in a place, and *"is there a drop I can use"* is a spatial query.
 
 Revisit issue **#421** (3D diorama preview) against decision 1: a diorama of *real, occupied*
 storage is a different and better proposition than a diorama of a preview.
+
+**Drag-to-reparent: considered and cut.** Their data (118/121 flat) says a re-parent gesture
+serves a hierarchy they don't have; drag on a shop tablet is the most failure-prone interaction
+available; and the house precedent is explicit — routings reorder with arrow buttons, no
+drag-and-drop. If it's ever wanted, the honest shape is a "Move into…" `Autocomplete` wiring the
+existing cycle-guarded `moveLocation`. Note that the demand this *looks* like is demand to move
+**stock**, not locations — and that UI already exists.
 
 ### 5.6 Lots — **RESOLVED: don't build them**
 
@@ -1413,10 +1558,37 @@ why that turned out to be unnecessary.)*
 [§5.2](#52-is-a-job-a-place--resolved-no) is resolved — a job is **not** a place. Build the
 simple depletion.
 
-### Phase 2 — locations reshaped
+### Phase 2 — locations reshaped ✅ **THE BOARD SLICE COMPLETE 2026-07-29**
 
-**J2** incremental places · permanent board · photos + fill state · palette fix · retire the
-mandatory wizard · PWA basics + the scanner spike ([§5.10](#510-native-app-deferred-scanning-case-must-be-spiked)).
+**Shipped:** the permanent board with rolled-up fill state · the detail sheet that owns every
+action · the tree list demoted to a Board|List toggle (finally carrying a child count) · the
+wizard demoted to "Subdivide this unit" with a container-safe palette · single-level places
+(floor, yard, bench) · sibling-name dedupe (backfill + unique index + live form warning) ·
+`BulkGenerateModal` and four dead exports retired.
+
+Fixed on the way, each found by reading a chain end-to-end rather than by a failing test: the
+empty state was unreachable for every real tenant (`trg_auto_track_stocked_part` guarantees an
+`Unassigned` row, so `tree.length === 0` was always false); `getLocationContents` was silently
+clipped by `max_rows` and didn't filter archived parts; `companyName` was never passed, so the QR
+label sheet printed with no heading; `materializeLocationSpec` re-validated the parent once per
+node.
+
+**Deliberately not in this slice, with reasons recorded in [§5.5](#55-locations-keep-them-visual-change-when-they-appear):**
+
+| Deferred | Why |
+|---|---|
+| **Batch "put these away"** (§5.5 decision 8) | A real feature needing its own design pass. **It gates the rollout: `inventory_locations` stays OFF for Contour until it exists** — otherwise their board is one tile holding 9,428 parts. |
+| **Incremental create-a-place inline** (decision 2) | A freeSolo create field is the exact mechanism that produced `ST0CK`. Now unblocked, since dedupe shipped. |
+| **Photos of real storage** (split out of decision 5) | Bucket + upload UI + thumbnails + mobile capture. Bundling it would have delayed fill state, which was one view and a pure function. |
+| **Bar rack card** (decision 4) | §9 marks it *weakly refuted* — their 22 real places contain no rack. Open question, not an assertion. |
+| **Drag-to-reparent** | Serves a hierarchy 118/121 of their locations didn't have; the house precedent is arrow buttons, not drag. |
+| **PWA basics + scanner spike** ([§5.10](#510-native-app-deferred-scanning-case-must-be-spiked)) | Independent of the board; unchanged by this slice. |
+
+**Follow-ups this slice created, not yet filed:** `materializeLocationSpec` is still sequential
+and non-transactional (one multi-row insert or an RPC is the real fix); `getBalancesForParts`
+chunks part ids at 500 but 500 × 3 locations = 1,500 rows, so it can truncate the same way
+`getLocationContents` did; the board removes `TOP_LIMIT`, which is right, but implies eventual
+virtualisation past a few hundred units.
 
 ### Phase 3 — purchasing
 
@@ -1547,6 +1719,49 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
   quantity — *verified by `…test.ts > 'adjustStockAtLocation calls adjust with the new converted quantity'`*.
 - [x] **Given** a new location, **when** an owner creates it, **then** a trimmed,
   company-scoped row is inserted — *verified by `…test.ts > 'createLocation'`*.
+
+**The storage board (Phase 2)**
+
+- [x] **Given** a cabinet that holds nothing directly but whose shelves hold 3 parts between
+  them, **when** the board renders, **then** the cabinet reads **occupied, 3 parts** — never
+  "empty" — *verified by `__tests__/utils/locationOccupancy.test.ts > 'rollUpOccupancy'` AND
+  `__tests__/components/inventory/locations/LocationBoard.test.tsx > 'reports a container as
+  occupied when only its shelves hold stock'`, and live against the seed (Cabinet 3 has no
+  occupancy row at all; Shelf A 2, Shelf B 1).* This is the assertion the feature turns on:
+  reporting it empty would send someone to fill an occupied shelf.
+- [x] **Given** any tree size, **when** the board loads, **then** it issues **exactly two**
+  requests — *verified by `__tests__/utils/inventoryLocationsAccess.test.ts > 'getLocationBoard —
+  request budget'`, pinned at both 40 and 400 locations.*
+- [x] **Given** a company whose only location is the auto-created `Unassigned` bucket, **then**
+  the board treats it as having no storage and states the size of the pile — *verified by
+  `…/LocationsManager.test.tsx > 'treats a company with only the system bucket as having no
+  storage'`*. The old `tree.length === 0` predicate was false for every real tenant.
+- [x] **Given** the `Unassigned` bucket, **then** it sorts last, is visually muted, and offers
+  **no** Rename / Delete / Duplicate / Subdivide — *verified by `…/LocationBoard.test.tsx` AND
+  `…/LocationDetailSheet.test.tsx > 'withholds every structural action from the system bucket'`*.
+  Renaming it would split the backfill bucket, since the stock RPCs resolve it by literal name.
+- [x] **Given** a location holding more parts than the page cap, **then** both the sheet and the
+  operator bin view say so rather than presenting a clipped list — *verified by
+  `…test.ts > 'getLocationContents'` (cap + exact total + archived-part exclusion) AND
+  `…/LocationDetailSheet.test.tsx > 'admits truncation…'`*.
+- [x] **Given** Subdivide on `Cabinet 3`, **then** the palette offers **no container card** and
+  the spec's first node is `Row 1` with code `CAB3-R01` under `parentId = 'cab-3'` — *verified by
+  `…/VisualLocationBuilder.test.tsx > 'subdividing an existing unit'`*. This pins both the
+  dormant nested-create path and the `Cabinet 3 › Cabinet 1` trap.
+- [x] **Given** a second Subdivide of a unit already holding Row 1–3, **then** it generates
+  **Row 4–6** with codes `R04`–`R06` — *verified by `__tests__/utils/locationSpec.test.ts >
+  'continuing past existing siblings'` AND `…/LocationsManager.test.tsx > 'continues the
+  numbering on a repeat subdivide'`*. Required, not cosmetic: a collision would kill a sequential
+  non-transactional insert run partway.
+- [x] **Given** two siblings with names differing only by case or whitespace, **then** the DB
+  refuses the second and the form warns before submit — *verified live against the local stack
+  (`"  shelf a  "` rejected beside `Shelf A`; two roots refused; the same name under a different
+  parent still allowed) AND by `…/LocationFormModal.test.tsx` for the warning parity.*
+- [x] **Given** a company where a user-made `unassigned ` predates the system bucket by a
+  decade, **when** the dedupe migration runs, **then** the `kind='system'` row keeps the literal
+  name `Unassigned` — *verified live against the local stack, 2026-07-29.* If the wrong row were
+  renamed the failure would be silent: every stock RPC would write to a freshly-created empty
+  bucket while the balances stayed behind.
 
 **Operator**
 
@@ -1694,8 +1909,9 @@ post-mortem and the opening-balance question — and the rest is Phase 2 input.
 | Question | Gates | Note |
 |---|---|---|
 | **Do service jobs carry a BOM line for the customer's material?** | [J4](#j4--job-kickoff-material-check) only | The last live question from the cut [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it). If yes, J4 needs one exclusion so those lines don't raise false shortages; if no, fully closed. Doesn't block Phase 1 either way. `custCode` is set on 51% of parts, but that likely means *"made for customer X"*, not *"customer supplied the material"* — **do not conflate them**. |
-| Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. Now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Don't add the card on a guess either way. |
-| What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` actually mean? | Phase 2 palette naming | Their vocabulary is opaque from outside, and it's the vocabulary that matters. One screen-share answers all of it — the card-sort in the discovery script is still the instrument. |
+| Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. Now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Don't add the card on a guess either way. **Phase 2 shipped without it**, and [§5.5 decision 4](#55-locations-keep-them-visual-change-when-they-appear) was amended to cite this open question rather than assert the opposite — the two sections used to contradict each other. A code comment in `storageTypes.tsx` carries the reasoning, so the card isn't re-added on intuition. |
+| What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` actually mean? | Phase 2 palette naming | Their vocabulary is opaque from outside, and it's the vocabulary that matters. One screen-share answers all of it — the card-sort in the discovery script is still the instrument. Phase 2's palette hedges by adding the *honest* single-level types (floor, yard, bench) so an opaque place doesn't have to be modelled as furniture. |
+| **How should thousands of parts leave `Unassigned` in bulk?** | The Phase 2 rollout itself | See [§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear). Not a palette question — a genuine design question (all of part X to one bin? bulk-assign a selection? a picker per part?). **Until it's answered, `inventory_locations` stays OFF for Contour**, because their board would otherwise be one tile holding 9,428 parts and four holding nothing. That is the most likely way the second attempt fails like the first, and we get one more attempt, not two. |
 | Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Remnants lost their free ride when lots were cut, so this now has to justify itself |
 | Scan ten in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) PWA-vs-native spike | Phase 2 only |
 | Label durability and placement | Label PDF | Implementation detail, not data model |
@@ -1724,11 +1940,17 @@ Worth pulling; do not cite numbers from either until someone has read them.
 
 ## 10. Next steps
 
-**Phase 1 is complete (2026-07-28). Next is Phase 2 — locations reshaped.**
+**Phase 1 complete (2026-07-28). Phase 2's board slice complete (2026-07-29).**
 
 The *why* layer this spec was written to diagnose now exists: numbers get in (J1, J9), get used
-on a job (J4), and record themselves as work happens (J7). Phase 2 goes back to the *where*
-layer that was built first, and reshapes it around what we now know.
+on a job (J4), and record themselves as work happens (J7). Phase 2 went back to the *where*
+layer that was built first and reshaped it — the board is permanent, the wizard is demoted to
+Subdivide, and sibling names can no longer collide.
+
+**The next decision is not a build, it's a design pass: batch "put these away"**
+([§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear)). It gates showing the
+board to Contour at all, and the flag being opt-in is what makes that gate real rather than
+aspirational. After it: create-a-place inline (unblocked now that dedupe shipped), then photos.
 
 **On the usability test: it is no longer a gate.** It was the right instrument when we had no
 evidence. We now have something better for the questions that mattered — 121 location rows and

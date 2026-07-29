@@ -224,6 +224,40 @@ only sanctioned exceptions:
   to serve the second.
 
   Red still means destructive on these pages: the part's Delete (archive) affordance.
+
+- **Fill state on the storage board** — `success.main` for "has stock", a hollow outline for
+  "empty". Read as *status*, not as *good/bad*: an empty bin isn't a failure, it's the
+  [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal that something needs
+  ordering. Green is doing the work of "there is material here", which is the only thing the data
+  supports.
+
+  **Never a percentage or a gauge.** We do not know a shelf's capacity, so "72% full" would be an
+  invented number presented with the confidence of a measured one. Binary is the honest
+  resolution, and stopping there is a deliberate design decision — see
+  [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)
+  decision 5.
+
+---
+
+## Tile-and-sheet: when a picture outranks per-element controls
+
+The storage board draws one tile per unit; a tile's compartments are ~6px tall. The 48px touch
+floor and a legible drawing are in direct conflict here — making each compartment tappable turns a
+5-row × 2-side cabinet into a ~500px tile and destroys the picture, which is the entire reason the
+board exists. (Nesting interactive elements inside a `CardActionArea` is also an a11y violation.)
+
+**The resolution: the whole tile is one tap target, and a detail sheet owns every action.**
+
+| Layer | Role |
+|---|---|
+| Tile (`ButtonBase` wrapping the drawing) | Depicts and summarises. One tap target, one accessible name carrying the summary. |
+| Elements inside the tile | Depict only — fill state, names, codes. Never interactive. |
+| Detail sheet (right-anchored `Drawer`) | Every action, plus drill-down into children and a lazily-loaded contents list. |
+
+Reach for this when a component's **value is the depiction** and per-element controls would have
+to shrink below the touch floor to preserve it. Prefer ordinary rows-with-buttons everywhere else:
+the extra tap is a real cost, justified here because the alternative is losing the drawing. It also
+matches the operator bin view's existing drill-down, so the two surfaces read the same way.
 - **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically
   (add = success / remove = error / adjust = info) — they indicate the *selected
   mode*, not an action.

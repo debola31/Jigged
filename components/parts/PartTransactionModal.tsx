@@ -22,10 +22,14 @@ import type { Part, PartUnitConversion } from '@/types/part';
 import type { InventoryTransactionType, TransactionFormData } from '@/types/partTransaction';
 import { addPartStock, removePartStock, adjustPartStock } from '@/utils/partsAccess';
 import { convertToBaseUnit, getStandardUnitsForUnit } from '@/lib/unitPresets';
+import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import type { JobWithRelations } from '@/types/job';
 
 interface PartTransactionModalProps {
   open: boolean;
   onClose: () => void;
+  /** Needed to load the job list for the Remove job tag (issue #59). */
+  companyId: string;
   part: Part;
   /** The part's unit conversions (fetched separately by the parent). */
   unitConversions: PartUnitConversion[];
@@ -37,6 +41,7 @@ interface PartTransactionModalProps {
 export default function PartTransactionModal({
   open,
   onClose,
+  companyId,
   part,
   unitConversions,
   onSuccess,
@@ -53,8 +58,20 @@ export default function PartTransactionModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Optional job tag on a removal — issue #59.
+   *
+   * This existed on the old /inventory/[itemId] page, shipped in March as validated shop
+   * feedback, and was lost in May when that page was folded into the parts workspace and this
+   * modal was written without it. `removePartStock` has always accepted the argument; nothing
+   * passed it.
+   */
+  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [job, setJob] = useState<JobWithRelations | null>(null);
+
   // Reset form when modal opens
-  const handleOpen = () => {
+  const handleOpen = async () => {
     setFormData({
       type: defaultType,
       quantity: 0,
@@ -62,6 +79,10 @@ export default function PartTransactionModal({
       notes: '',
     });
     setError(null);
+    setJob(null);
+    setLoadingJobs(true);
+    setJobs(await loadTaggableJobs(companyId));
+    setLoadingJobs(false);
   };
 
   // Available units for this part (primary + standard same-category + custom conversions)
@@ -154,7 +175,13 @@ export default function PartTransactionModal({
       if (formData.type === 'addition') {
         await addPartStock(part.id, formData.quantity, formData.unit, formData.notes);
       } else if (formData.type === 'depletion') {
-        await removePartStock(part.id, formData.quantity, formData.unit, formData.notes);
+        await removePartStock(
+          part.id,
+          formData.quantity,
+          formData.unit,
+          formData.notes,
+          job?.id || undefined,
+        );
       } else {
         await adjustPartStock(part.id, formData.quantity, formData.unit, formData.notes);
       }
@@ -338,6 +365,14 @@ export default function PartTransactionModal({
                 {primaryUnit}
               </Typography>
             )}
+          </Box>
+        )}
+
+        {/* Job tag — removals only (issue #59). Additions and adjustments aren't consumption,
+            so a job would be meaningless on them. */}
+        {formData.type === 'depletion' && (
+          <Box sx={{ mb: 2 }}>
+            <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
           </Box>
         )}
 

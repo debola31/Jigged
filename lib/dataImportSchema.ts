@@ -1,10 +1,15 @@
 /**
  * The canonical fields the owner can confirm/correct in the **Map** stage, per entity.
  *
- * This is the review-relevant slice — identity, required, referential, and cost fields —
- * i.e. the ones the deterministic analyzer (dataImportAnalyzer.ts) actually keys its checks
- * on, so a correction here visibly changes the review. Keys MUST match the analyzer's roles
+ * This is the review-relevant slice — identity, required, referential, cost, and **stock**
+ * fields. Most are ones the deterministic analyzer (dataImportAnalyzer.ts) keys its checks on,
+ * so a correction here visibly changes the review. Keys MUST match the analyzer's roles
  * (e.g. parts cost is `cost_per_unit`); keep the two in step when the check set changes.
+ *
+ * `quantity` / `reorder_point` are a deliberate widening beyond "what the analyzer checks":
+ * the backend has always accepted them (PART_SCHEMA in api/models/parts_import_models.py),
+ * but with no entry here they were invisible at Map, so an owner could neither see nor correct
+ * a mis-detected on-hand column. Opening balances are journey J1 in docs/modules/inventory.md.
  */
 
 import type { EntityType } from '@/types/data-import';
@@ -64,6 +69,8 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     { key: 'primary_unit', label: 'Unit of measure', required: true }, // parts can't import without one
     { key: 'preferred_vendor_name', label: 'Preferred vendor', required: false },
     { key: 'cost_per_unit', label: 'Cost / price', required: false },
+    { key: 'quantity', label: 'Quantity on hand', required: false },
+    { key: 'reorder_point', label: 'Reorder point', required: false },
   ],
   vendors: [{ key: 'name', label: 'Vendor name', required: true }],
   work_centers: [

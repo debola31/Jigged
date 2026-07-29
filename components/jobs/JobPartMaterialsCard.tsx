@@ -8,139 +8,221 @@ import {
   CardContent,
   Box,
   Typography,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemText,
+  Chip,
   CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
 } from '@mui/material';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
-import { getBomForPart } from '@/utils/bomAccess';
-import type { BomLineWithChildPart } from '@/types/bom';
+import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
+import type { MaterialRequirement } from '@/types/materialCheck';
 
 interface JobPartMaterialsCardProps {
   /** The made part this job_part produces (job_parts.part_id). */
   partId: string;
-  /**
-   * The job_part order quantity. When provided, each material row also shows
-   * the total this job draws — ceil(order_qty × per-part qty) for whole-unit
-   * lines — so the shop floor never sees a meaningless "0.05 strips per unit".
-   */
+  /** Parent job — scopes the "issued" figures. */
+  jobId: string;
+  jobPartId: string;
+  /** The job_part order quantity; the whole-order draw is computed from it. */
   orderQuantity?: number;
 }
 
-const formatMatQty = (n: number): string =>
-  n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+const fmt = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+const HEAD_SX = {
+  fontSize: 11,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase' as const,
+  color: 'text.secondary',
+  fontWeight: 600,
+  whiteSpace: 'nowrap' as const,
+};
+
+/** Digits line up column to column, so an outlier is visible without reading a label. */
+const NUM_SX = { fontVariantNumeric: 'tabular-nums' as const };
 
 /**
- * Read-only materials list for a job part, sourced LIVE from the part's BOM
- * (parts_bom) rather than the job_materials snapshot. Material consumption is
- * no longer tracked per job — the part BOM is the source of truth, so the Job
- * page reflects the current BOM. Quantities are per unit of the part; when the
- * order quantity is known, each row also shows the whole-order total.
+ * Material check for a job part — journey J4: *"can I say yes to this rush job right now?"*
+ *
+ * Required comes from the LIVE BOM (not the `job_materials` snapshot, which nothing reads),
+ * on-hand from `parts.quantity`, and issued from this job's `depletion` ledger rows. Nothing
+ * is stored; every figure is derived on read.
+ *
+ * Two honesty constraints are deliberate:
+ *
+ *  - **Top-level materials only.** `parts_bom` is recursive but this compares one level, so a
+ *    pump job says "needs 1 pump core" and not the aluminium inside it. Captioned on screen
+ *    rather than left for someone to discover from a wrong number.
+ *  - **Units that can't be converted show an em dash, never a zero.** A 0 in Short by reads as
+ *    "you're fine", which is the one answer we must not give when we can't actually compare.
+ *
+ * "On order" is absent because purchase orders don't exist yet (Phase 3, #571). A permanently
+ * empty column would just train people to ignore the row.
  */
-export default function JobPartMaterialsCard({ partId, orderQuantity }: JobPartMaterialsCardProps) {
+export default function JobPartMaterialsCard({
+  partId,
+  jobId,
+  jobPartId,
+  orderQuantity,
+}: JobPartMaterialsCardProps) {
   const params = useParams();
   const companyId = params.companyId as string;
-  const [lines, setLines] = useState<BomLineWithChildPart[] | null>(null);
+  const [rows, setRows] = useState<MaterialRequirement[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getBomForPart(partId)
+    getJobPartMaterialCheck({
+      companyId,
+      jobId,
+      jobPartId,
+      madePartId: partId,
+      orderQuantity: orderQuantity ?? 0,
+    })
       .then((data) => {
-        if (!cancelled) setLines(data);
+        if (!cancelled) setRows(data);
       })
       .catch(() => {
-        if (!cancelled) setLines([]);
+        if (!cancelled) setRows([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [partId]);
+  }, [companyId, jobId, jobPartId, partId, orderQuantity]);
+
+  const shortCount = (rows ?? []).filter((r) => r.status === 'short').length;
+  const oddCount = (rows ?? []).filter(
+    (r) => r.status === 'incomparable' || r.status === 'archived',
+  ).length;
 
   return (
     <Card elevation={2}>
       <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
           <Inventory2OutlinedIcon fontSize="small" color="primary" />
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Materials
           </Typography>
-          {lines && (
-            <Typography variant="caption" color="text.secondary">
-              ({lines.length} item{lines.length === 1 ? '' : 's'}, per unit)
-            </Typography>
+          {shortCount > 0 && (
+            <Chip
+              size="small"
+              color="warning"
+              label={`${shortCount} short`}
+              component={NextLink}
+              href={`/dashboard/${companyId}/inventory/shortages`}
+              clickable
+            />
+          )}
+          {oddCount > 0 && (
+            <Chip size="small" variant="outlined" label={`${oddCount} need attention`} />
           )}
         </Box>
 
-        {lines === null ? (
+        {rows === null ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
             <CircularProgress size={20} />
           </Box>
-        ) : lines.length === 0 ? (
+        ) : rows.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No materials on this part&apos;s BOM.
           </Typography>
         ) : (
-          <List dense disablePadding>
-            {lines.map((line, idx) => {
-              const childPartId = line.child_part?.id;
-              // Whole-order draw: ceil for discrete stock (a strip you can't cut
-              // a fraction of), else the fractional total. Shown so "0.05 strips
-              // per unit" is never the only number on the floor.
-              const jobNeeds =
-                orderQuantity && orderQuantity > 0
-                  ? line.consume_whole_units
-                    ? Math.ceil(orderQuantity * line.quantity)
-                    : orderQuantity * line.quantity
-                  : null;
-              const text = (
-                <ListItemText
-                  primary={
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                      {line.child_part?.part_name ?? 'Unknown item'}
-                    </Typography>
-                  }
-                  secondary={
-                    <>
-                      <Typography variant="caption" color="text.secondary" component="span" sx={{ display: 'block' }}>
-                        {line.quantity} {line.unit} / part
-                        {line.consume_whole_units ? ' · whole units' : ''}
-                      </Typography>
-                      {jobNeeds !== null && (
-                        <Typography variant="caption" color="text.primary" component="span" sx={{ display: 'block', fontWeight: 500 }}>
-                          This job needs {formatMatQty(jobNeeds)} {line.unit}
-                        </Typography>
-                      )}
-                    </>
-                  }
-                />
-              );
-              // Each BOM material is a real part — link the row to its detail
-              // page. Rows without a resolvable child part stay non-clickable.
-              return childPartId ? (
-                <ListItemButton
-                  key={line.id}
-                  component={NextLink}
-                  href={`/dashboard/${companyId}/parts/${childPartId}`}
-                  divider={idx < lines.length - 1}
-                  sx={{ alignItems: 'flex-start', py: 1 }}
-                >
-                  {text}
-                </ListItemButton>
-              ) : (
-                <ListItem
-                  key={line.id}
-                  divider={idx < lines.length - 1}
-                  sx={{ alignItems: 'flex-start', py: 1 }}
-                >
-                  {text}
-                </ListItem>
-              );
-            })}
-          </List>
+          <>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={HEAD_SX}>Material</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>Needs</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>On hand</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>Issued</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>Short by</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((r) => (
+                    <MaterialRow key={r.bomLineId} row={r} companyId={companyId} />
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+              Top-level materials only — sub-assemblies are not exploded. On-hand is the whole
+              shop&apos;s stock; other open jobs may want the same material.
+            </Typography>
+          </>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function MaterialRow({ row, companyId }: { row: MaterialRequirement; companyId: string }) {
+  const unit = row.stockUnit ?? row.bomUnit;
+
+  return (
+    <TableRow>
+      <TableCell sx={{ width: '99%' }}>
+        <Typography
+          variant="body2"
+          component={NextLink}
+          href={`/dashboard/${companyId}/parts/${row.partId}`}
+          sx={{ fontWeight: 500, color: 'inherit', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+        >
+          {row.partName}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.25, flexWrap: 'wrap' }}>
+          {row.status === 'incomparable' && (
+            <Tooltip
+              title={`The BOM line is in ${row.basis.kind === 'incomparable' ? row.basis.bomUnit : row.bomUnit}, but stock is counted in ${unit}. Add a conversion on this part to compare them.`}
+            >
+              <Chip size="small" color="warning" variant="outlined" label="Can't compare units" />
+            </Tooltip>
+          )}
+          {row.status === 'not_stocked' && (
+            <Chip size="small" variant="outlined" label="Not stocked" />
+          )}
+          {row.status === 'archived' && (
+            <Chip size="small" variant="outlined" label="Archived material" />
+          )}
+          {row.hasDiscrepancy && (
+            <Chip size="small" color="warning" variant="outlined" label="Shortfall recorded" />
+          )}
+        </Box>
+      </TableCell>
+
+      <TableCell align="right" sx={{ ...NUM_SX, whiteSpace: 'nowrap' }}>
+        {fmt(row.requiredInBomUnit)} {row.bomUnit}
+      </TableCell>
+
+      <TableCell align="right" sx={{ ...NUM_SX, whiteSpace: 'nowrap' }}>
+        {fmt(row.onHand)} {unit}
+      </TableCell>
+
+      <TableCell align="right" sx={{ ...NUM_SX, whiteSpace: 'nowrap' }}>
+        {row.issued > 0 ? `${fmt(row.issued)} ${unit}` : '—'}
+      </TableCell>
+
+      {/* An em dash, never a zero: we don't know, and "0" would read as "you're fine". */}
+      <TableCell align="right" sx={{ ...NUM_SX, whiteSpace: 'nowrap' }}>
+        {row.shortBy === null ? (
+          <Typography component="span" variant="body2" color="text.disabled">
+            —
+          </Typography>
+        ) : row.shortBy > 0 ? (
+          <Typography component="span" variant="body2" sx={{ ...NUM_SX, fontWeight: 700, color: 'warning.main' }}>
+            {fmt(row.shortBy)} {unit}
+          </Typography>
+        ) : (
+          <Typography component="span" variant="body2" color="text.disabled">
+            —
+          </Typography>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }

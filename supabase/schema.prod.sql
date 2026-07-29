@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-20T19:19:31Z
+-- Generated: 2026-07-28T19:47:45Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -76,6 +76,30 @@ CREATE TABLE IF NOT EXISTS "public"."auth_audit_log"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "auth_audit_log_pkey" PRIMARY KEY (id),
     CONSTRAINT "auth_audit_log_outcome_check" CHECK ((outcome = ANY (ARRAY['success'::text, 'forbidden'::text, 'failed'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."company_billing"
+(
+    "company_id" uuid NOT NULL,
+    "billing_exempt" boolean NOT NULL DEFAULT false,
+    "stripe_customer_id" text,
+    "stripe_subscription_id" text,
+    "subscription_status" text,
+    "subscription_price_id" text,
+    "current_period_end" timestamp with time zone,
+    "cancel_at" timestamp with time zone,
+    "canceled_at" timestamp with time zone,
+    "ended_at" timestamp with time zone,
+    "trial_end" timestamp with time zone,
+    "override_price_id" text,
+    "override_trial_days" integer,
+    "subscription_event_at" timestamp with time zone,
+    "synced_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "company_billing_pkey" PRIMARY KEY (company_id),
+    CONSTRAINT "company_billing_stripe_customer_id_key" UNIQUE (stripe_customer_id),
+    CONSTRAINT "company_billing_status_check" CHECK (((subscription_status IS NULL) OR (subscription_status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'unpaid'::text, 'incomplete'::text, 'incomplete_expired'::text, 'paused'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."company_custom_units"
@@ -346,9 +370,22 @@ CREATE TABLE IF NOT EXISTS "public"."user_company_access"
     "name" text,
     "pin_hash" text,
     "email" text,
+    "excluded_from_metrics" boolean NOT NULL DEFAULT false,
     CONSTRAINT "user_company_access_pkey" PRIMARY KEY (id),
     CONSTRAINT "user_company_access_user_id_company_id_key" UNIQUE (user_id, company_id),
     CONSTRAINT "user_company_access_role_check" CHECK ((role = ANY (ARRAY['admin'::text, 'user'::text, 'operator'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."operator_events"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "actor_id" uuid,
+    "kind" text NOT NULL,
+    "context" jsonb NOT NULL DEFAULT '{}'::jsonb,
+    "occurred_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "operator_events_pkey" PRIMARY KEY (id),
+    CONSTRAINT "operator_events_kind_check" CHECK ((kind = ANY (ARRAY['app_opened'::text, 'station_selected'::text, 'op_card_opened'::text, 'prior_notes_opened'::text, 'composer_focused'::text, 'composer_abandoned'::text, 'note_saved'::text, 'note_saved_with_photo'::text, 'photo_attached'::text, 'completion_recorded'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
@@ -482,6 +519,20 @@ CREATE TABLE IF NOT EXISTS "public"."part_attachments"
     CONSTRAINT "part_attachments_kind_check" CHECK ((kind = ANY (ARRAY['pdf'::text, 'step'::text, 'dwg'::text, 'other'::text])))
 );
 
+CREATE TABLE IF NOT EXISTS "public"."part_comments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "part_id" uuid NOT NULL,
+    "author_id" uuid,
+    "body" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "note_type" text NOT NULL DEFAULT 'user'::text,
+    CONSTRAINT "part_comments_pkey" PRIMARY KEY (id),
+    CONSTRAINT "part_comments_body_not_blank" CHECK ((length(btrim(body)) > 0)),
+    CONSTRAINT "part_comments_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'pricing'::text])))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."part_location_stock"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -493,20 +544,6 @@ CREATE TABLE IF NOT EXISTS "public"."part_location_stock"
     CONSTRAINT "part_location_stock_pkey" PRIMARY KEY (id),
     CONSTRAINT "part_location_stock_part_location_unique" UNIQUE (part_id, location_id),
     CONSTRAINT "part_location_stock_quantity_non_negative" CHECK ((quantity >= (0)::numeric))
-);
-
-CREATE TABLE IF NOT EXISTS "public"."part_notes"
-(
-    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
-    "company_id" uuid NOT NULL,
-    "part_id" uuid NOT NULL,
-    "author_id" uuid,
-    "body" text NOT NULL,
-    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "note_type" text NOT NULL DEFAULT 'user'::text,
-    CONSTRAINT "part_notes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "part_notes_body_not_blank" CHECK ((length(btrim(body)) > 0)),
-    CONSTRAINT "part_notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'pricing'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."part_pricing_tiers"
@@ -587,6 +624,7 @@ CREATE TABLE IF NOT EXISTS "public"."quote_line_items"
     "is_quote_override" boolean NOT NULL DEFAULT false,
     "pricing_basis_snapshot" jsonb,
     "basis_unknown" boolean NOT NULL DEFAULT false,
+    "lead_time_text" text,
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY (id),
     CONSTRAINT "quote_line_items_unique_seq" UNIQUE (quote_id, sequence),
     CONSTRAINT "quote_line_items_quantity_check" CHECK ((quantity > (0)::numeric))
@@ -800,9 +838,11 @@ CREATE TABLE IF NOT EXISTS "public"."job_operations"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "routing_operation_id" uuid,
+    "sent_at" timestamp with time zone,
+    "sent_by" uuid,
     CONSTRAINT "job_operations_pkey" PRIMARY KEY (id),
     CONSTRAINT "job_operations_job_part_sequence_key" UNIQUE (job_part_id, sequence),
-    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text])))
+    CONSTRAINT "job_operations_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'sent'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
@@ -830,24 +870,61 @@ CREATE TABLE IF NOT EXISTS "public"."inventory_transactions"
     CONSTRAINT "inventory_transactions_type_check" CHECK ((type = ANY (ARRAY['addition'::text, 'depletion'::text, 'adjustment'::text])))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."job_notes"
+CREATE TABLE IF NOT EXISTS "public"."job_operation_completions"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
-    "job_id" uuid NOT NULL,
+    "job_operation_id" uuid NOT NULL,
+    "job_part_id" uuid NOT NULL,
+    "quantity_good" numeric NOT NULL,
+    "completed_by" uuid,
+    "completed_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "note" text,
+    "voided_at" timestamp with time zone,
+    "voided_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "job_operation_completions_pkey" PRIMARY KEY (id),
+    CONSTRAINT "job_op_completions_note_not_blank" CHECK (((note IS NULL) OR (length(btrim(note)) > 0))),
+    CONSTRAINT "job_op_completions_quantity_positive" CHECK ((quantity_good > (0)::numeric))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."notes"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "job_id" uuid,
     "author_id" uuid,
     "body" text,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "job_part_id" uuid,
     "job_operation_id" uuid,
     "note_type" text NOT NULL DEFAULT 'user'::text,
-    CONSTRAINT "job_notes_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_notes_body_blank_or_null" CHECK (((body IS NULL) OR (length(btrim(body)) > 0))),
-    CONSTRAINT "job_notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'event'::text]))),
-    CONSTRAINT "job_notes_operation_requires_part" CHECK (((job_operation_id IS NULL) OR (job_part_id IS NOT NULL)))
+    "subject_kind" text NOT NULL,
+    "part_id" uuid,
+    "routing_operation_id" uuid,
+    "work_center_id" uuid,
+    "captured_job_id" uuid,
+    "captured_job_operation_id" uuid,
+    "corrects_note_id" uuid,
+    "viewer_count" integer NOT NULL DEFAULT 0,
+    "usage_count" integer NOT NULL DEFAULT 0,
+    CONSTRAINT "notes_pkey" PRIMARY KEY (id),
+    CONSTRAINT "notes_body_blank_or_null" CHECK (((body IS NULL) OR (length(btrim(body)) > 0))),
+    CONSTRAINT "notes_no_self_correction" CHECK (((corrects_note_id IS NULL) OR (corrects_note_id <> id))),
+    CONSTRAINT "notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'event'::text]))),
+    CONSTRAINT "notes_subject_valid" CHECK (
+CASE subject_kind
+    WHEN 'job'::text THEN ((job_id IS NOT NULL) AND ((job_operation_id IS NULL) OR (job_part_id IS NOT NULL)) AND (part_id IS NULL) AND (routing_operation_id IS NULL) AND (work_center_id IS NULL))
+    WHEN 'part'::text THEN ((part_id IS NOT NULL) AND (work_center_id IS NULL) AND (job_id IS NULL) AND (job_part_id IS NULL) AND (job_operation_id IS NULL))
+    WHEN 'work_center'::text THEN ((work_center_id IS NOT NULL) AND (part_id IS NULL) AND (routing_operation_id IS NULL) AND (job_id IS NULL) AND (job_part_id IS NULL) AND (job_operation_id IS NULL))
+    ELSE false
+END),
+    CONSTRAINT "notes_usage_count_nonneg" CHECK ((usage_count >= 0)),
+    CONSTRAINT "notes_viewer_count_nonneg" CHECK ((viewer_count >= 0))
 );
 
-CREATE TABLE IF NOT EXISTS "public"."job_note_media"
+CREATE TABLE IF NOT EXISTS "public"."note_media"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
     "company_id" uuid NOT NULL,
@@ -861,8 +938,33 @@ CREATE TABLE IF NOT EXISTS "public"."job_note_media"
     "height" integer,
     "duration_seconds" numeric,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT "job_note_media_pkey" PRIMARY KEY (id),
-    CONSTRAINT "job_note_media_kind_check" CHECK ((kind = ANY (ARRAY['photo'::text, 'video'::text])))
+    CONSTRAINT "note_media_pkey" PRIMARY KEY (id),
+    CONSTRAINT "note_media_kind_check" CHECK ((kind = ANY (ARRAY['photo'::text, 'video'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."note_reactions"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "note_id" uuid NOT NULL,
+    "reactor_id" uuid NOT NULL,
+    "kind" text NOT NULL,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "note_reactions_pkey" PRIMARY KEY (id),
+    CONSTRAINT "note_reactions_note_reactor_kind_key" UNIQUE (note_id, reactor_id, kind),
+    CONSTRAINT "note_reactions_kind_check" CHECK ((kind = ANY (ARRAY['helpful'::text, 'confirmed'::text])))
+);
+
+CREATE TABLE IF NOT EXISTS "public"."note_views"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "note_id" uuid NOT NULL,
+    "viewer_id" uuid NOT NULL,
+    "job_id" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "note_views_pkey" PRIMARY KEY (id),
+    CONSTRAINT "note_views_note_viewer_job_key" UNIQUE NULLS NOT DISTINCT (note_id, viewer_id, job_id)
 );
 
 -- ============================================================
@@ -872,6 +974,7 @@ ALTER TABLE "public"."ai_chat_queries" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."ai_config" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."auth_audit_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."companies" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."company_billing" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_custom_units" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."company_order_counters" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."customer_addresses" ENABLE ROW LEVEL SECURITY;
@@ -885,14 +988,18 @@ ALTER TABLE "public"."invitations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_fulfillment_audit" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_materials" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."job_note_media" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."job_notes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."job_operation_completions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_operations" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."job_parts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."jobs" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."note_media" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."note_reactions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."note_views" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."notes" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."operator_events" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_attachments" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."part_comments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_location_stock" ENABLE ROW LEVEL SECURITY;
-ALTER TABLE "public"."part_notes" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_pricing_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."part_procurement_tiers" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."parts" ENABLE ROW LEVEL SECURITY;
@@ -938,6 +1045,31 @@ CREATE POLICY "Users can read own company chat history"
    FROM user_company_access
   WHERE ((user_company_access.user_id = auth.uid()) AND (user_company_access.role = ANY (ARRAY['admin'::text, 'user'::text]))))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."ai_chat_queries";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."ai_chat_queries"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."ai_chat_queries";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."ai_chat_queries"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."ai_chat_queries";
+CREATE POLICY "billing_gate_update"
+    ON "public"."ai_chat_queries"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "Admins can delete AI config" ON "public"."ai_config";
 CREATE POLICY "Admins can delete AI config"
     ON "public"."ai_config"
@@ -963,6 +1095,31 @@ CREATE POLICY "Users can view their company's AI config"
     USING ((company_id IN ( SELECT user_company_access.company_id
    FROM user_company_access
   WHERE (user_company_access.user_id = auth.uid()))));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."ai_config";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."ai_config"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."ai_config";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."ai_config"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."ai_config";
+CREATE POLICY "billing_gate_update"
+    ON "public"."ai_config"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Company admins read auth audit" ON "public"."auth_audit_log";
 CREATE POLICY "Company admins read auth audit"
@@ -995,6 +1152,12 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "Members can view their company billing" ON "public"."company_billing";
+CREATE POLICY "Members can view their company billing"
+    ON "public"."company_billing"
+    FOR SELECT
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can delete company_custom_units" ON "public"."company_custom_units";
 CREATE POLICY "Users can delete company_custom_units"
     ON "public"."company_custom_units"
@@ -1013,6 +1176,31 @@ CREATE POLICY "Users can view company_custom_units"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."company_custom_units";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."company_custom_units"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."company_custom_units";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."company_custom_units"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."company_custom_units";
+CREATE POLICY "billing_gate_update"
+    ON "public"."company_custom_units"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "Company members manage their customer addresses" ON "public"."customer_addresses";
 CREATE POLICY "Company members manage their customer addresses"
     ON "public"."customer_addresses"
@@ -1025,6 +1213,39 @@ CREATE POLICY "Company members manage their customer addresses"
    FROM (customers c
      JOIN user_company_access uca ON ((uca.company_id = c.company_id)))
   WHERE ((c.id = customer_addresses.customer_id) AND (uca.user_id = auth.uid())))));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."customer_addresses";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."customer_addresses"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_addresses.customer_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."customer_addresses";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."customer_addresses"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_addresses.customer_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."customer_addresses";
+CREATE POLICY "billing_gate_update"
+    ON "public"."customer_addresses"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_addresses.customer_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_addresses.customer_id))));
 
 DROP POLICY IF EXISTS "Users can delete customer_contacts" ON "public"."customer_contacts";
 CREATE POLICY "Users can delete customer_contacts"
@@ -1067,6 +1288,39 @@ CREATE POLICY "ai_readonly_select"
    FROM customers c
   WHERE (c.company_id = (current_setting('jigged.company_id'::text, true))::uuid))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."customer_contacts";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."customer_contacts"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_contacts.customer_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."customer_contacts";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."customer_contacts"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_contacts.customer_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."customer_contacts";
+CREATE POLICY "billing_gate_update"
+    ON "public"."customer_contacts"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_contacts.customer_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM customers p
+  WHERE (p.id = customer_contacts.customer_id))));
+
 DROP POLICY IF EXISTS "Users can delete customers" ON "public"."customers";
 CREATE POLICY "Users can delete customers"
     ON "public"."customers"
@@ -1097,6 +1351,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."customers";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."customers"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."customers";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."customers"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."customers";
+CREATE POLICY "billing_gate_update"
+    ON "public"."customers"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "All authenticated users can read active templates" ON "public"."demo_data_templates";
 CREATE POLICY "All authenticated users can read active templates"
@@ -1151,6 +1430,31 @@ CREATE POLICY "Users can view inventory_locations"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."inventory_locations";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."inventory_locations"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."inventory_locations";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."inventory_locations"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."inventory_locations";
+CREATE POLICY "billing_gate_update"
+    ON "public"."inventory_locations"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "Users can insert inventory_transactions" ON "public"."inventory_transactions";
 CREATE POLICY "Users can insert inventory_transactions"
     ON "public"."inventory_transactions"
@@ -1175,6 +1479,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."inventory_transactions";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."inventory_transactions"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."inventory_transactions";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."inventory_transactions"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."inventory_transactions";
+CREATE POLICY "billing_gate_update"
+    ON "public"."inventory_transactions"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Admins can manage invitations" ON "public"."invitations";
 CREATE POLICY "Admins can manage invitations"
@@ -1207,6 +1536,31 @@ CREATE POLICY "Users can view their company's job_attachments"
     ON "public"."job_attachments"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."job_attachments";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."job_attachments"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."job_attachments";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."job_attachments"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."job_attachments";
+CREATE POLICY "billing_gate_update"
+    ON "public"."job_attachments"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Users can view job_fulfillment_audit" ON "public"."job_fulfillment_audit";
 CREATE POLICY "Users can view job_fulfillment_audit"
@@ -1262,43 +1616,82 @@ CREATE POLICY "ai_readonly_select"
    FROM jobs
   WHERE ((jobs.id = job_materials.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
-DROP POLICY IF EXISTS "Authors and admins can delete job_note_media" ON "public"."job_note_media";
-CREATE POLICY "Authors and admins can delete job_note_media"
-    ON "public"."job_note_media"
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."job_materials";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."job_materials"
+    AS RESTRICTIVE
     FOR DELETE
-    USING ((is_company_admin(company_id) OR (EXISTS ( SELECT 1
-   FROM job_notes n
-  WHERE ((n.id = job_note_media.note_id) AND (n.author_id = get_operator_access_id(n.company_id)))))));
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_materials.job_id))));
 
-DROP POLICY IF EXISTS "Users can insert job_note_media" ON "public"."job_note_media";
-CREATE POLICY "Users can insert job_note_media"
-    ON "public"."job_note_media"
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."job_materials";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."job_materials"
+    AS RESTRICTIVE
     FOR INSERT
-    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (get_operator_access_id(company_id) IS NOT NULL)));
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_materials.job_id))));
 
-DROP POLICY IF EXISTS "Users can view job_note_media" ON "public"."job_note_media";
-CREATE POLICY "Users can view job_note_media"
-    ON "public"."job_note_media"
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."job_materials";
+CREATE POLICY "billing_gate_update"
+    ON "public"."job_materials"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_materials.job_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_materials.job_id))));
+
+DROP POLICY IF EXISTS "Users can insert their company's operation completions" ON "public"."job_operation_completions";
+CREATE POLICY "Users can insert their company's operation completions"
+    ON "public"."job_operation_completions"
+    FOR INSERT
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can update their company's operation completions" ON "public"."job_operation_completions";
+CREATE POLICY "Users can update their company's operation completions"
+    ON "public"."job_operation_completions"
+    FOR UPDATE
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)))
+    WITH CHECK ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "Users can view their company's operation completions" ON "public"."job_operation_completions";
+CREATE POLICY "Users can view their company's operation completions"
+    ON "public"."job_operation_completions"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
-DROP POLICY IF EXISTS "Authors and admins can delete job_notes" ON "public"."job_notes";
-CREATE POLICY "Authors and admins can delete job_notes"
-    ON "public"."job_notes"
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."job_operation_completions";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."job_operation_completions"
+    AS RESTRICTIVE
     FOR DELETE
-    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+    TO authenticated
+    USING (company_can_write(company_id));
 
-DROP POLICY IF EXISTS "Users can insert own job_notes" ON "public"."job_notes";
-CREATE POLICY "Users can insert own job_notes"
-    ON "public"."job_notes"
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."job_operation_completions";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."job_operation_completions"
+    AS RESTRICTIVE
     FOR INSERT
-    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
 
-DROP POLICY IF EXISTS "Users can view job_notes" ON "public"."job_notes";
-CREATE POLICY "Users can view job_notes"
-    ON "public"."job_notes"
-    FOR SELECT
-    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."job_operation_completions";
+CREATE POLICY "billing_gate_update"
+    ON "public"."job_operation_completions"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Users can delete job_operations" ON "public"."job_operations";
 CREATE POLICY "Users can delete job_operations"
@@ -1341,6 +1734,39 @@ CREATE POLICY "ai_readonly_select"
    FROM jobs
   WHERE ((jobs.id = job_operations.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."job_operations";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."job_operations"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_operations.job_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."job_operations";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."job_operations"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_operations.job_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."job_operations";
+CREATE POLICY "billing_gate_update"
+    ON "public"."job_operations"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_operations.job_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM jobs p
+  WHERE (p.id = job_operations.job_id))));
+
 DROP POLICY IF EXISTS "Users can delete job_parts" ON "public"."job_parts";
 CREATE POLICY "Users can delete job_parts"
     ON "public"."job_parts"
@@ -1382,6 +1808,31 @@ CREATE POLICY "ai_readonly_select"
    FROM jobs
   WHERE ((jobs.id = job_parts.job_id) AND (jobs.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."job_parts";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."job_parts"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."job_parts";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."job_parts"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."job_parts";
+CREATE POLICY "billing_gate_update"
+    ON "public"."job_parts"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "Users can delete jobs" ON "public"."jobs";
 CREATE POLICY "Users can delete jobs"
     ON "public"."jobs"
@@ -1413,6 +1864,191 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."jobs";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."jobs"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."jobs";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."jobs"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."jobs";
+CREATE POLICY "billing_gate_update"
+    ON "public"."jobs"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."note_media";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."note_media"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."note_media";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."note_media"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."note_media";
+CREATE POLICY "billing_gate_update"
+    ON "public"."note_media"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "note_media_delete" ON "public"."note_media";
+CREATE POLICY "note_media_delete"
+    ON "public"."note_media"
+    FOR DELETE
+    TO authenticated
+    USING ((is_company_admin(company_id) OR (EXISTS ( SELECT 1
+   FROM notes n
+  WHERE ((n.id = note_media.note_id) AND (n.author_id = get_operator_access_id(n.company_id)))))));
+
+DROP POLICY IF EXISTS "note_media_insert" ON "public"."note_media";
+CREATE POLICY "note_media_insert"
+    ON "public"."note_media"
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (get_operator_access_id(company_id) IS NOT NULL)));
+
+DROP POLICY IF EXISTS "note_media_select" ON "public"."note_media";
+CREATE POLICY "note_media_select"
+    ON "public"."note_media"
+    FOR SELECT
+    TO authenticated
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."note_reactions";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."note_reactions"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."note_reactions";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."note_reactions"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."note_reactions";
+CREATE POLICY "billing_gate_update"
+    ON "public"."note_reactions"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "note_reactions_delete" ON "public"."note_reactions";
+CREATE POLICY "note_reactions_delete"
+    ON "public"."note_reactions"
+    FOR DELETE
+    TO authenticated
+    USING ((reactor_id = get_operator_access_id(company_id)));
+
+DROP POLICY IF EXISTS "note_reactions_insert" ON "public"."note_reactions";
+CREATE POLICY "note_reactions_insert"
+    ON "public"."note_reactions"
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (reactor_id = get_operator_access_id(company_id)) AND (NOT (EXISTS ( SELECT 1
+   FROM notes n
+  WHERE ((n.id = note_reactions.note_id) AND (n.author_id = get_operator_access_id(n.company_id))))))));
+
+DROP POLICY IF EXISTS "note_reactions_select" ON "public"."note_reactions";
+CREATE POLICY "note_reactions_select"
+    ON "public"."note_reactions"
+    FOR SELECT
+    TO authenticated
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "note_views_no_client_access" ON "public"."note_views";
+CREATE POLICY "note_views_no_client_access"
+    ON "public"."note_views"
+    AS RESTRICTIVE
+    FOR ALL
+    TO anon, authenticated, jigged_ai_readonly
+    USING (false)
+    WITH CHECK (false);
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."notes";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."notes"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."notes";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."notes"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."notes";
+CREATE POLICY "billing_gate_update"
+    ON "public"."notes"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "notes_delete" ON "public"."notes";
+CREATE POLICY "notes_delete"
+    ON "public"."notes"
+    FOR DELETE
+    TO authenticated
+    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+
+DROP POLICY IF EXISTS "notes_insert" ON "public"."notes";
+CREATE POLICY "notes_insert"
+    ON "public"."notes"
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
+
+DROP POLICY IF EXISTS "notes_select" ON "public"."notes";
+CREATE POLICY "notes_select"
+    ON "public"."notes"
+    FOR SELECT
+    TO authenticated
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
+DROP POLICY IF EXISTS "operator_events_no_client_access" ON "public"."operator_events";
+CREATE POLICY "operator_events_no_client_access"
+    ON "public"."operator_events"
+    AS RESTRICTIVE
+    FOR ALL
+    TO anon, authenticated, jigged_ai_readonly
+    USING (false)
+    WITH CHECK (false);
+
 DROP POLICY IF EXISTS "Uploaders and admins can delete part_attachments" ON "public"."part_attachments";
 CREATE POLICY "Uploaders and admins can delete part_attachments"
     ON "public"."part_attachments"
@@ -1431,27 +2067,80 @@ CREATE POLICY "Users can view part_attachments"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."part_attachments";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."part_attachments"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."part_attachments";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."part_attachments"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."part_attachments";
+CREATE POLICY "billing_gate_update"
+    ON "public"."part_attachments"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."part_comments";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."part_comments"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."part_comments";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."part_comments"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."part_comments";
+CREATE POLICY "billing_gate_update"
+    ON "public"."part_comments"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "part_comments_delete" ON "public"."part_comments";
+CREATE POLICY "part_comments_delete"
+    ON "public"."part_comments"
+    FOR DELETE
+    TO authenticated
+    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+
+DROP POLICY IF EXISTS "part_comments_insert" ON "public"."part_comments";
+CREATE POLICY "part_comments_insert"
+    ON "public"."part_comments"
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
+
+DROP POLICY IF EXISTS "part_comments_select" ON "public"."part_comments";
+CREATE POLICY "part_comments_select"
+    ON "public"."part_comments"
+    FOR SELECT
+    TO authenticated
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "Users can view part_location_stock" ON "public"."part_location_stock";
 CREATE POLICY "Users can view part_location_stock"
     ON "public"."part_location_stock"
-    FOR SELECT
-    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
-
-DROP POLICY IF EXISTS "Authors and admins can delete part_notes" ON "public"."part_notes";
-CREATE POLICY "Authors and admins can delete part_notes"
-    ON "public"."part_notes"
-    FOR DELETE
-    USING (((author_id = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
-
-DROP POLICY IF EXISTS "Users can insert own part_notes" ON "public"."part_notes";
-CREATE POLICY "Users can insert own part_notes"
-    ON "public"."part_notes"
-    FOR INSERT
-    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (author_id = get_operator_access_id(company_id))));
-
-DROP POLICY IF EXISTS "Users can view part_notes" ON "public"."part_notes";
-CREATE POLICY "Users can view part_notes"
-    ON "public"."part_notes"
     FOR SELECT
     USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
 
@@ -1461,6 +2150,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."part_pricing_tiers";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."part_pricing_tiers"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."part_pricing_tiers";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."part_pricing_tiers"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."part_pricing_tiers";
+CREATE POLICY "billing_gate_update"
+    ON "public"."part_pricing_tiers"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "part_pricing_tiers_delete" ON "public"."part_pricing_tiers";
 CREATE POLICY "part_pricing_tiers_delete"
@@ -1535,6 +2249,39 @@ CREATE POLICY "ai_readonly_select"
    FROM parts
   WHERE ((parts.id = part_procurement_tiers.part_id) AND (parts.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."part_procurement_tiers";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."part_procurement_tiers"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = part_procurement_tiers.part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."part_procurement_tiers";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."part_procurement_tiers"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = part_procurement_tiers.part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."part_procurement_tiers";
+CREATE POLICY "billing_gate_update"
+    ON "public"."part_procurement_tiers"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = part_procurement_tiers.part_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = part_procurement_tiers.part_id))));
+
 DROP POLICY IF EXISTS "Users can delete parts for their companies" ON "public"."parts";
 CREATE POLICY "Users can delete parts for their companies"
     ON "public"."parts"
@@ -1573,6 +2320,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."parts";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."parts"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."parts";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."parts"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."parts";
+CREATE POLICY "billing_gate_update"
+    ON "public"."parts"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Users can delete parts_bom" ON "public"."parts_bom";
 CREATE POLICY "Users can delete parts_bom"
@@ -1615,6 +2387,39 @@ CREATE POLICY "ai_readonly_select"
    FROM parts
   WHERE ((parts.id = parts_bom.parent_part_id) AND (parts.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."parts_bom";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."parts_bom"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_bom.parent_part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."parts_bom";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."parts_bom"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_bom.parent_part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."parts_bom";
+CREATE POLICY "billing_gate_update"
+    ON "public"."parts_bom"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_bom.parent_part_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_bom.parent_part_id))));
+
 DROP POLICY IF EXISTS "Users can delete parts_unit_conversions" ON "public"."parts_unit_conversions";
 CREATE POLICY "Users can delete parts_unit_conversions"
     ON "public"."parts_unit_conversions"
@@ -1656,6 +2461,39 @@ CREATE POLICY "ai_readonly_select"
    FROM parts
   WHERE ((parts.id = parts_unit_conversions.part_id) AND (parts.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."parts_unit_conversions";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."parts_unit_conversions"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_unit_conversions.part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."parts_unit_conversions";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."parts_unit_conversions"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_unit_conversions.part_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."parts_unit_conversions";
+CREATE POLICY "billing_gate_update"
+    ON "public"."parts_unit_conversions"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_unit_conversions.part_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM parts p
+  WHERE (p.id = parts_unit_conversions.part_id))));
+
 DROP POLICY IF EXISTS "Users can view their company's qb customer map" ON "public"."quickbooks_customer_map";
 CREATE POLICY "Users can view their company's qb customer map"
     ON "public"."quickbooks_customer_map"
@@ -1680,6 +2518,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."quote_line_items";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."quote_line_items"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."quote_line_items";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."quote_line_items"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."quote_line_items";
+CREATE POLICY "billing_gate_update"
+    ON "public"."quote_line_items"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "quote_line_items_delete" ON "public"."quote_line_items";
 CREATE POLICY "quote_line_items_delete"
@@ -1720,6 +2583,31 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."quote_materials";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."quote_materials"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."quote_materials";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."quote_materials"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."quote_materials";
+CREATE POLICY "billing_gate_update"
+    ON "public"."quote_materials"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "quote_materials_delete" ON "public"."quote_materials";
 CREATE POLICY "quote_materials_delete"
     ON "public"."quote_materials"
@@ -1758,6 +2646,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."quote_operations";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."quote_operations"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."quote_operations";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."quote_operations"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."quote_operations";
+CREATE POLICY "billing_gate_update"
+    ON "public"."quote_operations"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "quote_operations_delete" ON "public"."quote_operations";
 CREATE POLICY "quote_operations_delete"
@@ -1822,6 +2735,31 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."quotes";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."quotes"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."quotes";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."quotes"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."quotes";
+CREATE POLICY "billing_gate_update"
+    ON "public"."quotes"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "Users can delete routing_operations" ON "public"."routing_operations";
 CREATE POLICY "Users can delete routing_operations"
     ON "public"."routing_operations"
@@ -1863,6 +2801,39 @@ CREATE POLICY "ai_readonly_select"
    FROM routings
   WHERE ((routings.id = routing_operations.routing_id) AND (routings.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."routing_operations";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."routing_operations"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM routings p
+  WHERE (p.id = routing_operations.routing_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."routing_operations";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."routing_operations"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM routings p
+  WHERE (p.id = routing_operations.routing_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."routing_operations";
+CREATE POLICY "billing_gate_update"
+    ON "public"."routing_operations"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM routings p
+  WHERE (p.id = routing_operations.routing_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM routings p
+  WHERE (p.id = routing_operations.routing_id))));
+
 DROP POLICY IF EXISTS "Users can delete routings" ON "public"."routings";
 CREATE POLICY "Users can delete routings"
     ON "public"."routings"
@@ -1893,6 +2864,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."routings";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."routings"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."routings";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."routings"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."routings";
+CREATE POLICY "billing_gate_update"
+    ON "public"."routings"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "Users can delete own saved insights" ON "public"."saved_insights";
 CREATE POLICY "Users can delete own saved insights"
@@ -1953,6 +2949,39 @@ CREATE POLICY "ai_readonly_select"
    FROM shipments s
   WHERE ((s.id = shipment_line_items.shipment_id) AND (s.company_id = (current_setting('jigged.company_id'::text, true))::uuid)))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."shipment_line_items";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."shipment_line_items"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM shipments p
+  WHERE (p.id = shipment_line_items.shipment_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."shipment_line_items";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."shipment_line_items"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM shipments p
+  WHERE (p.id = shipment_line_items.shipment_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."shipment_line_items";
+CREATE POLICY "billing_gate_update"
+    ON "public"."shipment_line_items"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM shipments p
+  WHERE (p.id = shipment_line_items.shipment_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM shipments p
+  WHERE (p.id = shipment_line_items.shipment_id))));
+
 DROP POLICY IF EXISTS "Users can delete shipments" ON "public"."shipments";
 CREATE POLICY "Users can delete shipments"
     ON "public"."shipments"
@@ -1983,6 +3012,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."shipments";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."shipments"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."shipments";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."shipments"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."shipments";
+CREATE POLICY "billing_gate_update"
+    ON "public"."shipments"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "System admins can insert system_admins" ON "public"."system_admins";
 CREATE POLICY "System admins can insert system_admins"
@@ -2110,6 +3164,39 @@ CREATE POLICY "ai_readonly_select"
    FROM vendors v
   WHERE (v.company_id = (current_setting('jigged.company_id'::text, true))::uuid))));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."vendor_contacts";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."vendor_contacts"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM vendors p
+  WHERE (p.id = vendor_contacts.vendor_id))));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."vendor_contacts";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."vendor_contacts"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM vendors p
+  WHERE (p.id = vendor_contacts.vendor_id))));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."vendor_contacts";
+CREATE POLICY "billing_gate_update"
+    ON "public"."vendor_contacts"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(( SELECT p.company_id
+   FROM vendors p
+  WHERE (p.id = vendor_contacts.vendor_id))))
+    WITH CHECK (company_can_write(( SELECT p.company_id
+   FROM vendors p
+  WHERE (p.id = vendor_contacts.vendor_id))));
+
 DROP POLICY IF EXISTS "Users can delete vendors" ON "public"."vendors";
 CREATE POLICY "Users can delete vendors"
     ON "public"."vendors"
@@ -2141,6 +3228,31 @@ CREATE POLICY "ai_readonly_select"
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."vendors";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."vendors"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."vendors";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."vendors"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."vendors";
+CREATE POLICY "billing_gate_update"
+    ON "public"."vendors"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
 DROP POLICY IF EXISTS "anon_insert_waitlist" ON "public"."waitlist";
 CREATE POLICY "anon_insert_waitlist"
     ON "public"."waitlist"
@@ -2162,6 +3274,31 @@ CREATE POLICY "ai_readonly_select"
     FOR SELECT
     TO jigged_ai_readonly
     USING ((company_id = (current_setting('jigged.company_id'::text, true))::uuid));
+
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."work_centers";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."work_centers"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."work_centers";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."work_centers"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."work_centers";
+CREATE POLICY "billing_gate_update"
+    ON "public"."work_centers"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
 
 DROP POLICY IF EXISTS "work_centers_delete" ON "public"."work_centers";
 CREATE POLICY "work_centers_delete"
@@ -2202,7 +3339,7 @@ CREATE POLICY "Users can delete files from their company folder"
     TO authenticated
     USING (((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] IN ( SELECT (user_company_access.company_id)::text AS company_id
    FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid())))));
+  WHERE (user_company_access.user_id = auth.uid()))) AND company_can_write(((storage.foldername(name))[1])::uuid)));
 
 DROP POLICY IF EXISTS "Users can read files from their company folder" ON "storage"."objects";
 CREATE POLICY "Users can read files from their company folder"
@@ -2220,7 +3357,7 @@ CREATE POLICY "Users can upload files to their company folder"
     TO authenticated
     WITH CHECK (((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] IN ( SELECT (user_company_access.company_id)::text AS company_id
    FROM user_company_access
-  WHERE (user_company_access.user_id = auth.uid())))));
+  WHERE (user_company_access.user_id = auth.uid()))) AND company_can_write(((storage.foldername(name))[1])::uuid)));
 
 -- ============================================================
 -- 5. FOREIGN KEY CONSTRAINTS
@@ -2242,6 +3379,9 @@ ALTER TABLE "public"."auth_audit_log"
 
 ALTER TABLE "public"."companies"
     ADD CONSTRAINT "companies_demo_company_id_fkey" FOREIGN KEY (demo_company_id) REFERENCES companies(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."company_billing"
+    ADD CONSTRAINT "company_billing_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."company_custom_units"
     ADD CONSTRAINT "company_custom_units_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2330,26 +3470,14 @@ ALTER TABLE "public"."job_materials"
 ALTER TABLE "public"."job_materials"
     ADD CONSTRAINT "job_materials_parts_bom_id_fkey" FOREIGN KEY (parts_bom_id) REFERENCES parts_bom(id) ON DELETE SET NULL;
 
-ALTER TABLE "public"."job_note_media"
-    ADD CONSTRAINT "job_note_media_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+ALTER TABLE "public"."job_operation_completions"
+    ADD CONSTRAINT "job_op_completions_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."job_note_media"
-    ADD CONSTRAINT "job_note_media_note_id_fkey" FOREIGN KEY (note_id) REFERENCES job_notes(id) ON DELETE CASCADE;
+ALTER TABLE "public"."job_operation_completions"
+    ADD CONSTRAINT "job_op_completions_job_part_fk" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
 
-ALTER TABLE "public"."job_notes"
-    ADD CONSTRAINT "job_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."job_notes"
-    ADD CONSTRAINT "job_notes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."job_notes"
-    ADD CONSTRAINT "job_notes_job_id_fkey" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."job_notes"
-    ADD CONSTRAINT "job_notes_job_operation_id_fkey" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."job_notes"
-    ADD CONSTRAINT "job_notes_job_part_id_fkey" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
+ALTER TABLE "public"."job_operation_completions"
+    ADD CONSTRAINT "job_op_completions_operation_fk" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_completed_by_fkey" FOREIGN KEY (completed_by) REFERENCES auth.users(id);
@@ -2362,6 +3490,9 @@ ALTER TABLE "public"."job_operations"
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_routing_operation_id_fkey" FOREIGN KEY (routing_operation_id) REFERENCES routing_operations(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."job_operations"
+    ADD CONSTRAINT "job_operations_sent_by_fkey" FOREIGN KEY (sent_by) REFERENCES auth.users(id);
 
 ALTER TABLE "public"."job_operations"
     ADD CONSTRAINT "job_operations_work_center_id_fkey" FOREIGN KEY (work_center_id) REFERENCES work_centers(id) ON DELETE SET NULL;
@@ -2399,6 +3530,72 @@ ALTER TABLE "public"."jobs"
 ALTER TABLE "public"."jobs"
     ADD CONSTRAINT "jobs_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."note_media"
+    ADD CONSTRAINT "note_media_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_media"
+    ADD CONSTRAINT "note_media_note_fk" FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_reactions"
+    ADD CONSTRAINT "note_reactions_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_reactions"
+    ADD CONSTRAINT "note_reactions_note_fk" FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_reactions"
+    ADD CONSTRAINT "note_reactions_reactor_fk" FOREIGN KEY (reactor_id) REFERENCES user_company_access(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_views"
+    ADD CONSTRAINT "note_views_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_views"
+    ADD CONSTRAINT "note_views_job_fk" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."note_views"
+    ADD CONSTRAINT "note_views_note_fk" FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."note_views"
+    ADD CONSTRAINT "note_views_viewer_fk" FOREIGN KEY (viewer_id) REFERENCES user_company_access(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_author_fk" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_captured_job_fk" FOREIGN KEY (captured_job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_captured_job_operation_fk" FOREIGN KEY (captured_job_operation_id) REFERENCES job_operations(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_corrects_fk" FOREIGN KEY (corrects_note_id) REFERENCES notes(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_job_fk" FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_job_operation_fk" FOREIGN KEY (job_operation_id) REFERENCES job_operations(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_job_part_fk" FOREIGN KEY (job_part_id) REFERENCES job_parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_part_fk" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_routing_operation_fk" FOREIGN KEY (routing_operation_id) REFERENCES routing_operations(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_work_center_fk" FOREIGN KEY (work_center_id) REFERENCES work_centers(id) ON DELETE RESTRICT;
+
+ALTER TABLE "public"."operator_events"
+    ADD CONSTRAINT "operator_events_actor_fk" FOREIGN KEY (actor_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."operator_events"
+    ADD CONSTRAINT "operator_events_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."part_attachments"
     ADD CONSTRAINT "part_attachments_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2408,6 +3605,15 @@ ALTER TABLE "public"."part_attachments"
 ALTER TABLE "public"."part_attachments"
     ADD CONSTRAINT "part_attachments_uploaded_by_fkey" FOREIGN KEY (uploaded_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
 
+ALTER TABLE "public"."part_comments"
+    ADD CONSTRAINT "part_comments_author_fk" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."part_comments"
+    ADD CONSTRAINT "part_comments_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."part_comments"
+    ADD CONSTRAINT "part_comments_part_fk" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."part_location_stock"
     ADD CONSTRAINT "part_location_stock_company_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -2416,15 +3622,6 @@ ALTER TABLE "public"."part_location_stock"
 
 ALTER TABLE "public"."part_location_stock"
     ADD CONSTRAINT "part_location_stock_part_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE RESTRICT;
-
-ALTER TABLE "public"."part_notes"
-    ADD CONSTRAINT "part_notes_author_id_fkey" FOREIGN KEY (author_id) REFERENCES user_company_access(id) ON DELETE SET NULL;
-
-ALTER TABLE "public"."part_notes"
-    ADD CONSTRAINT "part_notes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
-
-ALTER TABLE "public"."part_notes"
-    ADD CONSTRAINT "part_notes_part_id_fkey" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."part_pricing_tiers"
     ADD CONSTRAINT "part_pricing_tiers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
@@ -2648,17 +3845,19 @@ CREATE INDEX IF NOT EXISTS idx_job_materials_job ON public.job_materials USING b
 CREATE INDEX IF NOT EXISTS idx_job_materials_job_part_id ON public.job_materials USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_material_part ON public.job_materials USING btree (material_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_materials_parts_bom ON public.job_materials USING btree (parts_bom_id);
-CREATE INDEX IF NOT EXISTS idx_job_note_media_note ON public.job_note_media USING btree (note_id);
-CREATE INDEX IF NOT EXISTS idx_job_notes_job_created ON public.job_notes USING btree (job_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_op_completions_job_part ON public.job_operation_completions USING btree (job_part_id);
+CREATE INDEX IF NOT EXISTS idx_job_op_completions_operation ON public.job_operation_completions USING btree (job_operation_id);
 CREATE INDEX IF NOT EXISTS idx_job_operations_job_part_id ON public.job_operations USING btree (job_part_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_job ON public.job_operations USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_ops_routing_operation ON public.job_operations USING btree (routing_operation_id) WHERE (routing_operation_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_job_ops_sent ON public.job_operations USING btree (status) WHERE (status = 'sent'::text);
 CREATE INDEX IF NOT EXISTS idx_job_ops_status ON public.job_operations USING btree (status);
 CREATE INDEX IF NOT EXISTS idx_job_ops_work_center ON public.job_operations USING btree (work_center_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_company_id ON public.job_parts USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_job_id ON public.job_parts USING btree (job_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_part_id ON public.job_parts USING btree (part_id);
 CREATE INDEX IF NOT EXISTS idx_job_parts_production_status ON public.job_parts USING btree (production_status);
+CREATE UNIQUE INDEX IF NOT EXISTS job_parts_one_active_per_quote_line ON public.job_parts USING btree (source_quote_line_item_id) WHERE ((source_quote_line_item_id IS NOT NULL) AND (production_status <> 'cancelled'::text));
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON public.jobs USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON public.jobs USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer_po_number ON public.jobs USING btree (company_id, customer_po_number) WHERE (customer_po_number IS NOT NULL);
@@ -2668,11 +3867,20 @@ CREATE INDEX IF NOT EXISTS idx_jobs_invoicing_status ON public.jobs USING btree 
 CREATE INDEX IF NOT EXISTS idx_jobs_job_number_trgm ON public.jobs USING gin (job_number gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_jobs_production_status ON public.jobs USING btree (company_id, production_status);
 CREATE INDEX IF NOT EXISTS idx_jobs_quote ON public.jobs USING btree (quote_id);
+CREATE INDEX IF NOT EXISTS idx_note_media_note ON public.note_media USING btree (note_id);
+CREATE INDEX IF NOT EXISTS idx_note_reactions_note ON public.note_reactions USING btree (note_id);
+CREATE INDEX IF NOT EXISTS idx_note_views_company ON public.note_views USING btree (company_id);
+CREATE INDEX IF NOT EXISTS idx_notes_author ON public.notes USING btree (author_id) WHERE (author_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_notes_captured_job ON public.notes USING btree (captured_job_id, created_at DESC) WHERE (captured_job_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_notes_job_created ON public.notes USING btree (job_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notes_part_step ON public.notes USING btree (part_id, routing_operation_id, created_at DESC) WHERE (part_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_notes_work_center ON public.notes USING btree (work_center_id, created_at DESC) WHERE (work_center_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_operator_events_company_time ON public.operator_events USING btree (company_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_attachments_part_created ON public.part_attachments USING btree (part_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_part_comments_part_created ON public.part_comments USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS part_location_stock_company_idx ON public.part_location_stock USING btree (company_id);
 CREATE INDEX IF NOT EXISTS part_location_stock_location_idx ON public.part_location_stock USING btree (location_id);
 CREATE INDEX IF NOT EXISTS part_location_stock_part_idx ON public.part_location_stock USING btree (part_id);
-CREATE INDEX IF NOT EXISTS idx_part_notes_part_created ON public.part_notes USING btree (part_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_company ON public.part_pricing_tiers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_part_pricing_tiers_part ON public.part_pricing_tiers USING btree (part_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_procurement_tiers_expiring ON public.part_procurement_tiers USING btree (part_id, expires_at) WHERE (expires_at IS NOT NULL);
@@ -2979,6 +4187,71 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.apply_billing_write_gate(p_table regclass)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+  EXECUTE format('DROP POLICY IF EXISTS billing_gate_insert ON %s', p_table);
+  EXECUTE format('DROP POLICY IF EXISTS billing_gate_update ON %s', p_table);
+  EXECUTE format('DROP POLICY IF EXISTS billing_gate_delete ON %s', p_table);
+  EXECUTE format(
+    'CREATE POLICY billing_gate_insert ON %s AS RESTRICTIVE FOR INSERT TO authenticated '
+    'WITH CHECK (public.company_can_write(company_id))', p_table);
+  EXECUTE format(
+    'CREATE POLICY billing_gate_update ON %s AS RESTRICTIVE FOR UPDATE TO authenticated '
+    'USING (public.company_can_write(company_id)) WITH CHECK (public.company_can_write(company_id))',
+    p_table);
+  EXECUTE format(
+    'CREATE POLICY billing_gate_delete ON %s AS RESTRICTIVE FOR DELETE TO authenticated '
+    'USING (public.company_can_write(company_id))', p_table);
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.apply_stripe_subscription(p_company_id uuid, p_stripe_customer_id text, p_stripe_subscription_id text, p_status text, p_price_id text, p_current_period_end timestamp with time zone, p_cancel_at timestamp with time zone, p_canceled_at timestamp with time zone, p_ended_at timestamp with time zone, p_trial_end timestamp with time zone, p_event_at timestamp with time zone)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  INSERT INTO public.company_billing AS cb (
+    company_id, stripe_customer_id, stripe_subscription_id, subscription_status,
+    subscription_price_id, current_period_end, cancel_at, canceled_at, ended_at,
+    trial_end, subscription_event_at, synced_at, billing_exempt
+  ) VALUES (
+    p_company_id, p_stripe_customer_id, p_stripe_subscription_id, p_status,
+    p_price_id, p_current_period_end, p_cancel_at, p_canceled_at, p_ended_at,
+    p_trial_end, p_event_at, now(),
+    -- A brand-new billing row created by a subscription event is a paying/trialing
+    -- company, never grandfathered.
+    false
+  )
+  ON CONFLICT (company_id) DO UPDATE SET
+    stripe_customer_id     = EXCLUDED.stripe_customer_id,
+    stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+    subscription_status    = EXCLUDED.subscription_status,
+    subscription_price_id  = EXCLUDED.subscription_price_id,
+    current_period_end     = EXCLUDED.current_period_end,
+    cancel_at              = EXCLUDED.cancel_at,
+    canceled_at            = EXCLUDED.canceled_at,
+    ended_at               = EXCLUDED.ended_at,
+    trial_end              = EXCLUDED.trial_end,
+    subscription_event_at  = EXCLUDED.subscription_event_at,
+    synced_at              = now(),
+    billing_exempt         = CASE
+      WHEN EXCLUDED.subscription_status IN ('active', 'past_due') THEN false
+      ELSE cb.billing_exempt
+    END
+  -- Monotonic guard: only apply if this event is newer than the last one we
+  -- recorded. A stale/duplicate delivery is a no-op (neither inserts nor updates).
+  WHERE cb.subscription_event_at IS NULL
+     OR cb.subscription_event_at <= EXCLUDED.subscription_event_at;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.archive_parts(p_ids uuid[])
  RETURNS void
  LANGUAGE plpgsql
@@ -3067,6 +4340,37 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.company_can_write(check_company_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT
+    -- Demo sandboxes are never billing-gated. Checked on the ACTIVE company_id
+    -- being written to, so a real company's lapse never cascades to its paired
+    -- demo. The storage.objects policies call this same function, so demo uploads
+    -- are covered here too.
+    EXISTS (
+      SELECT 1 FROM public.companies c
+      WHERE c.id = check_company_id AND c.is_demo
+    )
+    OR COALESCE((
+      SELECT
+        cb.billing_exempt
+        OR cb.subscription_status IN ('trialing', 'active', 'past_due')
+        OR (
+          cb.subscription_status IN ('canceled', 'unpaid')
+          AND COALESCE(cb.ended_at, cb.cancel_at, cb.current_period_end)
+              + interval '7 days' >= now()
+        )
+      FROM public.company_billing cb
+      WHERE cb.company_id = check_company_id
+    ), false);   -- missing row => false (new, never-subscribed companies)
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.compute_job_fulfillment_status(p_job_id uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -3113,6 +4417,49 @@ BEGIN
     IF v_full = v_total THEN RETURN 'fully_invoiced'; END IF;
     IF v_full > 0 OR v_partial > 0 THEN RETURN 'partially_invoiced'; END IF;
     RETURN 'uninvoiced';
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_operation_status(p_job_operation_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_target numeric;
+    v_good numeric;
+    v_kind text;
+    v_status text;
+BEGIN
+    SELECT jp.quantity, wc.kind, o.status
+      INTO v_target, v_kind, v_status
+      FROM public.job_operations o
+      JOIN public.job_parts jp ON jp.id = o.job_part_id
+      LEFT JOIN public.work_centers wc ON wc.id = o.work_center_id
+     WHERE o.id = p_job_operation_id;
+
+    -- Outside (external-vendor) ops are driven by the send/receive lifecycle
+    -- (status set directly), NOT by completion-quantity events. Preserve their
+    -- stored status so a part-quantity edit (or any completion recompute) can't
+    -- reset a sent/received op.
+    IF v_kind = 'external' THEN
+        RETURN v_status;
+    END IF;
+
+    SELECT COALESCE(SUM(c.quantity_good), 0) INTO v_good
+      FROM public.job_operation_completions c
+     WHERE c.job_operation_id = p_job_operation_id
+       AND c.voided_at IS NULL;
+
+    IF v_good <= 0 THEN
+        RETURN 'pending';
+    END IF;
+    IF v_target IS NOT NULL AND v_good >= v_target THEN
+        RETURN 'completed';
+    END IF;
+    RETURN 'in_progress';
 END $function$
 
 ;
@@ -3182,6 +4529,37 @@ BEGIN
         RETURN 'fully_invoiced';
     END IF;
     RETURN 'partially_invoiced';
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.compute_job_part_production_status(p_job_part_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_current text;
+    v_total int;
+    v_completed int;
+    v_active int;
+BEGIN
+    SELECT production_status INTO v_current FROM public.job_parts WHERE id = p_job_part_id;
+    IF v_current IS NULL OR v_current = 'cancelled' THEN
+        RETURN v_current;
+    END IF;
+
+    SELECT count(*),
+           count(*) FILTER (WHERE status = 'completed'),
+           count(*) FILTER (WHERE status <> 'pending')
+      INTO v_total, v_completed, v_active
+      FROM public.job_operations WHERE job_part_id = p_job_part_id;
+
+    IF v_total = 0 THEN RETURN v_current; END IF;
+    IF v_completed = v_total THEN RETURN 'completed'; END IF;
+    IF v_active > 0 THEN RETURN 'in_progress'; END IF;
+    RETURN 'not_started';
 END $function$
 
 ;
@@ -4502,26 +5880,28 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.get_ready_operations_for_station(p_company_id uuid, p_work_center_id uuid)
- RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity numeric)
+ RETURNS TABLE(job_id uuid, job_part_id uuid, job_operation_id uuid, operation_name text, op_status text, job_number text, part_id uuid, part_name text, part_description text, part_quantity numeric, is_hot boolean)
  LANGUAGE plpgsql
  STABLE
 AS $function$
 BEGIN
     RETURN QUERY
     WITH eligible_jobs AS (
-        SELECT j.id, j.job_number FROM jobs j
+        SELECT j.id, j.job_number, j.is_hot FROM jobs j
         WHERE j.company_id = p_company_id
-          AND j.production_status IN ('not_started', 'in_progress')  -- was j.status (nonexistent column)
+          AND j.production_status IN ('not_started', 'in_progress')
     ),
     station_ops AS (
-        SELECT jo.id, jo.job_id, jo.job_part_id, jo.operation_name, jo.status, jo.sequence, ej.job_number
+        SELECT jo.id, jo.job_id, jo.job_part_id, jo.operation_name, jo.status, jo.sequence,
+               ej.job_number, ej.is_hot
         FROM job_operations jo
         JOIN eligible_jobs ej ON ej.id = jo.job_id
         WHERE jo.work_center_id = p_work_center_id
           AND jo.status IN ('pending', 'in_progress')
     ),
     ready_or_active AS (
-        SELECT so.id, so.job_id, so.job_part_id, so.operation_name, so.status, so.job_number
+        SELECT so.id, so.job_id, so.job_part_id, so.operation_name, so.status,
+               so.job_number, so.is_hot
         FROM station_ops so
         WHERE so.status = 'in_progress'
            OR NOT EXISTS (
@@ -4541,10 +5921,13 @@ BEGIN
         jp.part_id,
         p.part_name,
         p.description AS part_description,
-        jp.quantity AS part_quantity
+        jp.quantity AS part_quantity,
+        ra.is_hot
     FROM ready_or_active ra
     JOIN job_parts jp ON jp.id = ra.job_part_id
-    JOIN parts p ON p.id = jp.part_id;
+    JOIN parts p ON p.id = jp.part_id
+    -- Hot jobs to the top; job_number for a deterministic secondary order.
+    ORDER BY ra.is_hot DESC, ra.job_number;
 END;
 $function$
 
@@ -4803,6 +6186,115 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.log_note_views(p_note_ids uuid[], p_job_id uuid DEFAULT NULL::uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_note      record;
+  v_viewer_id uuid;
+  v_job_ok    boolean;
+  v_companies uuid[];
+BEGIN
+  IF p_note_ids IS NULL OR array_length(p_note_ids, 1) IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- auth.uid() reads the request JWT GUC, which is set per-request independently of
+  -- current_user, so it is still the real caller inside a SECURITY DEFINER body.
+  SELECT array_agg(cid) INTO v_companies
+  FROM (SELECT public.get_user_company_ids() AS cid) s;
+  IF v_companies IS NULL THEN
+    RETURN;                              -- not a member of anything
+  END IF;
+
+  FOR v_note IN
+    -- Tenant validation by construction: a note outside the caller's companies simply
+    -- does not resolve, so there is no "wrong company" branch to get wrong. DISTINCT
+    -- absorbs a caller that passes the same id twice.
+    SELECT DISTINCT n.id, n.company_id, n.author_id
+    FROM public.notes n
+    WHERE n.id = ANY(p_note_ids) AND n.company_id = ANY(v_companies)
+  LOOP
+    -- Resolved per-note because a multi-company user has a different access id per shop.
+    v_viewer_id := public.get_operator_access_id(v_note.company_id);
+    CONTINUE WHEN v_viewer_id IS NULL;
+
+    -- Never the author viewing their own note. DB-enforced, and the client cannot opt
+    -- out because the client has no INSERT grant at all.
+    CONTINUE WHEN v_note.author_id IS NOT NULL AND v_viewer_id = v_note.author_id;
+
+    -- Never an account excluded from metrics. Also DB-enforced.
+    CONTINUE WHEN public.viewer_excluded_from_metrics(v_viewer_id);
+
+    -- A job from another company, or a garbage uuid, degrades to NULL rather than
+    -- raising: a bad job id must never cost us the read fact.
+    SELECT EXISTS (
+      SELECT 1 FROM public.jobs j
+      WHERE j.id = p_job_id AND j.company_id = v_note.company_id
+    ) INTO v_job_ok;
+
+    INSERT INTO public.note_views (company_id, note_id, viewer_id, job_id)
+    VALUES (v_note.company_id, v_note.id, v_viewer_id,
+            CASE WHEN v_job_ok THEN p_job_id ELSE NULL END)
+    -- The permanent dedupe. A repeat read is a no-op: no row, no trigger, no counter
+    -- movement, no error. Idempotent, so the client needs no bookkeeping of its own.
+    --
+    -- Named constraint rather than a column list: with NULLS NOT DISTINCT, arbiter
+    -- inference from (note_id, viewer_id, job_id) is subtle enough that naming the
+    -- constraint removes the question entirely, and it fails loudly if the constraint
+    -- is ever renamed instead of silently matching a different index.
+    ON CONFLICT ON CONSTRAINT note_views_note_viewer_job_key DO NOTHING;
+  END LOOP;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.log_operator_event(p_company_id uuid, p_kind text, p_context jsonb DEFAULT '{}'::jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_actor_id uuid;
+BEGIN
+  v_actor_id := public.get_operator_access_id(p_company_id);
+  -- Not a member of this company: log nothing rather than raising. Instrumentation must
+  -- never be able to break the interaction it is measuring.
+  IF v_actor_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO public.operator_events (company_id, actor_id, kind, context)
+  VALUES (p_company_id, v_actor_id, p_kind, COALESCE(p_context, '{}'::jsonb));
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.my_note_view_digest(p_tz text)
+ RETURNS integer
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- count DISTINCT viewer_id, not count(*). With job_id in the dedupe key three rows
+  -- can be one person on three jobs, and count(*) would render "3 people used your
+  -- notes" for a single reader — the exact overstatement this design exists to prevent.
+  SELECT count(DISTINCT v.viewer_id)::integer
+  FROM public.notes n
+  JOIN public.note_views v ON v.note_id = n.id
+  WHERE n.author_id IS NOT NULL
+    AND n.author_id = public.get_operator_access_id(n.company_id)
+    AND v.created_at >= (date_trunc('week', now() AT TIME ZONE p_tz) AT TIME ZONE p_tz);
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.next_order_number(company_uuid uuid)
  RETURNS integer
  LANGUAGE plpgsql
@@ -4820,6 +6312,293 @@ BEGIN
   RETURNING next_number - 1 INTO result;
   RETURN result;
 END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.no_client_access_grant_leaks()
+ RETURNS TABLE(table_name text, grantee text, privilege_type text)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT g.table_name::text, g.grantee::text, g.privilege_type::text
+  FROM information_schema.role_table_grants g
+  WHERE g.table_schema = 'public'
+    AND g.table_name IN ('note_views', 'operator_events')
+    AND g.grantee IN ('anon', 'authenticated', 'jigged_ai_readonly', 'PUBLIC')
+  ORDER BY 1, 2, 3;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.note_count_anomalies()
+ RETURNS TABLE(note_id uuid, stored_viewers integer, live_viewers bigint, stored_usage integer, live_usage bigint)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT n.id, n.viewer_count, COALESCE(v.viewers, 0),
+                n.usage_count,  COALESCE(v.usage, 0)
+  FROM public.notes n
+  LEFT JOIN (
+    SELECT nv.note_id,
+           count(DISTINCT nv.viewer_id) AS viewers,
+           count(DISTINCT nv.job_id) FILTER (WHERE nv.job_id IS NOT NULL) AS usage
+    FROM public.note_views nv
+    GROUP BY nv.note_id
+  ) v ON v.note_id = n.id
+  WHERE n.viewer_count < COALESCE(v.viewers, 0)
+     OR n.usage_count  < COALESCE(v.usage, 0)
+  ORDER BY 1;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.note_viewers(p_note_id uuid)
+ RETURNS TABLE(viewer_name text, job_number text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- ONE ROW PER PERSON, collapsed by GROUP BY. With job_id in the dedupe key, someone
+  -- who consulted this note on three jobs has three rows; the author must see them
+  -- once. min(job_number) picks the representative job LEXICOGRAPHICALLY, not by time —
+  -- an earliest-by-created_at pick would smuggle back exactly the timing signal the
+  -- no-timestamps rule exists to deny. Deliberately NOT count(DISTINCT job_id) per
+  -- person: "Kurtis keeps coming back to this" is repeat use attached to a name, which
+  -- is the reader-watching we refuse. Repeat use is published in aggregate only, as
+  -- notes.usage_count.
+  SELECT uca.name, min(j.job_number)
+  FROM public.notes n
+  JOIN public.note_views v            ON v.note_id = n.id
+  JOIN public.user_company_access uca ON uca.id = v.viewer_id
+  LEFT JOIN public.jobs j             ON j.id = v.job_id
+  WHERE n.id = p_note_id
+    -- The caller must BE the author, and that is the ONLY test. author_id is
+    -- nullable (ON DELETE SET NULL) and get_operator_access_id() is NULL for a
+    -- non-member, so the IS NOT NULL guard prevents a NULL = NULL accident from
+    -- ever mattering.
+    --
+    -- DELIBERATELY NOT role-dependent. An earlier draft excluded company admins,
+    -- to block an admin authoring a must-read note and harvesting a named read
+    -- list. That is dropped, because in a fifteen-person shop roles are fluid:
+    -- an operator promoted to lead would silently stop seeing who used their own
+    -- notes, losing the feedback loop that got them writing. Behaviour that
+    -- changes when someone's role changes is worse than the speed bump it buys —
+    -- and the bump was already defeatable, since anyone who can create accounts
+    -- can author from a non-admin one.
+    --
+    -- The guarantee is now one sentence with no exceptions: you see who used YOUR
+    -- notes; nobody sees who used anyone else's. The protection that actually
+    -- matters — no shop-wide report of who read which notes — is unaffected, and
+    -- lives in note_views having no client read path at all.
+    AND n.author_id IS NOT NULL
+    AND n.author_id = public.get_operator_access_id(n.company_id)
+  GROUP BY uca.id, uca.name
+  -- Ordered by NAME, never by time. No timestamp is returned at all.
+  ORDER BY uca.name NULLS LAST;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.note_views_bump_counts()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  -- Take the row lock as its OWN command, before counting. This is the whole trick.
+  -- In READ COMMITTED a sub-SELECT inside an UPDATE's SET clause is evaluated against
+  -- the statement's snapshot; when that UPDATE blocks on a concurrent writer and then
+  -- unblocks, the target row is re-fetched but the subquery is NOT re-evaluated against
+  -- the newly-committed data. Two people reading the same note concurrently would then
+  -- both compute 1 and GREATEST(1,1) would leave it at 1 — an undercount that
+  -- note_count_anomalies() would correctly flag, turning a legitimate race into a red
+  -- build. Locking first means the UPDATE below is a NEW command whose snapshot is
+  -- taken after the other transaction committed.
+  PERFORM 1 FROM public.notes WHERE id = NEW.note_id FOR UPDATE;
+
+  UPDATE public.notes SET
+    viewer_count = GREATEST(viewer_count, (
+      SELECT count(DISTINCT nv.viewer_id)
+      FROM public.note_views nv WHERE nv.note_id = NEW.note_id)),
+    usage_count  = GREATEST(usage_count, (
+      SELECT count(DISTINCT nv.job_id)
+      FROM public.note_views nv
+      WHERE nv.note_id = NEW.note_id AND nv.job_id IS NOT NULL))
+  WHERE id = NEW.note_id;
+
+  RETURN NULL;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.notes_validate_subject()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_part uuid;
+BEGIN
+  IF NEW.job_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.jobs j
+      WHERE j.id = NEW.job_id AND j.company_id = NEW.company_id)
+  THEN
+    RAISE EXCEPTION 'job % is not in company %', NEW.job_id, NEW.company_id;
+  END IF;
+
+  IF NEW.part_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.parts p
+      WHERE p.id = NEW.part_id AND p.company_id = NEW.company_id)
+  THEN
+    RAISE EXCEPTION 'part % is not in company %', NEW.part_id, NEW.company_id;
+  END IF;
+
+  IF NEW.work_center_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.work_centers w
+      WHERE w.id = NEW.work_center_id AND w.company_id = NEW.company_id)
+  THEN
+    RAISE EXCEPTION 'work center % is not in company %',
+                    NEW.work_center_id, NEW.company_id;
+  END IF;
+
+  -- routing_operations has NO company_id; tenancy resolves through routings. The same
+  -- query yields the part, so tenancy and part-consistency are checked together.
+  IF NEW.routing_operation_id IS NOT NULL THEN
+    SELECT r.part_id INTO v_part
+    FROM public.routing_operations ro
+    JOIN public.routings r ON r.id = ro.routing_id
+    WHERE ro.id = NEW.routing_operation_id AND r.company_id = NEW.company_id;
+
+    IF v_part IS NULL THEN
+      RAISE EXCEPTION 'routing operation % is not in company %',
+                      NEW.routing_operation_id, NEW.company_id;
+    END IF;
+    IF v_part IS DISTINCT FROM NEW.part_id THEN
+      RAISE EXCEPTION 'routing operation % belongs to part %, not %',
+                      NEW.routing_operation_id, v_part, NEW.part_id;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.part_playbook_notes(p_part_id uuid, p_routing_operation_id uuid DEFAULT NULL::uuid, p_operation_name text DEFAULT NULL::text, p_exclude_job_id uuid DEFAULT NULL::uuid, p_max_runs integer DEFAULT 10)
+ RETURNS TABLE(id uuid, body text, created_at timestamp with time zone, note_type text, subject_kind text, routing_operation_id uuid, corrects_note_id uuid, viewer_count integer, usage_count integer, author_name text, job_number text, operation_label text, media jsonb, reactions jsonb)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  WITH durable AS (
+    -- BRANCH 1 — the durable subject. One index hit on idx_notes_part_step. No prior
+    -- runs, no step-name heuristic, no cap. This is every note written after the
+    -- subject migration, and it is what makes the read-back loop possible at all.
+    SELECT
+      n.id, n.body, n.created_at, n.note_type, n.subject_kind, n.routing_operation_id,
+      n.corrects_note_id, n.viewer_count, n.usage_count, n.author_id,
+      cj.job_number AS src_job_number,
+      CASE
+        WHEN ro.id IS NULL THEN NULL
+        ELSE 'Op ' || ro.sequence::text ||
+             COALESCE(' · ' || wc.name, '')
+      END AS src_operation_label
+    FROM public.notes n
+    LEFT JOIN public.jobs cj              ON cj.id = n.captured_job_id
+    LEFT JOIN public.routing_operations ro ON ro.id = n.routing_operation_id
+    LEFT JOIN public.work_centers wc       ON wc.id = ro.work_center_id
+    WHERE n.subject_kind = 'part'
+      AND n.part_id = p_part_id
+      AND (p_routing_operation_id IS NULL
+           OR n.routing_operation_id = p_routing_operation_id)
+      -- Captured on the job the operator is standing in front of: already visible in
+      -- that job's feed, so showing it again as "previous" is noise.
+      AND (p_exclude_job_id IS NULL
+           OR n.captured_job_id IS DISTINCT FROM p_exclude_job_id)
+  ),
+  runs AS (
+    -- BRANCH 2 scaffolding — the most recent completed runs of this part.
+    SELECT jp.job_id, j.job_number
+    FROM public.job_parts jp
+    JOIN public.jobs j ON j.id = jp.job_id
+    WHERE jp.part_id = p_part_id
+      AND jp.production_status = 'completed'
+      AND (p_exclude_job_id IS NULL OR jp.job_id <> p_exclude_job_id)
+    ORDER BY jp.completed_at DESC NULLS LAST
+    LIMIT p_max_runs
+  ),
+  legacy AS (
+    -- BRANCH 2 — pre-migration notes, which are all subject_kind = 'job'. Step match
+    -- by routing_operation_id, falling back to operation_name when the job's step has
+    -- no routing link. Delete this branch once the old corpus stops mattering.
+    SELECT
+      n.id, n.body, n.created_at, n.note_type, n.subject_kind, n.routing_operation_id,
+      n.corrects_note_id, n.viewer_count, n.usage_count, n.author_id,
+      r.job_number AS src_job_number,
+      CASE
+        WHEN jo.id IS NULL THEN NULL
+        WHEN jo.sequence IS NULL THEN jo.operation_name
+        ELSE 'Op ' || jo.sequence::text || ' · ' || jo.operation_name
+      END AS src_operation_label
+    FROM runs r
+    JOIN public.notes n ON n.job_id = r.job_id AND n.subject_kind = 'job'
+    LEFT JOIN public.job_operations jo ON jo.id = n.job_operation_id
+    WHERE p_routing_operation_id IS NULL
+       OR jo.routing_operation_id = p_routing_operation_id
+       OR (jo.routing_operation_id IS NULL
+           AND p_operation_name IS NOT NULL
+           AND jo.operation_name = p_operation_name)
+  ),
+  combined AS (
+    SELECT * FROM durable
+    UNION ALL
+    SELECT * FROM legacy
+  )
+  SELECT
+    c.id, c.body, c.created_at, c.note_type, c.subject_kind, c.routing_operation_id,
+    c.corrects_note_id, c.viewer_count, c.usage_count,
+    a.name AS author_name,
+    c.src_job_number,
+    c.src_operation_label,
+    COALESCE(m.media, '[]'::jsonb),
+    COALESCE(rx.reactions, '[]'::jsonb)
+  FROM combined c
+  LEFT JOIN public.user_company_access a ON a.id = c.author_id
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object(
+             'id', md.id,
+             'storage_path', md.storage_path,
+             'thumbnail_path', md.thumbnail_path,
+             'kind', md.kind,
+             'mime_type', md.mime_type,
+             'width', md.width,
+             'height', md.height
+           ) ORDER BY md.created_at) AS media
+    FROM public.note_media md
+    WHERE md.note_id = c.id
+  ) m ON true
+  LEFT JOIN LATERAL (
+    -- Reactions embed here because they are PUBLIC within the shop — the deliberate
+    -- opposite of note_views, which has no read path at any level. Names and counts
+    -- both derive from this one array client-side, so the number and the names can
+    -- never disagree; that is why there is no denormalized reaction counter.
+    SELECT jsonb_agg(jsonb_build_object(
+             'kind', x.kind,
+             'name', u.name,
+             'created_at', x.created_at
+           )) AS reactions
+    FROM public.note_reactions x
+    JOIN public.user_company_access u ON u.id = x.reactor_id
+    WHERE x.note_id = c.id
+  ) rx ON true
+  ORDER BY c.created_at DESC;
 $function$
 
 ;
@@ -4842,6 +6621,106 @@ AS $function$
           WHERE pb.child_part_id = ANY(p_ids)
             AND pb.parent_part_id <> ALL(p_ids))::int;
 $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_operation_status_from_completion()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_op uuid;
+    v_jp uuid;
+    v_op_new text;
+    v_op_old text;
+    v_part_new text;
+    v_part_old text;
+BEGIN
+    IF pg_trigger_depth() > 4 THEN RETURN NULL; END IF;
+    v_op := COALESCE(NEW.job_operation_id, OLD.job_operation_id);
+
+    -- 3a. operation status + stamps
+    SELECT status, job_part_id INTO v_op_old, v_jp
+      FROM public.job_operations WHERE id = v_op;
+    IF v_jp IS NULL THEN RETURN NULL; END IF;   -- op was deleted (CASCADE); nothing to do
+
+    v_op_new := public.compute_job_operation_status(v_op);
+    IF v_op_new IS DISTINCT FROM v_op_old THEN
+        UPDATE public.job_operations SET
+            status = v_op_new,
+            -- Only ever set on a real transition (this IF), so now() is the moment
+            -- it crossed the threshold. Backfill of already-completed ops does NOT
+            -- change status, so their historical completed_at is preserved.
+            completed_at = CASE WHEN v_op_new = 'completed' THEN now() ELSE NULL END,
+            completed_by = CASE
+                WHEN v_op_new = 'completed' THEN (
+                    SELECT c.completed_by FROM public.job_operation_completions c
+                     WHERE c.job_operation_id = v_op AND c.voided_at IS NULL
+                     ORDER BY c.completed_at DESC LIMIT 1)
+                ELSE NULL END,
+            updated_at = now()
+        WHERE id = v_op;
+    END IF;
+
+    -- 3b. job_part production_status (fires the existing part->job trigger at depth 2)
+    v_part_new := public.compute_job_part_production_status(v_jp);
+    SELECT production_status INTO v_part_old FROM public.job_parts WHERE id = v_jp;
+    IF v_part_new IS DISTINCT FROM v_part_old THEN
+        UPDATE public.job_parts SET
+            production_status = v_part_new,
+            started_at = CASE
+                WHEN v_part_new IN ('in_progress', 'completed') AND started_at IS NULL
+                THEN now() ELSE started_at END,
+            completed_at = CASE
+                WHEN v_part_new = 'completed' THEN COALESCE(completed_at, now())
+                ELSE NULL END,
+            status_changed_at = now(),
+            updated_at = now()
+        WHERE id = v_jp;
+    END IF;
+
+    RETURN NULL;
+END $function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.recompute_job_ops_status_from_part_qty()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    r record;
+    v_new text;
+    v_old text;
+    v_part_new text;
+BEGIN
+    IF pg_trigger_depth() > 4 THEN RETURN NULL; END IF;
+    FOR r IN SELECT id, status FROM public.job_operations WHERE job_part_id = NEW.id LOOP
+        v_new := public.compute_job_operation_status(r.id);
+        v_old := r.status;
+        IF v_new IS DISTINCT FROM v_old THEN
+            UPDATE public.job_operations SET
+                status = v_new,
+                completed_at = CASE WHEN v_new = 'completed' THEN COALESCE(completed_at, now()) ELSE NULL END,
+                completed_by = CASE WHEN v_new = 'completed' THEN completed_by ELSE NULL END,
+                updated_at = now()
+            WHERE id = r.id;
+        END IF;
+    END LOOP;
+
+    v_part_new := public.compute_job_part_production_status(NEW.id);
+    IF v_part_new IS DISTINCT FROM NEW.production_status THEN
+        UPDATE public.job_parts SET
+            production_status = v_part_new,
+            completed_at = CASE WHEN v_part_new = 'completed' THEN COALESCE(completed_at, now()) ELSE NULL END,
+            status_changed_at = now(),
+            updated_at = now()
+        WHERE id = NEW.id;
+    END IF;
+    RETURN NULL;
+END $function$
 
 ;
 
@@ -5709,6 +7588,96 @@ END $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.tenant_tables_missing_write_gate()
+ RETURNS TABLE(table_name text)
+ LANGUAGE sql
+ STABLE
+AS $function$
+  SELECT c.relname::text
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a
+    ON a.attrelid = c.oid AND a.attname = 'company_id' AND NOT a.attisdropped
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+    AND c.relname NOT IN (
+      -- identity / bootstrap (gating would block signup / team / preferences)
+      'companies', 'user_company_access', 'user_preferences', 'system_admins',
+      'invitations', 'demo_data_templates', 'waitlist', 'saved_insights', 'feedback',
+      'company_billing',
+      -- service-role-only / SELECT-only (writes never come from the browser)
+      'auth_audit_log', 'job_fulfillment_audit', 'part_location_stock',
+      'company_order_counters', 'quickbooks_connections', 'quickbooks_customer_map',
+      'quickbooks_invoice_links', 'quickbooks_invoice_line_items',
+      -- SECURITY DEFINER-only writers; see the block comment above
+      'note_views', 'operator_events'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_policies p
+      WHERE p.schemaname = 'public'
+        AND p.tablename = c.relname
+        AND p.policyname = 'billing_gate_insert'
+    )
+  ORDER BY 1;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.touch_parent_part_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_part_id uuid;
+BEGIN
+  v_part_id := COALESCE(NEW.parent_part_id, OLD.parent_part_id);
+  IF v_part_id IS NOT NULL THEN
+    UPDATE public.parts SET updated_at = now() WHERE id = v_part_id;
+  END IF;
+  RETURN NULL;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.touch_part_from_routing_operation()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_routing_id uuid;
+  v_part_id uuid;
+BEGIN
+  v_routing_id := COALESCE(NEW.routing_id, OLD.routing_id);
+  IF v_routing_id IS NOT NULL THEN
+    SELECT part_id INTO v_part_id FROM public.routings WHERE id = v_routing_id;
+    IF v_part_id IS NOT NULL THEN
+      UPDATE public.parts SET updated_at = now() WHERE id = v_part_id;
+    END IF;
+  END IF;
+  RETURN NULL;
+END;
+$function$
+
+;
+
+CREATE OR REPLACE FUNCTION public.touch_part_updated_at()
+ RETURNS trigger
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_part_id uuid;
+BEGIN
+  v_part_id := COALESCE(NEW.part_id, OLD.part_id);
+  IF v_part_id IS NOT NULL THEN
+    UPDATE public.parts SET updated_at = now() WHERE id = v_part_id;
+  END IF;
+  RETURN NULL; -- AFTER trigger: return value is ignored
+END;
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.track_job_production_status_change()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -5861,6 +7830,21 @@ $function$
 
 ;
 
+CREATE OR REPLACE FUNCTION public.viewer_excluded_from_metrics(p_access_id uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_company_access uca
+    WHERE uca.id = p_access_id
+      AND (uca.excluded_from_metrics OR public.is_system_admin(uca.user_id))
+  );
+$function$
+
+;
+
 CREATE OR REPLACE FUNCTION public.word_similarity(text, text)
  RETURNS real
  LANGUAGE c
@@ -5910,6 +7894,9 @@ CREATE TRIGGER ai_config_updated_at BEFORE UPDATE ON public.ai_config FOR EACH R
 DROP TRIGGER IF EXISTS "companies_updated_at" ON "public"."companies";
 CREATE TRIGGER companies_updated_at BEFORE UPDATE ON public.companies FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "company_billing_updated_at" ON "public"."company_billing";
+CREATE TRIGGER company_billing_updated_at BEFORE UPDATE ON public.company_billing FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 DROP TRIGGER IF EXISTS "customer_contacts_updated_at" ON "public"."customer_contacts";
 CREATE TRIGGER customer_contacts_updated_at BEFORE UPDATE ON public.customer_contacts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -5928,6 +7915,18 @@ CREATE TRIGGER trg_snapshot_txn_location BEFORE INSERT ON public.inventory_trans
 DROP TRIGGER IF EXISTS "job_materials_updated_at" ON "public"."job_materials";
 CREATE TRIGGER job_materials_updated_at BEFORE UPDATE ON public.job_materials FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "job_operation_completions_updated_at" ON "public"."job_operation_completions";
+CREATE TRIGGER job_operation_completions_updated_at BEFORE UPDATE ON public.job_operation_completions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_op_status_on_completion_del" ON "public"."job_operation_completions";
+CREATE TRIGGER trigger_recompute_op_status_on_completion_del AFTER DELETE ON public.job_operation_completions FOR EACH ROW EXECUTE FUNCTION recompute_job_operation_status_from_completion();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_op_status_on_completion_ins" ON "public"."job_operation_completions";
+CREATE TRIGGER trigger_recompute_op_status_on_completion_ins AFTER INSERT ON public.job_operation_completions FOR EACH ROW EXECUTE FUNCTION recompute_job_operation_status_from_completion();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_op_status_on_completion_upd" ON "public"."job_operation_completions";
+CREATE TRIGGER trigger_recompute_op_status_on_completion_upd AFTER UPDATE OF quantity_good, voided_at, job_operation_id ON public.job_operation_completions FOR EACH ROW EXECUTE FUNCTION recompute_job_operation_status_from_completion();
+
 DROP TRIGGER IF EXISTS "job_operations_updated_at" ON "public"."job_operations";
 CREATE TRIGGER job_operations_updated_at BEFORE UPDATE ON public.job_operations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -5939,6 +7938,9 @@ CREATE TRIGGER trigger_recompute_jp_fulfillment_on_qty AFTER UPDATE OF quantity 
 
 DROP TRIGGER IF EXISTS "trigger_recompute_jp_invoicing_on_qty" ON "public"."job_parts";
 CREATE TRIGGER trigger_recompute_jp_invoicing_on_qty AFTER UPDATE OF quantity ON public.job_parts FOR EACH ROW WHEN ((old.quantity IS DISTINCT FROM new.quantity)) EXECUTE FUNCTION recompute_job_part_invoicing_from_qty();
+
+DROP TRIGGER IF EXISTS "trigger_recompute_op_status_on_part_qty" ON "public"."job_parts";
+CREATE TRIGGER trigger_recompute_op_status_on_part_qty AFTER UPDATE OF quantity ON public.job_parts FOR EACH ROW WHEN ((old.quantity IS DISTINCT FROM new.quantity)) EXECUTE FUNCTION recompute_job_ops_status_from_part_qty();
 
 DROP TRIGGER IF EXISTS "trigger_sync_job_fulfillment_from_parts_del" ON "public"."job_parts";
 CREATE TRIGGER trigger_sync_job_fulfillment_from_parts_del AFTER DELETE ON public.job_parts FOR EACH ROW EXECUTE FUNCTION sync_job_fulfillment_status_from_parts();
@@ -5979,14 +7981,26 @@ CREATE TRIGGER trg_snapshot_job_party BEFORE INSERT OR UPDATE OF customer_id, bi
 DROP TRIGGER IF EXISTS "trigger_job_production_status_change" ON "public"."jobs";
 CREATE TRIGGER trigger_job_production_status_change BEFORE UPDATE ON public.jobs FOR EACH ROW EXECUTE FUNCTION track_job_production_status_change();
 
+DROP TRIGGER IF EXISTS "note_views_bump_counts_trg" ON "public"."note_views";
+CREATE TRIGGER note_views_bump_counts_trg AFTER INSERT ON public.note_views FOR EACH ROW EXECUTE FUNCTION note_views_bump_counts();
+
+DROP TRIGGER IF EXISTS "notes_validate_subject_trg" ON "public"."notes";
+CREATE TRIGGER notes_validate_subject_trg BEFORE INSERT OR UPDATE OF company_id, job_id, part_id, routing_operation_id, work_center_id ON public.notes FOR EACH ROW EXECUTE FUNCTION notes_validate_subject();
+
 DROP TRIGGER IF EXISTS "trg_recompute_part_quantity" ON "public"."part_location_stock";
 CREATE TRIGGER trg_recompute_part_quantity AFTER INSERT OR DELETE OR UPDATE ON public.part_location_stock FOR EACH ROW EXECUTE FUNCTION recompute_part_quantity_from_locations();
 
 DROP TRIGGER IF EXISTS "part_pricing_tiers_updated_at" ON "public"."part_pricing_tiers";
 CREATE TRIGGER part_pricing_tiers_updated_at BEFORE UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trg_touch_part_on_pricing_tiers" ON "public"."part_pricing_tiers";
+CREATE TRIGGER trg_touch_part_on_pricing_tiers AFTER INSERT OR DELETE OR UPDATE ON public.part_pricing_tiers FOR EACH ROW EXECUTE FUNCTION touch_part_updated_at();
+
 DROP TRIGGER IF EXISTS "part_procurement_tiers_updated_at" ON "public"."part_procurement_tiers";
 CREATE TRIGGER part_procurement_tiers_updated_at BEFORE UPDATE ON public.part_procurement_tiers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_touch_part_on_procurement_tiers" ON "public"."part_procurement_tiers";
+CREATE TRIGGER trg_touch_part_on_procurement_tiers AFTER INSERT OR DELETE OR UPDATE ON public.part_procurement_tiers FOR EACH ROW EXECUTE FUNCTION touch_part_updated_at();
 
 DROP TRIGGER IF EXISTS "parts_updated_at" ON "public"."parts";
 CREATE TRIGGER parts_updated_at BEFORE UPDATE ON public.parts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -6002,6 +8016,9 @@ CREATE TRIGGER parts_bom_no_cycles BEFORE INSERT OR UPDATE OF parent_part_id, ch
 
 DROP TRIGGER IF EXISTS "parts_bom_updated_at" ON "public"."parts_bom";
 CREATE TRIGGER parts_bom_updated_at BEFORE UPDATE ON public.parts_bom FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_touch_part_on_bom" ON "public"."parts_bom";
+CREATE TRIGGER trg_touch_part_on_bom AFTER INSERT OR DELETE OR UPDATE ON public.parts_bom FOR EACH ROW EXECUTE FUNCTION touch_parent_part_updated_at();
 
 DROP TRIGGER IF EXISTS "quickbooks_connections_updated_at" ON "public"."quickbooks_connections";
 CREATE TRIGGER quickbooks_connections_updated_at BEFORE UPDATE ON public.quickbooks_connections FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -6048,8 +8065,14 @@ CREATE TRIGGER trigger_set_quote_number BEFORE INSERT ON public.quotes FOR EACH 
 DROP TRIGGER IF EXISTS "routing_operations_updated_at" ON "public"."routing_operations";
 CREATE TRIGGER routing_operations_updated_at BEFORE UPDATE ON public.routing_operations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS "trg_touch_part_on_routing_operations" ON "public"."routing_operations";
+CREATE TRIGGER trg_touch_part_on_routing_operations AFTER INSERT OR DELETE OR UPDATE ON public.routing_operations FOR EACH ROW EXECUTE FUNCTION touch_part_from_routing_operation();
+
 DROP TRIGGER IF EXISTS "routings_updated_at" ON "public"."routings";
 CREATE TRIGGER routings_updated_at BEFORE UPDATE ON public.routings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS "trg_touch_part_on_routings" ON "public"."routings";
+CREATE TRIGGER trg_touch_part_on_routings AFTER INSERT OR DELETE OR UPDATE ON public.routings FOR EACH ROW EXECUTE FUNCTION touch_part_updated_at();
 
 DROP TRIGGER IF EXISTS "enforce_shipment_line_item_customer_consistency_trg" ON "public"."shipment_line_items";
 CREATE TRIGGER enforce_shipment_line_item_customer_consistency_trg BEFORE INSERT OR UPDATE OF shipment_id, job_part_id ON public.shipment_line_items FOR EACH ROW EXECUTE FUNCTION enforce_shipment_line_item_customer_consistency();
@@ -6106,6 +8129,9 @@ COMMENT ON TABLE "public"."ai_config"
 COMMENT ON TABLE "public"."companies"
     IS 'Multi-tenant root table. Each company represents a separate manufacturing shop/business with isolated data. All other tables reference company_id for tenant isolation via RLS policies.';
 
+COMMENT ON TABLE "public"."company_billing"
+    IS 'Webhook-fed read cache of Stripe subscription state, 1:1 with companies. Stripe is source of truth; members read-only, service_role is sole writer. Entitlement is derived, not stored.';
+
 COMMENT ON TABLE "public"."company_custom_units"
     IS 'Custom measurement units defined per company for inventory tracking. Supplements the standard built-in units. Each unit name must be unique within a company.';
 
@@ -6129,6 +8155,24 @@ COMMENT ON TABLE "public"."inventory_transactions"
 
 COMMENT ON TABLE "public"."job_fulfillment_audit"
     IS 'Forward-transition log into fully_shipped. Written from create_shipment_with_line_items; never from a trigger (no incidental-ordering ambiguity for triggering_shipment_id). Reverse transitions are captured on shipments.voided_at/voided_by.';
+
+COMMENT ON TABLE "public"."job_operation_completions"
+    IS 'Append-only per-event good-quantity for partial operation completion. Source of truth for "how much of a job_operation is done" (non-void events). Corrections are void (voided_at) + re-enter, never edit-in-place. quantity_scrap is deferred (v1 is good-only).';
+
+COMMENT ON TABLE "public"."note_reactions"
+    IS 'helpful = thumbs up (there is no thumbs down, ever). confirmed = "I ran this part and this note is still accurate", rendered as "confirmed by <name>, <month year>" with a coarse date. NEVER add a constraint or trigger requiring a note_views row before a reaction is allowed: it looks like tidy integrity and would turn this endpoint into a clean oracle for "has member X viewed note N".';
+
+COMMENT ON TABLE "public"."note_views"
+    IS 'Who has read which note. NO client read path by design: no SELECT grant to anon/authenticated, plus a RESTRICTIVE deny-all. Authors get names via note_viewers(); everyone else gets counts via notes.viewer_count / usage_count. Never expose a per-job read breakdown, and never add this table to the supabase_realtime publication or to the AI SQL allowlist — either would reconstruct a per-operator reading report.';
+
+COMMENT ON TABLE "public"."notes"
+    IS 'Shop-floor knowledge. Subject is one of job / part / work_center (subject_kind), each with an optional finer grain. A part-subject note with a routing_operation_id is DURABLE and job-independent: the next person running that part reads it directly, with no traversal of prior jobs. Distinct from part_comments, which is the office activity feed.';
+
+COMMENT ON TABLE "public"."operator_events"
+    IS 'Capture-funnel instrumentation. Service-role read only — NOT readable by the shop''s own admin, because a per-operator event log would reconstruct the reading behaviour that note_views'' RLS exists to prevent. Founder access is via the SQL editor. Written only through log_operator_event().';
+
+COMMENT ON TABLE "public"."part_comments"
+    IS 'Office activity feed on a part: manual comments plus system-generated pricing entries. Renamed from part_notes. NOT shop-floor knowledge — deliberately carries no view logging, reactions or media. See public.notes.';
 
 COMMENT ON TABLE "public"."part_location_stock"
     IS 'Per-location stock balances; source of truth for location-tracked parts. SELECT-only via RLS — mutated only through SECURITY DEFINER RPCs that also write inventory_transactions.';
@@ -6256,6 +8300,18 @@ COMMENT ON COLUMN "public"."companies"."created_at"
 COMMENT ON COLUMN "public"."companies"."updated_at"
     IS 'Timestamp of last update. Auto-updated via trigger.';
 
+COMMENT ON COLUMN "public"."company_billing"."billing_exempt"
+    IS 'Grandfathered (existing at launch) => full access until they subscribe; webhook auto-clears on first active/past_due.';
+
+COMMENT ON COLUMN "public"."company_billing"."override_price_id"
+    IS 'Service-role-set reserved-customer price id (else backend founding price). Frontend never names a price.';
+
+COMMENT ON COLUMN "public"."company_billing"."override_trial_days"
+    IS 'Service-role-set reserved-customer trial length (else 30). 0 => no trial.';
+
+COMMENT ON COLUMN "public"."company_billing"."subscription_event_at"
+    IS 'Monotonic write guard: webhooks use event.created, /checkout/sync uses now().';
+
 COMMENT ON COLUMN "public"."company_custom_units"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -6364,6 +8420,24 @@ COMMENT ON COLUMN "public"."jobs"."customer_po_number"
 COMMENT ON COLUMN "public"."jobs"."deleted_at"
     IS 'Archive marker (see parts.deleted_at). Distinct from the cancelled production_status, which is a shop-floor outcome, not deletion.';
 
+COMMENT ON COLUMN "public"."jobs"."is_hot"
+    IS 'Rush/"Hot" job marker — visibility only, no scheduling behavior. Sorts hot jobs first in the admin list and operator station queue.';
+
+COMMENT ON COLUMN "public"."notes"."subject_kind"
+    IS 'job | part | work_center. Names the ROOT subject; the finer columns refine within it (job -> job_part -> job_operation, part -> routing_operation). Enforced by notes_subject_valid.';
+
+COMMENT ON COLUMN "public"."notes"."routing_operation_id"
+    IS 'The routing TEMPLATE step (the same step across every run), not a job''s instance of it. This is what makes a part-subject note durable and job-independent.';
+
+COMMENT ON COLUMN "public"."notes"."captured_job_id"
+    IS 'Provenance only: the job this note was written on, so it still appears in that job''s feed. Never a subject, never drives the Playbook.';
+
+COMMENT ON COLUMN "public"."notes"."viewer_count"
+    IS 'Distinct PEOPLE who have read this note, excluding the author and accounts excluded from metrics. Maintained ONLY by note_views_bump_counts(). MONOTONIC: never decremented, so deleting a member cannot be used to difference out what they read.';
+
+COMMENT ON COLUMN "public"."notes"."usage_count"
+    IS 'Distinct JOBS this note was consulted on (job-less reads do not count). The primary quality signal — a note used on 11 jobs is load-bearing, one read by 11 people once is curiosity. Same maintenance and monotonicity as viewer_count.';
+
 COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
     IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
 
@@ -6423,6 +8497,9 @@ COMMENT ON COLUMN "public"."quote_line_items"."pricing_basis_snapshot"
 
 COMMENT ON COLUMN "public"."quote_line_items"."basis_unknown"
     IS 'TRUE when this line was created before the basis-snapshot column existed. Renders a "basis unknown" chip on edit; drift detection uses degraded resolved-vs-current comparison. Option C from Issue #317 — Option A (backfill from current tiers) was explicitly dropped to avoid fabricating historical pricing.';
+
+COMMENT ON COLUMN "public"."quote_line_items"."lead_time_text"
+    IS 'Optional per-item lead time (free text, e.g. "2–3 weeks"). NULL = use the quote-level quotes.lead_time_text. Shown per item on the quote/PDF only when items differ.';
 
 COMMENT ON COLUMN "public"."quote_materials"."material_part_id"
     IS 'FK to the consumed material in the unified parts table (renamed from inventory_item_id when the item master was unified). Optional — supports ad-hoc materials not yet in the catalog.';
@@ -6544,6 +8621,9 @@ COMMENT ON COLUMN "public"."user_company_access"."created_at"
 COMMENT ON COLUMN "public"."user_company_access"."name"
     IS 'Display name for the team member. Stored here for easy querying without service role access to auth.users.';
 
+COMMENT ON COLUMN "public"."user_company_access"."excluded_from_metrics"
+    IS 'When true, this membership never produces a note_views row, so it cannot inflate note read counts. Service-role only: NOT writable by any browser role (see the column-scoped grants below), because an admin who could flip it on everyone-but-one would learn what that one person reads by watching counts move.';
+
 COMMENT ON COLUMN "public"."user_preferences"."id"
     IS 'Primary key. UUID auto-generated.';
 
@@ -6641,6 +8721,10 @@ GRANT ALL ON TABLE "public"."companies" TO "authenticated";
 GRANT SELECT ON TABLE "public"."companies" TO "jigged_ai_readonly";
 GRANT ALL ON TABLE "public"."companies" TO "postgres";
 GRANT ALL ON TABLE "public"."companies" TO "service_role";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."company_billing" TO "anon";
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."company_billing" TO "authenticated";
+GRANT ALL ON TABLE "public"."company_billing" TO "postgres";
+GRANT ALL ON TABLE "public"."company_billing" TO "service_role";
 GRANT ALL ON TABLE "public"."company_custom_units" TO "anon";
 GRANT ALL ON TABLE "public"."company_custom_units" TO "authenticated";
 GRANT ALL ON TABLE "public"."company_custom_units" TO "postgres";
@@ -6697,14 +8781,10 @@ GRANT ALL ON TABLE "public"."job_materials" TO "authenticated";
 GRANT SELECT ON TABLE "public"."job_materials" TO "jigged_ai_readonly";
 GRANT ALL ON TABLE "public"."job_materials" TO "postgres";
 GRANT ALL ON TABLE "public"."job_materials" TO "service_role";
-GRANT ALL ON TABLE "public"."job_note_media" TO "anon";
-GRANT ALL ON TABLE "public"."job_note_media" TO "authenticated";
-GRANT ALL ON TABLE "public"."job_note_media" TO "postgres";
-GRANT ALL ON TABLE "public"."job_note_media" TO "service_role";
-GRANT ALL ON TABLE "public"."job_notes" TO "anon";
-GRANT ALL ON TABLE "public"."job_notes" TO "authenticated";
-GRANT ALL ON TABLE "public"."job_notes" TO "postgres";
-GRANT ALL ON TABLE "public"."job_notes" TO "service_role";
+GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."job_operation_completions" TO "anon";
+GRANT SELECT, INSERT, UPDATE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."job_operation_completions" TO "authenticated";
+GRANT ALL ON TABLE "public"."job_operation_completions" TO "postgres";
+GRANT ALL ON TABLE "public"."job_operation_completions" TO "service_role";
 GRANT ALL ON TABLE "public"."job_operations" TO "anon";
 GRANT ALL ON TABLE "public"."job_operations" TO "authenticated";
 GRANT SELECT ON TABLE "public"."job_operations" TO "jigged_ai_readonly";
@@ -6720,18 +8800,34 @@ GRANT ALL ON TABLE "public"."jobs" TO "authenticated";
 GRANT SELECT ON TABLE "public"."jobs" TO "jigged_ai_readonly";
 GRANT ALL ON TABLE "public"."jobs" TO "postgres";
 GRANT ALL ON TABLE "public"."jobs" TO "service_role";
+GRANT ALL ON TABLE "public"."note_media" TO "anon";
+GRANT ALL ON TABLE "public"."note_media" TO "authenticated";
+GRANT ALL ON TABLE "public"."note_media" TO "postgres";
+GRANT ALL ON TABLE "public"."note_media" TO "service_role";
+GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."note_reactions" TO "anon";
+GRANT SELECT, INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."note_reactions" TO "authenticated";
+GRANT ALL ON TABLE "public"."note_reactions" TO "postgres";
+GRANT ALL ON TABLE "public"."note_reactions" TO "service_role";
+GRANT ALL ON TABLE "public"."note_views" TO "postgres";
+GRANT ALL ON TABLE "public"."note_views" TO "service_role";
+GRANT SELECT, INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."notes" TO "anon";
+GRANT SELECT, INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."notes" TO "authenticated";
+GRANT ALL ON TABLE "public"."notes" TO "postgres";
+GRANT ALL ON TABLE "public"."notes" TO "service_role";
+GRANT ALL ON TABLE "public"."operator_events" TO "postgres";
+GRANT ALL ON TABLE "public"."operator_events" TO "service_role";
 GRANT ALL ON TABLE "public"."part_attachments" TO "anon";
 GRANT ALL ON TABLE "public"."part_attachments" TO "authenticated";
 GRANT ALL ON TABLE "public"."part_attachments" TO "postgres";
 GRANT ALL ON TABLE "public"."part_attachments" TO "service_role";
+GRANT ALL ON TABLE "public"."part_comments" TO "anon";
+GRANT ALL ON TABLE "public"."part_comments" TO "authenticated";
+GRANT ALL ON TABLE "public"."part_comments" TO "postgres";
+GRANT ALL ON TABLE "public"."part_comments" TO "service_role";
 GRANT ALL ON TABLE "public"."part_location_stock" TO "anon";
 GRANT ALL ON TABLE "public"."part_location_stock" TO "authenticated";
 GRANT ALL ON TABLE "public"."part_location_stock" TO "postgres";
 GRANT ALL ON TABLE "public"."part_location_stock" TO "service_role";
-GRANT ALL ON TABLE "public"."part_notes" TO "anon";
-GRANT ALL ON TABLE "public"."part_notes" TO "authenticated";
-GRANT ALL ON TABLE "public"."part_notes" TO "postgres";
-GRANT ALL ON TABLE "public"."part_notes" TO "service_role";
 GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "anon";
 GRANT ALL ON TABLE "public"."part_pricing_tiers" TO "authenticated";
 GRANT SELECT ON TABLE "public"."part_pricing_tiers" TO "jigged_ai_readonly";
@@ -6816,8 +8912,8 @@ GRANT ALL ON TABLE "public"."system_admins" TO "anon";
 GRANT ALL ON TABLE "public"."system_admins" TO "authenticated";
 GRANT ALL ON TABLE "public"."system_admins" TO "postgres";
 GRANT ALL ON TABLE "public"."system_admins" TO "service_role";
-GRANT ALL ON TABLE "public"."user_company_access" TO "anon";
-GRANT ALL ON TABLE "public"."user_company_access" TO "authenticated";
+GRANT SELECT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."user_company_access" TO "anon";
+GRANT SELECT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."user_company_access" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_company_access" TO "postgres";
 GRANT ALL ON TABLE "public"."user_company_access" TO "service_role";
 GRANT ALL ON TABLE "public"."user_preferences" TO "anon";

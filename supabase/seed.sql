@@ -998,3 +998,86 @@ begin
     on conflict do nothing;
   end loop;
 end $$;
+
+-- ── Inventory locations (feature-flagged) ────────────────────────────────────
+-- Turned on for the seeded company so the location-tracked half of inventory is
+-- exercised in dev, preview branches and manual testing — not just the aggregate
+-- path. Names follow the vocabulary in Contour's legacy export (CABINET / SHELF /
+-- YARD), so the dev data looks like a real shop rather than "Location 1".
+--
+-- ORDER MATTERS, and this block must stay LAST. Tracking a part makes
+-- `enforce_tracked_part_quantity` reject any direct write to parts.quantity, and
+-- pg_temp.deplete_job() above does exactly that. Flip the flag before the
+-- transaction graph is built and the seed dies mid-way. Everything here runs
+-- after the last quantity write.
+
+-- Move a share of whatever a part currently holds at one location into another.
+-- Fraction of the *live* balance, floored to a whole unit (these are all 'each').
+create function pg_temp.put_away(p_part uuid, p_from uuid, p_to uuid, p_share numeric, p_name text)
+returns void language plpgsql as $$
+declare v_have numeric; v_move numeric;
+begin
+  select quantity into v_have from public.part_location_stock
+   where part_id = p_part and location_id = p_from;
+  v_move := floor(coalesce(v_have, 0) * p_share);
+  if v_move <= 0 then return; end if;
+  perform public.transfer_stock(p_part, p_from, p_to, v_move, 'each', v_move,
+                                'Put away to ' || p_name);
+end $$;
+
+do $$
+declare
+  v_unassigned uuid;
+  v_shelf_a    constant uuid := '71000000-0000-0000-0000-000000000002';
+  v_shelf_b    constant uuid := '71000000-0000-0000-0000-000000000003';
+  v_yard       constant uuid := '71000000-0000-0000-0000-000000000004';
+  v_company    constant uuid := '22222222-2222-2222-2222-222222222222';
+begin
+  -- transfer_stock authorises against get_user_company_ids(), i.e. auth.uid(), which is
+  -- null in a seed. Impersonate the dev user for this block so the put-aways go through
+  -- the real RPC — which also writes the paired transfer rows to inventory_transactions.
+  -- Transaction-local (the `true`), so it expires with this DO block.
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', '11111111-1111-1111-1111-111111111111',
+                      'role', 'authenticated')::text,
+    true);
+
+  update public.companies
+     set settings = jsonb_set(coalesce(settings, '{}'::jsonb),
+                              '{features,inventory_locations}', 'true')
+   where id = v_company;
+
+  -- Sanctioned bulk backfill: creates the system "Unassigned" bucket and moves
+  -- every stocked part's whole quantity into it. The rollup trigger then keeps
+  -- parts.quantity = SUM(balances), so no figure above changes.
+  v_unassigned := (public.enable_location_tracking_for_company(v_company) ->> 'location_id')::uuid;
+
+  -- No is_stockable / is_qr_anchor: both were dropped in
+  -- 20260623031347_drop_location_display_flags.sql. Every node is stockable and
+  -- every node can carry a QR now.
+  insert into public.inventory_locations (id, company_id, parent_id, name, kind, code, sort_order) values
+    ('71000000-0000-0000-0000-000000000001', v_company, null, 'Cabinet 3', 'cabinet', 'CAB3', 1),
+    (v_shelf_a, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf A', 'shelf', 'CAB3-A', 1),
+    (v_shelf_b, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf B', 'shelf', 'CAB3-B', 2),
+    (v_yard,    v_company, null, 'Yard', 'yard', 'YARD', 2)
+  on conflict (id) do nothing;
+
+  -- Spread stock so all three count-sheet write targets exist in dev data. The
+  -- count resolves a part's target by how many locations hold stock, so without
+  -- this every part sits at Unassigned and only one branch is ever reachable.
+  --   BUY-BEARING-608ZZ  -> Shelf A only        : counts to a named bin
+  --   RAW-STEEL-BLANK    -> Yard only           : counts to a named bin
+  --   BUY-ORING-214      -> Shelf A + Shelf B   : EXCLUDED from the sheet ("count it at its locations")
+  --   everything else    -> Unassigned          : counts to the system bucket
+  --
+  -- Quantities are read from the balance rather than hardcoded: pg_temp.deplete_job()
+  -- above has already consumed against these parts, so the seeded insert figures are
+  -- stale by now and transfer_stock rejects an overdraw.
+  perform pg_temp.put_away('60000000-0000-0000-0000-000000000004', v_unassigned, v_shelf_a, 1.0, 'Shelf A');
+  perform pg_temp.put_away('60000000-0000-0000-0000-000000000002', v_unassigned, v_yard,    1.0, 'Yard');
+  -- Split one part over two bins so the "count it at its locations" exclusion has a
+  -- live example: 60% to A, then everything still loose to B.
+  perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_a, 0.6, 'Shelf A');
+  perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_b, 1.0, 'Shelf B');
+end $$;

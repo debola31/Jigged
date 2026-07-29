@@ -418,28 +418,15 @@ export async function generateJobTravelerPdf(
     autoTable(doc, {
       startY: cursorY,
       margin: { left: MARGIN, right: MARGIN },
-      head: [['Material', 'Description', 'Qty / unit', 'Unit', 'Job needs']],
-      body: bom.map((line) => {
-        // Whole-order draw for the shop floor: ceil for discrete stock (a strip
-        // you can't cut a fraction of), else the fractional total. Avoids
-        // printing a bare "0.05 strips" that means nothing to someone pulling
-        // material.
-        const orderQty = traveler.quantity;
-        let jobNeeds = '—';
-        if (orderQty != null && orderQty > 0) {
-          const needed = line.consume_whole_units
-            ? Math.ceil(orderQty * line.quantity)
-            : orderQty * line.quantity;
-          jobNeeds = `${formatQty(needed)} ${line.unit ?? ''}`.trim();
-        }
-        return [
-          line.child_part?.part_name ?? '—',
-          line.child_part?.description?.trim() || '—',
-          formatQty(line.quantity),
-          line.unit ?? '—',
-          jobNeeds,
-        ];
-      }),
+      // No "Job needs" column: the sheet already states the order quantity in its header and
+      // the per-unit quantity in this table, so a third figure is the same fact restated.
+      head: [['Material', 'Description', 'Qty / unit', 'Unit']],
+      body: bom.map((line) => [
+        line.child_part?.part_name ?? '—',
+        line.child_part?.description?.trim() || '—',
+        formatQty(line.quantity),
+        line.unit ?? '—',
+      ]),
       styles: {
         font: 'helvetica',
         fontSize: 10,
@@ -459,7 +446,6 @@ export async function generateJobTravelerPdf(
         1: { cellWidth: 'auto' },
         2: { cellWidth: 70, halign: 'right' },
         3: { cellWidth: 55 },
-        4: { cellWidth: 80, halign: 'right', fontStyle: 'bold' },
       },
       theme: 'grid',
     });

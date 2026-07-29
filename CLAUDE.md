@@ -690,7 +690,7 @@ Product documentation is version-controlled in the `/docs` folder.
 | Product Requirements | [docs/prd.md](docs/prd.md) |
 | System Architecture | [docs/architecture.md](docs/architecture.md) |
 | Design System | [docs/design-system.md](docs/design-system.md) |
-| Build Sequence | [docs/build-sequence.md](docs/build-sequence.md) |
+| Operator Paperless Flow (journey spec) | [docs/operator-paperless-flow.md](docs/operator-paperless-flow.md) |
 
 ### Module Specifications
 

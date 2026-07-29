@@ -92,9 +92,10 @@ export default function InventoryTab({
               >
                 Add Stock
               </Button>
+              {/* Not red — see the note in PartLocationInventory: reversible bookkeeping, not
+                  a destructive act. */}
               <Button
-                variant="contained"
-                color="error"
+                variant="outlined"
                 size="large"
                 startIcon={<RemoveIcon />}
                 onClick={() => openTxnModal('depletion')}

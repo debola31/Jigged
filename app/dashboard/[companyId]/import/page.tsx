@@ -730,6 +730,27 @@ function ImportStep({
                     {e.errorCount > 0 ? `, ${e.errorCount.toLocaleString()} error${e.errorCount === 1 ? '' : 's'}` : ''}
                   </Typography>
                 </Box>
+                {/* Balances that deliberately didn't land. The parts imported fine; only the
+                    quantity was left alone, because a location-tracked part's on-hand is a
+                    rollup of its per-location stock. Reported rather than silent — a mapped
+                    column that quietly does nothing is worse than one that errors. */}
+                {e.locationTrackedSkipped.length > 0 && (
+                  <Box sx={{ ml: { sm: '146px' }, mt: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      <Box component="span" sx={{ color: 'info.main', fontWeight: 600 }}>
+                        {e.locationTrackedSkipped.length.toLocaleString()}
+                      </Box>{' '}
+                      {e.locationTrackedSkipped.length === 1 ? 'part is' : 'parts are'} tracked by
+                      location, so the quantity from your file wasn&apos;t applied — set those
+                      balances with an inventory count, or at a location.
+                    </Typography>
+                    <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      {e.locationTrackedSkipped.slice(0, 6).map((name, i) => (
+                        <Chip key={i} size="small" variant="outlined" label={name} sx={{ maxWidth: 260 }} />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
                 {/* Why the errors happened — grouped by reason, with real examples. Turns a
                     bare "38 errors" into "38 — Part not found (e.g. ABC-123)". */}
                 {e.errorGroups.length > 0 && (

@@ -88,7 +88,12 @@ test.describe('operator read-back loop', () => {
     // 1, whose note is captured on a DIFFERENT job from the one being read.
     await openTravelerFor(page, 'E2E-JS-NOTSTARTED');
 
-    await expect(page.getByText('Job Feed')).toBeVisible({ timeout: 30_000 });
+    // The feed is collapsed on the traveler so the steps sit above the fold, so open it
+    // first. MUI keeps collapsed children mounted-but-hidden, which means asserting on the
+    // feed's contents without expanding would fail on visibility rather than on the query.
+    await page.getByRole('button', { name: 'Notes & photos' }).click();
+
+    await expect(page.getByText('Job Feed', { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('Could not load the feed.')).toHaveCount(0);
   });
 });

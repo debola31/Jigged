@@ -63,8 +63,10 @@ api/.cache/
 # Sentry Config File
 .env.sentry-build-plugin
 
-# Usability test data (contains user research / PII)
-docs/usability-tests/
+# Usability test FINDINGS (contain user research / PII).
+# The scripts themselves are tracked — they're blank instruments, and specs link to them.
+# Anything with "findings" in the name stays local: that's where session data lands.
+docs/usability-tests/*findings*
 scripts/data/
 
 # Supabase

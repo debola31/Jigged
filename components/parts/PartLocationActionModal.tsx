@@ -8,6 +8,7 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
@@ -19,6 +20,9 @@ import {
   adjustStockAtLocation,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
@@ -44,6 +48,8 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 interface PartLocationActionModalProps {
   open: boolean;
   action: LocationAction;
+  /** Needed to load the job list for the Remove job tag (issue #59). */
+  companyId: string;
   partId: string;
   primaryUnit: string;
   unitOptions: string[];
@@ -58,6 +64,7 @@ interface PartLocationActionModalProps {
 export default function PartLocationActionModal({
   open,
   action,
+  companyId,
   partId,
   primaryUnit,
   unitOptions,
@@ -76,7 +83,13 @@ export default function PartLocationActionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleEnter = () => {
+  // Optional job tag on a removal — issue #59. The operator path has always had this; the
+  // owner path lost it in the May parts unification.
+  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [job, setJob] = useState<JobWithRelations | null>(null);
+
+  const handleEnter = async () => {
     setLocation(null);
     // Only one place to move from → pick it; no source picker needed.
     setSourceLoc(action === 'move' && sourceBalances.length === 1 ? sourceBalances[0] : null);
@@ -85,12 +98,55 @@ export default function PartLocationActionModal({
     setUnit(primaryUnit);
     setNotes('');
     setError(null);
+    setJob(null);
+    if (action !== 'deplete') return;
+    setLoadingJobs(true);
+    setJobs(await loadTaggableJobs(companyId));
+    setLoadingJobs(false);
   };
 
   const qtyLabel = action === 'adjust' ? 'New quantity at location' : 'Quantity';
   // Cap a Move to what's actually at the source (only meaningful in the part's
   // primary unit — a different unit can't be capped client-side).
   const available = isMove && sourceLoc && unit === primaryUnit ? sourceLoc.quantity : null;
+
+  /**
+   * Every location, each carrying what this part actually holds there.
+   *
+   * `sourceBalances` was already passed in but only consulted for Move, so the other actions
+   * offered a bare list of names — including parent nodes holding nothing — and the operator
+   * found out a shelf was empty only *after* choosing it and typing a number. The quantity
+   * belongs on the option, so the choice is informed rather than corrected.
+   *
+   * Locations holding stock sort first for a Remove: you are far likelier to be taking from a
+   * full shelf than from an empty one. Empty ones stay selectable — a graceful removal from a
+   * bin the system thinks is empty is a legitimate thing to record.
+   */
+  const quantityByLocation = new Map(sourceBalances.map((b) => [b.id, b.quantity]));
+  const locationOptions = (() => {
+    const withQty = locations.map((l) => ({ ...l, quantity: quantityByLocation.get(l.id) ?? 0 }));
+    if (action !== 'deplete') return withQty;
+    return withQty.sort((a, b) => {
+      if ((a.quantity > 0) !== (b.quantity > 0)) return a.quantity > 0 ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+  })();
+
+  /** What's at the chosen location. Only meaningful in the primary unit. */
+  const hereNow =
+    action === 'deplete' && location && unit === primaryUnit
+      ? (quantityByLocation.get(location.id) ?? 0)
+      : null;
+  const overdrawing = hereNow !== null && Number.isFinite(parseFloat(quantity))
+    && parseFloat(quantity) > hereNow;
+  /** Built as one string rather than interleaved JSX — mixing text and expressions across
+   *  lines silently swallowed a space ("0 eachrecorded here"). */
+  const overdrawMessage =
+    hereNow === 0
+      ? `Nothing is recorded at this location, so all ${num(parseFloat(quantity) || 0)} `
+        + `${primaryUnit} will be logged as a difference. It won't be blocked.`
+      : `That's more than the ${num(hereNow ?? 0)} ${primaryUnit} recorded here. Saving sets `
+        + `this location to zero and flags the difference — it won't be blocked.`;
 
   const handleSubmit = async () => {
     const qty = parseFloat(quantity);
@@ -126,7 +182,15 @@ export default function PartLocationActionModal({
       if (action === 'add') {
         await addStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
       } else if (action === 'deplete') {
-        await depleteStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
+        // Graceful, like the operator path: taking more than the system shows clamps the
+        // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
+        // the shelf whether or not our number agreed — blocking the record doesn't put it
+        // back, it just loses the fact. The warning above the button is what stops a typo.
+        await depleteStockAtLocation(partId, location!.id, qty, unit, {
+          graceful: true,
+          notes: notes || undefined,
+          jobId: job?.id || undefined,
+        });
       } else if (action === 'adjust') {
         await adjustStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
       } else {
@@ -135,7 +199,9 @@ export default function PartLocationActionModal({
       await onDone();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update stock.');
+      // Supabase errors are plain objects, not Error instances, so `instanceof` fell through
+      // to the generic string and threw away the reason the database gave us.
+      setError(friendlyErrorMessage(e, { entity: 'stock', fallback: 'Failed to update stock.' }));
     } finally {
       setSaving(false);
     }
@@ -182,11 +248,31 @@ export default function PartLocationActionModal({
             </>
           ) : (
             <Autocomplete
-              options={locations}
+              options={locationOptions}
               value={location}
               onChange={(_, v) => setLocation(v)}
+              // The input keeps the bare path; the quantity lives in the dropdown row, so a
+              // chosen value doesn't read as part of the location's name.
               getOptionLabel={(o) => o.label}
               isOptionEqualToValue={(o, v) => o.id === v.id}
+              renderOption={(props, o) => {
+                const { key, ...rest } = props;
+                const qty = quantityByLocation.get(o.id) ?? 0;
+                return (
+                  // The label takes the slack rather than relying on justify-content, which
+                  // MUI's own option class overrides.
+                  <Box component="li" key={key} {...rest} sx={{ display: 'flex', gap: 2 }}>
+                    <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{o.label}</Box>
+                    <Typography
+                      variant="caption"
+                      color={qty > 0 ? 'text.secondary' : 'text.disabled'}
+                      sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                    >
+                      {qty > 0 ? `${num(qty)} ${primaryUnit}` : 'empty'}
+                    </Typography>
+                  </Box>
+                );
+              }}
               renderInput={(params) => <TextField {...params} label="Location" required />}
             />
           )}
@@ -215,6 +301,24 @@ export default function PartLocationActionModal({
               ))}
             </TextField>
           </Stack>
+          {/* What's actually here, so a number is typed against a fact rather than a guess. */}
+          {hereNow !== null && (
+            <Typography variant="body2" color="text.secondary">
+              {hereNow > 0
+                ? `${num(hereNow)} ${primaryUnit} at this location now.`
+                : 'Nothing recorded at this location.'}
+            </Typography>
+          )}
+
+          {/* Warn, don't block. An over-removal is recorded at zero with a discrepancy flag —
+              the same behaviour the operator path has always had. */}
+          {overdrawing && <Alert severity="warning">{overdrawMessage}</Alert>}
+
+          {/* Removals only — an addition or a move isn't consumption, so a job tag on it
+              would mean nothing. Issue #59. */}
+          {action === 'deplete' && (
+            <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+          )}
           <TextField
             label="Notes (optional)"
             value={notes}

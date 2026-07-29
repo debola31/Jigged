@@ -430,6 +430,62 @@ function routingSequenceNotice(files: AnalyzedFile[]): Finding[] {
   return out;
 }
 
+/**
+ * How much of a mapped on-hand column is actually usable.
+ *
+ * The only check here that reads a value as a *number* rather than as present/blank. An
+ * import with no quantities is normal and valid — a shop can start at zero and count — so
+ * this never blocks. It exists because a legacy export's on-hand column is usually far
+ * emptier than the owner expects (the pilot shop's was populated on 0.5% of rows), and the
+ * Review step is where they should find that out rather than after importing.
+ */
+function quantityCoverage(files: AnalyzedFile[]): Finding[] {
+  const out: Finding[] = [];
+  for (const af of filesOf(files, 'parts')) {
+    const col = roleCol(af, 'quantity');
+    const total = af.rows.length;
+    if (!col || !total) continue;
+
+    let blank = 0;
+    let zero = 0;
+    let unreadable = 0;
+    for (const row of af.rows) {
+      const raw = norm(cell(row, col));
+      if (!raw) {
+        blank += 1;
+        continue;
+      }
+      const n = Number(raw);
+      if (Number.isNaN(n)) unreadable += 1;
+      else if (n === 0) zero += 1;
+    }
+    const usable = total - blank - zero - unreadable;
+    // Every row carries a real number — nothing to report.
+    if (usable === total) continue;
+
+    const parts: string[] = [];
+    if (blank) parts.push(`${blank.toLocaleString()} blank`);
+    if (zero) parts.push(`${zero.toLocaleString()} zero`);
+    if (unreadable) parts.push(`${unreadable.toLocaleString()} not a number`);
+
+    out.push({
+      id: `quantity_coverage.${af.filename}`,
+      category: 'quantity_coverage',
+      severity: 'info',
+      entity_type: 'parts',
+      title: `${usable.toLocaleString()} of ${total.toLocaleString()} parts in ${af.filename} have a quantity on hand`,
+      detail: `${parts.join(', ')}. Blank and zero both import as no stock; anything unreadable is skipped.`,
+      count: usable,
+      examples: [],
+      source_files: [af.filename],
+      verified: true,
+      recommended_action:
+        'Starting from zero is fine — you can set real balances with an inventory count once the parts are in.',
+    });
+  }
+  return out;
+}
+
 /** Run every deterministic check and return findings sorted by severity. */
 export function analyzeBundle(files: AnalyzedFile[]): Finding[] {
   const findings: Finding[] = [];
@@ -441,6 +497,7 @@ export function analyzeBundle(files: AnalyzedFile[]): Finding[] {
   }
   findings.push(...crossFileOrphans(files));
   findings.push(...costCoverage(files));
+  findings.push(...quantityCoverage(files));
   findings.push(...nameVariants(files));
   findings.push(...routingSequenceNotice(files));
   findings.sort((a, b) => (SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]) || a.id.localeCompare(b.id));

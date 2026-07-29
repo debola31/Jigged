@@ -131,6 +131,10 @@ export interface ExecuteResponseShape {
   imported_operations_count?: number; // routings
   imported_routings_count?: number; // routings
   errors?: unknown[];
+  /** Parts whose mapped quantity was not written because the part is location-tracked — its
+   *  balance is a rollup of part_location_stock and is set by a count or at a location. The
+   *  rest of the row imported fine, so this is a notice, not an error. */
+  location_tracked_skipped?: string[];
 }
 
 /** One class of failure, grouped so "38 errors" becomes "38 rows — part not found (e.g. …)".
@@ -149,6 +153,10 @@ export interface EntityResult {
   skipped: number;
   errorCount: number; // rows that failed to import (row-level rejections + failed-batch rows)
   errorGroups: ImportErrorGroup[];
+  /** Part names whose quantity didn't land because they're location-tracked. Not an error —
+   *  the parts imported, only the balance was left to a count. Surfaced so a mapped column
+   *  quietly not applying never goes unreported. */
+  locationTrackedSkipped: string[];
 }
 
 /** Recorded when a whole batch throws (network / 500) — carries the server's message and how
@@ -252,7 +260,16 @@ export function summarizeResults(results: BatchOutcome[]): ImportSummary {
 
   for (const { entity, response, failure } of results) {
     const e =
-      byEntity.get(entity) ?? { entity, created: 0, updated: 0, skipped: 0, errorCount: 0, errorGroups: [] };
+      byEntity.get(entity) ??
+      {
+        entity,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        errorCount: 0,
+        errorGroups: [],
+        locationTrackedSkipped: [],
+      };
     if (response === null) {
       failed = true;
       if (failure) {
@@ -267,6 +284,9 @@ export function summarizeResults(results: BatchOutcome[]): ImportSummary {
       e.created += createdOf(response);
       e.updated += response.updated_count ?? 0;
       e.skipped += response.skipped_count ?? 0;
+      for (const name of response.location_tracked_skipped ?? []) {
+        if (!e.locationTrackedSkipped.includes(name)) e.locationTrackedSkipped.push(name);
+      }
       const errs = response.errors ?? [];
       e.errorCount += errs.length;
       for (const er of errs) {

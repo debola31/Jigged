@@ -1,6 +1,8 @@
 # Demo Company & Platform Foundation
 
 > **SUPERSEDED:** This PRD has been replaced by [Demo Mode](./demo-mode.md). The demo mode approach revives the demo company architecture (separate `company_id`, RLS isolation) but wraps it in a seamless mode-toggle UX — the demo company is hidden from the user. See [Demo Mode PRD Section 16](./demo-mode.md#16-supersedes) for the full lineage. This file is retained for historical reference only.
+>
+> **Its schema references are pre-unification and are deliberately left as written.** They describe tables that no longer exist — `inventory_items`, `inventory_unit_conversions`, `routing_nodes`, `routing_edges`, `routing_materials`. Stocked items are now `parts` rows with `is_stocked = true`; routings use `routing_operations`; materials live on `parts_bom`. Do not use this file as a schema reference — see [Inventory](inventory.md), [Routings](routings.md) and [`architecture.md`](../architecture.md).
 
 ## 1. Overview
 

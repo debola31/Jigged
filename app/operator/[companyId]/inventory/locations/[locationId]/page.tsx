@@ -17,10 +17,12 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
-import { resolveScan } from '@/utils/inventoryLocationsAccess';
+import { resolveScan, getLocations } from '@/utils/inventoryLocationsAccess';
+import type { InventoryLocation } from '@/types/inventoryLocations';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
@@ -88,6 +90,35 @@ export default function OperatorBinViewPage() {
     },
     [companyId, parent?.id],
   );
+
+  /**
+   * Where a Move can go: every other location in the company, by full path.
+   *
+   * Loaded alongside the scan rather than lazily, because the whole point of this surface is
+   * that the operator's context is already known — making them wait after tapping Move would
+   * undo that. It's one small read of a tree a shop has a couple of dozen nodes in.
+   */
+  const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
+  const moveDestinations = useMemo(() => {
+    const list = allLocations ?? [];
+    const byId = new Map(list.map((l) => [l.id, l] as const));
+    const pathOf = (id: string): string => {
+      const names: string[] = [];
+      let cursor: string | null = id;
+      const guard = new Set<string>();
+      while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+        guard.add(cursor);
+        const n: InventoryLocation = byId.get(cursor)!;
+        names.unshift(n.name);
+        cursor = n.parent_id;
+      }
+      return names.join(' › ');
+    };
+    return list
+      .filter((l) => l.id !== locationId)
+      .map((l) => ({ id: l.id, label: pathOf(l.id) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [allLocations, locationId]);
 
   const modalUnit = modal?.part.primary_unit || 'ea';
   const unitOptions = useMemo(
@@ -199,33 +230,46 @@ export default function OperatorBinViewPage() {
                       {part.primary_unit ?? ''}
                     </Typography>
                   </Box>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  {/* Same four verbs, same words, as the admin part page.
+                      ORDER is fixed across both surfaces — Add, Remove, Move, Adjust — so a
+                      control is always in the same place. WEIGHT is what varies: Remove is the
+                      primary here (stock arrives in bulk once, and put-away is really
+                      receiving's job; it leaves in small amounts every job, all shift), while
+                      the admin page emphasises Add. Position serves the operator who knows
+                      where to reach; fill serves the one who doesn't yet.
+                      None of the four is red — reversible bookkeeping, not destruction. */}
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
                     <Button
-                      fullWidth
-                      variant="contained"
-                      color="primary"
+                      variant="outlined"
                       startIcon={<AddIcon />}
                       onClick={() => setModal({ action: 'add', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
                     >
                       Add
                     </Button>
                     <Button
-                      fullWidth
                       variant="contained"
-                      color="error"
                       startIcon={<RemoveIcon />}
                       onClick={() => setModal({ action: 'deplete', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
                     >
                       Remove
                     </Button>
                     <Button
-                      fullWidth
                       variant="outlined"
-                      color="info"
+                      startIcon={<SwapHorizIcon />}
+                      onClick={() => setModal({ action: 'move', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
+                    >
+                      Move
+                    </Button>
+                    <Button
+                      variant="outlined"
                       startIcon={<TuneIcon />}
                       onClick={() => setModal({ action: 'adjust', part })}
+                      sx={{ flex: 1, minWidth: 120 }}
                     >
-                      Set
+                      Adjust
                     </Button>
                   </Stack>
                 </CardContent>
@@ -247,6 +291,7 @@ export default function OperatorBinViewPage() {
           unitOptions={unitOptions}
           locationId={node.id}
           locationName={node.name}
+          moveDestinations={moveDestinations}
           operatorId={operatorId}
           onClose={() => setModal(null)}
           onDone={reload}

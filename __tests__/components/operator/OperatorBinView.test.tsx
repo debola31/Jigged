@@ -20,9 +20,12 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   resolveScan: vi.fn(),
+  // Move destinations: the page loads the whole tree so tapping Move doesn't wait on a fetch.
+  getLocations: vi.fn(async () => []),
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
+  transferStock: vi.fn(),
 }));
 
 vi.mock('@/utils/operatorAccess', () => ({

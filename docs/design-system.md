@@ -195,8 +195,35 @@ only sanctioned exceptions:
 - **Send-to-vendor waypoint** — "Mark Sent Out" is `outlined color="warning"`: a
   reversible "parts left the shop" step, deliberately amber, paired with a blue
   primary "Mark Received."
-- **Inventory verbs** — **Remove** is `color="error"` (subtractive); **Adjust** is
-  `variant="outlined"` (secondary); **Add** is a normal blue primary — *not* green.
+- ~~**Inventory verbs** — **Remove** is `color="error"` (subtractive)~~ — **revised
+  2026-07-29: no stock verb is red.** Add / Remove / Move / Adjust are all `variant`-only:
+  one is `contained`, the rest `outlined`, none carries a `color`.
+
+  The old rule coloured on the wrong axis. The headline question above is *"is it
+  **destructive**?"*; the exception justified red with *"(subtractive)"*. Those are different
+  things — subtractive describes the arithmetic, destructive describes the risk. Removing stock
+  is reversible and *writes* an append-only ledger row rather than destroying one. And because
+  red is simultaneously our enforced Delete colour, painting the most-pressed button in the
+  module red spent the danger signal on a routine act — the same way an alert that fires on
+  every row stops being an alert.
+
+  **Order is fixed; weight varies.** The four always appear in the same sequence —
+  **Add, Remove, Move, Adjust** — on every surface. Which one is `contained` is decided by
+  frequency, per surface, and is *not* a property of the verb:
+
+  | Surface | Primary | Why |
+  |---|---|---|
+  | Operator bin view | **Remove** | Stock arrives in bulk once (really receiving's job, J6) and leaves in small amounts on every job, all shift |
+  | Admin part page | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it |
+
+  **Do not reorder to emphasise.** Consistency governs *recognition* — where a control is, what
+  it's called, what it does — and those must not move. Emphasis governs *intent*, which is
+  legitimately different for an operator at a shelf and an owner at a desk. Splitting the two
+  serves both users: stable position is what a daily user's hand learns, and the filled button
+  is what a first-timer's eye finds. Moving the control to emphasise it would break the first
+  to serve the second.
+
+  Red still means destructive on these pages: the part's Delete (archive) affordance.
 - **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically
   (add = success / remove = error / adjust = info) — they indicate the *selected
   mode*, not an action.

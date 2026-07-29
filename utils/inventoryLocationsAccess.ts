@@ -27,9 +27,17 @@ import type {
   TransferResult,
   UpdateLocationInput,
 } from '@/types/inventoryLocations';
+import type { MaterialLocation } from '@/types/materialCheck';
 
 const LOCATION_COLUMNS =
   'id, company_id, parent_id, name, kind, code, sort_order, created_at, updated_at';
+
+/** Split an id list so a batched `.in()` stays inside PostgREST's URL limits. */
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 // ===========================================================================
 // Tree CRUD
@@ -382,6 +390,62 @@ export async function getBalancesForPart(
       };
     })
     .sort((a, b) => a.path.join(' / ').localeCompare(b.path.join(' / ')));
+}
+
+/**
+ * Balances for MANY parts, in one query — the batched sibling of `getBalancesForPart`.
+ *
+ * A sheet or a job's material list covering a few hundred parts would N+1 the single-part
+ * version into the ground. `path` here is the ANCESTOR names only (root first), excluding the
+ * location itself, so callers can render "Cabinet 3 › Shelf A" without repeating the leaf.
+ *
+ * Lifted out of `inventoryCountAccess`, where it lived privately and left `locationName` blank
+ * for the call site to patch in — a comment there flagged exactly that. Both J7 and J9 use it.
+ */
+export async function getBalancesForParts(
+  companyId: string,
+  partIds: string[],
+): Promise<Map<string, MaterialLocation[]>> {
+  const byPart = new Map<string, MaterialLocation[]>();
+  if (partIds.length === 0) return byPart;
+
+  const supabase = getSupabase();
+  const CHUNK = 500; // keep the IN () list well inside PostgREST's URL limits
+
+  const [locations, ...pages] = await Promise.all([
+    getLocations(companyId),
+    ...chunk(partIds, CHUNK).map(async (ids) => {
+      const { data, error } = await supabase
+        .from('part_location_stock')
+        .select('part_id, location_id, quantity')
+        .in('part_id', ids);
+      if (error) {
+        console.error('Error loading location balances:', error);
+        throw error;
+      }
+      return (data ?? []) as Array<{ part_id: string; location_id: string; quantity: number }>;
+    }),
+  ]);
+
+  const byId = new Map(locations.map((l) => [l.id, l] as const));
+
+  for (const row of pages.flat()) {
+    const full = computePathNames(row.location_id, byId);
+    const list = byPart.get(row.part_id) ?? [];
+    list.push({
+      locationId: row.location_id,
+      locationName: byId.get(row.location_id)?.name ?? 'Unknown location',
+      path: full.slice(0, -1), // ancestors only; the leaf is locationName
+      quantity: Number(row.quantity) || 0,
+    });
+    byPart.set(row.part_id, list);
+  }
+
+  for (const list of byPart.values()) {
+    list.sort((a, b) => [...a.path, a.locationName].join(' / ')
+      .localeCompare([...b.path, b.locationName].join(' / ')));
+  }
+  return byPart;
 }
 
 /** Parts (and quantities > 0) stored directly at a location. */

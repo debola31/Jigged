@@ -897,6 +897,252 @@ class TestPartsExecuteEndpoint:
         assert tier["cost_per_unit"] == 12.5
 
     @pytest.mark.unit
+    async def test_execute_omits_quantity_entirely_when_the_column_is_unmapped(
+        self, test_client
+    ):
+        """An unmapped quantity must not write 0 — that zeroed stock on every re-import.
+
+        parts.quantity is NOT NULL DEFAULT 0, so leaving the key out still inserts fine. The
+        bug was on the UPDATE half of the upsert: an explicit 0 overwrote a real balance for
+        any existing part whose CSV didn't happen to carry a quantity column.
+        """
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Part Name": "part_name", "Unit": "primary_unit"},
+            "pricing_columns": [],
+            "rows": [{"Part Name": "STEEL-4140", "Unit": "lbs"}],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[
+                {
+                    "id": "part-1",
+                    "part_name": "STEEL-4140",
+                    "quantity": 500,
+                    "primary_unit": "pounds",
+                    "is_location_tracked": False,
+                }
+            ],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        upserted = parts_inserts[0]["data"][0]
+        assert "quantity" not in upserted, "unmapped quantity must be absent, not 0"
+
+        # Nothing moved, so nothing to explain.
+        assert [r for r in insert_log if r["table"] == "inventory_transactions"] == []
+
+    @pytest.mark.unit
+    async def test_execute_writes_an_adjustment_ledger_row_for_an_imported_balance(
+        self, test_client
+    ):
+        """An imported quantity is a stock movement and needs provenance (J1).
+
+        Shape mirrors adjustPartStock: abs(delta) in the primary unit, direction in the notes.
+        """
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Unit": "primary_unit",
+                "Qty": "quantity",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "STEEL-4140", "Unit": "lbs", "Qty": "250"}],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[
+                {
+                    "id": "part-1",
+                    "part_name": "STEEL-4140",
+                    "quantity": 100,
+                    "primary_unit": "pounds",
+                    "is_location_tracked": False,
+                }
+            ],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        ledger = [r for r in insert_log if r["table"] == "inventory_transactions"]
+        assert len(ledger) == 1
+        entry = ledger[0]["data"][0]
+        assert entry["type"] == "adjustment"
+        assert entry["item_name"] == "STEEL-4140"
+        # abs(250 - 100); the table's CHECK (quantity >= 0) makes a signed delta unstorable.
+        assert entry["quantity"] == 150.0
+        assert entry["converted_quantity"] == 150.0
+        assert entry["unit"] == "pounds"
+        # Direction is only recoverable from the notes, so it must be there.
+        assert "100" in entry["notes"] and "250" in entry["notes"]
+
+    @pytest.mark.unit
+    async def test_execute_writes_no_ledger_row_when_the_quantity_is_unchanged(
+        self, test_client
+    ):
+        """A re-import that moves no number shouldn't manufacture ledger noise."""
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Unit": "primary_unit",
+                "Qty": "quantity",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "STEEL-4140", "Unit": "lbs", "Qty": "250"}],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[
+                {
+                    "id": "part-1",
+                    "part_name": "STEEL-4140",
+                    "quantity": 250,
+                    "primary_unit": "pounds",
+                    "is_location_tracked": False,
+                }
+            ],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert [r for r in insert_log if r["table"] == "inventory_transactions"] == []
+
+    @pytest.mark.unit
+    async def test_execute_skips_and_reports_quantity_for_a_location_tracked_part(
+        self, test_client
+    ):
+        """A tracked part's quantity is a rollup of part_location_stock, so we must not write it.
+
+        Previously this raised enforce_tracked_part_quantity and, because upserts are batched
+        500 at a time, failed all 500 rows with an opaque 500. Skipping is correct — silence
+        is not, so the skip is reported back rather than the balance quietly not landing.
+        """
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Unit": "primary_unit",
+                "Qty": "quantity",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "STEEL-4140", "Unit": "lbs", "Qty": "250"}],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[
+                {
+                    "id": "part-1",
+                    "part_name": "STEEL-4140",
+                    "quantity": 100,
+                    "primary_unit": "pounds",
+                    "is_location_tracked": True,
+                }
+            ],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Reported, not silent.
+        assert data["location_tracked_skipped"] == ["STEEL-4140"]
+
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        upserted = parts_inserts[0]["data"][0]
+        assert "quantity" not in upserted
+        # No balance moved, so a provenance row would be a lie.
+        assert [r for r in insert_log if r["table"] == "inventory_transactions"] == []
+        # Everything else about the row still imported.
+        assert upserted["primary_unit"] == "pounds"
+
+    @pytest.mark.unit
+    async def test_execute_writes_quantity_for_a_brand_new_part_even_with_locations_on(
+        self, test_client
+    ):
+        """The insert path is unguarded, and must stay that way.
+
+        enforce_tracked_part_quantity is BEFORE UPDATE only. A new part lands with its
+        quantity, and trg_auto_track_stocked_part then flips is_location_tracked and seeds
+        part_location_stock from it — so the balance ends up correct. Skipping new parts would
+        break the normal onboarding import for a locations-enabled company.
+        """
+        insert_log: list = []
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {
+                "Part Name": "part_name",
+                "Unit": "primary_unit",
+                "Qty": "quantity",
+            },
+            "pricing_columns": [],
+            "rows": [{"Part Name": "BRAND-NEW", "Unit": "lbs", "Qty": "40"}],
+            "skip_conflicts": False,
+            "uom_resolutions": {1: "pounds"},
+        }
+
+        # No existing part by that name — the tracked part in the company is unrelated.
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(
+            existing_parts=[
+                {
+                    "id": "part-9",
+                    "part_name": "SOMETHING-ELSE",
+                    "quantity": 5,
+                    "primary_unit": "pounds",
+                    "is_location_tracked": True,
+                }
+            ],
+            insert_log=insert_log,
+        )
+
+        response = await test_client.post("/api/parts/import/execute", json=request_data)
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["location_tracked_skipped"] == []
+
+        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
+        upserted = parts_inserts[0]["data"][0]
+        assert upserted["quantity"] == 40.0
+        # Prior is 0 for a new part, so the ledger row explains 0 -> 40.
+        ledger = [r for r in insert_log if r["table"] == "inventory_transactions"]
+        assert len(ledger) == 1
+        assert ledger[0]["data"][0]["quantity"] == 40.0
+
+    @pytest.mark.unit
     async def test_execute_resolves_preferred_vendor_to_id(self, test_client):
         """preferred_vendor_name resolves to vendor_id at execute time."""
         insert_log: list = []

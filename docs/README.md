@@ -6,12 +6,15 @@ Welcome to the Jigged documentation. Jigged is a data platform for small precisi
 
 ### Product Documentation
 - [Product Requirements Document](prd.md) - Full PRD with functional requirements
-- [PRD Critique](prd-critique.md) - Analysis and implementation critique
 - [System Architecture](architecture.md) - Technical architecture overview
 - [Design System](design-system.md) - UI/UX design guidelines and MUI theme
 
-### Build Guide
-- [Build Sequence](build-sequence.md) - Implementation roadmap
+### Journey Specs
+- [Operator Paperless Flow](operator-paperless-flow.md) - Operator journeys and the decisions bounding them
+
+> Inventory's journey spec is **not** here — it lives inside
+> [modules/inventory.md](modules/inventory.md), which carries both current state and target
+> journeys in one document.
 
 ### Module Specifications
 See [modules/](modules/) for detailed specifications:

@@ -196,7 +196,7 @@ bulkSoftDeleteCustomers(ids)      // Bulk delete
 
 - operation_types - Available operations
 
-- routings, routing_nodes, routing_materials - Process definitions (1:1 with parts). `routing_nodes` is a linear, sequence-ordered list of operations; `routing_materials` is the routing-level materials list.
+- routings, routing_operations - Process definitions (1:1 with parts). `routing_operations` is a linear, sequence-ordered list of operations. Materials are **not** routing-attached: they live on the part's BOM (`parts_bom`). The old `routing_materials` table was removed.
 
 - quotes, quote_line_items - Customer quotes. Line items are immutable snapshots of selected `part_pricing_tiers` (with optional per-quote price overrides via `is_quote_override`).
 
@@ -382,13 +382,13 @@ customers            -- Customer records
 parts                -- Part definitions with pricing (company-wide, no customer_id)
 operation_types      -- Available operations
 routings             -- Process routings (1:1 with parts, unique part_id)
-routing_nodes        -- Linear, sequence-ordered list of operations per routing
-routing_materials    -- Routing-level materials list (inventory_item_id, quantity, unit)
+routing_operations   -- Linear, sequence-ordered list of operations per routing
+parts_bom            -- Part-attached materials (parent_part_id, child_part_id, quantity, unit)
 quotes               -- Customer quotes (no routing_id)
 jobs                 -- Project header; from a quote (J-NNNN ↔ Q-NNNN) or directly from a PO (J-NNNN, quote_id null); job/quote numbers share one per-company counter (company_order_counters)
 job_parts            -- One row per physical part inside a job; owns per-part status + lifecycle timestamps
 job_operations       -- Steps in jobs (keyed on job_part_id; one independent sequence per part)
-job_materials        -- Per-(job, part) materials snapshot (expected + actual consumption)
+job_materials        -- Per-(job, part) BOM snapshot (expected only; consumption tracking was retired)
 ```
 
 ---

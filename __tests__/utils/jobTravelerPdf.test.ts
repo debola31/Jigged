@@ -211,6 +211,34 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
     expect(opts.didDrawCell).toBeUndefined();
   });
 
+  // "Job needs" was a third statement of a fact the sheet already carries twice — the order
+  // quantity in the header and the per-unit quantity in this table.
+  it('lists the BOM without restating the whole-order quantity', async () => {
+    await generateJobTravelerPdf({
+      traveler: traveler([op({ id: 'op-0' })]),
+      company,
+      bom: [
+        {
+          id: 'b1', parent_part_id: 'p', child_part_id: 'c', quantity: 2, unit: 'each',
+          sequence: 0, consume_whole_units: false, created_at: '', updated_at: '',
+          child_part: {
+            id: 'c', part_name: 'BUY-ORING-214', description: 'O-ring',
+            primary_unit: 'each', is_stocked: true, source: 'bought', costing_batch_quantity: 1,
+          },
+        },
+      ] as never,
+      companyId: 'c1',
+      baseUrl: 'https://app.test',
+      supabase: null,
+    });
+    const call = autoTableFn.mock.calls.find(
+      (c) => Array.isArray(c[1]?.head?.[0]) && c[1].head[0][0] === 'Material',
+    );
+    if (!call) throw new Error('BOM autoTable not found');
+    expect(call[1].head[0]).toEqual(['Material', 'Description', 'Qty / unit', 'Unit']);
+    expect(call[1].body[0]).toEqual(['BUY-ORING-214', 'O-ring', '2', 'each']);
+  });
+
   it('still renders the sheet when QR generation fails', async () => {
     qrMock.mockRejectedValueOnce(new Error('qr boom'));
     const opts = await renderAndGetOpsTable(traveler([op({ id: 'op-0' })]));

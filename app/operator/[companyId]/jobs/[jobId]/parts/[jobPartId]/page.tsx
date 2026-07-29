@@ -6,6 +6,9 @@ import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import Accordion from '@mui/material/Accordion';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import AccordionSummary from '@mui/material/AccordionSummary';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CardActionArea from '@mui/material/CardActionArea';
@@ -17,6 +20,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayCircleFilledIcon from '@mui/icons-material/PlayCircleFilled';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import { getJobPartTraveler } from '@/utils/operatorAccess';
 import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
@@ -213,10 +217,29 @@ export default function OperatorJobTravelerPage() {
         excludeJobId={traveler.job_id}
       />
 
-      {/* Job feed (read-only here) — notes + photos for the whole job, captured
-          per step on the operation pages. Bumped up top: operators use it a lot. */}
+      {/* Job feed (read-only here) — notes + photos for the whole job, captured per step on
+          the operation pages.
+          COLLAPSED by default. It was expanded and sat between the header and the steps, so a
+          job with a few notes pushed the one thing an operator came here to do below the fold.
+          The steps are the point of this page; the feed is context you open when you want it. */}
       <Box sx={{ mb: 3 }}>
-        <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
+        <Accordion
+          disableGutters
+          elevation={2}
+          sx={{ ...cardSx, '&::before': { display: 'none' }, borderRadius: 1 }}
+        >
+          {/* Deliberately not "Job feed" — JobFeed renders its own heading with that text,
+              so repeating it here duplicated the label on screen and made "Job Feed" an
+              ambiguous locator in e2e. */}
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 56 }}>
+            <Typography variant="overline" color="text.secondary">
+              Notes &amp; photos
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0 }}>
+            <JobFeed readOnly jobId={traveler.job_id} companyId={companyId} />
+          </AccordionDetails>
+        </Accordion>
       </Box>
 
       {/* Operations / steps — tap one to action it */}

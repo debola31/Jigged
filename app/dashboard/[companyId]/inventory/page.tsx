@@ -27,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import UploadIcon from '@mui/icons-material/Upload';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 import { AgGridReact } from 'ag-grid-react';
@@ -406,6 +407,14 @@ export default function InventoryPage() {
             Locations
           </Button>
         )}
+
+        <Button
+          variant="outlined"
+          startIcon={<FactCheckOutlinedIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
+        >
+          Count Inventory
+        </Button>
 
         <Button
           variant="outlined"

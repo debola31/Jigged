@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
@@ -244,50 +244,58 @@ describe('saving', () => {
     return user;
   };
 
-  it('re-reads current quantities before confirming', async () => {
+  it('re-reads current quantities before writing', async () => {
     await enterAndSave('4140 bar', '38');
     await waitFor(() => expect(refreshSystemQuantities).toHaveBeenCalledWith(['p1']));
   });
 
-  it('confirms in a dialog instead of a separate review page', async () => {
-    const user = await enterAndSave('4140 bar', '38');
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/save 1 change\?/i)).toBeInTheDocument();
-    expect(commitCount).not.toHaveBeenCalled();
+  // Save saves. The confirm dialog that used to sit here restated rows still visible behind it
+  // and warned on nearly every line, so it was removed — see the note on save() in the page.
+  it('commits straight from the sheet, with no confirm step', async () => {
+    await enterAndSave('4140 bar', '38');
 
-    await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
     const [variances] = asMock(commitCount).mock.calls[0];
     expect(variances).toHaveLength(1);
     expect(variances[0].counted).toBe(38);
   });
 
-  it('calls out a big swing in the dialog — most of those are miscounts', async () => {
+  // Size is not a gate any more: a count that finds 2 where the system said 40 saves like any
+  // other. Counting again is the fix, and the ledger records both numbers either way.
+  it('does not treat a large change as something to ask about', async () => {
     await enterAndSave('4140 bar', '2'); // 40 -> 2
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/more than half of what the system had/i)).toBeInTheDocument();
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(asMock(commitCount).mock.calls[0][0][0].counted).toBe(2);
   });
 
-  it('does not call that out for a routine change', async () => {
-    await enterAndSave('4140 bar', '38'); // 5%
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).queryByText(/more than half/i)).not.toBeInTheDocument();
-  });
-
-  it('says which parts moved while the count was open', async () => {
+  it('commits the quantity that was counted, not the one the sheet opened with', async () => {
     asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
     await enterAndSave('4140 bar', '38');
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/moved while you were counting/i)).toBeInTheDocument();
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [variances] = asMock(commitCount).mock.calls[0];
+    expect(variances[0].counted).toBe(38);
+    // Delta is against the refreshed 44, not the 40 the sheet loaded with — countNote quotes
+    // this number, so a stale one would put a wrong figure in the ledger.
+    expect(variances[0].delta).toBe(-6);
   });
 
-  it('backs out to the sheet with entries intact', async () => {
-    const user = await enterAndSave('4140 bar', '38');
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: /keep counting/i }));
+  it('says afterwards which parts moved while the count was open', async () => {
+    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    await enterAndSave('4140 bar', '38');
 
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(inputFor('4140 bar')).toHaveValue(38);
+    expect(await screen.findByText(/moved while you were counting/i)).toBeInTheDocument();
+  });
+
+  it('saves nothing when the refresh shows the count already matches', async () => {
+    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 38]]));
+    await enterAndSave('4140 bar', '38');
+
+    expect(await screen.findByText(/everything already matches/i)).toBeInTheDocument();
     expect(commitCount).not.toHaveBeenCalled();
   });
 
@@ -296,9 +304,7 @@ describe('saving', () => {
       committed: 0,
       failures: [{ partName: '4140 bar', message: 'network died' }],
     });
-    const user = await enterAndSave('4140 bar', '38');
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: /^save$/i }));
+    await enterAndSave('4140 bar', '38');
 
     expect(await screen.findByText(/could not be saved/i)).toBeInTheDocument();
     expect(mockPush).not.toHaveBeenCalled();

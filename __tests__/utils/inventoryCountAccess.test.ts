@@ -39,7 +39,6 @@ const variance = (
   counted,
   delta: counted - systemQuantity,
   movedSinceOpened: false,
-  magnitude: 1,
 });
 
 beforeEach(() => {

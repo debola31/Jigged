@@ -771,20 +771,35 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 >
 > "Holding stock" means `quantity > 0`; the seeded zero-row must not make a part look placed.
 >
-> Review **re-reads current quantities** before showing variances and flags anything that moved
-> while the sheet was open — the commit is safe either way (adjust sets absolutes), but variance
-> against a stale snapshot would mislead. Changes over 50% get one confirm rather than a review
-> gate, since [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/).
+> **Save commits — there is no confirm step, and no review page.** Both were built and both
+> were removed for the same reason: they restated the numbers the counter had just typed and
+> could still see. What the counter needs is the variance *as they type it*, on the row, which
+> is where it now appears.
 >
 > **Variance colour is direction, and only direction:** green up, red down, neutral for no
-> change. The large-change warning is a separate amber glyph beside the figure, never a third
-> colour on it — a big increase and a big decrease must not look alike in the one column whose
-> job is telling them apart.
+> change. Nothing else is encoded in that column — the number and its sign are the whole
+> message.
 >
-> **A change from a zero baseline is not "large".** Proportional change is undefined against
-> zero, and an opening count starts every part there, so treating 0 → *n* as infinite would put
-> a warning on every row of the first count a shop ever runs. A warning on one row in forty is
-> signal; on forty rows it is wallpaper. Stock going *to* zero still flags.
+> **Nothing judges the size of a change.** A 50% proportional threshold once drove a per-row
+> caution icon and a "some of these are big" callout, on the strength of the finding that
+> [~30% of large variances are count errors](https://www.getonecart.com/cycle-counting-inventory/).
+> It failed in practice: against the quantities a small shop holds — 7 on hand, 3 found — a
+> proportional change is large almost every time, so it fired on nearly every line and stopped
+> carrying information. A dialog that always says the same thing trains people to dismiss it,
+> which is worse than not asking.
+>
+> The finding is probably still sound; **expressing it as a percentage of quantity is what
+> failed.** A threshold on the *value* moved (`cost_per_unit × delta`) would scale correctly
+> across a $2 bearing and a $2,000 casting. The right figure is a question for a real shop
+> rather than a guess from here — **open for discovery**.
+>
+> Saving safely does not depend on any of that: a wrong count is fixed by counting again, and
+> every line writes an `adjustment` row naming both numbers.
+>
+> Quantities **are** still re-read immediately before the write. Not as a gate — the commit is
+> correct either way, since adjust sets absolutes — but because the ledger note records *"system
+> said X"*, and a stale X would quietly put a wrong figure in the audit trail. Anything that
+> moved mid-count is reported in the success message, after the fact.
 
 **Why this is Phase 1:** it is the ritual that keeps the other eleven journeys true, and
 the PRD's own success metric (*"100% inventory accuracy within 3 months"*) is unmeasurable

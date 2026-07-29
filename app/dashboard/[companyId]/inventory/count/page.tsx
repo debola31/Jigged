@@ -3,20 +3,22 @@
 /**
  * Stock count sheet — journey J9 in docs/modules/inventory.md.
  *
- * TWO steps: choose what you're counting, then count it. Save opens a confirm dialog.
+ * TWO steps: choose what you're counting, then count it. Save commits — nothing in between.
  *
- * Both halves of that shape were arrived at by getting it wrong first, so the reasoning is
- * worth keeping:
+ * That shape was arrived at by getting it wrong three times, so the reasoning is worth keeping:
  *
  *  - It started as Scope → Sheet → **Review**. The review page restated deltas the counter
  *    would have understood better the instant they typed them, so it's gone — the variance now
- *    appears on the row as you type, and the dialog is the summary.
+ *    appears on the row as you type.
  *  - It was then rebuilt as a **single** page listing every stocked part. That over-corrected:
  *    a wall of empty inputs reads as "fill in this form", hides that counting one part is
  *    perfectly normal, and loses what choosing was quietly doing — making a count a bounded,
  *    finishable task. "I'm counting these five things" beats a row per stocked part.
+ *  - Review then came back as a **confirm dialog**, which turned out to be the same mistake in
+ *    a smaller box: it showed rows still visible behind it, and its big-change warning fired on
+ *    nearly every line. Removed. See `save()`.
  *
- * So the scope step earns its place; the review step didn't.
+ * So the scope step earns its place; restating the count before saving it never did.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -29,10 +31,6 @@ import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import LinearProgress from '@mui/material/LinearProgress';
 import Snackbar from '@mui/material/Snackbar';
@@ -50,11 +48,9 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import {
-  bigVariances,
   buildDraft,
   buildVariances,
   clearDraft as clearStoredDraft,
@@ -63,7 +59,6 @@ import {
   commonUnit,
   countedTally,
   excludedCandidates,
-  isBigDelta,
   readDraft,
   rowDelta,
   writeDraft,
@@ -127,7 +122,6 @@ export default function InventoryCountPage() {
   const [resume, setResume] = useState<{ partIds: string[]; entries: CountEntries; savedAt: number } | null>(
     null,
   );
-  const [confirm, setConfirm] = useState<CountVariance[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [progress, setProgress] = useState<CountCommitProgress | null>(null);
@@ -228,38 +222,65 @@ export default function InventoryCountPage() {
     });
 
   // ── Save ────────────────────────────────────────────────────────────────
-  /** Re-read current quantities, then show what will change. The commit is safe either way
-   *  (adjust sets absolutes), but confirming against a stale snapshot would mislead. */
-  const startSave = async () => {
+  /**
+   * Save commits. There is no confirm step.
+   *
+   * There was one, and it was removed: it restated the very rows the counter had just typed and
+   * could still see, and its "some of these are big" callout fired on nearly every line —
+   * against the quantities a shop actually holds (7 on hand, 3 found), a proportional threshold
+   * flags almost everything, so the warning carried no information. A dialog that always says
+   * the same thing trains people to dismiss it, which is worse than not asking.
+   *
+   * Nothing here is destructive or hard to undo: a wrong count is fixed by counting again, and
+   * every line leaves an `adjustment` row naming both numbers.
+   *
+   * Quantities are still re-read first. The commit is correct either way (adjust sets
+   * absolutes), but `countNote` records "system said X" — without the refresh that X could be
+   * a stale number, and the ledger would be quietly wrong.
+   */
+  const save = async () => {
     setChecking(true);
+    let toCommit: CountVariance[];
     try {
       const fresh = await refreshSystemQuantities(Object.keys(entries));
       const updated = candidates.map((c) =>
         fresh.has(c.partId) ? { ...c, systemQuantity: fresh.get(c.partId) as number } : c,
       );
       setCandidates(updated);
-      setConfirm(committableVariances(buildVariances(updated, entries, openedWithRef.current)));
+      toCommit = committableVariances(buildVariances(updated, entries, openedWithRef.current));
     } catch (e) {
       setSnack({
         msg: e instanceof Error ? e.message : 'Could not re-check current quantities.',
         severity: 'error',
       });
+      return;
     } finally {
       setChecking(false);
     }
-  };
 
-  const doCommit = async () => {
-    const toCommit = confirm ?? [];
-    setConfirm(null);
+    // The refresh can empty this: someone else may have already set a part to what you counted.
+    if (toCommit.length === 0) {
+      clearDraft();
+      setSnack({ msg: 'Everything already matches — nothing to save.', severity: 'success' });
+      router.push(`/dashboard/${companyId}/inventory`);
+      return;
+    }
+
     setCommitting(true);
     setProgress({ done: 0, total: toCommit.length, currentPartName: '' });
     try {
       const result = await commitCount(toCommit, setProgress);
       clearDraft();
       if (result.failures.length === 0) {
+        const moved = toCommit.filter((v) => v.movedSinceOpened).length;
         setSnack({
-          msg: `Counted ${result.committed} ${result.committed === 1 ? 'item' : 'items'}.`,
+          msg:
+            `Counted ${result.committed} ${result.committed === 1 ? 'item' : 'items'}.` +
+            // Said after the fact rather than as a prompt — the count is what's on the shelf,
+            // so a mid-count movement changes nothing about what to save.
+            (moved > 0
+              ? ` ${moved} ${moved === 1 ? 'item' : 'items'} moved while you were counting; your count is what's saved.`
+              : ''),
           severity: 'success',
         });
         router.push(`/dashboard/${companyId}/inventory`);
@@ -273,9 +294,6 @@ export default function InventoryCountPage() {
       setCommitting(false);
     }
   };
-
-  const big = useMemo(() => (confirm ? bigVariances(confirm) : []), [confirm]);
-  const moved = useMemo(() => (confirm ?? []).filter((v) => v.movedSinceOpened), [confirm]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -523,7 +541,6 @@ export default function InventoryCountPage() {
                     const delta = rowDelta(c, entries);
                     const isCounted = delta !== null;
                     const matches = delta === 0;
-                    const bigChange = delta !== null && isBigDelta(c, delta);
 
                     // No row-level "done" tint: the variance cell already says whether a row
                     // has been actioned, and tinting the ground behind the figures only costs
@@ -570,11 +587,12 @@ export default function InventoryCountPage() {
                           </TableCell>
                         )}
 
-                        {/* Direction always owns the colour: green up, red down, neutral for
-                            no change. The big-change warning is a separate amber glyph rather
-                            than a third colour on the number — otherwise a large increase and
-                            a large decrease look identical, which is the one thing the
-                            variance column exists to distinguish. */}
+                        {/* Direction, and nothing else: green up, red down, neutral for no
+                            change. No per-row warning glyph — on the small quantities a shop
+                            actually counts, a proportional threshold fires on almost every
+                            line, and a column of cautions is indistinguishable from none. The
+                            large-change check still runs once, at the save confirm, where it
+                            can be read against the whole batch. */}
                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                           {isCounted &&
                             (matches ? (
@@ -593,18 +611,8 @@ export default function InventoryCountPage() {
                                   ...NUM_SX,
                                   fontWeight: 700,
                                   color: (delta as number) > 0 ? 'success.main' : 'error.main',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 0.5,
                                 }}
                               >
-                                {bigChange && (
-                                  <WarningAmberIcon
-                                    fontSize="small"
-                                    sx={{ color: 'warning.main' }}
-                                    titleAccess="Large change — worth a re-count"
-                                  />
-                                )}
                                 {signed(delta as number)}
                               </Typography>
                             ))}
@@ -662,67 +670,13 @@ export default function InventoryCountPage() {
             variant="contained"
             size="large"
             disabled={changes === 0 || checking}
-            onClick={startSave}
+            onClick={save}
             startIcon={checking ? <CircularProgress size={16} /> : undefined}
           >
             {checking ? 'Checking...' : `Save ${changes} ${changes === 1 ? 'change' : 'changes'}`}
           </Button>
         </Box>
       )}
-
-      {/* The old Review page, compressed into the moment it's useful. */}
-      <Dialog open={!!confirm} onClose={() => setConfirm(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {big.length > 0
-            ? `Save ${confirm?.length} ${confirm?.length === 1 ? 'change' : 'changes'}? Some are big.`
-            : `Save ${confirm?.length} ${confirm?.length === 1 ? 'change' : 'changes'}?`}
-        </DialogTitle>
-        <DialogContent>
-          {moved.length > 0 && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              {moved.length} {moved.length === 1 ? 'item' : 'items'} moved while you were
-              counting — these are current as of now.
-            </Alert>
-          )}
-          {big.length > 0 && (
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              {big.length} {big.length === 1 ? 'change is' : 'changes are'} more than half of
-              what the system had. Worth a re-count if any look wrong.
-            </Alert>
-          )}
-          <Stack divider={<Divider />}>
-            {(confirm ?? []).map((v) => (
-              <Box
-                key={v.candidate.partId}
-                sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1 }}
-              >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2" noWrap>
-                    {v.candidate.partName}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {num(v.candidate.systemQuantity)} → {num(v.counted)} {v.candidate.unit}
-                  </Typography>
-                </Box>
-                <Typography
-                  variant="body2"
-                  sx={{ fontWeight: 700, color: v.delta > 0 ? 'success.main' : 'error.main' }}
-                >
-                  {signed(v.delta)}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button color="inherit" size="large" onClick={() => setConfirm(null)}>
-            Keep counting
-          </Button>
-          <Button variant="contained" size="large" onClick={doCommit}>
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Snackbar
         open={!!snack}

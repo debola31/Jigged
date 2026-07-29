@@ -132,11 +132,6 @@ export function buildVariances(
       counted,
       delta,
       movedSinceOpened: opened !== undefined && opened !== candidate.systemQuantity,
-      // Proportional change, or 0 when there's no baseline. A change from zero has no
-      // percentage — and treating it as infinite would flag every row of an opening count,
-      // which is the one count where every part legitimately starts at zero.
-      magnitude:
-        candidate.systemQuantity === 0 ? 0 : Math.abs(delta) / candidate.systemQuantity,
     });
   }
   return out;
@@ -147,28 +142,20 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
   return variances.filter((v) => v.delta !== 0);
 }
 
-/**
- * Changes worth a second look.
+/*
+ * There is deliberately no "is this variance suspiciously large?" helper here.
  *
- * ~30% of large variances turn out to be count errors rather than real movement, so these get
- * a warning on the row and a callout in the save dialog — cheaper than gating every count
- * behind a review page.
+ * One existed — a 50% proportional threshold, backed by the cycle-count finding that ~30% of
+ * large variances are count errors. It drove a per-row caution icon and a confirm dialog, and
+ * both were removed: against the quantities a small shop actually holds (7 on hand, 3 found),
+ * proportional change is large almost every time, so the flag fired on nearly every line and
+ * stopped meaning anything.
  *
- * **Not flagged when the system had nothing.** Going 0 → 3 is what an opening count looks
- * like, so treating it as extraordinary would put a warning on every row of the first count a
- * shop ever runs. A warning on one row in forty is signal; on forty rows it's wallpaper.
+ * The finding is probably still true; expressing it as a percentage of quantity is what failed.
+ * A threshold on the *value* moved (`parts.cost_per_unit × delta`) would scale correctly across
+ * a $2 bearing and a $2,000 casting, but the right figure is a question for a real shop, not a
+ * guess from here. See docs/modules/inventory.md J9.
  */
-export const BIG_VARIANCE_THRESHOLD = 0.5;
-
-export function isBigDelta(candidate: CountCandidate, delta: number): boolean {
-  if (delta === 0) return false;
-  if (candidate.systemQuantity === 0) return false;
-  return Math.abs(delta) / candidate.systemQuantity >= BIG_VARIANCE_THRESHOLD;
-}
-
-export function bigVariances(variances: CountVariance[]): CountVariance[] {
-  return committableVariances(variances).filter((v) => v.magnitude >= BIG_VARIANCE_THRESHOLD);
-}
 
 /** Note recorded on each adjustment, so the ledger says where the number came from. */
 export function countNote(v: CountVariance): string {

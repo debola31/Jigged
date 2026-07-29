@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BIG_VARIANCE_THRESHOLD,
-  bigVariances,
   buildDraft,
   buildVariances,
   clearDraft,
@@ -11,7 +9,6 @@ import {
   commonUnit,
   countedTally,
   draftKey,
-  isBigDelta,
   excludedCandidates,
   parseDraft,
   readDraft,
@@ -138,26 +135,6 @@ describe('rowDelta', () => {
   });
 });
 
-describe('isBigDelta', () => {
-  it('flags a change of half or more', () => {
-    const c = candidate({ partId: 'a', systemQuantity: 10 });
-    expect(isBigDelta(c, -6)).toBe(true);
-    expect(isBigDelta(c, -1)).toBe(false);
-    expect(isBigDelta(c, 0)).toBe(false);
-  });
-
-  // An opening count starts every part at zero. If 0 → anything were "big", the first count a
-  // shop ever runs would be a solid wall of warnings, which is the same as no warnings at all.
-  it('does not flag a count against a zero baseline', () => {
-    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5)).toBe(false);
-    expect(isBigDelta(candidate({ partId: 'z', systemQuantity: 0 }), 5000)).toBe(false);
-  });
-
-  it('still flags stock that has gone entirely missing', () => {
-    expect(isBigDelta(candidate({ partId: 'g', systemQuantity: 12 }), -12)).toBe(true);
-  });
-});
-
 describe('buildVariances', () => {
   const candidates = [
     candidate({ partId: 'a', partName: 'A', systemQuantity: 10 }),
@@ -173,7 +150,6 @@ describe('buildVariances', () => {
     const v = buildVariances(candidates, { a: 7 }, new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(-3);
-    expect(v[0].magnitude).toBeCloseTo(0.3);
   });
 
   it('flags a line whose system quantity moved while the sheet was open', () => {
@@ -191,33 +167,32 @@ describe('buildVariances', () => {
     expect(buildVariances(candidates, { x: 3 }, new Map())).toEqual([]);
   });
 
-  it('reports no magnitude against a zero baseline — a change from nothing has no percentage', () => {
+  // The opening-count case: every part starts at zero, and finding stock there is ordinary.
+  it('treats a count against a zero baseline as an ordinary increase', () => {
     const zeroed = [candidate({ partId: 'z', systemQuantity: 0 })];
     const v = buildVariances(zeroed, { z: 5 }, new Map());
-    expect(v[0].magnitude).toBe(0);
+    expect(v).toHaveLength(1);
+    expect(v[0].delta).toBe(5);
   });
 });
 
-describe('committable + big variances', () => {
+describe('committableVariances', () => {
   const candidates = [
     candidate({ partId: 'same', systemQuantity: 10 }),
     candidate({ partId: 'small', systemQuantity: 10 }),
     candidate({ partId: 'big', systemQuantity: 10 }),
   ];
-  const entries: CountEntries = {
-    same: 10, // matches — nothing to write
-    small: 9, // 10%
-    big: 2, // 80%
-  };
+  const entries: CountEntries = { same: 10, small: 9, big: 2 };
   const variances = buildVariances(candidates, entries, new Map());
 
   it('drops lines counted equal to the system — no write needed', () => {
     expect(committableVariances(variances).map((v) => v.candidate.partId)).toEqual(['small', 'big']);
   });
 
-  it('flags only the changes past the threshold for a second look', () => {
-    expect(BIG_VARIANCE_THRESHOLD).toBe(0.5);
-    expect(bigVariances(variances).map((v) => v.candidate.partId)).toEqual(['big']);
+  // Size is deliberately not judged here any more — see the note in inventoryCountPlan.ts.
+  // A count that finds 2 where the system said 10 is committed like any other.
+  it('does not treat a large change differently from a small one', () => {
+    expect(committableVariances(variances)).toHaveLength(2);
   });
 });
 

@@ -70,10 +70,9 @@ export interface CountVariance {
   counted: number;
   /** counted - systemQuantity. Signed here; the ledger stores abs() with direction in notes. */
   delta: number;
-  /** True when the system quantity moved since the sheet was opened. */
+  /** True when the system quantity moved since the sheet was opened. Reported after the save,
+   *  not asked about before it — the count is what's on the shelf either way. */
   movedSinceOpened: boolean;
-  /** |delta| as a share of the system quantity, for the big-variance warning. */
-  magnitude: number;
 }
 
 export interface CountCommitProgress {

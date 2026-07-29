@@ -43,15 +43,7 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => ({ from: fromSpy }),
 }));
 
-vi.mock('@/utils/inventoryLocationsAccess', () => ({
-  getBalancesForParts: vi.fn(async () => new Map()),
-  getLocations: vi.fn(async () => [{ id: 'loc-un', name: 'Unassigned' }]),
-}));
-
 import { getShopMaterialShortages, getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
-import { getBalancesForParts } from '@/utils/inventoryLocationsAccess';
-
-const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
 /** N job parts, each on its own job, all making the same part. */
 const jobPartRows = (n: number) =>
@@ -77,7 +69,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   filters = [];
   fromSpy.mockImplementation((table: string) => makeBuilder(table));
-  asMock(getBalancesForParts).mockResolvedValue(new Map());
 
   tableData.job_parts = jobPartRows(20);
   tableData.parts_bom = [
@@ -127,17 +118,18 @@ describe('getShopMaterialShortages — request budget', () => {
     expect(fromSpy.mock.calls.map((c) => c[0])).toContain('parts_unit_conversions');
   });
 
-  // The job card and the shop-wide view don't render bin detail; loading it would cost an
-  // extra query plus a whole-tree read for nothing.
-  it('skips the bin read unless the caller asks for locations', async () => {
+  // Neither consumer renders where stock sits, so the bin balances and the whole location
+  // tree are never read. This was loaded for the operator traveler's take action, which was
+  // removed — see docs/modules/inventory.md J7.
+  it('never reads bin balances or the location tree', async () => {
     await getShopMaterialShortages('co1', 'all');
-    expect(getBalancesForParts).not.toHaveBeenCalled();
-
     await getJobPartMaterialCheck({
       companyId: 'co1', jobId: 'job1', jobPartId: 'jp1',
-      madePartId: 'made1', orderQuantity: 2, withLocations: true,
+      madePartId: 'made1', orderQuantity: 2,
     });
-    expect(getBalancesForParts).toHaveBeenCalledTimes(1);
+    const tables = fromSpy.mock.calls.map((c) => c[0]);
+    expect(tables).not.toContain('part_location_stock');
+    expect(tables).not.toContain('inventory_locations');
   });
 });
 

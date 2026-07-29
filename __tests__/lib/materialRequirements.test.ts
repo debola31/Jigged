@@ -10,16 +10,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildRequirement,
-  issueNote,
-  locationLabel,
   requiredQuantity,
-  resolveIssueTarget,
   resolveUnitBasis,
   rollUpShortages,
   shortageWindowEnd,
 } from '@/lib/materialRequirements';
 import type {
-  MaterialLocation,
   MaterialRequirement,
   MaterialStockFacts,
   ShortageContribution,
@@ -35,13 +31,6 @@ const stock = (over: Partial<MaterialStockFacts> & { partId: string }): Material
   ...over,
 });
 
-const bin = (locationId: string, quantity: number, path: string[] = []): MaterialLocation => ({
-  locationId,
-  locationName: locationId,
-  path,
-  quantity,
-});
-
 const req = (over: Partial<Parameters<typeof buildRequirement>[0]> = {}) =>
   buildRequirement({
     bomLineId: 'b1',
@@ -53,7 +42,6 @@ const req = (over: Partial<Parameters<typeof buildRequirement>[0]> = {}) =>
     customFactor: null,
     issued: 0,
     hasDiscrepancy: false,
-    locations: [],
     ...over,
   });
 
@@ -271,65 +259,6 @@ describe('rollUpShortages', () => {
     ]);
     expect(rows.map((r) => r.partId)).toEqual(['bad', 'mild', 'fine']);
     expect(rows[0].contributions.map((c) => c.jobId)).toEqual(['j3', 'j2']);
-  });
-});
-
-describe('resolveIssueTarget', () => {
-  const unassigned = { id: 'loc-un', name: 'Unassigned' };
-
-  it('sends an untracked part to the aggregate quantity', () => {
-    expect(resolveIssueTarget(false, [], unassigned)).toEqual({ kind: 'aggregate' });
-  });
-
-  it('sends a tracked part with one stocked bin to that bin', () => {
-    const t = resolveIssueTarget(true, [bin('loc-a', 40, ['Cabinet 3'])], unassigned);
-    expect(t).toEqual({
-      kind: 'location', locationId: 'loc-a', locationName: 'Cabinet 3 › loc-a', quantityHere: 40,
-    });
-  });
-
-  // The seeded zero row at Unassigned must not make a part look placed.
-  it('ignores bins holding nothing when deciding how many places hold stock', () => {
-    const t = resolveIssueTarget(true, [bin('loc-un', 0), bin('loc-a', 5)], unassigned);
-    expect(t.kind).toBe('location');
-    if (t.kind === 'location') expect(t.locationId).toBe('loc-a');
-  });
-
-  it('falls back to Unassigned when nothing is recorded anywhere', () => {
-    const t = resolveIssueTarget(true, [bin('loc-a', 0)], unassigned);
-    expect(t).toEqual({
-      kind: 'location', locationId: 'loc-un', locationName: 'Unassigned', quantityHere: 0,
-    });
-  });
-
-  it('blocks rather than guessing when tracked with no Unassigned bucket', () => {
-    expect(resolveIssueTarget(true, [], null).kind).toBe('blocked');
-  });
-
-  /**
-   * Unlike a count, which EXCLUDES a multi-bin part, an issue asks the operator — they are
-   * standing at the shelf and know which one they opened. Defaulting to the fullest makes
-   * the common case one tap while keeping the ledger honest about where stock left from.
-   */
-  it('asks the operator when several bins hold stock, pre-selecting the fullest', () => {
-    const t = resolveIssueTarget(true, [bin('loc-a', 10), bin('loc-b', 90), bin('loc-c', 50)], unassigned);
-    expect(t.kind).toBe('choose');
-    if (t.kind === 'choose') {
-      expect(t.defaultLocationId).toBe('loc-b');
-      expect(t.options.map((o) => o.locationId)).toEqual(['loc-b', 'loc-c', 'loc-a']);
-    }
-  });
-});
-
-describe('locationLabel and issueNote', () => {
-  it('renders a bin the way someone would say it', () => {
-    expect(locationLabel(bin('Shelf A', 1, ['Cabinet 3']))).toBe('Cabinet 3 › Shelf A');
-    expect(locationLabel(bin('Yard', 1))).toBe('Yard');
-  });
-
-  it('names the job on the ledger row', () => {
-    expect(issueNote('J-1047', 'Hydraulic Pump')).toBe('Issued to J-1047 (Hydraulic Pump)');
-    expect(issueNote('J-1047', null)).toBe('Issued to J-1047');
   });
 });
 

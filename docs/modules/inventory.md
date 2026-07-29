@@ -326,11 +326,14 @@ calls to any stock function from `jobsAccess.ts`, `operatorAccess.ts`, `shipment
 `operationCompletionsAccess.ts`. **Every stock movement in Jigged is a deliberate human act of
 bookkeeping** — which is exactly the thing a busy shop stops doing.
 
-**Still true after J7 (2026-07-28), and deliberately.** The operator taking material on the
-traveler is a *deliberate act* — they tap TAKE — not a side effect of starting or completing
-anything. What changed is the ergonomics, not the principle: the job link is now made by
-construction rather than by remembering an optional field, and it is available on the owner
-path too (#59 restored). Nothing anywhere decrements stock on its own.
+**Still true after Phase 1 (2026-07-28), and deliberately.** Consumption is recorded when the
+operator removes stock at a bin and tags the job — a deliberate act, not a side effect of
+starting or completing anything. What changed is that the job tag is now available to the owner
+too (#59 restored) and that [J4](#j4--job-kickoff-material-check) reads those rows back, so the
+bookkeeping finally pays for itself. Nothing anywhere decrements stock on its own.
+
+The job tag remains **optional**, and that is the accepted risk of this design — see the
+reversal note in [J7](#j7--issue-material-to-a-job).
 
 ### UI surfaces
 
@@ -654,48 +657,74 @@ get material.
 Take the material, and the depletion is **linked to the job**. This is the PRD's stated
 primary path and issue #59's ask.
 
-> **Their legacy data proves the demand.** 97 of the 121 "locations" in their old ERP were
-> job, work-order or part numbers ([§5.5](#55-locations-keep-them-visual-change-when-they-appear)).
-> Users typed job numbers into a location field for years because there was no job↔material
-> link. **This journey is not a hypothesis — it is a workaround they already built by hand,
-> in the wrong field, at scale.** It is the strongest-evidenced item in the entire spec.
-
-**The entry point must be the job, not the bin.** This is the sharpest consequence of the
-validation, and it reverses an assumption baked into both the current build and the earlier
-draft of this spec:
-
-- **The old flow was bin-first** — scan a location QR → see contents → remove → *optionally*
-  tag a job. That serves someone auditing a bin. It does not serve an operator whose context
-  is *"I'm starting job 1047."*
-- **The flow is now job-first** — operator is on the job traveler → sees the material the
-  job needs → taps it → sees where it is → confirms taking it. The depletion is job-linked by
-  construction rather than by an optional field the operator must remember.
-- Bin-first stays as the secondary path. It is the right shape for J9 counting and J11
-  finding, and it already works.
-
-> **Built 2026-07-28** — a **Material** section on the traveler, above the steps, because
-> material comes before work. Two decisions worth recording:
+> **Their legacy data proves the demand — for the *link*.** 97 of the 121 "locations" in their
+> old ERP were job, work-order or part numbers
+> ([§5.5](#55-locations-keep-them-visual-change-when-they-appear)). Users typed job numbers into
+> a location field for years because there was no job↔material link. **This journey is not a
+> hypothesis — it is a workaround they already built by hand, in the wrong field, at scale.**
+> It is the strongest-evidenced item in the spec.
 >
-> **A part in several bins asks the operator**, pre-selected to the fullest. That is deliberately
-> the opposite of [J9](#j9--count-it), which *excludes* multi-bin parts: at a count nobody is
-> present to say which bin a number came from, but here the operator is standing at the shelf
-> and knows which one they opened. Auto-choosing would make the ledger lie about where stock
-> left from, corrupting exactly the bin accuracy that counting and finding depend on. A take is
-> **never split across bins** — that is two ledger rows from one tap with no rollback if the
-> second fails.
+> ⚠️ **Read that evidence for exactly what it says.** It proves the *link* is wanted. It does
+> **not** say where the operator should start. See the reversal below.
+
+**Consumption is recorded at the bin, tagged to the job.** The operator scans a location, takes
+what they need, and picks the job — the existing bin path, with the job tag it has always had
+([`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)).
+Always graceful: over-consumption clamps to zero, flags `has_discrepancy`, stamps the operator.
+[J4](#j4--job-kickoff-material-check) then reads those rows back as "issued" per job.
+
+> ### The job-first reversal — built 2026-07-28, removed the same day
 >
-> **The quantity prefills what's left to fetch and is not clamped to on-hand.** Clamping would
-> silently under-record when the bin is short; graceful depletion exists to record the truth.
+> An earlier draft of this section said, emphatically, that **"the entry point must be the job,
+> not the bin"**: operator on the traveler → sees what the job needs → taps → confirms taking
+> it. That was built — a Material section on the traveler with a take action — reviewed on the
+> running app, and **removed**. Recorded here because the reasoning is worth keeping and the
+> question will come back.
+>
+> **1. The evidence was over-read.** 97-of-121 proves users want material tied to a job. It says
+> nothing about which screen you start from — a job tag at the bin satisfies it exactly as well,
+> and that already existed. The draft treated "the link is wanted" and "the job is the entry
+> point" as the same claim. They are not.
+>
+> **2. It contradicted [§5.2](#52-is-a-job-a-place--resolved-no), two sections earlier.**
+> Job-first entry is a *consequence* of job-as-container: if a job is a thing you allocate
+> material into, of course the UI starts there — that's where the container is. §5.2 rejected
+> job-as-container for us, on the finding that Contour's operator grabs material when they
+> start and nothing is staged against a job beforehand. **The draft rejected the model and kept
+> its UI shape.**
+>
+> **3. On Sortly specifically**, since [§5.1](#51-material-moves-through-jobs-by-default) cites
+> their [Jobs feature](https://www.sortly.com/blog/new-feature-alert-jobs/) as independent
+> validation — that citation is still good, and it validates the **motivation**, not the
+> mechanism. Their stated before-state is ours (*"technicians wrote usage on paper or forgot to
+> document it"*) and their payoff is J4 + J7 (*"tracking exactly what materials were used"*,
+> *"preventing double-purchasing"*). But Sortly's Jobs is a **container**: create the job,
+> allocate items to it, close it out and lock the history. We had already declined their
+> close-out step for that reason. Taking their entry point while refusing their model was
+> half-adopting a design — the half that carries the cost, without the half that makes it
+> coherent.
+>
+> **4. Two write paths for one fact.** Bin-first already recorded job-tagged consumption. Adding
+> a second entry point meant two ways to state the same thing, which
+> [§5.8](#58-the-ledger-is-append-only-and-non-authoritative) exists to warn about.
+>
+> **5. It was built on an unadopted surface.** Operators are not yet marking operations complete
+> in practice. Stacking material handling onto a screen whose primary job hasn't landed is
+> speculative — the traveler's own steps are what needs to work first.
+>
+> **What job-first would genuinely have added, and what we accept losing:** the job link becomes
+> automatic rather than remembered, and an optional field is a field that gets forgotten. That
+> is real, and it is the thing to watch.
+>
+> **REOPEN IF** the job tag turns out to be routinely skipped at the bin — that is the failure
+> this design is exposed to, and the one measurable signal that would justify revisiting. Check
+> it by counting depletions with a null `job_id` once the shop is using it. Reopen also if a
+> shop starts staging material against jobs, which would reopen §5.2 and make the container
+> model — and its entry point — correct together rather than piecemeal.
 
 **Consequence for issue #59.** The March ask was a job selector in the owner's
-`PartTransactionModal`, and that regression is real — but it is **no longer the high-value
-fix**, because the owner is not who moves material. Restoring it is a small correctness
-patch; building the job-first operator path is the actual journey. Do not let the open issue
-number set the priority.
-
-**Deliberately not adopted:** Sortly's *close out the job and lock the history* step. It
-belongs to their job-as-container model, which [§5.2](#52-is-a-job-a-place--resolved-no)
-rejected for us. Revisit only if that fork reopens.
+`PartTransactionModal`, and that regression was real — **restored 2026-07-28**, on both stock
+engines, with the test that should have existed in March.
 
 #### This journey *is* consumption tracking
 
@@ -713,8 +742,9 @@ The mechanics that were specced under J9 carried over unchanged, and **shipped 2
   (the same computation [J4](#j4--job-kickoff-material-check) needs), actual is the sum of
   those rows, variance is computed on read. `job_materials` was not revived; see
   [§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger).
-- **Graceful over-depletion is reused** — clamp to zero, flag `has_discrepancy`, stamp the
-  operator. Behaves identically to the bin path, confirmed live.
+- **Graceful over-depletion** — clamp to zero, flag `has_discrepancy`, stamp the operator.
+  This *is* the bin path's existing behaviour, which is the point: consumption reuses a
+  mechanism already in production rather than adding a parallel one.
 - **Issue #550 closed by being folded in, not by being built as written.** Worth stating
   plainly, because the issue and the delivery do not match: #550 asked for a confirm-consumption
   step at operation completion, gated behind an `inventory_transactions` feature flag. That flag
@@ -1414,7 +1444,7 @@ point of the exercise.
 | J4 material check | Flow 3 step 2 | silent | ✅ 2026-07-28 (top level only) |
 | J5 buy it | Flow 3 steps 4–5 | silent | ❌ |
 | J6 receive it | Admin persona; Flow 3 step 6 | silent | ❌ |
-| J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ✅ 2026-07-28, job-first on the operator surface |
+| J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ✅ 2026-07-28 — bin checkout + job tag, read back by J4. Job-first entry built and reverted (see J7) |
 | J8 remnants | *(absent)* | silent | ❌ |
 | J9 count | success metric: 100% accuracy | silent | ✅ **built 2026-07-28** |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
@@ -1574,23 +1604,17 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
 
 **Issue to job (J7)**
 
-- [x] **Given** an operator on the traveler, **when** they take material, **then** a `depletion`
-  row carrying `job_id` is written and the balance drops — *verified by
-  `__tests__/components/operator/OperatorIssueMaterialModal.test.tsx`; manually confirmed
-  2026-07-28 on both engines.*
-  > Replaces an earlier bullet phrased *"Given a completed operation … then stock depletes."*
-  > That wording was **rewritten rather than ticked**: J7 deliberately does not auto-deplete on
-  > completion, and [§3](#nothing-decrements-automatically) says nothing decrements
-  > automatically. Ticking it would have asserted behaviour the spec explicitly rejects.
-- [x] **Given** a part in several bins, **then** the operator chooses which, pre-selected to the
-  fullest, and the ledger records that bin — *verified by `…OperatorIssueMaterialModal.test.tsx
-  > 'choosing a bin'`; manually confirmed by taking from the **non-default** bin and checking
-  the balance moved there.*
-- [x] **Given** more taken than is on hand, **then** it clamps to zero, flags `has_discrepancy`
-  and does **not** block — *manually confirmed 2026-07-28.*
-- [x] **Given** an untracked part, **then** the take routes to `removePartStockGraceful` and
-  never to a location RPC — *verified by `…'engine routing'`; manually confirmed by
-  un-tracking a part, since every seeded stocked part is location-tracked.*
+- [x] **Given** an operator at a bin, **when** they remove stock and tag a job, **then** a
+  `depletion` row carrying `job_id` is written and the balance drops — *verified by
+  `__tests__/components/operator/OperatorLocationActionModal.test.tsx`; manually confirmed
+  2026-07-28 on both engines, including the graceful clamp at zero stock.*
+- [x] **Given** those depletions, **when** the job is viewed, **then** they read back as
+  "issued" against the right material — *verified by
+  `__tests__/utils/materialCheckAccess.test.ts`; manually confirmed on J-0006.*
+- [ ] **Given** an operator on the traveler, **when** they take material, **then** the job link
+  is made without them choosing it — **built 2026-07-28 and removed the same day.** Not a gap
+  to fill: see the reversal in [J7](#j7--issue-material-to-a-job) for why, and for the signal
+  that would justify revisiting (job tags routinely skipped at the bin).
 
 **Owner-side job link (#59)**
 
@@ -1615,7 +1639,7 @@ shop's own words — good enough for the structural decisions below, not for pri
 |---|---|---|
 | Staged before the job, or grabbed at the machine? | **Grabbed at the machine** | [§5.2](#52-is-a-job-a-place--resolved-no) — a job is **not** a place. Cheaper branch. |
 | Stock vs buy per job? | **They stock** — lots of rush jobs, so they hold what those need | Confirms Phase 1's premise; [J4](#j4--job-kickoff-material-check) reframed around *"can I say yes to this rush job?"* |
-| Who moves material? | **The operator, on the floor** | [J7](#j7--issue-material-to-a-job) becomes job-first on the operator surface; #59's owner-side fix demoted |
+| Who moves material? | **The operator, on the floor** | [J7](#j7--issue-material-to-a-job) stays on the operator's bin path; #59's owner-side fix demoted but shipped |
 | What units? | **Mixed** — some `each`, some feet/inches | FR-1 conversion is load-bearing, both discrete and continuous |
 | Opening balances? | **Start from zero.** Legacy figures exist but accuracy is *"questionable"* | [J1](#j1--seed-the-item-master-and-opening-balances) out of Phase 1; [J9](#j9--count-it) becomes onboarding |
 | Certs / heat / regulated customers? | **None** | [Traceability, cut](#cut--traceability-can-we-prove-it) cut, lot layer cut, Phase 4 halved |

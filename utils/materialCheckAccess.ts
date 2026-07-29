@@ -16,10 +16,9 @@
  * surfaces say so on screen.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { getBalancesForParts, getLocations } from '@/utils/inventoryLocationsAccess';
+
 import { buildRequirement, rollUpShortages, shortageWindowEnd } from '@/lib/materialRequirements';
 import type {
-  MaterialLocation,
   MaterialRequirement,
   MaterialStockFacts,
   PartShortage,
@@ -29,9 +28,6 @@ import type {
 
 /** Job-part statuses that still need material. */
 const OPEN_STATUSES = ['not_started', 'in_progress'] as const;
-
-/** The auto-created system bucket a tracked part falls back to. Resolved by name, as the RPCs do. */
-const UNASSIGNED_NAME = 'Unassigned';
 
 const CHUNK_PARENTS = 200;
 const CHUNK_IDS = 500;
@@ -199,13 +195,13 @@ async function loadIssued(
 /**
  * Turn job parts into material requirements. The shared middle of both entry points.
  *
- * `withLocations` is only true for the operator path — the job card and the shop-wide view
- * don't need bin detail, and skipping it saves a query plus a whole-tree read.
+ * Deliberately does NOT load bin balances. It did, for the operator traveler's take action —
+ * that surface was removed (see docs/modules/inventory.md J7), and neither remaining consumer
+ * renders where stock sits. Loading it cost a query plus a whole-location-tree read.
  */
 async function buildRequirementsFor(
   companyId: string,
   jobParts: JobPartRow[],
-  withLocations: boolean,
 ): Promise<Array<{ jobPart: JobPartRow; requirements: MaterialRequirement[] }>> {
   if (jobParts.length === 0) return [];
 
@@ -217,12 +213,9 @@ async function buildRequirementsFor(
   const jobIds = [...new Set(jobParts.map((jp) => jp.jobId))];
 
   // Wave 2: everything below depends only on the BOM, so it all goes at once.
-  const [stockByPart, issued, balances] = await Promise.all([
+  const [stockByPart, issued] = await Promise.all([
     loadStockFacts(childIds),
     loadIssued(companyId, jobIds),
-    withLocations
-      ? getBalancesForParts(companyId, childIds)
-      : Promise.resolve(new Map<string, MaterialLocation[]>()),
   ]);
 
   const conversions = await loadConversionFactors(
@@ -256,19 +249,13 @@ async function buildRequirementsFor(
           customFactor: conversions.get(`${line.child_part_id}:${line.unit}`) ?? null,
           issued: seen?.quantity ?? 0,
           hasDiscrepancy: seen?.hasDiscrepancy ?? false,
-          locations: balances.get(line.child_part_id) ?? [],
         }),
       ];
     }),
   }));
 }
 
-/**
- * J4 for one job part — the job page card and the operator traveler.
- *
- * `withLocations` drives whether bin detail is loaded; the traveler needs it to say where the
- * material is and to route the take, the job card does not.
- */
+/** J4 for one job part — the job page card. */
 export async function getJobPartMaterialCheck(args: {
   companyId: string;
   jobId: string;
@@ -277,7 +264,6 @@ export async function getJobPartMaterialCheck(args: {
   madePartId: string;
   madePartName?: string | null;
   orderQuantity: number;
-  withLocations?: boolean;
 }): Promise<MaterialRequirement[]> {
   const built = await buildRequirementsFor(
     args.companyId,
@@ -291,18 +277,8 @@ export async function getJobPartMaterialCheck(args: {
       dueDate: null,
       isHot: false,
     }],
-    args.withLocations ?? false,
   );
   return built[0]?.requirements ?? [];
-}
-
-/** The Unassigned bucket for a company, or null when locations aren't in use. */
-export async function getUnassignedLocation(
-  companyId: string,
-): Promise<{ id: string; name: string } | null> {
-  const locations = await getLocations(companyId);
-  const row = locations.find((l) => l.name === UNASSIGNED_NAME);
-  return row ? { id: row.id, name: row.name } : null;
 }
 
 /**
@@ -384,7 +360,7 @@ export async function getShopMaterialShortages(
       }];
     });
 
-  const built = await buildRequirementsFor(companyId, jobParts, false);
+  const built = await buildRequirementsFor(companyId, jobParts);
 
   const lines = built.flatMap(({ jobPart, requirements }) =>
     requirements.map((requirement) => ({

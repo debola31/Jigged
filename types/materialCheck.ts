@@ -1,14 +1,13 @@
 /**
- * Job material check — domain types (journeys J4 and J7 in docs/modules/inventory.md).
+ * Job material check — domain types (journey J4 in docs/modules/inventory.md).
  *
- * One computation, three consumers: the job page card, the operator traveler, and the
- * shop-wide shortage view. Everything here is derived — there is no material table and no
- * migration. Required comes from the live BOM × the job-part order quantity; issued is the
- * sum of `depletion` ledger rows carrying the job; short-by is arithmetic on read.
+ * One computation, two consumers: the job page card and the shop-wide shortage view.
+ * Everything here is derived — there is no material table and no migration. Required comes
+ * from the live BOM × the job-part order quantity; issued is the sum of `depletion` ledger
+ * rows carrying the job (written at the bin, per J7); short-by is arithmetic on read.
  *
- * **Top-level materials only.** `parts_bom` is recursive, but J4 compares one level: a job for
- * a pump reads "you need 1 pump core", not the aluminium the core is made from. That is right
- * for J7 (the operator pulls the sub-assembly off the shelf) and incomplete for J4. Both
+ * **Top-level materials only.** `parts_bom` is recursive, but this compares one level: a job
+ * for a pump reads "you need 1 pump core", not the aluminium the core is made from. Both
  * surfaces say so on screen; the recursive explode is the follow-up.
  */
 
@@ -90,27 +89,7 @@ export interface MaterialRequirement {
   status: RequirementStatus;
   basis: UnitBasis;
   isLocationTracked: boolean;
-  /** Bins holding stock. Empty for untracked parts; drives "where is it?" and the picker. */
-  locations: MaterialLocation[];
 }
-
-/**
- * Where an issued quantity is written. Sibling of `CountTarget`.
- *
- * Note the deliberate difference from counting: a count *excludes* a part split across bins,
- * because nobody is present to say which bin the number came from. Here the operator is
- * standing at the shelf, so they pick — auto-choosing would make the ledger lie about where
- * material left from, which corrupts the bin accuracy that counting and finding depend on.
- */
-export type IssueTarget =
-  /** Untracked part: removePartStockGraceful against parts.quantity. */
-  | { kind: 'aggregate' }
-  /** Exactly one bin holds stock (or none does, and we fall back to Unassigned). */
-  | { kind: 'location'; locationId: string; locationName: string; quantityHere: number }
-  /** Several bins hold stock — the operator picks, pre-selected to the fullest. */
-  | { kind: 'choose'; options: MaterialLocation[]; defaultLocationId: string }
-  /** Tracked with nowhere to write — no bins and no Unassigned bucket to fall back to. */
-  | { kind: 'blocked'; reason: string };
 
 /** One job's claim on a part, for the shop-wide view. */
 export interface ShortageContribution {

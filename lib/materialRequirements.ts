@@ -2,14 +2,12 @@
  * Job material requirements — the pure core (journeys J4 and J7 in docs/modules/inventory.md).
  *
  * No I/O, no React. `utils/materialCheckAccess.ts` is the thin driver that feeds this, exactly
- * as `inventoryCountAccess` feeds `inventoryCountPlan`. Three surfaces read the output: the
- * job page card, the operator traveler, and the shop-wide shortage view — so the arithmetic
- * lives here once and is unit-tested here once.
+ * as `inventoryCountAccess` feeds `inventoryCountPlan`. Two surfaces read the output — the job
+ * page card and the shop-wide shortage view — so the arithmetic lives here once and is
+ * unit-tested here once.
  */
 import { getConversionFactor, resolveUnitAlias } from '@/lib/unitPresets';
 import type {
-  IssueTarget,
-  MaterialLocation,
   MaterialRequirement,
   MaterialStockFacts,
   PartShortage,
@@ -90,11 +88,10 @@ export function buildRequirement(args: {
   customFactor: number | null;
   issued: number;
   hasDiscrepancy: boolean;
-  locations: MaterialLocation[];
 }): MaterialRequirement {
   const {
     bomLineId, bomQuantity, bomUnit, consumeWholeUnits, orderQuantity,
-    stock, customFactor, issued, hasDiscrepancy, locations,
+    stock, customFactor, issued, hasDiscrepancy,
   } = args;
 
   const requiredInBomUnit = requiredQuantity(orderQuantity, bomQuantity, consumeWholeUnits);
@@ -130,7 +127,6 @@ export function buildRequirement(args: {
     status,
     basis,
     isLocationTracked: stock.isLocationTracked,
-    locations,
   };
 }
 
@@ -215,64 +211,6 @@ export function rollUpShortages(
     if ((b.shortBy ?? 0) !== (a.shortBy ?? 0)) return (b.shortBy ?? 0) - (a.shortBy ?? 0);
     return a.partName.localeCompare(b.partName);
   });
-}
-
-/**
- * Where an issued quantity is written. Sibling of `resolveCountTarget`.
- *
- * "Holds stock" means `quantity > 0`, so the auto-seeded zero row at Unassigned doesn't make
- * a part look placed.
- */
-export function resolveIssueTarget(
-  isLocationTracked: boolean,
-  balances: MaterialLocation[],
-  unassigned: { id: string; name: string } | null,
-): IssueTarget {
-  if (!isLocationTracked) return { kind: 'aggregate' };
-
-  const holding = balances.filter((b) => b.quantity > 0);
-
-  if (holding.length === 0) {
-    // Nothing recorded anywhere. Unassigned is the honest destination — the take really
-    // happened, and graceful depletion will record the shortfall.
-    if (!unassigned) {
-      return {
-        kind: 'blocked',
-        reason: 'This part is tracked by location but has no location to take from.',
-      };
-    }
-    return {
-      kind: 'location',
-      locationId: unassigned.id,
-      locationName: unassigned.name,
-      quantityHere: 0,
-    };
-  }
-
-  if (holding.length === 1) {
-    const only = holding[0];
-    return {
-      kind: 'location',
-      locationId: only.locationId,
-      locationName: locationLabel(only),
-      quantityHere: only.quantity,
-    };
-  }
-
-  const options = [...holding].sort((a, b) => b.quantity - a.quantity);
-  return { kind: 'choose', options, defaultLocationId: options[0].locationId };
-}
-
-/** "Cabinet 3 › Shelf A" — the path a person would say out loud. */
-export function locationLabel(loc: MaterialLocation): string {
-  return [...loc.path, loc.locationName].filter(Boolean).join(' › ');
-}
-
-/** Note stored on the depletion, so the ledger says why the stock moved. */
-export function issueNote(jobNumber: string, madePartName: string | null): string {
-  return madePartName
-    ? `Issued to ${jobNumber} (${madePartName})`
-    : `Issued to ${jobNumber}`;
 }
 
 /**

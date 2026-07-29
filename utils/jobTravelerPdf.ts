@@ -32,7 +32,6 @@ import QRCode from 'qrcode';
 import type { Company } from '@/utils/companyAccess';
 import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 import type { BomLineWithChildPart } from '@/types/bom';
-import { requiredQuantity } from '@/lib/materialRequirements';
 import {
   buildShopHeaderLines,
   formatDate,
@@ -419,25 +418,15 @@ export async function generateJobTravelerPdf(
     autoTable(doc, {
       startY: cursorY,
       margin: { left: MARGIN, right: MARGIN },
-      head: [['Material', 'Description', 'Qty / unit', 'Unit', 'Job needs']],
-      body: bom.map((line) => {
-        // Whole-order draw for the shop floor. The rule (ceil for discrete stock, so nobody
-        // reads "0.05 strips") lives in lib/materialRequirements so the printout and the
-        // screen can't drift apart.
-        const orderQty = traveler.quantity;
-        let jobNeeds = '—';
-        if (orderQty != null && orderQty > 0) {
-          const needed = requiredQuantity(orderQty, line.quantity, line.consume_whole_units);
-          jobNeeds = `${formatQty(needed)} ${line.unit ?? ''}`.trim();
-        }
-        return [
-          line.child_part?.part_name ?? '—',
-          line.child_part?.description?.trim() || '—',
-          formatQty(line.quantity),
-          line.unit ?? '—',
-          jobNeeds,
-        ];
-      }),
+      // No "Job needs" column: the sheet already states the order quantity in its header and
+      // the per-unit quantity in this table, so a third figure is the same fact restated.
+      head: [['Material', 'Description', 'Qty / unit', 'Unit']],
+      body: bom.map((line) => [
+        line.child_part?.part_name ?? '—',
+        line.child_part?.description?.trim() || '—',
+        formatQty(line.quantity),
+        line.unit ?? '—',
+      ]),
       styles: {
         font: 'helvetica',
         fontSize: 10,
@@ -457,7 +446,6 @@ export async function generateJobTravelerPdf(
         1: { cellWidth: 'auto' },
         2: { cellWidth: 70, halign: 'right' },
         3: { cellWidth: 55 },
-        4: { cellWidth: 80, halign: 'right', fontStyle: 'bold' },
       },
       theme: 'grid',
     });

@@ -36,7 +36,15 @@ const services = [
     args: ['index.py'],
     cwd: 'api',
     readyUrl: 'http://localhost:8000/docs',
-    timeoutMs: 30_000,
+    // 90s, not 30s. All three services are spawned together and the clock starts
+    // for all of them at once, so this budget is shared with Next.js compiling
+    // instrumentation and the root route on a two-core CI runner. Observed on a
+    // red build: uvicorn only logged "Uvicorn running" 22 seconds in, leaving 8
+    // seconds to import the app (pandas, anthropic, supabase) and serve /docs.
+    // Nothing was broken — the budget was simply too tight to survive
+    // contention, which makes it a periodic false red. Next.js already gets 120s
+    // for the same reason; this was the outlier.
+    timeoutMs: 90_000,
     // Hermetic QuickBooks: no Intuit call. create_invoice returns a deterministic
     // fake so the invoicing spec can exercise the full push against the real DB.
     // (Guarded off in production by QUICKBOOKS_ENVIRONMENT != 'production'.)

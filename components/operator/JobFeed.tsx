@@ -19,6 +19,7 @@ import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CloseIcon from '@mui/icons-material/Close';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
+import NoteReactions from '@/components/operator/NoteReactions';
 import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
@@ -196,8 +197,10 @@ export default function JobFeed({
     [notes],
   );
 
+  // Resolved unconditionally, not just when the composer is shown: reactions need
+  // the member id on the read-only traveler feed too, both to know whether the
+  // reader has already reacted and to hide the control on their own notes.
   useEffect(() => {
-    if (!showComposer) return;
     let active = true;
     getCurrentMember(companyId).then((op) => {
       if (active && op) setOperatorId(op.id);
@@ -205,7 +208,7 @@ export default function JobFeed({
     return () => {
       active = false;
     };
-  }, [showComposer, companyId]);
+  }, [companyId]);
 
   // Post-completion capture offer: fire ONCE per completion event. Only react to
   // a *new* signal value (ignore the initial undefined/0), and only offer when
@@ -691,6 +694,18 @@ export default function JobFeed({
                       );
                     })}
                   </Box>
+                )}
+
+                {/* Auto-logged 'event' rows are system audit entries, not somebody's
+                    contribution — there is nothing to endorse. */}
+                {note.note_type === 'user' && (
+                  <NoteReactions
+                    companyId={companyId}
+                    noteId={note.id}
+                    authorId={note.author_id}
+                    reactions={note.reactions}
+                    memberId={operatorId}
+                  />
                 )}
               </Box>
             ))}

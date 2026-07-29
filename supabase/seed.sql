@@ -924,3 +924,77 @@ begin
     end loop;
   end loop;
 end $$;
+
+-- ═══ Endorsements ════════════════════════════════════════════════════════════
+-- The voluntary half of the loop. Without these every note reads as unendorsed
+-- and the thumbs-up looks like a feature nobody uses — the same reason the seed
+-- logs reads above.
+--
+-- Two rules the app enforces in SQL and the seed must not break: never your own
+-- note (self-endorsement is noise, and the INSERT policy refuses it), and one row
+-- per (note, reactor, kind).
+--
+-- Only 'helpful' is written. 'confirmed' remains in the CHECK constraint with no
+-- UI and nothing that writes it; seeding it would put rows on screen that no
+-- operator could have produced.
+do $$
+declare
+  v_co   uuid := '22222222-2222-2222-2222-222222222222';
+  v_pool uuid[] := array[
+    '23000000-0000-0000-0000-000000000005',   -- Diego Alvarez  (operator)
+    '23000000-0000-0000-0000-000000000006',   -- Priya Nair     (operator)
+    '23000000-0000-0000-0000-000000000003'    -- Sam Carter     (user)
+  ];
+  n        record;
+  v_reactor uuid;
+  v_take   int;
+  i        int;
+begin
+  for n in
+    select id, author_id,
+           (row_number() over (order by created_at, id))::int as rn
+    from public.notes
+    where company_id = v_co and note_type = 'user' and author_id is not null
+  loop
+    -- Endorsement is rarer than reading, and deliberately so: most notes carry
+    -- none. A seed where everything is endorsed would make the signal worthless
+    -- and hide the ordinary state.
+    v_take := case when n.rn % 3 = 0 then 2 when n.rn % 3 = 1 then 1 else 0 end;
+    for i in 1 .. v_take loop
+      v_reactor := v_pool[1 + ((n.rn + i) % array_length(v_pool, 1))];
+      continue when v_reactor = n.author_id;
+      insert into public.note_reactions (company_id, note_id, reactor_id, kind, created_at)
+      values (v_co, n.id, v_reactor, 'helpful', now() - ((n.rn % 6) || ' days')::interval)
+      on conflict do nothing;
+    end loop;
+  end loop;
+end $$;
+
+-- The durable part-subject notes are the ones people actually consult on a later
+-- run, so endorsement follows reading: give each at least one. The rotation above
+-- is a modulo lottery and left both of them at zero, which would have made the
+-- read-back surface — the Playbook and "previous notes" — look like the one place
+-- nobody found anything useful.
+do $$
+declare
+  v_co uuid := '22222222-2222-2222-2222-222222222222';
+  n record;
+  v_reactor uuid;
+begin
+  for n in
+    select id, author_id
+    from public.notes
+    where company_id = v_co and subject_kind = 'part' and note_type = 'user'
+      and author_id is not null
+  loop
+    -- Anyone but the author; the two operators cover each other's notes.
+    v_reactor := case
+      when n.author_id = '23000000-0000-0000-0000-000000000006'
+        then '23000000-0000-0000-0000-000000000005'
+      else '23000000-0000-0000-0000-000000000006'
+    end;
+    insert into public.note_reactions (company_id, note_id, reactor_id, kind, created_at)
+    values (v_co, n.id, v_reactor, 'helpful', now() - interval '3 days')
+    on conflict do nothing;
+  end loop;
+end $$;

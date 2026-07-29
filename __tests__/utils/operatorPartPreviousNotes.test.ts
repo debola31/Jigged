@@ -46,6 +46,8 @@ function row(over: Record<string, unknown> = {}) {
     routing_operation_id: 'ro1',
     corrects_note_id: null,
     viewer_count: 4,
+    author_id: 'them',
+    reactions: [],
     usage_count: 11,
     author_name: 'Kurtis',
     job_number: 'J-0041',

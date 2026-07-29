@@ -39,6 +39,8 @@ import {
   getAllStationsOperatorJobs,
   getCompletedOperatorJobs,
   getAllStationsCompletedOperatorJobs,
+  addReaction,
+  removeReaction,
   markOperationSent,
   markOperationReceived,
   revertOperationCompletion,
@@ -478,5 +480,63 @@ describe('getOutsideOpsForCompany', () => {
     mockQueryBuilder.data = null;
     mockQueryBuilder.error = { message: 'boom' };
     expect(await getOutsideOpsForCompany('c1')).toEqual([]);
+  });
+});
+
+
+describe('reactions', () => {
+  // getCurrentMember resolves via a single() on user_company_access.
+  const asMember = (id: string | null) => {
+    mockQueryBuilder.data = id === null ? null : { id, name: 'Diego', user_id: 'auth-user-1' };
+  };
+
+  it('writes the reaction as the caller, never as a supplied identity', async () => {
+    // The RLS policy pins reactor_id to get_operator_access_id(), so a forged id
+    // would be rejected anyway — but the signature never offers one, which is
+    // what stops "Kurtis confirmed this" from being expressible at all.
+    asMember('acc-me');
+    await addReaction('c1', 'n1');
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('note_reactions');
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith({
+      company_id: 'c1',
+      note_id: 'n1',
+      reactor_id: 'acc-me',
+      kind: 'helpful',
+    });
+  });
+
+  it('treats a duplicate as success, not as an error', async () => {
+    // Two taps racing, or a second device. The end state is what the caller
+    // asked for, so the unique constraint firing is not something to report.
+    asMember('acc-me');
+    mockQueryBuilder.error = { code: '23505', message: 'duplicate key' };
+
+    await expect(addReaction('c1', 'n1')).resolves.toBeUndefined();
+  });
+
+  it('surfaces a real failure so the optimistic UI can roll back', async () => {
+    asMember('acc-me');
+    mockQueryBuilder.error = { code: '42501', message: 'permission denied' };
+
+    await expect(addReaction('c1', 'n1')).rejects.toThrow('Could not save that.');
+  });
+
+  it('scopes the un-react to the caller, so nobody can clear someone else\'s', async () => {
+    // Belt to the DELETE policy's braces: admins deliberately cannot curate the
+    // public record of what the shop found useful.
+    asMember('acc-me');
+    await removeReaction('c1', 'n1');
+
+    expect(mockQueryBuilder.delete).toHaveBeenCalled();
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('note_id', 'n1');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('reactor_id', 'acc-me');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('kind', 'helpful');
+  });
+
+  it('refuses to write when the caller is not a member of the company', async () => {
+    asMember(null);
+
+    await expect(addReaction('c1', 'n1')).rejects.toThrow(/member/i);
   });
 });

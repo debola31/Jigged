@@ -40,6 +40,8 @@ function makeNote(over: Partial<JobNote> = {}): JobNote {
     note_type: 'user',
     created_at: '2026-07-01T10:00:00.000Z',
     author_name: 'Op',
+    author_id: 'them',
+    reactions: [],
     media: [],
     ...over,
   };

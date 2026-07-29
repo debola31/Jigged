@@ -19,6 +19,7 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -125,6 +126,18 @@ function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
               {note.body}
             </Typography>
           )}
+
+          {/* Read-only by necessity, not omission: RLS forbids reacting to your
+              own note, so here endorsements are RECEPTION — the same category as
+              the view count above, and the other half of what came back. */}
+          <NoteReactions
+            companyId={companyId}
+            noteId={note.id}
+            authorId={null}
+            reactions={note.reactions}
+            memberId={null}
+            readOnly
+          />
         </CardContent>
       </CardActionArea>
 

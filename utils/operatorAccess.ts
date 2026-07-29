@@ -37,6 +37,7 @@ import type {
   MyContribution,
   MyNote,
   NoteViewer,
+  NoteReaction,
 } from '@/types/operator';
 
 // ============================================================================
@@ -1276,10 +1277,33 @@ const JOB_NOTE_SELECT =
   'id, subject_kind, job_id, job_operation_id, captured_job_id, ' +
   'captured_job_operation_id, part_id, routing_operation_id, ' +
   'viewer_count, usage_count, body, note_type, created_at, ' +
-  'author:user_company_access(name), ' +
+  'author_id, author:user_company_access(name), ' +
+  // Reactions embed because they are PUBLIC within the shop — the deliberate
+  // opposite of note_views, which has no client read path at any level. Count and
+  // names both derive from this one array, so they can never disagree; that is
+  // why no denormalized reaction counter exists.
+  'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
   'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
   'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
   'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
+
+type ReactionRel = {
+  kind: string;
+  reactor_id: string;
+  reactor: { name: string | null } | { name: string | null }[] | null;
+};
+
+/** Shared decode for both read paths (PostgREST embed and the playbook RPC's jsonb). */
+function mapReactions(rows: ReactionRel[] | null | undefined): NoteReaction[] {
+  return (rows ?? []).map((r) => {
+    const reactor = Array.isArray(r.reactor) ? r.reactor[0] : r.reactor;
+    return {
+      kind: r.kind === 'confirmed' ? ('confirmed' as const) : ('helpful' as const),
+      reactor_id: r.reactor_id,
+      name: reactor?.name ?? null,
+    };
+  });
+}
 
 type StepRel =
   | { operation_name: string | null; sequence: number | null }
@@ -1300,7 +1324,9 @@ type JobNoteRow = {
   body: string | null;
   note_type: string | null;
   created_at: string;
+  author_id: string | null;
   author: { name: string | null } | { name: string | null }[] | null;
+  reactions: ReactionRel[] | null;
   operation: StepRel;
   captured_operation: StepRel;
   media: Array<{
@@ -1339,6 +1365,8 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
   }));
   return {
     id: n.id,
+    author_id: n.author_id,
+    reactions: mapReactions(n.reactions),
     // The job this note belongs to FROM THE FEED'S POINT OF VIEW: its own job for a
     // job-subject note, the capturing job for a durable part-subject one.
     job_id: n.job_id ?? n.captured_job_id ?? '',
@@ -1526,11 +1554,14 @@ type PlaybookRow = {
   corrects_note_id: string | null;
   viewer_count: number;
   usage_count: number;
+  author_id: string | null;
   author_name: string | null;
   job_number: string | null;
   operation_label: string | null;
   media: JobNoteMedia[] | null;
-  reactions: unknown;
+  // The RPC aggregates these as jsonb with the same field names the PostgREST
+  // embed produces, so mapReactions decodes both paths.
+  reactions: ReactionRel[] | null;
 };
 
 /**
@@ -1622,6 +1653,8 @@ export async function getPartPreviousNotes(
     note_type: r.note_type === 'event' ? 'event' : 'user',
     created_at: r.created_at,
     author_name: r.author_name,
+    author_id: r.author_id,
+    reactions: mapReactions(r.reactions),
     subject_kind:
       r.subject_kind === 'part' || r.subject_kind === 'work_center'
         ? r.subject_kind
@@ -1672,6 +1705,9 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
         'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
         'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
         'part:parts(part_name), ' +
+        // Read-only here: RLS forbids reacting to your own note, so on My work
+        // these are reception rather than an available action.
+        'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
         // Both job FKs: a job-subject note carries job_id, a durable
         // part-subject one carries only captured_job_id. Either way the author
         // gets a way back to where they wrote it.
@@ -1696,6 +1732,7 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     operation: StepRel;
     captured_operation: StepRel;
     part: { part_name: string | null } | { part_name: string | null }[] | null;
+    reactions: ReactionRel[] | null;
     job: JobRel;
     captured_job: JobRel;
     media: Array<{ id: string }> | null;
@@ -1718,6 +1755,7 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
       operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),
       part_name: part?.part_name ?? null,
       photo_count: (r.media ?? []).length,
+      reactions: mapReactions(r.reactions),
       viewer_count: r.viewer_count,
       usage_count: r.usage_count,
     };
@@ -1749,4 +1787,79 @@ export async function getNoteViewers(noteId: string): Promise<NoteViewer[]> {
   const { data, error } = await supabase.rpc('note_viewers', { p_note_id: noteId });
   if (error || !data) return [];
   return data as unknown as NoteViewer[];
+}
+
+
+// ============================================================================
+// REACTIONS — public, attributable endorsement
+// ============================================================================
+
+/**
+ * Mark a note helpful, or take it back.
+ *
+ * The deliberate opposite of view logging. A view is involuntary and private —
+ * a record that someone needed to look something up, which is why note_views has
+ * no client read path at all. A reaction is a voluntary claim, so it is public
+ * inside the shop, attributable by name, and removable only by the person who
+ * made it (admins cannot curate the record of what the shop found useful).
+ *
+ * Everything that could go wrong is refused by RLS rather than trusted here:
+ * you cannot forge someone else's reactor_id, and you cannot react to your own
+ * note. The UI hides the control on your own notes so the refusal is never
+ * reached — see NoteReactions — but the database is the enforcement.
+ *
+ * Errors are thrown, not swallowed: unlike view logging (fire-and-forget,
+ * Sentry-only), a reaction is a deliberate act and the caller rolls back its
+ * optimistic state if it fails.
+ */
+export async function addReaction(
+  companyId: string,
+  noteId: string,
+  kind: NoteReaction['kind'] = 'helpful',
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const member = await getCurrentMember(companyId);
+  if (!member) throw new Error('Not a member of this company.');
+
+  const { error } = await supabase.from('note_reactions').insert({
+    company_id: companyId,
+    note_id: noteId,
+    reactor_id: member.id,
+    kind,
+  });
+
+  // A duplicate is the unique constraint doing its job — two taps racing, or a
+  // second device. The end state is what the caller asked for, so it is not an
+  // error to report.
+  if (error && error.code !== '23505') {
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not save that.' }),
+    );
+  }
+}
+
+/** Remove your own reaction. The DELETE policy scopes this to the caller. */
+export async function removeReaction(
+  companyId: string,
+  noteId: string,
+  kind: NoteReaction['kind'] = 'helpful',
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const member = await getCurrentMember(companyId);
+  if (!member) throw new Error('Not a member of this company.');
+
+  const { error } = await supabase
+    .from('note_reactions')
+    .delete()
+    .eq('note_id', noteId)
+    .eq('reactor_id', member.id)
+    .eq('kind', kind);
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not undo that.' }),
+    );
+  }
 }

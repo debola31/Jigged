@@ -28,6 +28,8 @@ const NOTE_ROW = {
   part_id: 'part-1',
   routing_operation_id: 'ro-1',
   viewer_count: 0,
+  author_id: 'them',
+  reactions: [],
   usage_count: 0,
   body: 'watch the bore',
   note_type: 'user',

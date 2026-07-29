@@ -54,8 +54,10 @@ export default function OperatorJobMaterials({
   orderQuantity,
 }: OperatorJobMaterialsProps) {
   const [picked, setPicked] = useState<MaterialRequirement | null>(null);
+  // user_company_access.id — stamps the ledger AND authors the feed note. Note notes.author_id
+  // is an FK to user_company_access, NOT the auth user id; passing auth.uid() here fails the
+  // constraint silently, since the note write is best-effort.
   const [operatorId, setOperatorId] = useState<string | null>(null);
-  const [authorId, setAuthorId] = useState<string | null>(null);
 
   // Best-effort: an unresolvable member just means an unstamped ledger row, never a blocked
   // take. Same shape as the bin page.
@@ -65,7 +67,6 @@ export default function OperatorJobMaterials({
       .then((m) => {
         if (cancelled || !m) return;
         setOperatorId(m.id);
-        setAuthorId(m.user_id);
       })
       .catch(() => {});
     return () => {
@@ -87,10 +88,14 @@ export default function OperatorJobMaterials({
   );
 
   const requirements = data?.requirements ?? [];
-  const unitOptions = useMemo(
-    () => (picked ? getStandardUnitsForUnit(picked.stockUnit ?? picked.bomUnit) : []),
-    [picked],
-  );
+  // getStandardUnitsForUnit returns the OTHER units in the category, not the primary — so it
+  // has to be prepended or the picker renders empty for a part in a single-unit category
+  // (every 'each' part, i.e. most of them). Same construction as the bin page.
+  const unitOptions = useMemo(() => {
+    if (!picked) return [];
+    const primary = picked.stockUnit ?? picked.bomUnit;
+    return Array.from(new Set([primary, ...getStandardUnitsForUnit(primary)])).filter(Boolean);
+  }, [picked]);
 
   if (loading && !data) {
     return (
@@ -127,7 +132,6 @@ export default function OperatorJobMaterials({
           unassigned={data?.unassigned ?? null}
           unitOptions={unitOptions}
           operatorId={operatorId}
-          authorId={authorId}
           onClose={() => setPicked(null)}
           onDone={reload}
         />

@@ -35,10 +35,11 @@ interface OperatorIssueMaterialModalProps {
   /** The system bucket to fall back to when a tracked part has no stock anywhere. */
   unassigned: { id: string; name: string } | null;
   unitOptions: string[];
-  /** user_company_access.id of the signed-in operator; stamps the ledger. */
+  /**
+   * user_company_access.id of the signed-in operator. Stamps the ledger AND authors the feed
+   * note — `notes.author_id` is an FK to user_company_access, not to the auth user.
+   */
   operatorId: string | null;
-  /** auth user id, for the feed note author. */
-  authorId: string | null;
   onClose: () => void;
   onDone: () => void | Promise<void>;
 }
@@ -71,7 +72,6 @@ export default function OperatorIssueMaterialModal({
   unassigned,
   unitOptions,
   operatorId,
-  authorId,
   onClose,
   onDone,
 }: OperatorIssueMaterialModalProps) {
@@ -143,17 +143,20 @@ export default function OperatorIssueMaterialModal({
 
       // Best-effort trace in the feed operators actually read. The stock write has already
       // landed and cannot be undone, so a failed note must never surface as a failed take.
-      if (authorId) {
+      if (operatorId) {
         try {
           await addJobNote(
             jobId,
             companyId,
-            authorId,
+            operatorId,
             `Took ${qty} ${unit} of ${requirement.partName}${fromLabel ? ` from ${fromLabel}` : ''}`,
             { jobPartId, noteType: 'event' },
           );
-        } catch {
-          /* the ledger row is the record; the feed line is a convenience */
+        } catch (noteErr) {
+          // Logged, never surfaced: the stock write has landed and cannot be undone, so a
+          // failed note must not read as a failed take. Logging matters — a silent swallow
+          // hid an author_id FK mismatch here once.
+          console.error('Issue recorded, but the job feed note failed:', noteErr);
         }
       }
 

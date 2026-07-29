@@ -69,7 +69,6 @@ const renderModal = (req: MaterialRequirement, over: Record<string, unknown> = {
       unassigned={{ id: 'loc-un', name: 'Unassigned' }}
       unitOptions={['each']}
       operatorId="op1"
-      authorId="user1"
       onClose={onClose}
       onDone={onDone}
       {...over}
@@ -242,8 +241,11 @@ describe('after the take', () => {
     await take(user);
 
     await waitFor(() =>
+      // Authored with the user_company_access id, NOT auth.uid() — notes.author_id is an FK
+      // to user_company_access, and getting it wrong fails silently behind the best-effort
+      // catch. That happened once; this pins it.
       expect(addJobNote).toHaveBeenCalledWith(
-        'job1', 'co1', 'user1',
+        'job1', 'co1', 'op1',
         'Took 8 each of BUY-ORING-214 from Cabinet 3 › loc-a',
         expect.objectContaining({ jobPartId: 'jp1', noteType: 'event' }),
       ),

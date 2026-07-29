@@ -6,15 +6,14 @@ import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import ButtonBase from '@mui/material/ButtonBase';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
+import CardActionArea from '@mui/material/CardActionArea';
 import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
-import IconButton from '@mui/material/IconButton';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -69,16 +68,6 @@ import PartReferenceRow from '@/components/operator/PartReferenceRow';
  */
 const OP_DETAILS_KEY = 'jigged:op-details-expanded';
 
-/**
- * Height of the operator shell's fixed bottom navigation.
- *
- * The sticky action bar has to clear it. The shell reserves the space with a
- * margin on <main>, but that does NOT help a sticky child here: <main> is taller
- * than the viewport and does not scroll internally, so the WINDOW is the scroll
- * container and `bottom: 0` pins to the viewport edge — directly underneath the
- * nav. Measured: main 48→720 on a 577px viewport, bar bottom 557, nav top 521.
- */
-const BOTTOM_NAV_H = 56;
 
 export default function OperatorOperationActionPage() {
   const params = useParams();
@@ -383,7 +372,7 @@ export default function OperatorOperationActionPage() {
     // Bottom padding so the last of the feed can scroll clear of the sticky
     // action bar instead of ending underneath it — the documented failure mode
     // of sticky bars is obscuring the content or the error you need to read.
-    <Box sx={{ pb: `${BOTTOM_NAV_H + 88}px` }}>
+    <Box>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -394,6 +383,16 @@ export default function OperatorOperationActionPage() {
         elevation={2}
         sx={{ mb: 3, bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' }}
       >
+        {/* THE WHOLE CARD TOGGLES. One target rather than a chevron button:
+            a separate control for the same action is a second thing to aim at,
+            and nesting it inside this action area would be invalid markup. The
+            expanded section sits OUTSIDE this button for the same reason — it
+            contains a real link. */}
+        <CardActionArea
+          onClick={() => setDetailsOpen((v) => !v)}
+          aria-expanded={detailsOpen}
+          aria-label={detailsOpen ? 'Hide job details' : 'Show job details'}
+        >
         <CardContent sx={{ py: 1.5 }}>
           {/* ONE LINE BY DEFAULT: job number and part — what an operator needs to
               confirm they have the right thing in hand. Everything else is
@@ -403,29 +402,9 @@ export default function OperatorOperationActionPage() {
               The rest expands IN PLACE rather than on another page, so nobody
               loses their position mid-task. */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {/* The job number doubles as the link to this part's traveler — the
-                full step list. It's the way there for an operator who scanned
-                straight into one operation (no in-app history to pop back to);
-                the list icon signals it's tappable. */}
-            <ButtonBase
-              onClick={() => nav.push(travelerHref)}
-              aria-label={`View all steps for job ${job.job_number}`}
-              sx={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 0.75,
-                minHeight: 44,
-                borderRadius: 1,
-                mx: -0.75,
-                px: 0.75,
-                flexShrink: 0,
-              }}
-            >
-              <Typography variant="h6" component="span" fontWeight={700}>
-                {job.job_number}
-              </Typography>
-              <FormatListBulletedIcon fontSize="small" sx={{ color: 'primary.light' }} />
-            </ButtonBase>
+            <Typography variant="h6" component="span" fontWeight={700} sx={{ flexShrink: 0 }}>
+              {job.job_number}
+            </Typography>
             <Typography variant="h6" color="text.secondary" sx={{ flexShrink: 0 }}>
               ·
             </Typography>
@@ -433,22 +412,31 @@ export default function OperatorOperationActionPage() {
               {job.part_name || 'Part'}
             </Typography>
             <Box sx={{ flex: 1 }} />
-            <IconButton
-              onClick={() => setDetailsOpen((v) => !v)}
-              aria-label={detailsOpen ? 'Hide job details' : 'Show job details'}
-              aria-expanded={detailsOpen}
-              sx={{ width: 44, height: 44, flexShrink: 0 }}
-            >
-              <ExpandMoreIcon
-                sx={{
-                  transition: 'transform 150ms',
-                  transform: detailsOpen ? 'rotate(180deg)' : 'none',
-                }}
-              />
-            </IconButton>
+            {/* Decorative, NOT a button. The whole card is the tap target, so a
+                separate chevron control would be a second target for the same
+                action — and a nested one, which is invalid markup. It stays as the
+                affordance: without any indicator nobody discovers the card
+                expands at all. */}
+            <ExpandMoreIcon
+              sx={{
+                flexShrink: 0,
+                color: 'text.secondary',
+                transition: 'transform 150ms',
+                transform: detailsOpen ? 'rotate(180deg)' : 'none',
+              }}
+            />
           </Box>
 
-          {/* INSTRUCTIONS ARE NOT BEHIND THE CHEVRON. "Torque to 40, not 45" is
+          {/* Shop part descriptions frequently ARE the working instruction
+              ("Linear Actuator A-200, 6061, deburr all edges"), so this is
+              always visible rather than behind the expander. */}
+          {job.part_description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {job.part_description}
+            </Typography>
+          )}
+
+          {/* INSTRUCTIONS ARE NOT BEHIND THE EXPANDER. "Torque to 40, not 45" is
               the most action-relevant thing on the screen, so hiding it would
               invert the whole principle. It renders only when a shop has
               actually written something. */}
@@ -471,16 +459,35 @@ export default function OperatorOperationActionPage() {
             </Box>
           )}
 
+
+          {/* ALWAYS VISIBLE, deliberately outside the expander: "where am I on
+              this part" is the question a step screen exists to answer, and it
+              must not depend on whether someone happened to expand the card. */}
+          {job.operations_total > 1 && (
+            <Box sx={{ mt: 1.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Part progress
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {job.operations_completed} of {job.operations_total} operations
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={(job.operations_completed / job.operations_total) * 100}
+                sx={{ height: 6, borderRadius: 1 }}
+              />
+            </Box>
+          )}
+        </CardContent>
+      </CardActionArea>
+
           <Collapse in={detailsOpen} unmountOnExit>
-          <Box sx={{ mt: 1.5 }}>
+          <Box sx={{ px: 2, pb: 2 }}>
           <Typography variant="body2" color="text.secondary">
             {job.customer_name || 'No customer'}
           </Typography>
-          {job.part_description && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-              {job.part_description}
-            </Typography>
-          )}
           <Typography variant="body2" color="text.secondary">
             Order qty {job.part_quantity}
           </Typography>
@@ -504,6 +511,21 @@ export default function OperatorOperationActionPage() {
             </Box>
           )}
 
+          {/* The way to the full step list. It used to be the job number itself,
+              which cannot stay now that the whole card is one tap target — a link
+              nested inside a button is invalid and swallows one of the two taps.
+              An explicit labelled link is also clearer than an icon nobody was
+              told about. */}
+          <Button
+            variant="text"
+            size="small"
+            endIcon={<FormatListBulletedIcon fontSize="small" />}
+            onClick={() => nav.push(travelerHref)}
+            sx={{ mt: 0.5, ml: -1, minHeight: 44 }}
+          >
+            View all steps for {job.job_number}
+          </Button>
+
           {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Estimated:{' '}
@@ -513,26 +535,8 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
-          {job.operations_total > 1 && (
-            <Box sx={{ mt: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Part progress
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {job.operations_completed} of {job.operations_total} operations
-                </Typography>
-              </Box>
-              <LinearProgress
-                variant="determinate"
-                value={(job.operations_completed / job.operations_total) * 100}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
-            </Box>
-          )}
           </Box>
           </Collapse>
-        </CardContent>
       </Card>
 
       <PartReferenceRow
@@ -541,6 +545,43 @@ export default function OperatorOperationActionPage() {
         partName={job.part_name}
         excludeJobId={jobId}
         jobOperationId={jobOperationId}
+        // The quantity shares the reference row rather than taking a line of its
+        // own. Three controls on one line is what buys back the vertical space
+        // that used to require pinning the action to the bottom.
+        trailing={
+          !isCompleted && !isExternal ? (
+        <TextField
+          label="Parts finished"
+          type="number"
+          value={qtyValue}
+          onChange={(e) => {
+            setQtyDirty(true);
+            setQtyInput(e.target.value);
+          }}
+          inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Parts finished' }}
+          fullWidth
+          size="medium"
+          error={consequence.kind === 'over'}
+          helperText={
+            consequence.kind === 'none'
+              ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
+              : completionConsequenceCaption(consequence)
+          }
+          FormHelperTextProps={{
+            sx: {
+              color:
+                consequence.kind === 'over'
+                  ? 'error.main'
+                  : consequence.kind === 'partial'
+                    ? 'warning.main'
+                    : consequence.kind === 'full'
+                      ? 'success.main'
+                      : 'text.secondary',
+            },
+          }}
+        />
+          ) : undefined
+        }
       />
 
       {isCompleted ? (
@@ -650,36 +691,6 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
-          <TextField
-            label="Good pieces finished"
-            type="number"
-            value={qtyValue}
-            onChange={(e) => {
-              setQtyDirty(true);
-              setQtyInput(e.target.value);
-            }}
-            inputProps={{ min: 0, inputMode: 'numeric', 'aria-label': 'Good pieces finished' }}
-            fullWidth
-            size="medium"
-            error={consequence.kind === 'over'}
-            helperText={
-              consequence.kind === 'none'
-                ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
-                : completionConsequenceCaption(consequence)
-            }
-            FormHelperTextProps={{
-              sx: {
-                color:
-                  consequence.kind === 'over'
-                    ? 'error.main'
-                    : consequence.kind === 'partial'
-                      ? 'warning.main'
-                      : consequence.kind === 'full'
-                        ? 'success.main'
-                        : 'text.secondary',
-              },
-            }}
-          />
 
           {/* CAPTURE, MERGED INTO COMPLETION.
               Finishing a step and writing down what you learned are one act, one
@@ -691,7 +702,7 @@ export default function OperatorOperationActionPage() {
               Optional, always: completion works with the field left empty. */}
           <NoteCaptureFields
             capture={capture}
-            placeholder="Anything worth noting for next time? (optional)"
+            placeholder="Anything worth noting for next time?"
             disabled={actionLoading}
             compact
           />
@@ -704,27 +715,15 @@ export default function OperatorOperationActionPage() {
               research says a primary action belongs. It sits inside the scrolling
               region, so it lands directly above the bottom nav rather than over
               it, and the errors above it stay visible. */}
-          <Box
-            sx={{
-              // FIXED, not sticky. `position: sticky` is inert here: the operator
-              // shell gives <main> `overflow: auto`, which makes main the nearest
-              // scrollport, and main never scrolls internally (it is simply taller
-              // than the viewport and the WINDOW does the scrolling). A sticky
-              // child of a non-scrolling scrollport never sticks — measured at
-              // bottom 557 with the nav top at 521, i.e. underneath the nav.
-              // Fixed escapes the overflow ancestor and pins to the viewport.
-              position: 'fixed',
-              left: 0,
-              right: 0,
-              bottom: BOTTOM_NAV_H,
-              px: 2,
-              pt: 1,
-              pb: 1.5,
-              bgcolor: 'background.default',
-              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-              zIndex: 2,
-            }}
-          >
+          {/* IN NORMAL FLOW, not pinned. A fixed bar guaranteed the action was
+              always reachable but overlaid the content beneath it, so it was
+              reverted by decision. The protection now comes from density instead:
+              the quantity field shares a row with Files/Playbook and the job card
+              collapses to a few lines, which keeps this above the fold on a tall
+              phone. That is a weaker guarantee than pinning — if this screen grows
+              again the action can drift off-screen, which is exactly how it broke
+              the first time. Measure before adding anything above it. */}
+          <Box>
             {/* One button, and it says what it will do. The quantity field
                 defaults to the full remaining balance, so this records a full
                 completion by default and a partial when the number is dialled

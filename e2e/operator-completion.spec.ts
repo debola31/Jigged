@@ -66,7 +66,7 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<v
   await expect(page).toHaveURL(/\/parts\/[0-9a-f-]{36}/, { timeout: 30_000 });
 }
 
-const qtyField = (page: Page) => page.getByLabel('Good pieces finished');
+const qtyField = (page: Page) => page.getByLabel('Parts finished');
 const recordButton = (page: Page) => page.getByRole('button', { name: /record completion/i });
 const undoButton = (page: Page) => page.getByRole('button', { name: /undo all/i });
 const saveNoteButton = (page: Page) => page.getByRole('button', { name: /save note/i });

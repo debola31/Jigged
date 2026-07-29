@@ -1,5 +1,7 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
 import { useState } from 'react';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -19,6 +21,13 @@ interface PartReferenceRowProps {
   excludeJobId: string;
   /** Present on the operation page → enables the notes "This step" filter. */
   jobOperationId?: string;
+  /**
+   * Rendered on the SAME row, after the reference buttons, taking the remaining
+   * width. The operation page puts the quantity field here: three controls on one
+   * line instead of three lines, which is what keeps RECORD COMPLETION above the
+   * fold on a tall phone now that it is no longer pinned.
+   */
+  trailing?: ReactNode;
 }
 
 /**
@@ -38,6 +47,7 @@ export default function PartReferenceRow({
   partName,
   excludeJobId,
   jobOperationId,
+  trailing,
 }: PartReferenceRowProps) {
   const [filesOpen, setFilesOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -62,7 +72,15 @@ export default function PartReferenceRow({
   const hasNotes = (noteCount ?? 0) > 0;
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 3 }}>
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 1,
+        flexWrap: 'nowrap',
+        mb: trailing ? 1 : 3,
+      }}
+    >
       {/* Both outlined so they read as one family (per the design system —
           grouped actions share a variant). Files leads via bolder weight + a
           count, not by being the only one with a border. */}
@@ -70,7 +88,7 @@ export default function PartReferenceRow({
         variant="outlined"
         startIcon={<FolderOpenIcon />}
         onClick={() => setFilesOpen(true)}
-        sx={{ minHeight: 48, fontWeight: 700 }}
+        sx={{ minHeight: 48, fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}
       >
         {hasFiles ? `Files · ${fileCount}` : 'Files'}
       </Button>
@@ -78,10 +96,19 @@ export default function PartReferenceRow({
         variant="outlined"
         startIcon={<HistoryIcon />}
         onClick={() => setNotesOpen(true)}
-        sx={{ minHeight: 48, fontWeight: hasNotes ? 700 : 400 }}
+        sx={{
+          minHeight: 48,
+          fontWeight: hasNotes ? 700 : 400,
+          flexShrink: 0,
+          whiteSpace: 'nowrap',
+        }}
       >
         {hasNotes ? `Playbook · ${noteCount}` : 'Playbook'}
       </Button>
+
+      {/* Takes whatever width is left, so the field shrinks rather than wrapping
+          the buttons onto a second line. */}
+      {trailing && <Box sx={{ flex: 1, minWidth: 0 }}>{trailing}</Box>}
 
       {filesOpen && (
         <PartFilesSheet

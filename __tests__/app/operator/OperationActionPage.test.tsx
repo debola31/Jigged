@@ -92,7 +92,11 @@ vi.mock('@/components/operator/JobFeed', () => ({
     />
   ),
 }));
-vi.mock('@/components/operator/PartReferenceRow', () => ({ default: () => <div /> }));
+// Must render `trailing`: the quantity field now shares this row, so a mock that
+// drops the slot silently removes the control every completion test drives.
+vi.mock('@/components/operator/PartReferenceRow', () => ({
+  default: ({ trailing }: { trailing?: React.ReactNode }) => <div>{trailing}</div>,
+}));
 
 // A station is selected and MATCHES the step, so the guard is out of the way
 // unless a test overrides it.
@@ -178,13 +182,13 @@ describe('operation action page — completion (characterisation)', () => {
     mockSummaries.mockResolvedValue(summary(4) as never);
     renderPage();
 
-    const field = await screen.findByLabelText('Good pieces finished');
+    const field = await screen.findByLabelText('Parts finished');
     await waitFor(() => expect(field).toHaveValue(6));
   });
 
   it('records the quantity in the field', async () => {
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await userEvent.click(recordButton());
 
@@ -203,7 +207,7 @@ describe('operation action page — completion (characterisation)', () => {
     // gesture with a smaller number, not a separate mode.
     const user = userEvent.setup();
     renderPage();
-    const field = await screen.findByLabelText('Good pieces finished');
+    const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
     await user.type(field, '3');
@@ -220,7 +224,7 @@ describe('operation action page — completion (characterisation)', () => {
     // nothing typed there is no action to offer, so it is disabled either way.
     const user = userEvent.setup();
     renderPage();
-    const field = await screen.findByLabelText('Good pieces finished');
+    const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
 
@@ -237,7 +241,7 @@ describe('operation action page — completion (characterisation)', () => {
     // is much worse than an extra code path.
     const user = userEvent.setup();
     renderPage();
-    const field = await screen.findByLabelText('Good pieces finished');
+    const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
     await user.type(screen.getByPlaceholderText(/worth noting/i), 'machine down, nothing run');
@@ -264,7 +268,7 @@ describe('operation action page — completion (characterisation)', () => {
     // came to press — but it should not cost a page navigation either.
     const user = userEvent.setup();
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     expect(screen.queryByText('Cascade Robotics')).not.toBeInTheDocument();
 
@@ -272,7 +276,7 @@ describe('operation action page — completion (characterisation)', () => {
 
     expect(await screen.findByText('Cascade Robotics')).toBeInTheDocument();
     // Still on the same screen — expanded, not navigated.
-    expect(screen.getByLabelText('Good pieces finished')).toBeInTheDocument();
+    expect(screen.getByLabelText('Parts finished')).toBeInTheDocument();
   });
 
   it('allows over-completion — warned, never blocked', async () => {
@@ -280,7 +284,7 @@ describe('operation action page — completion (characterisation)', () => {
     // unable to record what physically happened.
     const user = userEvent.setup();
     renderPage();
-    const field = await screen.findByLabelText('Good pieces finished');
+    const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
     await user.type(field, '12');
@@ -298,7 +302,7 @@ describe('operation action page — completion (characterisation)', () => {
     let release: () => void = () => {};
     mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await userEvent.click(recordButton());
     expect(mockEvent).not.toHaveBeenCalledWith('co1', 'completion_recorded', expect.anything());
@@ -316,7 +320,7 @@ describe('operation action page — completion (characterisation)', () => {
   it('does not log a completion when the write fails', async () => {
     mockCreate.mockRejectedValue(new Error('offline') as never);
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await userEvent.click(recordButton());
 
@@ -334,7 +338,7 @@ describe('operation action page — completion (characterisation)', () => {
     let release: () => void = () => {};
     mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await user.type(screen.getByPlaceholderText(/worth noting/i), 'fixture walks');
     await user.click(recordButton());
@@ -349,7 +353,7 @@ describe('operation action page — completion (characterisation)', () => {
     // Capture is optional, always. Requiring it would make finishing a step
     // conditional on having something to say.
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await userEvent.click(recordButton());
 
@@ -363,7 +367,7 @@ describe('operation action page — completion (characterisation)', () => {
     // read as finished, and a back tap discarded it silently.
     const user = userEvent.setup();
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await user.type(screen.getByPlaceholderText(/worth noting/i), 'back the feed off');
     await user.click(recordButton());
@@ -385,7 +389,7 @@ describe('operation action page — completion (characterisation)', () => {
     const user = userEvent.setup();
     mockAddNote.mockRejectedValue(new Error('note write failed'));
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     await user.type(screen.getByPlaceholderText(/worth noting/i), 'something');
     await user.click(recordButton());
@@ -403,7 +407,7 @@ describe('operation action page — completion (characterisation)', () => {
   it('owns capture itself, so the feed does not offer a second composer', async () => {
     // Two composers on one screen would be a bug; this asserts which one is live.
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
 
     expect(screen.getByTestId('job-feed')).toHaveAttribute('data-standalone-capture', 'false');
   });
@@ -436,7 +440,7 @@ describe('operation action page — completion (characterisation)', () => {
 
   it('offers Undo only once something has been recorded', async () => {
     renderPage();
-    await screen.findByLabelText('Good pieces finished');
+    await screen.findByLabelText('Parts finished');
     expect(screen.queryByRole('button', { name: /undo all/i })).not.toBeInTheDocument();
 
     mockSummaries.mockResolvedValue(summary(4) as never);

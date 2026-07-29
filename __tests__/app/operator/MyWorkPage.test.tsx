@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@/__tests__/test-utils';
+import { render, screen, waitFor, within, routerMocks } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 import MyWorkPage from '@/app/operator/[companyId]/my-work/page';
@@ -21,6 +21,8 @@ function note(over: Partial<MyNote> = {}): MyNote {
     created_at: '2026-07-20T14:00:00Z',
     operation_label: 'Op 20 · Mill',
     part_name: 'BRKT-1042',
+    job_id: 'job-1',
+    job_number: 'J-0042',
     photo_count: 0,
     viewer_count: 0,
     usage_count: 0,
@@ -40,6 +42,7 @@ function contribution(over: Partial<MyContribution> = {}): MyContribution {
 }
 
 beforeEach(() => {
+  routerMocks.push.mockClear();
   mockGetMyContribution.mockReset();
   mockGetNoteViewers.mockReset();
   mockGetNoteViewers.mockResolvedValue([]);
@@ -53,6 +56,47 @@ describe('My Work', () => {
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
     expect(screen.getByText('BRKT-1042')).toBeInTheDocument();
     expect(screen.getByText('Op 20 · Mill')).toBeInTheDocument();
+    expect(screen.getByText('J-0042')).toBeInTheDocument();
+  });
+
+  it('leads back to the job the note was written on', async () => {
+    // A note with no context is an orphan: the author cannot tell what they were
+    // looking at when they wrote it, let alone go and check.
+    const user = userEvent.setup();
+    mockGetMyContribution.mockResolvedValue(contribution());
+    render(<MyWorkPage />);
+
+    await user.click(await screen.findByText('J-0042'));
+
+    expect(routerMocks.push).toHaveBeenCalledWith(
+      '/operator/test-company-id/jobs/job-1',
+    );
+  });
+
+  it('does not open the note when the job chip is tapped', async () => {
+    // The chip sits in the header for exactly this reason — nested inside the
+    // card's action area it would both navigate AND expand, or swallow one.
+    const user = userEvent.setup();
+    mockGetMyContribution.mockResolvedValue(
+      contribution({ notes: [note({ viewer_count: 2 })] }),
+    );
+    render(<MyWorkPage />);
+
+    await user.click(await screen.findByText('J-0042'));
+
+    expect(mockGetNoteViewers).not.toHaveBeenCalled();
+  });
+
+  it('survives a note whose job has been deleted', async () => {
+    // Provenance is ON DELETE SET NULL: the knowledge outlives its origin, so a
+    // missing job must cost the link, never the note.
+    mockGetMyContribution.mockResolvedValue(
+      contribution({ notes: [note({ job_id: null, job_number: null })] }),
+    );
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
+    expect(screen.queryByText('J-0042')).not.toBeInTheDocument();
   });
 
   it('counts VIEWS in the summary, not people', async () => {
@@ -77,9 +121,9 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     await screen.findByText(/Clamp on the boss/);
-    expect(within(screen.getByRole('button')).getByText('4')).toBeInTheDocument();
+    expect(within(screen.getAllByRole('listitem')[0]).getByText('4')).toBeInTheDocument();
     expect(screen.queryByText(/11/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/job/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ jobs?/)).not.toBeInTheDocument();
   });
 
   it('shows an unread note as a zero, not as a sentence about being unread', async () => {
@@ -91,7 +135,7 @@ describe('My Work', () => {
 
     await screen.findByText(/Clamp on the boss/);
     // Scoped to the note card — the summary block carries its own "0 views".
-    expect(within(screen.getByRole('button')).getByText('0')).toBeInTheDocument();
+    expect(within(screen.getAllByRole('listitem')[0]).getByText('0')).toBeInTheDocument();
     expect(screen.queryByText(/not used/i)).not.toBeInTheDocument();
   });
 
@@ -127,9 +171,10 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     await screen.findByText(/Clamp on the boss/);
-    expect(screen.getByRole('button')).toBeDisabled();
+    const card = screen.getByRole('button', { name: /Clamp on the boss/ });
+    expect(card).toBeDisabled();
 
-    await user.click(screen.getByRole('button'));
+    await user.click(card);
     await waitFor(() => expect(mockGetNoteViewers).not.toHaveBeenCalled());
   });
 

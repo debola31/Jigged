@@ -1672,6 +1672,11 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
         'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
         'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
         'part:parts(part_name), ' +
+        // Both job FKs: a job-subject note carries job_id, a durable
+        // part-subject one carries only captured_job_id. Either way the author
+        // gets a way back to where they wrote it.
+        'job:jobs!notes_job_fk(id, job_number), ' +
+        'captured_job:jobs!notes_captured_job_fk(id, job_number), ' +
         'media:note_media(id)',
     )
     .eq('company_id', companyId)
@@ -1691,15 +1696,23 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     operation: StepRel;
     captured_operation: StepRel;
     part: { part_name: string | null } | { part_name: string | null }[] | null;
+    job: JobRel;
+    captured_job: JobRel;
     media: Array<{ id: string }> | null;
   };
 
+  type JobRel = { id: string; job_number: string } | { id: string; job_number: string }[] | null;
+  const oneJob = (rel: JobRel) => (Array.isArray(rel) ? rel[0] : rel) ?? null;
+
   const notes: MyNote[] = (data as unknown as Row[]).map((r) => {
     const part = Array.isArray(r.part) ? r.part[0] : r.part;
+    const job = oneJob(r.job) ?? oneJob(r.captured_job);
     return {
       id: r.id,
       body: r.body,
       created_at: r.created_at,
+      job_id: job?.id ?? null,
+      job_number: job?.job_number ?? null,
       // A durable part-subject note has no step of its own; the step it was
       // captured at is the readable label.
       operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),

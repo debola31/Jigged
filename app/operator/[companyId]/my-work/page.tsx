@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -14,6 +14,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import LaunchIcon from '@mui/icons-material/Launch';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
@@ -59,7 +60,8 @@ function ReachRow({ note }: { note: MyNote }) {
   );
 }
 
-function NoteRow({ note }: { note: MyNote }) {
+function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewers, setViewers] = useState<NoteViewer[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,36 +82,56 @@ function NoteRow({ note }: { note: MyNote }) {
   };
 
   return (
-    <Card elevation={2} sx={{ ...cardSx, mb: 1.5 }}>
-      <CardActionArea onClick={toggle} disabled={note.viewer_count === 0} sx={{ p: 0 }}>
-        <CardContent sx={{ py: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-            {/* Leads the row so every card has a number in the same place — a
-                stable column to scan down, present whether or not the note
-                carries a part or a step. */}
-            <ReachRow note={note} />
-            {note.part_name && (
-              <Typography variant="subtitle2" fontWeight={700} noWrap>
-                {note.part_name}
-              </Typography>
-            )}
-            {note.operation_label && (
-              <Chip size="small" label={note.operation_label} variant="outlined" />
-            )}
-            {note.photo_count > 0 && (
-              <Chip
-                size="small"
-                variant="outlined"
-                icon={<PhotoCameraIcon />}
-                label={note.photo_count}
-              />
-            )}
-            <Box sx={{ flex: 1 }} />
-            <Typography variant="caption" color="text.secondary">
-              {formatDate(note.created_at)}
-            </Typography>
-          </Box>
+    <Card component="li" elevation={2} sx={{ ...cardSx, mb: 1.5 }}>
+      {/* The header sits OUTSIDE the action area on purpose: the job chip is a
+          real navigation control, and a button nested inside a button is invalid
+          markup that swallows one of the two taps. */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          flexWrap: 'wrap',
+          px: 2,
+          pt: 1.5,
+        }}
+      >
+        {/* Leads the row so every card has a number in the same place — a stable
+            column to scan down, present whether or not the note carries a part. */}
+        <ReachRow note={note} />
+        {note.part_name && (
+          <Typography variant="subtitle2" fontWeight={700} noWrap>
+            {note.part_name}
+          </Typography>
+        )}
+        {note.operation_label && (
+          <Chip size="small" label={note.operation_label} variant="outlined" />
+        )}
+        {note.photo_count > 0 && (
+          <Chip size="small" variant="outlined" icon={<PhotoCameraIcon />} label={note.photo_count} />
+        )}
+        {/* What the note is about, and the way back to it. Filled rather than
+            outlined so it reads as the one actionable thing in a row of labels.
+            For a durable part-subject note this is where it was WRITTEN, not what
+            it is about — the part name beside it carries that. */}
+        {note.job_id && note.job_number && (
+          <Chip
+            label={note.job_number}
+            color="primary"
+            size="small"
+            onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
+            icon={<LaunchIcon />}
+            sx={{ height: 32, fontWeight: 700 }}
+          />
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="caption" color="text.secondary">
+          {formatDate(note.created_at)}
+        </Typography>
+      </Box>
 
+      <CardActionArea onClick={toggle} disabled={note.viewer_count === 0} sx={{ p: 0 }}>
+        <CardContent sx={{ pt: 1, pb: 1.5 }}>
           {note.body && (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
               {note.body}
@@ -121,6 +143,12 @@ function NoteRow({ note }: { note: MyNote }) {
       <Collapse in={open} unmountOnExit>
         <Box sx={{ px: 2, pb: 2 }}>
           <Divider sx={{ mb: 1 }} />
+          {/* Explicitly labelled: the job beside a viewer's name is the job THEY
+              consulted it on, which is not the job chip in the header (where the
+              note was written). Same format, different meaning — so say which. */}
+          <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+            Viewed by
+          </Typography>
           {loading ? (
             <CircularProgress size={16} />
           ) : (
@@ -243,9 +271,11 @@ export default function MyWorkPage() {
       <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>
         Your notes
       </Typography>
-      <Box sx={{ mt: 0.5 }}>
+      {/* A real list: it is one semantically, screen readers announce the count,
+          and each card becomes an addressable item rather than an anonymous div. */}
+      <Box component="ul" sx={{ mt: 0.5, listStyle: 'none', p: 0, m: 0 }}>
         {c.notes.map((n) => (
-          <NoteRow key={n.id} note={n} />
+          <NoteRow key={n.id} note={n} companyId={companyId} />
         ))}
       </Box>
     </Box>

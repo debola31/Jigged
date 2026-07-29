@@ -331,6 +331,14 @@ export interface MyNote {
   operation_label: string | null;
   /** Part the note is durably attached to, when it has one. */
   part_name: string | null;
+  /**
+   * The job this note was written on — job_id for a job-subject note,
+   * captured_job_id for a durable part-subject one. Null once that job is
+   * deleted (provenance is ON DELETE SET NULL: the knowledge outlives its
+   * origin, so losing the link must never lose the note).
+   */
+  job_id: string | null;
+  job_number: string | null;
   photo_count: number;
   /** Distinct PEOPLE who read it. Saturates near shop size — that is its meaning. */
   viewer_count: number;

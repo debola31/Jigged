@@ -48,16 +48,22 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 // simply ignored rather than needing a parse fallback.
 const SEEN_KEY = 'jigged:note-views-acknowledged';
 
-/** The running total already shown; 0 on a fresh device or any bad/absent value. */
-function readAcknowledged(): number {
-  if (typeof window === 'undefined') return 0;
+/**
+ * The running total already shown on THIS device, or null if it has never shown
+ * one — a distinction that matters, because null means "adopt the total
+ * silently", not "everything is new". See the first-run note in the component.
+ */
+function readAcknowledged(): number | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const n = Number(window.localStorage.getItem(SEEN_KEY));
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    const raw = window.localStorage.getItem(SEEN_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    // A mangled value is treated as absent rather than as zero: zero would
+    // announce the entire history as new.
+    return Number.isFinite(n) && n >= 0 ? n : null;
   } catch {
-    // Private mode, quota, or a hand-mangled value. Showing the banner is the
-    // safe failure: the loop survives, at worst one extra impression.
-    return 0;
+    return null; // private mode / quota — the banner is best-effort
   }
 }
 
@@ -77,28 +83,48 @@ interface NoteUsageBannerProps {
 }
 
 export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBannerProps) {
-  const [acknowledged, setAcknowledged] = useState(readAcknowledged);
+  const [banked, setBanked] = useState(false);
+
+  const { data } = useLoad(async () => {
+    const { data: total, error } = await getSupabase().rpc('my_note_view_digest');
+    // Silent on failure: a broken digest must not put an error in front of an
+    // operator who was only trying to start work.
+    if (error) return { total: 0, fresh: 0 };
+    const runningTotal = (total as number | null) ?? 0;
+
+    const prior = readAcknowledged();
+    if (prior === null) {
+      // FIRST RUN ON THIS DEVICE. Adopt the total without announcing it. The
+      // acknowledged mark lives in localStorage, so it does not follow the
+      // person — sign in on a shop tablet, a replacement phone, a second
+      // browser, or after clearing site data, and a zero default would render
+      // the ENTIRE history as new: "312 new views on your notes" after a year.
+      // The banner's whole credibility rests on its number being true, and in a
+      // shop this size the author can simply ask someone and find out it wasn't.
+      //
+      // The cost is one missed announcement: views that accrued while this
+      // device was away are never banner-announced. That is information delayed,
+      // not lost — the full picture is on My work, one tap down. Announcing a
+      // falsehood is worse than staying quiet.
+      writeAcknowledged(runningTotal);
+      return { total: runningTotal, fresh: 0 };
+    }
+    // Both counters are monotonic, so this can never go negative.
+    return { total: runningTotal, fresh: runningTotal - prior };
+  }, [companyId]);
+
+  const runningTotal = data?.total ?? 0;
+  const fresh = data?.fresh ?? 0;
 
   // Both the ✕ and a tap-through count as "I have seen this". Tapping through
   // especially: coming back from My work to the same banner you just acted on
   // reads as if nothing happened.
-  const acknowledge = (total: number) => {
-    writeAcknowledged(total);
-    setAcknowledged(total);
+  const acknowledge = () => {
+    writeAcknowledged(runningTotal);
+    setBanked(true);
   };
 
-  const { data: total } = useLoad(async () => {
-    const { data, error } = await getSupabase().rpc('my_note_view_digest');
-    // Silent on failure: a broken digest must not put an error in front of an
-    // operator who was only trying to start work.
-    if (error) return 0;
-    return (data as number | null) ?? 0;
-  }, [companyId]);
-
-  const runningTotal = total ?? 0;
-  // Both counters are monotonic, so this can never go negative.
-  const fresh = runningTotal - acknowledged;
-  if (fresh <= 0) return null;
+  if (banked || fresh <= 0) return null;
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -116,12 +142,12 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
           // click bubbles to onOpenDetail and dismissing navigates the operator
           // away from the screen they were trying to clear.
           e.stopPropagation();
-          acknowledge(runningTotal);
+          acknowledge();
         }}
         {...(onOpenDetail
           ? {
               onClick: () => {
-                acknowledge(runningTotal);
+                acknowledge();
                 onOpenDetail();
               },
               sx: { cursor: 'pointer', minHeight: 48 },

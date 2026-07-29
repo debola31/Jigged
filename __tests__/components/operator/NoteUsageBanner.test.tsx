@@ -44,6 +44,7 @@ describe('NoteUsageBanner', () => {
   it('renders nothing when nothing has happened', async () => {
     // A standing "0 views" is a permanent reminder that nobody cares. Silence
     // is better.
+    localStorage.setItem(SEEN_KEY, '0');
     rpc.mockResolvedValue({ data: 0, error: null });
     const { container } = render(<NoteUsageBanner companyId="c1" />);
 
@@ -62,6 +63,7 @@ describe('NoteUsageBanner', () => {
   });
 
   it('reads naturally at one', async () => {
+    localStorage.setItem(SEEN_KEY, '0');
     rpc.mockResolvedValue({ data: 1, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
@@ -72,6 +74,7 @@ describe('NoteUsageBanner', () => {
     // The permanent rule: a caller-supplied time window would be a bisection
     // oracle for WHEN a note was read. The delta is computed here instead,
     // from a number the server already gave us.
+    localStorage.setItem(SEEN_KEY, '0');
     rpc.mockResolvedValue({ data: 2, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
@@ -128,6 +131,7 @@ describe('NoteUsageBanner', () => {
     // nothing happened.
     const user = userEvent.setup();
     const onOpenDetail = vi.fn();
+    localStorage.setItem(SEEN_KEY, '0');
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
 
@@ -142,6 +146,7 @@ describe('NoteUsageBanner', () => {
     // navigate the operator away from the screen they were dismissing.
     const user = userEvent.setup();
     const onOpenDetail = vi.fn();
+    localStorage.setItem(SEEN_KEY, '0');
     rpc.mockResolvedValue({ data: 3, error: null });
     render(<NoteUsageBanner companyId="c1" onOpenDetail={onOpenDetail} />);
     await screen.findByText('3 new views on your notes.');
@@ -151,13 +156,38 @@ describe('NoteUsageBanner', () => {
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
-  it('shows rather than hides when storage is unreadable', async () => {
-    // Failing open is the safe direction: at worst one extra impression, versus
-    // silently ending the feedback loop.
-    localStorage.setItem(SEEN_KEY, 'not a number');
-    rpc.mockResolvedValue({ data: 2, error: null });
+  it('announces nothing on a device that has never shown the banner', async () => {
+    // THE MULTI-DEVICE TRAP. The acknowledged mark lives in localStorage, so it
+    // does not follow the person: a shop tablet, a replacement phone, a second
+    // browser or cleared site data all start empty. Defaulting to zero would
+    // render the entire history as new — "312 new views" after a year — and the
+    // banner's only asset is that its number is true.
+    rpc.mockResolvedValue({ data: 312, error: null });
+    const { container } = render(<NoteUsageBanner companyId="c1" />);
+
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    // The total is adopted silently, so the NEXT view is correctly announced.
+    expect(localStorage.getItem(SEEN_KEY)).toBe('312');
+  });
+
+  it('announces normally once that device has a mark', async () => {
+    localStorage.setItem(SEEN_KEY, '312');
+    rpc.mockResolvedValue({ data: 313, error: null });
     render(<NoteUsageBanner companyId="c1" />);
 
-    expect(await screen.findByText('2 new views on your notes.')).toBeInTheDocument();
+    expect(await screen.findByText('1 new view on your notes.')).toBeInTheDocument();
+  });
+
+  it('treats a mangled stored value as absent, not as zero', async () => {
+    // Zero would announce the whole history; absent adopts it quietly. Staying
+    // silent beats announcing a falsehood.
+    localStorage.setItem(SEEN_KEY, 'not a number');
+    rpc.mockResolvedValue({ data: 40, error: null });
+    const { container } = render(<NoteUsageBanner companyId="c1" />);
+
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    expect(localStorage.getItem(SEEN_KEY)).toBe('40');
   });
 });

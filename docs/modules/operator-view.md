@@ -178,8 +178,18 @@ see this", not "nobody can".
   total it last acknowledged in `localStorage` and renders the **difference**, so
   it appears only when something has genuinely happened and goes quiet once seen —
   no nag on the many jobs-list visits in a shift. Both the ✕ and a tap-through
-  bank the total. Renders `null` at zero. Unreadable storage fails **open**: one
-  extra impression beats silently ending the loop.
+  bank the total. Renders `null` at zero.
+
+  **First run on a device announces nothing.** The mark lives in `localStorage`,
+  so it follows the *device*, not the person — a shop tablet, a replacement
+  phone, a second browser or cleared site data all start empty. Defaulting to
+  zero would render the whole history as new ("312 new views" after a year), and
+  the banner's only asset is that its number is true. Instead the current total
+  is adopted silently, so the *next* view is announced correctly. The cost is one
+  missed announcement: views that accrued while that device was away are never
+  banner-announced. Information delayed, not lost — the full picture is on My
+  work, one tap down. A mangled stored value is treated as **absent** for the
+  same reason (zero would announce everything).
 
   Two earlier designs are recorded here because both are tempting and both are
   wrong. A **weekly window** (the first version) let the count climb all week

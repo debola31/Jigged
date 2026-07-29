@@ -109,7 +109,7 @@ scrap/defect discovery framing, and the stale-doc fix list.
 
 ### Action & capture
 - Operation action page: **Mark Complete** + **Undo**, append-only **notes + photo/video**
-  feed (`job_notes` / `job_note_media`), and "last time we ran this part" guidance.
+  feed (`notes` / `note_media`), and "last time we ran this part" guidance.
   — `app/operator/[companyId]/jobs/[jobId]/parts/[jobPartId]/operations/[jobOperationId]/page.tsx`,
   `components/operator/JobFeed.tsx`, `components/operator/PreviousRunCard.tsx`.
 - **Per-operation QR** on the printed traveler (`utils/jobTravelerPdf.ts`) deep-links to a

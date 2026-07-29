@@ -1,44 +1,48 @@
 'use client';
 
+/**
+ * The list view — demoted, and finally honest.
+ *
+ * The board is the home now. This survives because a list is genuinely better for finding one
+ * name in 121, but it is no longer where you *act*: every action moved to `LocationDetailSheet`,
+ * so `LocationTreeCallbacks` collapsed from six functions to one (`onOpen`) and the per-row
+ * overflow menu is gone.
+ *
+ * The two things it always lacked are the two things a text tree has to carry to be worth
+ * anything: **a child count** (a collapsed cabinet used to look identical to a leaf) and **fill
+ * state**. Both now render on every row.
+ */
 import { useState } from 'react';
 import Box from '@mui/material/Box';
+import ButtonBase from '@mui/material/ButtonBase';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
-import ListItemIcon from '@mui/material/ListItemIcon';
-import ListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import AddIcon from '@mui/icons-material/Add';
-import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
+import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
 
 export interface LocationTreeCallbacks {
-  onAddChild: (node: InventoryLocationNode) => void;
-  onBulkGenerate: (node: InventoryLocationNode) => void;
-  onPrintQR: (node: InventoryLocationNode) => void;
-  onDuplicate: (node: InventoryLocationNode) => void;
-  onEdit: (node: InventoryLocationNode) => void;
-  onDelete: (node: InventoryLocationNode) => void;
+  /** Rows are navigators — opening one is the only thing a row does. */
+  onOpen: (node: InventoryLocationNode) => void;
 }
 
-function LocationRow({ node, cb }: { node: InventoryLocationNode; cb: LocationTreeCallbacks }) {
-  const [expanded, setExpanded] = useState(true);
-  const [menuEl, setMenuEl] = useState<null | HTMLElement>(null);
-  const hasChildren = node.children.length > 0;
+const num = (n: number) => n.toLocaleString();
 
-  const act = (fn: (n: InventoryLocationNode) => void) => () => {
-    setMenuEl(null);
-    fn(node);
-  };
+function LocationRow({
+  node,
+  cb,
+  occupancy,
+}: {
+  node: InventoryLocationNode;
+  cb: LocationTreeCallbacks;
+  occupancy: OccupancyMap;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+  const o = occupancyFor(occupancy, node.id);
 
   return (
     <Box>
@@ -54,6 +58,8 @@ function LocationRow({ node, cb }: { node: InventoryLocationNode; cb: LocationTr
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
+        {/* Expand stays a separate control from open — collapsing a big cabinet to scan past it
+            is a different intent from inspecting it, and conflating them makes one impossible. */}
         <IconButton
           size="small"
           onClick={() => setExpanded((e) => !e)}
@@ -63,59 +69,46 @@ function LocationRow({ node, cb }: { node: InventoryLocationNode; cb: LocationTr
           {expanded ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
         </IconButton>
 
-        <Typography sx={{ fontWeight: hasChildren ? 600 : 400 }}>{node.name}</Typography>
-
-        {node.code && <Chip size="small" label={node.code} variant="outlined" />}
-        {node.kind && (
-          <Typography variant="caption" color="text.secondary">
-            {node.kind}
+        <ButtonBase
+          onClick={() => cb.onOpen(node)}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 48,
+            justifyContent: 'flex-start',
+            gap: 1,
+            px: 1,
+            borderRadius: 1,
+            textAlign: 'left',
+          }}
+        >
+          <Typography sx={{ fontWeight: hasChildren ? 600 : 400 }} noWrap>
+            {node.name}
           </Typography>
-        )}
 
-        <Box sx={{ flex: 1 }} />
+          {node.code && <Chip size="small" label={node.code} variant="outlined" />}
 
-        {/* The auto-managed system 'Unassigned' bucket has no manual actions —
-            renaming it would split the backfill bucket (the RPC resolves it by
-            name), and it can't be added under, duplicated, printed, or deleted. */}
-        {node.kind !== 'system' && (
-          <>
-            <IconButton size="small" aria-label="Actions" onClick={(e) => setMenuEl(e.currentTarget)}>
-              <MoreVertIcon />
-            </IconButton>
-            <Menu anchorEl={menuEl} open={Boolean(menuEl)} onClose={() => setMenuEl(null)}>
-              <MenuItem onClick={act(cb.onAddChild)}>
-                <ListItemIcon><AddIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Add sub-location</ListItemText>
-              </MenuItem>
-              <MenuItem onClick={act(cb.onBulkGenerate)}>
-                <ListItemIcon><AutoAwesomeMotionIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Bulk-generate…</ListItemText>
-              </MenuItem>
-              <MenuItem onClick={act(cb.onPrintQR)}>
-                <ListItemIcon><QrCode2Icon fontSize="small" /></ListItemIcon>
-                <ListItemText>Print QR…</ListItemText>
-              </MenuItem>
-              <MenuItem onClick={act(cb.onDuplicate)}>
-                <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Duplicate</ListItemText>
-              </MenuItem>
-              <MenuItem onClick={act(cb.onEdit)}>
-                <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
-                <ListItemText>Edit</ListItemText>
-              </MenuItem>
-              <MenuItem onClick={act(cb.onDelete)}>
-                <ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>
-                <ListItemText sx={{ color: 'error.main' }}>Delete</ListItemText>
-              </MenuItem>
-            </Menu>
-          </>
-        )}
+          {/* A collapsed parent used to be indistinguishable from a leaf. */}
+          {hasChildren && (
+            <Typography variant="caption" color="text.secondary">
+              {node.children.length} inside
+            </Typography>
+          )}
+
+          <Box sx={{ flex: 1 }} />
+
+          <Chip
+            size="small"
+            variant={o.hasStock ? 'filled' : 'outlined'}
+            label={o.hasStock ? `${num(o.totalParts)} part${o.totalParts === 1 ? '' : 's'}` : 'empty'}
+          />
+        </ButtonBase>
       </Box>
 
       {hasChildren && expanded && (
         <Box>
           {node.children.map((child) => (
-            <LocationRow key={child.id} node={child} cb={cb} />
+            <LocationRow key={child.id} node={child} cb={cb} occupancy={occupancy} />
           ))}
         </Box>
       )}
@@ -126,14 +119,16 @@ function LocationRow({ node, cb }: { node: InventoryLocationNode; cb: LocationTr
 export default function LocationTreeView({
   nodes,
   callbacks,
+  occupancy,
 }: {
   nodes: InventoryLocationNode[];
   callbacks: LocationTreeCallbacks;
+  occupancy: OccupancyMap;
 }) {
   return (
     <Box>
       {nodes.map((node) => (
-        <LocationRow key={node.id} node={node} cb={callbacks} />
+        <LocationRow key={node.id} node={node} cb={callbacks} occupancy={occupancy} />
       ))}
     </Box>
   );

@@ -16,7 +16,7 @@ export default function InventoryLocationsPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const { setTitle } = usePageTitle();
-  const { features, loading } = useCompanyFeatures();
+  const { features, companyName, loading } = useCompanyFeatures();
   const enabled = features.inventory_locations;
 
   useEffect(() => {
@@ -48,7 +48,9 @@ export default function InventoryLocationsPage() {
       >
         Back to Inventory
       </Button>
-      <LocationsManager companyId={companyId} />
+      {/* `companyName` was never passed before, so the QR label sheet printed with no heading —
+          the prop existed and read `undefined` on every call. */}
+      <LocationsManager companyId={companyId} companyName={companyName ?? undefined} />
     </Box>
   );
 }

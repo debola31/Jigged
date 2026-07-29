@@ -7,6 +7,9 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
@@ -18,6 +21,8 @@ import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaicOutlined';
+import GridViewIcon from '@mui/icons-material/GridView';
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 
 import type {
   BulkGenerateSpec,
@@ -25,20 +30,23 @@ import type {
   InventoryLocationNode,
 } from '@/types/inventoryLocations';
 import {
-  getLocations,
   buildLocationTree,
+  getLocationBoard,
   createLocation,
   updateLocation,
   bulkGenerateChildren,
   duplicateLocation,
   deleteLocation,
 } from '@/utils/inventoryLocationsAccess';
+import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import BulkGenerateModal from './BulkGenerateModal';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
+import LocationBoard from './board/LocationBoard';
+import LocationDetailSheet from './board/LocationDetailSheet';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -66,8 +74,37 @@ function collectLabels(node: InventoryLocationNode, byId: Map<string, InventoryL
   return out;
 }
 
-// Stable empty fallback so the tree/labels memos don't churn while loading.
+/** Ancestors of a node, root → node inclusive, as tree nodes (the sheet's breadcrumb). */
+function nodePath(
+  id: string,
+  byNodeId: Map<string, InventoryLocationNode>,
+): InventoryLocationNode[] {
+  const out: InventoryLocationNode[] = [];
+  let cursor: string | null = id;
+  const guard = new Set<string>();
+  while (cursor && byNodeId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocationNode = byNodeId.get(cursor)!;
+    out.unshift(node);
+    cursor = node.parent_id;
+  }
+  return out;
+}
+
+/** Flatten a tree into id → node so the sheet can re-resolve its node after a reload. */
+function indexTree(roots: InventoryLocationNode[]): Map<string, InventoryLocationNode> {
+  const out = new Map<string, InventoryLocationNode>();
+  const walk = (n: InventoryLocationNode) => {
+    out.set(n.id, n);
+    n.children.forEach(walk);
+  };
+  roots.forEach(walk);
+  return out;
+}
+
+// Stable empty fallbacks so the tree/labels memos don't churn while loading.
 const EMPTY_LOCATIONS: InventoryLocation[] = [];
+const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 
 interface LocationsManagerProps {
   companyId: string;
@@ -78,6 +115,17 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
+
+  /**
+   * Board is always the default, and the choice is deliberately NOT persisted.
+   *
+   * Remembering "List" would quietly un-demote the view this phase just demoted: someone who
+   * peeked at the list once would never see the board again.
+   */
+  const [view, setView] = useState<'board' | 'list'>('board');
+
+  /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
+  const [sheetId, setSheetId] = useState<string | null>(null);
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -105,35 +153,65 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   });
 
   const {
-    data: locationsData,
+    data: boardData,
     loading,
     reload,
-  } = useLoad(() => getLocations(companyId), [companyId], {
+  } = useLoad(() => getLocationBoard(companyId), [companyId], {
     onError: (e) => {
       setError(e instanceof Error ? e.message : 'Failed to load locations.');
     },
   });
-  const locations = locationsData ?? EMPTY_LOCATIONS;
+  const locations = boardData?.locations ?? EMPTY_LOCATIONS;
+  const directPartCounts = boardData?.directPartCounts ?? EMPTY_COUNTS;
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
   const tree = useMemo(() => buildLocationTree(locations), [locations]);
+  const byNodeId = useMemo(() => indexTree(tree), [tree]);
+  const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
 
-  const callbacks = {
-    onAddChild: (node: InventoryLocationNode) =>
-      setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) }),
-    onEdit: (node: InventoryLocationNode) =>
-      setFormState({ open: true, location: node, parentId: node.parent_id, parentPath: [] }),
-    onBulkGenerate: (node: InventoryLocationNode) =>
-      setBulkState({ open: true, parentId: node.id, parentPath: computePath(node.id, byId) }),
-    onPrintQR: (node: InventoryLocationNode) =>
+  const sheetNode = sheetId ? byNodeId.get(sheetId) ?? null : null;
+  const sheetPath = useMemo(() => (sheetId ? nodePath(sheetId, byNodeId) : []), [sheetId, byNodeId]);
+
+  /**
+   * "Nothing here yet" can't be `tree.length === 0`.
+   *
+   * `trg_auto_track_stocked_part` creates a top-level `('Unassigned', kind='system')` row the
+   * moment any stocked part exists, so `tree.length === 0` was **false for every real tenant** —
+   * the empty state below and both its CTAs were unreachable, and what an owner actually got was
+   * one action-less row reading "Unassigned". `tree.length === 0` is kept for the genuinely
+   * fresh company (flag on, no stocked parts yet).
+   */
+  const noRealStorage = tree.length > 0 && tree.every((n) => n.kind === 'system');
+
+  const openSheet = (node: InventoryLocationNode) => setSheetId(node.id);
+
+  // Every action closes the sheet first: they all open a modal of their own, and two stacked
+  // surfaces on a tablet leaves nothing legible underneath.
+  const sheetActions = {
+    onAddChild: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
+    },
+    onSubdivide: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      setBulkState({ open: true, parentId: node.id, parentPath: computePath(node.id, byId) });
+    },
+    onEdit: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      setFormState({ open: true, location: node, parentId: node.parent_id, parentPath: [] });
+    },
+    onPrintQR: (node: InventoryLocationNode) => {
+      setSheetId(null);
       setQrState({
         open: true,
         node,
         path: computePath(node.id, byId),
         labels: collectLabels(node, byId),
-      }),
+      });
+    },
     onDuplicate: async (node: InventoryLocationNode) => {
+      setSheetId(null);
       try {
         const created = await duplicateLocation(companyId, node.id);
         await reload();
@@ -142,7 +220,10 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         setToast(e instanceof Error ? e.message : 'Failed to duplicate location.');
       }
     },
-    onDelete: (node: InventoryLocationNode) => setDeleteState({ open: true, node }),
+    onDelete: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      setDeleteState({ open: true, node });
+    },
   };
 
   const submitForm = async (values: LocationFormValues) => {
@@ -188,8 +269,27 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
 
   return (
     <Box>
-      {/* Toolbar */}
+      {/* Toolbar — single row */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Segmented, not Tabs: this re-modes the same content rather than switching sections. */}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={view}
+          onChange={(_, v) => v && setView(v)}
+          aria-label="View"
+        >
+          <ToggleButton value="board" aria-label="Board">
+            <Tooltip title="Board">
+              <GridViewIcon fontSize="small" />
+            </Tooltip>
+          </ToggleButton>
+          <ToggleButton value="list" aria-label="List">
+            <Tooltip title="List">
+              <FormatListBulletedIcon fontSize="small" />
+            </Tooltip>
+          </ToggleButton>
+        </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
         <Button
           variant="outlined"
@@ -217,7 +317,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {loading ? (
+      {loading && !boardData ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress />
         </Box>
@@ -247,12 +347,47 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           </CardContent>
         </Card>
       ) : (
-        <Card elevation={2}>
-          <CardContent>
-            <LocationTreeView nodes={tree} callbacks={callbacks} />
-          </CardContent>
-        </Card>
+        <>
+          {/* The REAL first-run state: one system bucket, no furniture. Naming the size of the
+              pile is the diagnosis that motivates building the first cabinet. */}
+          {noRealStorage && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {occupancyFor(occupancy, tree[0].id).totalParts.toLocaleString()} parts, nowhere in
+              particular. Build your cabinets, shelving, and bins below, then print QR labels to
+              scan from the shop floor.
+            </Alert>
+          )}
+
+          {view === 'board' ? (
+            <LocationBoard
+              tree={tree}
+              occupancy={occupancy}
+              onOpen={openSheet}
+              onAddStorage={() => setBuilderOpen(true)}
+            />
+          ) : (
+            <Card elevation={2}>
+              <CardContent>
+                <LocationTreeView
+                  nodes={tree}
+                  occupancy={occupancy}
+                  callbacks={{ onOpen: openSheet }}
+                />
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
+
+      <LocationDetailSheet
+        open={sheetNode !== null}
+        node={sheetNode}
+        path={sheetPath}
+        occupancy={occupancy}
+        actions={sheetActions}
+        onNavigate={openSheet}
+        onClose={() => setSheetId(null)}
+      />
 
       <LocationFormModal
         open={formState.open}

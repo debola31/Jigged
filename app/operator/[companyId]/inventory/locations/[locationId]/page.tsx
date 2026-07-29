@@ -144,6 +144,7 @@ export default function OperatorBinViewPage() {
 
   const children = scan?.children ?? [];
   const contents = scan?.contents ?? [];
+  const contentsTotal = scan?.contentsTotal ?? 0;
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -216,6 +217,14 @@ export default function OperatorBinViewPage() {
           </Card>
         ) : (
           <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {/* The list is capped. Saying so beats the silent `max_rows` clip this read used to
+                take — an operator seeing 200 of 9,428 needs to know the rest exist. */}
+            {contentsTotal > contents.length && (
+              <Alert severity="info">
+                Showing the {contents.length} largest of {num(contentsTotal)} parts here. Scan or
+                search a part to reach one that isn&apos;t listed.
+              </Alert>
+            )}
             {contents.map((part) => (
               <Card key={part.part_id} elevation={2}>
                 <CardContent>

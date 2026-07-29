@@ -13,15 +13,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 const { state, mockSupabase } = vi.hoisted(() => {
-  const s: { fromQueue: Array<{ data: unknown; error: unknown }>; rpc: { data: unknown; error: unknown } } = {
+  // `count` rides along because PostgREST returns it beside `data` when a select asks for
+  // `{ count: 'exact' }` — that's how a capped read reports the true total.
+  type Result = { data: unknown; error: unknown; count?: number | null };
+  const s: { fromQueue: Result[]; rpc: { data: unknown; error: unknown }; calls: Record<string, unknown[]>[] } = {
     fromQueue: [],
     rpc: { data: null, error: null },
+    calls: [],
   };
-  const makeBuilder = (result: { data: unknown; error: unknown }) => {
+  const makeBuilder = (result: Result) => {
     const b: Record<string, unknown> = {};
-    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'gt', 'order', 'limit', 'single', 'maybeSingle'].forEach(
+    // Every chain method's arguments are recorded so a test can assert the filters
+    // (`.is('part.deleted_at', null)`, `.limit(n)`) actually reached PostgREST.
+    const seen: Record<string, unknown[]> = {};
+    s.calls.push(seen);
+    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'gt', 'order', 'limit', 'single', 'maybeSingle'].forEach(
       (m) => {
-        b[m] = vi.fn(() => b);
+        b[m] = vi.fn((...args: unknown[]) => {
+          seen[m] = args;
+          return b;
+        });
       },
     );
     // Thenable: awaiting anywhere in the chain resolves to { data, error }.
@@ -57,6 +68,9 @@ import {
   disableLocationTracking,
   getLocationOccupancy,
   getLocationBoard,
+  getLocationContents,
+  LOCATION_CONTENTS_LIMIT,
+  resolveScan,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
@@ -72,13 +86,14 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   ...over,
 });
 
-const queueFrom = (...results: Array<{ data: unknown; error: unknown }>) => {
+const queueFrom = (...results: Array<{ data: unknown; error: unknown; count?: number | null }>) => {
   state.fromQueue.push(...results);
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   state.fromQueue = [];
+  state.calls = [];
   state.rpc = { data: null, error: null };
 });
 
@@ -454,5 +469,77 @@ describe('getLocationOccupancy', () => {
   it('propagates a read failure instead of silently reporting an empty warehouse', async () => {
     state.fromQueue = [{ data: null, error: { message: 'boom' } }];
     await expect(getLocationOccupancy('co1')).rejects.toBeTruthy();
+  });
+});
+
+/**
+ * A read that used to lie by omission.
+ *
+ * `getLocationContents` had no `.limit()`, so PostgREST's `max_rows = 1000` clipped it silently —
+ * invisible against the seed's 14 rows, wrong for a shop whose `Unassigned` bucket holds every
+ * part they own. And it didn't filter archived parts, so it would have listed four where the
+ * occupancy view counted three, making the board and the sheet contradict each other.
+ */
+describe('getLocationContents', () => {
+  const row = (id: string, quantity: number) => ({
+    quantity,
+    part: { id, part_name: id, primary_unit: 'each' },
+  });
+
+  it('caps the page and reports the true total so the UI can admit truncation', async () => {
+    queueFrom({ data: [row('p1', 5), row('p2', 3)], error: null, count: 9428 });
+
+    const page = await getLocationContents('shelf-a');
+
+    expect(page.contents).toHaveLength(2);
+    expect(page.total).toBe(9428);
+    expect(state.calls[0].limit).toEqual([LOCATION_CONTENTS_LIMIT]);
+  });
+
+  it('excludes archived parts, so the sheet agrees with the occupancy view', async () => {
+    queueFrom({ data: [row('p1', 5)], error: null, count: 1 });
+    await getLocationContents('shelf-a');
+    // An `!inner` embed is what makes the filter drop the parent row rather than null the join.
+    expect(String(state.calls[0].select?.[0])).toContain('!inner');
+    expect(state.calls[0].is).toEqual(['part.deleted_at', null]);
+  });
+
+  it('falls back to the page length when PostgREST returns no count', async () => {
+    queueFrom({ data: [row('p1', 5)], error: null, count: null });
+    expect((await getLocationContents('shelf-a')).total).toBe(1);
+  });
+
+  it('sorts the page by part name for scanning, whatever order it arrived in', async () => {
+    queueFrom({ data: [row('zinc', 1), row('alum', 2)], error: null, count: 2 });
+    const page = await getLocationContents('shelf-a');
+    expect(page.contents.map((c) => c.part_name)).toEqual(['alum', 'zinc']);
+  });
+
+  it('honours an explicit smaller limit', async () => {
+    queueFrom({ data: [row('p1', 5)], error: null, count: 50 });
+    await getLocationContents('shelf-a', 10);
+    expect(state.calls[0].limit).toEqual([10]);
+  });
+});
+
+/**
+ * The bin view's contract with the cap.
+ *
+ * `resolveScan` fans out to the capped read, so it has to carry the total up — otherwise the
+ * operator page silently re-acquires the exact truncation the cap was added to expose.
+ */
+describe('resolveScan', () => {
+  it('carries the contents total up so the operator page can say what it hid', async () => {
+    queueFrom(
+      { data: loc({ id: 'shelf-a', parent_id: 'cab' }), error: null }, // getLocation
+      { data: [loc({ id: 'cab' }), loc({ id: 'shelf-a', parent_id: 'cab' })], error: null },
+      { data: [{ quantity: 5, part: { id: 'p1', part_name: 'p1', primary_unit: 'each' } }], error: null, count: 9428 },
+    );
+
+    const scan = await resolveScan('shelf-a');
+
+    expect(scan.contents).toHaveLength(1);
+    expect(scan.contentsTotal).toBe(9428);
+    expect(scan.path.map((p) => p.id)).toEqual(['cab', 'shelf-a']);
   });
 });

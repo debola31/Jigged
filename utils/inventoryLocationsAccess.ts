@@ -506,14 +506,48 @@ export async function getBalancesForParts(
   return byPart;
 }
 
-/** Parts (and quantities > 0) stored directly at a location. */
-export async function getLocationContents(locationId: string): Promise<LocationContent[]> {
+/**
+ * How many parts one location lists at a time.
+ *
+ * Bounded on purpose. This read used to have no limit at all, which meant PostgREST's
+ * `max_rows = 1000` (`supabase/config.toml`) clipped it **silently** — invisible on the seed's
+ * 14 rows, wrong on a shop whose `Unassigned` bucket holds every part they own. An explicit cap
+ * paired with an exact `total` lets the UI say "showing 200 of 9,428" instead of quietly lying.
+ */
+export const LOCATION_CONTENTS_LIMIT = 200;
+
+export interface LocationContentsPage {
+  contents: LocationContent[];
+  /** Exact parts held here, ignoring the page size — so the UI can admit truncation. */
+  total: number;
+}
+
+/**
+ * Parts (and quantities > 0) stored directly at a location, capped at `limit`.
+ *
+ * Archived parts are excluded, which matches `inventory_location_occupancy` exactly — without
+ * that the board would chip a cabinet "3 parts" while the sheet listed four.
+ *
+ * Truncation is ordered by quantity descending so it's deterministic and useful (the biggest
+ * holdings survive); the returned page is then sorted alphabetically, which is how an operator
+ * scans a bin. At any realistic location count the two are the same list.
+ */
+export async function getLocationContents(
+  locationId: string,
+  limit: number = LOCATION_CONTENTS_LIMIT,
+): Promise<LocationContentsPage> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from('part_location_stock')
-    .select('quantity, part:parts!part_location_stock_part_fkey(id, part_name, primary_unit)')
+    .select(
+      'quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      { count: 'exact' },
+    )
     .eq('location_id', locationId)
-    .gt('quantity', 0);
+    .is('part.deleted_at', null)
+    .gt('quantity', 0)
+    .order('quantity', { ascending: false })
+    .limit(limit);
   if (error) {
     console.error('Error fetching location contents:', error);
     throw error;
@@ -527,7 +561,7 @@ export async function getLocationContents(locationId: string): Promise<LocationC
       | null;
   };
 
-  return ((data ?? []) as Row[])
+  const contents = ((data ?? []) as Row[])
     .map((row) => {
       const part = Array.isArray(row.part) ? row.part[0] : row.part;
       if (!part) return null;
@@ -540,6 +574,8 @@ export async function getLocationContents(locationId: string): Promise<LocationC
     })
     .filter((r): r is LocationContent => r !== null)
     .sort((a, b) => a.part_name.localeCompare(b.part_name));
+
+  return { contents, total: count ?? contents.length };
 }
 
 /** Resolve a scanned location id into node + ancestor path + children +
@@ -548,7 +584,7 @@ export async function resolveScan(locationId: string): Promise<ResolvedScan> {
   const node = await getLocation(locationId);
   if (!node) throw new Error('Location not found');
 
-  const [locations, contents] = await Promise.all([
+  const [locations, page] = await Promise.all([
     getLocations(node.company_id),
     getLocationContents(locationId),
   ]);
@@ -567,7 +603,7 @@ export async function resolveScan(locationId: string): Promise<ResolvedScan> {
     .filter((l) => l.parent_id === locationId)
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
-  return { node, path, children, contents };
+  return { node, path, children, contents: page.contents, contentsTotal: page.total };
 }
 
 // ===========================================================================

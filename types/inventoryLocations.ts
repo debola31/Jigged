@@ -134,8 +134,15 @@ export interface ResolvedScan {
   path: InventoryLocation[];
   /** Direct children (for parent → drill-down). */
   children: InventoryLocation[];
-  /** Parts + quantities at this node (for leaf → actions). */
+  /** Parts + quantities at this node (for leaf → actions). Capped — see `contentsTotal`. */
   contents: LocationContent[];
+  /**
+   * Exact parts held here, which may exceed `contents.length`.
+   *
+   * Carried so the bin view can say "showing 200 of 9,428" rather than presenting a clipped
+   * list as the whole truth — `max_rows` was already doing that silently.
+   */
+  contentsTotal: number;
 }
 
 // ---- RPC return shapes (jsonb) -------------------------------------------

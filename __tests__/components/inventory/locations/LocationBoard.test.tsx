@@ -1,0 +1,138 @@
+/**
+ * The board.
+ *
+ * The load-bearing test is `reports a container as occupied when only its shelves hold stock`.
+ * The occupancy view reports what sits DIRECTLY at a location, so a cabinet whose shelves are
+ * full has no row at all — and a board that reads it as "empty" would send someone to fill an
+ * already-occupied shelf. That's the one failure mode worse than showing no fill state, and the
+ * seed contains exactly this shape (Cabinet 3 › Shelf A/B).
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '../../../test-utils';
+import userEvent from '@testing-library/user-event';
+
+import LocationBoard from '@/components/inventory/locations/board/LocationBoard';
+import { rollUpOccupancy } from '@/utils/locationOccupancy';
+import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
+
+const node = (
+  over: Partial<InventoryLocation> & { id: string },
+  children: InventoryLocationNode[] = [],
+  depth = 0,
+): InventoryLocationNode => ({
+  company_id: 'co1',
+  parent_id: null,
+  name: over.id,
+  kind: null,
+  code: null,
+  sort_order: 0,
+  created_at: '',
+  updated_at: '',
+  ...over,
+  children,
+  depth,
+});
+
+const renderBoard = (
+  tree: InventoryLocationNode[],
+  counts: Array<[string, number]> = [],
+  overrides: Partial<{ onOpen: () => void; onAddStorage: () => void }> = {},
+) => {
+  const onOpen = overrides.onOpen ?? vi.fn();
+  const onAddStorage = overrides.onAddStorage ?? vi.fn();
+  render(
+    <LocationBoard
+      tree={tree}
+      occupancy={rollUpOccupancy(tree, new Map(counts))}
+      onOpen={onOpen}
+      onAddStorage={onAddStorage}
+    />,
+  );
+  return { onOpen, onAddStorage };
+};
+
+const cabinetWithShelves = () => {
+  const shelfA = node({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3' }, [], 1);
+  const shelfB = node({ id: 'shelf-b', name: 'Shelf B', parent_id: 'cab3' }, [], 1);
+  return node({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', code: 'CAB3' }, [shelfA, shelfB]);
+};
+
+describe('LocationBoard', () => {
+  it('draws a unit with its name and code', () => {
+    renderBoard([cabinetWithShelves()]);
+    expect(screen.getByText('Cabinet 3')).toBeInTheDocument();
+    expect(screen.getByText('CAB3')).toBeInTheDocument();
+    expect(screen.getByText('Shelf A')).toBeInTheDocument();
+  });
+
+  /** The assertion the whole feature turns on. */
+  it('reports a container as occupied when only its shelves hold stock', () => {
+    renderBoard([cabinetWithShelves()], [['shelf-a', 2], ['shelf-b', 1]]);
+
+    // Rolled up: the cabinet's own row is absent from the view entirely.
+    expect(screen.getByRole('button', { name: 'Cabinet 3 — 3 parts' })).toBeInTheDocument();
+    expect(screen.getByText('3 parts')).toBeInTheDocument();
+    expect(screen.queryByText('empty')).not.toBeInTheDocument();
+  });
+
+  it('says empty only when nothing anywhere inside holds stock', () => {
+    renderBoard([cabinetWithShelves()]);
+    expect(screen.getByRole('button', { name: 'Cabinet 3 — empty' })).toBeInTheDocument();
+    expect(screen.getByText('empty')).toBeInTheDocument();
+  });
+
+  it('singularises one part', () => {
+    renderBoard([cabinetWithShelves()], [['shelf-a', 1]]);
+    expect(screen.getByText('1 part')).toBeInTheDocument();
+  });
+
+  /**
+   * `Unassigned` is guaranteed to exist and on a real shop is the biggest thing on the board.
+   * Leading with it makes the page read "one giant tile is my inventory"; last makes it read
+   * "here is my storage; separately, here is the pile to put away."
+   */
+  it('sorts the system bucket last however it arrives, and explains it', () => {
+    const unassigned = node({ id: 'un', name: 'Unassigned', kind: 'system' });
+    renderBoard([unassigned, cabinetWithShelves()], [['un', 9428]]);
+
+    const units = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+    expect(units[0]).toBe('Cabinet 3 — empty');
+    expect(units[1]).toBe('Unassigned — 9,428 parts');
+    expect(screen.getByText(/put-away list, not a shelf/i)).toBeInTheDocument();
+  });
+
+  it('opens the sheet for the whole unit, not for a compartment', async () => {
+    const user = userEvent.setup();
+    const { onOpen } = renderBoard([cabinetWithShelves()], [['shelf-a', 2]]);
+
+    // Compartments render fill state but are deliberately not tap targets: at the 48px floor a
+    // 5-row cabinet becomes a ~500px tile and the drawing — the point — is destroyed.
+    expect(screen.queryByRole('button', { name: /Shelf A/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^Cabinet 3/ }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen.mock.calls[0][0].id).toBe('cab3');
+  });
+
+  it('keeps an Add storage tile in the grid permanently, not only at first run', async () => {
+    const user = userEvent.setup();
+    const { onAddStorage } = renderBoard([cabinetWithShelves()], [['shelf-a', 2]]);
+
+    await user.click(screen.getByRole('button', { name: /add storage/i }));
+    expect(onAddStorage).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The preview truncates at TOP_LIMIT = 24 and that's fine — a preview of "24 of 40" is honest.
+   * A home screen that hides someone's storage is not, so the board deliberately diverges.
+   */
+  it('does not truncate top-level units the way the preview does', () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      node({ id: `u${i}`, name: `Unit ${i + 1}` }),
+    );
+    renderBoard(many);
+
+    expect(screen.getByText('Unit 30')).toBeInTheDocument();
+    expect(screen.queryByText(/\+\d+ more/)).not.toBeInTheDocument();
+  });
+});

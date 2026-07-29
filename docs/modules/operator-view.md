@@ -3,9 +3,8 @@
 ## Overview
 
 The Operator View is a mobile-first interface for shop-floor operators, used on their own
-phones. Operators sign in, select the station they're working at (by scanning a posted
-station-QR placard or tapping it from a list), see the work ready at that station, open a
-step, and record progress with a single **Mark Complete**.
+phones. Operators sign in, tap the station they're working at from a list, see the work
+ready at that station, open a step, and record progress with a single **Mark Complete**.
 
 > This spec covers the **data model and screens**. For the end-to-end operator journeys
 > and the paperless-preferred model, see [operator-paperless-flow.md](../operator-paperless-flow.md).
@@ -31,12 +30,17 @@ step, and record progress with a single **Mark Complete**.
 ## Stations (work centers)
 
 - A "station" is a row in **`work_centers`**; each `job_operations` row carries `work_center_id`.
-- The operator selects a station **per session** — there is **no permanent operator↔station
-  assignment**. Selection persists in `sessionStorage` (`jigged_operator_station`) and can be
-  changed any time (scan a different placard, or pick from the header).
-- **Station QR placards** are generated per work center (`components/operations/StationQRCode.tsx`)
-  and bulk-printable from the work-centers list. The QR encodes
-  `…/operator/{companyId}/login?station={workCenterId}`.
+- The operator picks a station from a tappable list (`components/operator/StationSelector.tsx`,
+  fed by `getStationOperationTypes` → internal work centers) — there is **no permanent
+  operator↔station assignment**. Selection persists in `localStorage`
+  (`jigged_operator_station`, via `components/operator/OperatorStationContext.tsx`), so it
+  survives a browser restart or a backgrounded-tab eviction, and can be changed any time from
+  the header station dropdown. Logout clears it (`clearStoredStation`).
+- **There is no station QR.** Per-work-center QR placards (a download on each work-center
+  detail page plus a bulk **Print Placards** action, encoding
+  `…/operator/{companyId}/login?station={workCenterId}`) were removed in July 2026 — they were
+  never posted on a shop floor, and in-app selection plus the dashboard jobs list's **Shop
+  floor view** button reach the same place. The login page no longer reads a `?station=` param.
 
 ## Data model
 
@@ -336,7 +340,7 @@ to protect.
 
 | Screen | Route | Purpose |
 |---|---|---|
-| Login | `/operator/{companyId}/login` | Email/password; captures `?station=`, `?job=&part=&operation=`, or `?location=` from a scanned QR and routes accordingly. |
+| Login | `/operator/{companyId}/login` | Email/password; captures `?job=&part=`, `?job=&part=&operation=`, or `?location=` from a scanned QR and routes accordingly. A bare sign-in lands on the station job list. |
 | Station job list (dispatch) | `/operator/{companyId}/jobs` | Work ready/in-progress at the selected station — one row per (job, part), sorted by due date. An **All Stations** lens shows the whole plant grouped by station. |
 | Job parts hub | `/operator/{companyId}/jobs/{jobId}` | For multi-part jobs, lists the job's parts with progress; single-part jobs redirect straight to the traveler. |
 | Part traveler | `…/jobs/{jobId}/parts/{jobPartId}` | All steps for one part (read-only), with a back-link to the parts hub on multi-part jobs. |
@@ -347,8 +351,9 @@ to protect.
 
 ## QR codes
 
-- **Station placard** (per work center): selects the station and opens its job list. Posted at
-  the machine, printed once; bulk-print all from the work-centers list.
+There are two: the traveler QR and the inventory-location label. **There is no station QR** —
+see [Stations](#stations-work-centers).
+
 - **Traveler QR** (`utils/jobTravelerPdf.ts`): **exactly one per traveler sheet**, in the header
   beside the Job #, captioned "Scan to open this traveler". It opens that part's traveler page,
   where the operator taps the step they're working. An **optional accelerator** for shops
@@ -356,6 +361,9 @@ to protect.
   *A previous revision printed a QR on every operation row; operators couldn't tell which code
   they were pointing their phone at, so the sheet is back to one unambiguous target. The
   `?job=&part=&operation=` deep link still resolves for sheets printed under that revision.*
+- **Inventory location label** (`utils/locationLabelPdf.ts`, `components/inventory/locations/LocationQRModal.tsx`):
+  printed on a bin/cabinet, encodes `?location={id}` and opens that bin's view. Feature-gated
+  with the rest of inventory locations — see [Inventory](inventory.md).
 - The printed traveler's other shop-floor conventions: **outside (external-vendor) steps are
   flagged with a heavy black outline + bold text (border only, no fill)** — unmistakable and
   grayscale-safe, but essentially no extra toner (earlier gray/solid fills drew a shop-owner ink
@@ -386,7 +394,7 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 **Authentication & routing**
 
-- [ ] **Given** an operator scans a station placard, **when** they open `…/login?station={workCenterId}` and sign in with email/password, **then** the station is written to `sessionStorage` (`jigged_operator_station`) and they land on that station's job list — *write path verified by `__tests__/components/operations/StationQRCode.test.tsx > 'StationQRCode' > 'renders the QR code with the operator-login URL'`; login/session-persist E2E automation-pending (`OperatorLoginPage`)*.
+- [ ] **Given** a signed-in operator with no station yet, **when** they tap one in the station selector, **then** it is written to `localStorage` (`jigged_operator_station`), they land on that station's job list, and it is still selected after a browser restart — while logout clears it — *verified by `__tests__/components/operator/OperatorStationContext.test.tsx > 'OperatorStationProvider' > 'setStation persists (survives a reload); clearStoredStation wipes it on logout'` and `'hydrates the stored station on mount and finishes initializing'`; login E2E automation-pending (`OperatorLoginPage`)*.
 - [ ] **Given** a signed-in user with `role='operator'`, **when** `getPostLoginRoute` runs, **then** they are routed to `/operator/{companyId}` (office roles go to `/dashboard/{companyId}`) — *automation-pending (`getPostLoginRoute` in `utils/companyAccess.ts`)*.
 - [ ] **Given** the traveler QR (`?job=&part=`) — the one code printed on a job traveler — **when** the operator signs in, **then** they land on that part's traveler page and pick the step themselves; a `?job=&part=&operation=` QR (older travelers still on the floor) jumps straight to that step's action view, a `?location=` QR opens that bin, and a bare scan falls back to the station jobs list — *automation-pending (`OperatorLoginPage.postLoginPath`); the traveler's single-QR contract is verified by `__tests__/utils/jobTravelerPdf.test.ts > 'generateJobTravelerPdf — single traveler QR'`*.
 

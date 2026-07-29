@@ -2,6 +2,13 @@
 
 > **Status:** Draft proposal · **Date:** 2026-06-29 · **Branch:** `feature/operator-paperless-proposal`
 >
+> **Update (2026-07-29):** the **station-QR placard was removed** — generator, bulk-print
+> action, and the `?station=` deep-link all deleted. It shipped but was never posted on a
+> floor, so it stopped being the lever this doc treats it as; operators reach their station
+> by signing in and tapping it (J1), or via **Shop floor view** on the dashboard jobs list.
+> §1, §2, §3, §4 (J1/J2), and §6 are amended below. Everything about the *queue* path — the
+> actual paperless loop — is unchanged.
+>
 > **Purpose.** Define the *preferred* operator experience as **paperless**, spec the
 > operator user journeys end-to-end, and record the product decisions that bound them.
 > This doc is meant to (a) become the operator-journey source of truth and (b) drive a
@@ -17,19 +24,18 @@
 ## 1. TL;DR
 
 The paperless path operators "can't reach" **already exists and is wired end-to-end**:
-sign in → select a station (by scanning a posted station-QR placard *or* tapping it from
-a list) → see the live list of jobs ready at that station → tap one → **Mark Complete**.
-No printed traveler is required anywhere in that loop.
+sign in → tap the station you're standing at → see the live list of jobs ready at that
+station → tap one → **Mark Complete**. No printed traveler is required anywhere in that loop.
 
 The problem is **not a missing capability — it's that the path was never deployed.**
-The station-QR placards exist as a *feature*, but they have **not been posted on the floor**,
-so the only QR codes in the building are the per-operation ones on printed travelers —
-operators scan paper because it's the only QR there is. The work, therefore, is:
+The only QR codes in the building are on printed travelers — operators scan paper because
+it's the only QR there is. (A station-QR placard feature also existed, but it was never
+posted on a floor either, and was removed in July 2026; station entry is tap-select.) The
+work, therefore, is:
 
-1. **Deploy the station-placard flow, then make paperless the default** — placards aren't
-   posted yet, so step one is getting them onto the floor (bulk-print so it's one action);
-   then land the operator on the queue and demote the printed traveler to an optional
-   transition aid. ([§6](#6-making-paperless-the-preferred-model))
+1. **Make the queue the default** — land the operator on their station's queue, make
+   "change station" obvious, and demote the printed traveler to an optional transition
+   aid. ([§6](#6-making-paperless-the-preferred-model))
 2. **Spec the journeys we haven't nailed** — the **whole-plant view** ([§7](#7-whole-plant-view-proposed))
    and **multi-part jobs** ([§8](#8-multi-part-job-navigation-proposed)) — so we can decide
    *from the journeys* whether/how to build them (rather than guessing).
@@ -37,7 +43,7 @@ operators scan paper because it's the only QR there is. The work, therefore, is:
    — nothing exists today and it isn't yet thought through.
 
 The one genuinely missing *capability* is the whole-plant ("sign into the plant") view;
-everything else is deployment, adoption polish, and spec hygiene.
+everything else is adoption polish and spec hygiene.
 
 ---
 
@@ -45,9 +51,9 @@ everything else is deployment, adoption polish, and spec hygiene.
 
 ### Goal
 Make the **preferred, default operator workflow paperless**: an operator on their own
-phone signs in, identifies their station (QR scan or tap-select), and pulls work from a
-live, station-scoped queue — confirming each step with a single tap. Printed travelers
-remain available as a *fallback* during transition, not as the primary mechanism.
+phone signs in, taps the station they're standing at, and pulls work from a live,
+station-scoped queue — confirming each step with a single tap. Printed travelers remain
+available as a *fallback* during transition, not as the primary mechanism.
 
 ### Explicit non-goals (deliberate, decided)
 These are intentional simplicity choices. They are **not** gaps to "fix" — the operator
@@ -85,15 +91,15 @@ scrap/defect discovery framing, and the stale-doc fix list.
 ### Station = work center
 - "Station" maps to a row in **`work_centers`** (not `operation_type` — that terminology
   is stale in older docs). Each `job_operations` row carries `work_center_id`.
-- **Station QR placards already exist:** each work center's detail page renders a
-  downloadable A4 placard — `components/operations/StationQRCode.tsx`, used at
-  `app/dashboard/[companyId]/work-centers/[workCenterId]/page.tsx`. The QR encodes
-  `…/operator/{companyId}/login?station={workCenterId}`. Print once, post at the machine.
-  **Not yet deployed:** the *generator* exists, but placards have **not been posted** on the
-  floor — getting them up is the actual near-term unlock ([§6](#6-making-paperless-the-preferred-model)).
-- **Manual selection** also works with no QR: `components/operator/StationSelector.tsx`
-  lists work centers as tappable buttons; selection is kept in `sessionStorage`
-  (`jigged_operator_station`) via `components/operator/OperatorStationContext.tsx`.
+- **Station entry is tap-select:** `components/operator/StationSelector.tsx` lists the
+  internal work centers as tappable buttons; the choice is kept in `localStorage`
+  (`jigged_operator_station`) via `components/operator/OperatorStationContext.tsx`, so it
+  survives a browser restart, and the header dropdown switches it any time.
+- **Station QR placards were removed (July 2026).** A per-work-center placard generator and
+  a bulk **Print Placards** action existed, encoding
+  `…/operator/{companyId}/login?station={workCenterId}` — but placards were **never posted**
+  on a floor, so the feature never influenced behaviour. Deleted rather than left as dead
+  weight; tap-select plus **Shop floor view** on the dashboard jobs list cover the same entry.
 
 ### The dispatch list (station-scoped job queue)
 - `app/operator/[companyId]/jobs/page.tsx` shows one row per **(job, job_part)** with a
@@ -120,9 +126,8 @@ scrap/defect discovery framing, and the stale-doc fix list.
 - **No job-level hub** — there is no `app/operator/[companyId]/jobs/[jobId]/page.tsx`;
   navigation drops the operator onto a single **part**. Multi-part jobs have no
   "see/switch parts" surface ([§8](#8-multi-part-job-navigation-proposed)).
-- **Paperless isn't deployed** — the station-placard *generator* exists but placards have
-  **not been posted on the floor**, so the only QR in the building is the printed traveler;
-  nothing steers a shop to deploy the placard flow ([§6](#6-making-paperless-the-preferred-model)).
+- **Paperless isn't the default** — the only QR in the building is the printed traveler, and
+  nothing steers a shop toward the queue path ([§6](#6-making-paperless-the-preferred-model)).
 - **No scrap/defect/quality capture** ([§5.4](#54-scrap--defect--quality-flagging-discovery)).
 
 ---
@@ -133,21 +138,24 @@ The spine is the MES-standard **dispatch-list pull model** (operator stands at a
 sees what's ready, pulls the next job). We already have it per-station; the journeys below
 make it the *default* and fill the two gaps (whole-plant, multi-part).
 
-### J1 — Station entry by QR placard (preferred, paperless)
-1. Operator walks to e.g. *CNC Lathe #2*, scans the **posted station placard** with their phone.
-2. Lands on operator login with `?station={workCenterId}`. If already authenticated → station
-   set, straight to the dispatch list. If not → log in once, then dispatch list.
-3. Dispatch list shows everything ready at *CNC Lathe #2*, sorted by due date.
-4. Tap a job/part → operation action → **Mark Complete** (+ optional note/photo) → back to the list.
+### J1 — Station entry by tap-select (preferred, paperless)
+1. Operator walks to e.g. *CNC Lathe #2* and opens the operator view on their phone — a
+   bookmark, or **Shop floor view** from the dashboard jobs list.
+2. If already authenticated → straight in (the session persists per device). If not → log in
+   once with email/password.
+3. They **tap *CNC Lathe #2* from the station list** (`StationSelector`). The choice is stored
+   on the device, so on every later visit they land straight on the queue; the header dropdown
+   switches stations any time.
+4. Dispatch list shows everything ready at *CNC Lathe #2*, sorted by due date.
+5. Tap a job/part → operation action → **Mark Complete** (+ optional note/photo) → back to the list.
 
-*Status:* **built.** *Change needed:* make the placard easy to deploy and the queue the
-obvious home ([§6](#6-making-paperless-the-preferred-model)).
+*Status:* **built.** *Change needed:* make the queue the obvious home
+([§6](#6-making-paperless-the-preferred-model)).
 
-### J2 — Station entry by tap-select (no placard / lost / new machine)
-Same as J1, but the operator opens the app, logs in, and **taps their station from the
-list** (`StationSelector`). Ensures the paperless path never *depends* on a placard being present.
-
-*Status:* **built.**
+*Note:* an earlier revision of this doc split station entry into J1 (scan a posted station-QR
+placard) and J2 (tap-select as the no-placard fallback). The placard was removed in July 2026
+— it was never posted on a floor — so tap-select **is** the entry path, and the old J2 is
+folded in here. J2 is retired; the numbering gap is deliberate so J3–J6 keep their names.
 
 ### J3 — Work the queue → action a step
 From the dispatch list, tap a (job, part) row → land on the ready operation (or the part
@@ -247,22 +255,26 @@ for anemic data and copy-from-X redundancy before committing. Likely premature.
 
 ## 6. Making paperless the preferred model
 
-The capability is there but **was never deployed** — placards aren't posted, so the only QR on
-the floor is the printed traveler. Deployment is the single biggest lever; these changes get the
-placard flow onto the floor and make the queue path *win* over paper.
+The capability is there but **was never made the default** — the only QR on the floor is the
+printed traveler, and nothing steers a shop to the queue. These changes make the queue path
+*win* over paper.
 
-- **Bulk placard deployment (the keystone).** Placards aren't posted today, and they're
-  downloaded one-per-work-center from each detail page — tedious across a whole floor. Add a
-  **"Print all station placards"** action (one PDF, one page per work center) so a shop can
-  print, laminate, and post the entire floor in one pass. This is the most direct unlock.
-- **Dispatch list = the operator home.** After login (without a deep-link), land the operator on
-  *the queue* — either their last station (from `sessionStorage`) or a station picker — not a
-  dead end. Make "change station" obvious in the header.
-- **Demote the printed traveler.** Reframe per-operation traveler QR as an explicit *fallback*
-  (J6), not the default. Consider a setting/onboarding step: "We've gone paperless — post these
-  station placards" vs "keep printing travelers."
-- **Onboarding nudge.** A short shop-setup checklist: (1) create work centers, (2) print &
-  post station placards, (3) operators bookmark/scan once. Surfaces the path that already exists.
+> **Amended (2026-07-29).** The original keystone here was *"bulk placard deployment"* — add a
+> print-all action so a shop could post the whole floor in one pass. That action was built,
+> and placards still never went up. The placard feature has since been removed, so the
+> keystone is now **getting operators onto the queue by default**, below. The lesson kept:
+> the bottleneck was adoption, not the absence of a print button.
+
+- **Dispatch list = the operator home (the keystone).** After login, land the operator on *the
+  queue* — their last station (persisted in `localStorage`, so a returning operator skips the
+  picker entirely) or, first time only, the station picker — never a dead end. Make "change
+  station" obvious in the header.
+- **Demote the printed traveler.** Reframe the traveler QR as an explicit *fallback* (J6), not
+  the default. Consider a setting/onboarding step: "We've gone paperless — operators pick their
+  station in the app" vs "keep printing travelers."
+- **Onboarding nudge.** A short shop-setup checklist: (1) create work centers, (2) invite
+  operators, (3) each operator signs in once on their phone and picks their station (it sticks
+  per device). Surfaces the path that already exists.
 - **Parallel run, then retire paper.** Per the transition research, run paper + digital together
   for a few weeks; once the queue path sticks, stop printing travelers by default.
 
@@ -324,8 +336,8 @@ should be corrected (proposed, for approval):
 |---|---|---|
 | `prd.md` FR-5 (L124) | "operator enters their **PIN or scans their personal QR badge**" | Email/password on personal phones; no PIN/badge ([§5.1](#51-authentication)). |
 | `prd.md` FR-6 (L125) | WO entry, start-time, time-tracking, permanent station | Already superseded by §4.3 — mark it explicitly stale or delete. |
-| `prd.md` Flow 1 (L151) | "Operator scans **operation type QR**, enters job number"; step 6 blank | Work-center QR + dispatch-list/scan-to-complete; remove "enter job number"; fill/remove the empty step. |
-| `prd.md` Flow 4 (L199-211) | "**Operator Shift Start**", operation-type QR, PIN/badge, time tracking begins | Reframe as "Station sign-in" (J1/J2); no shift, no PIN/badge, no timer. |
+| `prd.md` Flow 1 (L151) | "Operator scans **operation type QR**, enters job number"; step 6 blank | Dispatch list (or the traveler QR) → open the step → Mark Complete; remove "enter job number"; fill/remove the empty step. |
+| `prd.md` Flow 4 (L199-211) | "**Operator Shift Start**", operation-type QR, PIN/badge, time tracking begins | Reframe as "Station sign-in" (J1); no shift, no PIN/badge, no timer. |
 | `prd.md` FR-11 (L130) | templates with "series or **parallel** flows" | **Linear routings only** — no DAG/parallel. |
 | `prd.md` FR-12 (L131) | time-per-station, time streaks | Already noted in §4.3 — gamification (if any) is on completion counts/on-time, not duration. |
 | `prd.md` FR-19 + Flow 2 | Pass/Fail QC workflow + rework routing | **Not built.** Fold into the scrap/defect discovery ([§5.4](#54-scrap--defect--quality-flagging-discovery)) — revive, reshape, or drop. |
@@ -337,9 +349,9 @@ should be corrected (proposed, for approval):
 
 ## 10. Open questions / next steps
 
-1. **Approve the journeys** (J1–J6) and the paperless-preferred framing ([§6](#6-making-paperless-the-preferred-model)).
+1. **Approve the journeys** (J1, J3–J6 — J2 was folded into J1) and the paperless-preferred framing ([§6](#6-making-paperless-the-preferred-model)).
 2. **Whole-plant view:** decide read-only vs actionable, and complement vs replace ([§7](#7-whole-plant-view-proposed)) → then build (additive RPC + lens toggle).
 3. **Multi-part:** confirm operators actually need a parts hub vs separate queue rows ([§8](#8-multi-part-job-navigation-proposed)).
 4. **Scrap/defect:** run discovery on the [§5.4](#54-scrap--defect--quality-flagging-discovery) questions before any build; decide the fate of FR-19/Flow 2.
 5. **Doc hygiene:** on approval, apply the [§9](#9-stale-doc-reconciliation) corrections to `prd.md` and rewrite `operator-view.md`.
-6. **Optional verification:** run the app and walk J1 (station-scan → dispatch → Mark Complete) to confirm the built path behaves as described before building on it.
+6. **Optional verification:** run the app and walk J1 (tap-select a station → dispatch → Mark Complete) to confirm the built path behaves as described before building on it.

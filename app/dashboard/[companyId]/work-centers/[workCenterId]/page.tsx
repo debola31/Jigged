@@ -11,7 +11,6 @@ import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
-import Grid from '@mui/material/Grid';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -28,8 +27,6 @@ import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
-import { getCompany } from '@/utils/companyAccess';
-import StationQRCode from '@/components/operations/StationQRCode';
 
 export default function WorkCenterDetailPage() {
   const params = useParams();
@@ -41,23 +38,16 @@ export default function WorkCenterDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  // Load the work center plus its company name (for the station-QR caption) in
-  // parallel. useLoad keeps every setState inside the async callback, so the
-  // load effect can't trip set-state-in-effect.
-  const { data, loading } = useLoad(
-    () =>
-      Promise.all([
-        getWorkCenterWithRelations(workCenterId),
-        getCompany(companyId),
-      ]),
-    [workCenterId, companyId],
+  // useLoad keeps every setState inside the async callback, so the load effect
+  // can't trip set-state-in-effect.
+  const { data: workCenter, loading } = useLoad(
+    () => getWorkCenterWithRelations(workCenterId),
+    [workCenterId],
     {
       onError: (err) =>
         setError(err instanceof Error ? err.message : 'Failed to load work center'),
     },
   );
-  const workCenter = data?.[0] ?? null;
-  const companyName = data?.[1]?.name;
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -93,8 +83,6 @@ export default function WorkCenterDetailPage() {
   }
 
   const isInternal = workCenter.kind === 'internal';
-  const metadataCode =
-    typeof workCenter.metadata?.code === 'string' ? (workCenter.metadata.code as string) : null;
 
   return (
     <Box>
@@ -181,124 +169,100 @@ export default function WorkCenterDetailPage() {
         </CardContent>
       </Card>
 
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card elevation={2} sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Details
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {/* Kind-conditional fields mirror the form so the displayed data is consistent.
-                    Internal: labor rate. External: vendor link + a hint that pricing
-                    lives on the routing operations, not on the work center. */}
-                {isInternal && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Labor Rate
-                    </Typography>
-                    <Typography variant="body1" fontWeight={500}>
-                      {workCenter.labor_rate !== null
-                        ? `$${Number(workCenter.labor_rate).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}/hr`
-                        : '—'}
-                    </Typography>
-                  </Box>
-                )}
-                {!isInternal && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Vendor
-                    </Typography>
-                    {workCenter.vendor ? (
-                      <MuiLink
-                        component={NextLink}
-                        href={`/dashboard/${companyId}/vendors/${workCenter.vendor.id}`}
-                        sx={{ fontWeight: 500 }}
-                      >
-                        {workCenter.vendor.name}
-                      </MuiLink>
-                    ) : (
-                      <Typography variant="body1" color="text.secondary">
-                        —
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-                {!isInternal && (
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Pricing per routing operation
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>
-                      External work centers price per routing operation. Each
-                      routing op sets its own{' '}
-                      <strong>vendor unit price</strong> for this vendor — external
-                      work bills once per part, so there is no setup cost.
-                    </Typography>
-                  </Box>
-                )}
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Description
-                  </Typography>
-                  <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                    {workCenter.description || '—'}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Used in routing operations
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {workCenter.routing_operations_count} operation
-                    {workCenter.routing_operations_count !== 1 ? 's' : ''}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Created
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatDate(workCenter.created_at)}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Updated
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {formatDate(workCenter.updated_at)}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {isInternal && (
-          <Grid size={{ xs: 12, md: 6 }}>
-            <Card elevation={2} sx={{ height: '100%' }}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                  Station QR Code
+      <Card elevation={2}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+            Details
+          </Typography>
+          <Divider sx={{ mb: 2 }} />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Kind-conditional fields mirror the form so the displayed data is consistent.
+                Internal: labor rate. External: vendor link + a hint that pricing
+                lives on the routing operations, not on the work center. */}
+            {isInternal && (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Labor Rate
                 </Typography>
-                <Divider sx={{ mb: 2 }} />
-                <StationQRCode
-                  workCenterId={workCenter.id}
-                  operationName={workCenter.name}
-                  operationCode={metadataCode}
-                  companyId={companyId}
-                  companyName={companyName}
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
-      </Grid>
+                <Typography variant="body1" fontWeight={500}>
+                  {workCenter.labor_rate !== null
+                    ? `$${Number(workCenter.labor_rate).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}/hr`
+                    : '—'}
+                </Typography>
+              </Box>
+            )}
+            {!isInternal && (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Vendor
+                </Typography>
+                {workCenter.vendor ? (
+                  <MuiLink
+                    component={NextLink}
+                    href={`/dashboard/${companyId}/vendors/${workCenter.vendor.id}`}
+                    sx={{ fontWeight: 500 }}
+                  >
+                    {workCenter.vendor.name}
+                  </MuiLink>
+                ) : (
+                  <Typography variant="body1" color="text.secondary">
+                    —
+                  </Typography>
+                )}
+              </Box>
+            )}
+            {!isInternal && (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Pricing per routing operation
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  External work centers price per routing operation. Each
+                  routing op sets its own{' '}
+                  <strong>vendor unit price</strong> for this vendor — external
+                  work bills once per part, so there is no setup cost.
+                </Typography>
+              </Box>
+            )}
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Description
+              </Typography>
+              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                {workCenter.description || '—'}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Used in routing operations
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {workCenter.routing_operations_count} operation
+                {workCenter.routing_operations_count !== 1 ? 's' : ''}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Created
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {formatDate(workCenter.created_at)}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Updated
+              </Typography>
+              <Typography variant="body1" fontWeight={500}>
+                {formatDate(workCenter.updated_at)}
+              </Typography>
+            </Box>
+          </Box>
+        </CardContent>
+      </Card>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Work Center?</DialogTitle>

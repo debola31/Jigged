@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 
-// Mutable holder for the mocked ?station= param (hoisted above vi.mock).
-const nav = vi.hoisted(() => ({ station: null as string | null }));
-
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ companyId: 'c1' }),
-  useSearchParams: () => new URLSearchParams(nav.station ? `station=${nav.station}` : ''),
 }));
 
 vi.mock('@/utils/operatorAccess', () => ({
@@ -57,7 +53,6 @@ beforeAll(() => {
 
 beforeEach(() => {
   window.localStorage.clear();
-  nav.station = null;
   vi.clearAllMocks();
 });
 
@@ -79,14 +74,6 @@ describe('OperatorStationProvider', () => {
 
     await waitFor(() => expect(result.current.initializing).toBe(false));
     expect(result.current.stationId).toBeNull();
-  });
-
-  it('prefers a ?station= URL param (QR scan) and persists it to localStorage', async () => {
-    nav.station = 'st-url';
-    const { result } = renderHook(() => useStationContext(), { wrapper: OperatorStationProvider });
-
-    await waitFor(() => expect(result.current.stationId).toBe('st-url'));
-    expect(window.localStorage.getItem(KEY)).toBe('st-url');
   });
 
   it('setStation persists (survives a reload); clearStoredStation wipes it on logout', async () => {

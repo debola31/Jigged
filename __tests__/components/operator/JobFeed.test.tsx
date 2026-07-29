@@ -6,6 +6,7 @@ import JobFeed from '@/components/operator/JobFeed';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
 import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote } from '@/types/operator';
 
 vi.mock('@/utils/operatorAccess', () => ({
@@ -18,6 +19,10 @@ vi.mock('@/utils/jobNoteMediaAccess', () => ({
   getJobNoteMediaUrl: vi.fn(),
 }));
 vi.mock('@/utils/imageCompression', () => ({ compressPhoto: vi.fn() }));
+// Dwell tracking imports the Supabase client at module scope; it has its own
+// suite in __tests__/hooks/useNoteDwell.test.tsx.
+vi.mock('@/hooks/useNoteDwell', () => ({ useNoteDwell: () => ({ observe: () => () => {} }) }));
+vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -222,5 +227,113 @@ describe('JobFeed — dictation hint', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss tip' }));
     expect(screen.queryByText(HINT_TEXT)).not.toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!).dismissed).toBe(true);
+  });
+});
+
+// The capture funnel. With an empty notes corpus these events are the only
+// readable signal for the first weeks of the pilot, so what matters is that the
+// steps stay DISTINGUISHABLE: "opened the composer" must not be conflated with
+// "saved", and a failed post must never be counted as a save. Otherwise the
+// result reads as "adoption was poor" with no way to tell friction from fit.
+describe('JobFeed — capture funnel events', () => {
+  it('records composer_focused once, however many times they refocus', async () => {
+    const user = userEvent.setup();
+    renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    const field = screen.getByPlaceholderText('Add a note or photo for this step…');
+
+    await user.click(field);
+    await user.tab();
+    await user.click(field);
+
+    const focused = mock(logOperatorEvent).mock.calls.filter(
+      (c: unknown[]) => c[1] === 'composer_focused',
+    );
+    expect(focused).toHaveLength(1);
+  });
+
+  it('records note_saved only after the write resolves', async () => {
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'watch the bore' }));
+    renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'watch the bore',
+    );
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() =>
+      expect(mock(logOperatorEvent).mock.calls.some((c: unknown[]) => c[1] === 'note_saved')).toBe(
+        true,
+      ),
+    );
+  });
+
+  it('does NOT record a save when the post fails', async () => {
+    // The distinction the funnel exists for: they tried and it broke is capture
+    // friction, not a successful capture.
+    const user = userEvent.setup();
+    mock(addJobNote).mockRejectedValue(new Error('offline'));
+    renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'never lands',
+    );
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await screen.findByRole('alert');
+    expect(
+      mock(logOperatorEvent).mock.calls.some(
+        (c: unknown[]) => c[1] === 'note_saved' || c[1] === 'note_saved_with_photo',
+      ),
+    ).toBe(false);
+  });
+
+  it('records composer_abandoned when they open it and leave without saving', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'half a thought',
+    );
+    unmount();
+
+    const abandoned = mock(logOperatorEvent).mock.calls.filter(
+      (c: unknown[]) => c[1] === 'composer_abandoned',
+    );
+    expect(abandoned).toHaveLength(1);
+    expect(abandoned[0][2]).toMatchObject({ bodyLength: 'half a thought'.length });
+  });
+
+  it('does NOT record abandonment when they never opened the composer', async () => {
+    const { unmount } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+    unmount();
+
+    expect(
+      mock(logOperatorEvent).mock.calls.some((c: unknown[]) => c[1] === 'composer_abandoned'),
+    ).toBe(false);
+  });
+
+  it('does NOT record abandonment after a successful save', async () => {
+    const user = userEvent.setup();
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'saved' }));
+    const { unmount } = renderFeed();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(screen.getByPlaceholderText('Add a note or photo for this step…'), 'saved');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+    await waitFor(() => expect(addJobNote).toHaveBeenCalled());
+    unmount();
+
+    expect(
+      mock(logOperatorEvent).mock.calls.some((c: unknown[]) => c[1] === 'composer_abandoned'),
+    ).toBe(false);
   });
 });

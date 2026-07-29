@@ -11,6 +11,8 @@ import type { Station } from '@/types/operator';
 // backgrounded-tab eviction / browser restart — the shop-floor reality that had
 // operators landing on a job with the station picker stacked underneath it every
 // morning. A QR deep-link (?station=) always overrides the stored value.
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+
 const STORAGE_KEY = 'jigged_operator_station';
 
 // localStorage access can throw (Safari private mode throws on setItem; access
@@ -143,10 +145,16 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
     resolveName();
   }, [stationId, stations]);
 
-  const setStation = useCallback((id: string) => {
-    setStationId(id);
-    writeStoredStation(id);
-  }, []);
+  // One call site covers every route in: the station picker, the header
+  // dropdown, and a station-placard QR — they all land here.
+  const setStation = useCallback(
+    (id: string) => {
+      setStationId(id);
+      writeStoredStation(id);
+      logOperatorEvent(companyId, 'station_selected', { workCenterId: id });
+    },
+    [companyId],
+  );
 
   return (
     <StationContext.Provider

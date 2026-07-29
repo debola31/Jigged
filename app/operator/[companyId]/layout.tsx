@@ -26,6 +26,7 @@ import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 /**
@@ -88,6 +89,12 @@ export default function OperatorLayout({
       }
 
       setUserRole(operatorAccess.role || 'operator');
+
+      // Top of the funnel. Everything else is measured against this: if
+      // app_opened is near zero, no downstream number is interpretable and the
+      // problem is deployment, not the product. Fired after membership is
+      // confirmed so a bounced sign-in is not counted as a session.
+      logOperatorEvent(companyId, 'app_opened');
 
       setIsLoading(false);
     };

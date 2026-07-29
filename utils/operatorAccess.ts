@@ -1548,6 +1548,42 @@ type PlaybookRow = {
  * When `jobOperationId` is given, scopes to that step: by routing step for
  * durable notes, falling back to operation_name for legacy ones.
  */
+/**
+ * How many previous notes exist for this part — for the count on the operator's
+ * "Previous notes" affordance.
+ *
+ * Deliberately the SAME RPC the sheet reads, counted server-side via
+ * `head: true, count: 'exact'`, so no rows cross the wire. Counting a different
+ * source (say, part-subject notes only) would be cheaper but would drift from
+ * what the sheet actually shows — and a badge that disagrees with the list is
+ * worse than no badge, because it teaches operators the number is noise.
+ *
+ * Unscoped by step on purpose: the affordance opens at "All part" scope, so the
+ * count must describe what they will land on.
+ *
+ * Returns 0 rather than throwing. This is decoration on a hot path — an operator
+ * must never lose the op card because a count failed.
+ */
+export async function countPartPreviousNotes(
+  partId: string,
+  opts?: { excludeJobId?: string; maxRuns?: number },
+): Promise<number> {
+  const supabase = getSupabase();
+
+  const { count, error } = await supabase.rpc(
+    'part_playbook_notes',
+    {
+      p_part_id: partId,
+      p_exclude_job_id: opts?.excludeJobId ?? undefined,
+      p_max_runs: opts?.maxRuns ?? 10,
+    },
+    { head: true, count: 'exact' },
+  );
+
+  if (error) return 0;
+  return count ?? 0;
+}
+
 export async function getPartPreviousNotes(
   partId: string,
   companyId: string,

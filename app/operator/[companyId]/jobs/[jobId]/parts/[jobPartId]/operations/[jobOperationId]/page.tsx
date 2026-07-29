@@ -37,6 +37,7 @@ import {
 } from '@/components/operations/operationMath';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
+import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
@@ -95,6 +96,18 @@ export default function OperatorOperationActionPage() {
     }
     loadOperator();
   }, [companyId]);
+
+  // Top of the funnel for the reader flow: they reached a step. Compared against
+  // prior_notes_opened this is what shows whether prior knowledge is being found
+  // — notes written but never opened is a discoverability problem, not a
+  // motivation one, and only these two numbers together can tell them apart.
+  //
+  // Keyed on the operation so re-renders don't re-count, and fired regardless of
+  // whether a station is selected — landing here and bouncing off the station
+  // picker is itself a funnel step worth seeing.
+  useEffect(() => {
+    logOperatorEvent(companyId, 'op_card_opened', { jobOperationId });
+  }, [companyId, jobOperationId]);
 
   const {
     data: job,
@@ -156,6 +169,8 @@ export default function OperatorOperationActionPage() {
         quantityGood: qty,
       });
       setQtyDirty(false);
+      // After the write resolves — a failed completion is not a completion.
+      logOperatorEvent(companyId, 'completion_recorded', { jobOperationId, quantityGood: qty });
       await reloadAll();
       // Completion is now persisted. Offer capture last, so a client death at
       // the prompt cannot un-complete the step.

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useLoad } from '@/hooks/useLoad';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 /**
@@ -96,6 +97,13 @@ export default function NoteUsageBanner({ companyId, onOpenDetail }: NoteUsageBa
     <Box sx={{ mb: 2 }}>
       <Alert
         severity="success"
+        // The default success icon is a check circle — the vocabulary of "the
+        // thing you just did worked". Nobody did anything here; this is ambient
+        // news about other people. The eye ties it to the view counts on My work,
+        // which is where tapping it lands, and stops the banner reading as a
+        // confirmation of an action. Green stays: it is doing real work as the
+        // reward signal, and that is the whole point of the banner.
+        icon={<VisibilityOutlinedIcon fontSize="inherit" />}
         onClose={(e) => {
           // The close button sits INSIDE the tappable Alert, so without this the
           // click bubbles to onOpenDetail and dismissing navigates the operator

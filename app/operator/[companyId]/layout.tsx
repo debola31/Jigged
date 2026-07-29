@@ -17,6 +17,7 @@ import ListItemText from '@mui/material/ListItemText';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
+import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -117,12 +118,14 @@ export default function OperatorLayout({
   useEffect(() => {
     if (pathname?.includes('/profile')) setNavValue('profile');
     else if (pathname?.includes('/inventory')) setNavValue('inventory');
+    else if (pathname?.includes('/my-work')) setNavValue('my-work');
     else setNavValue('jobs');
   }, [pathname]);
 
   const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
+    else if (newValue === 'my-work') router.push(`/operator/${companyId}/my-work`);
     else if (newValue === 'profile') router.push(`/operator/${companyId}/profile`);
     else router.push(`/operator/${companyId}/jobs`);
   };
@@ -204,7 +207,11 @@ function OperatorShell({
   // The warehouse is station-independent, so keep the nav (and a way out) on
   // inventory routes even before a station is picked.
   const isInventoryRoute = pathname?.includes('/inventory') ?? false;
-  const navVisible = Boolean(stationId) || isInventoryRoute;
+  // Same reason as inventory: what you've written isn't tied to a station, and
+  // this is the destination the login banner points at — it must be reachable
+  // before a station is picked.
+  const isMyWorkRoute = pathname?.includes('/my-work') ?? false;
+  const navVisible = Boolean(stationId) || isInventoryRoute || isMyWorkRoute;
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   const handleStationMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -395,6 +402,16 @@ function OperatorShell({
                 sx={{ minHeight: 56 }}
               />
             )}
+            {/* "My work" is the operator's own contribution surface. Today that
+                is notes and photos; it is named for what it will hold, not only
+                for what is in it now. What it must NOT grow into is a record of
+                completions — see the header of the my-work page. */}
+            <BottomNavigationAction
+              label="My work"
+              value="my-work"
+              icon={<StickyNote2OutlinedIcon />}
+              sx={{ minHeight: 56 }}
+            />
             <BottomNavigationAction
               label="Profile"
               value="profile"

@@ -395,7 +395,7 @@ SyteLine, Infor, Oracle — surface outside processing in the vendor/purchasing 
 readiness/predecessor logic — it informs the shipping lead, replacing the hand-highlighted
 traveler / paper slip. The queue and each row offer Undo (received → sent → not-sent).
 
-**Audit / activity:** send/receive are **not** logged as `job_notes` — `sent_at`/`sent_by` and
+**Audit / activity:** send/receive are **not** logged as `notes` — `sent_at`/`sent_by` and
 `completed_at`/`completed_by` on the operation are the record, and the **/activity** feed
 derives vendor-tagged **"Sent to {vendor}"** and **"Received from {vendor}"** rows under the
 **Operations** filter (alongside internal "Operation completed"), from those columns

@@ -3477,7 +3477,7 @@ export type Database = {
         Args: { p_company_id: string; p_context?: Json; p_kind: string }
         Returns: undefined
       }
-      my_note_view_digest: { Args: { p_tz: string }; Returns: number }
+      my_note_view_digest: { Args: never; Returns: number }
       next_order_number: { Args: { company_uuid: string }; Returns: number }
       no_client_access_grant_leaks: {
         Args: never

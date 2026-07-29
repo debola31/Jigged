@@ -431,8 +431,9 @@ def test_counters_never_fall_when_a_member_is_deleted(shop):
 
 
 def test_digest_counts_people_not_rows(shop):
-    """Three rows can be one person on three jobs. "3 people used your notes"
-    for a single reader is the exact overstatement this must not make."""
+    """Three rows can be one person on three jobs. "3 views" for a single reader
+    consulting one note is the exact overstatement this must not make — the
+    digest sums viewer_count, which is per (person, note)."""
     note_id = _make_note(shop)
     for job in (shop["job_a"], shop["job_b"]):
         shop["reader"]["client"].rpc(
@@ -440,9 +441,7 @@ def test_digest_counts_people_not_rows(shop):
         ).execute()
 
     assert len(_rows(shop, note_id)) == 2
-    n = shop["author"]["client"].rpc(
-        "my_note_view_digest", {"p_tz": "America/Detroit"}
-    ).execute().data
+    n = shop["author"]["client"].rpc("my_note_view_digest").execute().data
     assert n == 1
 
 
@@ -452,10 +451,39 @@ def test_digest_is_scoped_to_the_callers_own_notes(shop):
         "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
     ).execute()
 
-    n = shop["reader2"]["client"].rpc(
-        "my_note_view_digest", {"p_tz": "America/Detroit"}
-    ).execute().data
+    n = shop["reader2"]["client"].rpc("my_note_view_digest").execute().data
     assert n == 0
+
+
+def test_digest_takes_no_time_window(shop):
+    """The permanent rule, asserted rather than left to code review: the digest
+    accepts NO arguments. A caller-supplied window would be a bisection oracle
+    recovering WHEN a note was read, which combined with note_viewers() naming
+    the reader reconstructs "Kurtis had to look this up on Tuesday". The banner
+    subtracts a running total on the client instead, so no instant ever crosses
+    the wire."""
+    with pytest.raises(Exception):
+        shop["author"]["client"].rpc(
+            "my_note_view_digest", {"p_tz": "America/Detroit"}
+        ).execute()
+
+
+def test_digest_is_a_running_total_not_a_window(shop):
+    """It must keep climbing as new people read, with no window that could age
+    a view out — that is what makes "N new views since you last looked" work
+    from a client-side subtraction alone."""
+    note_id = _make_note(shop)
+    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 0
+
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 1
+
+    shop["reader2"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+    assert shop["author"]["client"].rpc("my_note_view_digest").execute().data == 2
 
 
 # ── the durable subject, and the constraints protecting it ───────────────────

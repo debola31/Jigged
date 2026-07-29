@@ -34,6 +34,9 @@ import type {
   JobNote,
   JobNoteMedia,
   PartPreviousNote,
+  MyContribution,
+  MyNote,
+  NoteViewer,
 } from '@/types/operator';
 
 // ============================================================================
@@ -1628,4 +1631,122 @@ export async function getPartPreviousNotes(
     media: r.media ?? [],
     job_number: r.job_number ?? '',
   }));
+}
+
+// ============================================================================
+// MY WORK — the operator's own contribution, and its reception
+// ============================================================================
+
+/**
+ * What the caller has written, and how far it has travelled.
+ *
+ * This is the return half of the loop: an operator writes something down and,
+ * without this, nothing ever comes back. The login banner says "3 people used
+ * your notes this week" and until now had nowhere to go.
+ *
+ * WHAT IT DELIBERATELY DOES NOT RETURN. No completion count, no streak, no
+ * average, nothing comparable against another person. A contribution screen is
+ * exactly where a leaderboard wants to grow, and the shop-floor guardrail is
+ * that no operator-facing surface ever reflects their pace or standing back at
+ * them. Their own output and its reception, nothing else.
+ *
+ * viewer_count and usage_count are columns on the row, so the whole screen is
+ * one round trip — no per-note count queries.
+ */
+export async function getMyContribution(companyId: string): Promise<MyContribution> {
+  const supabase = getSupabase();
+
+  const member = await getCurrentMember(companyId);
+  const empty: MyContribution = {
+    noteCount: 0,
+    photoCount: 0,
+    peopleReached: 0,
+    notes: [],
+  };
+  if (!member) return empty;
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select(
+      'id, body, created_at, viewer_count, usage_count, ' +
+        'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
+        'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
+        'part:parts(part_name), ' +
+        // Both job FKs: a job-subject note carries job_id, a durable
+        // part-subject one carries only captured_job_id. Either way the author
+        // gets a way back to where they wrote it.
+        'job:jobs!notes_job_fk(id, job_number), ' +
+        'captured_job:jobs!notes_captured_job_fk(id, job_number), ' +
+        'media:note_media(id)',
+    )
+    .eq('company_id', companyId)
+    .eq('author_id', member.id)
+    // Auto-logged entries are not somebody's contribution.
+    .eq('note_type', 'user')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) return empty;
+
+  type Row = {
+    id: string;
+    body: string | null;
+    created_at: string;
+    viewer_count: number;
+    usage_count: number;
+    operation: StepRel;
+    captured_operation: StepRel;
+    part: { part_name: string | null } | { part_name: string | null }[] | null;
+    job: JobRel;
+    captured_job: JobRel;
+    media: Array<{ id: string }> | null;
+  };
+
+  type JobRel = { id: string; job_number: string } | { id: string; job_number: string }[] | null;
+  const oneJob = (rel: JobRel) => (Array.isArray(rel) ? rel[0] : rel) ?? null;
+
+  const notes: MyNote[] = (data as unknown as Row[]).map((r) => {
+    const part = Array.isArray(r.part) ? r.part[0] : r.part;
+    const job = oneJob(r.job) ?? oneJob(r.captured_job);
+    return {
+      id: r.id,
+      body: r.body,
+      created_at: r.created_at,
+      job_id: job?.id ?? null,
+      job_number: job?.job_number ?? null,
+      // A durable part-subject note has no step of its own; the step it was
+      // captured at is the readable label.
+      operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),
+      part_name: part?.part_name ?? null,
+      photo_count: (r.media ?? []).length,
+      viewer_count: r.viewer_count,
+      usage_count: r.usage_count,
+    };
+  });
+
+  return {
+    noteCount: notes.length,
+    photoCount: notes.reduce((n, x) => n + x.photo_count, 0),
+    // Summed rather than distinct, and labelled "views" in the UI for exactly
+    // that reason: the per-note numbers it adds up are visible right below it.
+    // Distinct people across all notes would need the view rows, which are
+    // deliberately unreadable by any browser role.
+    peopleReached: notes.reduce((n, x) => n + x.viewer_count, 0),
+    notes,
+  };
+}
+
+/**
+ * Who read one of YOUR notes. Authors only.
+ *
+ * Enforced in note_viewers() itself, not here: the caller must be the note's
+ * author, and note_views has no client read path at all, so this is the single
+ * narrow window through which any name is ever exposed. One row per person
+ * however many jobs they used it on, ordered by name and carrying no timestamp
+ * — an author must not be able to infer who read it first.
+ */
+export async function getNoteViewers(noteId: string): Promise<NoteViewer[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('note_viewers', { p_note_id: noteId });
+  if (error || !data) return [];
+  return data as unknown as NoteViewer[];
 }

@@ -114,7 +114,10 @@ export default function PartLocationInventory({
         <Button variant="contained" color="primary" startIcon={<AddIcon />} onClick={() => setAction('add')}>
           Add
         </Button>
-        <Button variant="contained" color="error" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>
+        {/* At-rest trigger, so `outlined error` — design-system.md reserves `contained error`
+            for the final confirm inside the dialog. This was a contained red fill on the most
+            frequently pressed control on the page. */}
+        <Button variant="outlined" color="error" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>
           Remove
         </Button>
         <Button variant="outlined" startIcon={<SwapHorizIcon />} onClick={() => setAction('move')}>

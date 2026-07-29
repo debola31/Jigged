@@ -43,34 +43,13 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => ({ from: fromSpy }),
 }));
 
-import { getShopMaterialShortages, getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
-
-/** N job parts, each on its own job, all making the same part. */
-const jobPartRows = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({
-    id: `jp${i}`,
-    job_id: `job${i}`,
-    part_id: 'made1',
-    quantity: 2,
-    production_status: 'not_started',
-    part: { id: 'made1', part_name: 'Widget' },
-    job: {
-      id: `job${i}`,
-      job_number: `J-${1000 + i}`,
-      due_date: null,
-      is_hot: false,
-      production_status: 'not_started',
-      company_id: 'co1',
-      deleted_at: null,
-    },
-  }));
+import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
 
 beforeEach(() => {
   vi.clearAllMocks();
   filters = [];
   fromSpy.mockImplementation((table: string) => makeBuilder(table));
 
-  tableData.job_parts = jobPartRows(20);
   tableData.parts_bom = [
     { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'each', consume_whole_units: false },
     { id: 'b2', parent_part_id: 'made1', child_part_id: 'oring', quantity: 4, unit: 'each', consume_whole_units: false },
@@ -85,125 +64,51 @@ beforeEach(() => {
   tableData.inventory_transactions = [];
 });
 
-describe('getShopMaterialShortages — request budget', () => {
+describe('getJobPartMaterialCheck — request budget', () => {
   /**
-   * 20 jobs × 3 materials. A naive implementation issues at least one read per job (20+) or
-   * per BOM line (60+). This pipeline issues one per TABLE.
+   * One request per TABLE, not per BOM line. The shape earns its keep even for a single job
+   * part: a naive version would look up each child's stock and conversions individually.
    */
-  it('does not scale its query count with the number of jobs', async () => {
-    await getShopMaterialShortages('co1', 'all');
-
-    const tables = fromSpy.mock.calls.map((c) => c[0]);
-    expect(tables).toEqual([
-      'job_parts',
+  it('reads one query per table regardless of BOM size', async () => {
+    await getJobPartMaterialCheck({
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
+    });
+    expect(fromSpy.mock.calls.map((c) => c[0])).toEqual([
       'parts_bom',
       'parts',
       'inventory_transactions',
-      // parts_unit_conversions is skipped entirely — every BOM unit matches its stock unit.
+      // parts_unit_conversions is skipped — every BOM unit matches its stock unit.
     ]);
-    expect(fromSpy).toHaveBeenCalledTimes(4);
-  });
-
-  it('holds that budget when the job count grows', async () => {
-    tableData.job_parts = jobPartRows(200);
-    await getShopMaterialShortages('co1', 'all');
-    expect(fromSpy).toHaveBeenCalledTimes(4);
   });
 
   it('reads conversions only for lines whose BOM unit differs from the stock unit', async () => {
     tableData.parts_bom = [
       { id: 'b1', parent_part_id: 'made1', child_part_id: 'steel', quantity: 3, unit: 'feet', consume_whole_units: false },
     ];
-    await getShopMaterialShortages('co1', 'all');
-    expect(fromSpy.mock.calls.map((c) => c[0])).toContain('parts_unit_conversions');
-  });
-
-  // Neither consumer renders where stock sits, so the bin balances and the whole location
-  // tree are never read. This was loaded for the operator traveler's take action, which was
-  // removed — see docs/modules/inventory.md J7.
-  it('never reads bin balances or the location tree', async () => {
-    await getShopMaterialShortages('co1', 'all');
     await getJobPartMaterialCheck({
-      companyId: 'co1', jobId: 'job1', jobPartId: 'jp1',
-      madePartId: 'made1', orderQuantity: 2,
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
     });
-    const tables = fromSpy.mock.calls.map((c) => c[0]);
-    expect(tables).not.toContain('part_location_stock');
-    expect(tables).not.toContain('inventory_locations');
-  });
-});
-
-describe('getShopMaterialShortages — aggregation', () => {
-  it('aggregates one row per part across every job that needs it', async () => {
-    const { shortages, jobCount } = await getShopMaterialShortages('co1', 'all');
-
-    expect(jobCount).toBe(20);
-    expect(shortages.map((s) => s.partId).sort()).toEqual(['bolt', 'oring', 'steel']);
-
-    // 20 jobs × 2 each × 3 per unit = 120 required, against 15 on hand counted ONCE.
-    const steel = shortages.find((s) => s.partId === 'steel')!;
-    expect(steel.totalRequired).toBe(120);
-    expect(steel.onHand).toBe(15);
-    expect(steel.shortBy).toBe(105);
-    expect(steel.contributions).toHaveLength(20);
-  });
-
-  it('subtracts what those jobs already took', async () => {
-    tableData.inventory_transactions = [
-      { job_id: 'job0', part_id: 'steel', converted_quantity: 6, has_discrepancy: false },
-    ];
-    const { shortages } = await getShopMaterialShortages('co1', 'all');
-    const steel = shortages.find((s) => s.partId === 'steel')!;
-    expect(steel.totalIssued).toBe(6);
-    expect(steel.shortBy).toBe(99); // (120 − 6) − 15
+    expect(fromSpy.mock.calls.map((c) => c[0])).toContain('parts_unit_conversions');
   });
 
   // An 'addition' or 'adjustment' counted as consumption would understate every shortage.
   it('only counts depletions, never additions or adjustments', async () => {
-    await getShopMaterialShortages('co1', 'all');
+    await getJobPartMaterialCheck({
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
+    });
     expect(filterFor('inventory_transactions', 'eq')).toContainEqual(['type', 'depletion']);
     expect(filterFor('inventory_transactions', 'eq')).toContainEqual(['company_id', 'co1']);
   });
 
-  // The classic soft-delete leak: an archived job still has live job_parts rows.
-  it('excludes archived jobs and scopes to the company', async () => {
-    await getShopMaterialShortages('co1', 'all');
-    expect(filterFor('job_parts', 'is')).toContainEqual(['job.deleted_at', null]);
-    expect(filterFor('job_parts', 'eq')).toContainEqual(['job.company_id', 'co1']);
-    expect(filterFor('job_parts', 'in')).toContainEqual([
-      'production_status', ['not_started', 'in_progress'],
-    ]);
-  });
-});
-
-describe('getShopMaterialShortages — window', () => {
-  const HOT = { ...jobPartRows(1)[0], id: 'jp-hot', job_id: 'job-hot' };
-
-  it('keeps a job due far in the future out of the week window', async () => {
-    tableData.job_parts = [{
-      ...HOT,
-      job: { ...HOT.job, id: 'job-hot', job_number: 'J-FUTURE', due_date: '2099-01-01', is_hot: false },
-    }];
-    const { jobCount } = await getShopMaterialShortages('co1', 'week', new Date(2026, 6, 28));
-    expect(jobCount).toBe(0);
-  });
-
-  // The window only ever ADDS jobs. Each of these would be a harmful omission.
-  it.each([
-    ['a hot job', { due_date: '2099-01-01', is_hot: true }],
-    ['an overdue job', { due_date: '2020-01-01', is_hot: false }],
-    ['an undated job', { due_date: null, is_hot: false }],
-  ])('always includes %s, whatever the window', async (_label, over) => {
-    tableData.job_parts = [{ ...HOT, job: { ...HOT.job, ...over } }];
-    const { jobCount } = await getShopMaterialShortages('co1', 'week', new Date(2026, 6, 28));
-    expect(jobCount).toBe(1);
-  });
-
-  it('reports the resolved range so "this week" is never ambiguous', async () => {
-    const { rangeEnd } = await getShopMaterialShortages('co1', 'week', new Date(2026, 6, 28));
-    expect(rangeEnd).toBe('2026-08-02');
-    const all = await getShopMaterialShortages('co1', 'all', new Date(2026, 6, 28));
-    expect(all.rangeEnd).toBeNull();
+  // Neither surface renders where stock sits, so bin balances and the location tree are never
+  // read — see docs/modules/inventory.md J7 for why the operator take action went away.
+  it('never reads bin balances or the location tree', async () => {
+    await getJobPartMaterialCheck({
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
+    });
+    const tables = fromSpy.mock.calls.map((c) => c[0]);
+    expect(tables).not.toContain('part_location_stock');
+    expect(tables).not.toContain('inventory_locations');
   });
 });
 

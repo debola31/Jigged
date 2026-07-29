@@ -8,6 +8,7 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
@@ -110,16 +111,31 @@ export default function PartLocationActionModal({
   const available = isMove && sourceLoc && unit === primaryUnit ? sourceLoc.quantity : null;
 
   /**
-   * What's actually at the chosen location, for a Remove.
+   * Every location, each carrying what this part actually holds there.
    *
-   * `sourceBalances` was already passed in but only consulted for Move, so Remove offered
-   * every location — including parent nodes holding nothing — with no indication of what was
-   * there. Typing a number against an empty shelf then failed at the database with no clue
-   * why. Only meaningful in the primary unit; a different unit can't be compared client-side.
+   * `sourceBalances` was already passed in but only consulted for Move, so the other actions
+   * offered a bare list of names — including parent nodes holding nothing — and the operator
+   * found out a shelf was empty only *after* choosing it and typing a number. The quantity
+   * belongs on the option, so the choice is informed rather than corrected.
+   *
+   * Locations holding stock sort first for a Remove: you are far likelier to be taking from a
+   * full shelf than from an empty one. Empty ones stay selectable — a graceful removal from a
+   * bin the system thinks is empty is a legitimate thing to record.
    */
+  const quantityByLocation = new Map(sourceBalances.map((b) => [b.id, b.quantity]));
+  const locationOptions = (() => {
+    const withQty = locations.map((l) => ({ ...l, quantity: quantityByLocation.get(l.id) ?? 0 }));
+    if (action !== 'deplete') return withQty;
+    return withQty.sort((a, b) => {
+      if ((a.quantity > 0) !== (b.quantity > 0)) return a.quantity > 0 ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+  })();
+
+  /** What's at the chosen location. Only meaningful in the primary unit. */
   const hereNow =
     action === 'deplete' && location && unit === primaryUnit
-      ? (sourceBalances.find((b) => b.id === location.id)?.quantity ?? 0)
+      ? (quantityByLocation.get(location.id) ?? 0)
       : null;
   const overdrawing = hereNow !== null && Number.isFinite(parseFloat(quantity))
     && parseFloat(quantity) > hereNow;
@@ -232,11 +248,31 @@ export default function PartLocationActionModal({
             </>
           ) : (
             <Autocomplete
-              options={locations}
+              options={locationOptions}
               value={location}
               onChange={(_, v) => setLocation(v)}
+              // The input keeps the bare path; the quantity lives in the dropdown row, so a
+              // chosen value doesn't read as part of the location's name.
               getOptionLabel={(o) => o.label}
               isOptionEqualToValue={(o, v) => o.id === v.id}
+              renderOption={(props, o) => {
+                const { key, ...rest } = props;
+                const qty = quantityByLocation.get(o.id) ?? 0;
+                return (
+                  // The label takes the slack rather than relying on justify-content, which
+                  // MUI's own option class overrides.
+                  <Box component="li" key={key} {...rest} sx={{ display: 'flex', gap: 2 }}>
+                    <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{o.label}</Box>
+                    <Typography
+                      variant="caption"
+                      color={qty > 0 ? 'text.secondary' : 'text.disabled'}
+                      sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                    >
+                      {qty > 0 ? `${num(qty)} ${primaryUnit}` : 'empty'}
+                    </Typography>
+                  </Box>
+                );
+              }}
               renderInput={(params) => <TextField {...params} label="Location" required />}
             />
           )}

@@ -90,39 +90,3 @@ export interface MaterialRequirement {
   basis: UnitBasis;
   isLocationTracked: boolean;
 }
-
-/** One job's claim on a part, for the shop-wide view. */
-export interface ShortageContribution {
-  jobId: string;
-  jobNumber: string;
-  jobPartId: string;
-  madePartName: string | null;
-  dueDate: string | null;
-  isHot: boolean;
-  /** `null` when this job's line is incomparable, so it can't join the total. */
-  required: number | null;
-}
-
-/** A part aggregated across every open job that needs it. */
-export interface PartShortage {
-  partId: string;
-  partName: string;
-  stockUnit: string | null;
-  /** Counted ONCE, however many jobs want it — the whole point of aggregating. */
-  onHand: number;
-  totalRequired: number | null;
-  totalIssued: number;
-  shortBy: number | null;
-  status: 'ok' | 'short' | 'incomparable';
-  /** How many contributing jobs couldn't be compared, surfaced rather than swallowed. */
-  incomparableJobCount: number;
-  /** Due date ascending, undated last. */
-  contributions: ShortageContribution[];
-}
-
-/**
- * Which open jobs the shop-wide view counts.
- *
- * Overdue, hot and undated jobs are in scope in EVERY window — see `shortageWindowEnd`.
- */
-export type ShortageWindow = 'week' | 'month' | 'all';

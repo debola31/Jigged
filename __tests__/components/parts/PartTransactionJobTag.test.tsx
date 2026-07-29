@@ -153,7 +153,7 @@ describe('PartLocationActionModal — job tag on removal (#59)', () => {
     renderLoc('deplete');
 
     await user.click(await screen.findByRole('combobox', { name: /location/i }));
-    await user.click(await screen.findByRole('option', { name: 'Shelf A' }));
+    await user.click(await screen.findByRole('option', { name: /^Shelf A/ }));
 
     await user.click(screen.getByRole('combobox', { name: /tag to a job/i }));
     await user.click(await screen.findByRole('option', { name: /J-1048/ }));
@@ -199,10 +199,24 @@ describe('PartLocationActionModal — removing more than is there', () => {
       { wrapper },
     );
 
-  const pickLocation = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  // Option names now carry the quantity ("Shelf A40 each"), so match the label prefix.
+  const pickLocation = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
     await user.click(await screen.findByRole('combobox', { name: /location/i }));
-    await user.click(await screen.findByRole('option', { name }));
+    await user.click(await screen.findByRole('option', { name: new RegExp(`^${label}`) }));
   };
+
+  /**
+   * The point of the whole change: the quantity is on the OPTION, so you pick a shelf that has
+   * stock rather than picking blind and being corrected afterwards.
+   */
+  it('shows what each location holds in the dropdown, stocked ones first', async () => {
+    const user = userEvent.setup();
+    renderRemove([{ id: 'l1', label: 'Shelf A', quantity: 40 }]);
+    await user.click(await screen.findByRole('combobox', { name: /location/i }));
+
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['Shelf A40 each', 'Cabinet 3empty']);
+  });
 
   it('says what is actually at the chosen location', async () => {
     const user = userEvent.setup();

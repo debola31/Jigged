@@ -92,8 +92,10 @@ export default function InventoryTab({
               >
                 Add Stock
               </Button>
+              {/* At-rest trigger → `outlined error`, not a contained red fill; the contained
+                  variant belongs on the confirm inside the dialog. */}
               <Button
-                variant="contained"
+                variant="outlined"
                 color="error"
                 size="large"
                 startIcon={<RemoveIcon />}

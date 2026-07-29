@@ -586,11 +586,25 @@ is flagged *before* the job is scheduled, not discovered at the machine. From th
 you can act — add to the buy list ([J5](#j5--buy-it)) or substitute.
 
 A shop-wide **"Short for this week"** view aggregates the same computation across open jobs.
+**Deferred to Phase 3** — see the note below.
 
 > **Built 2026-07-28.** `JobPartMaterialsCard` (was a read-only BOM list with no stock in it)
 > now shows **Needs · On hand · Issued · Short by** per material, and
-> `/dashboard/{companyId}/inventory/shortages` aggregates the same computation across open
-> jobs. Everything is derived on read — no new table, no migration.
+> Everything is derived on read — no new table, no migration.
+>
+> **The shop-wide roll-up was built and then deferred to Phase 3 (#571).** It worked — one row
+> per part, on-hand counted once across every open job, verified live on the seed. It came out
+> because **it had no next step.** J4's own line says *"from the shortage you can act — add to
+> the buy list (J5) or substitute"*, and J5 is Phase 3: the page could tell you that you were
+> short and then offer nothing to do about it. A toolbar button whose default window usually
+> reported "nothing is short" was earning space on a promise it couldn't keep.
+>
+> The per-job card is the half that answers J4's actual question — *can I say yes to this rush
+> job right now?* — and it needs no purchasing to be useful.
+>
+> Restoring it is cheap: the page, the batched aggregate (`getShopMaterialShortages`) and the
+> roll-up (`rollUpShortages`, with the test pinning on-hand-counted-once) are all in git at
+> **`87df208`**. Bring them back with J5, where "short" leads to a buy list.
 >
 > **Three limitations, all stated on screen rather than left to be found in a wrong number:**
 >
@@ -602,8 +616,9 @@ A shop-wide **"Short for this week"** view aggregates the same computation acros
 > 2. **No "on order" column.** Purchase orders don't exist until Phase 3 (#571). A permanently
 >    empty column trains people to ignore the row, so it is omitted rather than stubbed.
 > 3. **A job card compares one job to the whole shop's stock.** Two jobs each needing 10 against
->    15 both read "not short" individually; only the shop-wide view sees the conflict. The card
->    links to it so its number never reads as the whole truth.
+>    15 both read "not short" individually — nothing surfaces that conflict until the shop-wide
+>    roll-up returns in Phase 3. The card says on screen that other open jobs may want the same
+>    material, so its number never reads as the whole truth.
 >
 > **Units that can't be converted are refused, not guessed.** `convertToBaseUnit` returns the
 > *unconverted* number with a `console.warn` when there is no route between two units — on this
@@ -1587,18 +1602,17 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
 
 - [x] **Given** a job, **when** it is viewed, **then** each material shows required · on hand ·
   issued · short by — *verified by `__tests__/components/jobs/JobPartMaterialsCard.test.tsx`*.
-- [x] **Given** two open jobs needing the same material, **then** the shop-wide view counts
-  on-hand **once** and sums the requirements — *verified by
-  `__tests__/lib/materialRequirements.test.ts > 'counts on-hand once across jobs'` and
-  `__tests__/utils/materialCheckAccess.test.ts`*. This is the case a per-job card structurally
-  cannot show.
+- [ ] **Given** two open jobs needing the same material, **then** on-hand is counted **once**
+  across them — **built and deferred to Phase 3**, not a gap left open by accident. It was
+  verified working (`rollUpShortages`, on-hand-counted-once test, git `87df208`) and pulled
+  because a shortage has nowhere to go until there's a buy list.
 - [x] **Given** a BOM unit with no route to the stock unit, **then** short-by is **blank, never
   zero**, and the row says why — *verified by `…JobPartMaterialsCard.test.tsx > 'renders an em
   dash, never a number'`; manually confirmed 2026-07-28 with a `pounds` BOM line against an
   `each` part.*
-- [x] **Given** any number of open jobs, **then** the shop-wide query count stays constant —
-  *verified by `…materialCheckAccess.test.ts > 'does not scale its query count'` (4 queries at
-  20 jobs and at 200).*
+- [x] **Given** a job part with any number of BOM lines, **then** the read costs one query per
+  table rather than one per line — *verified by
+  `…materialCheckAccess.test.ts > 'reads one query per table regardless of BOM size'`.*
 - [ ] **Given** a made sub-assembly on a BOM, **then** its own materials are exploded —
   **not built, and captioned on screen.** Level 1 only; see the note in J4. Follow-up.
 

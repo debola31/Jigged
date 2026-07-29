@@ -1,25 +1,17 @@
 /**
- * The pure core behind J4 and J7.
+ * The pure core behind J4.
  *
- * The two tests that matter most, because both encode a bug that would otherwise ship
- * looking correct:
- *   - `rollUpShortages` counting on-hand ONCE across jobs, not once per job.
- *   - `resolveUnitBasis` refusing to compare units it can't convert, rather than returning
- *     the unconverted number the way `convertToBaseUnit` does.
+ * The one that matters most is `resolveUnitBasis` refusing to compare units it can't convert,
+ * rather than returning the unconverted number the way `convertToBaseUnit` does — that's the
+ * difference between "we can't tell" and a confident wrong answer.
  */
 import { describe, it, expect } from 'vitest';
 import {
   buildRequirement,
   requiredQuantity,
   resolveUnitBasis,
-  rollUpShortages,
-  shortageWindowEnd,
 } from '@/lib/materialRequirements';
-import type {
-  MaterialRequirement,
-  MaterialStockFacts,
-  ShortageContribution,
-} from '@/types/materialCheck';
+import type { MaterialStockFacts } from '@/types/materialCheck';
 
 const stock = (over: Partial<MaterialStockFacts> & { partId: string }): MaterialStockFacts => ({
   partName: over.partId.toUpperCase(),
@@ -162,120 +154,5 @@ describe('buildRequirement', () => {
   it('labels an archived material rather than dropping the row', () => {
     const r = req({ stock: stock({ partId: 'p1', onHand: 0, isArchived: true }) });
     expect(r.status).toBe('archived');
-  });
-});
-
-describe('rollUpShortages', () => {
-  const contribution = (over: Partial<ShortageContribution> & { jobId: string }): ShortageContribution => ({
-    jobNumber: over.jobId.toUpperCase(),
-    jobPartId: `${over.jobId}-jp`,
-    madePartName: 'Widget',
-    dueDate: null,
-    isHot: false,
-    required: null,
-    ...over,
-  });
-
-  const line = (jobId: string, requirement: MaterialRequirement, over: Partial<ShortageContribution> = {}) => ({
-    contribution: contribution({ jobId, ...over }),
-    requirement,
-  });
-
-  /**
-   * THE test. Two jobs each need 10 of a part with 15 on hand. Individually neither is
-   * short. Aggregated, the shop is 5 short. A roll-up that compares each job to the full
-   * on-hand — or sums per-job shortfalls — reports "fine" and the shop runs out mid-week.
-   */
-  it('counts on-hand once across jobs instead of once per job', () => {
-    const r = () => req({ bomQuantity: 10, orderQuantity: 1, stock: stock({ partId: 'steel', onHand: 15 }) });
-    const [row] = rollUpShortages([line('j1', r()), line('j2', r())]);
-
-    expect(row.partId).toBe('steel');
-    expect(row.totalRequired).toBe(20);
-    expect(row.onHand).toBe(15);
-    expect(row.shortBy).toBe(5);
-    expect(row.status).toBe('short');
-    expect(row.contributions).toHaveLength(2);
-  });
-
-  it('nets off stock already issued, which has left the shelf on-hand reflects', () => {
-    const r = req({ bomQuantity: 20, orderQuantity: 1, issued: 8, stock: stock({ partId: 'steel', onHand: 10 }) });
-    const [row] = rollUpShortages([line('j1', r)]);
-    expect(row.totalIssued).toBe(8);
-    expect(row.shortBy).toBe(2); // (20 − 8) − 10
-  });
-
-  // A job with two job_parts drawing the same material carries the identical job-level
-  // issued figure on both rows. Adding both would halve the apparent shortage.
-  it('does not double-count issued when one job draws a material twice', () => {
-    const r = () => req({ bomQuantity: 5, orderQuantity: 1, issued: 6, stock: stock({ partId: 'steel', onHand: 0 }) });
-    const [row] = rollUpShortages([
-      line('j1', r(), { jobPartId: 'jp-a' }),
-      line('j1', r(), { jobPartId: 'jp-b' }),
-    ]);
-    expect(row.totalIssued).toBe(6);
-  });
-
-  it('quarantines an incomparable contribution without poisoning the comparable total', () => {
-    const good = req({ bomQuantity: 4, orderQuantity: 1, stock: stock({ partId: 'steel', onHand: 1 }) });
-    const bad = req({
-      bomQuantity: 4, bomUnit: 'feet', orderQuantity: 1,
-      stock: stock({ partId: 'steel', primaryUnit: 'pounds', onHand: 1 }),
-    });
-    const [row] = rollUpShortages([line('j1', good), line('j2', bad)]);
-
-    expect(row.totalRequired).toBe(4);
-    expect(row.shortBy).toBe(3);
-    expect(row.incomparableJobCount).toBe(1);
-    expect(row.status).toBe('short');
-  });
-
-  it('marks the part incomparable only when no contribution can be compared', () => {
-    const bad = req({
-      bomUnit: 'feet',
-      stock: stock({ partId: 'steel', primaryUnit: 'pounds', onHand: 1 }),
-    });
-    const [row] = rollUpShortages([line('j1', bad)]);
-    expect(row.status).toBe('incomparable');
-    expect(row.totalRequired).toBeNull();
-    expect(row.shortBy).toBeNull();
-  });
-
-  it('leaves never-stocked and archived materials off a purchasing list', () => {
-    expect(rollUpShortages([
-      line('j1', req({ stock: stock({ partId: 'a', isStocked: false }) })),
-      line('j2', req({ stock: stock({ partId: 'b', isArchived: true }) })),
-    ])).toEqual([]);
-  });
-
-  it('sorts shortages worst first, and contributions by due date with undated last', () => {
-    const mk = (partId: string, need: number, onHand: number) =>
-      req({ bomQuantity: need, orderQuantity: 1, stock: stock({ partId, onHand }) });
-    const rows = rollUpShortages([
-      line('j1', mk('mild', 12, 10), { dueDate: '2026-08-05' }),
-      line('j2', mk('bad', 50, 0), { dueDate: null }),
-      line('j3', mk('bad', 0, 0), { dueDate: '2026-08-01' }),
-      line('j4', mk('fine', 1, 99), { dueDate: '2026-08-02' }),
-    ]);
-    expect(rows.map((r) => r.partId)).toEqual(['bad', 'mild', 'fine']);
-    expect(rows[0].contributions.map((c) => c.jobId)).toEqual(['j3', 'j2']);
-  });
-});
-
-describe('shortageWindowEnd', () => {
-  // A rolling today+7 gives a different answer on Friday than on Monday for an unchanged set
-  // of jobs, which is how people stop trusting the number. Week-ending is stable.
-  it('ends "this week" on the coming Sunday, not seven days out', () => {
-    expect(shortageWindowEnd('week', new Date(2026, 6, 28))).toBe('2026-08-02'); // Tue → Sun
-    expect(shortageWindowEnd('week', new Date(2026, 6, 31))).toBe('2026-08-02'); // Fri → same Sun
-  });
-
-  it('keeps a Sunday on its own day rather than pushing a week out', () => {
-    expect(shortageWindowEnd('week', new Date(2026, 7, 2))).toBe('2026-08-02');
-  });
-
-  it('gives 30 days for the month window and no bound for all', () => {
-    expect(shortageWindowEnd('month', new Date(2026, 6, 28))).toBe('2026-08-27');
-    expect(shortageWindowEnd('all', new Date(2026, 6, 28))).toBeNull();
   });
 });

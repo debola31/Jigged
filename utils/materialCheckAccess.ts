@@ -1,33 +1,24 @@
 /**
- * Job material check — access layer (journeys J4 and J7 in docs/modules/inventory.md).
+ * Job material check — access layer (journey J4 in docs/modules/inventory.md).
  *
  * A thin driver over `lib/materialRequirements`, mirroring the
  * `inventoryCountAccess` ↔ `inventoryCountPlan` split. No new tables: required comes from the
  * live BOM, on-hand from `parts.quantity`, issued from `depletion` rows carrying the job.
  *
- * **The N+1 rule.** Both entry points are the SAME pipeline — the per-job check just runs it
- * with single-element inputs. Query count is CONSTANT in the number of jobs, parts and BOM
- * lines: two dependent waves of batched `.in()` reads, never a loop issuing one request per
- * job. `__tests__/utils/materialCheckAccess.test.ts` asserts the request count against a
- * 20-job fixture, because a comment saying "don't N+1 this" is not a guarantee (issue #68).
+ * **Batched, never per-item.** A job part's materials cost a fixed number of requests
+ * regardless of how many BOM lines it has — batched `.in()` reads in two dependent waves, and
+ * the test asserts the count. Written this way because it was originally also feeding a
+ * shop-wide roll-up over every open job, where a loop would have been an N+1 (issue #68); the
+ * shape is worth keeping now that it isn't.
  *
  * **Top-level BOM only** — one level of `parts_bom`, matching J4's spec and the card that
- * exists today. A pump job reads "needs 1 pump core", not the aluminium inside it. Both
- * surfaces say so on screen.
+ * exists today. A pump job reads "needs 1 pump core", not the aluminium inside it. The card
+ * says so on screen.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
-import { buildRequirement, rollUpShortages, shortageWindowEnd } from '@/lib/materialRequirements';
-import type {
-  MaterialRequirement,
-  MaterialStockFacts,
-  PartShortage,
-  ShortageContribution,
-  ShortageWindow,
-} from '@/types/materialCheck';
-
-/** Job-part statuses that still need material. */
-const OPEN_STATUSES = ['not_started', 'in_progress'] as const;
+import { buildRequirement } from '@/lib/materialRequirements';
+import type { MaterialRequirement, MaterialStockFacts } from '@/types/materialCheck';
 
 const CHUNK_PARENTS = 200;
 const CHUNK_IDS = 500;
@@ -50,12 +41,8 @@ interface BomRow {
 interface JobPartRow {
   jobPartId: string;
   jobId: string;
-  jobNumber: string;
   madePartId: string;
-  madePartName: string | null;
   orderQuantity: number;
-  dueDate: string | null;
-  isHot: boolean;
 }
 
 /** Q2 — BOM lines for a set of made parts. No child embed; the child read is Q3. */
@@ -259,132 +246,15 @@ async function buildRequirementsFor(
 export async function getJobPartMaterialCheck(args: {
   companyId: string;
   jobId: string;
-  jobNumber?: string;
   jobPartId: string;
   madePartId: string;
-  madePartName?: string | null;
   orderQuantity: number;
 }): Promise<MaterialRequirement[]> {
-  const built = await buildRequirementsFor(
-    args.companyId,
-    [{
-      jobPartId: args.jobPartId,
-      jobId: args.jobId,
-      jobNumber: args.jobNumber ?? '',
-      madePartId: args.madePartId,
-      madePartName: args.madePartName ?? null,
-      orderQuantity: args.orderQuantity,
-      dueDate: null,
-      isHot: false,
-    }],
-  );
+  const built = await buildRequirementsFor(args.companyId, [{
+    jobPartId: args.jobPartId,
+    jobId: args.jobId,
+    madePartId: args.madePartId,
+    orderQuantity: args.orderQuantity,
+  }]);
   return built[0]?.requirements ?? [];
-}
-
-/**
- * J4 shop-wide — every open job's claim on each material, aggregated.
- *
- * Window semantics: the window only ever *adds* jobs. Overdue, hot and undated open jobs are
- * always in scope, because a "this week" view that hides last week's late job, or the rush job
- * that is the whole reason for this feature, is worse than no view at all.
- */
-export async function getShopMaterialShortages(
-  companyId: string,
-  window: ShortageWindow,
-  today: Date = new Date(),
-): Promise<{ shortages: PartShortage[]; rangeEnd: string | null; jobCount: number }> {
-  const rangeEnd = shortageWindowEnd(window, today);
-  const supabase = getSupabase();
-
-  // Q1 — open job parts on live jobs. The window is applied in memory: it is a disjunction
-  // over two tables (jobs.due_date / jobs.is_hot) and PostgREST's `.or()` across an embed is
-  // fragile enough that filtering a small open-job set client-side is the safer trade.
-  const { data, error } = await supabase
-    .from('job_parts')
-    .select(
-      'id, job_id, part_id, quantity, production_status, ' +
-        'part:parts!job_parts_part_id_fkey(id, part_name), ' +
-        'job:jobs!inner(id, job_number, due_date, is_hot, production_status, company_id, deleted_at)',
-    )
-    .eq('job.company_id', companyId)
-    .is('job.deleted_at', null)
-    .in('production_status', [...OPEN_STATUSES])
-    .range(0, 999);
-
-  if (error) {
-    console.error('Error loading open job parts for shortages:', error);
-    throw error;
-  }
-
-  type Row = {
-    id: string;
-    job_id: string;
-    part_id: string;
-    quantity: number;
-    part: { id: string; part_name: string } | { id: string; part_name: string }[] | null;
-    job: {
-      id: string; job_number: string; due_date: string | null;
-      is_hot: boolean; production_status: string;
-    } | Array<{
-      id: string; job_number: string; due_date: string | null;
-      is_hot: boolean; production_status: string;
-    }> | null;
-  };
-
-  const todayIso = isoDate(today);
-
-  const jobParts: JobPartRow[] = ((data ?? []) as unknown as Row[])
-    .flatMap((row) => {
-      const job = Array.isArray(row.job) ? row.job[0] : row.job;
-      const part = Array.isArray(row.part) ? row.part[0] : row.part;
-      if (!job || !OPEN_STATUSES.includes(job.production_status as (typeof OPEN_STATUSES)[number])) {
-        return [];
-      }
-      // In scope when due inside the window, OR overdue, OR hot, OR undated — see the note above.
-      const inWindow =
-        rangeEnd === null ||
-        job.due_date === null ||
-        job.is_hot ||
-        job.due_date <= rangeEnd ||
-        (todayIso !== null && job.due_date < todayIso);
-      if (!inWindow) return [];
-      return [{
-        jobPartId: row.id,
-        jobId: row.job_id,
-        jobNumber: job.job_number,
-        madePartId: row.part_id,
-        madePartName: part?.part_name ?? null,
-        orderQuantity: Number(row.quantity) || 0,
-        dueDate: job.due_date,
-        isHot: Boolean(job.is_hot),
-      }];
-    });
-
-  const built = await buildRequirementsFor(companyId, jobParts);
-
-  const lines = built.flatMap(({ jobPart, requirements }) =>
-    requirements.map((requirement) => ({
-      requirement,
-      contribution: {
-        jobId: jobPart.jobId,
-        jobNumber: jobPart.jobNumber,
-        jobPartId: jobPart.jobPartId,
-        madePartName: jobPart.madePartName,
-        dueDate: jobPart.dueDate,
-        isHot: jobPart.isHot,
-        required: null,
-      } satisfies ShortageContribution,
-    })),
-  );
-
-  return {
-    shortages: rollUpShortages(lines),
-    rangeEnd,
-    jobCount: new Set(jobParts.map((jp) => jp.jobId)).size,
-  };
-}
-
-function isoDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }

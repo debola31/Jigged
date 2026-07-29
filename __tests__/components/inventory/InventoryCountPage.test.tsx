@@ -184,11 +184,13 @@ describe('inline feedback', () => {
     expect(screen.getByText(/1 will change · all in ft/)).toBeInTheDocument();
   });
 
+  // The two quantity columns must name their *source*, not both claim to be the stock level —
+  // "On hand" next to "Counted" read as the physical count, which is the other column.
   it('gives the sheet proper columns, and no per-row unit when they all match', async () => {
     await onSheet();
-    expect(screen.getByRole('columnheader', { name: /on hand/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^system$/i })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /counted/i })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /variance/i })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^change$/i })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^unit$/i })).not.toBeInTheDocument();
   });
 

@@ -703,8 +703,19 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 
 > **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **two steps.** Choose the
 > parts you're counting, then count them on a **count sheet**: proper columns for
-> *Part · On hand · Counted · Variance*, tabular figures so digits line up, and the variance
-> filled in as you type. Save opens a confirm dialog. There is no third review step.
+> *Part · System · Counted · Change*, tabular figures so digits line up, and the change filled
+> in as you type. Save commits — there is no confirm and no review step.
+>
+> **The headers name the number's source, not the number.** "On hand" and "Counted" were the
+> first attempt and they collided: both columns are quantities on hand, and "on hand" reads as
+> the one you just physically counted — which is the *next* column. **System** vs **Counted**
+> says the only thing that actually distinguishes them. *Expected* was the alternative (it is
+> what Sortly and most count apps use) and was rejected for priming the counter toward
+> confirming the record — the count is not blind, so it does not need the extra nudge.
+>
+> **Change, not Variance.** The footer already reads *"2 will change"* and the button *"Save 2
+> changes"*; *Variance* was the single place this page used a different — and less spoken —
+> word for the same number.
 >
 > The column layout is the one [every stocktake system converges on](https://www.stockount.com/articles/how-to-do-a-cycle-count),
 > and the one a shop already knows from a clipboard — chosen over three alternatives (an

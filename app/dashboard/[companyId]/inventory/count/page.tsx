@@ -517,11 +517,18 @@ export default function InventoryCountPage() {
           <Card elevation={2}>
             <TableContainer>
               <Table size="small" sx={{ minWidth: 560 }}>
+                {/* "System" and "Counted", not "On hand" and "Counted". Both columns are
+                    quantities on hand — the only thing separating them is where the number came
+                    from, so that is what the headers have to say. "On hand" read as the physical
+                    count, which is the neighbouring column.
+                    "Change", not "Variance": the footer already says "2 will change" and the
+                    button "Save 2 changes", so Variance was the one place this page used a
+                    different word for the same number — and the least spoken one. */}
                 <TableHead>
                   <TableRow>
                     <TableCell sx={HEAD_SX}>Part</TableCell>
                     <TableCell align="right" sx={HEAD_SX}>
-                      On hand
+                      System
                     </TableCell>
                     <TableCell align="right" sx={HEAD_SX}>
                       Counted
@@ -532,7 +539,7 @@ export default function InventoryCountPage() {
                       </TableCell>
                     )}
                     <TableCell align="right" sx={HEAD_SX}>
-                      Variance
+                      Change
                     </TableCell>
                   </TableRow>
                 </TableHead>

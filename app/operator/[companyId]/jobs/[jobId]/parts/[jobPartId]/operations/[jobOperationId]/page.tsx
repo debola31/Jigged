@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import posthog from 'posthog-js';
 import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -235,6 +236,14 @@ export default function OperatorOperationActionPage() {
       setQtyDirty(false);
       // After the write resolves — a failed completion is not a completion.
       logOperatorEvent(companyId, 'completion_recorded', { jobOperationId, quantityGood: qty });
+      // Analytics fires here, beside the existing operator event and BEFORE the note capture
+      // below: the completion is durable at this point, and a slow photo upload must not delay or
+      // skip the measurement of the thing that already happened.
+      posthog.capture('operator_operation_completed', {
+        job_operation_id: jobOperationId,
+        quantity_good: qty,
+        is_partial: qty < remaining,
+      });
 
       // ORDER IS LOAD-BEARING, AND DELIBERATELY NOT ATOMIC.
       //

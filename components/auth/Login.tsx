@@ -17,6 +17,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import posthog from 'posthog-js';
 import { getSupabase } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import { isValidEmail } from '@/lib/validators';
@@ -69,6 +70,8 @@ export default function Login({ expired, returnTo }: LoginProps) {
       }
 
       if (data.user) {
+        posthog.identify(data.user.id, { email: data.user.email });
+        posthog.capture('user_signed_in');
         // If we have a valid returnTo path (e.g., from session expiry), go there
         if (returnTo && isValidReturnTo(returnTo)) {
           router.push(returnTo);

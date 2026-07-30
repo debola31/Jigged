@@ -1,0 +1,62 @@
+[
+  {
+    "event_name": "user_signed_in",
+    "event_description": "A user successfully signed in with email and password.",
+    "file": "components/auth/Login.tsx"
+  },
+  {
+    "event_name": "user_signed_out",
+    "event_description": "A user explicitly signed out of their session.",
+    "file": "components/providers/AuthProvider.tsx"
+  },
+  {
+    "event_name": "invitation_accepted",
+    "event_description": "A new team member accepted their invitation and completed account setup.",
+    "file": "app/accept-invite/[invitationId]/page.tsx"
+  },
+  {
+    "event_name": "quote_created",
+    "event_description": "A new customer quote was created with line items.",
+    "file": "components/quotes/QuoteForm.tsx"
+  },
+  {
+    "event_name": "quote_converted_to_job",
+    "event_description": "A quote was accepted and converted into a production job.",
+    "file": "components/quotes/ConvertToJobModal.tsx"
+  },
+  {
+    "event_name": "job_created_from_po",
+    "event_description": "A new job was created directly from a customer purchase order.",
+    "file": "components/jobs/AcceptPurchaseOrderModal.tsx"
+  },
+  {
+    "event_name": "jobs_bulk_cancelled",
+    "event_description": "One or more production jobs were bulk cancelled.",
+    "file": "app/dashboard/[companyId]/jobs/page.tsx"
+  },
+  {
+    "event_name": "operator_operation_completed",
+    "event_description": "An operator recorded completion of a manufacturing operation step.",
+    "file": "app/operator/[companyId]/jobs/[jobId]/parts/[jobPartId]/operations/[jobOperationId]/page.tsx"
+  },
+  {
+    "event_name": "shipment_created",
+    "event_description": "A shipment was created to fulfill part of a job.",
+    "file": "components/shipments/ShipmentForm.tsx"
+  },
+  {
+    "event_name": "part_created",
+    "event_description": "A new part was added to the company's parts catalog.",
+    "file": "components/parts/workspace/PartWorkspace.tsx"
+  },
+  {
+    "event_name": "inventory_stock_updated",
+    "event_description": "Stock level at a location was added, depleted, adjusted, or moved by an owner-side user.",
+    "file": "components/parts/PartLocationActionModal.tsx"
+  },
+  {
+    "event_name": "operator_inventory_stock_updated",
+    "event_description": "Stock level at a location was added, depleted, adjusted, or moved by a shop-floor operator.",
+    "file": "components/operator/OperatorLocationActionModal.tsx"
+  }
+]

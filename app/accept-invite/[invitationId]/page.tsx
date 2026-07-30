@@ -15,6 +15,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import posthog from 'posthog-js';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
 import { setLastCompany } from '@/utils/companyAccess';
@@ -268,6 +269,9 @@ export default function AcceptInvitePage() {
 
       // Set as last company
       await setLastCompany(userId, companyId);
+
+      posthog.identify(userId, { email: invitation.email });
+      posthog.capture('invitation_accepted', { role: invitation.role });
 
       // Redirect to dashboard
       router.replace(`/dashboard/${companyId}`);

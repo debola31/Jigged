@@ -85,7 +85,15 @@ export interface LocationBoardProps {
    */
   photoUrls?: ReadonlyMap<string, string>;
   onOpen: (node: InventoryLocationNode) => void;
-  onAddStorage: () => void;
+  /**
+   * Omit to hide the "Add storage" tile entirely.
+   *
+   * The operator surface reuses this board so the person at the shelf sees the same drawn
+   * units, photos and fill state as the owner does — but creating storage is an owner's job,
+   * and an operator tapping "Add storage" mid-shift is how `MISC 8-25-21` gets into a location
+   * table (§5.5 finding 2). Read-only is the honest shape there, not a disabled button.
+   */
+  onAddStorage?: () => void;
 }
 
 export default function LocationBoard({
@@ -182,23 +190,25 @@ export default function LocationBoard({
       {/* Sized like a unit's header row, not like a whole unit. At 140px tall it was the biggest
           thing on a board of flat locations, and — landing directly under Cabinet 3 in the grid
           flow — read as though it belonged to that cabinet rather than to the board. */}
-      <ButtonBase
-        onClick={onAddStorage}
-        sx={{
-          minHeight: 56,
-          border: 2,
-          borderStyle: 'dashed',
-          borderColor: 'divider',
-          borderRadius: 1,
-          display: 'flex',
-          gap: 1,
-          color: 'text.secondary',
-          '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
-        }}
-      >
-        <AddIcon fontSize="small" />
-        <Typography variant="body2">Add storage</Typography>
-      </ButtonBase>
+      {onAddStorage && (
+        <ButtonBase
+          onClick={onAddStorage}
+          sx={{
+            minHeight: 56,
+            border: 2,
+            borderStyle: 'dashed',
+            borderColor: 'divider',
+            borderRadius: 1,
+            display: 'flex',
+            gap: 1,
+            color: 'text.secondary',
+            '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
+          }}
+        >
+          <AddIcon fontSize="small" />
+          <Typography variant="body2">Add storage</Typography>
+        </ButtonBase>
+      )}
     </Box>
   );
 }

@@ -48,26 +48,15 @@ const WASM_PATH = '/wasm/zxing_reader.wasm';
 const DECODE_INTERVAL_MS = 200;
 
 /**
- * Pull a location id out of a scanned string.
+ * Parsing moved to `lib/jiggedScan.ts`, which resolves BOTH kinds of Jigged QR — a location
+ * label and a job traveler — because they differ only by query string and an operator holding
+ * a traveler sheet shouldn't need a different gesture from one holding a bin label.
  *
- * Accepts a full scan URL (what our printed labels encode) or a bare UUID (so a keyboard-wedge
- * scanner or a hand-typed code also works). Returns null for anything else — a shipping label, a
- * vendor barcode, a URL from another system — because silently treating a foreign code as one of
- * ours would send someone to a location that doesn't exist.
+ * Re-exported here so existing importers and their test suite are untouched.
  */
-export function locationIdFromScan(text: string): string | null {
-  const trimmed = text.trim();
-  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (UUID.test(trimmed)) return trimmed.toLowerCase();
+import { parseJiggedScan } from '@/lib/jiggedScan';
 
-  try {
-    const param = new URL(trimmed).searchParams.get('location');
-    if (param && UUID.test(param)) return param.toLowerCase();
-  } catch {
-    // Not a URL. Falls through to null.
-  }
-  return null;
-}
+export { locationIdFromScan, parseJiggedScan, type JiggedScan } from '@/lib/jiggedScan';
 
 export interface LocationScannerProps {
   open: boolean;
@@ -77,6 +66,17 @@ export interface LocationScannerProps {
    * from another company, which decodes perfectly well but isn't one of yours.
    */
   onScan: (locationId: string) => boolean | void | Promise<boolean | void>;
+  /**
+   * A job traveler was read. Optional: surfaces where travelers are meaningful (the operator
+   * tab-bar scanner) and omitted where they aren't, in which case a traveler scan is refused
+   * with a legible message rather than silently ignored.
+   */
+  onScanTraveler?: (scan: {
+    jobId: string;
+    jobPartId: string;
+    /** Present only on older travelers, which target a specific step. */
+    operationId?: string;
+  }) => boolean | void | Promise<boolean | void>;
   title?: string;
 }
 
@@ -84,7 +84,8 @@ export default function LocationScanner({
   open,
   onClose,
   onScan,
-  title = 'Scan a location label',
+  onScanTraveler,
+  title = 'Scan a label',
 }: LocationScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -152,12 +153,34 @@ export default function LocationScanner({
             const text = results[0]?.text;
             if (!text) return;
 
-            const id = locationIdFromScan(text);
-            if (!id) {
-              setRejected('That code isn’t a Jigged location label.');
+            const scan = parseJiggedScan(text);
+            if (!scan) {
+              setRejected('That code isn’t a Jigged label.');
               return;
             }
-            const accepted = await onScan(id);
+
+            // A traveler is only accepted where the caller can do something with one. Refusing
+            // it out loud beats silently ignoring a code that decoded perfectly well — the
+            // operator would just keep pointing the camera at it.
+            if (scan.kind === 'traveler') {
+              if (!onScanTraveler) {
+                setRejected('That’s a job traveler — scan a storage label here.');
+                return;
+              }
+              const ok = await onScanTraveler({
+                jobId: scan.jobId,
+                jobPartId: scan.jobPartId,
+                operationId: scan.operationId,
+              });
+              if (ok === false) {
+                setRejected('That traveler belongs to a different company.');
+                return;
+              }
+              setRejected(null);
+              return;
+            }
+
+            const accepted = await onScan(scan.locationId);
             if (accepted === false) {
               setRejected('That label belongs to a different company.');
               return;
@@ -191,7 +214,7 @@ export default function LocationScanner({
       cancelled = true;
       stop();
     };
-  }, [open, onScan, stop]);
+  }, [open, onScan, onScanTraveler, stop]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>

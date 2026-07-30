@@ -18,6 +18,8 @@ import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
+import LocationScanner from '@/components/scanner/LocationScanner';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -122,12 +124,55 @@ export default function OperatorLayout({
     else setNavValue('jobs');
   }, [pathname]);
 
+  /** Scan opens over whatever you were doing; every other tab is a route. */
+  const [scanning, setScanning] = useState(false);
+
   const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
+    // Scan is a modal action wearing a tab's clothes. Deliberately does NOT become the
+    // selected tab: you're still on Jobs (or wherever) with a scanner over the top, and
+    // leaving the selection where it was is what makes closing the dialog feel like
+    // dismissing something rather than navigating back.
+    if (newValue === 'scan') {
+      setScanning(true);
+      return;
+    }
+
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
     else if (newValue === 'my-work') router.push(`/operator/${companyId}/my-work`);
-    else if (newValue === 'profile') router.push(`/operator/${companyId}/profile`);
     else router.push(`/operator/${companyId}/jobs`);
+  };
+
+  /**
+   * Where each kind of Jigged QR goes.
+   *
+   * Both are deep links the printed paper already encodes, so this mirrors what the login
+   * passthrough would have done — minus the camera-app round trip and the interstitial.
+   */
+  const handleScanLocation = (locationId: string) => {
+    setScanning(false);
+    router.push(`/operator/${companyId}/inventory/locations/${locationId}`);
+  };
+
+  const handleScanTraveler = ({
+    jobId,
+    jobPartId,
+    operationId,
+  }: {
+    jobId: string;
+    jobPartId: string;
+    operationId?: string;
+  }) => {
+    setScanning(false);
+    // Mirrors `postLoginPath` in the login passthrough exactly. Older travelers still on the
+    // floor encode an operation and jump straight to that step; current sheets omit it so the
+    // operator picks. Dropping it here would quietly make in-app scanning worse than the
+    // camera-app path those sheets were printed for.
+    router.push(
+      operationId
+        ? `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${operationId}`
+        : `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`,
+    );
   };
 
   // Don't show header/nav on login page
@@ -176,6 +221,23 @@ export default function OperatorLayout({
         >
           {children}
         </OperatorShell>
+
+        {/*
+          Lives at the layout level, not on a page, because the tab bar owns it — so it opens
+          over whatever screen you were on and closing it returns you there. A Dialog portals
+          out of this position anyway, so being a sibling of the shell costs nothing.
+
+          Both handlers mirror the login passthrough's `postLoginPath`, which is what the
+          printed QR would have gone through: same destination, minus the camera-app round trip
+          and the login interstitial.
+        */}
+        <LocationScanner
+          open={scanning}
+          onClose={() => setScanning(false)}
+          onScan={handleScanLocation}
+          onScanTraveler={handleScanTraveler}
+          title="Scan a Jigged label"
+        />
       </OperatorChromeProvider>
     </OperatorStationProvider>
   );
@@ -305,7 +367,7 @@ function OperatorShell({
           </Box>
 
           {/* Right: dashboard shortcut for non-operators (admins/leads viewing
-              the operator view). Logout lives on the Profile tab, not here. */}
+              the operator view). */}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"
@@ -317,6 +379,26 @@ function OperatorShell({
               <DashboardIcon fontSize="small" />
             </IconButton>
           )}
+
+          {/*
+            Profile moved here from a bottom tab so Scan could have that slot without
+            burying "My work".
+
+            It holds three low-frequency things — a read-only name/email/company card,
+            Logout, and Give Feedback — none of which an operator touches during a shift.
+            A tab is prime real estate on a four-slot bar; an avatar in the header is the
+            conventional home for account actions and costs nothing. "My work" stays one
+            tap, which was the point: it's a primary daily surface, not spare space.
+          */}
+          <IconButton
+            color="inherit"
+            onClick={() => router.push(`/operator/${companyId}/profile`)}
+            aria-label="Profile"
+            size="small"
+            sx={{ ml: 0.5 }}
+          >
+            <PersonIcon fontSize="small" />
+          </IconButton>
         </Toolbar>
 
         {/* Station Selector Menu */}
@@ -409,20 +491,37 @@ function OperatorShell({
                 sx={{ minHeight: 56 }}
               />
             )}
+            {/*
+              Scan is a tab, not a button buried on one screen.
+
+              It is the operator's most frequent physical gesture — you arrive at a shelf or
+              pick up a traveler sheet holding a piece of paper with a QR on it. Previously
+              the only in-app scanner lived on the inventory page and read location labels
+              only, so a traveler meant leaving the app for the phone's camera: a different
+              gesture for a near-identical piece of paper. One scanner, both kinds.
+
+              It opens a dialog rather than navigating, so scanning never loses the screen
+              you were on — which matters for the continuous flows (a count session, receiving
+              a pallet) that motivated an in-app scanner at all.
+            */}
+            <BottomNavigationAction
+              label="Scan"
+              value="scan"
+              icon={<QrCodeScannerIcon />}
+              sx={{ minHeight: 56 }}
+            />
             {/* "My work" is the operator's own contribution surface. Today that
                 is notes and photos; it is named for what it will hold, not only
                 for what is in it now. What it must NOT grow into is a record of
-                completions — see the header of the my-work page. */}
+                completions — see the header of the my-work page.
+
+                It keeps its own tab: making room for Scan by merging it with Profile would
+                have put an operator's own work behind a second tap to free a slot for
+                account settings nobody opens mid-shift. */}
             <BottomNavigationAction
               label="My work"
               value="my-work"
               icon={<StickyNote2OutlinedIcon />}
-              sx={{ minHeight: 56 }}
-            />
-            <BottomNavigationAction
-              label="Profile"
-              value="profile"
-              icon={<PersonIcon />}
               sx={{ minHeight: 56 }}
             />
           </BottomNavigation>

@@ -6,29 +6,44 @@ import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import Button from '@mui/material/Button';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 
-import LocationScanner from '@/components/scanner/LocationScanner';
-import { getLocations } from '@/utils/inventoryLocationsAccess';
+import { getLocationBoard, buildLocationTree } from '@/utils/inventoryLocationsAccess';
+import { rollUpOccupancy } from '@/utils/locationOccupancy';
+import LocationBoard, { boardOrder } from '@/components/inventory/locations/board/LocationBoard';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
-// Stable empty fallback so the roots memo doesn't churn while the first load runs.
+// Stable empty fallbacks so the tree/occupancy memos don't churn while the first load runs.
 const EMPTY_LOCATIONS: InventoryLocation[] = [];
+const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
+const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
 
 /**
- * Operator "warehouse home" — the root of the Inventory tab. Lists the
- * top-level storage locations to browse (drill down into the bin view), so the
- * warehouse is reachable and orientable without a physical QR scan. Scanning a
- * printed label still jumps straight to a bin (the fast path).
+ * Operator "warehouse home" — the root of the Inventory tab.
+ *
+ * ## Why this is the same board the owner sees
+ *
+ * It used to be a plain list of names, kinds and codes, while the owner's Storage page drew
+ * each unit with its compartments, its photo and its fill state. That split was backwards:
+ * the person who most needs to *recognise* a physical place is the one standing in front of
+ * it, and `CAB3-A` is not recognisable. §5.5 decision 1's promise — "what you preview is what
+ * you live with" — has to extend to the people at the shelf, so this renders `LocationBoard`
+ * directly rather than a parallel implementation that would drift.
+ *
+ * Two deliberate differences from the owner's board:
+ *
+ * - **No "Add storage" tile.** Creating places is an owner's job. An operator adding one
+ *   mid-shift is exactly how `MISC 8-25-21` gets into a location table (§5.5 finding 2).
+ * - **No detail sheet.** Tapping a unit navigates into the existing bin view, which already
+ *   owns the take/return actions, rather than opening a second actions surface on top of it.
+ *
+ * Scanning is no longer here either: it's a tab-bar action in the operator layout, where it
+ * resolves both location labels *and* job travelers. A button on this one page could only
+ * ever read locations, and only if you'd already navigated here.
  */
 export default function OperatorWarehouseHomePage() {
   const params = useParams();
@@ -36,21 +51,25 @@ export default function OperatorWarehouseHomePage() {
   const companyId = params.companyId as string;
 
   const [error, setError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
 
-  const { data: locationsData, loading } = useLoad(
-    () => getLocations(companyId),
-    [companyId],
-    {
-      onError: (e) => {
-        setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
-      },
+  // getLocationBoard, not getLocations: the board needs per-location part counts for fill
+  // state and one batched set of signed photo URLs. Same single request pair the owner's page
+  // makes, so the two can't disagree about what's in a place.
+  const { data: boardData, loading } = useLoad(() => getLocationBoard(companyId), [companyId], {
+    onError: (e) => {
+      setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
     },
-  );
-  const locations = locationsData ?? EMPTY_LOCATIONS;
+  });
 
-  // Top-level locations are the warehouse roots to browse from.
-  const roots = useMemo(() => locations.filter((l) => l.parent_id === null), [locations]);
+  const locations = boardData?.locations ?? EMPTY_LOCATIONS;
+  const directPartCounts = boardData?.directPartCounts ?? EMPTY_COUNTS;
+  const photoUrls = boardData?.photoUrls ?? EMPTY_URLS;
+
+  // Sorted with the same comparator as the owner's board, so `Unassigned` lands last in both.
+  const tree = useMemo(() => buildLocationTree(locations).sort(boardOrder), [locations]);
+  // Rolled up: a cabinet whose shelves hold stock must read as occupied, or an operator gets
+  // sent to fill a shelf that's already full.
+  const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -60,34 +79,9 @@ export default function OperatorWarehouseHomePage() {
           Inventory
         </Typography>
       </Stack>
-      {/* This was a decorative icon beside a sentence — it described a capability the app didn't
-          have, since scanning meant leaving for the phone's camera app and coming back through the
-          login route. Now it's the button. */}
-      <Button
-        variant="contained"
-        size="large"
-        fullWidth
-        startIcon={<QrCodeScannerIcon />}
-        onClick={() => setScanning(true)}
-        sx={{ mb: 1, minHeight: 56 }}
-      >
-        Scan a label
-      </Button>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Or browse your storage below.
+        Tap a place to see what&apos;s in it, or use Scan to jump straight there from a label.
       </Typography>
-
-      <LocationScanner
-        open={scanning}
-        onClose={() => setScanning(false)}
-        onScan={(locationId) => {
-          // Reject a code from another company rather than routing to a bin that will 404 — the
-          // location list is already loaded, so this costs nothing.
-          if (!locations.some((l) => l.id === locationId)) return false;
-          setScanning(false);
-          router.push(`/operator/${companyId}/inventory/locations/${locationId}`);
-        }}
-      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -99,7 +93,7 @@ export default function OperatorWarehouseHomePage() {
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
           <CircularProgress />
         </Box>
-      ) : roots.length === 0 ? (
+      ) : tree.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
             <WarehouseOutlinedIcon sx={{ fontSize: 44, color: 'text.disabled', mb: 1 }} />
@@ -109,29 +103,14 @@ export default function OperatorWarehouseHomePage() {
           </CardContent>
         </Card>
       ) : (
-        <Stack spacing={1}>
-          {roots.map((loc) => (
-            <Card key={loc.id} elevation={2}>
-              <CardActionArea
-                onClick={() => router.push(`/operator/${companyId}/inventory/locations/${loc.id}`)}
-                sx={{ minHeight: 56 }}
-              >
-                <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 600 }}>{loc.name}</Typography>
-                    {loc.kind && (
-                      <Typography variant="caption" color="text.secondary">
-                        {loc.kind}
-                      </Typography>
-                    )}
-                  </Box>
-                  {loc.code && <Chip size="small" label={loc.code} variant="outlined" />}
-                  <KeyboardArrowRightIcon color="action" />
-                </CardContent>
-              </CardActionArea>
-            </Card>
-          ))}
-        </Stack>
+        <LocationBoard
+          tree={tree}
+          occupancy={occupancy}
+          photoUrls={photoUrls}
+          onOpen={(node) =>
+            router.push(`/operator/${companyId}/inventory/locations/${node.id}`)
+          }
+        />
       )}
     </Box>
   );

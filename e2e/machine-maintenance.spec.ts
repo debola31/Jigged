@@ -110,7 +110,12 @@ test.describe('Machine Maintenance', () => {
 
     // Exactly once, and pinned: an entry never renders twice. While it is
     // outstanding it lives in the pinned block and nowhere else.
-    await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
+    //
+    // `exact` matters from here on. Once a fix exists it QUOTES this text
+    // ("Fixes: <observation>"), and getByText matches substrings — so a loose
+    // locator counts the quotation as a second copy of the entry and the
+    // one-appearance invariant stops being what this asserts.
+    await expect(page.getByText(observation, { exact: true })).toHaveCount(1, { timeout: 30_000 });
     await expect(openList(page).getByText(observation)).toBeVisible({ timeout: 30_000 });
 
     // The reply opens INLINE, under the item it answers — no banner, no mode on
@@ -125,13 +130,18 @@ test.describe('Machine Maintenance', () => {
     // It MOVED rather than vanished: gone from the pinned block, still on the
     // page. A log that loses rows stops being a log.
     await expect(openList(page).getByText(observation)).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByText(observation, { exact: true })).toHaveCount(1, { timeout: 30_000 });
+
+    // And the two ends of the loop name each other: the fix quotes what it
+    // answered, the resolved entry says who closed it.
+    await expect(page.getByText(`Fixes: ${observation}`)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Fixed by /)).toBeVisible({ timeout: 30_000 });
 
     // And it stays moved after a reload — proving the state came from the
     // resolving row rather than from anything held in the page.
     await page.reload();
     await expect(openList(page).getByText(observation)).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByText(observation, { exact: true })).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByText(fix)).toBeVisible({ timeout: 30_000 });
   });
 

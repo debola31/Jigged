@@ -54,6 +54,28 @@ export const metadata: Metadata = {
     // home-screen icon was broken. Verified against the dev server: `.png` → 404, bare → 200.
     apple: '/apple-icon',
   },
+  /**
+   * The home-screen caption, and nothing else.
+   *
+   * iOS reads `apple-mobile-web-app-title` for the Add to Home Screen label and prefers it over
+   * both the manifest's `short_name` and `<title>`. With no such tag the sheet pre-fills from
+   * `<title>`, which on the marketing home page resolves through the `%s | Jigged` template to
+   * "Jigged — Your whole shop, in one place | Jigged" — a fine `<title>`, and a useless caption
+   * under a 60px icon. `short_name: 'Jigged'` in `app/manifest.ts` covers Android; this covers iOS.
+   *
+   * **`capable: false` is load-bearing, not a spelled-out default.** Next resolves a missing
+   * `capable` to `true` (`resolveAppleWebApp`), which emits `mobile-web-app-capable` and asks the
+   * launcher to install standalone — precisely what `app/manifest.ts` declines to do via
+   * `display: 'browser'` until the iOS camera-permission spike clears. Read the note there before
+   * flipping either. `title` is emitted independently of `capable`, so this costs nothing.
+   *
+   * (Next also emits `apple-mobile-web-app-status-bar-style` unconditionally once this key exists.
+   * It only applies in standalone, and `default` is what we'd pick anyway.)
+   */
+  appleWebApp: {
+    title: 'Jigged',
+    capable: false,
+  },
   openGraph: {
     title: 'Jigged — Manufacturing Operations System',
     description:

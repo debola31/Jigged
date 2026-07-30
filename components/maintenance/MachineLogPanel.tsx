@@ -282,8 +282,15 @@ export default function MachineLogPanel({
 
       {/* Only when there is something to open. A machine with no manuals shows
           nothing at all — never an "add a manual" row, which is the shape a
-          setup prompt takes when it sneaks back in (§4.5). */}
-      {(manualCount ?? 0) > 0 && (
+          setup prompt takes when it sneaks back in (§4.5).
+
+          Operator surface ONLY. The office work-center page manages manuals
+          itself, in a section directly above this one that lists each file with
+          its size, uploader and a delete control — so rendering this button
+          there put the same manual on screen twice in two different chromes,
+          one of which quietly dropped the management affordances. Reading on
+          the floor, uploading in the office: the button is the floor half. */}
+      {!readOnly && (manualCount ?? 0) > 0 && (
         <Box sx={{ mb: 2 }}>
           <Button
             variant="outlined"

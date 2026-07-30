@@ -250,6 +250,23 @@ describe('MachineLogPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('offers the manuals button on the floor but not in the office', async () => {
+    // The office work-center page manages manuals itself, in a section directly
+    // above this panel that lists each file with its uploader and a delete
+    // control. Rendering the button there too put the same manual on screen
+    // twice in two different chromes — one of which silently dropped the
+    // management affordances. Reading on the floor, uploading in the office.
+    mockCountManuals.mockResolvedValue(2);
+
+    const { unmount } = render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    expect(await screen.findByRole('button', { name: /manuals · 2/i })).toBeInTheDocument();
+    unmount();
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" readOnly />);
+    await waitFor(() => expect(mockGetMachineLog).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /manuals/i })).not.toBeInTheDocument();
+  });
+
   it('names the author in the log but not while an item is outstanding', async () => {
     // §5: a list of outstanding items with names down the side is a list of who
     // reports the most problems. The name is deferred, not lost.

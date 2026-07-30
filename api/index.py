@@ -3,6 +3,14 @@ import sys
 import logging
 import sentry_sdk
 
+# Sentry must not report from the test suite. `sentry_sdk.init` runs at import time,
+# which under pytest happens during collection — before PYTEST_CURRENT_TEST is set —
+# so the reliable signal is pytest already being in sys.modules. Without this,
+# tests that deliberately provoke failures (a bad Stripe webhook signature, a Resend
+# 500) get filed as High-priority production errors. That was 2 of the 23 issues in
+# the backend queue, and they alerted every CI run.
+_UNDER_PYTEST = "pytest" in sys.modules
+
 # Add api directory to path for Vercel serverless functions
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,11 +28,32 @@ logger = logging.getLogger(__name__)
 # Load environment variables (.env.local is the Next.js convention used in this project)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env.local'))
 
-# Initialize Sentry for error monitoring
+def resolve_sentry_environment() -> str:
+    """Which environment this process reports as, in precedence order.
+
+    This was `os.getenv("ENVIRONMENT", "development")`, and ENVIRONMENT is never set on
+    Vercel — so local dev, pytest, preview AND production all reported as "development".
+    That is why the backend showed zero issues under `production` while real preview
+    failures sat in the development bucket, indistinguishable from localhost noise.
+
+    VERCEL_ENV is injected by Vercel itself (production | preview | development), so it
+    can't drift the way a hand-set variable does. ENVIRONMENT stays as a fallback so a
+    non-Vercel host can still name itself.
+    """
+    return os.getenv("VERCEL_ENV") or os.getenv("ENVIRONMENT") or "development"
+
+
+# Initialize Sentry for error monitoring.
+SENTRY_ENVIRONMENT = resolve_sentry_environment()
+
+# Disabling needs an EMPTY STRING, not None — there is no `enabled` kwarg, and a None
+# dsn makes the SDK fall back to reading SENTRY_DSN from the environment, which
+# `load_dotenv` above has already populated from .env.local. So `dsn=None` looks like
+# "off" and is actually "on"; only a falsy-but-not-None value truly disables it.
 sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),
+    dsn="" if _UNDER_PYTEST else os.getenv("SENTRY_DSN"),
     traces_sample_rate=0.1,
-    environment=os.getenv("ENVIRONMENT", "development"),
+    environment=SENTRY_ENVIRONMENT,
     send_default_pii=True,
 )
 

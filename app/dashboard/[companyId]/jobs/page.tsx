@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import posthog from 'posthog-js';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -363,6 +364,7 @@ export default function JobsPage() {
     setCancelling(true);
     try {
       await bulkCancelJobs(selectedIds);
+      posthog.capture('jobs_bulk_cancelled', { count: selectedIds.length });
       setSelectedIds([]);
       if (gridRef.current?.api) {
         gridRef.current.api.deselectAll();

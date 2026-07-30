@@ -20,9 +20,14 @@ Jigged centralizes jobs, parts, quotes, inventory, and shop-floor status into fo
 # Install
 pnpm install
 
-# Configure
-cp .env.example .env.local
-# Fill in NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Configure — create .env.local and fill in:
+#   NEXT_PUBLIC_SUPABASE_URL          Supabase project URL
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY     Supabase anon/publishable key
+#   NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN PostHog project token (product analytics)
+#   NEXT_PUBLIC_SENTRY_DSN            Sentry DSN, Next.js server + edge runtimes
+#   SENTRY_DSN                        Sentry DSN, FastAPI backend
+# Observability is optional locally: both SDKs are disabled outside a
+# production build, so a missing DSN changes nothing in dev.
 
 # Run
 pnpm dev                       # frontend on :3000

@@ -1,6 +1,7 @@
 'use client';
 
 import * as Sentry from "@sentry/nextjs";
+import posthog from "posthog-js";
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
@@ -93,6 +94,8 @@ export default function AuthProvider({ children }: AuthProviderProps) {
 
         if (event === 'SIGNED_OUT') {
           intentionalSignOut.current = false;
+          posthog.capture('user_signed_out');
+          posthog.reset();
         }
       }
     );
@@ -102,10 +105,11 @@ export default function AuthProvider({ children }: AuthProviderProps) {
     };
   }, []);
 
-  // Set Sentry user context for error tracking
+  // Set Sentry user context and identify with PostHog for error tracking and analytics
   useEffect(() => {
     if (user) {
       Sentry.setUser({ id: user.id, email: user.email ?? undefined });
+      posthog.identify(user.id, { email: user.email ?? undefined });
     } else {
       Sentry.setUser(null);
     }

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, routerMocks, resetRouterMocks } from '../../test-utils';
+import userEvent from '@testing-library/user-event';
+import * as Sentry from '@sentry/nextjs';
 import AuthGuard from '@/components/auth/AuthGuard';
+
+vi.mock('@sentry/nextjs', () => ({
+  captureException: vi.fn(),
+}));
 
 // Mock the auth provider
 const mockUseAuth = vi.fn();
@@ -18,11 +24,25 @@ vi.mock('@/utils/companyAccess', () => ({
   getUserRole: (...args: unknown[]) => mockGetUserRole(...args),
 }));
 
-// Mock consumeSessionExpiry
+// Mock consumeSessionExpiry only — isTransientAbortError and toError are the real
+// implementations on purpose, since the abort-classification logic is exactly what
+// these tests are exercising. Stubbing it would test the mock, not the fix.
 const mockConsumeSessionExpiry = vi.fn();
-vi.mock('@/lib/supabaseErrors', () => ({
-  consumeSessionExpiry: () => mockConsumeSessionExpiry(),
-}));
+vi.mock('@/lib/supabaseErrors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/supabaseErrors')>();
+  return {
+    ...actual,
+    consumeSessionExpiry: () => mockConsumeSessionExpiry(),
+  };
+});
+
+/** The shape @supabase/auth-js rejects with when another call steals the auth lock. */
+const lockStolenError = () => ({
+  code: '',
+  details: '',
+  hint: 'Request was aborted (timeout or manual cancellation)',
+  message: 'AbortError: Lock was stolen by another request',
+});
 
 describe('AuthGuard', () => {
   beforeEach(() => {
@@ -341,7 +361,11 @@ describe('AuthGuard', () => {
   // ============== Error Handling ==============
 
   describe('error handling', () => {
-    it('shows no access when verifyCompanyAccess throws', async () => {
+    // This block previously asserted that a thrown error shows "You don't have access
+    // to this company" — it encoded the bug. A failed *check* is not a denial, and
+    // conflating them locked real users out of companies they had access to (Sentry
+    // JAVASCRIPT-NEXTJS-9 / -H, 4 users, running since March).
+    it('shows a retryable "could not check" state — NOT a denial — when the check throws', async () => {
       mockUseAuth.mockReturnValue({
         user: { id: 'user-1', email: 'test@example.com' },
         loading: false,
@@ -355,10 +379,148 @@ describe('AuthGuard', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText(/don't have access to this company/i)).toBeInTheDocument();
+        expect(screen.getByText(/couldn't check your access/i)).toBeInTheDocument();
       });
 
+      expect(screen.queryByText(/don't have access to this company/i)).not.toBeInTheDocument();
       expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+    });
+
+    it('reports a genuine error to Sentry as a real Error, not a raw object', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'test@example.com' },
+        loading: false,
+      });
+      // A raw Supabase-shaped rejection: previously handed straight to Sentry, which
+      // produced an ungroupable issue titled "e".
+      mockVerifyCompanyAccess.mockRejectedValue({
+        code: '42501',
+        details: '',
+        hint: '',
+        message: 'permission denied for table user_company_access',
+      });
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn't check your access/i)).toBeInTheDocument();
+      });
+
+      expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+      const reported = vi.mocked(Sentry.captureException).mock.calls[0][0];
+      expect(reported).toBeInstanceOf(Error);
+      expect((reported as Error).message).toBe(
+        'permission denied for table user_company_access'
+      );
+      // The Postgres code survives normalisation so it still reaches Sentry's context.
+      expect((reported as Error & { code?: string }).code).toBe('42501');
+    });
+
+    it('lets the user retry after a failed check', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'test@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockRejectedValueOnce(new Error('Database error'));
+      mockGetUserRole.mockResolvedValue('admin');
+      mockSetLastCompany.mockResolvedValue(undefined);
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn't check your access/i)).toBeInTheDocument();
+      });
+
+      mockVerifyCompanyAccess.mockResolvedValue(true);
+      await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Protected Content')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // ============== Auth-lock Contention (the production bug) ==============
+
+  describe('stolen auth lock', () => {
+    it('retries and succeeds when the auth lock is stolen once', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'test@example.com' },
+        loading: false,
+      });
+      // @supabase/auth-js serialises token refreshes with the Web Locks API; a
+      // concurrent call steals the lock and the loser rejects. The winner is doing the
+      // same work, so retrying resolves it.
+      mockVerifyCompanyAccess
+        .mockRejectedValueOnce(lockStolenError())
+        .mockResolvedValue(true);
+      mockGetUserRole.mockResolvedValue('admin');
+      mockSetLastCompany.mockResolvedValue(undefined);
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Protected Content')).toBeInTheDocument();
+      });
+
+      expect(mockVerifyCompanyAccess).toHaveBeenCalledTimes(2);
+      // Never renders the denial screen on the way through.
+      expect(screen.queryByText(/don't have access to this company/i)).not.toBeInTheDocument();
+    });
+
+    it('does not report a stolen lock to Sentry — it is a benign race, not a bug', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'test@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockRejectedValue(lockStolenError());
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn't check your access/i)).toBeInTheDocument();
+      });
+
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+    });
+
+    it('never claims denial when the lock is stolen on every attempt', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { id: 'user-1', email: 'test@example.com' },
+        loading: false,
+      });
+      mockVerifyCompanyAccess.mockRejectedValue(lockStolenError());
+
+      render(
+        <AuthGuard companyId="company-1">
+          <div>Protected Content</div>
+        </AuthGuard>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn't check your access/i)).toBeInTheDocument();
+      });
+
+      // The whole point: a lock race must never present as "you don't have access".
+      expect(screen.queryByText(/don't have access to this company/i)).not.toBeInTheDocument();
+      // Retried exactly once, then gave a recoverable state rather than looping.
+      expect(mockVerifyCompanyAccess).toHaveBeenCalledTimes(2);
     });
   });
 

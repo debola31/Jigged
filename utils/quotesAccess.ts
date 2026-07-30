@@ -4,7 +4,7 @@ import * as Sentry from '@sentry/nextjs';
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -274,7 +274,10 @@ export async function sweepExpiredQuotes(companyId: string): Promise<void> {
 
   if (error) {
     console.warn('sweepExpiredQuotes failed:', error);
-    Sentry.captureException(error, { level: 'warning' });
+    // Normalised: a raw Supabase error object reaches Sentry as an ungroupable
+    // "Object captured as exception with keys: …" with the real message hidden in a
+    // __serialized__ extra. See toError in lib/supabaseErrors.
+    Sentry.captureException(toError(error, 'sweepExpiredQuotes failed'), { level: 'warning' });
   }
 }
 
@@ -454,7 +457,9 @@ export async function createQuote(
       await writeCostSnapshotsForPart(quote.id, companyId, partId, qty);
     } catch (snapshotError) {
       console.warn('Failed to write cost snapshot for part:', partId, snapshotError);
-      Sentry.captureException(snapshotError, { level: 'warning' });
+      Sentry.captureException(toError(snapshotError, 'Failed to write cost snapshot'), {
+        level: 'warning',
+      });
     }
   }
 

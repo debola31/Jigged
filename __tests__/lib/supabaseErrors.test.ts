@@ -4,6 +4,8 @@ import {
   redirectToSessionExpiry,
   consumeSessionExpiry,
   friendlyErrorMessage,
+  isTransientAbortError,
+  toError,
 } from '@/lib/supabaseErrors';
 
 describe('isAuthError', () => {
@@ -259,5 +261,101 @@ describe('friendlyErrorMessage — deliberate check violations', () => {
     expect(
       friendlyErrorMessage({ code: '23514', message: 'permission denied for table parts' }),
     ).toMatch(/don't have permission/);
+  });
+});
+
+describe('isTransientAbortError', () => {
+  // The exact shape @supabase/auth-js rejects with when another call steals the auth
+  // lock. Recovered from the __serialized__ extra on Sentry JAVASCRIPT-NEXTJS-9.
+  const lockStolen = {
+    code: '',
+    details: '',
+    hint: 'Request was aborted (timeout or manual cancellation)',
+    message: 'AbortError: Lock was stolen by another request',
+  };
+
+  it('recognises the Supabase lock-steal rejection', () => {
+    expect(isTransientAbortError(lockStolen)).toBe(true);
+  });
+
+  it('recognises a real DOMException-style AbortError by name', () => {
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    expect(isTransientAbortError(err)).toBe(true);
+  });
+
+  it('recognises the navigator-lock acquisition message', () => {
+    expect(
+      isTransientAbortError({ message: 'Acquiring an exclusive Navigator LockManager lock timed out' }),
+    ).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isTransientAbortError({ message: 'LOCK WAS STOLEN by another request' })).toBe(true);
+  });
+
+  it('does NOT classify real failures as transient', () => {
+    // The dangerous direction: a permission error wrongly treated as transient would be
+    // silently retried and never reported.
+    expect(isTransientAbortError({ code: '42501', message: 'permission denied for table parts' })).toBe(false);
+    expect(isTransientAbortError(new Error('Database error'))).toBe(false);
+    expect(isTransientAbortError({ code: 'PGRST301', message: 'JWT expired' })).toBe(false);
+    expect(isTransientAbortError(null)).toBe(false);
+    expect(isTransientAbortError(undefined)).toBe(false);
+    expect(isTransientAbortError('a string')).toBe(false);
+  });
+});
+
+describe('toError', () => {
+  it('passes a real Error through untouched', () => {
+    const original = new Error('boom');
+    expect(toError(original)).toBe(original);
+  });
+
+  it('converts a raw Supabase error object into a grouppable Error', () => {
+    // Without this, Sentry shows "Object captured as exception with keys: code,
+    // details, hint, message" titled "e", with the real message buried in an extra.
+    const result = toError({
+      code: '42501',
+      details: 'some detail',
+      hint: 'some hint',
+      message: 'permission denied for table parts',
+    });
+
+    expect(result).toBeInstanceOf(Error);
+    expect(result.message).toBe('permission denied for table parts');
+    expect((result as Error & { code?: string }).code).toBe('42501');
+    expect((result as Error & { details?: string }).details).toBe('some detail');
+    expect((result as Error & { hint?: string }).hint).toBe('some hint');
+  });
+
+  it('falls back to hint when message is absent', () => {
+    expect(toError({ hint: 'Request was aborted' }).message).toBe('Request was aborted');
+  });
+
+  it('handles a thrown string', () => {
+    expect(toError('just a string').message).toBe('just a string');
+  });
+
+  it('uses the fallback for a shapeless value, and never produces an empty message', () => {
+    expect(toError({}, 'Failed to verify access').message).toBe('Failed to verify access');
+    expect(toError(null, 'Failed to verify access').message).toBe('Failed to verify access');
+    expect(toError({ message: '' }, 'Failed to verify access').message).toBe('Failed to verify access');
+  });
+
+  it('omits empty code/details/hint rather than attaching noise', () => {
+    const result = toError({ code: '', details: '', hint: '', message: 'boom' });
+    expect(result).not.toHaveProperty('code');
+    expect(result).not.toHaveProperty('details');
+  });
+
+  it('preserves name so a normalised AbortError is still classified as transient', () => {
+    // Round-trip guarantee: AuthGuard calls toError before reporting, and the retry
+    // path checks isTransientAbortError. Losing `name` would break that pairing.
+    const result = toError({
+      hint: 'Request was aborted (timeout or manual cancellation)',
+      message: 'AbortError: Lock was stolen by another request',
+    });
+    expect(isTransientAbortError(result)).toBe(true);
   });
 });

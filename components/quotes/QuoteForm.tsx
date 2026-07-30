@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import posthog from 'posthog-js';
 import NextLink from 'next/link';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -1024,6 +1025,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     try {
       if (mode === 'create') {
         const { quote } = await createQuote(companyId, payload);
+        posthog.capture('quote_created', {
+          line_item_count: payload.parts.length,
+          customer_id: formData.customer_id,
+        });
         onSave?.();
         router.push(`/dashboard/${companyId}/quotes/${quote.id}`);
       } else if (mode === 'edit' && quoteId) {

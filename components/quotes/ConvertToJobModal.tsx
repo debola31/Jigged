@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -300,6 +301,11 @@ export default function ConvertToJobModal({
           return;
         }
       }
+      posthog.capture('quote_converted_to_job', {
+        quote_id: quote.id,
+        part_count: includedGroups.length,
+        is_hot: hot,
+      });
       onConverted(result.job.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to convert quote to job');

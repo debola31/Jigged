@@ -112,8 +112,13 @@ describe('LocationsManager', () => {
     vi.mocked(getLocationBoard).mockResolvedValue(board([]));
     render(<LocationsManager companyId="co1" />);
 
-    expect(await screen.findByText(/no storage locations yet/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /add manually/i })).toBeInTheDocument();
+    expect(await screen.findByText(/no storage yet/i)).toBeInTheDocument();
+    // ONE button. This used to offer "Build visually" and "Add manually" side by side,
+    // asking someone who has never seen the feature to choose between two flows before
+    // knowing what either produces.
+    expect(screen.getByRole('button', { name: /add storage/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /build visually/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add manually/i })).not.toBeInTheDocument();
   });
 
   it('opens the sheet from a board tile and shows what is inside', async () => {
@@ -126,45 +131,52 @@ describe('LocationsManager', () => {
     expect(screen.getByText(/nothing here directly · 3 parts in sub-locations/i)).toBeInTheDocument();
   });
 
-  /** Board is the home; the list survives for finding one name among many, and is not sticky. */
-  it('defaults to the board and can re-mode to the list', async () => {
-    const user = userEvent.setup();
+  /**
+   * Three tests were removed here — "defaults to the board and can re-mode to the list",
+   * "sorts Unassigned last in the list too" and "opens the sheet from a list row too".
+   *
+   * The Board|List toggle and `LocationTreeView` are gone. An indented text tree is the
+   * opposite of the visual map the research asks for, Cabinet 1 alone exploded into 15
+   * rows, and at the ~12–18 places a real shop has the board is strictly better — so the
+   * toggle was a choice with no good answer. The board is now the only view, which is why
+   * these three have nothing left to assert.
+   */
+  it('offers no view toggle — the board is the only view', async () => {
     render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
 
-    const boardTile = await screen.findByRole('button', { name: /^Cabinet 3/ });
-    expect(boardTile).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'List' }));
-
-    // The list finally carries a child count and fill state — neither existed before.
-    expect(await screen.findByText('2 inside')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /add storage/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'List' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Board' })).not.toBeInTheDocument();
   });
 
-  /** The board sorts the put-away pile last; the list has to agree, or the demoted view undoes it. */
-  it('sorts Unassigned last in the list too, not only on the board', async () => {
+  /** Scanning is an operator gesture at a shelf, not an admin gesture at a desk. */
+  it('has no Scan button — that moved to the operator tab bar', async () => {
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    expect(screen.queryByRole('button', { name: /^scan$/i })).not.toBeInTheDocument();
+  });
+
+  /** The whole point of the reshape: one way in, not three. */
+  it('exposes exactly one way to add storage, and it is not the wizard', async () => {
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    expect(screen.getAllByRole('button', { name: /add storage/i })).toHaveLength(1);
+    expect(
+      screen.queryByRole('button', { name: /new top-level location/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /build visually/i })).not.toBeInTheDocument();
+  });
+
+  /** The board is the hub, so the company-wide sheet is reached from here. */
+  it('offers Count everything, since /inventory no longer exists to host it', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
-    await user.click(screen.getByRole('button', { name: 'List' }));
-    await screen.findByText('2 inside');
-
-    const rows = screen.getAllByRole('button').map((b) => b.textContent ?? '');
-    const unassigned = rows.findIndex((t) => t.includes('Unassigned'));
-    const cabinet = rows.findIndex((t) => t.includes('Cabinet 3'));
-    expect(cabinet).toBeLessThan(unassigned);
-  });
-
-  it('opens the sheet from a list row too', async () => {
-    const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
-    await screen.findByRole('button', { name: /^Cabinet 3/ });
-
-    await user.click(screen.getByRole('button', { name: 'List' }));
-    await user.click(await screen.findByRole('button', { name: /Shelf A/ }));
-
-    expect(await screen.findByText("What's here")).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /count everything/i }));
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count');
   });
 
   it('routes the sheet delete through the confirm dialog', async () => {
@@ -226,18 +238,18 @@ describe('LocationsManager', () => {
     expect(startSortOrder).toBe(1);
   });
 
-  it('starts a top-level build at zero — there is nothing to sort after', async () => {
-    const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
-    await screen.findByRole('button', { name: /^Cabinet 3/ });
-
-    await user.click(screen.getByRole('button', { name: /build visually/i }));
-    await user.click(screen.getByText('Cabinet'));
-    await user.click(await screen.findByRole('button', { name: /create 16 locations/i }));
-
-    expect(vi.mocked(materializeLocationSpec).mock.calls[0][1]).toBeNull();
-    expect(vi.mocked(materializeLocationSpec).mock.calls[0][3]).toBe(0);
-  });
+  /**
+   * Removed: "starts a top-level build at zero — there is nothing to sort after".
+   *
+   * There is no top-level build any more. The multi-level builder is reachable only from
+   * Subdivide on a unit that already exists (§5.5 decision 3's original intent), so its
+   * `parentId` is never null and there is no top-level path to test. 118 of Contour's 121
+   * legacy locations were flat in a system that supported nesting, which is why a wizard
+   * was the wrong primary way to create a place.
+   *
+   * The subdivide paths — aimed at the unit, carrying its code, and continuing the
+   * numbering on a repeat — are covered by the tests either side of this comment.
+   */
 
   it('continues the numbering on a repeat subdivide', async () => {
     const user = userEvent.setup();

@@ -8,9 +8,6 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
@@ -21,10 +18,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
-import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaicOutlined';
-import GridViewIcon from '@mui/icons-material/GridView';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
-import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 import {
@@ -39,13 +33,11 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
-import LocationTreeView from './LocationTreeView';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import LocationBoard, { boardOrder } from './board/LocationBoard';
 import LocationDetailSheet from './board/LocationDetailSheet';
-import LocationScanner from '@/components/scanner/LocationScanner';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -137,28 +129,13 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     startSortOrder: 0,
   });
 
-  const openTopLevelBuilder = () =>
-    setBuilder({
-      open: true,
-      parentId: null,
-      parentCode: null,
-      parentPath: [],
-      existingSiblingNames: [],
-      startSortOrder: 0,
-    });
-
-  /**
-   * Board is always the default, and the choice is deliberately NOT persisted.
-   *
-   * Remembering "List" would quietly un-demote the view this phase just demoted: someone who
-   * peeked at the list once would never see the board again.
-   */
-  const [view, setView] = useState<'board' | 'list'>('board');
+  // `openTopLevelBuilder` is gone with the toolbar's "Build visually". The builder itself
+  // survives, reached only from Subdivide on a unit that already exists — which is what
+  // §5.5 decision 3 prescribed all along, and it keeps the `parentId` path as the only
+  // path rather than a dormant second one.
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [sheetId, setSheetId] = useState<string | null>(null);
-
-  const [scanning, setScanning] = useState(false);
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -338,37 +315,29 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
 
   return (
     <Box>
-      {/* Toolbar — single row */}
+      {/*
+        Toolbar — single row, and deliberately almost empty.
+
+        It used to hold five setup controls (Scan · Print all labels · New top-level
+        location · Build visually, plus a Board|List toggle) on a page whose own spec
+        section is titled "Design for the sustain, not the setup". What went:
+
+        - **Board|List toggle** — an indented text tree is the opposite of the map the
+          research asks for, and Cabinet 1 alone exploded into 15 rows. At the ~12–18
+          places a real shop has, the board is strictly better; the choice was a burden.
+        - **Scan** — scanning a printed label is an operator gesture at a shelf, not an
+          admin gesture at a desk. It lives in the operator tab bar now.
+        - **New top-level location** and **Build visually** — these were two entry points
+          to two different creation flows, and `Build visually` called the *identical*
+          function as the in-grid "Add storage" tile. Now there is one way to add storage:
+          that tile. Multi-level lives on only as Subdivide, on a unit that already exists.
+
+        What arrived is `Count everything`, because the board is now the hub: the
+        company-wide sheet is reached from here rather than from a sibling button on a
+        page that no longer exists.
+      */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-        {/* Segmented, not Tabs: this re-modes the same content rather than switching sections. */}
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={view}
-          onChange={(_, v) => v && setView(v)}
-          aria-label="View"
-        >
-          <ToggleButton value="board" aria-label="Board">
-            <Tooltip title="Board">
-              <GridViewIcon fontSize="small" />
-            </Tooltip>
-          </ToggleButton>
-          <ToggleButton value="list" aria-label="List">
-            <Tooltip title="List">
-              <FormatListBulletedIcon fontSize="small" />
-            </Tooltip>
-          </ToggleButton>
-        </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
-        {/* Scanning a label you already printed is faster than finding it in a grid of 22 — and
-            it's the same gesture the operator surface uses, so the two read alike. */}
-        <Button
-          variant="outlined"
-          startIcon={<QrCodeScannerIcon />}
-          onClick={() => setScanning(true)}
-        >
-          Scan
-        </Button>
         <Button
           variant="outlined"
           startIcon={<QrCode2Icon />}
@@ -379,17 +348,10 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         </Button>
         <Button
           variant="outlined"
-          startIcon={<AddIcon />}
-          onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+          startIcon={<FactCheckOutlinedIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
         >
-          New top-level location
-        </Button>
-        <Button
-          variant="contained"
-          startIcon={<AutoAwesomeMosaicOutlinedIcon />}
-          onClick={openTopLevelBuilder}
-        >
-          Build visually
+          Count everything
         </Button>
       </Box>
 
@@ -411,24 +373,23 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       ) : tree.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
+            {/* One button, matching the board's single "Add storage" tile. This offered
+                "Build visually" and "Add manually" side by side — asking someone who has
+                never seen the feature to choose between two flows before they know what
+                either produces. Name one place; subdivide it later if it needs it. */}
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              No storage locations yet. Build your cabinets, shelving, and bins visually in a couple of
-              taps, then print QR labels to scan from the shop floor.
+              No storage yet. Name the places you already have — a cabinet, a shelf, the
+              yard — then print QR labels to scan from the shop floor.
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
               <Button
                 variant="contained"
-                startIcon={<AutoAwesomeMosaicOutlinedIcon />}
-                onClick={openTopLevelBuilder}
-              >
-                Build visually
-              </Button>
-              <Button
-                variant="text"
                 startIcon={<AddIcon />}
-                onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+                onClick={() =>
+                  setFormState({ open: true, location: null, parentId: null, parentPath: [] })
+                }
               >
-                Add manually
+                Add storage
               </Button>
             </Box>
           </CardContent>
@@ -445,40 +406,27 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
             </Alert>
           )}
 
-          {view === 'board' ? (
-            <LocationBoard
-              tree={tree}
-              occupancy={occupancy}
-              photoUrls={photoUrls}
-              onOpen={openSheet}
-              onAddStorage={openTopLevelBuilder}
-            />
-          ) : (
-            <Card elevation={2}>
-              <CardContent>
-                <LocationTreeView
-                  nodes={tree}
-                  occupancy={occupancy}
-                  callbacks={{ onOpen: openSheet }}
-                />
-              </CardContent>
-            </Card>
-          )}
+          {/* The single way to add storage. It opens the *simple* form — a name and an
+              optional kind, creating one flat place — not the multi-level builder it used
+              to call. 118 of Contour's 121 legacy locations were flat, in a system that
+              supported nesting, so a wizard is the wrong primary path. A 5-row cabinet is
+              now two comprehensible steps: create "Cabinet 1", then Subdivide it. */}
+          <LocationBoard
+            tree={tree}
+            occupancy={occupancy}
+            photoUrls={photoUrls}
+            onOpen={openSheet}
+            onAddStorage={() =>
+              setFormState({ open: true, location: null, parentId: null, parentPath: [] })
+            }
+          />
         </>
       )}
 
-      <LocationScanner
-        open={scanning}
-        onClose={() => setScanning(false)}
-        onScan={(locationId) => {
-          // A label from another company decodes fine but isn't yours; the tree is already loaded,
-          // so refusing it costs nothing and beats opening an empty sheet.
-          const node = byNodeId.get(locationId);
-          if (!node) return false;
-          setScanning(false);
-          setSheetId(node.id);
-        }}
-      />
+      {/* The scanner lived here and is gone: scanning a printed label is something you do
+          standing at a shelf, which is the operator surface, not this admin page. It moved
+          to the operator tab bar, where it also resolves job travelers — one scanner for
+          every kind of Jigged QR. */}
 
       <LocationDetailSheet
         open={sheetNode !== null}

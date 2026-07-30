@@ -73,6 +73,73 @@ export function isAuthError(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Is this a *transient* abort rather than a real failure?
+ *
+ * `@supabase/auth-js` serialises token refreshes across tabs with the Web Locks API.
+ * When two calls contend, the newer one takes the lock with `{ steal: true }` and the
+ * loser's promise rejects with `AbortError: Lock was stolen by another request`. That
+ * means "this attempt was superseded", NOT "the operation failed" — the newer holder
+ * is completing the same work.
+ *
+ * Treating it as a failure is how a benign race became a user-visible lockout: AuthGuard
+ * caught it and rendered "You don't have access to this company" to people who did.
+ * Callers should retry or ignore these, never surface them as denial.
+ */
+export function isTransientAbortError(error: unknown): boolean {
+  if (!error) return false;
+
+  const err = asRecord(error);
+  const name = typeof err.name === 'string' ? err.name : '';
+  if (name === 'AbortError') return true;
+
+  // The Supabase wrapper loses `name`, keeping the text in `message`/`hint`.
+  const haystack = [err.message, err.hint, err.details]
+    .filter((v): v is string => typeof v === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    haystack.includes('lock was stolen') ||
+    haystack.includes('aborterror') ||
+    haystack.includes('request was aborted') ||
+    haystack.includes('acquiring an exclusive navigator lock')
+  );
+}
+
+/**
+ * Normalise anything throwable into a real `Error`, for `Sentry.captureException`.
+ *
+ * Supabase rejects with a plain object (`{ code, details, hint, message }`), not an
+ * Error. Handing that straight to Sentry produces an issue titled `"e"` with the body
+ * "Object captured as exception with keys: code, details, hint, message" — unreadable,
+ * and ungroupable, because Sentry has no type or stack to fingerprint on. The real
+ * message ends up buried in a `__serialized__` extra where nobody looks.
+ *
+ * Keeps `code`/`details`/`hint` as own properties so they still reach Sentry's context.
+ */
+export function toError(value: unknown, fallbackMessage = 'Unknown error'): Error {
+  if (value instanceof Error) return value;
+
+  const record = asRecord(value);
+  const message =
+    (typeof record.message === 'string' && record.message) ||
+    (typeof record.hint === 'string' && record.hint) ||
+    (typeof value === 'string' && value) ||
+    fallbackMessage;
+
+  const error = new Error(message);
+  for (const key of ['code', 'details', 'hint'] as const) {
+    if (record[key] !== undefined && record[key] !== '') {
+      Object.assign(error, { [key]: record[key] });
+    }
+  }
+  // Preserve an AbortError's name so isTransientAbortError still recognises it.
+  if (typeof record.name === 'string' && record.name) error.name = record.name;
+
+  return error;
+}
+
 // ---------------------------------------------------------------------------
 // User-facing error translation
 // ---------------------------------------------------------------------------

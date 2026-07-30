@@ -32,7 +32,13 @@ Sentry.init({
   // A mistyped password is not a bug. Sentry's custom inbound message filters are
   // a paid feature, so this is dropped client-side instead — strictly better, since
   // the event never leaves the browser and never counts against quota.
-  ignoreErrors: ["Invalid login credentials"],
+  //
+  // `EmptyRanges` is injected by a Safari extension, not by us: the symbol appears in
+  // zero files across the source tree, node_modules AND the built production bundle,
+  // and the stack is a single frame with no filename caught by window.onerror. Sentry's
+  // browser-extensions inbound filter misses it because the frame carries no
+  // extension-scheme URL to match on.
+  ignoreErrors: ["Invalid login credentials", "EmptyRanges"],
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

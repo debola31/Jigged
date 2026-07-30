@@ -38,7 +38,7 @@ import {
   refreshLocationQuantities,
   commitCount,
 } from '@/utils/inventoryCountAccess';
-import { bulkPutAway, createLocation, getLocations } from '@/utils/inventoryLocationsAccess';
+import { bulkPutAway, getLocations } from '@/utils/inventoryLocationsAccess';
 import type { CountCandidate } from '@/types/inventoryCount';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;

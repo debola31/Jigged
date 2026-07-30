@@ -127,10 +127,25 @@ rather than a convenience ([§6](#6-phases-and-gates)).
 
 ### 4.2 The timeline
 
-Open items sit pinned at the top, then entries newest first, each attributed and dated. Newest
+Open items sit pinned above the log, then entries newest first, each attributed and dated. Newest
 first, and not grouped by kind, because the reader's question on arriving at a machine page is
 almost always "what has happened to this machine lately". Any grouping answers a question nobody
 asked, and pushes the recent thing below the fold.
+
+**Revised at build time, on two points the running screen made obvious.**
+
+*The composer sits above the pinned items, not below them.* With outstanding work first, a machine
+carrying several open items pushed the composer off the top of a phone — the one thing this screen
+exists to make easy became the thing you had to scroll to find. Writing does not queue behind
+however much is outstanding.
+
+*An entry appears exactly once.* An open item used to render as a pinned summary **and** again in
+the log below, which was one fact twice with different chrome, and the summary dropped the entry's
+photo — which on "the way cover has started to drag" is most of the message. Now an outstanding
+item lives in the pinned block as a full card, and the moment somebody logs the fix it drops into
+the log carrying its author. The log itself is one card of divider-separated rows, matching how the
+[Operator View](operator-view.md) already renders notes: same content, same reading gesture, and a
+four-word entry no longer costs a whole card plus a gap.
 
 ### 4.3 Capture
 
@@ -229,12 +244,18 @@ operator's pace or standing back at them*
 may show who logs how many entries, or how often a given operator files a noticed.
 
 That collides with a real design want, and the collision resolves in one direction. **Decided:**
-the open-items list shows the observation and the date; the author is visible on the entry's own
-card, one tap away. This is a deliberate trade and it costs the list some context. A list of open
-items with names against it is a list of who reports the most problems, read straight down the
+the open-items list shows the observation, the date and the photo — but not the author. A list of
+open items with names against it is a list of who reports the most problems, read straight down the
 column, and that is the shape of every operator scorecard this product has already refused to
-build. The cost of the trade is a slightly thinner list. The cost of the alternative is that
-filing a noticed becomes an admission.
+build. The cost of the alternative is that filing a noticed becomes an admission.
+
+**Amended at build time.** This originally said the author was "visible on the entry's own card, one
+tap away", because an open item also rendered in the log below. It no longer does — an entry appears
+exactly once ([§4.2](#42-the-timeline)) — so the name is not one tap away, it is **deferred**: the
+entry carries its author from the moment somebody logs the fix and it drops into the log. That is a
+better version of the same trade rather than a weaker one. While a thing is outstanding, who raised
+it is not the question; once it is dealt with, both names survive on the record and neither is
+counted.
 
 ## 6. Phases and gates
 

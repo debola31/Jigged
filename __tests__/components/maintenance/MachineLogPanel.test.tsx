@@ -123,25 +123,52 @@ describe('MachineLogPanel', () => {
     expect(screen.queryByText(/\bjobs\b/i)).not.toBeInTheDocument();
   });
 
-  it('pins open items above the timeline AND leaves them in it', async () => {
-    // Both halves matter. Pinned, because the reader's question on arriving is
-    // "what is outstanding". Still in the timeline, because a log that loses rows
-    // stops being a log — the open list is a VIEW of the timeline, not a
-    // separate inbox that rows move between.
+  it('shows an outstanding item exactly once, pinned above the log', async () => {
+    // It used to render in the pinned block AND again in the log below — the
+    // same fact twice with different chrome. Now it appears once and moves: it
+    // sits pinned while outstanding, and drops into the log once resolved.
     const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
     mockGetMachineLog.mockResolvedValue({ entries: [note({ id: 'a' }), open], open: [open] });
 
     render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
     await screen.findByText('Topped up the way lube.');
 
-    const occurrences = screen.getAllByText('Coolant smells off.');
-    expect(occurrences).toHaveLength(2);
-
-    const [pinned, inTimeline] = occurrences;
-    expect(pinned.compareDocumentPosition(inTimeline)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getAllByText('Coolant smells off.')).toHaveLength(1);
     expect(
-      pinned.compareDocumentPosition(screen.getByText('Topped up the way lube.')),
+      screen
+        .getByText('Coolant smells off.')
+        .compareDocumentPosition(screen.getByText('Topped up the way lube.')),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('puts the composer above the outstanding items, so it cannot be pushed off-screen', async () => {
+    // With the pinned block first, a machine with several outstanding items
+    // scrolled the one thing this screen exists for off the top of the phone.
+    const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
+    mockGetMachineLog.mockResolvedValue({ entries: [open], open: [open] });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Coolant smells off.');
+
+    expect(
+      screen
+        .getByPlaceholderText(/what did you do/i)
+        .compareDocumentPosition(screen.getByText('Coolant smells off.')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('names the author in the log but not while an item is outstanding', async () => {
+    // §5: a list of outstanding items with names down the side is a list of who
+    // reports the most problems. The name is deferred, not lost.
+    const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed',
+      author_name: 'Kurtis' });
+    mockGetMachineLog.mockResolvedValue({ entries: [note({ id: 'a' }), open], open: [open] });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Coolant smells off.');
+
+    // One "Kurtis" — from the logged entry, not the pinned one.
+    expect(screen.getAllByText('Kurtis')).toHaveLength(1);
   });
 
   it('binds the fix to the item and records the loop closing', async () => {

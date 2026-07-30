@@ -94,7 +94,7 @@ test.describe('Machine Maintenance', () => {
     await expect(page.getByText(body)).toBeVisible({ timeout: 30_000 });
   });
 
-  test('a noticed item opens, and logging the fix closes it without deleting anything', async ({
+  test('a flagged item pins once, and logging the fix moves it into the log', async ({
     page,
   }) => {
     const companyId = await operatorHome(page);
@@ -105,9 +105,10 @@ test.describe('Machine Maintenance', () => {
     await page.getByRole('checkbox', { name: /needs attention/i }).click();
     await addButton(page).click();
 
-    // Pinned in the open list AND present on the timeline: two occurrences of one
-    // row, which is the shape the whole design turns on.
-    await expect(page.getByText(observation)).toHaveCount(2, { timeout: 30_000 });
+    // Exactly once, and pinned: an entry never renders twice. While it is
+    // outstanding it lives in the pinned block and nowhere else.
+    await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
+    await expect(openList(page).getByText(observation)).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole('button', { name: /log the fix/i }).first().click();
     const fix = `E2E replaced the wiper ${stamp()}`;
@@ -116,13 +117,15 @@ test.describe('Machine Maintenance', () => {
 
     await expect(page.getByText(fix)).toBeVisible({ timeout: 30_000 });
 
-    // Down to one occurrence: it left the OPEN list but stayed in the log. A log
-    // that loses rows stops being a log.
+    // It MOVED rather than vanished: gone from the pinned block, still on the
+    // page. A log that loses rows stops being a log.
+    await expect(openList(page).getByText(observation)).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
 
-    // And it is still closed after a reload — proving the state came from the
+    // And it stays moved after a reload — proving the state came from the
     // resolving row rather than from anything held in the page.
     await page.reload();
+    await expect(openList(page).getByText(observation)).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
     await expect(page.getByText(fix)).toBeVisible({ timeout: 30_000 });
   });
@@ -138,9 +141,7 @@ test.describe('Machine Maintenance', () => {
     await composer(page).fill(observation);
     await page.getByRole('checkbox', { name: /needs attention/i }).click();
     await addButton(page).click();
-    await expect(page.getByText(observation)).toHaveCount(2, { timeout: 30_000 });
-
-    await expect(openList(page).getByText(observation)).toBeVisible();
+    await expect(openList(page).getByText(observation)).toBeVisible({ timeout: 30_000 });
     // The author's name is on the entry card below, one tap away — not here.
     await expect(openList(page).getByText('E2E Test User')).toHaveCount(0);
   });

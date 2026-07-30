@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
 import CircularProgress from '@mui/material/CircularProgress';
+import Divider from '@mui/material/Divider';
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import Typography from '@mui/material/Typography';
 import { useLoad } from '@/hooks/useLoad';
@@ -22,10 +25,12 @@ import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import { countWorkCenterAttachments } from '@/utils/workCenterAttachmentsAccess';
 import MachineComposer from '@/components/maintenance/MachineComposer';
 import MachineDetailsCard from '@/components/maintenance/MachineDetailsCard';
-import MachineEntryCard from '@/components/maintenance/MachineEntryCard';
+import MachineEntry from '@/components/maintenance/MachineEntry';
 import MachineManualsSheet from '@/components/maintenance/MachineManualsSheet';
 import MachineOpenItems from '@/components/maintenance/MachineOpenItems';
 import type { MachineNote, MaintenanceKind } from '@/types/machineMaintenance';
+
+const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 
 /**
  * One machine's logbook: open items pinned, then everything, newest first.
@@ -154,6 +159,14 @@ export default function MachineLogPanel({
   }, []);
 
   const openIds = useMemo(() => new Set((log?.open ?? []).map((o) => o.id)), [log]);
+  // The log excludes whatever is pinned above it. Each entry appears EXACTLY
+  // once: outstanding items live in the pinned block, and the moment somebody
+  // logs the fix they drop into the log here, carrying their author. Rendering
+  // both was the same fact twice with different chrome.
+  const logged = useMemo(
+    () => (log?.entries ?? []).filter((e) => !openIds.has(e.id)),
+    [log, openIds],
+  );
   const resolverAuthorById = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const e of log?.entries ?? []) {
@@ -211,8 +224,10 @@ export default function MachineLogPanel({
         machineName={machineName}
       />
 
-      <MachineOpenItems items={log?.open ?? []} onLogFix={readOnly ? undefined : startFix} />
-
+      {/* COMPOSER FIRST. It used to sit below the outstanding items, so a machine
+          with several of them pushed the one thing this screen exists to make
+          easy off the top of the phone. Writing is the primary act here; it does
+          not queue behind however much is outstanding. */}
       {!readOnly && (
         <MachineComposer
           capture={captureWithReset}
@@ -223,6 +238,14 @@ export default function MachineLogPanel({
         />
       )}
 
+      <MachineOpenItems
+        items={log?.open ?? []}
+        companyId={companyId}
+        memberId={memberId}
+        onLogFix={readOnly ? undefined : startFix}
+        readOnly={readOnly}
+      />
+
       {entries.length === 0 ? (
         // A plain statement of fact. Not a nudge, not an illustration, not a
         // "get started" — the machine simply has no history yet, and saying so
@@ -230,25 +253,31 @@ export default function MachineLogPanel({
         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
           Nothing logged for this machine yet.
         </Typography>
-      ) : (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {entries.map((entry) => (
-            // observe() attaches to the BODY element, never the card or a count
-            // badge — a read means somebody actually dwelled on the words.
-            <Box key={entry.id} ref={observe(entry.id)}>
-              <MachineEntryCard
-                entry={entry}
-                companyId={companyId}
-                memberId={memberId}
-                isOpen={openIds.has(entry.id)}
-                resolvedBy={resolverAuthorById.get(entry.id) ?? null}
-                onLogFix={() => startFix(entry)}
-                readOnly={readOnly}
-              />
-            </Box>
-          ))}
-        </Box>
-      )}
+      ) : logged.length > 0 ? (
+        // ONE card, rows separated by dividers — the shape the job feed already
+        // uses for notes. Same content type, same reading gesture, and a
+        // four-word entry no longer costs a whole card plus a gap.
+        <Card elevation={2} sx={cardSx}>
+          <CardContent>
+            {logged.map((entry, idx) => (
+              <Box key={entry.id}>
+                {idx > 0 && <Divider sx={{ my: 1.5 }} />}
+                {/* observe() attaches to the entry BODY, never a container or a
+                    count badge — a read means somebody dwelled on the words. */}
+                <Box ref={observe(entry.id)}>
+                  <MachineEntry
+                    entry={entry}
+                    companyId={companyId}
+                    memberId={memberId}
+                    resolvedBy={resolverAuthorById.get(entry.id) ?? null}
+                    readOnly={readOnly}
+                  />
+                </Box>
+              </Box>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <MachineDetailsCard details={details ?? null} />
     </Box>

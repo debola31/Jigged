@@ -24,7 +24,7 @@ import type { NoteCapture } from '@/hooks/useNoteCapture';
 const composerSx = {
   bgcolor: 'rgba(26, 31, 74, 0.55)',
   backdropFilter: 'blur(8px)',
-  border: '1px solid rgba(70, 130, 180, 0.55)',
+  border: '1px solid rgba(70, 130, 180, 0.85)',
 };
 
 /**

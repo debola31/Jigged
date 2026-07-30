@@ -71,10 +71,12 @@ export default function MachineEntryCard({
           <Typography variant="caption" color="text.secondary">
             {formatWhen(entry.created_at)}
           </Typography>
-          {entry.maintenance_kind && (
-            <Chip label={entry.maintenance_kind} size="small" variant="outlined" />
-          )}
-          {isOpen && <Chip label="Open" size="small" color="warning" />}
+          {/* The flag is shown as STATE, not as a label. Rendering the stored
+              value too would put "noticed" next to "Needs attention" on the same
+              row, saying one thing twice; and on a resolved entry the bare word
+              "noticed" would read as its category rather than as its history,
+              which "Fixed by …" below already tells better. */}
+          {isOpen && <Chip label="Needs attention" size="small" color="warning" />}
         </Box>
 
         {entry.body && (

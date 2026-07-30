@@ -6,10 +6,8 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import Typography from '@mui/material/Typography';
+import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
-import { MAINTENANCE_KINDS } from '@/types/machineMaintenance';
 import type { MaintenanceKind, MachineNote } from '@/types/machineMaintenance';
 import type { NoteCapture } from '@/hooks/useNoteCapture';
 
@@ -20,14 +18,25 @@ const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' 
  *
  * The text field, the photo picker, the dictation hint and the whole iOS
  * unreadable-file mitigation come from NoteCaptureFields — the same component
- * the step composer renders, not a copy of it. Only the kind chip is new here,
- * and it lives in this component rather than in NoteCaptureFields precisely
- * because a maintenance verb means nothing on a step note.
+ * the step composer renders, not a copy of it. Only the one toggle is new here,
+ * and it lives in this component rather than in NoteCaptureFields because
+ * "is this outstanding?" means nothing on a step note.
  *
- * THE CHIP IS OPTIONAL AND DESELECTABLE. Tapping the selected value clears it.
- * Somebody who cannot decide whether they cleaned or adjusted a thing must be
- * able to write the sentence anyway — a forced taxonomy at capture time is the
- * thing that stops capture, and an unclassified entry is still knowledge.
+ * ONE TOGGLE, NOT A TAXONOMY. An earlier draft offered five verbs (cleaned,
+ * repaired, replaced, adjusted, noticed). Four of them had no reader anywhere in
+ * the product — nothing filtered, grouped, ranked or counted by them, and §4.2
+ * forbids grouping the timeline by kind — so they were five choices presented to
+ * somebody in a container whose entire risk is that nobody writes in it. They
+ * also did not match the TPM frame §3 cites (cleaning, inspection, lubrication,
+ * retightening), which is a sign they were invented rather than observed.
+ *
+ * What survives is the one value the system acts on. Flagging pins the entry to
+ * the top of this machine until somebody logs a fix; it notifies nobody, and the
+ * label says the condition rather than promising a response.
+ *
+ * DESELECTABLE, and off by default. Most entries are records of work already
+ * done, and a person who is unsure must be able to write the sentence anyway —
+ * a forced classification at capture time is the thing that stops capture.
  */
 export default function MachineComposer({
   capture,
@@ -78,24 +87,16 @@ export default function MachineComposer({
         />
 
         <Box sx={{ mt: 1.5 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-            Optional
-          </Typography>
-          <ToggleButtonGroup
-            value={kind}
-            exclusive
-            // MUI hands back null when the selected button is tapped again, which
-            // is exactly the clearing gesture we want — pass it straight through.
-            onChange={(_e, next: MaintenanceKind | null) => onKindChange(next)}
+          <ToggleButton
+            value="noticed"
+            selected={kind === 'noticed'}
+            onChange={() => onKindChange(kind === 'noticed' ? null : 'noticed')}
             size="small"
-            sx={{ flexWrap: 'wrap' }}
+            sx={{ minHeight: 44, textTransform: 'none' }}
           >
-            {MAINTENANCE_KINDS.map((k) => (
-              <ToggleButton key={k} value={k} sx={{ minHeight: 40, textTransform: 'none' }}>
-                {k}
-              </ToggleButton>
-            ))}
-          </ToggleButtonGroup>
+            <ReportProblemOutlinedIcon fontSize="small" sx={{ mr: 0.75 }} />
+            Needs attention
+          </ToggleButton>
         </Box>
 
         <Box sx={{ mt: 1.5 }}>

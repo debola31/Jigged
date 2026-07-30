@@ -22,21 +22,19 @@ import type { JobNoteMedia, NoteReaction } from '@/types/operator';
  */
 
 /**
- * The five verbs, and the whole taxonomy. OPTIONAL at capture: an unclassified
- * entry is still knowledge, and a forced choice at capture time is what stops
- * capture (§4.3).
+ * Mirrors the notes_maintenance_kind_valid CHECK, which still accepts all five
+ * verbs. **Only 'noticed' has a UI**, and only 'noticed' does anything: it is
+ * what deriveOpenItems filters on, and therefore what pins an entry to the top
+ * of a machine until somebody logs a fix.
  *
- * Only 'noticed' can be open — the others describe something already done.
+ * The other four are deliberately unused rather than pending. They had no reader
+ * anywhere — nothing filtered, grouped, ranked or counted by them — so they were
+ * four extra choices in a container whose whole risk is that nobody writes in
+ * it. They are left in the CHECK because widening a constraint later is a
+ * migration and narrowing it buys nothing; re-introducing them, if a real corpus
+ * ever argues for it, is a UI change with no schema work.
  */
 export type MaintenanceKind = 'cleaned' | 'repaired' | 'replaced' | 'adjusted' | 'noticed';
-
-export const MAINTENANCE_KINDS: readonly MaintenanceKind[] = [
-  'cleaned',
-  'repaired',
-  'replaced',
-  'adjusted',
-  'noticed',
-] as const;
 
 /** One entry on a machine's timeline. */
 export interface MachineNote {

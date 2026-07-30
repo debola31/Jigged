@@ -96,7 +96,7 @@ export default function PartsPage() {
   const companyId = params.companyId as string;
 
   const searchParams = useSearchParams();
-  const { features } = useCompanyFeatures();
+  const { features, loading: featuresLoading } = useCompanyFeatures();
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -586,8 +586,15 @@ export default function PartsPage() {
         {/* Only when locations are OFF. With the flag on, counting is reached from the
             Storage board — you count a place, not a catalogue (inventory.md §5.11). With
             it off there are no places, so the company-wide count is the only count and
-            this is now its only home, since /inventory folded into this page. */}
-        {!features.inventory_locations && (
+            this is now its only home, since /inventory folded into this page.
+
+            `!featuresLoading` matters: without it the button renders during the flag's
+            load window and then vanishes, because an unresolved `features` object makes
+            `!features.inventory_locations` true. Caught on the preview — a control that
+            appears and then disappears is worse than one that was never there. The sidebar
+            solves the same problem with a Skeleton in the item's slot; here the honest
+            answer is to show nothing until we know. */}
+        {!featuresLoading && !features.inventory_locations && (
           <Button
             variant="outlined"
             startIcon={<FactCheckOutlinedIcon />}

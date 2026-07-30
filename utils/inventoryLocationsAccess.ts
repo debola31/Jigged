@@ -580,6 +580,90 @@ export async function getLocationContents(
   return { contents, total: count ?? contents.length };
 }
 
+/** Rows per page when working through a location's contents. */
+export const LOCATION_PAGE_SIZE = 100;
+
+export interface LocationContentsQuery {
+  /** Server-side match on the part name. Blank/absent means everything here. */
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * One page of a location's contents, searchable and offset-able.
+ *
+ * `getLocationContents` answers *"what's in this bin"* for a bin you can take in at a glance, and
+ * caps at 200 with no way past it. That's the wrong shape for working through `Unassigned`, which on
+ * a real shop holds **every part they own** — you can't scroll 9,428 rows and you can't select them
+ * meaningfully. The realistic move is *"search for what I'm holding, take those"*, so search is
+ * server-side and paging is explicit.
+ *
+ * Ordered by name (not quantity): a page you're going to search and tick through has to be
+ * alphabetical to be navigable, and unlike the capped read there's no "keep the biggest" truncation
+ * to be clever about.
+ *
+ * ⚠️ **An offset is only valid for an unchanged result set.** Putting parts away removes them from
+ * *this* location's rows, so a caller that holds its offset across a move will silently skip
+ * whatever shifted up. Refetch from offset 0 after any write — see the worksheet.
+ */
+export async function getLocationContentsPage(
+  locationId: string,
+  { search = '', limit = LOCATION_PAGE_SIZE, offset = 0 }: LocationContentsQuery = {},
+): Promise<LocationContentsPage> {
+  const supabase = getSupabase();
+  let query = supabase
+    .from('part_location_stock')
+    .select(
+      'quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      { count: 'exact' },
+    )
+    .eq('location_id', locationId)
+    .is('part.deleted_at', null)
+    .gt('quantity', 0);
+
+  const term = search.trim();
+  // Filtering and ordering both reach through the embed, so the whole thing stays one request —
+  // the alternative (fetch, then filter in JS) would have to fetch everything first, which is the
+  // problem this function exists to avoid.
+  if (term) query = query.ilike('part.part_name', `%${term}%`);
+
+  const { data, error, count } = await query
+    // `'part'` is the embed's ALIAS, not the table name. `referencedTable: 'parts'` makes PostgREST
+    // reject the whole request with `PGRST108 'parts' is not an embedded resource` — verified
+    // against the running stack, which is the only way this surfaces (it type-checks either way).
+    .order('part_name', { referencedTable: 'part', ascending: true })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error('Error fetching location contents page:', error);
+    throw error;
+  }
+
+  type Row = {
+    quantity: number;
+    part:
+      | { id: string; part_name: string; primary_unit: string | null }
+      | Array<{ id: string; part_name: string; primary_unit: string | null }>
+      | null;
+  };
+
+  const contents = ((data ?? []) as Row[])
+    .map((row) => {
+      const part = Array.isArray(row.part) ? row.part[0] : row.part;
+      if (!part) return null;
+      return {
+        part_id: part.id,
+        part_name: part.part_name,
+        primary_unit: part.primary_unit,
+        quantity: Number(row.quantity),
+      } as LocationContent;
+    })
+    .filter((r): r is LocationContent => r !== null);
+
+  return { contents, total: count ?? contents.length };
+}
+
 /** Resolve a scanned location id into node + ancestor path + children +
  * contents, so the bin view can render drill-down (parent) vs actions (leaf). */
 export async function resolveScan(locationId: string): Promise<ResolvedScan> {
@@ -766,5 +850,56 @@ export async function transferStock(
     throw error;
   }
   return data as unknown as TransferResult;
+}
+
+/**
+ * Most parts a single put-away may move — mirrors `PUT_AWAY_MAX` in the RPC.
+ *
+ * Duplicated here only so the UI can cap "select all shown" and say so *before* someone selects
+ * 2,000 rows and gets refused. The DB is the enforcer; this is the courtesy.
+ */
+export const PUT_AWAY_MAX = 1000;
+
+export interface PutAwayResult {
+  /** Parts whose balance actually moved. */
+  moved: number;
+  /** Requested but not moved — no stock here, no row here, untracked, or archived. */
+  skipped: number;
+  /** One id for the whole batch, so the ledger reads it as a single event. */
+  transfer_group_id: string;
+}
+
+/**
+ * Move the FULL balance of many parts from one location to another, atomically.
+ *
+ * The counterpart to `transferStock` for the put-away job: no quantity and no unit, because it
+ * moves everything each part holds. That means **no per-part conversion read** — one request for N
+ * parts where looping `transferStock` would cost 2N.
+ *
+ * ⚠️ **Never chunk this array.** The reason `bulk_put_away` exists is that a half-moved pile is
+ * worse than no move — you can't tell what you already did. Splitting into 500s would turn one
+ * transaction into several, each with its own `transfer_group_id`, and a failure in the second batch
+ * would leave precisely the mess the RPC prevents. `bulkDeleteParts` can chunk safely because
+ * soft-delete is idempotent; this is not. The 500-chunk convention elsewhere in this file exists for
+ * `.in()` reads, where the real limit is PostgREST's URL length — an RPC POSTs a body and has no
+ * such constraint. The RPC caps the array itself at `PUT_AWAY_MAX` so no caller can re-introduce a
+ * loop and quietly break the guarantee.
+ */
+export async function bulkPutAway(
+  fromLocationId: string,
+  toLocationId: string,
+  partIds: string[],
+): Promise<PutAwayResult> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('bulk_put_away', {
+    p_from_location_id: fromLocationId,
+    p_to_location_id: toLocationId,
+    p_part_ids: partIds,
+  });
+  if (error) {
+    console.error('Error putting stock away:', error);
+    throw error;
+  }
+  return data as unknown as PutAwayResult;
 }
 

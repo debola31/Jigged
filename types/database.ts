@@ -3327,6 +3327,14 @@ export type Database = {
         Returns: undefined
       }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
+      bulk_put_away: {
+        Args: {
+          p_from_location_id: string
+          p_part_ids: string[]
+          p_to_location_id: string
+        }
+        Returns: Json
+      }
       company_can_write: {
         Args: { check_company_id: string }
         Returns: boolean

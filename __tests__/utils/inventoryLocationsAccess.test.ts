@@ -27,7 +27,7 @@ const { state, mockSupabase } = vi.hoisted(() => {
     // (`.is('part.deleted_at', null)`, `.limit(n)`) actually reached PostgREST.
     const seen: Record<string, unknown[]> = {};
     s.calls.push(seen);
-    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'gt', 'order', 'limit', 'single', 'maybeSingle'].forEach(
+    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'gt', 'ilike', 'order', 'limit', 'range', 'single', 'maybeSingle'].forEach(
       (m) => {
         b[m] = vi.fn((...args: unknown[]) => {
           seen[m] = args;
@@ -69,7 +69,10 @@ import {
   getLocationOccupancy,
   getLocationBoard,
   getLocationContents,
+  getLocationContentsPage,
   LOCATION_CONTENTS_LIMIT,
+  LOCATION_PAGE_SIZE,
+  bulkPutAway,
   resolveScan,
 } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
@@ -617,5 +620,108 @@ describe('duplicate sibling names', () => {
         { key: '0', name: 'Row 1', kind: 'row', code: 'R01', children: [] },
       ]),
     ).rejects.toThrow(/already a "Row 1" in the same place/i);
+  });
+});
+
+/**
+ * Put-away's read: searchable and paginated, because `Unassigned` holds everything.
+ */
+describe('getLocationContentsPage', () => {
+  const row = (id: string, quantity: number) => ({
+    quantity,
+    part: { id, part_name: id, primary_unit: 'each' },
+  });
+
+  it('pages with range and reports the true total', async () => {
+    queueFrom({ data: [row('p1', 5), row('p2', 3)], error: null, count: 9428 });
+
+    const page = await getLocationContentsPage('un', { limit: 2, offset: 4 });
+
+    expect(page.contents).toHaveLength(2);
+    expect(page.total).toBe(9428);
+    // range() is inclusive on both ends, so a limit of 2 from offset 4 is 4..5.
+    expect(state.calls[0].range).toEqual([4, 5]);
+  });
+
+  it('pushes the search to the server rather than filtering a fetched page', async () => {
+    queueFrom({ data: [row('BUY-ORING-214', 828)], error: null, count: 1 });
+    await getLocationContentsPage('un', { search: '  oring  ' });
+    expect(state.calls[0].ilike).toEqual(['part.part_name', '%oring%']);
+  });
+
+  it('omits the filter entirely for a blank search', async () => {
+    queueFrom({ data: [], error: null, count: 0 });
+    await getLocationContentsPage('un', { search: '   ' });
+    expect(state.calls[0].ilike).toBeUndefined();
+  });
+
+  /**
+   * `referencedTable` must be the embed's ALIAS. Passing the table name type-checks fine and then
+   * fails at runtime with `PGRST108 'parts' is not an embedded resource` — so the string is pinned.
+   */
+  it('orders by name through the embed alias, not the table name', async () => {
+    queueFrom({ data: [], error: null, count: 0 });
+    await getLocationContentsPage('un');
+    expect(state.calls[0].order).toEqual(['part_name', { referencedTable: 'part', ascending: true }]);
+  });
+
+  it('excludes archived parts and empty rows, like the board does', async () => {
+    queueFrom({ data: [], error: null, count: 0 });
+    await getLocationContentsPage('un');
+    expect(String(state.calls[0].select?.[0])).toContain('!inner');
+    expect(state.calls[0].is).toEqual(['part.deleted_at', null]);
+    expect(state.calls[0].gt).toEqual(['quantity', 0]);
+  });
+
+  it('defaults to one page of LOCATION_PAGE_SIZE from the start', async () => {
+    queueFrom({ data: [], error: null, count: 0 });
+    await getLocationContentsPage('un');
+    expect(state.calls[0].range).toEqual([0, LOCATION_PAGE_SIZE - 1]);
+  });
+});
+
+/**
+ * Put-away's write.
+ *
+ * The budget test is the important one: it exists to stop someone "helpfully" adding a 500-chunk
+ * loop later, which would silently turn one atomic transaction into several and re-create the
+ * half-moved pile the RPC was built to prevent.
+ */
+describe('bulkPutAway', () => {
+  it('sends every part in ONE rpc call, whatever the count', async () => {
+    state.rpc = { data: { moved: 900, skipped: 0, transfer_group_id: 'grp1' }, error: null };
+    const ids = Array.from({ length: 900 }, (_, i) => `p${i}`);
+
+    const res = await bulkPutAway('un', 'yard', ids);
+
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(1);
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('bulk_put_away', {
+      p_from_location_id: 'un',
+      p_to_location_id: 'yard',
+      p_part_ids: ids,
+    });
+    expect(res.moved).toBe(900);
+    expect(res.transfer_group_id).toBe('grp1');
+  });
+
+  // No quantity and no unit — it moves the whole balance, so there is nothing to convert and no
+  // per-part conversion read. Looping transferStock would have cost 2 requests per part.
+  it('reads nothing before writing — no conversion context', async () => {
+    state.rpc = { data: { moved: 1, skipped: 0, transfer_group_id: 'g' }, error: null };
+    await bulkPutAway('un', 'yard', ['p1']);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
+  });
+
+  it('reports what it skipped rather than pretending everything moved', async () => {
+    state.rpc = { data: { moved: 3, skipped: 4, transfer_group_id: 'g' }, error: null };
+    expect(await bulkPutAway('un', 'yard', ['a', 'b', 'c', 'd', 'e', 'f', 'g'])).toMatchObject({
+      moved: 3,
+      skipped: 4,
+    });
+  });
+
+  it('propagates the DB refusal instead of reporting a silent success', async () => {
+    state.rpc = { data: null, error: { message: 'Too many parts at once (1001 of a maximum 1000).' } };
+    await expect(bulkPutAway('un', 'yard', ['p1'])).rejects.toBeTruthy();
   });
 });

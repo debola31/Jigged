@@ -5,7 +5,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import ToggleButton from '@mui/material/ToggleButton';
+import Chip from '@mui/material/Chip';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { MaintenanceKind, MachineNote } from '@/types/machineMaintenance';
@@ -81,25 +81,32 @@ export default function MachineComposer({
           </Alert>
         )}
 
+        {/* `compact`: the field grows as it fills and the camera is an adjacent
+            icon, which is the shape the step composer already uses. The full
+            layout's outlined "Add photo" button was the widest thing on the
+            screen and sat above the fold on a phone, pushing the log itself
+            down — for a secondary action on a surface people are meant to
+            SCROLL, that is the wrong thing to be biggest. */}
         <NoteCaptureFields
           capture={capture}
           placeholder="What did you do, or what did you notice?"
+          compact
         />
 
-        <Box sx={{ mt: 1.5 }}>
-          <ToggleButton
-            value="noticed"
-            selected={kind === 'noticed'}
-            onChange={() => onKindChange(kind === 'noticed' ? null : 'noticed')}
-            size="small"
-            sx={{ minHeight: 44, textTransform: 'none' }}
-          >
-            <ReportProblemOutlinedIcon fontSize="small" sx={{ mr: 0.75 }} />
-            Needs attention
-          </ToggleButton>
-        </Box>
-
-        <Box sx={{ mt: 1.5 }}>
+        {/* One row: the flag and the commit. Two stacked full-width controls
+            cost three lines of a phone screen to say very little. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
+          <Chip
+            icon={<ReportProblemOutlinedIcon />}
+            label="Needs attention"
+            onClick={() => onKindChange(kind === 'noticed' ? null : 'noticed')}
+            color={kind === 'noticed' ? 'warning' : 'default'}
+            variant={kind === 'noticed' ? 'filled' : 'outlined'}
+            // 48, not the Chip default: this is a tap target on a shop floor,
+            // often with gloves on, and it sits next to a 48px button.
+            sx={{ height: 48, borderRadius: 3, px: 0.5 }}
+          />
+          <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
             onClick={submit}

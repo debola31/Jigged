@@ -15,6 +15,7 @@ Detailed specifications for each Jigged module.
 | [Routings](routings.md) | Job routing definitions | Should Have |
 | [Inventory](inventory.md) | Inventory tracking | Should Have |
 | [Operator View](operator-view.md) | Shop floor interface | Must Have |
+| [Machine Maintenance](machine-maintenance.md) | Operator-written logbook per machine, reached from the selected station. Flag-gated single-shop pilot with a kill criterion written in advance. | Built (unreleased) |
 | [Shipments](shipments.md) | Packing slips + fulfillment status | Built |
 | [Invitation System](invitation-system.md) | User invitations and referrals | Should Have |
 | [Data Import](data-import.md) | Guided onboarding import (Upload → Map → Review & Fix → Import); idempotent natural-identity upsert. See also the [Phase 2 design](data-import-phase2-design.md). | Built |

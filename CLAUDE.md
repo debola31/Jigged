@@ -773,6 +773,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Routings](docs/modules/routings.md)
 - [Inventory](docs/modules/inventory.md)
 - [Operator View](docs/modules/operator-view.md)
+- [Machine Maintenance](docs/modules/machine-maintenance.md) (operator-logged machine logbook; flag-gated pilot with a written kill criterion)
 - [Invitation System](docs/modules/invitation-system.md)
 - [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))
 - [Billing & Subscriptions](docs/modules/billing.md) (Stripe-hosted checkout/portal; DB-enforced entitlement)

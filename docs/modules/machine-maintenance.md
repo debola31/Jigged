@@ -1,11 +1,30 @@
 # Machine Maintenance Module
 
-> **Status:** Draft proposal · **Date:** 2026-07-29 · **Pilot:** one shop, behind a feature flag
+> **Status:** Phase 1 built, unreleased · **Date:** 2026-07-30 · **Pilot:** one shop, behind the
+> `machine_maintenance` flag (off everywhere by default)
 >
-> **Purpose.** Propose a machine-scoped maintenance logbook, and state in advance the condition
-> under which it gets parked. Nothing in this module is built. The bet is written down together
-> with its kill criterion ([§2](#2-hypothesis-and-kill-criterion)) so that the result cannot be
-> renegotiated once it arrives.
+> **Purpose.** A machine-scoped maintenance logbook, and the condition under which it gets parked,
+> stated in advance. The bet is written down together with its kill criterion
+> ([§2](#2-hypothesis-and-kill-criterion)) so that the result cannot be renegotiated once it
+> arrives.
+>
+> This document was committed as a proposal and then amended where building it changed an answer.
+> Six sections carry a revision: [§4.2](#42-the-timeline) (an entry appears exactly once, and the
+> composer sits above the outstanding items), [§4.3](#43-capture) (the five-verb kind chip is cut to
+> one "Needs attention" toggle — four of the five had no reader and no research),
+> [§4.4](#44-noticed-then-resolved) (the fix is an inline reply rather than a mode on the top
+> composer, and stays nested under what it answers rather than being filed as its own entry),
+> [§5](#5-what-it-is-not) (the withheld author is deferred rather than one tap away),
+> [§6](#6-phases-and-gates) (the archived-machines defect was not being fixed elsewhere, so it is
+> fixed here), [§8](#8-measurement) (`confirmed` is cut — Phase 1 ships no freshness signal and says
+> why), and [§9](#9-open-questions) (details and manuals ship; the office gets a read-only view).
+> Everything else is as proposed.
+>
+> Two patterns run through those. Several cut a control the proposal asked for, each for the same
+> reason: a control whose answer changes nothing teaches operators this surface is decorative. The
+> rest were written before there was anything on the screen — the layout ones only became visible
+> once a machine carried real entries, which is an argument for building the thin thing early rather
+> than specifying harder.
 
 **Dependencies:** [Work Centers](work-centers.md), because a machine is a `work_centers` row with
 `kind='internal'` and there is no separate machine entity. The notes system and its read-back loop
@@ -115,27 +134,117 @@ rather than a convenience ([§6](#6-phases-and-gates)).
 
 ### 4.2 The timeline
 
-Open items sit pinned at the top, then entries newest first, each attributed and dated. Newest
+Open items sit pinned above the log, then entries newest first, each attributed and dated. Newest
 first, and not grouped by kind, because the reader's question on arriving at a machine page is
 almost always "what has happened to this machine lately". Any grouping answers a question nobody
 asked, and pushes the recent thing below the fold.
+
+**Revised at build time, on two points the running screen made obvious.**
+
+*The composer sits above the pinned items, not below them.* With outstanding work first, a machine
+carrying several open items pushed the composer off the top of a phone — the one thing this screen
+exists to make easy became the thing you had to scroll to find. Writing does not queue behind
+however much is outstanding.
+
+*An entry appears exactly once.* An open item used to render as a pinned summary **and** again in
+the log below, which was one fact twice with different chrome, and the summary dropped the entry's
+photo — which on "the way cover has started to drag" is most of the message. Now an outstanding
+item lives in the pinned block as a full card, and the moment somebody logs the fix it drops into
+the log carrying its author. The log itself is one card of divider-separated rows, matching how the
+[Operator View](operator-view.md) already renders notes: same content, same reading gesture, and a
+four-word entry no longer costs a whole card plus a gap.
 
 ### 4.3 Capture
 
 Free text. Dictation is the phone keyboard's dictation key, which operators already use; no custom
 voice capture is built or proposed. Photos are optional and go through the native sheet, so an
-existing camera-roll photo works: the end-of-shift offset photo is already on the phone. A kind
-chip is offered with five values: cleaned, repaired, replaced, adjusted, noticed.
+existing camera-roll photo works: the end-of-shift offset photo is already on the phone. Alongside
+them, one optional toggle: **Needs attention**.
 
-**Decided:** kind is optional. An unclassified entry is still knowledge, and a forced taxonomy at
-capture time is the thing that stops capture. A person who cannot decide whether they cleaned or
-adjusted something will write nothing rather than choose wrongly.
+**Decided (revised at build time): one toggle, not a taxonomy.** This section originally offered a
+kind chip with five values — cleaned, repaired, replaced, adjusted, noticed — asserted in a single
+sentence with nothing behind it. Two things were wrong with that list.
+
+It did not match the frame this document itself argues from. [§3](#3-who-its-for) grounds the module
+in autonomous maintenance, "cleaning, inspection, lubrication and retightening"; only *cleaned*
+appears in both, and **lubrication is missing entirely** — the very thing
+[§1](#1-problem) builds the case on ("roughly seven in ten spindle shutdowns trace back to
+lubrication that was missed or not recorded"). A taxonomy that omits the category its own evidence
+rests on was invented rather than observed.
+
+And four of the five had no reader. Nothing in the product filtered, grouped, ranked or counted by
+kind — [§4.2](#42-the-timeline) forbids grouping the timeline by it — so they were four extra
+decisions asked of somebody in a container whose entire risk is that nobody writes in it at all.
+Only `noticed` ever did anything: it is what pins an entry to the top of the machine
+([§4.4](#44-noticed-then-resolved)).
+
+So the one value with a consumer survives, under a label that says the condition rather than naming
+a category. It is **off by default** — most entries record work already done — and deselectable,
+because a person who is unsure must still be able to write the sentence. The database CHECK keeps
+all five values: widening a constraint later is a migration, narrowing it buys nothing, and if a
+real corpus ever argues for categories they come back as a UI change with a consumer attached.
+
+**"Needs attention" notifies nobody.** There is no notification path in Phase 1
+([§9](#9-open-questions)), and the wording is chosen not to imply one. What it does is keep the
+entry pinned to that machine until somebody logs a fix — so the person who meets it is the next
+operator standing at the machine, which is precisely the handoff [§1](#1-problem) says goes wrong.
+Its only intended exit is a second entry describing what was done: there is no dismiss and no close,
+and `notes` is append-only, so clearing the pin and recording the knowledge are the same act.
 
 ### 4.4 Noticed, then resolved
 
-An open noticed item offers "log the fix", which is the same composer with the resolution link
-already bound. There is no assignment, no priority and no due date, because each of those needs a
-second person to mean anything ([§3](#3-who-its-for)).
+An open noticed item offers "log the fix". There is no assignment, no priority and no due date,
+because each of those needs a second person to mean anything ([§3](#3-who-its-for)).
+
+**Revised at build time: the fix is an inline reply, not a mode.** This originally specified "the
+same composer with the resolution link already bound", asserted in one sentence with no research
+behind it — the doc has nothing on replies or resolution interfaces at all. Reusing the top composer
+made resolving an item a MODE, announced by a banner, and modes fail in exactly the conditions this
+surface has: the banner scrolls out of view, and somebody who walks away mid-thought comes back to a
+composer that looks ordinary and is not.
+
+It also had a real defect. Starting a fix left whatever was half-typed in that composer alone while
+re-binding it to a resolution, so a sentence written about something else could silently become the
+fix for an item tapped afterwards.
+
+**And the first attempt at fixing that did not finish the job — worth recording, because the wrong
+diagnosis survived a build.** Giving the reply its own composer stopped the MAIN composer
+contaminating a reply, and a test pinned that. But there was still only one reply composer, shared by
+every outstanding item, and its draft was cleared in exactly one place: a successful save. So
+starting a fix on one item, typing, then tapping "log the fix" on a second item moved the composer
+without moving the text — and submitting filed the first item's sentence as the second item's
+resolution. The second closes on a sentence written about something else, the first stays
+outstanding forever, and because the log is append-only nobody can correct it; the only remedy is a
+second entry saying the first was misfiled.
+
+The lesson is about where state lives, not how many composers there are. A draft must not outlive the
+thing it was written about, so the draft now lives **with the target**: the reply composer is mounted
+keyed by the item it answers, and switching items destroys one and builds another. There is nothing
+to remember to reset, which is the same reasoning that makes open state derived rather than stored —
+a rule enforced by structure does not depend on every future edit remembering it.
+
+So the fix composer opens **beneath the item it answers**, and the item's "log the fix" control is
+replaced by it — the ordinary reply gesture, where position carries the meaning and there is no
+state to remember. It offers no flag of its own: a fix resolves something, and if the work uncovers
+a new problem that is a new entry rather than this one being both.
+
+**And it stays a reply once it lands.** The first build filed the fix as its own entry on the
+timeline and drew the link in text: the fix quoted the observation ("Fixes: …") and the observation
+gained a "Fixed by …" line. That reads as two separate entries that happen to mention each other,
+and the quotation had to be truncated to one line to fit — so the link was drawn by cutting off the
+very text it was pointing at. Instead the fix renders **nested under what it answers**, indented
+beneath a left rule, the way a reply reads on any messaging surface. Position carries the link, so
+neither end needs a sentence explaining itself, and nothing has to be truncated to fit.
+
+Threads sort by **latest activity**, not by the root's age. This is the one cost nesting carries: an
+observation from three weeks ago, answered this morning, would otherwise sit three weeks down a list
+that [§4.2](#42-the-timeline) keeps newest-first precisely because the reader is asking what has
+happened lately. Sorting on the thread rather than the root keeps that promise — resolving something
+old brings it back to the top, which is also what the person who did the work would expect.
+
+Only resolutions nest. This is not general threaded discussion: an ordinary entry cannot be replied
+to, because a shop this size has no conversation to hold ([§3](#3-who-its-for)) and a reply affordance
+on every row would invite one this surface is not built to keep readable.
 
 Open state is derived from the existence of a resolving entry and is never stored. So there is no
 state anyone has to remember to close, and no way for the open list to disagree with the timeline
@@ -191,12 +300,18 @@ operator's pace or standing back at them*
 may show who logs how many entries, or how often a given operator files a noticed.
 
 That collides with a real design want, and the collision resolves in one direction. **Decided:**
-the open-items list shows the observation and the date; the author is visible on the entry's own
-card, one tap away. This is a deliberate trade and it costs the list some context. A list of open
-items with names against it is a list of who reports the most problems, read straight down the
+the open-items list shows the observation, the date and the photo — but not the author. A list of
+open items with names against it is a list of who reports the most problems, read straight down the
 column, and that is the shape of every operator scorecard this product has already refused to
-build. The cost of the trade is a slightly thinner list. The cost of the alternative is that
-filing a noticed becomes an admission.
+build. The cost of the alternative is that filing a noticed becomes an admission.
+
+**Amended at build time.** This originally said the author was "visible on the entry's own card, one
+tap away", because an open item also rendered in the log below. It no longer does — an entry appears
+exactly once ([§4.2](#42-the-timeline)) — so the name is not one tap away, it is **deferred**: the
+entry carries its author from the moment somebody logs the fix and it drops into the log. That is a
+better version of the same trade rather than a weaker one. While a thing is outstanding, who raised
+it is not the question; once it is dealt with, both names survive on the record and neither is
+counted.
 
 ## 6. Phases and gates
 
@@ -206,8 +321,12 @@ Before the clock in [§2](#2-hypothesis-and-kill-criterion) can mean anything, a
 be able to reach a machine page at all, and what stands in the way is not this module's work.
 
 Station selection is the only entrance ([§4.1](#41-one-door)), so one live defect in it becomes a
-prerequisite here: the station picker leaks archived machines because it does not filter on
-`deleted_at`. It is already known and is being fixed independently. One further fact about the
+prerequisite here: the station picker leaked archived machines because it did not filter on
+`deleted_at`. This draft said it "is being fixed independently"; it was not — no branch, issue or PR
+covered it, and `getStationOperationTypes` was the one work-center reader in the codebase without
+the filter. **It is fixed as part of this module's work**, along with the matching gap in
+`getStationName`, which now answers null for an archived machine so the stored station clears itself
+rather than stranding an operator on a machine that no longer exists. One further fact about the
 floor belongs here rather than in a retrospective:
 
 > Operator adoption of the existing operator surface is currently near zero: operators are not yet
@@ -282,33 +401,57 @@ want to see. `viewer_count`, distinct people, still works; it saturates near sho
 its meaning.
 
 The consequence is a decision rather than a complaint. Reads can tell us an entry was found; they
-cannot tell us it is still true. `confirmed` is therefore the designated freshness signal for this
-module. The reaction kind already exists alongside `helpful`, with no negative option by design,
-but only `helpful` has a UI today (on an unmerged branch), so this is a prerequisite here rather
-than an inheritance. Its stored meaning is worded part-first, "I ran this part and this note is
-still accurate", where the machine reading is "I did this and it still holds"; that wording
-question comes along with it. None of this is the gate. The gate is
-[§2](#2-hypothesis-and-kill-criterion).
+cannot tell us it is still true.
+
+**Decided (revised at build time): Phase 1 ships no freshness signal, and accepts the gap.** An
+earlier draft of this section named `confirmed` — a reaction kind that exists in the database
+alongside `helpful`, with no negative option by design, and has never had a UI — as the designated
+freshness signal for this module, and called building that UI a prerequisite. It is not one, and the
+argument against it is the argument this module makes everywhere else. `confirmed` means "I did this
+and it still holds", which needs a second person to re-perform the same maintenance and then say so.
+At a fifteen-person shop, inside a four-week window, against a bar of five entries, that will not
+happen. It would ship as a control nobody taps — which makes the surface look busier than it is and
+teaches operators that some buttons here are decorative, the exact opposite of what a container
+being filled for the first time needs. No product in the category offers one either, which is weak
+evidence but not none.
+
+So `helpful` is inherited unchanged and nothing else is built. The honest position is that Phase 1
+can tell whether an entry was *found* and not whether it is still *true*, and that a corpus small
+enough to fail the [§2](#2-hypothesis-and-kill-criterion) bar is also far too small for staleness to
+be the problem worth solving. If the corpus survives and starts to age, revisit this with real
+entries in hand. None of this is the gate. The gate is [§2](#2-hypothesis-and-kill-criterion).
 
 ## 9. Open questions
 
-Four questions are closed and are not reopened here: kind is optional
-([§4](#4-what-it-is-phase-1)), there is no seeded corpus
+Four questions are closed and are not reopened here: classification is optional — and, since
+[§4.3](#43-capture) was revised, is one toggle rather than five verbs; there is no seeded corpus
 ([§2](#2-hypothesis-and-kill-criterion)), open-items attribution resolves in favor of the guardrail
 ([§5](#5-what-it-is-not)), and the module is called Machine Maintenance.
 
-**Does the Maintenance tab appear before a station is selected?** Recommendation: no. Without a
-station the tab needs a picker, and a picker is the ceremony [§4.5](#45-zero-required-setup)
-refuses. Station selection already answers the question a picker would ask. This question is
-load-bearing now that the tab is the only entrance, and it has a visible consequence: an operator
-who notices something on a machine that is not their selected station changes station first, using
-the selector that already exists. At this machine count that is acceptable. If it proves to be
-friction, the answer is revisiting this question, not reviving a code on the machine.
+**Does the Maintenance tab appear before a station is selected? Decided: no.** Without a station the
+tab needs a picker, and a picker is the ceremony [§4.5](#45-zero-required-setup) refuses. Station
+selection already answers the question a picker would ask. This is load-bearing now that the tab is
+the only entrance, and it has a visible consequence: an operator who notices something on a machine
+that is not their selected station changes station first, using the selector that already exists. At
+this machine count that is acceptable. If it proves to be friction, the answer is revisiting this
+question, not reviving a code on the machine. Built exactly this way: the tab is rendered only when
+a flag is on **and** a station is set, and unlike the Inventory and My work tabs it is deliberately
+not on the list of routes that keep the nav visible before a station exists.
 
-**Do machine details and manual attachments belong in Phase 1 at all, given nothing gates on
-them?** Recommendation: keep both, and never prompt for either. A manual an operator can open on
-the floor is worth having on day one. If this instead resolves to deferring them,
-[§4.5](#45-zero-required-setup) changes with it; the two must not be allowed to disagree.
+**Do machine details and manual attachments belong in Phase 1 at all, given nothing gates on them?
+Decided: both ship, and nothing ever prompts for either.** A manual an operator can open on the
+floor is worth having on day one. Reading happens on the floor; filling either one in happens in the
+office, where somebody with a spec sheet is doing paperwork on purpose. The enforceable half is
+tested rather than merely asserted: a machine with no details renders nothing at all — not an empty
+state, not a completeness meter, not a prompt — and a machine with no manuals shows no manuals row.
+
+**Can the office read a machine's log without an operator device? Decided: yes, read-only.** Not a
+question this draft asked, and it needed answering before build. The work-center page in the
+dashboard carries the same timeline with no composer. "One door" ([§4.1](#41-one-door)) is a rule
+about the operator entrance and about pickers, not a rule against the founder being able to watch
+whether the [§2](#2-hypothesis-and-kill-criterion) corpus is forming. An office **composer** is
+refused for a different reason: the bar counts non-founder authors, and the most convenient way to
+write entries must not be the one seat that would invalidate the result.
 
 **Is the flag retired after the pilot, or kept?** Recommendation: retired, on the precedent
 [Shipments](shipments.md) set (gated during rollout, then made core and the key removed), but only

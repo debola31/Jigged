@@ -1309,14 +1309,19 @@ const JOB_NOTE_SELECT =
   'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
   'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
 
-type ReactionRel = {
+export type ReactionRel = {
   kind: string;
   reactor_id: string;
   reactor: { name: string | null } | { name: string | null }[] | null;
 };
 
-/** Shared decode for both read paths (PostgREST embed and the playbook RPC's jsonb). */
-function mapReactions(rows: ReactionRel[] | null | undefined): NoteReaction[] {
+/**
+ * Shared decode for every read path that carries reactions — the PostgREST
+ * embed, the playbook RPC's jsonb, and the machine log. Exported so the machine
+ * surface decodes reactions the same way rather than growing a second copy that
+ * could drift on the `confirmed` branch.
+ */
+export function mapReactions(rows: ReactionRel[] | null | undefined): NoteReaction[] {
   return (rows ?? []).map((r) => {
     const reactor = Array.isArray(r.reactor) ? r.reactor[0] : r.reactor;
     return {

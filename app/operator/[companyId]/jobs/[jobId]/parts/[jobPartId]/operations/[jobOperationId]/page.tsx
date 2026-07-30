@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
@@ -45,7 +45,7 @@ import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import StationSelector from '@/components/operator/StationSelector';
 import JobFeed from '@/components/operator/JobFeed';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
-import { useNoteCapture } from '@/hooks/useNoteCapture';
+import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 
 /**
@@ -183,11 +183,20 @@ export default function OperatorOperationActionPage() {
   // impossible to add the photo afterwards, and an outside step could never
   // carry "sent to coater, back on the 16th".
   const ownsCapture = !isCompleted && !isExternal;
-  const capture = useNoteCapture({
+  const stepContext = useMemo(
+    () => ({ jobPartId, jobOperationId }),
+    [jobPartId, jobOperationId],
+  );
+  const writer = useStepNoteWriter({
     companyId,
     jobId,
     operatorId: currentOperatorId,
-    context: { jobPartId, jobOperationId },
+    context: stepContext,
+  });
+  const capture = useNoteCapture({
+    companyId,
+    operatorId: currentOperatorId,
+    writer,
     enabled: ownsCapture,
   });
 

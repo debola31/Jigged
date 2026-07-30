@@ -79,9 +79,11 @@ insert into public.companies (
   ('22222222-2222-2222-2222-222222222222', 'Vanguard Precision Works',
    '1420 Rand Drive', 'Detroit', 'MI', '48211', 'USA',
    '(313) 555-0142', 'shop@vanguardprecision.test', 'vanguardprecision.test',
-   -- Enable the opt-in data-import tool in dev + preview branches so
-   -- it's visible while the feature rolls out. Seed is local/preview-only, never prod.
-   '{"features": {"data_import": true}}'::jsonb)
+   -- Opt-in features are ON in dev + preview branches. A flag-gated feature that
+   -- no preview deployment can display is a feature nobody can review — the
+   -- reviewer sees an unchanged app and has to take the diff's word for it.
+   -- Seed is local/preview-only, never prod, so this widens nothing real.
+   '{"features": {"data_import": true, "machine_maintenance": true}}'::jsonb)
 on conflict (id) do nothing;
 
 -- Billing cache: the grandfather backfill in the stripe_billing_cache migration

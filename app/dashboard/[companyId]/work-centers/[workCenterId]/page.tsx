@@ -27,6 +27,9 @@ import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
+import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
+import MachineManualsManager from '@/components/maintenance/MachineManualsManager';
 
 export default function WorkCenterDetailPage() {
   const params = useParams();
@@ -37,6 +40,9 @@ export default function WorkCenterDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  const { features } = useCompanyFeatures();
+  const maintenanceEnabled = Boolean(features.machine_maintenance);
 
   // useLoad keeps every setState inside the async callback, so the load effect
   // can't trip set-state-in-effect.
@@ -263,6 +269,31 @@ export default function WorkCenterDetailPage() {
           </Box>
         </CardContent>
       </Card>
+
+      {/* Maintenance, for internal machines only — an outside vendor's process is
+          not a machine anyone stands at. Read-only by design: there is no
+          composer here, because the pilot's bar counts NON-FOUNDER authors and
+          the most convenient place to write must not be the one seat that would
+          invalidate the result. Manuals and machine details are the office's job;
+          the log is the floor's. */}
+      {maintenanceEnabled && workCenter.kind === 'internal' && (
+        <Card elevation={2} sx={{ mt: 3 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Maintenance log
+            </Typography>
+            {/* Sub-labelled, because the card is titled "Maintenance log" and an
+                upload button is not a log entry. Two named things beat one
+                heading that covers only half of what sits under it. */}
+            <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+              Manuals
+            </Typography>
+            <MachineManualsManager companyId={companyId} workCenterId={workCenterId} />
+            <Divider sx={{ my: 2 }} />
+            <MachineLogPanel workCenterId={workCenterId} companyId={companyId} readOnly />
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Work Center?</DialogTitle>

@@ -160,6 +160,37 @@ async function ensureCompanyBilling(
   if (error) throw new Error(`company_billing upsert failed: ${error.message}`);
 }
 
+/**
+ * Turn on the pilot flags the specs exercise.
+ *
+ * Merges rather than replaces, and runs on every setup rather than only on
+ * company creation: this seeder is find-or-insert, so a company created before a
+ * flag existed would otherwise never get it, and a local stack keeps whatever
+ * the first run made until someone does a db reset. CI always starts clean;
+ * a developer's machine does not.
+ */
+async function ensureFeatureFlags(
+  supabase: SupabaseClient,
+  companyId: string,
+  flags: Record<string, boolean>,
+): Promise<void> {
+  const { data, error: readErr } = await supabase
+    .from('companies')
+    .select('settings')
+    .eq('id', companyId)
+    .single();
+  if (readErr) throw new Error(`settings read failed: ${readErr.message}`);
+
+  const settings = (data?.settings ?? {}) as Record<string, unknown>;
+  const features = (settings.features ?? {}) as Record<string, unknown>;
+
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings: { ...settings, features: { ...features, ...flags } } })
+    .eq('id', companyId);
+  if (error) throw new Error(`feature flag update failed: ${error.message}`);
+}
+
 async function ensureUserCompanyAccess(
   supabase: SupabaseClient,
   userId: string,
@@ -751,6 +782,11 @@ export default async function globalSetup(): Promise<void> {
 
   // After the jobs, so the note's provenance job resolves.
   await ensureDurableNote(supabase, companyId, mfgPartId, 'E2E-JS-DONE');
+
+  // The Maintenance tab is flag-gated. No maintenance ENTRIES are seeded: the
+  // spec writes its own through the UI, which is the only way to exercise the
+  // capture path the module is actually a bet on.
+  await ensureFeatureFlags(supabase, companyId, { machine_maintenance: true });
 
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
 }

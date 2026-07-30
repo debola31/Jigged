@@ -32,6 +32,9 @@ import {
   deleteWorkCenter,
   bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
+// Spread into form fixtures so a field added to WorkCenterFormData later shows
+// up here as a default rather than as `undefined` reaching the access layer.
+import { EMPTY_WORK_CENTER_FORM } from '@/types/workCenter';
 
 describe('workCentersAccess', () => {
   beforeEach(() => {
@@ -118,6 +121,7 @@ describe('workCentersAccess', () => {
     it('inserts a work center with parsed labor_rate and nulled vendor_id for internal kind', async () => {
       mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
       await createWorkCenter('co-1', {
+        ...EMPTY_WORK_CENTER_FORM,
         name: 'Mill',
         kind: 'internal',
         vendor_id: null,
@@ -157,6 +161,51 @@ describe('workCentersAccess', () => {
       expect(updateArg.deleted_at).toBeTruthy();
       expect(mockQueryBuilder.in).toHaveBeenCalledWith('id', ['wc1', 'wc2']);
       expect(mockQueryBuilder.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  // Optional machine attributes (Machine Maintenance). Blank must persist as NULL,
+  // not as an empty string: "nobody filled this in" needs exactly one
+  // representation, or a detail surface ends up rendering "Serial:" against
+  // nothing on a machine the shop never described — the empty-state prompt §4.5
+  // refuses, arrived at by accident.
+  describe('workCentersAccess machine details', () => {
+    it('writes blank machine details as null', async () => {
+      mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
+      await createWorkCenter('co-1', {
+        ...EMPTY_WORK_CENTER_FORM,
+        name: 'Mill',
+        kind: 'internal',
+        labor_rate: '85.50',
+      });
+
+      const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(insertCall.make).toBeNull();
+      expect(insertCall.model).toBeNull();
+      expect(insertCall.serial_number).toBeNull();
+      expect(insertCall.year_built).toBeNull();
+      expect(insertCall.purchased_on).toBeNull();
+    });
+
+    it('trims and parses the details that were filled in', async () => {
+      mockQueryBuilder.data = { id: 'new', name: 'Mill', kind: 'internal' };
+      await createWorkCenter('co-1', {
+        ...EMPTY_WORK_CENTER_FORM,
+        name: 'Mill',
+        kind: 'internal',
+        labor_rate: '85.50',
+        make: '  Haas ',
+        model: 'VF-2',
+        serial_number: ' 1104321 ',
+        year_built: '2014',
+        purchased_on: '2016-03-08',
+      });
+
+      const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(insertCall.make).toBe('Haas');
+      expect(insertCall.serial_number).toBe('1104321');
+      expect(insertCall.year_built).toBe(2014);
+      expect(insertCall.purchased_on).toBe('2016-03-08');
     });
   });
 });

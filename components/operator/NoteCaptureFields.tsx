@@ -9,12 +9,12 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
-import type { NoteCapture } from '@/hooks/useNoteCapture';
+import type { NoteCaptureFieldsState } from '@/hooks/useNoteCapture';
 
 const THUMB = 76;
 
 /** Shared by both layouts. */
-function PendingThumbs({ capture }: { capture: NoteCapture }) {
+function PendingThumbs({ capture }: { capture: NoteCaptureFieldsState }) {
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
       {capture.pending.map((p) => (
@@ -112,7 +112,7 @@ export default function NoteCaptureFields({
   disabled = false,
   compact = false,
 }: {
-  capture: NoteCapture;
+  capture: NoteCaptureFieldsState;
   placeholder: string;
   disabled?: boolean;
   compact?: boolean;

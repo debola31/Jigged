@@ -17,6 +17,7 @@ import ListItemText from '@mui/material/ListItemText';
 import WorkIcon from '@mui/icons-material/Work';
 import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
+import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import LocationScanner from '@/components/scanner/LocationScanner';
@@ -120,6 +121,7 @@ export default function OperatorLayout({
   useEffect(() => {
     if (pathname?.includes('/profile')) setNavValue('profile');
     else if (pathname?.includes('/inventory')) setNavValue('inventory');
+    else if (pathname?.includes('/maintenance')) setNavValue('maintenance');
     else if (pathname?.includes('/my-work')) setNavValue('my-work');
     else setNavValue('jobs');
   }, [pathname]);
@@ -139,6 +141,7 @@ export default function OperatorLayout({
 
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
+    else if (newValue === 'maintenance') router.push(`/operator/${companyId}/maintenance`);
     else if (newValue === 'my-work') router.push(`/operator/${companyId}/my-work`);
     else router.push(`/operator/${companyId}/jobs`);
   };
@@ -266,6 +269,10 @@ function OperatorShell({
   const pathname = usePathname();
   const router = useRouter();
   const showInventory = Boolean(features.inventory_locations);
+  // A machine IS a station, so the logbook only exists once one is selected —
+  // deliberately NOT added to the navVisible escape list below, unlike inventory
+  // and my-work. Without a station there is no machine to have a tab for.
+  const showMaintenance = Boolean(features.machine_maintenance) && Boolean(stationId);
   // The warehouse is station-independent, so keep the nav (and a way out) on
   // inventory routes even before a station is picked.
   const isInventoryRoute = pathname?.includes('/inventory') ?? false;
@@ -462,6 +469,16 @@ function OperatorShell({
           }}
           elevation={3}
         >
+          {/*
+            ⚠️ This bar is FULL. At the full complement it carries five destinations —
+            Jobs · Inventory · Scan · Maintenance · My work — which is the documented Material
+            Design ceiling for bottom navigation (3–5). Both Inventory and Maintenance are
+            flag-gated, so most shops see three or four.
+
+            A sixth needs something to leave, not another slot. Profile already moved to the
+            header avatar for exactly this reason; the next candidate is whichever destination
+            turns out to be visited least, measured rather than guessed.
+          */}
           <BottomNavigation
             value={navValue}
             onChange={onNavChange}
@@ -503,6 +520,11 @@ function OperatorShell({
               It opens a dialog rather than navigating, so scanning never loses the screen
               you were on — which matters for the continuous flows (a count session, receiving
               a pallet) that motivated an in-app scanner at all.
+
+              **Placed third deliberately.** At the full complement — Jobs · Inventory · Scan ·
+              Maintenance · My work — this puts the most-used action dead centre, which is where
+              a thumb rests. With both flags off it degrades to Jobs · Scan · My work and stays
+              centred.
             */}
             <BottomNavigationAction
               label="Scan"
@@ -510,6 +532,14 @@ function OperatorShell({
               icon={<QrCodeScannerIcon />}
               sx={{ minHeight: 56 }}
             />
+            {showMaintenance && (
+              <BottomNavigationAction
+                label="Maintenance"
+                value="maintenance"
+                icon={<BuildOutlinedIcon />}
+                sx={{ minHeight: 56 }}
+              />
+            )}
             {/* "My work" is the operator's own contribution surface. Today that
                 is notes and photos; it is named for what it will hold, not only
                 for what is in it now. What it must NOT grow into is a record of

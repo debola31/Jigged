@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addJobNote } from '@/utils/operatorAccess';
 import { addJobNoteMedia } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+import type { OperatorEventContext } from '@/utils/operatorEventsAccess';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
@@ -68,7 +69,40 @@ export interface NoteCaptureContext {
   jobOperationId: string;
 }
 
-export interface NoteCapture {
+/**
+ * WHERE the note goes, injected by the surface that owns the composer.
+ *
+ * The draft, the photo pipeline, the iOS unreadable-File mitigation, the mic
+ * hint and every funnel event are subject-agnostic and must exist exactly once.
+ * The WRITE is the only part that differs between a step note and a machine
+ * maintenance entry, so it is the only part that is passed in.
+ *
+ * Generic over the note type so neither caller loses its return type to a union
+ * it would then have to narrow.
+ */
+export interface NoteWriter<TNote> {
+  createNote: (body: string | null) => Promise<TNote>;
+  attachMedia: (
+    note: TNote,
+    file: File,
+    dims?: { width: number; height: number },
+  ) => Promise<JobNoteMedia>;
+  /** Merge saved media onto the note for the optimistic prepend. */
+  withMedia: (note: TNote, media: JobNoteMedia[]) => TNote;
+  /** Merged into every funnel event this composer emits. */
+  eventContext?: OperatorEventContext;
+}
+
+/**
+ * Everything about a capture that does NOT depend on where the note ends up:
+ * the draft, the pending photos, the dictation hint, the focus signal.
+ *
+ * Split out because it is exactly what NoteCaptureFields renders. That component
+ * is shared by the step composer and the machine composer, and typing it against
+ * this rather than against a particular note type is what makes the sharing
+ * honest rather than a cast.
+ */
+export interface NoteCaptureFieldsState {
   draft: string;
   setDraft: (v: string) => void;
   pending: PendingPhoto[];
@@ -83,6 +117,9 @@ export interface NoteCapture {
   noteFocused: () => void;
   pickPhotos: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   removePending: (id: string) => void;
+}
+
+export interface NoteCapture<TNote = JobNote> extends NoteCaptureFieldsState {
   /**
    * Write the note and its media. Returns the note (with media) so an optimistic
    * list can prepend it, or null when there was nothing to write.
@@ -91,18 +128,18 @@ export interface NoteCapture {
    * means. On the completion path the completion has already landed and must
    * stand, so the error is surfaced on its own rather than rolled back.
    */
-  submit: () => Promise<JobNote | null>;
+  submit: () => Promise<TNote | null>;
 }
 
-export function useNoteCapture(opts: {
+export function useNoteCapture<TNote = JobNote>(opts: {
   companyId: string;
-  jobId: string;
   operatorId: string | null;
-  context: NoteCaptureContext | null;
+  /** Null when there is nothing to write against yet — the composer stays inert. */
+  writer: NoteWriter<TNote> | null;
   /** Off when there is no capture surface mounted (e.g. a read-only feed). */
   enabled: boolean;
-}): NoteCapture {
-  const { companyId, jobId, operatorId, context, enabled } = opts;
+}): NoteCapture<TNote> {
+  const { companyId, operatorId, writer, enabled } = opts;
 
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<PendingPhoto[]>([]);
@@ -124,6 +161,12 @@ export function useNoteCapture(opts: {
   const focusedRef = useRef(false);
   const capturedRef = useRef(false);
   const draftRef = useRef({ bodyLength: 0, photoCount: 0 });
+  // The writer's event context, mirrored into a ref so the unmount handler can
+  // read it without re-registering the effect (and without a stale closure).
+  // Every event from this composer carries it, so a machine capture is
+  // distinguishable from a step capture at every step of the funnel rather than
+  // only at the save.
+  const eventContextRef = useRef<OperatorEventContext>({});
 
   const hasContent = draft.trim().length > 0 || pending.length > 0;
 
@@ -142,6 +185,10 @@ export function useNoteCapture(opts: {
     draftRef.current = { bodyLength: draft.trim().length, photoCount: pending.length };
   }, [draft, pending]);
 
+  useEffect(() => {
+    eventContextRef.current = writer?.eventContext ?? {};
+  }, [writer]);
+
   // Revoke preview URLs on unmount.
   useEffect(() => {
     return () => {
@@ -158,7 +205,10 @@ export function useNoteCapture(opts: {
     return () => {
       if (!enabled) return;
       if (!focusedRef.current || capturedRef.current) return;
-      logOperatorEvent(companyId, 'composer_abandoned', draftRef.current);
+      logOperatorEvent(companyId, 'composer_abandoned', {
+        ...eventContextRef.current,
+        ...draftRef.current,
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -166,7 +216,7 @@ export function useNoteCapture(opts: {
   const noteFocused = useCallback(() => {
     if (focusedRef.current) return;
     focusedRef.current = true;
-    logOperatorEvent(companyId, 'composer_focused');
+    logOperatorEvent(companyId, 'composer_focused', { ...eventContextRef.current });
   }, [companyId]);
 
   const dismissMicHint = useCallback(() => {
@@ -224,7 +274,10 @@ export function useNoteCapture(opts: {
         );
       }
       setPending((prev) => [...prev, ...prepared]);
-      logOperatorEvent(companyId, 'photo_attached', { count: prepared.length });
+      logOperatorEvent(companyId, 'photo_attached', {
+        ...eventContextRef.current,
+        count: prepared.length,
+      });
     },
     [companyId],
   );
@@ -237,8 +290,8 @@ export function useNoteCapture(opts: {
     });
   }, []);
 
-  const submit = useCallback(async (): Promise<JobNote | null> => {
-    if (!context) return null;
+  const submit = useCallback(async (): Promise<TNote | null> => {
+    if (!writer) return null;
     const body = draft.trim();
     const photos = pending;
     if (!body && photos.length === 0) return null;
@@ -251,19 +304,12 @@ export function useNoteCapture(opts: {
     setSaving(true);
     setError(null);
     try {
-      const note = await addJobNote(jobId, companyId, operatorId, body || null, {
-        jobPartId: context.jobPartId,
-        jobOperationId: context.jobOperationId,
-      });
+      const note = await writer.createNote(body || null);
 
       const media: JobNoteMedia[] = [];
       for (const p of photos) {
         const prepared = await compressPhoto(p.file);
-        media.push(
-          await addJobNoteMedia(companyId, jobId, note.id, prepared.file, {
-            dims: prepared.dims,
-          }),
-        );
+        media.push(await writer.attachMedia(note, prepared.file, prepared.dims));
       }
 
       photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
@@ -273,18 +319,18 @@ export function useNoteCapture(opts: {
       // the funnel's whole job is separating "tried" from "succeeded".
       capturedRef.current = true;
       logOperatorEvent(companyId, media.length > 0 ? 'note_saved_with_photo' : 'note_saved', {
-        jobOperationId: context.jobOperationId,
+        ...(writer.eventContext ?? {}),
         bodyLength: body.length,
         photoCount: media.length,
       });
-      return { ...note, media };
+      return writer.withMedia(note, media);
     } catch (err) {
       setError(friendlyErrorMessage(err, { entity: 'note', fallback: 'Could not save that.' }));
       throw err;
     } finally {
       setSaving(false);
     }
-  }, [context, draft, pending, operatorId, jobId, companyId]);
+  }, [writer, draft, pending, operatorId, companyId]);
 
   return {
     draft,
@@ -301,4 +347,37 @@ export function useNoteCapture(opts: {
     removePending,
     submit,
   };
+}
+
+/**
+ * The writer for a note captured at a step, which is what both job surfaces use.
+ *
+ * `addJobNote` chooses the SUBJECT itself — durable (part, routing step) when the
+ * step has a routing link, this-job-only when it doesn't — so that decision stays
+ * where it was and the operator is still never asked to classify anything.
+ *
+ * Memoized on its inputs: `submit` closes over the writer, so a fresh object each
+ * render would rebuild the callback every keystroke.
+ */
+export function useStepNoteWriter(args: {
+  companyId: string;
+  jobId: string;
+  operatorId: string | null;
+  context: NoteCaptureContext | null;
+}): NoteWriter<JobNote> | null {
+  const { companyId, jobId, operatorId, context } = args;
+  return useMemo(() => {
+    if (!context || !operatorId) return null;
+    return {
+      createNote: (body) =>
+        addJobNote(jobId, companyId, operatorId, body, {
+          jobPartId: context.jobPartId,
+          jobOperationId: context.jobOperationId,
+        }),
+      attachMedia: (note, file, dims) =>
+        addJobNoteMedia(companyId, jobId, note.id, file, { dims }),
+      withMedia: (note, media) => ({ ...note, media }),
+      eventContext: { jobOperationId: context.jobOperationId },
+    };
+  }, [companyId, jobId, operatorId, context]);
 }

@@ -30,6 +30,7 @@ import {
 import VendorAutocomplete from '@/components/vendors/VendorAutocomplete';
 import { highContrastToggleSx } from '@/lib/highContrastToggleSx';
 import { parseOptionalNumber } from '@/lib/validators';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 interface WorkCenterFormProps {
   mode: 'create' | 'edit';
@@ -66,6 +67,9 @@ export default function WorkCenterForm({
   // costing reads kind live, so switching internal↔external would orphan the
   // pricing fields on every referencing operation (see Q1 in the PR).
   const kindLocked = mode === 'edit' && routingOperationsCount > 0;
+
+  const { features } = useCompanyFeatures();
+  const maintenanceEnabled = Boolean(features.machine_maintenance);
 
   const [formData, setFormData] = useState<WorkCenterFormData>(initialData);
   const [loading, setLoading] = useState(false);
@@ -353,6 +357,83 @@ export default function WorkCenterForm({
           </Grid>
         </CardContent>
       </Card>
+
+      {/* Machine details, for internal work centers only — an outside vendor's
+          process has no serial number.
+
+          EVERY FIELD IS OPTIONAL AND NOTHING VALIDATES THEM. There is no "you
+          should fill this in", no completeness indicator, and no consequence for
+          leaving the whole card empty. Asset data entry is a leading cause of
+          CMMS abandonment: the tool arrives, the shop is asked to describe its
+          equipment before it can do anything, and the project dies in the
+          describing. The machines are already in Jigged as work centers, so the
+          maintenance module starts with a complete asset list and an empty asset
+          detail — which is the right way round.
+
+          It lives here, in the office, rather than on the floor: somebody with a
+          spec sheet in front of them is doing paperwork on purpose. */}
+      {maintenanceEnabled && formData.kind === 'internal' && (
+        <Card elevation={2} sx={{ mt: 3 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 0.5 }}>
+              Machine details
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              All optional. Nothing depends on them.
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Make"
+                  value={formData.make}
+                  onChange={handleTextChange('make')}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Model"
+                  value={formData.model}
+                  onChange={handleTextChange('model')}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  fullWidth
+                  label="Serial number"
+                  value={formData.serial_number}
+                  onChange={handleTextChange('serial_number')}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Year"
+                  type="number"
+                  value={formData.year_built}
+                  onChange={handleTextChange('year_built')}
+                  disabled={loading}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 3 }}>
+                <TextField
+                  fullWidth
+                  label="Purchased"
+                  type="date"
+                  value={formData.purchased_on}
+                  onChange={handleTextChange('purchased_on')}
+                  disabled={loading}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                />
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
         <Button variant="outlined" onClick={handleCancel} disabled={loading}>

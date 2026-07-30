@@ -20,7 +20,7 @@ import { getJobNotes, getCurrentMember } from '@/utils/operatorAccess';
 import NoteReactions from '@/components/operator/NoteReactions';
 import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
-import { useNoteCapture } from '@/hooks/useNoteCapture';
+import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 
@@ -113,13 +113,13 @@ export default function JobFeed({
   // standaloneCapture prop.
   const showComposer = !readOnly && !!operationContext && standaloneCapture;
 
-  const capture = useNoteCapture({
+  const writer = useStepNoteWriter({
     companyId,
     jobId,
     operatorId,
     context: operationContext ?? null,
-    enabled: showComposer,
   });
+  const capture = useNoteCapture({ companyId, operatorId, writer, enabled: showComposer });
 
   // Read tracking. The feed is where an operator encounters other people's notes
   // in the course of a job, so it is the surface the whole loop is measuring.

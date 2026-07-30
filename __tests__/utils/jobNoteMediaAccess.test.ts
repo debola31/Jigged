@@ -40,6 +40,7 @@ vi.mock('@/utils/storageHelpers', () => ({
 }));
 
 import {
+  addNoteMedia,
   addJobNoteMedia,
   getJobNoteMediaUrl,
   deleteJobNoteMedia,
@@ -116,6 +117,50 @@ describe('addJobNoteMedia', () => {
     expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
       expect.objectContaining({ width: null, height: null }),
     );
+  });
+});
+
+// A machine-subject note has no job to file its photos under, so the folder
+// became a caller decision. addJobNoteMedia is now a wrapper over this — the
+// block above is what pins that the job path did not move.
+describe('addNoteMedia', () => {
+  it('files under whatever folder the caller names', async () => {
+    mockGenerateStoragePath.mockReturnValue('c1/work-centers/wc1/abc_photo.jpg');
+    mockQueryBuilder.data = {
+      id: 'media-2',
+      note_id: 'n9',
+      storage_path: 'c1/work-centers/wc1/abc_photo.jpg',
+      thumbnail_path: null,
+      kind: 'photo',
+      mime_type: 'image/jpeg',
+      width: null,
+      height: null,
+    };
+
+    await addNoteMedia('c1', 'n9', makeFile('photo.jpg', 2048), {
+      folder: { entityType: 'work-centers', entityId: 'wc1' },
+    });
+
+    expect(mockGenerateStoragePath).toHaveBeenCalledWith('c1', 'work-centers', 'wc1', 'photo.jpg');
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        company_id: 'c1',
+        note_id: 'n9',
+        storage_path: 'c1/work-centers/wc1/abc_photo.jpg',
+      }),
+    );
+  });
+
+  it('still rolls the upload back when the row insert fails', async () => {
+    mockGenerateStoragePath.mockReturnValue('c1/work-centers/wc1/abc_photo.jpg');
+    mockQueryBuilder.error = { message: 'insert boom' };
+
+    await expect(
+      addNoteMedia('c1', 'n9', makeFile('photo.jpg', 2048), {
+        folder: { entityType: 'work-centers', entityId: 'wc1' },
+      }),
+    ).rejects.toThrow(/Failed to attach the photo/);
+    expect(mockDeleteFileFromStorage).toHaveBeenCalledWith('c1/work-centers/wc1/abc_photo.jpg');
   });
 });
 

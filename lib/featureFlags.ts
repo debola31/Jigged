@@ -72,6 +72,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     description:
       'Guided data importer for onboarding: upload legacy ERP CSV exports, review what will come in and what to fix (record counts, duplicates, orphan references, gaps) plus a best-effort source-ERP guess, then import. Opt-in per tenant while onboarding.',
   },
+  {
+    key: 'machine_maintenance',
+    label: 'Machine Maintenance',
+    description:
+      'A maintenance logbook per machine, written by whoever is standing at it: a Maintenance tab on the operator view once a station is selected, with optional machine details and manuals, plus a read-only log on the work-center page. One pilot shop at a time — see docs/modules/machine-maintenance.md.',
+  },
 ] as const;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];
@@ -122,6 +128,17 @@ export function isDataImportEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
   return readFeatureFlag(company, 'data_import');
+}
+
+/**
+ * Machine Maintenance is opt-IN, and stays that way through the pilot: the
+ * module is an experiment with a written kill criterion, so it must be on at
+ * exactly the shops whose behaviour is being measured and nowhere else.
+ */
+export function isMachineMaintenanceEnabled(
+  company: Pick<Company, 'settings'> | null | undefined,
+): boolean {
+  return readFeatureFlag(company, 'machine_maintenance');
 }
 
 /**

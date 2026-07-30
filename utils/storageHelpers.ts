@@ -22,11 +22,18 @@ export function sanitizeFilename(filename: string): string {
 }
 
 /**
+ * The folder an upload is filed under. Only the FIRST segment of the path is
+ * load-bearing: the bucket's RLS gates on `foldername[1] = companyId`, so adding
+ * an entity type here needs no new storage policy.
+ */
+export type StorageEntityType = 'quotes' | 'jobs' | 'parts' | 'work-centers' | 'locations';
+
+/**
  * Generate storage path with UUID prefix and sanitized filename
  */
 export function generateStoragePath(
   companyId: string,
-  entityType: 'quotes' | 'jobs' | 'parts' | 'locations',
+  entityType: StorageEntityType,
   entityId: string,
   filename: string
 ): string {

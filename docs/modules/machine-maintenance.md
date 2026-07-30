@@ -1,0 +1,331 @@
+# Machine Maintenance Module
+
+> **Status:** Draft proposal · **Date:** 2026-07-29 · **Pilot:** one shop, behind a feature flag
+>
+> **Purpose.** Propose a machine-scoped maintenance logbook, and state in advance the condition
+> under which it gets parked. Nothing in this module is built. The bet is written down together
+> with its kill criterion ([§2](#2-hypothesis-and-kill-criterion)) so that the result cannot be
+> renegotiated once it arrives.
+
+**Dependencies:** [Work Centers](work-centers.md), because a machine is a `work_centers` row with
+`kind='internal'` and there is no separate machine entity. The notes system and its read-back loop
+([Operator View](operator-view.md#the-read-back-loop-attribution)). Station selection, which is
+the only entrance to this module, and the one live defect in it named in
+[§6](#6-phases-and-gates).
+
+---
+
+## 1. Problem
+
+The shop's most technical operator writes almost nothing on job travelers. The reason is not
+reticence and it is not tap count. His knowledge is machine-specific, and every capture surface
+Jigged has built is shaped like a part or like an operation: the durable note is the one rooted at
+a part and a routing step, durable precisely because it answers "how do you run this part here".
+He has been offered a container that does not fit what he knows, and declined it, which is the
+correct response to a container that does not fit.
+
+What operators still text a departed veteran about is how to maintain the equipment. He left a
+year ago. None of it was written down. The channel that replaced the record is one personal
+friendship, which has no owner, no backup and no expiry warning; it decays quietly and nobody
+finds out on a good day.
+
+The industry picture says this is not a local eccentricity. Contaminated coolant and missed
+lubrication are the leading causes of premature bearing and ballscrew failure, and roughly seven
+in ten spindle shutdowns trace back to lubrication that was missed **or not recorded** (industry
+figures, not measured at the pilot shop). The second half of that disjunction is the half that
+makes it a software problem. A shop can be doing the work and still be one departure away from
+losing the knowledge of what the work is.
+
+The capture behavior already exists. Machinists photograph offsets at the end of a shift and carry
+mental lists of things to look into tomorrow. That is a habit with nowhere to land, so this module
+proposes a landing place rather than a new discipline. The canonical failure it targets is the
+handoff where the outgoing operator says the machine ran fine and does not mention the way cover
+that has started to drag. Nothing in that sentence is a lie, and nothing in it is recoverable.
+
+## 2. Hypothesis and kill criterion
+
+**H:** machine-scoped knowledge is a container operators will fill, where part-operation-scoped
+knowledge was not. The part-scoped container exists, it is durable by design, and it is close to
+empty. That is the prior result this module is arguing with.
+
+**Decided:** Phase 1 passes only if at least five entries exist from at least three distinct
+non-founder authors within four weeks. Four entries from four people is a kill. Eight entries from
+two people is a kill; one enthusiast is a person, not a container.
+
+The four weeks start at the **first organic entry**, not at ship date. If no organic entry appears
+within four weeks of the flag going on, that silence is the kill result, but only on one
+condition: machine pages have to have been opened during the window. A container nobody filled and
+a container nobody reached both look like silence from outside, and [§8](#8-measurement) is what
+tells them apart. If page opens are near zero across the four weeks, the result is recorded as
+**not yet tested**, not as a kill, and the clock restarts once the door is demonstrably reachable
+and in use.
+
+That is not a hypothetical escape hatch. This module launches into an operator surface that is not
+yet in daily use ([§6](#6-phases-and-gates)), so the likeliest first result is "not yet tested",
+and that result must not be quietly upgraded to a pass or downgraded to a kill.
+
+**Decided:** no seeded corpus, at all. No backfill, no transcription of the departed veteran's
+texts, no entry written on anyone's behalf. Anyone may write down knowledge they got from him, as
+themselves; nobody writes as him. **Why:** a container that arrives pre-filled cannot answer the
+only question Phase 1 asks, and a demo corpus and an evidence corpus cannot be the same rows.
+
+Reads are the earlier and cheaper signal. `viewer_count` moves the first time somebody opens an
+entry, which will happen before the fifth entry exists. Watch it, and do not promote it to the
+gate: a corpus that is read but not extended is still one person's knowledge with a wider
+audience.
+
+## 3. Who it's for
+
+The design center is the infrequent frontline user at a shop with no maintenance department. The
+requester, the approver and the technician are the same person, standing at the machine, deciding
+in the moment whether the thing they just noticed is worth saying out loud. The pilot shop is
+roughly fifteen people. There is no maintenance role in Jigged today and none is proposed; the
+frontline role is `operator`, and the operator is the technician.
+
+This is where the module parts company with the CMMS category deliberately. CMMS products model a
+requester who raises a request, a manager who approves and assigns it, and a technician who
+performs and closes it. Their strongest mobile experiences split into two profiles for exactly
+that reason: an infrequent operator who reports, and a continuous technician who lives in the
+queue. Jigged builds only the first profile, because the second person does not exist at a shop
+this size. Building the split anyway would add three steps to a one-person action.
+
+The frame is autonomous maintenance, the first pillar of TPM: operator-owned basic care, which is
+cleaning, inspection, lubrication and retightening done by the person at the machine. It is not a
+work order routed to a department. This has a consequence that [§5](#5-what-it-is-not) leans on:
+there is nobody for a request to be sent *to*, so request and approval workflows are rejected on
+structural grounds rather than as scope trimming.
+
+## 4. What it is (Phase 1)
+
+A logbook for a machine, reachable from the floor without a search, written by whoever is standing
+there.
+
+### 4.1 One door
+
+A Maintenance tab, available once a station is selected, opens the logbook for the machine the
+operator is standing at. There is no picker, because a station is a machine: the operator's
+station list is `work_centers` filtered to `kind='internal'`, so selecting a station has already
+answered the only question a picker would ask.
+
+There is deliberately nothing to scan on the machine itself. A shop at this scale has few
+machines, and the operator has already told the app which one they are standing at, so a code
+posted on the machine would solve a navigation problem this product does not have. The in-app path
+is the only entrance, which makes the health of station selection a dependency of this module
+rather than a convenience ([§6](#6-phases-and-gates)).
+
+### 4.2 The timeline
+
+Open items sit pinned at the top, then entries newest first, each attributed and dated. Newest
+first, and not grouped by kind, because the reader's question on arriving at a machine page is
+almost always "what has happened to this machine lately". Any grouping answers a question nobody
+asked, and pushes the recent thing below the fold.
+
+### 4.3 Capture
+
+Free text. Dictation is the phone keyboard's dictation key, which operators already use; no custom
+voice capture is built or proposed. Photos are optional and go through the native sheet, so an
+existing camera-roll photo works: the end-of-shift offset photo is already on the phone. A kind
+chip is offered with five values: cleaned, repaired, replaced, adjusted, noticed.
+
+**Decided:** kind is optional. An unclassified entry is still knowledge, and a forced taxonomy at
+capture time is the thing that stops capture. A person who cannot decide whether they cleaned or
+adjusted something will write nothing rather than choose wrongly.
+
+### 4.4 Noticed, then resolved
+
+An open noticed item offers "log the fix", which is the same composer with the resolution link
+already bound. There is no assignment, no priority and no due date, because each of those needs a
+second person to mean anything ([§3](#3-who-its-for)).
+
+Open state is derived from the existence of a resolving entry and is never stored. So there is no
+state anyone has to remember to close, and no way for the open list to disagree with the timeline
+it is drawn from.
+
+### 4.5 Zero required setup
+
+Machine details (make, model, serial, year, purchase date) and manual attachments are all
+optional. Nothing is gated on any of them, and nothing prompts for them. Asset data-entry time is
+a leading cause of CMMS abandonment: the tool arrives, the shop is asked to describe its equipment
+before it can do anything, and the project dies in the describing. The machines already exist in
+Jigged as work centers, so this module starts with its asset list complete and its asset detail
+empty, which is the right way round.
+
+The enforceable form of that principle: no empty-state nudge, no completeness meter, no prompt to
+finish setting up a machine, and no surface that renders one machine as less ready than another
+because somebody typed a serial number into it.
+
+### 4.6 Attribution
+
+Inherited from the notes system whole, not redesigned. The author is resolved server-side, so an
+entry is written as the person writing it and cannot be attributed to anyone else. Authors see
+named views of their own entries; everyone else sees aggregates. The rule is one sentence with no
+role branch: *you see who viewed your own notes; nobody sees who viewed anyone else's*
+([Operator View](operator-view.md#the-read-back-loop-attribution)).
+
+The container is already modelled. The notes system carries a work-center subject end to end, and
+nothing in the app writes one today.
+
+## 5. What it is not
+
+Each of these is a real product that exists elsewhere and is rejected here for a stated reason,
+not deferred by oversight.
+
+- **Request and approval workflows.** There is no second person for a request to reach
+  ([§3](#3-who-its-for)).
+- **MRO parts inventory.** A second item master with a second counting ritual, while the first one
+  is still being learned ([Inventory](inventory.md)).
+- **Criticality rankings, MTBF, MTTR, PM-compliance dashboards.** All four are ratios computed
+  over a corpus that does not exist yet.
+- **Downtime tracking.** Actual time was deliberately removed from this product and is
+  structurally unrepresentable ([Operator View](operator-view.md#surveillance-guardrail-non-negotiable)).
+- **Lockout/tagout fields.** A compliance artifact, and Jigged is not the shop's compliance system
+  of record.
+- **Bulk asset import.** The machines are already in Jigged; an importer would be a second door
+  into a room that has one.
+- **Any per-operator maintenance scorecard or comparison, visible to anyone.**
+- **Schedules and reminders.** Deferred by sequence, not by taste ([§6](#6-phases-and-gates)).
+
+The surveillance guardrail extends here in full: *no operator-facing surface may reflect an
+operator's pace or standing back at them*
+([Operator View](operator-view.md#surveillance-guardrail-non-negotiable)). Concretely, no surface
+may show who logs how many entries, or how often a given operator files a noticed.
+
+That collides with a real design want, and the collision resolves in one direction. **Decided:**
+the open-items list shows the observation and the date; the author is visible on the entry's own
+card, one tap away. This is a deliberate trade and it costs the list some context. A list of open
+items with names against it is a list of who reports the most problems, read straight down the
+column, and that is the shape of every operator scorecard this product has already refused to
+build. The cost of the trade is a slightly thinner list. The cost of the alternative is that
+filing a noticed becomes an admission.
+
+## 6. Phases and gates
+
+Phase 1 ships behind a per-tenant feature flag (flags live in `companies.settings.features` and
+are registered in `lib/featureFlags.ts`; turning one on for a pilot tenant is a single update).
+Before the clock in [§2](#2-hypothesis-and-kill-criterion) can mean anything, an operator has to
+be able to reach a machine page at all, and what stands in the way is not this module's work.
+
+Station selection is the only entrance ([§4.1](#41-one-door)), so one live defect in it becomes a
+prerequisite here: the station picker leaks archived machines because it does not filter on
+`deleted_at`. It is already known and is being fixed independently. One further fact about the
+floor belongs here rather than in a retrospective:
+
+> Operator adoption of the existing operator surface is currently near zero: operators are not yet
+> marking operations complete. This module launches into a surface that is not yet in daily use,
+> which is a real risk to the four-week clock rather than a footnote to it, and it is why the
+> clock in [§2](#2-hypothesis-and-kill-criterion) carries a precondition.
+
+**Phase 1: the logbook.** Everything in [§4](#4-what-it-is-phase-1), at one pilot shop.
+**Gate:** the bar in [§2](#2-hypothesis-and-kill-criterion).
+
+**Phase 2: standing procedures.** Described at design level only. Any good entry can be promoted
+to a standing procedure, and the original author is preserved on the promotion, because the person
+who knew the thing is the point. Completing a procedure writes an entry on the machine's timeline,
+so the log remains the single record of what happened to the machine and procedures do not become
+a parallel history. **Gate:** at least ten entries, of which at least three describe a repeatable
+how-to. The count alone is not the gate: a procedure library is a distillation, and there is
+nothing to distil until entries start repeating themselves.
+
+**Phase 3: schedules.** Two trigger kinds: a calendar interval, and usage, where usage is measured
+good pieces through the machine since the last entry that satisfied the procedure. This trigger
+needs no sensor, no meter reading and no integration, because the machine record and the job
+record are the same record: good pieces are already recorded against an operation, and that
+operation already names its work center. **Gate:** Phase 2 procedures exist, **and** at least
+three shops have answered whether they run a separate CMMS or track maintenance in their ERP. Only
+one shop is reachable today, so this gate is blocked on access rather than on engineering, and it
+should stay blocked rather than be reinterpreted downward.
+
+Schedules shipped before a corpus exists produce the nagging, surveillance-flavored version of
+this product: a machine page that tells an operator what he is late on, assembled out of nothing
+he wrote. That is the version of a CMMS frontline users abandon, and it would also make the
+[§2](#2-hypothesis-and-kill-criterion) result unreadable in retrospect, because a container nobody
+filled and a container that started nagging on day one fail the same way from outside.
+
+Logs, then procedures, then schedules. That order is not negotiable.
+
+## 7. Competitive position
+
+The category is validated and it is owned. MaintainX was acquired by Autodesk in 2026 for a
+reported figure of roughly $3.6B, builds an AI knowledge base out of the completion notes
+technicians write on work orders, and holds the top ease-of-use ratings in its category. That is
+the same insight this module rests on, executed by a company with a decade of head start and a
+sales motion aimed at exactly this buyer. Jigged does not out-CMMS a CMMS, and any roadmap item
+whose justification is parity with one is rejected on that basis alone.
+
+The wedge is not a feature. It is that maintenance data and job data are one system. A usage
+trigger needs no sensor, no meter reading and no integration, because Jigged already counts good
+pieces through the machine as a by-product of running the shop. "The machine was down Thursday"
+and "that job ran long" become two readings of one record instead of two systems reconciled by
+somebody who happens to remember both. A dedicated CMMS cannot reach that without an integration
+that a fifteen-person shop will never build. Any design choice that requires maintenance data to
+live apart from job data is wrong by definition.
+
+## 8. Measurement
+
+The funnel is the primary instrument, and for a structural reason rather than a preference: with
+an empty starting corpus, every count-based surface is silent at launch. The existing capture
+funnel was built to make exactly this distinction and applies here unchanged, in the form its own
+source states it: page opened but composer never focused means the container does not fit, and
+composer focused but nothing saved means capture friction. Without those, "adoption was poor" is
+unreadable, and unreadable is the one outcome that cannot be acted on. Four moments need
+instrumenting on this path: the machine page opened, the composer focused, an entry saved, and a
+noticed resolved.
+
+Two limitations are known in advance and are not bugs. First, a machine-entry read carries no job
+context, and the per-job usage counter counts distinct jobs and ignores the absent one, so it
+stays at zero for this module permanently. The "used on N jobs" signal that ranks the part
+Playbook does not exist here and must never be displayed here. Second, read logging dedupes per
+person, per entry, per job, and treats the absent job as equal to itself, so a person's repeat
+consultation of the same entry is recorded once, ever. Somebody rereading the way-cover entry six
+months later is invisible, and that reread is precisely the event a maintenance logbook would most
+want to see. `viewer_count`, distinct people, still works; it saturates near shop size, which is
+its meaning.
+
+The consequence is a decision rather than a complaint. Reads can tell us an entry was found; they
+cannot tell us it is still true. `confirmed` is therefore the designated freshness signal for this
+module. The reaction kind already exists alongside `helpful`, with no negative option by design,
+but only `helpful` has a UI today (on an unmerged branch), so this is a prerequisite here rather
+than an inheritance. Its stored meaning is worded part-first, "I ran this part and this note is
+still accurate", where the machine reading is "I did this and it still holds"; that wording
+question comes along with it. None of this is the gate. The gate is
+[§2](#2-hypothesis-and-kill-criterion).
+
+## 9. Open questions
+
+Four questions are closed and are not reopened here: kind is optional
+([§4](#4-what-it-is-phase-1)), there is no seeded corpus
+([§2](#2-hypothesis-and-kill-criterion)), open-items attribution resolves in favor of the guardrail
+([§5](#5-what-it-is-not)), and the module is called Machine Maintenance.
+
+**Does the Maintenance tab appear before a station is selected?** Recommendation: no. Without a
+station the tab needs a picker, and a picker is the ceremony [§4.5](#45-zero-required-setup)
+refuses. Station selection already answers the question a picker would ask. This question is
+load-bearing now that the tab is the only entrance, and it has a visible consequence: an operator
+who notices something on a machine that is not their selected station changes station first, using
+the selector that already exists. At this machine count that is acceptable. If it proves to be
+friction, the answer is revisiting this question, not reviving a code on the machine.
+
+**Do machine details and manual attachments belong in Phase 1 at all, given nothing gates on
+them?** Recommendation: keep both, and never prompt for either. A manual an operator can open on
+the floor is worth having on day one. If this instead resolves to deferring them,
+[§4.5](#45-zero-required-setup) changes with it; the two must not be allowed to disagree.
+
+**Is the flag retired after the pilot, or kept?** Recommendation: retired, on the precedent
+[Shipments](shipments.md) set (gated during rollout, then made core and the key removed), but only
+after a second shop clears the [§2](#2-hypothesis-and-kill-criterion) bar rather than after the
+first one.
+
+**What happens to a machine's timeline when the machine is archived?** Recommendation: the entries
+survive and stay readable, and the page stays reachable by direct link while dropping out of
+lists. Archiving hides a machine from pickers, not its knowledge, and knowledge must not be
+destroyable as a side effect of tidying a list.
+
+**Can a noticed item be resolved by someone other than the person who filed it?** Recommendation:
+yes, and that is most of the point. The resolving entry carries its own author, so both names
+survive and neither is counted. The open part is notification: there is no operator notification
+path today, so in Phase 1 the original author finds out by reading the timeline. State that limit
+rather than designing around it.
+
+**Does Phase 2 promotion leave the original entry on the timeline?** Recommendation: yes, and mark
+it as promoted. A log that loses rows stops being a log, and an unexplained near-duplicate is what
+makes people stop trusting one.

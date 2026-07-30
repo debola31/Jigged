@@ -139,11 +139,12 @@ against a count computed over exactly the rows it admitted. So:
 - **No function touching `note_views` may accept a viewer parameter.** The three
   that touch it: `log_note_views` (returns `void` — a duplicate must be
   indistinguishable from a first view), `note_viewers(note_id)` (authors only, one
-  row per person, ordered by name, **no timestamps**). `my_note_view_digest()`
-  used to be the third but no longer touches the table at all — it sums
-  `notes.viewer_count`, so it is now `SECURITY INVOKER`. **It takes no arguments,
-  permanently**: a caller-supplied time window would be a bisection oracle for
-  when a note was read.
+  row per person, ordered by name, **no timestamps**). `my_note_digest()` used to
+  be the third — as `my_note_view_digest`, before it also began reporting helpful
+  marks — but no longer touches the table at all: it reads `notes.viewer_count`
+  and counts `note_reactions`, so it is `SECURITY INVOKER`. **It takes no
+  arguments, permanently**: a caller-supplied time window would be a bisection
+  oracle for when a note was read.
 - **`authenticated` has no UPDATE on `notes` at all** — notes are append-only today,
   so the whole privilege is revoked. Otherwise setting `viewer_count = 0` and
   returning later to read the delta is a one-bit read oracle per note. If note
@@ -298,6 +299,148 @@ they attach to a *note*. "Diego has 47 thumbs-ups" is a leaderboard and "Priya
 gave 3" is a participation score — both are the operator-comparative metrics this
 module refuses. Nothing sums them by person, including My work, which shows
 endorsements received *on a note*.
+
+### Capture is part of completing (B4)
+
+Finishing a step and writing down what you learned are **one act, one button, one
+commit**. The completion block carries the quantity field, an optional "Anything
+worth noting for next time?" with photo attach, and `RECORD COMPLETION` submits
+all of it.
+
+It used to be three separate things: record the completion, then a prompt
+offering to add a photo, then a *separate* Post. The middle of that had no
+durability — attaching a photo showed a thumbnail, the flow read as finished, and
+a back tap discarded it silently. There was no `beforeunload` guard and no draft
+persistence, so the only real fix was to stop having two commits. **The
+post-completion offer is deleted, not relocated.**
+
+**Submit order is load-bearing and deliberately NOT atomic:**
+
+1. `createOperationCompletion` — lands first, durably
+2. `addJobNote`, if there is text or a photo
+3. `addJobNoteMedia` per photo
+
+A transaction would be *worse*: it would roll back real finished work because an
+image failed to upload on shop wifi. So if the note fails the completion stands,
+and the note error surfaces on its own next to the text the operator still has.
+Asserted by `OperationActionPage.test.tsx > 'writes the note only AFTER the
+completion has landed'` and `'keeps the completion when the note fails'`.
+
+**Capture is always optional.** Completion works with the field empty.
+
+**Where the feed keeps its own composer.** Three of the four branches of the
+operation page have no completion block, so capture cannot live only there:
+
+| Branch | Capture |
+|---|---|
+| Internal, incomplete | **In the completion block**, one button |
+| Internal, **complete** | Feed composer — otherwise a photo could never be added after finishing, which is how photos actually arrive (taken on the phone's camera, attached later) |
+| **Outside** step (send/receive) | Feed composer — `operator-paperless-flow.md` calls *"sent to coater 7/9, expected back 7/16"* the highest-value note in the system |
+| No station selected | Neither: the page is only a station picker |
+
+`JobFeed`'s `standaloneCapture` prop is that switch, and it is false on the normal
+path so there is never more than one composer on screen. This is a deliberate
+deviation from the plan's *"the note cannot be saved without completing"*, forced
+by the render branches rather than by preference.
+
+**The primary button says what it will do, and that closes a hole.** With a
+quantity it reads `RECORD COMPLETION` and submits the completion then the note.
+With **nothing finished but something typed** it reads `SAVE NOTE` and writes the
+note alone.
+
+That path is not a convenience. `qty > 0` is enforced, so an operator who
+finished zero pieces — *"machine down"*, *"waiting on material"*, *"tool chipped,
+swapping it"* — otherwise had two options and both were bad: stay silent and lose
+exactly the knowledge this workstream exists to capture, or **type a false
+quantity** to get the note saved. Corrupting the number that feeds costing and
+scheduling to satisfy a UI constraint is far worse than an extra code path. One
+field, one button, no second composer.
+
+### Density on the step screen
+
+This screen's failure mode is crowding, and the primary action is what gets
+pushed off the bottom. ISA-101 frames it as a Level 1 action display, not a
+Level 3 detail display: *"what does the operator need to know right now"*.
+
+- **The job card is one line** — `J-0007 · PROD-ACTUATOR-200` — and **the whole
+  card is the tap target**, with a decorative chevron as the affordance. A
+  separate chevron button would be a second control for one action, and nesting
+  it would be invalid markup. The expanded section sits **outside** that button
+  because it contains a real link (`View all steps for J-0007`), which is where
+  the traveler link moved to when the job number stopped being one.
+- **Expanded state is sticky** across steps via `sessionStorage`. Whether it
+  should persist across days as a remembered preference is undecided.
+- **Always visible, never behind the expander:** the part description, the
+  per-operation instructions, and **part progress** — "where am I on this part"
+  is the question a step screen exists to answer.
+- **`Parts finished` shares a row with Files and Playbook**, leading it, matched
+  to their 48px height. It leads because it is the input for the primary action
+  while those are reference; they keep their counts, which is what actually
+  advertises them.
+- **Capture is one row** — single-line field that grows, camera as an adjacent
+  icon. The dictation tip is a **caption, never an icon button**: nothing can
+  invoke the OS keyboard's dictation from a web page, so a mic icon beside a real
+  camera button is a false affordance.
+
+**The action is NOT pinned, by decision.** A fixed bar guaranteed reachability
+but overlaid the content beneath it. The protection is density instead, which is
+a weaker guarantee — measured at 440×956, collapsed the button clears the nav
+(bottom 495 vs 521); **expanded it does not** (629) and needs a scroll. Since the
+expander is sticky, an operator who expands once keeps it that way. **Measure
+before adding anything above that button** — that is exactly how it broke the
+first time.
+
+### Description vs instructions: no dimming, ever
+
+Two lines can carry the engineer's intent, and the app cannot tell which:
+`parts.description` and `job_operations.instructions`. Per-operation text is
+optional and frequently blank, so shops often put the instruction in the part
+description instead.
+
+So **neither is de-emphasised**, and the distinction is a dimmed **label**
+(`Instructions:`, the same word the admin sees when writing the field) rather than
+weight or a tinted box. What is dimmed is chrome, never content — the label shares
+the content's font size, so **colour is the only difference between them**. A
+smaller label beside larger text read as two unrelated lines rather than a label
+and its value, and the colon carries the demarcation a size change was doing
+badly.
+
+An earlier revision dimmed the description to make the instruction "the brighter
+one". That was wrong twice over: it asserted "reference, not instruction" exactly
+when that was false, and ISA-101 requires every emphasis to carry a defined
+meaning — de-emphasis used as a **guess** carries none, and NN/G's hierarchy work
+is explicit that muted text draws less attention. Emphasis stays reserved for
+states that genuinely mean "look here now": the over-quantity error and the
+station-mismatch warning.
+
+**The seed matters here.** `supabase/seed.sql` used to fill every routing step's
+`instructions` with `'<WorkCenter> operation'`. That made the box appear on every
+step of every demo, which teaches an operator the box is noise so they skip it on
+the day it says "torque to 40, not 45". Four steps now carry real shop
+instructions and the rest are NULL, so a usability session tells us about the
+design rather than about our test data.
+
+One implementation, two hosts: [`useNoteCapture`](../../hooks/useNoteCapture.ts)
+owns the draft, the photo pipeline (including the iOS unreadable-`File`
+mitigation) and the funnel events; [`NoteCaptureFields`](../../components/operator/NoteCaptureFields.tsx)
+renders them and deliberately owns **no** submit button, because the surface it
+sits in decides what "save" means.
+
+### Triangularity (B5)
+
+The asymmetry that makes writing something down worth the extra taps:
+
+| | Effort | What comes back |
+|---|---|---|
+| Completion alone | one tap | **Nothing.** The step turns green |
+| Completion + a note | ~4 more taps | A Playbook entry with their name, a view count that grows, named readers, a login-banner line |
+
+**Do not equalise it.** If completing were rewarded on its own, the note would be
+pure cost and nobody would write one. So "nothing comes back from a bare
+completion" is a feature with a test —
+`e2e/operator-completion.spec.ts > 'a bare completion adds no note and no My work
+row'` — which also scans My work for `completed`, `streak`, `average` and `pace`,
+because a contribution screen is exactly where a completion count wants to appear.
 
 ### Surveillance guardrail (non-negotiable)
 
@@ -462,6 +605,9 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 - [ ] **Given** a colleague's note, **when** the operator taps Helpful, **then** the count moves immediately and the write follows — an optimistic toggle, because a thumbs-up that waits for shop wifi reads as broken — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** a failed write, **when** it rejects, **then** the button rolls back rather than leaving a lie on screen, with no toast — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** nothing finished and something typed, **when** the operator taps the primary button, **then** the note is saved with NO completion invented to carry it — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'saves a note alone when nothing was finished'` and `e2e/operator-completion.spec.ts`*.
+- [ ] **Given** an empty quantity and an empty note, **then** the button is disabled — the zero-quantity completion floor is unchanged — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'cannot record zero'`*.
+- [ ] **Given** the step screen, **when** it loads, **then** the job card is collapsed and expands IN PLACE without navigating — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'collapses the job details by default, and opens them in place'`*.
 - [ ] **Given** the operator's OWN note, **when** it renders, **then** no control is offered — RLS forbids self-reaction, so the tap would be a guaranteed `42501` — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** a `confirmed` row, **when** the card renders, **then** it is excluded from the helpful count and its reactor is not named — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** any note, **when** looking for a negative option, **then** none exists on screen or in the schema — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.

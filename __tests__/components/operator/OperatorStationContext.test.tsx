@@ -11,11 +11,14 @@ vi.mock('@/utils/operatorAccess', () => ({
   getStationName: vi.fn().mockResolvedValue('Anca Grinder'),
 }));
 
+import { getStationName } from '@/utils/operatorAccess';
 import {
   OperatorStationProvider,
   useStationContext,
   clearStoredStation,
 } from '@/components/operator/OperatorStationContext';
+
+const mockGetStationName = vi.mocked(getStationName);
 
 const KEY = 'jigged_operator_station';
 
@@ -85,5 +88,31 @@ describe('OperatorStationProvider', () => {
 
     clearStoredStation();
     expect(window.localStorage.getItem(KEY)).toBeNull();
+  });
+
+  // An archived machine used to stay selected forever: getStationName ignored
+  // deleted_at, so the id resolved, and even once it stopped resolving the
+  // provider kept the id with a blank name — a station-gated app pointed at a
+  // machine nobody can stand at, with no way out from the floor.
+  it('forgets a stored station whose machine has been archived, dropping back to the picker', async () => {
+    window.localStorage.setItem(KEY, 'st-archived');
+    mockGetStationName.mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useStationContext(), { wrapper: OperatorStationProvider });
+
+    await waitFor(() => expect(result.current.stationId).toBeNull());
+    expect(result.current.stationName).toBeNull();
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('keeps the stored station when the lookup fails, because a dropped connection is not an archive', async () => {
+    window.localStorage.setItem(KEY, 'st-anca');
+    mockGetStationName.mockRejectedValueOnce(new Error('network down'));
+
+    const { result } = renderHook(() => useStationContext(), { wrapper: OperatorStationProvider });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.stationId).toBe('st-anca');
+    expect(window.localStorage.getItem(KEY)).toBe('st-anca');
   });
 });

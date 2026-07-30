@@ -1048,6 +1048,10 @@ export async function getStationOperationTypes(
     // Operators only run internal stations; external/vendor work centers are
     // handled through the routing/job workflow, not picked at the station.
     .eq('kind', 'internal')
+    // Archived machines are gone from the shop's point of view. Without this the
+    // picker offers a machine nobody can be standing at, and selecting one is
+    // unrecoverable from the floor.
+    .is('deleted_at', null)
     .order('name');
 
   if (error) throw new Error(error.message);
@@ -1058,16 +1062,34 @@ export async function getStationOperationTypes(
   }));
 }
 
+/**
+ * Resolve a station's display name, or null when there is no live machine with
+ * that id.
+ *
+ * Filters `deleted_at` even though it is a by-id read, which is the opposite of
+ * the usual rule. The distinction is what the read is FOR: a detail page or a
+ * document's retained FK is resolving history and must still render, but this
+ * call is VALIDATING A PERSISTED SELECTION. A null answer is the signal that the
+ * stored station no longer names anywhere an operator can stand, and the caller
+ * drops them back to the picker rather than leaving them on a ghost machine.
+ *
+ * Throws on a query failure so the caller can tell "this machine is gone" (null)
+ * apart from "the network is down" (throw) — the first should clear the stored
+ * station, the second must never touch it.
+ */
 export async function getStationName(
   stationId: string,
 ): Promise<string | null> {
   const supabase = getSupabase();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('work_centers')
     .select('name')
     .eq('id', stationId)
-    .single();
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
 
   return data?.name || null;
 }

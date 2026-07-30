@@ -552,3 +552,58 @@ class TestCompaniesRLS:
             .execute()
         )
         assert result.data == []
+
+
+# work_center_attachments --------------------------------------------------------
+#
+# Machine manuals. Company-scoped like everything else, with one extra rule the
+# other tables here don't have: the uploader is resolved server-side, so a member
+# cannot file an upload under someone else's name.
+
+
+class TestWorkCenterAttachmentsRLS:
+    def test_select_cross_tenant_returns_empty(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        result = (
+            _user_a_table(seeded_user_a, "work_center_attachments")
+            .select("id")
+            .eq("work_center_id", seeded_company_b_graph["work_center_id"])
+            .execute()
+        )
+        assert result.data == []
+
+    def test_insert_into_other_company_is_blocked(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        _expect_blocked_insert(
+            lambda: _user_a_table(seeded_user_a, "work_center_attachments")
+            .insert(
+                {
+                    "company_id": seeded_company_b_graph["company_id"],
+                    "work_center_id": seeded_company_b_graph["work_center_id"],
+                    "storage_path": "b/work-centers/x/attack.pdf",
+                    "file_name": "attack.pdf",
+                    "kind": "pdf",
+                }
+            )
+            .execute()
+        )
+
+    # The "uploaded_by must be the acting member" rule is NOT tested here.
+    # These fixtures' companies are not billing-entitled, so every write is
+    # refused by the billing gate before any other policy is consulted — an
+    # attribution test would pass without ever exercising the clause it names.
+    # It lives in test_note_views_rls.py instead, on a writable fixture, next to
+    # the identical rule for notes.author_id.
+
+    def test_delete_cross_tenant_returns_empty(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        result = (
+            _user_a_table(seeded_user_a, "work_center_attachments")
+            .delete()
+            .eq("work_center_id", seeded_company_b_graph["work_center_id"])
+            .execute()
+        )
+        assert result.data == []

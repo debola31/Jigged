@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isAiInsightsEnabled,
   isInventoryLocationsEnabled,
+  isMachineMaintenanceEnabled,
   readCompanyFeatures,
   KNOWN_FEATURES,
 } from '@/lib/featureFlags';
@@ -67,5 +68,30 @@ describe('featureFlags: ai_insights (opt-out / default-on)', () => {
 
     const disabled = readCompanyFeatures({ settings: { features: { ai_insights: false } } });
     expect(disabled.ai_insights).toBe(false);
+  });
+});
+
+describe('featureFlags: machine_maintenance (opt-in pilot flag)', () => {
+  it('is registered in KNOWN_FEATURES with no defaultEnabled', () => {
+    // The module is an experiment with a written kill criterion, so it must be
+    // on at exactly the shops whose behaviour is being measured. An opt-out
+    // default would silently widen the sample and make the result unreadable.
+    const descriptor = KNOWN_FEATURES.find((f) => f.key === 'machine_maintenance');
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.defaultEnabled).toBeUndefined();
+  });
+
+  it('reads settings.features.machine_maintenance (boolean or "true"), defaulting off', () => {
+    expect(isMachineMaintenanceEnabled({ settings: { features: { machine_maintenance: true } } })).toBe(true);
+    expect(isMachineMaintenanceEnabled({ settings: { features: { machine_maintenance: 'true' } } })).toBe(true);
+    expect(isMachineMaintenanceEnabled({ settings: { features: {} } })).toBe(false);
+    expect(isMachineMaintenanceEnabled(null)).toBe(false);
+    expect(isMachineMaintenanceEnabled(undefined)).toBe(false);
+  });
+
+  it('readCompanyFeatures includes the key', () => {
+    expect(
+      readCompanyFeatures({ settings: { features: { machine_maintenance: true } } }).machine_maintenance,
+    ).toBe(true);
   });
 });

@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -462,6 +463,10 @@ export default function ShipmentForm({
 
     try {
       const result = await createShipment(companyId, payload);
+      posthog.capture('shipment_created', {
+        line_item_count: payload.line_items.length,
+        shipping_method: payload.shipping_method,
+      });
       await onCreated({
         shipmentId: result.shipmentId,
         packingSlipNumber: result.packingSlipNumber,

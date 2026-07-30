@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -277,6 +278,11 @@ export default function AcceptPurchaseOrderModal({
         }
       }
 
+      posthog.capture('job_created_from_po', {
+        part_count: lines.filter((l) => l.part).length,
+        total_value: total,
+        is_hot: hot,
+      });
       onCreated(result.job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create the job.');

@@ -23,10 +23,32 @@
  *    nearly every line. Removed. See `save()`.
  *
  * So the scope step earns its place; restating the count before saving it never did.
+ *
+ * ## Two ways in, one worksheet
+ *
+ * With no `?location=`, this is the company-wide sheet described above: pick parts across the shop.
+ *
+ * With `?location=<id>`, it is **place-scoped**, which is what §5.11 asked for all along — you walk
+ * a shop bin by bin, not part by part. Three things change, and they're all consequences of
+ * standing at one place rather than looking at the whole catalogue:
+ *
+ *  - **Nothing is excluded.** Company-wide, a part split across bins can't be counted item-by-item
+ *    (count 38 against 10+20+10 and no bin defensibly absorbs the −2). At one bin that ambiguity
+ *    doesn't exist, so the parts the other sheet has to name and skip are countable here.
+ *  - **Search runs on the server**, because `Unassigned` holds every part a real shop owns and you
+ *    cannot filter 9,428 rows in the browser.
+ *  - **You can put things away.** Alongside "Count N parts" there's "Move N to…", because the other
+ *    thing you do standing at a bin is notice something doesn't belong there. That single addition
+ *    is what makes this the put-away tool — at `Unassigned`, this screen *is* how a shop empties
+ *    the pile that `trg_auto_track_stocked_part` created.
+ *
+ * The two write paths stay deliberately different. Counting commits line-by-line and reports
+ * per-line failures, because line 50 failing must not invalidate lines 1–49. A move is one atomic
+ * RPC, because a half-moved pile is worse than no move — you can't tell what you already did.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -70,8 +92,21 @@ import {
 import {
   commitCount,
   loadCountCandidates,
+  loadLocationCountCandidates,
+  refreshLocationQuantities,
   refreshSystemQuantities,
 } from '@/utils/inventoryCountAccess';
+import {
+  PUT_AWAY_MAX,
+  bulkPutAway,
+  createLocation,
+  getLocations,
+} from '@/utils/inventoryLocationsAccess';
+import LocationPicker, {
+  type LocationPickerOption,
+} from '@/components/inventory/locations/LocationPicker';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import type { InventoryLocation } from '@/types/inventoryLocations';
 import type {
   CountCandidate,
   CountCommitProgress,
@@ -100,15 +135,23 @@ const signed = (n: number) => `${n > 0 ? '+' : ''}${num(n)}`;
 export default function InventoryCountPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const companyId = params.companyId as string;
+
+  /** `?location=<id>` switches the whole sheet to place-scoped. See the module comment. */
+  const locationId = searchParams.get('location');
+  const locationMode = Boolean(locationId);
+
+  const [locationName, setLocationName] = useState('');
+  const [allLocations, setAllLocations] = useState<InventoryLocation[]>([]);
 
   // Without this the Header falls back to "Inventory Details" for any unrecognised
   // /inventory/* route, which is both wrong and confusing mid-count.
   const { setTitle } = usePageTitle();
   useEffect(() => {
-    setTitle('Count Inventory');
+    setTitle(locationMode && locationName ? `Count ${locationName}` : 'Count Inventory');
     return () => setTitle(null);
-  }, [setTitle]);
+  }, [setTitle, locationMode, locationName]);
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -118,6 +161,21 @@ export default function InventoryCountPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [entries, setEntries] = useState<CountEntries>({});
   const [search, setSearch] = useState('');
+
+  /**
+   * The search term the server has been asked about.
+   *
+   * Place-scoped mode filters server-side, so the raw keystrokes are debounced into this before
+   * becoming a request. Company-wide mode filters `countable` in memory and ignores it.
+   */
+  const [serverSearch, setServerSearch] = useState('');
+
+  /** Parts held at this location in total — may exceed the page, so the UI can say so. */
+  const [hereTotal, setHereTotal] = useState(0);
+
+  /** Put-away state: the destination, and whether a move is in flight. */
+  const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
+  const [moving, setMoving] = useState(false);
 
   /** System quantities as the sheet loaded — compared to a fresh read at save, so we can say
    *  which parts moved underneath the count. */
@@ -136,6 +194,32 @@ export default function InventoryCountPage() {
     let cancelled = false;
     (async () => {
       try {
+        // Place-scoped: read one page of THIS bin's contents. `serverSearch` is a dependency, so
+        // typing re-runs this against the server — `Unassigned` holds every part a shop owns and
+        // cannot be filtered in the browser.
+        if (locationId) {
+          const locations = await getLocations(companyId);
+          if (cancelled) return;
+          const here = locations.find((l) => l.id === locationId);
+          if (!here) {
+            setLoadError('That location no longer exists.');
+            return;
+          }
+          setAllLocations(locations);
+          setLocationName(here.name);
+
+          const { candidates: found, total } = await loadLocationCountCandidates(
+            locationId,
+            here.name,
+            { search: serverSearch },
+          );
+          if (cancelled) return;
+          setCandidates(found);
+          setHereTotal(total);
+          openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
+          return;
+        }
+
         const found = await loadCountCandidates(companyId);
         if (cancelled) return;
         setCandidates(found);
@@ -161,15 +245,25 @@ export default function InventoryCountPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, locationId, serverSearch]);
+
+  // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
+  // is unconditional so the two modes don't need different effect shapes.
+  useEffect(() => {
+    const id = setTimeout(() => setServerSearch(search.trim()), 300);
+    return () => clearTimeout(id);
+  }, [search]);
 
   const countable = useMemo(() => countableCandidates(candidates), [candidates]);
   const excluded = useMemo(() => excludedCandidates(candidates), [candidates]);
 
   const visible = useMemo(() => {
+    // Already filtered by the server in place-scoped mode; re-filtering here would hide rows
+    // while a debounced request was still in flight.
+    if (locationMode) return countable;
     const q = search.trim().toLowerCase();
     return q ? countable.filter((c) => c.partName.toLowerCase().includes(q)) : countable;
-  }, [countable, search]);
+  }, [countable, search, locationMode]);
 
   /** The chosen parts, in list order. */
   const sheet = useMemo(
@@ -246,7 +340,12 @@ export default function InventoryCountPage() {
     setChecking(true);
     let toCommit: CountVariance[];
     try {
-      const fresh = await refreshSystemQuantities(Object.keys(entries));
+      // Place-scoped counts must re-read the balance AT THIS BIN. `refreshSystemQuantities` reads
+      // `parts.quantity`, the roll-up across every location — using it here would compare a shelf
+      // count against the whole shop's total and report a variance on every line.
+      const fresh = locationId
+        ? await refreshLocationQuantities(locationId, Object.keys(entries))
+        : await refreshSystemQuantities(Object.keys(entries));
       const updated = candidates.map((c) =>
         fresh.has(c.partId) ? { ...c, systemQuantity: fresh.get(c.partId) as number } : c,
       );
@@ -297,6 +396,78 @@ export default function InventoryCountPage() {
     } finally {
       setCommitting(false);
     }
+  };
+
+  // ── Put away ────────────────────────────────────────────────────────────
+  /**
+   * Send every selected part's whole balance to one place.
+   *
+   * One atomic RPC, deliberately unlike `save()`'s line-by-line commit: a count is a set of
+   * independent observations, so line 50 failing mustn't undo lines 1–49 — but a half-moved pile
+   * is worse than no move at all, because you can't tell what you already did.
+   */
+  const putAway = async () => {
+    if (!locationId || !moveTo || selectedIds.length === 0) return;
+    setMoving(true);
+    try {
+      const res = await bulkPutAway(locationId, moveTo.id, selectedIds);
+
+      // Refetch from the START. These parts have just left this location, so the result set
+      // shifted — holding the previous page's offset would silently skip whatever moved up.
+      setSelectedIds([]);
+      setEntries({});
+      setMoveTo(null);
+      const { candidates: found, total } = await loadLocationCountCandidates(
+        locationId,
+        locationName,
+        { search: serverSearch },
+      );
+      setCandidates(found);
+      setHereTotal(total);
+      openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
+
+      setSnack({
+        msg:
+          `Put ${res.moved} ${res.moved === 1 ? 'part' : 'parts'} away in ${moveTo.label}.` +
+          // Skipped means "nothing here to move" — a zero balance, which every stocked part has at
+          // Unassigned whether or not it holds anything. Worth saying, not worth alarm.
+          (res.skipped > 0 ? ` ${res.skipped} had nothing here to move.` : ''),
+        severity: 'success',
+      });
+    } catch (e) {
+      setSnack({
+        msg: friendlyErrorMessage(e, { entity: 'stock', fallback: 'Could not put these away.' }),
+        severity: 'error',
+      });
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  /** Every location, for the destination picker. Only loaded in place-scoped mode. */
+  const destinationOptions = useMemo<LocationPickerOption[]>(() => {
+    const byId = new Map(allLocations.map((l) => [l.id, l] as const));
+    const pathOf = (id: string): string => {
+      const names: string[] = [];
+      let cursor: string | null = id;
+      const guard = new Set<string>();
+      while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+        guard.add(cursor);
+        const n: InventoryLocation = byId.get(cursor)!;
+        names.unshift(n.name);
+        cursor = n.parent_id;
+      }
+      return names.join(' › ');
+    };
+    return allLocations
+      .map((l) => ({ id: l.id, label: pathOf(l.id), kind: l.kind }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [allLocations]);
+
+  const createDestination = async (name: string): Promise<LocationPickerOption> => {
+    const created = await createLocation(companyId, { name });
+    setAllLocations((prev) => [...prev, created]);
+    return { id: created.id, label: created.name, kind: created.kind };
   };
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -399,11 +570,14 @@ export default function InventoryCountPage() {
       {step === 0 && (
         <Box>
           <Typography variant="body1" sx={{ mb: 0.5 }}>
-            Pick the parts you&apos;re about to count.
+            {locationMode
+              ? `What's in ${locationName}?`
+              : 'Pick the parts you’re about to count.'}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            One part or the whole shop — whatever you&apos;re walking right now. You can always
-            count the rest later.
+            {locationMode
+              ? 'Tick what you’re counting — or what doesn’t belong here, and send it somewhere else.'
+              : 'One part or the whole shop — whatever you’re walking right now. You can always count the rest later.'}
           </Typography>
 
           {countable.length === 0 ? (
@@ -422,14 +596,19 @@ export default function InventoryCountPage() {
             <>
               <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextField
-                  placeholder="Search parts..."
+                  placeholder={locationMode ? 'Search what’s here…' : 'Search parts...'}
                   size="small"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   sx={{ width: 300 }}
                 />
                 <Box sx={{ flex: 1 }} />
-                <Button onClick={() => setSelectedIds(visible.map((c) => c.partId))}>
+                <Button
+                  onClick={() => setSelectedIds(visible.map((c) => c.partId))}
+                  // The RPC refuses more than PUT_AWAY_MAX to bound how long it holds row locks.
+                  // Say so here rather than letting someone select 2,000 and be told no.
+                  disabled={visible.length > PUT_AWAY_MAX}
+                >
                   Select all{visible.length !== countable.length ? ' shown' : ''}
                 </Button>
                 <Button
@@ -443,6 +622,55 @@ export default function InventoryCountPage() {
                     : `Count ${selectedIds.length} ${selectedIds.length === 1 ? 'part' : 'parts'}`}
                 </Button>
               </Box>
+
+              {/* ── Put away: the other thing you do standing at a bin ─────────── */}
+              {locationMode && (
+                <Card elevation={2} sx={{ mb: 3 }}>
+                  <CardContent
+                    sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}
+                  >
+                    <Box sx={{ minWidth: 260, flex: 1 }}>
+                      <LocationPicker
+                        label="Send the ticked parts to…"
+                        options={destinationOptions}
+                        value={moveTo}
+                        onChange={setMoveTo}
+                        excludeId={locationId}
+                        excludeSystem
+                        disabled={moving}
+                        onCreate={createDestination}
+                        helperText={
+                          selectedIds.length === 0
+                            ? 'Tick something above first.'
+                            : `Moves everything each part has here — ${selectedIds.length} ${
+                                selectedIds.length === 1 ? 'part' : 'parts'
+                              }.`
+                        }
+                      />
+                    </Box>
+                    <Button
+                      variant="outlined"
+                      size="large"
+                      sx={{ mt: 1 }}
+                      disabled={moving || !moveTo || selectedIds.length === 0}
+                      onClick={putAway}
+                    >
+                      {moving
+                        ? 'Putting away…'
+                        : `Put ${selectedIds.length || ''} away`.replace('  ', ' ')}
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* The page is capped, and `Unassigned` on a real shop holds every part they own —
+                  so say what isn't shown rather than presenting a page as the whole bin. */}
+              {locationMode && hereTotal > countable.length && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Showing {countable.length} of {num(hereTotal)} parts here. Search to narrow it
+                  down — putting a batch away removes it from this list.
+                </Alert>
+              )}
 
               <Card elevation={2}>
                 <Stack divider={<Divider />}>

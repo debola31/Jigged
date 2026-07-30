@@ -15,6 +15,7 @@ import { getStockedParts, adjustPartStock } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
   getBalancesForParts,
+  getLocationContentsPage,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { resolveCountTarget, countNote, type LocationBalance } from '@/lib/inventoryCountPlan';
@@ -71,6 +72,78 @@ export async function loadCountCandidates(
       target: resolveCountTarget(part.is_location_tracked, partBalances, unassigned),
     };
   });
+}
+
+/**
+ * Build the count sheet for ONE location.
+ *
+ * §5.11 asks for the count to be **place-scoped**, and the company-wide sheet above never was —
+ * it's part-first, and you walk a shop bin by bin, not part by part.
+ *
+ * It also removes an exclusion the company-wide sheet cannot avoid. There, a part split across
+ * bins is *unc*ountable: if it holds 10+20+10 and you count 38, no bin defensibly absorbs the −2,
+ * so `resolveCountTarget` drops it. Standing at one bin there is no such ambiguity — "Shelf A holds
+ * 830" adjusts Shelf A and says nothing about Shelf B. **So every part here is countable, including
+ * the split ones the other sheet has to name and skip.**
+ *
+ * `systemQuantity` is therefore the balance AT THIS LOCATION, not the part's company-wide total.
+ */
+export async function loadLocationCountCandidates(
+  locationId: string,
+  locationName: string,
+  opts: { search?: string; limit?: number; offset?: number } = {},
+): Promise<{ candidates: CountCandidate[]; total: number }> {
+  const { contents, total } = await getLocationContentsPage(locationId, opts);
+
+  return {
+    candidates: contents.map((c) => ({
+      partId: c.part_id,
+      partName: c.part_name,
+      // The paged read is deliberately narrow — it doesn't join descriptions, because this list is
+      // reached by searching for a part you're holding rather than by browsing for one.
+      description: null,
+      unit: c.primary_unit ?? 'ea',
+      systemQuantity: c.quantity,
+      target: { kind: 'location', locationId, locationName },
+    })),
+    total,
+  };
+}
+
+/**
+ * Re-read the balances AT ONE LOCATION before committing a place-scoped count.
+ *
+ * The company-wide sibling below reads `parts.quantity`, which is the roll-up across every bin —
+ * using it here would compare a shelf count against the whole shop's total and report a variance
+ * on every line.
+ */
+export async function refreshLocationQuantities(
+  locationId: string,
+  partIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (partIds.length === 0) return out;
+
+  const supabase = getSupabase();
+  const CHUNK = 500;
+
+  for (let i = 0; i < partIds.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from('part_location_stock')
+      .select('part_id, quantity')
+      .eq('location_id', locationId)
+      .in('part_id', partIds.slice(i, i + CHUNK));
+
+    if (error) {
+      console.error('Error refreshing location quantities for count:', error);
+      throw error;
+    }
+    for (const row of data ?? []) out.set(row.part_id, Number(row.quantity) || 0);
+  }
+  // A part whose row vanished (moved away mid-count) reads 0 rather than going missing, so the
+  // sheet shows "0 here now" instead of silently keeping the opening number.
+  for (const id of partIds) if (!out.has(id)) out.set(id, 0);
+  return out;
 }
 
 /**

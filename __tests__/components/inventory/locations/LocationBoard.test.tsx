@@ -192,6 +192,34 @@ describe('LocationBoard — photos', () => {
     expect(document.querySelector('img')).toBeNull();
   });
 
+  /**
+   * Photos are the cheapest visual hierarchy we have and they now show on the operator surface
+   * too, so a place lacking one is worth surfacing rather than leaving silent — otherwise a
+   * photographed place and an unphotographed one look identical from the board.
+   *
+   * A passive glyph, not a button: the whole tile is one tap target and the sheet owns every
+   * action (§5.5 decision 1). A nested control would steal taps meant for the tile.
+   */
+  it('marks a real place that has no photo yet', () => {
+    renderBoard([cabinetWithShelves()]);
+    expect(screen.getByTitle('No photo yet')).toBeInTheDocument();
+    // Still passive — the tile itself is the only button.
+    expect(screen.queryByRole('button', { name: /photo/i })).not.toBeInTheDocument();
+  });
+
+  it('does not mark a place that already has one', () => {
+    renderBoard([withPhoto()], [], {
+      photoUrls: new Map([['co1/locations/cab3/a.jpg', 'https://signed/a']]),
+    });
+    expect(screen.queryByTitle('No photo yet')).not.toBeInTheDocument();
+  });
+
+  /** `Unassigned` is a virtual bucket — there is no physical shelf to photograph. */
+  it('does not ask the put-away pile for a photo', () => {
+    renderBoard([node({ id: 'un', name: 'Unassigned', kind: 'system' })]);
+    expect(screen.queryByTitle('No photo yet')).not.toBeInTheDocument();
+  });
+
   /** The photo identifies the unit; the compartments carry fill state. Both, not either. */
   it('keeps the compartments and their fill state alongside the photo', () => {
     const shelfA = node({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3' }, [], 1);

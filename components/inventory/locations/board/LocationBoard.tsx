@@ -15,6 +15,7 @@
  */
 import ButtonBase from '@mui/material/ButtonBase';
 import Box from '@mui/material/Box';
+import AddAPhotoOutlinedIcon from '@mui/icons-material/AddAPhotoOutlined';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
@@ -134,10 +135,28 @@ export default function LocationBoard({
       {units.map((node) => {
         const o = occupancyFor(occupancy, node.id);
         const isSystem = node.kind === 'system';
+        /**
+         * A real place with no photograph.
+         *
+         * The board draws furniture from a free-text `kind`, which is a guess at what the thing
+         * looks like; a photo is how someone recognises the shelf they're standing in front of —
+         * and the same picture now shows on the operator surface. So the gap is worth making
+         * visible, not silent.
+         *
+         * Deliberately a passive glyph, NOT a button: the whole tile is one tap target and the
+         * sheet owns every action (§5.5 decision 1). A nested button here would put a ~24px
+         * control inside a 48px target and steal taps meant for the tile. `Unassigned` is
+         * exempt — it's a virtual bucket with no physical shelf to photograph.
+         */
+        const wantsPhoto = !isSystem && !node.photo_path;
         return (
           <ButtonBase
             key={node.id}
             onClick={() => onOpen(node)}
+            // Deliberately NOT mentioning the missing photo: the accessible name should say
+            // what the place is and what's in it. A photo is a *visual* recognition aid, so
+            // announcing its absence is noise for someone who can't use it either way. The
+            // glyph carries its own titleAccess for anyone who can.
             aria-label={`${node.name} — ${o.hasStock ? parts(o.totalParts) : 'empty'}`}
             sx={{
               display: 'block',
@@ -153,11 +172,20 @@ export default function LocationBoard({
               muted={isSystem}
               photoUrl={node.photo_path ? photoUrls?.get(node.photo_path) : null}
               headerRight={
-                <Chip
-                  size="small"
-                  variant={o.hasStock ? 'filled' : 'outlined'}
-                  label={o.hasStock ? parts(o.totalParts) : 'empty'}
-                />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  {wantsPhoto && (
+                    <AddAPhotoOutlinedIcon
+                      fontSize="small"
+                      sx={{ color: 'text.disabled' }}
+                      titleAccess="No photo yet"
+                    />
+                  )}
+                  <Chip
+                    size="small"
+                    variant={o.hasStock ? 'filled' : 'outlined'}
+                    label={o.hasStock ? parts(o.totalParts) : 'empty'}
+                  />
+                </Box>
               }
             />
             {/* Inside the tile's own border, not floating underneath it — sitting outside made the

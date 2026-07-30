@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single', 'maybeSingle'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -39,6 +39,8 @@ import {
   getAllStationsOperatorJobs,
   getCompletedOperatorJobs,
   getAllStationsCompletedOperatorJobs,
+  getStationOperationTypes,
+  getStationName,
   addReaction,
   removeReaction,
   markOperationSent,
@@ -538,5 +540,44 @@ describe('reactions', () => {
     asMember(null);
 
     await expect(addReaction('c1', 'n1')).rejects.toThrow(/member/i);
+  });
+});
+
+// The station picker is the only entrance to a machine, so a leak here is not
+// cosmetic: an operator who picks an archived machine lands on a station that no
+// longer exists and has no way back except clearing site data.
+describe('station selection', () => {
+  it('offers only live internal machines — archived ones are gone from the shop', async () => {
+    mockQueryBuilder.data = [{ id: 'wc1', name: 'Anca Grinder' }];
+
+    await getStationOperationTypes('c1');
+
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'c1');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('kind', 'internal');
+    expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
+  });
+
+  it('resolves a live station to its name', async () => {
+    mockQueryBuilder.data = { name: 'Anca Grinder' };
+
+    await expect(getStationName('wc1')).resolves.toBe('Anca Grinder');
+    expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
+  });
+
+  it('answers null for an archived machine, which is what tells the caller to forget it', async () => {
+    // maybeSingle, not single: "no live row" is an expected answer here, not an
+    // error. The provider clears the stored station on exactly this null.
+    mockQueryBuilder.data = null;
+
+    await expect(getStationName('wc-archived')).resolves.toBeNull();
+    expect(mockQueryBuilder.maybeSingle).toHaveBeenCalled();
+  });
+
+  it('throws on a query failure rather than answering null', async () => {
+    // A dropped connection must not read as "your machine was archived" — that
+    // would wipe a valid station off the device every time the wifi blinked.
+    mockQueryBuilder.error = { message: 'network down' };
+
+    await expect(getStationName('wc1')).rejects.toThrow('network down');
   });
 });

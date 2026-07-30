@@ -47,8 +47,11 @@ export default function MachineOpenItems({
   return (
     <Card elevation={2} sx={{ ...cardSx, mb: 2 }} data-testid="machine-open-items">
       <CardContent sx={{ py: 1.5 }}>
+        {/* Same words as the toggle that puts things here and the chip on the
+            entry card. Three names for one state is three things to work out for
+            somebody who opens this screen once a fortnight. */}
         <Typography variant="overline" color="text.secondary">
-          Open
+          Needs attention
         </Typography>
         {items.map((item) => (
           <Box

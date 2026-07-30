@@ -9,10 +9,15 @@
 > arrives.
 >
 > This document was committed as a proposal and then amended where building it changed an answer.
-> Three sections carry a revision: [§6](#6-phases-and-gates) (the archived-machines defect was not
-> being fixed elsewhere, so it is fixed here), [§8](#8-measurement) (`confirmed` is cut — Phase 1
-> ships no freshness signal and says why), and [§9](#9-open-questions) (details and manuals ship;
-> the office gets a read-only view). Everything else is as proposed.
+> Four sections carry a revision: [§4.3](#43-capture) (the five-verb kind chip is cut to one
+> "Needs attention" toggle — four of the five had no reader and no research), [§6](#6-phases-and-gates)
+> (the archived-machines defect was not being fixed elsewhere, so it is fixed here),
+> [§8](#8-measurement) (`confirmed` is cut — Phase 1 ships no freshness signal and says why), and
+> [§9](#9-open-questions) (details and manuals ship; the office gets a read-only view). Everything
+> else is as proposed.
+>
+> Three of those four cut something the proposal asked for, each for the same reason: a control
+> whose answer changes nothing is a control that teaches operators this surface is decorative.
 
 **Dependencies:** [Work Centers](work-centers.md), because a machine is a `work_centers` row with
 `kind='internal'` and there is no separate machine entity. The notes system and its read-back loop
@@ -131,12 +136,38 @@ asked, and pushes the recent thing below the fold.
 
 Free text. Dictation is the phone keyboard's dictation key, which operators already use; no custom
 voice capture is built or proposed. Photos are optional and go through the native sheet, so an
-existing camera-roll photo works: the end-of-shift offset photo is already on the phone. A kind
-chip is offered with five values: cleaned, repaired, replaced, adjusted, noticed.
+existing camera-roll photo works: the end-of-shift offset photo is already on the phone. Alongside
+them, one optional toggle: **Needs attention**.
 
-**Decided:** kind is optional. An unclassified entry is still knowledge, and a forced taxonomy at
-capture time is the thing that stops capture. A person who cannot decide whether they cleaned or
-adjusted something will write nothing rather than choose wrongly.
+**Decided (revised at build time): one toggle, not a taxonomy.** This section originally offered a
+kind chip with five values — cleaned, repaired, replaced, adjusted, noticed — asserted in a single
+sentence with nothing behind it. Two things were wrong with that list.
+
+It did not match the frame this document itself argues from. [§3](#3-who-its-for) grounds the module
+in autonomous maintenance, "cleaning, inspection, lubrication and retightening"; only *cleaned*
+appears in both, and **lubrication is missing entirely** — the very thing
+[§1](#1-problem) builds the case on ("roughly seven in ten spindle shutdowns trace back to
+lubrication that was missed or not recorded"). A taxonomy that omits the category its own evidence
+rests on was invented rather than observed.
+
+And four of the five had no reader. Nothing in the product filtered, grouped, ranked or counted by
+kind — [§4.2](#42-the-timeline) forbids grouping the timeline by it — so they were four extra
+decisions asked of somebody in a container whose entire risk is that nobody writes in it at all.
+Only `noticed` ever did anything: it is what pins an entry to the top of the machine
+([§4.4](#44-noticed-then-resolved)).
+
+So the one value with a consumer survives, under a label that says the condition rather than naming
+a category. It is **off by default** — most entries record work already done — and deselectable,
+because a person who is unsure must still be able to write the sentence. The database CHECK keeps
+all five values: widening a constraint later is a migration, narrowing it buys nothing, and if a
+real corpus ever argues for categories they come back as a UI change with a consumer attached.
+
+**"Needs attention" notifies nobody.** There is no notification path in Phase 1
+([§9](#9-open-questions)), and the wording is chosen not to imply one. What it does is keep the
+entry pinned to that machine until somebody logs a fix — so the person who meets it is the next
+operator standing at the machine, which is precisely the handoff [§1](#1-problem) says goes wrong.
+Its only intended exit is a second entry describing what was done: there is no dismiss and no close,
+and `notes` is append-only, so clearing the pin and recording the knowledge are the same act.
 
 ### 4.4 Noticed, then resolved
 
@@ -315,8 +346,8 @@ entries in hand. None of this is the gate. The gate is [§2](#2-hypothesis-and-k
 
 ## 9. Open questions
 
-Four questions are closed and are not reopened here: kind is optional
-([§4](#4-what-it-is-phase-1)), there is no seeded corpus
+Four questions are closed and are not reopened here: classification is optional — and, since
+[§4.3](#43-capture) was revised, is one toggle rather than five verbs; there is no seeded corpus
 ([§2](#2-hypothesis-and-kill-criterion)), open-items attribution resolves in favor of the guardrail
 ([§5](#5-what-it-is-not)), and the module is called Machine Maintenance.
 

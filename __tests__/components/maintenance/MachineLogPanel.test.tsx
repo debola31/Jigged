@@ -201,4 +201,57 @@ describe('MachineLogPanel', () => {
     expect(screen.queryByRole('button', { name: /add to log/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/what did you do/i)).not.toBeInTheDocument();
   });
+
+  describe('the composer', () => {
+    it('offers one flag, not a taxonomy', async () => {
+      // Four of the original five verbs had no reader anywhere — nothing filtered,
+      // grouped, ranked or counted by them — so they were four extra decisions
+      // asked of somebody in a container whose whole risk is that nobody writes in
+      // it. If they come back, they should come back with a consumer.
+      render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+      await screen.findByText(/nothing logged for this machine yet/i);
+
+      expect(screen.getByRole('button', { name: /needs attention/i })).toBeInTheDocument();
+      for (const dead of ['cleaned', 'repaired', 'replaced', 'adjusted']) {
+        expect(screen.queryByRole('button', { name: new RegExp(`^${dead}$`, 'i') })).toBeNull();
+      }
+    });
+
+    it('is off by default, because most entries record work already done', async () => {
+      mockAddMachineNote.mockResolvedValue(note({ id: 'a' }));
+      render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+      await screen.findByText(/nothing logged for this machine yet/i);
+
+      await userEvent.type(screen.getByPlaceholderText(/what did you do/i), 'Topped up the lube.');
+      await userEvent.click(screen.getByRole('button', { name: /add to log/i }));
+
+      await waitFor(() =>
+        expect(mockAddMachineNote).toHaveBeenCalledWith(
+          'wc1', 'c1', 'acc-me', 'Topped up the lube.',
+          expect.objectContaining({ maintenanceKind: null }),
+        ),
+      );
+    });
+
+    it('can be turned back off after being turned on', async () => {
+      // Somebody who taps it and reconsiders must be able to undo that without
+      // clearing the sentence they already wrote.
+      mockAddMachineNote.mockResolvedValue(note({ id: 'a' }));
+      render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+      await screen.findByText(/nothing logged for this machine yet/i);
+
+      const flag = screen.getByRole('button', { name: /needs attention/i });
+      await userEvent.type(screen.getByPlaceholderText(/what did you do/i), 'Looked at it.');
+      await userEvent.click(flag);
+      await userEvent.click(flag);
+      await userEvent.click(screen.getByRole('button', { name: /add to log/i }));
+
+      await waitFor(() =>
+        expect(mockAddMachineNote).toHaveBeenCalledWith(
+          'wc1', 'c1', 'acc-me', 'Looked at it.',
+          expect.objectContaining({ maintenanceKind: null }),
+        ),
+      );
+    });
+  });
 });

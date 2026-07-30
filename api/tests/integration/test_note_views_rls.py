@@ -143,13 +143,17 @@ def shop(supabase_admin):
         "boss": boss,
         "part_id": part_id,
         "routing_operation_id": routing_op_id,
+        "work_center_id": wc_id,
         "job_a": jobs[0],
         "job_b": jobs[1],
         "admin": admin,
     }
     yield ctx
 
-    for table in ("jobs", "routings", "parts", "work_centers"):
+    # notes first: a machine-subject note holds work_centers with ON DELETE
+    # RESTRICT, so tearing down in the other order leaves the work center behind
+    # and the failure is swallowed by the except.
+    for table in ("notes", "jobs", "routings", "parts", "work_centers"):
         try:
             admin.table(table).delete().eq("company_id", company_id).execute()
         except Exception:
@@ -859,3 +863,201 @@ def test_playbook_returns_author_id_so_the_ui_can_hide_the_control(shop):
         .data
     )
     assert rows and rows[0]["author_id"] == shop["author"]["access_id"]
+
+
+# ── machine maintenance: the machine subject, and derived open state ─────────
+#
+# See docs/modules/machine-maintenance.md. The point of these is that the module
+# stores NO "open" flag: an observation is open exactly while no entry resolves
+# it. That only holds if the database guarantees a resolver always sits on the
+# same machine as its target, because the read derives open-ness from a single
+# work-center result set and would silently mis-report if a resolver could live
+# anywhere else. So the invariant is the trigger's job, and these are the tests
+# that say so.
+
+
+def _machine_note(shop, body: str, kind: str | None = None, resolves: str | None = None) -> str:
+    row = {
+        "company_id": shop["company_id"],
+        "subject_kind": "work_center",
+        "work_center_id": shop["work_center_id"],
+        "author_id": shop["author"]["access_id"],
+        "body": body,
+    }
+    if kind is not None:
+        row["maintenance_kind"] = kind
+    if resolves is not None:
+        row["resolves_note_id"] = resolves
+    return shop["admin"].table("notes").insert(row).execute().data[0]["id"]
+
+
+def test_a_machine_entry_can_be_written_at_all(shop):
+    """The work_center subject has been modelled since the notes rewrite and
+    nothing has ever written one. This is the first row that does."""
+    note_id = _machine_note(shop, "Way cover has started to drag.", kind="noticed")
+
+    row = shop["admin"].table("notes").select("*").eq("id", note_id).single().execute().data
+    assert row["subject_kind"] == "work_center"
+    assert row["work_center_id"] == shop["work_center_id"]
+    assert row["maintenance_kind"] == "noticed"
+    assert row["job_id"] is None and row["part_id"] is None
+
+
+def test_kind_is_optional(shop):
+    """An unclassified entry is still knowledge. A forced taxonomy at capture
+    time is what stops capture, so the column has to accept nothing."""
+    note_id = _machine_note(shop, "Topped up the way lube.")
+    row = shop["admin"].table("notes").select("maintenance_kind").eq("id", note_id).single().execute().data
+    assert row["maintenance_kind"] is None
+
+
+def test_kind_is_limited_to_the_five_verbs(shop):
+    with pytest.raises(Exception):
+        _machine_note(shop, "x", kind="lubricated")
+
+
+def test_a_part_note_cannot_carry_a_maintenance_kind(shop):
+    with pytest.raises(Exception):
+        shop["admin"].table("notes").insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "part",
+                "part_id": shop["part_id"],
+                "body": "x",
+                "maintenance_kind": "cleaned",
+            }
+        ).execute()
+
+
+def test_open_is_derived_from_the_absence_of_a_resolver(shop):
+    """The whole open-items model in one test. Nothing is written to close an
+    item — a second entry is added, and the first stops being open because of it."""
+    observation = _machine_note(shop, "Coolant smells off.", kind="noticed")
+
+    def resolvers_of(note_id: str) -> list[dict]:
+        return (
+            shop["admin"].table("notes").select("id").eq("resolves_note_id", note_id).execute().data
+        )
+
+    assert resolvers_of(observation) == []
+
+    fix = _machine_note(shop, "Drained and recharged the coolant.", kind="repaired", resolves=observation)
+    assert [r["id"] for r in resolvers_of(observation)] == [fix]
+
+
+def test_deleting_the_fix_reopens_the_observation(shop):
+    """ON DELETE SET NULL, not CASCADE: removing the record of a fix must not
+    remove the observation, and the item legitimately becomes open again."""
+    observation = _machine_note(shop, "Chip conveyor jams on long runs.", kind="noticed")
+    fix = _machine_note(shop, "Cleared the jam and re-tensioned.", resolves=observation)
+
+    shop["admin"].table("notes").delete().eq("id", fix).execute()
+
+    still_there = shop["admin"].table("notes").select("id").eq("id", observation).execute().data
+    assert len(still_there) == 1
+    assert (
+        shop["admin"].table("notes").select("id").eq("resolves_note_id", observation).execute().data
+        == []
+    )
+
+
+def test_a_fix_cannot_point_at_an_entry_on_another_machine(shop):
+    """If this were allowed the open list would be wrong rather than merely
+    incomplete: the resolver would never appear in the target machine's result
+    set, so the item would read as open forever while a fix existed elsewhere."""
+    observation = _machine_note(shop, "Spindle runs warm.", kind="noticed")
+    other_wc = (
+        shop["admin"]
+        .table("work_centers")
+        .insert({"company_id": shop["company_id"], "name": f"LATHE-{os.urandom(2).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    with pytest.raises(Exception):
+        shop["admin"].table("notes").insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "work_center",
+                "work_center_id": other_wc,
+                "body": "fixed it (on the wrong machine)",
+                "resolves_note_id": observation,
+            }
+        ).execute()
+
+
+def test_a_fix_cannot_point_at_an_entry_that_was_never_noticed(shop):
+    routine = _machine_note(shop, "Wiped it down.", kind="cleaned")
+    with pytest.raises(Exception):
+        _machine_note(shop, "resolving a non-problem", resolves=routine)
+
+
+def test_a_fix_cannot_point_at_a_note_in_another_company(shop, supabase_admin):
+    """And the refusal must not say WHY. The validator is SECURITY DEFINER, so it
+    reads past RLS; a message that distinguished "no such note" from "different
+    company" would be a cross-tenant existence oracle."""
+    other_company = (
+        supabase_admin.table("companies")
+        .insert({"name": f"mm-other-{os.urandom(3).hex()}"})
+        .execute()
+        .data[0]["id"]
+    )
+    try:
+        other_wc = (
+            supabase_admin.table("work_centers")
+            .insert({"company_id": other_company, "name": "FOREIGN MILL"})
+            .execute()
+            .data[0]["id"]
+        )
+        foreign = (
+            supabase_admin.table("notes")
+            .insert(
+                {
+                    "company_id": other_company,
+                    "subject_kind": "work_center",
+                    "work_center_id": other_wc,
+                    "body": "their problem",
+                    "maintenance_kind": "noticed",
+                }
+            )
+            .execute()
+            .data[0]["id"]
+        )
+
+        with pytest.raises(Exception) as exc:
+            _machine_note(shop, "resolving someone else's machine", resolves=foreign)
+        assert "not an open observation on this machine" in str(exc.value)
+
+        # Same message for a uuid that does not exist at all — the two cases are
+        # indistinguishable from outside, which is the point.
+        with pytest.raises(Exception) as exc2:
+            _machine_note(shop, "resolving nothing", resolves="99999999-9999-9999-9999-999999999999")
+        assert "not an open observation on this machine" in str(exc2.value)
+    finally:
+        supabase_admin.table("notes").delete().eq("company_id", other_company).execute()
+        supabase_admin.table("work_centers").delete().eq("company_id", other_company).execute()
+        supabase_admin.table("companies").delete().eq("id", other_company).execute()
+
+
+def test_a_machine_entry_still_cannot_carry_another_subject(shop):
+    with pytest.raises(Exception):
+        shop["admin"].table("notes").insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "work_center",
+                "work_center_id": shop["work_center_id"],
+                "part_id": shop["part_id"],
+                "body": "two subjects",
+            }
+        ).execute()
+
+
+def test_a_machine_read_never_counts_toward_usage(shop):
+    """usage_count counts DISTINCT JOBS a note was consulted on, and a machine
+    read has no job. §8 of the module doc states this stays zero permanently and
+    must never be displayed there — this is what pins it."""
+    note_id = _machine_note(shop, "Grease points are behind the rear panel.")
+    shop["reader"]["client"].rpc("log_note_views", {"p_note_ids": [note_id]}).execute()
+
+    viewer_count, usage_count = _counts(shop, note_id)
+    assert viewer_count == 1
+    assert usage_count == 0

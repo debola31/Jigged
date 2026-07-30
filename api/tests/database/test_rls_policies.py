@@ -43,6 +43,8 @@ follow-up if specific bypass routes are suspected.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 from postgrest.exceptions import APIError
 
@@ -549,6 +551,91 @@ class TestCompaniesRLS:
             _user_a_table(seeded_user_a, "companies")
             .delete()
             .eq("id", seeded_company_b_graph["company_id"])
+            .execute()
+        )
+        assert result.data == []
+
+
+# work_center_attachments --------------------------------------------------------
+#
+# Machine manuals. Company-scoped like everything else, with one extra rule the
+# other tables here don't have: the uploader is resolved server-side, so a member
+# cannot file an upload under someone else's name.
+
+
+class TestWorkCenterAttachmentsRLS:
+    def test_select_cross_tenant_returns_empty(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        result = (
+            _user_a_table(seeded_user_a, "work_center_attachments")
+            .select("id")
+            .eq("work_center_id", seeded_company_b_graph["work_center_id"])
+            .execute()
+        )
+        assert result.data == []
+
+    def test_insert_into_other_company_is_blocked(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        _expect_blocked_insert(
+            lambda: _user_a_table(seeded_user_a, "work_center_attachments")
+            .insert(
+                {
+                    "company_id": seeded_company_b_graph["company_id"],
+                    "work_center_id": seeded_company_b_graph["work_center_id"],
+                    "storage_path": "b/work-centers/x/attack.pdf",
+                    "file_name": "attack.pdf",
+                    "kind": "pdf",
+                }
+            )
+            .execute()
+        )
+
+    def test_uploader_cannot_be_someone_else(self, seeded_user_a):
+        """uploaded_by must equal the acting member. Attribution is not a field
+        the client gets to choose — the same rule notes.author_id follows.
+
+        Uses user A's OWN company so the company check cannot be what blocks it:
+        this has to fail on the uploader clause alone.
+        """
+        own_wc = (
+            _user_a_table(seeded_user_a, "work_centers")
+            .insert(
+                {
+                    "company_id": seeded_user_a["company_id"],
+                    "name": f"RLS-WC-{os.urandom(3).hex()}",
+                }
+            )
+            .execute()
+            .data[0]["id"]
+        )
+        try:
+            _expect_blocked_insert(
+                lambda: _user_a_table(seeded_user_a, "work_center_attachments")
+                .insert(
+                    {
+                        "company_id": seeded_user_a["company_id"],
+                        "work_center_id": own_wc,
+                        "storage_path": "a/work-centers/x/manual.pdf",
+                        "file_name": "manual.pdf",
+                        "kind": "pdf",
+                        # Not this caller's user_company_access id.
+                        "uploaded_by": "99999999-9999-9999-9999-999999999999",
+                    }
+                )
+                .execute()
+            )
+        finally:
+            _user_a_table(seeded_user_a, "work_centers").delete().eq("id", own_wc).execute()
+
+    def test_delete_cross_tenant_returns_empty(
+        self, seeded_user_a, seeded_company_b_graph
+    ):
+        result = (
+            _user_a_table(seeded_user_a, "work_center_attachments")
+            .delete()
+            .eq("work_center_id", seeded_company_b_graph["work_center_id"])
             .execute()
         )
         assert result.data == []

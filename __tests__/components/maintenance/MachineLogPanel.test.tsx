@@ -316,6 +316,86 @@ describe('MachineLogPanel', () => {
     );
   });
 
+  it('does not carry a half-written fix from one outstanding item to another', async () => {
+    // The SAME defect as the test below, in the direction the two-composer split
+    // did not close. That split stopped the MAIN composer contaminating a reply.
+    // It did not stop one reply contaminating the next, because a single shared
+    // reply capture kept its draft while `startFix` re-pointed it at a new item:
+    // the composer moved, the sentence did not.
+    //
+    // Consequence if this regresses: B closes on a sentence written about A, A
+    // stays outstanding forever, and `notes` is append-only so nobody can
+    // correct it — only add a second entry saying the first was misfiled.
+    const a = note({ id: 'a', body: 'Way cover is dragging.', maintenance_kind: 'noticed' });
+    const b = note({ id: 'b', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
+    mockGetMachineLog.mockResolvedValue({ entries: [b, a], open: [a, b] });
+    mockAddMachineNote.mockResolvedValue(note({ id: 'fix' }));
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Way cover is dragging.');
+
+    // Scoped per item: the opener and the composer's submit share a label, and
+    // within an item only one of them exists at a time — opening the reply hides
+    // that item's opener.
+    const item = (text: string) =>
+      screen.getAllByTestId('machine-open-item').find((el) => el.textContent?.includes(text))!;
+    const fixButton = (text: string) =>
+      within(item(text)).getByRole('button', { name: /^log the fix$/i });
+
+    // Start a fix on A and type into it.
+    await userEvent.click(fixButton('Way cover is dragging.'));
+    await userEvent.type(
+      screen.getByPlaceholderText(/what did you do to fix it/i),
+      'Replaced the way-cover wiper.',
+    );
+
+    // Change your mind and start a fix on B instead. B's opener is still there:
+    // only the item currently being replied to has its button hidden.
+    await userEvent.click(fixButton('Coolant smells off.'));
+
+    // B's composer starts EMPTY. A's sentence went with A.
+    expect(screen.getByPlaceholderText(/what did you do to fix it/i)).toHaveValue('');
+
+    // And submitting now cannot file A's words against B.
+    await userEvent.type(
+      screen.getByPlaceholderText(/what did you do to fix it/i),
+      'Drained and recharged.',
+    );
+    await userEvent.click(fixButton('Coolant smells off.'));
+
+    await waitFor(() => expect(mockAddMachineNote).toHaveBeenCalled());
+    const [, , , body, opts] = mockAddMachineNote.mock.calls.at(-1)!;
+    expect(body).toBe('Drained and recharged.');
+    expect(opts).toMatchObject({ resolvesNoteId: 'b' });
+  });
+
+  it('discards a cancelled fix rather than reopening it on the next item', async () => {
+    // Cancel used to clear only which item was being answered, leaving the text
+    // alive in the shared capture — so the next item you opened arrived
+    // pre-filled with a sentence you had explicitly abandoned.
+    const a = note({ id: 'a', body: 'Way cover is dragging.', maintenance_kind: 'noticed' });
+    const b = note({ id: 'b', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
+    mockGetMachineLog.mockResolvedValue({ entries: [b, a], open: [a, b] });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Way cover is dragging.');
+
+    const item = (text: string) =>
+      screen.getAllByTestId('machine-open-item').find((el) => el.textContent?.includes(text))!;
+    const fixButton = (text: string) =>
+      within(item(text)).getByRole('button', { name: /^log the fix$/i });
+
+    await userEvent.click(fixButton('Way cover is dragging.'));
+    await userEvent.type(
+      screen.getByPlaceholderText(/what did you do to fix it/i),
+      'Abandoned thought.',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await userEvent.click(fixButton('Coolant smells off.'));
+    expect(screen.getByPlaceholderText(/what did you do to fix it/i)).toHaveValue('');
+  });
+
   it('does not hand a half-written note to an item somebody then taps', async () => {
     // The bug the inline reply removes structurally. Starting a fix used to
     // leave whatever was in the main composer alone while re-binding it to a

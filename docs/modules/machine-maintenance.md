@@ -205,7 +205,23 @@ composer that looks ordinary and is not.
 
 It also had a real defect. Starting a fix left whatever was half-typed in that composer alone while
 re-binding it to a resolution, so a sentence written about something else could silently become the
-fix for an item tapped afterwards. Two composers with two drafts cannot do that to each other.
+fix for an item tapped afterwards.
+
+**And the first attempt at fixing that did not finish the job — worth recording, because the wrong
+diagnosis survived a build.** Giving the reply its own composer stopped the MAIN composer
+contaminating a reply, and a test pinned that. But there was still only one reply composer, shared by
+every outstanding item, and its draft was cleared in exactly one place: a successful save. So
+starting a fix on one item, typing, then tapping "log the fix" on a second item moved the composer
+without moving the text — and submitting filed the first item's sentence as the second item's
+resolution. The second closes on a sentence written about something else, the first stays
+outstanding forever, and because the log is append-only nobody can correct it; the only remedy is a
+second entry saying the first was misfiled.
+
+The lesson is about where state lives, not how many composers there are. A draft must not outlive the
+thing it was written about, so the draft now lives **with the target**: the reply composer is mounted
+keyed by the item it answers, and switching items destroys one and builds another. There is nothing
+to remember to reset, which is the same reasoning that makes open state derived rather than stored —
+a rule enforced by structure does not depend on every future edit remembering it.
 
 So the fix composer opens **beneath the item it answers**, and the item's "log the fix" control is
 replaced by it — the ordinary reply gesture, where position carries the meaning and there is no

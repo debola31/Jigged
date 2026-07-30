@@ -24,6 +24,7 @@ import {
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import { countWorkCenterAttachments } from '@/utils/workCenterAttachmentsAccess';
 import MachineComposer from '@/components/maintenance/MachineComposer';
+import MachineReplyComposer from '@/components/maintenance/MachineReplyComposer';
 import MachineDetailsCard from '@/components/maintenance/MachineDetailsCard';
 import MachineEntry from '@/components/maintenance/MachineEntry';
 import MachineManualsSheet from '@/components/maintenance/MachineManualsSheet';
@@ -127,38 +128,6 @@ export default function MachineLogPanel({
     enabled: !readOnly,
   });
 
-  /**
-   * The reply's OWN writer and OWN capture — a second draft, not a mode on the
-   * first.
-   *
-   * This is why it matters beyond looks: `startFix` used to leave whatever was
-   * half-typed in the main composer alone while re-binding it to a resolution,
-   * so a sentence written about something else silently became the fix for an
-   * item somebody tapped afterwards. Two composers cannot do that to each other.
-   */
-  const replyWriter: NoteWriter<MachineNote> | null = useMemo(() => {
-    if (readOnly || !memberId || !replyingTo) return null;
-    const target = replyingTo;
-    return {
-      createNote: (body) =>
-        addMachineNote(workCenterId, companyId, memberId, body, {
-          maintenanceKind: null,
-          resolvesNoteId: target.id,
-        }),
-      attachMedia: (note, file, dims) =>
-        addMachineNoteMedia(companyId, workCenterId, note.id, file, { dims }),
-      withMedia: (note, media) => ({ ...note, media }),
-      eventContext: { workCenterId, resolving: true },
-    };
-  }, [readOnly, memberId, workCenterId, companyId, replyingTo]);
-
-  const replyCapture = useNoteCapture<MachineNote>({
-    companyId,
-    operatorId: memberId,
-    writer: replyWriter,
-    enabled: !readOnly && replyingTo != null,
-  });
-
   // Wrap submit so the surface can reset its own state and reload afterwards.
   // The hook deliberately does not know what "saved" means to the caller.
   const captureWithReset = useMemo(
@@ -176,23 +145,6 @@ export default function MachineLogPanel({
     [capture, reload],
   );
 
-  const replyWithReset = useMemo(
-    () => ({
-      ...replyCapture,
-      submit: async () => {
-        const saved = await replyCapture.submit();
-        if (saved) {
-          // The loop closing, which is the behaviour the module is betting on:
-          // somebody fixed a thing somebody else flagged.
-          logOperatorEvent(companyId, 'noticed_resolved', { workCenterId });
-          setReplyingTo(null);
-          reload();
-        }
-        return saved;
-      },
-    }),
-    [replyCapture, companyId, workCenterId, reload],
-  );
 
   // Opens a reply directly under the item. No scroll-to-top and no banner: the
   // composer's POSITION says what it answers, which is a thing you cannot lose
@@ -328,17 +280,28 @@ export default function MachineLogPanel({
         memberId={memberId}
         onLogFix={readOnly ? undefined : startFix}
         replyingToId={replyingTo?.id ?? null}
-        renderReply={() => (
-          <MachineComposer
-            capture={replyWithReset}
-            kind={null}
-            onKindChange={() => {}}
-            variant="reply"
-            placeholder="What did you do to fix it?"
-            submitLabel="Log the fix"
-            onCancel={() => setReplyingTo(null)}
-          />
-        )}
+        // KEYED BY THE ITEM IT ANSWERS. The draft lives inside this component,
+        // so switching targets unmounts one composer and mounts another and the
+        // half-typed sentence dies with the item it was written about. It used
+        // to be one shared capture whose draft outlived its target, which meant
+        // a sentence about A could be filed as the fix for B — the very defect
+        // the second composer was introduced to remove. See MachineReplyComposer.
+        renderReply={() =>
+          replyingTo && memberId ? (
+            <MachineReplyComposer
+              key={replyingTo.id}
+              target={replyingTo}
+              companyId={companyId}
+              workCenterId={workCenterId}
+              memberId={memberId}
+              onSaved={() => {
+                setReplyingTo(null);
+                reload();
+              }}
+              onCancel={() => setReplyingTo(null)}
+            />
+          ) : null
+        }
         readOnly={readOnly}
       />
 

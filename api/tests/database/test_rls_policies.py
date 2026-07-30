@@ -43,8 +43,6 @@ follow-up if specific bypass routes are suspected.
 """
 from __future__ import annotations
 
-import os
-
 import pytest
 from postgrest.exceptions import APIError
 
@@ -592,42 +590,12 @@ class TestWorkCenterAttachmentsRLS:
             .execute()
         )
 
-    def test_uploader_cannot_be_someone_else(self, seeded_user_a):
-        """uploaded_by must equal the acting member. Attribution is not a field
-        the client gets to choose — the same rule notes.author_id follows.
-
-        Uses user A's OWN company so the company check cannot be what blocks it:
-        this has to fail on the uploader clause alone.
-        """
-        own_wc = (
-            _user_a_table(seeded_user_a, "work_centers")
-            .insert(
-                {
-                    "company_id": seeded_user_a["company_id"],
-                    "name": f"RLS-WC-{os.urandom(3).hex()}",
-                }
-            )
-            .execute()
-            .data[0]["id"]
-        )
-        try:
-            _expect_blocked_insert(
-                lambda: _user_a_table(seeded_user_a, "work_center_attachments")
-                .insert(
-                    {
-                        "company_id": seeded_user_a["company_id"],
-                        "work_center_id": own_wc,
-                        "storage_path": "a/work-centers/x/manual.pdf",
-                        "file_name": "manual.pdf",
-                        "kind": "pdf",
-                        # Not this caller's user_company_access id.
-                        "uploaded_by": "99999999-9999-9999-9999-999999999999",
-                    }
-                )
-                .execute()
-            )
-        finally:
-            _user_a_table(seeded_user_a, "work_centers").delete().eq("id", own_wc).execute()
+    # The "uploaded_by must be the acting member" rule is NOT tested here.
+    # These fixtures' companies are not billing-entitled, so every write is
+    # refused by the billing gate before any other policy is consulted — an
+    # attribution test would pass without ever exercising the clause it names.
+    # It lives in test_note_views_rls.py instead, on a writable fixture, next to
+    # the identical rule for notes.author_id.
 
     def test_delete_cross_tenant_returns_empty(
         self, seeded_user_a, seeded_company_b_graph

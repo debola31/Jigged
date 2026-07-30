@@ -150,10 +150,11 @@ def shop(supabase_admin):
     }
     yield ctx
 
-    # notes first: a machine-subject note holds work_centers with ON DELETE
-    # RESTRICT, so tearing down in the other order leaves the work center behind
-    # and the failure is swallowed by the except.
-    for table in ("notes", "jobs", "routings", "parts", "work_centers"):
+    # notes and manuals first: both hold work_centers with ON DELETE RESTRICT
+    # (deliberately — archiving a machine must not destroy its history), so
+    # tearing down in the other order leaves the work center behind and the
+    # failure is swallowed by the except.
+    for table in ("notes", "work_center_attachments", "jobs", "routings", "parts", "work_centers"):
         try:
             admin.table(table).delete().eq("company_id", company_id).execute()
         except Exception:
@@ -1061,3 +1062,46 @@ def test_a_machine_read_never_counts_toward_usage(shop):
     viewer_count, usage_count = _counts(shop, note_id)
     assert viewer_count == 1
     assert usage_count == 0
+
+
+def test_a_manual_cannot_be_uploaded_as_someone_else(shop):
+    """Same rule as notes.author_id, on the machine's manuals: uploaded_by is
+    resolved server-side, so attribution is never a field the client chooses.
+
+    Lives here rather than in test_rls_policies.py because this fixture's company
+    IS billing-entitled. On a non-entitled company the billing gate refuses every
+    write first, and the test would pass without touching the clause it names.
+    """
+    with pytest.raises(Exception):
+        shop["author"]["client"].table("work_center_attachments").insert(
+            {
+                "company_id": shop["company_id"],
+                "work_center_id": shop["work_center_id"],
+                "storage_path": f"{shop['company_id']}/work-centers/x/manual.pdf",
+                "file_name": "manual.pdf",
+                "kind": "pdf",
+                "uploaded_by": shop["reader"]["access_id"],
+            }
+        ).execute()
+
+
+def test_a_manual_uploads_fine_under_your_own_name(shop):
+    """The positive half — otherwise the test above could pass because uploads are
+    broken outright."""
+    row = (
+        shop["author"]["client"]
+        .table("work_center_attachments")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "work_center_id": shop["work_center_id"],
+                "storage_path": f"{shop['company_id']}/work-centers/x/manual.pdf",
+                "file_name": "manual.pdf",
+                "kind": "pdf",
+                "uploaded_by": shop["author"]["access_id"],
+            }
+        )
+        .execute()
+        .data[0]
+    )
+    assert row["uploaded_by"] == shop["author"]["access_id"]

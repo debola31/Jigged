@@ -748,19 +748,55 @@ export default function InventoryCountPage() {
                 </Stack>
               </Card>
 
-              {/* Parts held back, named rather than silently missing. */}
+              {/*
+                Parts held back — and now reachable, which is the difference between naming
+                a limitation and leaving a dead end.
+
+                The copy already said "count these at their locations"; the chips were inert,
+                so it was an instruction with nowhere to follow. Each place is now a link to
+                its own worksheet, where the part IS countable: "Shelf A holds 830" adjusts
+                Shelf A and says nothing about Shelf B. The capability always existed — only
+                the route was missing.
+              */}
               {excluded.length > 0 && (
                 <Alert severity="info" sx={{ mt: 3 }}>
-                  <Typography variant="body2" sx={{ mb: 1 }}>
+                  <Typography variant="body2" sx={{ mb: 1.5 }}>
                     {excluded.length} {excluded.length === 1 ? 'part is' : 'parts are'} not on this
                     sheet — their stock sits in more than one place, so a single total has no
-                    unambiguous home. Count these at their locations.
+                    unambiguous home. Count them where they actually are:
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                  <Stack spacing={1}>
                     {excluded.slice(0, 8).map((c) => (
-                      <Chip key={c.partId} size="small" variant="outlined" label={c.partName} />
+                      <Box
+                        key={c.partId}
+                        sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {c.partName}
+                        </Typography>
+                        {c.target.kind === 'excluded' &&
+                          c.target.locations.map((l) => (
+                            <Chip
+                              key={l.id}
+                              size="small"
+                              variant="outlined"
+                              clickable
+                              label={l.name}
+                              onClick={() =>
+                                router.push(
+                                  `/dashboard/${companyId}/inventory/count?location=${l.id}`,
+                                )
+                              }
+                            />
+                          ))}
+                      </Box>
                     ))}
-                  </Box>
+                  </Stack>
+                  {excluded.length > 8 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                      …and {excluded.length - 8} more.
+                    </Typography>
+                  )}
                 </Alert>
               )}
             </>

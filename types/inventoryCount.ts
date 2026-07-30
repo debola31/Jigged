@@ -24,8 +24,16 @@ export type CountTarget =
   | { kind: 'aggregate' }
   /** Location-tracked with an unambiguous destination: adjustStockAtLocation. */
   | { kind: 'location'; locationId: string; locationName: string }
-  /** Location-tracked and split across bins — not countable item-by-item. */
-  | { kind: 'excluded'; reason: string };
+  /**
+   * Location-tracked and split across bins — not countable item-by-item *here*.
+   *
+   * `locations` carries the places actually holding stock, so the sheet can link to each
+   * one's place-scoped worksheet instead of dead-ending. Excluding a part is only
+   * defensible if we also say where to go: at one bin there is no ambiguity, so these are
+   * countable — just not from a company-wide total. Empty when the exclusion has some
+   * other cause (e.g. no Unassigned location exists).
+   */
+  | { kind: 'excluded'; reason: string; locations: { id: string; name: string }[] };
 
 /** A part as it appears on the sheet, with its system quantity and resolved target. */
 export interface CountCandidate {

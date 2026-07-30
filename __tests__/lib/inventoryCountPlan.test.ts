@@ -81,6 +81,32 @@ describe('resolveCountTarget', () => {
     if (target.kind === 'excluded') expect(target.reason).toContain('3 locations');
   });
 
+  /**
+   * Excluding a part is only defensible if we also say where to go. The sheet links each
+   * place to its own worksheet, where the part IS countable — so the branch has to carry
+   * the places, not just how many there were.
+   */
+  it('carries the holding places on the excluded branch, so the sheet can route to them', () => {
+    const target = resolveCountTarget(
+      true,
+      [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 0)],
+      UNASSIGNED,
+    );
+
+    expect(target.kind).toBe('excluded');
+    if (target.kind !== 'excluded') return;
+    // Only places actually holding stock — the zero row is not somewhere to send anyone.
+    expect(target.locations.map((l) => l.id)).toEqual(['loc-a', 'loc-b']);
+    expect(target.locations.every((l) => l.name.length > 0)).toBe(true);
+  });
+
+  it('carries no places when the exclusion is not about being split', () => {
+    const target = resolveCountTarget(true, [], null);
+    expect(target.kind).toBe('excluded');
+    // Nothing anywhere and no Unassigned bucket: there is no worksheet that would help.
+    if (target.kind === 'excluded') expect(target.locations).toEqual([]);
+  });
+
   it('excludes rather than guesses when there is no Unassigned bucket to fall back to', () => {
     expect(resolveCountTarget(true, [], null).kind).toBe('excluded');
   });

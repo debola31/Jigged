@@ -47,7 +47,13 @@ export function resolveCountTarget(
 
   if (holding.length === 0) {
     if (!unassigned) {
-      return { kind: 'excluded', reason: 'No "Unassigned" location exists to hold the count.' };
+      return {
+        kind: 'excluded',
+        reason: 'No "Unassigned" location exists to hold the count.',
+        // Nowhere to send anyone: the part holds stock nowhere, so there is no
+        // place-scoped worksheet that would help.
+        locations: [],
+      };
     }
     return { kind: 'location', locationId: unassigned.id, locationName: unassigned.name };
   }
@@ -60,9 +66,13 @@ export function resolveCountTarget(
     };
   }
 
+  // Carrying the places, not just their count, is what turns this from a dead end into a
+  // route: the sheet links each one to its place-scoped worksheet, where the same part IS
+  // countable because "Shelf A holds 830" says nothing about Shelf B.
   return {
     kind: 'excluded',
     reason: `Stock is split across ${holding.length} locations — count this at its locations.`,
+    locations: holding.map((b) => ({ id: b.locationId, name: b.locationName })),
   };
 }
 

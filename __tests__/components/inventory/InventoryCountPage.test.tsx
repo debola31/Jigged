@@ -149,13 +149,51 @@ describe('choosing what to count', () => {
       cand({
         partId: 'p9',
         partName: 'Split part',
-        target: { kind: 'excluded', reason: 'Stock is split across 3 locations' },
+        target: {
+          kind: 'excluded',
+          reason: 'Stock is split across 2 locations',
+          locations: [
+            { id: 'shelf-a', name: 'Shelf A' },
+            { id: 'shelf-b', name: 'Shelf B' },
+          ],
+        },
       }),
     ]);
     renderPage();
     await screen.findByText('4140 bar');
     expect(screen.getByText(/not on this sheet/i)).toBeInTheDocument();
     expect(screen.getByText('Split part')).toBeInTheDocument();
+  });
+
+  /**
+   * Naming a held-back part is only half the job — the copy says "count them where they
+   * actually are", and until now the chips were inert, so that was an instruction with
+   * nowhere to follow. At one bin the same part is perfectly countable: "Shelf A holds
+   * 830" adjusts Shelf A and says nothing about Shelf B.
+   */
+  it('routes a held-back part to each place it actually sits in', async () => {
+    const user = userEvent.setup();
+    asMock(loadCountCandidates).mockResolvedValue([
+      cand({ partId: 'p1', partName: '4140 bar' }),
+      cand({
+        partId: 'p9',
+        partName: 'Split part',
+        target: {
+          kind: 'excluded',
+          reason: 'Stock is split across 2 locations',
+          locations: [
+            { id: 'shelf-a', name: 'Shelf A' },
+            { id: 'shelf-b', name: 'Shelf B' },
+          ],
+        },
+      }),
+    ]);
+    renderPage();
+    await screen.findByText('Split part');
+
+    await user.click(screen.getByRole('button', { name: 'Shelf B' }));
+
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=shelf-b');
   });
 
   it('shows an empty state when nothing is stocked', async () => {

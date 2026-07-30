@@ -37,6 +37,12 @@ vi.mock('@/utils/jobNoteMediaAccess', () => ({
 vi.mock('@/utils/imageCompression', () => ({
   compressPhoto: vi.fn(async (f: File) => ({ file: f, dims: { width: 10, height: 10 } })),
 }));
+const { mockCountManuals } = vi.hoisted(() => ({ mockCountManuals: vi.fn() }));
+vi.mock('@/utils/workCenterAttachmentsAccess', () => ({
+  countWorkCenterAttachments: (...a: unknown[]) => mockCountManuals(...a),
+  listWorkCenterAttachments: vi.fn(async () => []),
+  getWorkCenterAttachmentUrl: vi.fn(async () => 'blob:x'),
+}));
 
 import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
@@ -62,6 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetMachineDetails.mockResolvedValue(null);
   mockGetMachineLog.mockResolvedValue({ entries: [], open: [] });
+  mockCountManuals.mockResolvedValue(0);
 });
 
 describe('MachineLogPanel', () => {
@@ -200,5 +207,24 @@ describe('MachineLogPanel', () => {
     await screen.findByText('Topped up the way lube.');
     expect(screen.queryByRole('button', { name: /add to log/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/what did you do/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('MachineLogPanel manuals', () => {
+  it('shows no manuals affordance at all when the machine has none', async () => {
+    // Not "Manuals · 0", and certainly not "Add a manual" — an empty machine
+    // must not advertise a gap in itself (§4.5).
+    mockCountManuals.mockResolvedValue(0);
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+
+    await screen.findByText(/nothing logged for this machine yet/i);
+    expect(screen.queryByRole('button', { name: /manual/i })).not.toBeInTheDocument();
+  });
+
+  it('offers the manuals once there is something to open', async () => {
+    mockCountManuals.mockResolvedValue(2);
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+
+    expect(await screen.findByRole('button', { name: /manuals · 2/i })).toBeInTheDocument();
   });
 });

@@ -8,8 +8,33 @@ import type {
 } from '@/types/workCenter';
 import { orIlikeValue } from '@/utils/searchFilter';
 
+// ONE string literal, deliberately: getTypedSupabase infers the row type from
+// the select string, and a concatenated expression widens to `string` — which
+// silently degrades every read in this file to GenericStringError. The optional
+// machine attributes (make…purchased_on) are read everywhere a work center is
+// read, so the maintenance surfaces need no second query for them.
 const WORK_CENTER_COLUMNS =
-  'id, company_id, name, kind, vendor_id, labor_rate, description, metadata, created_at, updated_at';
+  'id, company_id, name, kind, vendor_id, labor_rate, description, make, model, serial_number, year_built, purchased_on, metadata, created_at, updated_at';
+
+/**
+ * The optional machine attributes, normalised for a write.
+ *
+ * Blank means NULL rather than an empty string, so "nobody filled this in" has
+ * exactly one representation. A surface that decides whether to render a detail
+ * row would otherwise have to test for two, and one of them would eventually get
+ * missed — rendering "Serial:" against nothing on a machine the shop never
+ * described, which is the empty-state prompt §4.5 refuses, arrived at by
+ * accident.
+ */
+function machineDetailFields(formData: WorkCenterFormData) {
+  return {
+    make: formData.make.trim() || null,
+    model: formData.model.trim() || null,
+    serial_number: formData.serial_number.trim() || null,
+    year_built: formData.year_built ? parseInt(formData.year_built, 10) : null,
+    purchased_on: formData.purchased_on || null,
+  };
+}
 
 /**
  * Get all work centers as a flat list for AG Grid display.
@@ -294,6 +319,7 @@ export async function createWorkCenter(
       vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
+      ...machineDetailFields(formData),
       metadata: {},
     })
     .select(WORK_CENTER_COLUMNS)
@@ -343,6 +369,7 @@ async function reviveArchivedWorkCenterByName(
       vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
+      ...machineDetailFields(formData),
       metadata: {},
       deleted_at: null,
       updated_at: new Date().toISOString(),
@@ -376,6 +403,7 @@ export async function updateWorkCenter(
       vendor_id: formData.kind === 'external' ? formData.vendor_id : null,
       labor_rate: formData.labor_rate ? parseFloat(formData.labor_rate) : null,
       description: formData.description.trim() || null,
+      ...machineDetailFields(formData),
       updated_at: new Date().toISOString(),
     })
     .eq('id', workCenterId)

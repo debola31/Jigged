@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
+import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined';
 import Typography from '@mui/material/Typography';
 import { useLoad } from '@/hooks/useLoad';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
@@ -17,9 +19,11 @@ import {
   getMachineLog,
 } from '@/utils/machineMaintenanceAccess';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+import { countWorkCenterAttachments } from '@/utils/workCenterAttachmentsAccess';
 import MachineComposer from '@/components/maintenance/MachineComposer';
 import MachineDetailsCard from '@/components/maintenance/MachineDetailsCard';
 import MachineEntryCard from '@/components/maintenance/MachineEntryCard';
+import MachineManualsSheet from '@/components/maintenance/MachineManualsSheet';
 import MachineOpenItems from '@/components/maintenance/MachineOpenItems';
 import type { MachineNote, MaintenanceKind } from '@/types/machineMaintenance';
 
@@ -54,6 +58,7 @@ export default function MachineLogPanel({
   const [memberId, setMemberId] = useState<string | null>(null);
   const [kind, setKind] = useState<MaintenanceKind | null>(null);
   const [resolving, setResolving] = useState<MachineNote | null>(null);
+  const [manualsOpen, setManualsOpen] = useState(false);
 
   const {
     data: log,
@@ -64,6 +69,14 @@ export default function MachineLogPanel({
   });
 
   const { data: details } = useLoad(() => getMachineDetails(workCenterId), [workCenterId]);
+
+  // Only decides whether an affordance renders, and returns 0 rather than
+  // throwing — so a failure degrades to "this machine has no manuals", which is
+  // also what it looks like when it genuinely has none.
+  const { data: manualCount } = useLoad(
+    () => countWorkCenterAttachments(workCenterId),
+    [workCenterId],
+  );
 
   // The precondition for reading any result at all: a container nobody filled
   // and a container nobody reached both look like silence from outside, and this
@@ -172,6 +185,29 @@ export default function MachineLogPanel({
           {machineName}
         </Typography>
       )}
+
+      {/* Only when there is something to open. A machine with no manuals shows
+          nothing at all — never an "add a manual" row, which is the shape a
+          setup prompt takes when it sneaks back in (§4.5). */}
+      {(manualCount ?? 0) > 0 && (
+        <Box sx={{ mb: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<MenuBookOutlinedIcon />}
+            onClick={() => setManualsOpen(true)}
+            sx={{ minHeight: 48 }}
+          >
+            Manuals · {manualCount}
+          </Button>
+        </Box>
+      )}
+
+      <MachineManualsSheet
+        open={manualsOpen}
+        onClose={() => setManualsOpen(false)}
+        workCenterId={workCenterId}
+        machineName={machineName}
+      />
 
       <MachineOpenItems items={log?.open ?? []} onLogFix={readOnly ? undefined : startFix} />
 

@@ -111,19 +111,31 @@ test.describe('Machine Maintenance', () => {
     // Exactly once, and pinned: an entry never renders twice. While it is
     // outstanding it lives in the pinned block and nowhere else.
     //
-    // `exact` matters from here on. Once a fix exists it QUOTES this text
-    // ("Fixes: <observation>"), and getByText matches substrings — so a loose
-    // locator counts the quotation as a second copy of the entry and the
-    // one-appearance invariant stops being what this asserts.
+    // `exact` matters from here on: getByText matches substrings, and every
+    // entry this spec writes shares the `E2E ` prefix, so a loose locator would
+    // count a neighbouring run's entry as a second copy of this one and the
+    // one-appearance invariant would stop being what this asserts.
     await expect(page.getByText(observation, { exact: true })).toHaveCount(1, { timeout: 30_000 });
     await expect(openList(page).getByText(observation)).toBeVisible({ timeout: 30_000 });
 
     // The reply opens INLINE, under the item it answers — no banner, no mode on
     // the composer at the top.
-    await page.getByRole('button', { name: /log the fix/i }).first().click();
+    //
+    // Scoped to THIS test's item, not `.first()`. Notes are append-only and the
+    // local stack is shared across runs, so any earlier run that died between
+    // flagging and fixing leaves its open item behind — and every open item
+    // carries a button with this name. CI always starts clean, so `.first()`
+    // went green there while failing locally on a strict-mode violation.
+    const myItem = openList(page)
+      .getByTestId('machine-open-item')
+      .filter({ hasText: observation });
+    await myItem.getByRole('button', { name: /log the fix/i }).click();
+
     const fix = `E2E replaced the wiper ${stamp()}`;
     await replyComposer(page).fill(fix);
-    await page.getByRole('button', { name: /^log the fix$/i }).click();
+    // Within the item, only the reply's submit is left: opening the reply hides
+    // that item's own opener, which is exactly the ambiguity this asserts away.
+    await myItem.getByRole('button', { name: /^log the fix$/i }).click();
 
     await expect(page.getByText(fix)).toBeVisible({ timeout: 30_000 });
 
@@ -132,10 +144,18 @@ test.describe('Machine Maintenance', () => {
     await expect(openList(page).getByText(observation)).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByText(observation, { exact: true })).toHaveCount(1, { timeout: 30_000 });
 
-    // And the two ends of the loop name each other: the fix quotes what it
-    // answered, the resolved entry says who closed it.
-    await expect(page.getByText(`Fixes: ${observation}`)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/Fixed by /)).toBeVisible({ timeout: 30_000 });
+    // The fix reads as a REPLY: below what it answers, and indented from it.
+    // Asserted geometrically because that is exactly the claim — a reader
+    // recognises a reply by where it sits, not by any text it contains.
+    const fixEl = page.getByText(fix, { exact: true });
+    await expect(fixEl).toBeVisible({ timeout: 30_000 });
+
+    const rootBox = await page.getByText(observation, { exact: true }).boundingBox();
+    const replyBox = await fixEl.boundingBox();
+    expect(rootBox, 'the resolved observation should still be on the page').not.toBeNull();
+    expect(replyBox, 'the fix should be on the page').not.toBeNull();
+    expect(replyBox!.y).toBeGreaterThan(rootBox!.y);
+    expect(replyBox!.x).toBeGreaterThan(rootBox!.x);
 
     // And it stays moved after a reload — proving the state came from the
     // resolving row rather than from anything held in the page.

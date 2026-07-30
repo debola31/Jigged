@@ -157,31 +157,63 @@ describe('MachineLogPanel', () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it('shows a fix what it answers, in both directions', async () => {
-    // The link lived only in the data: a fix landed at the top of the log saying
-    // nothing about what it was for, and the item it closed said only that
-    // somebody had fixed it. Both ends now name the other.
-    const obs = note({
-      id: 'obs',
-      body: 'Coolant smells off.',
-      maintenance_kind: 'noticed',
-      author_name: 'Kurtis',
-    });
+  it('nests a fix under what it fixed, rather than filing it as its own entry', async () => {
+    const obs = note({ id: 'obs', body: 'Coolant smells off.', created_at: '2026-07-01T08:00:00Z' });
     const fix = note({
       id: 'fix',
       body: 'Drained and recharged.',
       resolves_note_id: 'obs',
-      author_name: 'Dana',
+      created_at: '2026-07-03T09:00:00Z',
     });
     mockGetMachineLog.mockResolvedValue({ entries: [fix, obs], open: [] });
 
     render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
     await screen.findByText('Drained and recharged.');
 
-    // Forward: the fix quotes the thing it fixed.
-    expect(screen.getByText(/Fixes:\s*Coolant smells off\./)).toBeInTheDocument();
-    // Back: the resolved item names who closed it.
-    expect(screen.getByText(/Fixed by Dana/)).toBeInTheDocument();
+    // The reply reads downward from what it answers.
+    expect(
+      screen
+        .getByText('Coolant smells off.')
+        .compareDocumentPosition(screen.getByText('Drained and recharged.')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    // And says so by POSITION — no quote of the original, no "Fixed by" line.
+    // The quote had to be truncated to fit, which cut off the text it quoted.
+    expect(screen.queryByText(/^Fixes:/)).toBeNull();
+    expect(screen.queryByText(/Fixed by/)).toBeNull();
+  });
+
+  it('sorts threads by latest activity, so a fix logged today does not sink', async () => {
+    // The cost nesting would otherwise carry: an observation from three weeks
+    // ago, answered this morning, would sit below untouched newer entries — and
+    // §4.2 keeps this list newest-first because the reader is asking what has
+    // happened lately.
+    const oldObs = note({ id: 'obs', body: 'Old observation.', created_at: '2026-07-01T08:00:00Z' });
+    const recentFix = note({
+      id: 'fix',
+      body: 'Fixed it this morning.',
+      resolves_note_id: 'obs',
+      created_at: '2026-07-20T09:00:00Z',
+    });
+    const newerPlain = note({
+      id: 'plain',
+      body: 'Something unrelated.',
+      created_at: '2026-07-10T08:00:00Z',
+    });
+    mockGetMachineLog.mockResolvedValue({
+      entries: [newerPlain, recentFix, oldObs],
+      open: [],
+    });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Fixed it this morning.');
+
+    // The old observation leads, because its thread was touched most recently.
+    expect(
+      screen
+        .getByText('Old observation.')
+        .compareDocumentPosition(screen.getByText('Something unrelated.')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('names the author in the log but not while an item is outstanding', async () => {

@@ -44,8 +44,6 @@ export default function MachineEntry({
   companyId,
   memberId,
   isOpen,
-  resolvedBy,
-  fixes,
   onLogFix,
   hideAuthor = false,
   readOnly = false,
@@ -56,19 +54,6 @@ export default function MachineEntry({
   memberId: string | null;
   /** True for a flagged entry nothing has resolved yet. */
   isOpen?: boolean;
-  /** Author of the entry that resolved this one, when there is one. */
-  resolvedBy?: string | null;
-  /**
-   * The entry THIS one fixed, when it is a resolution.
-   *
-   * The link existed in the data from the first migration and was invisible on
-   * screen: a fix landed at the top of the log saying nothing about what it
-   * answered, and the item it closed said only that somebody had fixed it. In a
-   * flat chronological log a quoted line IS the collapsed form of a reply —
-   * there is nothing to expand, because the thing it quotes is one scroll away
-   * in the same list.
-   */
-  fixes?: string | null;
   /** Offered only on an open item. Absent in read-only (office) rendering. */
   onLogFix?: () => void;
   /**
@@ -113,25 +98,6 @@ export default function MachineEntry({
         )}
       </Box>
 
-      {fixes && (
-        <Typography
-          variant="caption"
-          sx={{
-            display: 'block',
-            mb: 0.5,
-            pl: 1,
-            borderLeft: '2px solid',
-            borderColor: 'success.light',
-            color: 'text.secondary',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          Fixes: {fixes}
-        </Typography>
-      )}
-
       {entry.body && (
         <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', mb: entry.media.length ? 1 : 0 }}>
           {entry.body}
@@ -139,12 +105,6 @@ export default function MachineEntry({
       )}
 
       {entry.media.length > 0 && <NoteMediaGallery media={entry.media} />}
-
-      {resolvedBy && (
-        <Typography variant="caption" color="success.light" sx={{ display: 'block', mt: 0.5 }}>
-          Fixed by {resolvedBy}
-        </Typography>
-      )}
 
       <NoteReactions
         companyId={companyId}

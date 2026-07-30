@@ -204,34 +204,46 @@ export default function MachineLogPanel({
   const openIds = useMemo(() => new Set((log?.open ?? []).map((o) => o.id)), [log]);
   // The log excludes whatever is pinned above it. Each entry appears EXACTLY
   // once: outstanding items live in the pinned block, and the moment somebody
-  // logs the fix they drop into the log here, carrying their author. Rendering
-  // both was the same fact twice with different chrome.
-  const logged = useMemo(
-    () => (log?.entries ?? []).filter((e) => !openIds.has(e.id)),
-    [log, openIds],
-  );
-  const resolverAuthorById = useMemo(() => {
-    const map = new Map<string, string | null>();
-    for (const e of log?.entries ?? []) {
-      if (e.resolves_note_id) map.set(e.resolves_note_id, e.author_name);
-    }
-    return map;
-  }, [log]);
-
-  // What each fix answers, so the resolution can quote it. The link has existed
-  // in the data since the first migration and was invisible on screen: a fix
-  // landed at the top of the log saying nothing about what it was for.
-  const fixedBodyById = useMemo(() => {
-    const bodies = new Map<string, string | null>();
-    for (const e of log?.entries ?? []) bodies.set(e.id, e.body);
-    const map = new Map<string, string>();
-    for (const e of log?.entries ?? []) {
+  // logs the fix the pair drops into the log below as a thread.
+  /**
+   * The log as THREADS: each entry that fixes something hangs under the entry it
+   * fixed, the way a reply sits under its message.
+   *
+   * Sorted by the thread's LATEST activity, not the root's own timestamp. That
+   * is the part worth getting right: nesting alone would leave a fix logged
+   * today buried under an observation from three weeks ago, and §4.2 keeps this
+   * list newest-first precisely because the reader's question on arriving is
+   * "what has happened to this machine lately". Sorting by latest activity gives
+   * the reply structure without answering that question worse.
+   *
+   * Completeness is guaranteed by the database, not hoped for: a resolver must
+   * sit on the same work center as its target, so every reply's root is in this
+   * same result set.
+   */
+  const threads = useMemo(() => {
+    const entries = log?.entries ?? [];
+    const repliesByRoot = new Map<string, MachineNote[]>();
+    for (const e of entries) {
       if (!e.resolves_note_id) continue;
-      const target = bodies.get(e.resolves_note_id);
-      if (target) map.set(e.id, target);
+      const list = repliesByRoot.get(e.resolves_note_id) ?? [];
+      list.push(e);
+      repliesByRoot.set(e.resolves_note_id, list);
     }
-    return map;
-  }, [log]);
+
+    return entries
+      .filter((e) => !e.resolves_note_id && !openIds.has(e.id))
+      .map((root) => {
+        // Oldest first within a thread — a conversation reads downward.
+        const replies = (repliesByRoot.get(root.id) ?? [])
+          .slice()
+          .sort((a, b) => a.created_at.localeCompare(b.created_at));
+        const lastActivity = replies.length
+          ? replies[replies.length - 1].created_at
+          : root.created_at;
+        return { root, replies, lastActivity };
+      })
+      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+  }, [log, openIds]);
 
   if (loading && !log) {
     return (
@@ -321,27 +333,51 @@ export default function MachineLogPanel({
         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
           Nothing logged for this machine yet.
         </Typography>
-      ) : logged.length > 0 ? (
+      ) : threads.length > 0 ? (
         // ONE card, rows separated by dividers — the shape the job feed already
         // uses for notes. Same content type, same reading gesture, and a
         // four-word entry no longer costs a whole card plus a gap.
         <Card elevation={2} sx={cardSx}>
           <CardContent>
-            {logged.map((entry, idx) => (
-              <Box key={entry.id}>
+            {threads.map(({ root, replies }, idx) => (
+              <Box key={root.id}>
                 {idx > 0 && <Divider sx={{ my: 1.5 }} />}
                 {/* observe() attaches to the entry BODY, never a container or a
                     count badge — a read means somebody dwelled on the words. */}
-                <Box ref={observe(entry.id)}>
+                <Box ref={observe(root.id)}>
                   <MachineEntry
-                    entry={entry}
+                    entry={root}
                     companyId={companyId}
                     memberId={memberId}
-                    resolvedBy={resolverAuthorById.get(entry.id) ?? null}
-                    fixes={fixedBodyById.get(entry.id) ?? null}
                     readOnly={readOnly}
                   />
                 </Box>
+
+                {replies.map((reply) => (
+                  <Box
+                    key={reply.id}
+                    ref={observe(reply.id)}
+                    // Indented under what it answers, with a rule down the side:
+                    // the reply shape people already read everywhere else. No
+                    // "Fixes: …" quote and no "Fixed by …" line — position says
+                    // both, and the quote had to be truncated to fit, which cut
+                    // off the very text it was quoting.
+                    sx={{
+                      mt: 1.5,
+                      ml: 2,
+                      pl: 2,
+                      borderLeft: '2px solid',
+                      borderColor: 'rgba(255,255,255,0.14)',
+                    }}
+                  >
+                    <MachineEntry
+                      entry={reply}
+                      companyId={companyId}
+                      memberId={memberId}
+                      readOnly={readOnly}
+                    />
+                  </Box>
+                ))}
               </Box>
             ))}
           </CardContent>

@@ -79,7 +79,7 @@ export default function MachineOpenItems({
       <Card elevation={2} sx={openCardSx}>
         <CardContent>
           {items.map((item, idx) => (
-            <Box key={item.id}>
+            <Box key={item.id} data-testid="machine-open-item">
               {idx > 0 && <Divider sx={{ my: 1.5, borderColor: 'rgba(255,167,38,0.25)' }} />}
               <MachineEntry
                 entry={item}

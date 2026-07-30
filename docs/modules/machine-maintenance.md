@@ -13,7 +13,8 @@
 > composer sits above the outstanding items), [§4.3](#43-capture) (the five-verb kind chip is cut to
 > one "Needs attention" toggle — four of the five had no reader and no research),
 > [§4.4](#44-noticed-then-resolved) (the fix is an inline reply rather than a mode on the top
-> composer), [§5](#5-what-it-is-not) (the withheld author is deferred rather than one tap away),
+> composer, and stays nested under what it answers rather than being filed as its own entry),
+> [§5](#5-what-it-is-not) (the withheld author is deferred rather than one tap away),
 > [§6](#6-phases-and-gates) (the archived-machines defect was not being fixed elsewhere, so it is
 > fixed here), [§8](#8-measurement) (`confirmed` is cut — Phase 1 ships no freshness signal and says
 > why), and [§9](#9-open-questions) (details and manuals ship; the office gets a read-only view).
@@ -210,6 +211,24 @@ So the fix composer opens **beneath the item it answers**, and the item's "log t
 replaced by it — the ordinary reply gesture, where position carries the meaning and there is no
 state to remember. It offers no flag of its own: a fix resolves something, and if the work uncovers
 a new problem that is a new entry rather than this one being both.
+
+**And it stays a reply once it lands.** The first build filed the fix as its own entry on the
+timeline and drew the link in text: the fix quoted the observation ("Fixes: …") and the observation
+gained a "Fixed by …" line. That reads as two separate entries that happen to mention each other,
+and the quotation had to be truncated to one line to fit — so the link was drawn by cutting off the
+very text it was pointing at. Instead the fix renders **nested under what it answers**, indented
+beneath a left rule, the way a reply reads on any messaging surface. Position carries the link, so
+neither end needs a sentence explaining itself, and nothing has to be truncated to fit.
+
+Threads sort by **latest activity**, not by the root's age. This is the one cost nesting carries: an
+observation from three weeks ago, answered this morning, would otherwise sit three weeks down a list
+that [§4.2](#42-the-timeline) keeps newest-first precisely because the reader is asking what has
+happened lately. Sorting on the thread rather than the root keeps that promise — resolving something
+old brings it back to the top, which is also what the person who did the work would expect.
+
+Only resolutions nest. This is not general threaded discussion: an ordinary entry cannot be replied
+to, because a shop this size has no conversation to hold ([§3](#3-who-its-for)) and a reply affordance
+on every row would invite one this surface is not built to keep readable.
 
 Open state is derived from the existence of a resolving entry and is never stored. So there is no
 state anyone has to remember to close, and no way for the open list to disagree with the timeline

@@ -113,7 +113,10 @@ export default function JobPartMaterialsCard({
               color="warning"
               label={`${shortCount} short`}
               component={NextLink}
-              href={`/dashboard/${companyId}/inventory/shortages`}
+              // Was `/inventory/shortages` — a route that was never built, so this
+              // chip 404'd for anyone who clicked it. The shop-wide shortage lens is
+              // the Parts stock filter, which reads `?status=`.
+              href={`/dashboard/${companyId}/parts?status=low`}
               clickable
             />
           )}

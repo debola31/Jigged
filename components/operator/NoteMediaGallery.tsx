@@ -8,6 +8,7 @@ import DialogContent from '@mui/material/DialogContent';
 import IconButton from '@mui/material/IconButton';
 import CircularProgress from '@mui/material/CircularProgress';
 import CloseIcon from '@mui/icons-material/Close';
+import BrokenImageOutlinedIcon from '@mui/icons-material/BrokenImageOutlined';
 import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
 import type { JobNoteMedia } from '@/types/operator';
 
@@ -25,8 +26,8 @@ const THUMB = 72;
 export default function NoteMediaGallery({ media }: { media: JobNoteMedia[] }) {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
-  // Batch-load this note's thumbnail URLs once (a failed one just stays blank).
-  const { data: urls } = useLoad(async () => {
+  // Batch-load this note's thumbnail URLs once.
+  const { data: urls, loading } = useLoad(async () => {
     const pairs = await Promise.all(
       media.map(async (m) => {
         try {
@@ -72,6 +73,13 @@ export default function NoteMediaGallery({ media }: { media: JobNoteMedia[] }) {
                 justifyContent: 'center',
               }}
             >
+              {/* A spinner means "still fetching". It must NOT be the resting
+                  state for a URL that failed: signing can fail for reasons the
+                  operator cannot do anything about (an expired session, a
+                  missing storage read policy on a preview build), and a thumbnail
+                  that spins forever reads as "the app is stuck" — so the photo
+                  gets attached again, and again. A broken-image mark says the
+                  photo is there and this device cannot show it, which is true. */}
               {url ? (
                 <Box
                   component="img"
@@ -79,8 +87,14 @@ export default function NoteMediaGallery({ media }: { media: JobNoteMedia[] }) {
                   alt="Past run photo"
                   sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
-              ) : (
+              ) : loading ? (
                 <CircularProgress size={16} />
+              ) : (
+                <BrokenImageOutlinedIcon
+                  fontSize="small"
+                  sx={{ color: 'text.disabled' }}
+                  titleAccess="Photo could not be loaded"
+                />
               )}
             </Box>
           );

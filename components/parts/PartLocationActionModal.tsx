@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -8,7 +9,6 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
-import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
@@ -21,15 +21,22 @@ import {
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import LocationPicker, {
+  type LocationPickerOption,
+} from '@/components/inventory/locations/LocationPicker';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
-export interface LocationOption {
-  id: string;
-  label: string;
-}
+/**
+ * A choosable location.
+ *
+ * Now just the picker's own option type — this used to be a separate `{ id, label }` and the two
+ * drifted, which is how the destination picker ended up unable to show quantities or to recognise
+ * the system bucket.
+ */
+export type LocationOption = LocationPickerOption;
 
 /** A location where the part currently HAS stock — a valid Move source. */
 export interface LocationBalanceOption extends LocationOption {
@@ -57,6 +64,14 @@ interface PartLocationActionModalProps {
   locations: LocationOption[];
   /** Locations where the part has stock — the Move sources (with quantities). */
   sourceBalances?: LocationBalanceOption[];
+  /**
+   * Create a location from a name typed into the picker.
+   *
+   * Optional: omit it and the picker is choose-only. §5.5 decision 2 held this back until the
+   * sibling-name unique index existed, because a bare create-as-you-type field is how `ST0CK`
+   * appeared beside `STOCK` in the legacy data.
+   */
+  onCreateLocation?: (name: string) => Promise<LocationOption>;
   onClose: () => void;
   onDone: () => void | Promise<void>;
 }
@@ -70,6 +85,7 @@ export default function PartLocationActionModal({
   unitOptions,
   locations,
   sourceBalances = [],
+  onCreateLocation,
   onClose,
   onDone,
 }: PartLocationActionModalProps) {
@@ -196,6 +212,12 @@ export default function PartLocationActionModal({
       } else {
         await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, notes || undefined);
       }
+      posthog.capture('inventory_stock_updated', {
+        action,
+        part_id: partId,
+        quantity: qty,
+        unit,
+      });
       await onDone();
       onClose();
     } catch (e) {
@@ -237,43 +259,30 @@ export default function PartLocationActionModal({
                   renderInput={(params) => <TextField {...params} label="From location" required />}
                 />
               )}
-              <Autocomplete
-                options={locations}
+              {/* The destination now excludes the source and the `Unassigned` bucket, and shows
+                  what the part already holds at each candidate — none of which it did while this
+                  was a second, separately-written Autocomplete. */}
+              <LocationPicker
+                label="To location"
+                options={locationOptions}
                 value={toLocation}
-                onChange={(_, v) => setToLocation(v)}
-                getOptionLabel={(o) => o.label}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
-                renderInput={(params) => <TextField {...params} label="To location" required />}
+                onChange={setToLocation}
+                excludeId={sourceLoc?.id ?? null}
+                excludeSystem
+                unit={primaryUnit}
+                required
+                onCreate={onCreateLocation}
               />
             </>
           ) : (
-            <Autocomplete
+            <LocationPicker
+              label="Location"
               options={locationOptions}
               value={location}
-              onChange={(_, v) => setLocation(v)}
-              // The input keeps the bare path; the quantity lives in the dropdown row, so a
-              // chosen value doesn't read as part of the location's name.
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(o, v) => o.id === v.id}
-              renderOption={(props, o) => {
-                const { key, ...rest } = props;
-                const qty = quantityByLocation.get(o.id) ?? 0;
-                return (
-                  // The label takes the slack rather than relying on justify-content, which
-                  // MUI's own option class overrides.
-                  <Box component="li" key={key} {...rest} sx={{ display: 'flex', gap: 2 }}>
-                    <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{o.label}</Box>
-                    <Typography
-                      variant="caption"
-                      color={qty > 0 ? 'text.secondary' : 'text.disabled'}
-                      sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
-                    >
-                      {qty > 0 ? `${num(qty)} ${primaryUnit}` : 'empty'}
-                    </Typography>
-                  </Box>
-                );
-              }}
-              renderInput={(params) => <TextField {...params} label="Location" required />}
+              onChange={setLocation}
+              unit={primaryUnit}
+              required
+              onCreate={onCreateLocation}
             />
           )}
           <Stack direction="row" spacing={1}>

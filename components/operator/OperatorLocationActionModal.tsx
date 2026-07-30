@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -11,7 +12,6 @@ import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
-import Autocomplete from '@mui/material/Autocomplete';
 
 import {
   addStockAtLocation,
@@ -21,6 +21,9 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import LocationPicker, {
+  type LocationPickerOption,
+} from '@/components/inventory/locations/LocationPicker';
 import type { JobWithRelations } from '@/types/job';
 
 export type OperatorLocationAction = 'add' | 'deplete' | 'adjust' | 'move';
@@ -54,7 +57,7 @@ interface OperatorLocationActionModalProps {
   locationId: string;
   locationName: string;
   /** Where a Move can go. Loaded by the parent; empty for the other actions. */
-  moveDestinations?: Array<{ id: string; label: string }>;
+  moveDestinations?: LocationPickerOption[];
   /** user_company_access.id of the signed-in operator (for the ledger). */
   operatorId: string | null;
   onClose: () => void;
@@ -140,6 +143,13 @@ export default function OperatorLocationActionModal({
       } else {
         await transferStock(partId, locationId, destination!.id, qty, unit, notes || undefined);
       }
+      posthog.capture('operator_inventory_stock_updated', {
+        action,
+        part_id: partId,
+        quantity: qty,
+        unit,
+        location_id: locationId,
+      });
       await onDone();
       onClose();
     } catch (e) {
@@ -197,14 +207,17 @@ export default function OperatorLocationActionModal({
             </Typography>
           )}
           {action === 'move' && (
-            <Autocomplete
+            // Shared with the admin part page, so the two can't drift again. `excludeSystem`
+            // matters here: an operator moving something off a shelf is never trying to put it
+            // back on the "nowhere in particular" pile.
+            <LocationPicker
+              label="Move to"
               options={moveDestinations}
               value={destination}
-              onChange={(_, v) => setDestination(v)}
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(o, v) => o.id === v.id}
-              renderInput={(params) => <TextField {...params} label="Move to" required />}
-              noOptionsText="No other locations"
+              onChange={setDestination}
+              excludeId={locationId}
+              excludeSystem
+              required
             />
           )}
           {action === 'deplete' && (

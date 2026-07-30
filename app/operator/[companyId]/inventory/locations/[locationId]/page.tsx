@@ -114,11 +114,12 @@ export default function OperatorBinViewPage() {
       }
       return names.join(' › ');
     };
+    // The current location and the `Unassigned` bucket are both dropped by `LocationPicker` now
+    // (`excludeId` / `excludeSystem`), so this only has to build the labelled list.
     return list
-      .filter((l) => l.id !== locationId)
-      .map((l) => ({ id: l.id, label: pathOf(l.id) }))
+      .map((l) => ({ id: l.id, label: pathOf(l.id), kind: l.kind }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [allLocations, locationId]);
+  }, [allLocations]);
 
   const modalUnit = modal?.part.primary_unit || 'ea';
   const unitOptions = useMemo(

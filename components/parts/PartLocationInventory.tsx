@@ -19,7 +19,7 @@ import type {
   InventoryLocation,
   PartLocationBalanceWithLocation,
 } from '@/types/inventoryLocations';
-import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
+import { createLocation, getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import PartLocationActionModal, {
   type LocationAction,
@@ -81,13 +81,28 @@ export default function PartLocationInventory({
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
 
+  // `kind` rides along so the picker can drop the auto-managed `Unassigned` bucket from
+  // destination lists without needing to know how it's identified.
   const locationOptions = useMemo<LocationOption[]>(
     () =>
       locations
-        .map((l) => ({ id: l.id, label: pathLabel(l.id, byId) }))
+        .map((l) => ({ id: l.id, label: pathLabel(l.id, byId), kind: l.kind }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [locations, byId],
   );
+
+  /**
+   * Create a top-level location from a name typed into the picker.
+   *
+   * No kind and no code: the name is the identity, and a code is display-only (QR payloads carry
+   * the UUID). Someone naming a shelf mid-move shouldn't have to fill a form — and if they want a
+   * code later, the board's Rename does that.
+   */
+  const createLocationFromPicker = async (name: string): Promise<LocationOption> => {
+    const created = await createLocation(companyId, { name });
+    await reload();
+    return { id: created.id, label: created.name, kind: created.kind };
+  };
 
   // Move sources: only the locations where this part actually has stock.
   const sourceBalances = useMemo<LocationBalanceOption[]>(
@@ -169,6 +184,7 @@ export default function PartLocationInventory({
           unitOptions={unitOptions}
           locations={locationOptions}
           sourceBalances={sourceBalances}
+          onCreateLocation={createLocationFromPicker}
           onClose={() => setAction(null)}
           onDone={onActionDone}
         />

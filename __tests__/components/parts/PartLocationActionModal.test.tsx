@@ -58,7 +58,7 @@ describe('PartLocationActionModal — Move', () => {
     expect(screen.queryByRole('combobox', { name: /from location/i })).not.toBeInTheDocument();
 
     await userEvent.click(toCombo);
-    await userEvent.click(await screen.findByRole('option', { name: 'Right' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Right/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '1');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
@@ -70,7 +70,7 @@ describe('PartLocationActionModal — Move', () => {
   it('blocks moving more than the source holds, upfront (no DB call)', async () => {
     renderMove([{ id: 'l1', label: 'Left', quantity: 2 }]);
     await userEvent.click(await screen.findByRole('combobox', { name: /to location/i }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Right' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Right/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '5');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
@@ -90,7 +90,7 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('option', { name: /Left — 2 ea/ }));
 
     await userEvent.click(screen.getByRole('combobox', { name: /to location/i }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Bin' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Bin/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '1');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 

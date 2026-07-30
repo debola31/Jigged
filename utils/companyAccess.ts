@@ -4,6 +4,7 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
 import { readCustomPaymentTerms, MAX_CUSTOM_PAYMENT_TERMS } from '@/lib/companyDefaults';
+import { toError } from '@/lib/supabaseErrors';
 
 export interface Company {
   id: string;
@@ -200,7 +201,17 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
 }
 
 /**
- * Verify user has access to a specific company
+ * Verify user has access to a specific company.
+ *
+ * Returns false ONLY for a definitive "no membership row" answer. Any other failure
+ * throws, because the caller (AuthGuard, the sole caller) renders a false return as
+ * "You don't have access to this company" — so swallowing a network blip or an RLS
+ * error into `false` locks out a user who *does* have access. That's the same
+ * conflation of "couldn't check" with "denied" that this fix exists to remove; it just
+ * had a second path through here.
+ *
+ * PGRST116 is PostgREST's "no rows returned" from `.single()`, which genuinely means
+ * no membership — that one is a real negative, not an error.
  */
 export async function verifyCompanyAccess(userId: string, companyId: string): Promise<boolean> {
   const supabase = getSupabase();
@@ -214,7 +225,7 @@ export async function verifyCompanyAccess(userId: string, companyId: string): Pr
 
   if (error && error.code !== 'PGRST116') {
     console.error('Error verifying company access:', error);
-    return false;
+    throw toError(error, 'Could not verify company access');
   }
 
   return !!data;

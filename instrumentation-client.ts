@@ -32,7 +32,22 @@ Sentry.init({
   // A mistyped password is not a bug. Sentry's custom inbound message filters are
   // a paid feature, so this is dropped client-side instead — strictly better, since
   // the event never leaves the browser and never counts against quota.
-  ignoreErrors: ["Invalid login credentials"],
+  //
+  // `EmptyRanges` is injected by a Safari extension, not by us: the symbol appears in
+  // zero files across the source tree, node_modules AND the built production bundle,
+  // and the stack is a single frame with no filename caught by window.onerror. Sentry's
+  // browser-extensions inbound filter misses it because the frame carries no
+  // extension-scheme URL to match on.
+  //
+  // "Lock was stolen" is @supabase/auth-js's OWN recovery path working as designed:
+  // when a token-refresh lock is orphaned (a component unmounts mid-refresh), the next
+  // caller times out and re-acquires with `{ steal: true }`, which rejects the orphaned
+  // holder. It arrives as an unhandled background rejection with no frames in our code
+  // and no user-visible effect — AuthGuard's own handling of the same race is in
+  // components/auth/AuthGuard.tsx. Filtering it removes a permanently non-actionable
+  // issue (Sentry JAVASCRIPT-NEXTJS-H) rather than leaving it to retrain us to ignore
+  // the queue, which is how this project got 55 stale issues in the first place.
+  ignoreErrors: ["Invalid login credentials", "EmptyRanges", "Lock was stolen"],
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

@@ -3,7 +3,6 @@ import Container from '@mui/material/Container';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import Link from 'next/link';
 import { VALID_TOKENS } from '../tokens';
 import InviteForm from '@/components/marketing/InviteForm';
 
@@ -58,8 +57,15 @@ export default async function InvitePage({ params }: Props) {
               This invite link isn&apos;t valid. Visit our homepage to learn more
               about Jigged or request early access.
             </Typography>
+            {/* `href` alone, NOT `component={Link}`. This page is a Server Component,
+                and MUI's Button is a Client Component — so passing the next/link
+                function as a prop cannot be serialised across the boundary and threw
+                "Functions cannot be passed directly to Client Components" during
+                render (Sentry JAVASCRIPT-NEXTJS-1K). MUI renders an <a> whenever href
+                is set, so this needs no component override. Losing client-side
+                prefetch is the right trade here: it's a single escape hatch out of an
+                error page, where a full navigation is if anything more robust. */}
             <Button
-              component={Link}
               href="/"
               variant="contained"
               size="large"

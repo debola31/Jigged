@@ -526,13 +526,29 @@ describe('companyAccess utilities', () => {
       expect(result).toBe(false);
     });
 
-    it('returns false on database error (graceful fallback)', async () => {
+    // Previously asserted `false` on a database error and called it a "graceful
+    // fallback". It wasn't graceful — AuthGuard renders a false return as "You don't
+    // have access to this company", so any network blip or RLS error locked out a user
+    // who did have access. Only PGRST116 ("no rows") is a real negative; everything
+    // else means we couldn't determine the answer and must say so.
+    it('throws on a database error rather than reporting no access', async () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { code: '500', message: 'Server error' };
 
-      const result = await verifyCompanyAccess('user-1', 'company-1');
+      await expect(verifyCompanyAccess('user-1', 'company-1')).rejects.toThrow('Server error');
+    });
 
-      expect(result).toBe(false);
+    it('throws a real Error carrying the Postgres code, not a raw object', async () => {
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = {
+        code: '42501',
+        message: 'permission denied for table user_company_access',
+      };
+
+      await expect(verifyCompanyAccess('user-1', 'company-1')).rejects.toMatchObject({
+        message: 'permission denied for table user_company_access',
+        code: '42501',
+      });
     });
   });
 

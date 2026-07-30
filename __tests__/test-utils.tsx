@@ -12,20 +12,29 @@ const mockForward = vi.fn();
 const mockRefresh = vi.fn();
 const mockPrefetch = vi.fn();
 
+// These hooks must return STABLE references, because Next.js's real ones do. Handing
+// back a fresh object per call makes any effect with `router`/`params`/`searchParams` in
+// its dependency array re-run on every single render — so components appear to thrash in
+// tests while behaving fine in production, and genuine dependency bugs get masked by the
+// noise. Built lazily (`??=`) so the vi.fn() references are read at call time rather than
+// when this hoisted factory runs.
+let routerStub: Record<string, unknown> | undefined;
+let paramsStub: Record<string, string> | undefined;
+let searchParamsStub: URLSearchParams | undefined;
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: mockPush,
-    replace: mockReplace,
-    back: mockBack,
-    forward: mockForward,
-    refresh: mockRefresh,
-    prefetch: mockPrefetch,
-  }),
-  useParams: () => ({
-    companyId: 'test-company-id',
-  }),
+  useRouter: () =>
+    (routerStub ??= {
+      push: mockPush,
+      replace: mockReplace,
+      back: mockBack,
+      forward: mockForward,
+      refresh: mockRefresh,
+      prefetch: mockPrefetch,
+    }),
+  useParams: () => (paramsStub ??= { companyId: 'test-company-id' }),
   usePathname: () => '/dashboard/test-company-id',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => (searchParamsStub ??= new URLSearchParams()),
 }));
 
 // All providers wrapper

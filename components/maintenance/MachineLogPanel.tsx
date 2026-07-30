@@ -180,11 +180,13 @@ export default function MachineLogPanel({
         </Alert>
       )}
 
-      {machineName && (
-        <Typography variant="h6" sx={{ mb: 1.5 }}>
-          {machineName}
-        </Typography>
-      )}
+      {/* No machine name here. On the operator surface the AppBar already shows
+          it — in orange, with the station switcher attached — so a heading
+          underneath said the same word twice and cost a row on a phone. The
+          office page passes no name at all, because the work-center page it sits
+          on is already titled. `machineName` survives only for the manuals sheet
+          below, which opens fullscreen over both and does need to say which
+          machine it belongs to. */}
 
       {/* Only when there is something to open. A machine with no manuals shows
           nothing at all — never an "add a manual" row, which is the shape a

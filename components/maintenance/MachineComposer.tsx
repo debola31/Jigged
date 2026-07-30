@@ -11,7 +11,21 @@ import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { MaintenanceKind, MachineNote } from '@/types/machineMaintenance';
 import type { NoteCapture } from '@/hooks/useNoteCapture';
 
-const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
+/**
+ * The composer is the one card on this screen you can act on — every other one
+ * is a record you can only read — and it looked identical to them.
+ *
+ * Differentiated by EDGE, not by fill. The theme is explicit that cards are deep
+ * translucent panels and that "a pale surface goes washed-out/muddy" on the lit
+ * canvas, so lightening this one would fight the design language. A steel-blue
+ * hairline — the app's primary/interactive colour — marks it as the place you
+ * do something, while it stays the same substantial panel as its neighbours.
+ */
+const composerSx = {
+  bgcolor: 'rgba(26, 31, 74, 0.55)',
+  backdropFilter: 'blur(8px)',
+  border: '1px solid rgba(70, 130, 180, 0.55)',
+};
 
 /**
  * Write something down about the machine you are standing at.
@@ -63,7 +77,7 @@ export default function MachineComposer({
   };
 
   return (
-    <Card elevation={2} sx={{ ...cardSx, mb: 2 }}>
+    <Card elevation={2} sx={{ ...composerSx, mb: 2 }}>
       <CardContent sx={{ py: 1.5 }}>
         {resolving && (
           <Alert
@@ -133,7 +147,19 @@ export default function MachineComposer({
             variant="contained"
             onClick={submit}
             disabled={!capture.hasContent || capture.saving}
-            sx={{ minHeight: 48 }}
+            // MUI's default disabled contained button is near-invisible on this
+            // dark panel — it reads as broken rather than as waiting for you to
+            // type, and "readable in bright environments" is a design principle
+            // here, not a nicety. Tinted with the primary and given legible
+            // label contrast, it stays obviously inactive while still looking
+            // like the button it is about to become.
+            sx={{
+              minHeight: 48,
+              '&.Mui-disabled': {
+                bgcolor: 'rgba(70, 130, 180, 0.22)',
+                color: 'rgba(255, 255, 255, 0.55)',
+              },
+            }}
           >
             {capture.saving ? 'Saving…' : 'Add to log'}
           </Button>

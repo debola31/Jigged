@@ -40,6 +40,8 @@ export default function MachineOpenItems({
   companyId,
   memberId,
   onLogFix,
+  replyingToId = null,
+  renderReply,
   readOnly = false,
 }: {
   items: MachineNote[];
@@ -47,6 +49,10 @@ export default function MachineOpenItems({
   memberId: string | null;
   /** Absent in read-only (office) rendering, where there is nothing to act on. */
   onLogFix?: (item: MachineNote) => void;
+  /** Item whose reply composer is open, if any. */
+  replyingToId?: string | null;
+  /** Renders the inline reply composer, directly beneath its item. */
+  renderReply?: () => React.ReactNode;
   readOnly?: boolean;
 }) {
   // No empty state. A machine with nothing outstanding should look like a
@@ -81,9 +87,19 @@ export default function MachineOpenItems({
                 memberId={memberId}
                 isOpen
                 hideAuthor
-                onLogFix={onLogFix ? () => onLogFix(item) : undefined}
+                // Hidden while its own reply is open: the composer sitting
+                // right below IS the affordance, and two controls saying "Log
+                // the fix" at once — one opening, one committing — is a coin
+                // flip for somebody meeting this screen occasionally.
+                onLogFix={
+                  onLogFix && replyingToId !== item.id ? () => onLogFix(item) : undefined
+                }
                 readOnly={readOnly}
               />
+              {/* Attached to the item it answers. A reply that sits where the
+                  thing it replies to is needs no banner to say what it is
+                  about, and no mode to remember. */}
+              {replyingToId === item.id && renderReply && renderReply()}
             </Box>
           ))}
         </CardContent>

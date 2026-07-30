@@ -171,7 +171,7 @@ describe('MachineLogPanel', () => {
     expect(screen.getAllByText('Kurtis')).toHaveLength(1);
   });
 
-  it('binds the fix to the item and records the loop closing', async () => {
+  it('replies inline, binds the fix to its item, and records the loop closing', async () => {
     const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
     mockGetMachineLog.mockResolvedValue({ entries: [open], open: [open] });
     mockAddMachineNote.mockResolvedValue(note({ id: 'fix', resolves_note_id: 'obs' }));
@@ -179,12 +179,16 @@ describe('MachineLogPanel', () => {
     render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
     await screen.findAllByText('Coolant smells off.');
 
+    // The reply composer does not exist until it is asked for, and it is its own
+    // field — not the one at the top wearing a banner.
+    expect(screen.queryByPlaceholderText(/what did you do to fix it/i)).toBeNull();
     await userEvent.click(screen.getAllByRole('button', { name: /log the fix/i })[0]);
+
     await userEvent.type(
-      screen.getByPlaceholderText(/what did you do/i),
+      screen.getByPlaceholderText(/what did you do to fix it/i),
       'Drained and recharged.',
     );
-    await userEvent.click(screen.getByRole('button', { name: /add to log/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^log the fix$/i }));
 
     await waitFor(() =>
       expect(mockAddMachineNote).toHaveBeenCalledWith(
@@ -192,7 +196,7 @@ describe('MachineLogPanel', () => {
         'c1',
         'acc-me',
         'Drained and recharged.',
-        expect.objectContaining({ resolvesNoteId: 'obs' }),
+        expect.objectContaining({ resolvesNoteId: 'obs', maintenanceKind: null }),
       ),
     );
     await waitFor(() =>
@@ -202,29 +206,41 @@ describe('MachineLogPanel', () => {
     );
   });
 
-  it('does not preselect a kind when logging a fix', async () => {
-    // Plenty of fixes are a clean or an adjustment. Defaulting to "repaired"
-    // would be exactly the taxonomy nudge the optional chip exists to avoid.
+  it('does not hand a half-written note to an item somebody then taps', async () => {
+    // The bug the inline reply removes structurally. Starting a fix used to
+    // leave whatever was in the main composer alone while re-binding it to a
+    // resolution, so a sentence about something else silently became the fix.
+    // Two composers cannot do that to each other.
     const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
     mockGetMachineLog.mockResolvedValue({ entries: [open], open: [open] });
     mockAddMachineNote.mockResolvedValue(note({ id: 'fix' }));
 
     render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
     await screen.findAllByText('Coolant smells off.');
+
+    await userEvent.type(
+      screen.getByPlaceholderText(/what did you do, or what did you notice/i),
+      'Unrelated: swept the floor.',
+    );
     await userEvent.click(screen.getAllByRole('button', { name: /log the fix/i })[0]);
 
-    await userEvent.type(screen.getByPlaceholderText(/what did you do/i), 'Done.');
-    await userEvent.click(screen.getByRole('button', { name: /add to log/i }));
+    // The reply starts empty, and the unrelated draft is still where it was.
+    expect(screen.getByPlaceholderText(/what did you do to fix it/i)).toHaveValue('');
+    expect(
+      screen.getByPlaceholderText(/what did you do, or what did you notice/i),
+    ).toHaveValue('Unrelated: swept the floor.');
+  });
 
-    await waitFor(() =>
-      expect(mockAddMachineNote).toHaveBeenCalledWith(
-        'wc1',
-        'c1',
-        'acc-me',
-        'Done.',
-        expect.objectContaining({ maintenanceKind: null }),
-      ),
-    );
+  it('offers no flag on the reply — a fix resolves, it does not also raise', async () => {
+    const open = note({ id: 'obs', body: 'Coolant smells off.', maintenance_kind: 'noticed' });
+    mockGetMachineLog.mockResolvedValue({ entries: [open], open: [open] });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findAllByText('Coolant smells off.');
+    await userEvent.click(screen.getAllByRole('button', { name: /log the fix/i })[0]);
+
+    // One checkbox on the page: the main composer's. The reply has none.
+    expect(screen.getAllByRole('checkbox', { name: /needs attention/i })).toHaveLength(1);
   });
 
   it('offers no composer when the office is reading', async () => {

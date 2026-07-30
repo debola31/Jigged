@@ -32,7 +32,10 @@ async function operatorHome(page: Page): Promise<string> {
 }
 
 const maintenanceTab = (page: Page) => page.getByRole('button', { name: /^Maintenance$/ });
-const composer = (page: Page) => page.getByPlaceholder(/what did you do/i);
+// Anchored: the reply composer's placeholder ('What did you do to fix it?')
+// also starts with 'what did you do', so an unanchored regex matches both.
+const composer = (page: Page) => page.getByPlaceholder(/what did you do, or what did you notice/i);
+const replyComposer = (page: Page) => page.getByPlaceholder(/what did you do to fix it/i);
 const addButton = (page: Page) => page.getByRole('button', { name: /add to log/i });
 const openList = (page: Page) => page.getByTestId('machine-open-items');
 
@@ -110,10 +113,12 @@ test.describe('Machine Maintenance', () => {
     await expect(page.getByText(observation)).toHaveCount(1, { timeout: 30_000 });
     await expect(openList(page).getByText(observation)).toBeVisible({ timeout: 30_000 });
 
+    // The reply opens INLINE, under the item it answers — no banner, no mode on
+    // the composer at the top.
     await page.getByRole('button', { name: /log the fix/i }).first().click();
     const fix = `E2E replaced the wiper ${stamp()}`;
-    await composer(page).fill(fix);
-    await addButton(page).click();
+    await replyComposer(page).fill(fix);
+    await page.getByRole('button', { name: /^log the fix$/i }).click();
 
     await expect(page.getByText(fix)).toBeVisible({ timeout: 30_000 });
 

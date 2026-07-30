@@ -62,7 +62,7 @@ export default function MachineLogPanel({
   const [error, setError] = useState<string | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [kind, setKind] = useState<MaintenanceKind | null>(null);
-  const [resolving, setResolving] = useState<MachineNote | null>(null);
+  const [replyingTo, setReplyingTo] = useState<MachineNote | null>(null);
   const [manualsOpen, setManualsOpen] = useState(false);
 
   const {
@@ -110,20 +110,53 @@ export default function MachineLogPanel({
       createNote: (body) =>
         addMachineNote(workCenterId, companyId, memberId, body, {
           maintenanceKind: kind,
-          resolvesNoteId: resolving?.id ?? null,
+          // The main composer never resolves anything — that is the reply's job.
+          resolvesNoteId: null,
         }),
       attachMedia: (note, file, dims) =>
         addMachineNoteMedia(companyId, workCenterId, note.id, file, { dims }),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { workCenterId, maintenanceKind: kind },
     };
-  }, [readOnly, memberId, workCenterId, companyId, kind, resolving]);
+  }, [readOnly, memberId, workCenterId, companyId, kind]);
 
   const capture = useNoteCapture<MachineNote>({
     companyId,
     operatorId: memberId,
     writer,
     enabled: !readOnly,
+  });
+
+  /**
+   * The reply's OWN writer and OWN capture — a second draft, not a mode on the
+   * first.
+   *
+   * This is why it matters beyond looks: `startFix` used to leave whatever was
+   * half-typed in the main composer alone while re-binding it to a resolution,
+   * so a sentence written about something else silently became the fix for an
+   * item somebody tapped afterwards. Two composers cannot do that to each other.
+   */
+  const replyWriter: NoteWriter<MachineNote> | null = useMemo(() => {
+    if (readOnly || !memberId || !replyingTo) return null;
+    const target = replyingTo;
+    return {
+      createNote: (body) =>
+        addMachineNote(workCenterId, companyId, memberId, body, {
+          maintenanceKind: null,
+          resolvesNoteId: target.id,
+        }),
+      attachMedia: (note, file, dims) =>
+        addMachineNoteMedia(companyId, workCenterId, note.id, file, { dims }),
+      withMedia: (note, media) => ({ ...note, media }),
+      eventContext: { workCenterId, resolving: true },
+    };
+  }, [readOnly, memberId, workCenterId, companyId, replyingTo]);
+
+  const replyCapture = useNoteCapture<MachineNote>({
+    companyId,
+    operatorId: memberId,
+    writer: replyWriter,
+    enabled: !readOnly && replyingTo != null,
   });
 
   // Wrap submit so the surface can reset its own state and reload afterwards.
@@ -134,28 +167,38 @@ export default function MachineLogPanel({
       submit: async () => {
         const saved = await capture.submit();
         if (saved) {
-          if (resolving) {
-            // The loop closing, which is the behaviour the module is betting on:
-            // somebody fixed a thing somebody else flagged.
-            logOperatorEvent(companyId, 'noticed_resolved', { workCenterId });
-          }
           setKind(null);
-          setResolving(null);
           reload();
         }
         return saved;
       },
     }),
-    [capture, resolving, companyId, workCenterId, reload],
+    [capture, reload],
   );
 
+  const replyWithReset = useMemo(
+    () => ({
+      ...replyCapture,
+      submit: async () => {
+        const saved = await replyCapture.submit();
+        if (saved) {
+          // The loop closing, which is the behaviour the module is betting on:
+          // somebody fixed a thing somebody else flagged.
+          logOperatorEvent(companyId, 'noticed_resolved', { workCenterId });
+          setReplyingTo(null);
+          reload();
+        }
+        return saved;
+      },
+    }),
+    [replyCapture, companyId, workCenterId, reload],
+  );
+
+  // Opens a reply directly under the item. No scroll-to-top and no banner: the
+  // composer's POSITION says what it answers, which is a thing you cannot lose
+  // track of the way you can lose a mode indicator that has scrolled off-screen.
   const startFix = useCallback((item: MachineNote) => {
-    setResolving(item);
-    // Kind stays unset. Pre-selecting "repaired" would be the taxonomy nudge the
-    // optional chip exists to avoid, and plenty of fixes are a clean or an
-    // adjustment.
-    setKind(null);
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    setReplyingTo((current) => (current?.id === item.id ? null : item));
   }, []);
 
   const openIds = useMemo(() => new Set((log?.open ?? []).map((o) => o.id)), [log]);
@@ -233,8 +276,6 @@ export default function MachineLogPanel({
           capture={captureWithReset}
           kind={kind}
           onKindChange={setKind}
-          resolving={resolving}
-          onCancelResolving={() => setResolving(null)}
         />
       )}
 
@@ -243,6 +284,18 @@ export default function MachineLogPanel({
         companyId={companyId}
         memberId={memberId}
         onLogFix={readOnly ? undefined : startFix}
+        replyingToId={replyingTo?.id ?? null}
+        renderReply={() => (
+          <MachineComposer
+            capture={replyWithReset}
+            kind={null}
+            onKindChange={() => {}}
+            variant="reply"
+            placeholder="What did you do to fix it?"
+            submitLabel="Log the fix"
+            onCancel={() => setReplyingTo(null)}
+          />
+        )}
         readOnly={readOnly}
       />
 

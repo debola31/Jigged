@@ -9,15 +9,21 @@
 > arrives.
 >
 > This document was committed as a proposal and then amended where building it changed an answer.
-> Four sections carry a revision: [§4.3](#43-capture) (the five-verb kind chip is cut to one
-> "Needs attention" toggle — four of the five had no reader and no research), [§6](#6-phases-and-gates)
-> (the archived-machines defect was not being fixed elsewhere, so it is fixed here),
-> [§8](#8-measurement) (`confirmed` is cut — Phase 1 ships no freshness signal and says why), and
-> [§9](#9-open-questions) (details and manuals ship; the office gets a read-only view). Everything
-> else is as proposed.
+> Six sections carry a revision: [§4.2](#42-the-timeline) (an entry appears exactly once, and the
+> composer sits above the outstanding items), [§4.3](#43-capture) (the five-verb kind chip is cut to
+> one "Needs attention" toggle — four of the five had no reader and no research),
+> [§4.4](#44-noticed-then-resolved) (the fix is an inline reply rather than a mode on the top
+> composer), [§5](#5-what-it-is-not) (the withheld author is deferred rather than one tap away),
+> [§6](#6-phases-and-gates) (the archived-machines defect was not being fixed elsewhere, so it is
+> fixed here), [§8](#8-measurement) (`confirmed` is cut — Phase 1 ships no freshness signal and says
+> why), and [§9](#9-open-questions) (details and manuals ship; the office gets a read-only view).
+> Everything else is as proposed.
 >
-> Three of those four cut something the proposal asked for, each for the same reason: a control
-> whose answer changes nothing is a control that teaches operators this surface is decorative.
+> Two patterns run through those. Several cut a control the proposal asked for, each for the same
+> reason: a control whose answer changes nothing teaches operators this surface is decorative. The
+> rest were written before there was anything on the screen — the layout ones only became visible
+> once a machine carried real entries, which is an argument for building the thin thing early rather
+> than specifying harder.
 
 **Dependencies:** [Work Centers](work-centers.md), because a machine is a `work_centers` row with
 `kind='internal'` and there is no separate machine entity. The notes system and its read-back loop
@@ -186,9 +192,24 @@ and `notes` is append-only, so clearing the pin and recording the knowledge are 
 
 ### 4.4 Noticed, then resolved
 
-An open noticed item offers "log the fix", which is the same composer with the resolution link
-already bound. There is no assignment, no priority and no due date, because each of those needs a
-second person to mean anything ([§3](#3-who-its-for)).
+An open noticed item offers "log the fix". There is no assignment, no priority and no due date,
+because each of those needs a second person to mean anything ([§3](#3-who-its-for)).
+
+**Revised at build time: the fix is an inline reply, not a mode.** This originally specified "the
+same composer with the resolution link already bound", asserted in one sentence with no research
+behind it — the doc has nothing on replies or resolution interfaces at all. Reusing the top composer
+made resolving an item a MODE, announced by a banner, and modes fail in exactly the conditions this
+surface has: the banner scrolls out of view, and somebody who walks away mid-thought comes back to a
+composer that looks ordinary and is not.
+
+It also had a real defect. Starting a fix left whatever was half-typed in that composer alone while
+re-binding it to a resolution, so a sentence written about something else could silently become the
+fix for an item tapped afterwards. Two composers with two drafts cannot do that to each other.
+
+So the fix composer opens **beneath the item it answers**, and the item's "log the fix" control is
+replaced by it — the ordinary reply gesture, where position carries the meaning and there is no
+state to remember. It offers no flag of its own: a fix resolves something, and if the work uncovers
+a new problem that is a new entry rather than this one being both.
 
 Open state is derived from the existence of a resolving entry and is never stored. So there is no
 state anyone has to remember to close, and no way for the open list to disagree with the timeline

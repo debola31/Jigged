@@ -1,6 +1,5 @@
 'use client';
 
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -21,6 +20,8 @@ import type { NoteCapture } from '@/hooks/useNoteCapture';
  * hairline — the app's primary/interactive colour — marks it as the place you
  * do something, while it stays the same substantial panel as its neighbours.
  */
+const replySx = { bgcolor: 'transparent', backgroundImage: 'none' };
+
 const composerSx = {
   bgcolor: 'rgba(26, 31, 74, 0.55)',
   backdropFilter: 'blur(8px)',
@@ -56,16 +57,27 @@ export default function MachineComposer({
   capture,
   kind,
   onKindChange,
-  resolving,
-  onCancelResolving,
+  variant = 'primary',
+  placeholder = 'What did you do, or what did you notice?',
+  submitLabel = 'Add to log',
+  onCancel,
 }: {
   capture: NoteCapture<MachineNote>;
   kind: MaintenanceKind | null;
   onKindChange: (next: MaintenanceKind | null) => void;
-  /** The open item this entry will resolve, when "Log the fix" started it. */
-  resolving?: MachineNote | null;
-  onCancelResolving?: () => void;
+  /**
+   * 'reply' is the inline composer that resolves one outstanding item. It drops
+   * the flag checkbox — a fix resolves something; if the work uncovers a NEW
+   * problem that is a new entry, not this one flagged as both — and it drops the
+   * blue edge, because it is nested inside the amber block and does not need to
+   * announce itself as a second primary surface.
+   */
+  variant?: 'primary' | 'reply';
+  placeholder?: string;
+  submitLabel?: string;
+  onCancel?: () => void;
 }) {
+  const isReply = variant === 'reply';
   const submit = async () => {
     try {
       await capture.submit();
@@ -77,23 +89,8 @@ export default function MachineComposer({
   };
 
   return (
-    <Card elevation={2} sx={{ ...composerSx, mb: 2 }}>
+    <Card elevation={isReply ? 0 : 2} sx={isReply ? replySx : { ...composerSx, mb: 2 }}>
       <CardContent sx={{ py: 1.5 }}>
-        {resolving && (
-          <Alert
-            severity="info"
-            sx={{ mb: 1.5 }}
-            action={
-              onCancelResolving && (
-                <Button color="inherit" size="small" onClick={onCancelResolving}>
-                  Cancel
-                </Button>
-              )
-            }
-          >
-            Logging the fix for: {resolving.body ?? 'that item'}
-          </Alert>
-        )}
 
         {/* `compact`: the field grows as it fills and the camera is an adjacent
             icon, which is the shape the step composer already uses. The full
@@ -103,7 +100,7 @@ export default function MachineComposer({
             SCROLL, that is the wrong thing to be biggest. */}
         <NoteCaptureFields
           capture={capture}
-          placeholder="What did you do, or what did you notice?"
+          placeholder={placeholder}
           compact
         />
 
@@ -122,6 +119,13 @@ export default function MachineComposer({
             The label carries the colour when checked; the box alone is a small
             state change to notice across a shop. */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+          {isReply ? (
+            onCancel && (
+              <Button size="small" onClick={onCancel} sx={{ minHeight: 44 }}>
+                Cancel
+              </Button>
+            )
+          ) : (
           <FormControlLabel
             control={
               <Checkbox
@@ -142,6 +146,7 @@ export default function MachineComposer({
               },
             }}
           />
+          )}
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
@@ -161,7 +166,7 @@ export default function MachineComposer({
               },
             }}
           >
-            {capture.saving ? 'Saving…' : 'Add to log'}
+            {capture.saving ? 'Saving…' : submitLabel}
           </Button>
         </Box>
       </CardContent>

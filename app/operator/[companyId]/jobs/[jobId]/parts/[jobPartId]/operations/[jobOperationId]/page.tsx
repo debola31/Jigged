@@ -451,17 +451,17 @@ export default function OperatorOperationActionPage() {
               here now": the over-quantity error and the station mismatch.
               The earlier problem was the tinted box, not the label. */}
           {job.operation_instructions && (
-            <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5 }}>
-              {/* "Instructions" — the same word the admin sees when writing this
+            <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
+              {/* "Instructions:" — the same word the admin sees when writing this
                   field. ISA-101's consistency rule is about exactly this: an
-                  operator and an engineer talking about the same box should be
-                  using the same name for it. */}
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ flexShrink: 0, pt: '2px' }}
-              >
-                Instructions
+                  operator and an engineer talking about the same box should use
+                  the same name for it.
+                  Same variant as the content, so the only difference between them
+                  is colour. A smaller label beside larger text read as two
+                  unrelated things rather than a label and its value, and the colon
+                  does the demarcating that a size change was doing badly. */}
+              <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                Instructions:
               </Typography>
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
                 {job.operation_instructions}

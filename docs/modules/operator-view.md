@@ -398,8 +398,12 @@ optional and frequently blank, so shops often put the instruction in the part
 description instead.
 
 So **neither is de-emphasised**, and the distinction is a dimmed **label**
-(`Instructions`, the same word the admin sees when writing the field) rather than
-weight or a tinted box. What is dimmed is chrome, never content.
+(`Instructions:`, the same word the admin sees when writing the field) rather than
+weight or a tinted box. What is dimmed is chrome, never content — the label shares
+the content's font size, so **colour is the only difference between them**. A
+smaller label beside larger text read as two unrelated lines rather than a label
+and its value, and the colon carries the demarcation a size change was doing
+badly.
 
 An earlier revision dimmed the description to make the instruction "the brighter
 one". That was wrong twice over: it asserted "reference, not instruction" exactly

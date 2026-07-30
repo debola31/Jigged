@@ -53,6 +53,19 @@ function renderFeed(props: Partial<React.ComponentProps<typeof JobFeed>> = {}) {
   );
 }
 
+/**
+ * Render with the feed's OWN composer live.
+ *
+ * After B4 the composer only appears where no completion block owns capture — an
+ * already-complete step, or an outside step. The behaviour these tests cover
+ * (the photo picker, the dictation hint, the funnel events) did not change; it
+ * moved into useNoteCapture and is rendered by both hosts, so they are still
+ * exercised through this surface.
+ */
+function renderComposer(props: Partial<React.ComponentProps<typeof JobFeed>> = {}) {
+  return renderFeed({ standaloneCapture: true, ...props });
+}
+
 // This jsdom env ships no Storage — polyfill a minimal in-memory one (same
 // pattern as OperatorStationContext.test).
 class MemoryStorage {
@@ -97,99 +110,22 @@ beforeEach(() => {
   window.localStorage.setItem('jigged:composer-mic-hint', JSON.stringify({ shows: 0, dismissed: true }));
 });
 
-describe('JobFeed — post-completion capture offer', () => {
-  it('shows the offer only after a completion signal, and only when nothing is captured', async () => {
-    const { rerender } = renderFeed({ captureOfferSignal: 0 });
-    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
-
-    // No offer before a completion event.
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-
-    // A new completion signal, empty feed → offer appears.
-    rerender(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} captureOfferSignal={1} />);
-    expect(await screen.findByText(OFFER_TEXT)).toBeInTheDocument();
-  });
-
-  it('does NOT offer when the operator already captured a note or photo', async () => {
-    mock(getJobNotes).mockResolvedValue([makeNote({ body: 'set jaws to 0.5' })]);
-    const { rerender } = renderFeed({ captureOfferSignal: 0 });
-    await waitFor(() => expect(screen.getByText('set jaws to 0.5')).toBeInTheDocument());
-
-    rerender(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} captureOfferSignal={1} />);
-    // Give the effect a chance to run, then assert it stayed closed.
-    await Promise.resolve();
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-  });
-
-  it('still offers when the only note is an auto-logged event note', async () => {
-    mock(getJobNotes).mockResolvedValue([
-      makeNote({ note_type: 'event', body: 'Order qty changed 10 → 12' }),
-    ]);
-    const { rerender } = renderFeed({ captureOfferSignal: 0 });
-    await waitFor(() => expect(screen.getByText('Order qty changed 10 → 12')).toBeInTheDocument());
-
-    rerender(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} captureOfferSignal={1} />);
-    expect(await screen.findByText(OFFER_TEXT)).toBeInTheDocument();
-  });
-
-  it('is one-per-event: Skip dismisses and it only reopens on a new signal', async () => {
-    const user = userEvent.setup();
-    const { rerender } = renderFeed({ captureOfferSignal: 1 });
-    await screen.findByText(OFFER_TEXT);
-
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-
-    // Re-render with the SAME signal — stays closed (skip means skip).
-    rerender(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} captureOfferSignal={1} />);
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-
-    // A brand-new completion → a fresh single offer.
-    rerender(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} captureOfferSignal={2} />);
-    expect(await screen.findByText(OFFER_TEXT)).toBeInTheDocument();
-  });
-
-  it('Skip performs no writes — the offer can never affect the (already-committed) completion', async () => {
-    const user = userEvent.setup();
-    renderFeed({ captureOfferSignal: 1 });
-    await screen.findByText(OFFER_TEXT);
-
-    await user.click(screen.getByRole('button', { name: 'Skip' }));
-    expect(addJobNote).not.toHaveBeenCalled();
-    expect(addJobNoteMedia).not.toHaveBeenCalled();
-  });
-
-  it('"Add photo" opens the file picker and closes the offer', async () => {
-    const user = userEvent.setup();
-    const { container } = renderFeed({ captureOfferSignal: 1 });
-    await screen.findByText(OFFER_TEXT);
-
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {});
-
-    // Offer's "Add photo" is the first (rendered above the composer's button).
-    await user.click(screen.getAllByRole('button', { name: 'Add photo' })[0]);
-
-    expect(clickSpy).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-  });
-
-  it('"Add note" focuses the composer and closes the offer', async () => {
-    const user = userEvent.setup();
-    renderFeed({ captureOfferSignal: 1 });
-    await screen.findByText(OFFER_TEXT);
-
-    await user.click(screen.getByRole('button', { name: 'Add note' }));
-
-    const field = screen.getByPlaceholderText('Add a note or photo for this step…');
-    expect(field).toHaveFocus();
-    expect(screen.queryByText(OFFER_TEXT)).not.toBeInTheDocument();
-  });
-});
+// DELETED WITH B4: the post-completion "add a photo?" offer.
+//
+// Six tests went with it, and that is the right outcome rather than a loss of
+// coverage. The offer existed to chase a note AFTER the fact, which is exactly
+// the two-stage commit that lost photos: it prompted, the operator attached, a
+// thumbnail appeared, and nothing was written until a separate Post they had no
+// reason to look for. Capture now sits inside the completion block and lands
+// with the completion, so there is nothing to prompt for.
+//
+// The property the offer protected — completion durable BEFORE capture is
+// attempted — is asserted in OperationActionPage.test.tsx
+// ('writes the note only AFTER the completion has landed').
 
 describe('JobFeed — camera-roll photos unlocked', () => {
   it('file input has no capture attribute and still accepts images', async () => {
-    const { container } = renderFeed();
+    const { container } = renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     expect(fileInput).not.toHaveAttribute('capture');
@@ -202,20 +138,20 @@ describe('JobFeed — dictation hint', () => {
 
   it('shows on first composer mounts and counts the show', async () => {
     window.localStorage.removeItem(HINT_KEY);
-    renderFeed();
+    renderComposer();
     expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem(HINT_KEY)!)).toEqual({ shows: 1, dismissed: false });
   });
 
   it('still shows on the last allowed mount (below the cap of 5)', async () => {
     window.localStorage.setItem(HINT_KEY, JSON.stringify({ shows: 4, dismissed: false }));
-    renderFeed();
+    renderComposer();
     expect(await screen.findByText(HINT_TEXT)).toBeInTheDocument();
   });
 
   it('stops showing once the cap of 5 is reached', async () => {
     window.localStorage.setItem(HINT_KEY, JSON.stringify({ shows: 5, dismissed: false }));
-    renderFeed();
+    renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     expect(screen.queryByText(HINT_TEXT)).not.toBeInTheDocument();
   });
@@ -223,7 +159,7 @@ describe('JobFeed — dictation hint', () => {
   it('hides immediately and persists dismissal when the × is tapped', async () => {
     const user = userEvent.setup();
     window.localStorage.removeItem(HINT_KEY);
-    renderFeed();
+    renderComposer();
     await screen.findByText(HINT_TEXT);
 
     await user.click(screen.getByRole('button', { name: 'Dismiss tip' }));
@@ -240,7 +176,7 @@ describe('JobFeed — dictation hint', () => {
 describe('JobFeed — capture funnel events', () => {
   it('records composer_focused once, however many times they refocus', async () => {
     const user = userEvent.setup();
-    renderFeed();
+    renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     const field = screen.getByPlaceholderText('Add a note or photo for this step…');
 
@@ -257,7 +193,7 @@ describe('JobFeed — capture funnel events', () => {
   it('records note_saved only after the write resolves', async () => {
     const user = userEvent.setup();
     mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'watch the bore' }));
-    renderFeed();
+    renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
 
     await user.type(
@@ -278,7 +214,7 @@ describe('JobFeed — capture funnel events', () => {
     // friction, not a successful capture.
     const user = userEvent.setup();
     mock(addJobNote).mockRejectedValue(new Error('offline'));
-    renderFeed();
+    renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
 
     await user.type(
@@ -297,7 +233,7 @@ describe('JobFeed — capture funnel events', () => {
 
   it('records composer_abandoned when they open it and leave without saving', async () => {
     const user = userEvent.setup();
-    const { unmount } = renderFeed();
+    const { unmount } = renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
 
     await user.type(
@@ -314,7 +250,7 @@ describe('JobFeed — capture funnel events', () => {
   });
 
   it('does NOT record abandonment when they never opened the composer', async () => {
-    const { unmount } = renderFeed();
+    const { unmount } = renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
     unmount();
 
@@ -326,7 +262,7 @@ describe('JobFeed — capture funnel events', () => {
   it('does NOT record abandonment after a successful save', async () => {
     const user = userEvent.setup();
     mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'saved' }));
-    const { unmount } = renderFeed();
+    const { unmount } = renderComposer();
     await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
 
     await user.type(screen.getByPlaceholderText('Add a note or photo for this step…'), 'saved');

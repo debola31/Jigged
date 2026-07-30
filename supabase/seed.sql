@@ -310,41 +310,52 @@ insert into public.routings (id, company_id, part_id, name, description) values
 on conflict (id) do nothing;
 
 -- routing_operations: internal = setup 15 / cycle 3 / no external price; external (anodize) = 0/0 + external_unit_price 4.5.
+--
+-- INSTRUCTIONS ARE MOSTLY NULL, ON PURPOSE. Every step used to carry
+-- '<WorkCenter> operation' — a string that restates the work center already shown
+-- in the operator's header and says nothing. The operation page renders the
+-- Instructions box only when the column is non-empty, so junk here made the box
+-- appear on EVERY step in every demo and preview, which teaches an operator that
+-- the box is noise. They then skip it on the day it says "torque to 40, not 45".
+--
+-- A handful of steps get real shop instructions and the rest get NULL, so the
+-- seed shows both states honestly — and a usability session tells us something
+-- about the design rather than about our test data.
 insert into public.routing_operations (routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, instructions) values
   -- housing: saw, mill, deburr
-  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000001',10,15,3,null,null,'Bandsaw operation'),
-  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000002',20,15,3,null,null,'CNC Mill (Haas VF-2) operation'),
-  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000004',30,15,3,null,null,'Manual Deburr operation'),
+  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000001',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000002',20,15,3,null,null,'Indicate the fixture to 0.001 before the first bore — the pattern walks otherwise.'),
+  ('70000000-0000-0000-0000-000000000009','40000000-0000-0000-0000-000000000004',30,15,3,null,null,null),
   -- shaft: saw, lathe, deburr
-  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000001',10,15,3,null,null,'Bandsaw operation'),
-  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000003',20,15,3,null,null,'CNC Lathe (Okuma) operation'),
-  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000004',30,15,3,null,null,'Manual Deburr operation'),
+  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000001',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000003',20,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000010','40000000-0000-0000-0000-000000000004',30,15,3,null,null,null),
   -- cover: mill, deburr, anodize(external)
-  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000002',10,15,3,null,null,'CNC Mill (Haas VF-2) operation'),
-  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000004',20,15,3,null,null,'Manual Deburr operation'),
-  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000007',30,0,0,null,4.5,'Anodizing (ProFinish) operation'),
+  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000002',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000011','40000000-0000-0000-0000-000000000007',30,0,0,null,4.5,'Mask the bore before it goes out. ProFinish will not mask it for us.'),
   -- bracket: mill, deburr
-  ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000002',10,15,3,null,null,'CNC Mill (Haas VF-2) operation'),
-  ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000004',20,15,3,null,null,'Manual Deburr operation'),
+  ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000002',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000012','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null),
   -- pumpcore: assembly, inspect
-  ('70000000-0000-0000-0000-000000000013','40000000-0000-0000-0000-000000000005',10,15,3,null,null,'Assembly Bench operation'),
-  ('70000000-0000-0000-0000-000000000013','40000000-0000-0000-0000-000000000006',20,15,3,null,null,'Final Inspection operation'),
+  ('70000000-0000-0000-0000-000000000013','40000000-0000-0000-0000-000000000005',10,15,3,null,null,'Press the bearings with the arbor fixture. Seat fully BEFORE pinning or the shaft binds.'),
+  ('70000000-0000-0000-0000-000000000013','40000000-0000-0000-0000-000000000006',20,15,3,null,null,'Seal-face flatness within 0.0005 TIR. Anything over, set it aside — do not rework on the bench.'),
   -- gearbox: assembly, inspect
-  ('70000000-0000-0000-0000-000000000014','40000000-0000-0000-0000-000000000005',10,15,3,null,null,'Assembly Bench operation'),
-  ('70000000-0000-0000-0000-000000000014','40000000-0000-0000-0000-000000000006',20,15,3,null,null,'Final Inspection operation'),
+  ('70000000-0000-0000-0000-000000000014','40000000-0000-0000-0000-000000000005',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000014','40000000-0000-0000-0000-000000000006',20,15,3,null,null,null),
   -- pump: assembly, inspect
-  ('70000000-0000-0000-0000-000000000015','40000000-0000-0000-0000-000000000005',10,15,3,null,null,'Assembly Bench operation'),
-  ('70000000-0000-0000-0000-000000000015','40000000-0000-0000-0000-000000000006',20,15,3,null,null,'Final Inspection operation'),
+  ('70000000-0000-0000-0000-000000000015','40000000-0000-0000-0000-000000000005',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000015','40000000-0000-0000-0000-000000000006',20,15,3,null,null,null),
   -- actuator: assembly, inspect
-  ('70000000-0000-0000-0000-000000000016','40000000-0000-0000-0000-000000000005',10,15,3,null,null,'Assembly Bench operation'),
-  ('70000000-0000-0000-0000-000000000016','40000000-0000-0000-0000-000000000006',20,15,3,null,null,'Final Inspection operation'),
+  ('70000000-0000-0000-0000-000000000016','40000000-0000-0000-0000-000000000005',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000016','40000000-0000-0000-0000-000000000006',20,15,3,null,null,null),
   -- manifold: mill, assembly, inspect
-  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000002',10,15,3,null,null,'CNC Mill (Haas VF-2) operation'),
-  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000005',20,15,3,null,null,'Assembly Bench operation'),
-  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000006',30,15,3,null,null,'Final Inspection operation'),
+  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000002',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000005',20,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000017','40000000-0000-0000-0000-000000000006',30,15,3,null,null,null),
   -- rail: saw, deburr
-  ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000001',10,15,3,null,null,'Bandsaw operation'),
-  ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000004',20,15,3,null,null,'Manual Deburr operation')
+  ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000001',10,15,3,null,null,null),
+  ('70000000-0000-0000-0000-000000000018','40000000-0000-0000-0000-000000000004',20,15,3,null,null,null)
 on conflict do nothing;
 
 -- Pricing tiers for sellable products (sequence 1/2/3…; markup %).

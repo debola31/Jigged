@@ -218,6 +218,21 @@ export default function MachineLogPanel({
     return map;
   }, [log]);
 
+  // What each fix answers, so the resolution can quote it. The link has existed
+  // in the data since the first migration and was invisible on screen: a fix
+  // landed at the top of the log saying nothing about what it was for.
+  const fixedBodyById = useMemo(() => {
+    const bodies = new Map<string, string | null>();
+    for (const e of log?.entries ?? []) bodies.set(e.id, e.body);
+    const map = new Map<string, string>();
+    for (const e of log?.entries ?? []) {
+      if (!e.resolves_note_id) continue;
+      const target = bodies.get(e.resolves_note_id);
+      if (target) map.set(e.id, target);
+    }
+    return map;
+  }, [log]);
+
   if (loading && !log) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -323,6 +338,7 @@ export default function MachineLogPanel({
                     companyId={companyId}
                     memberId={memberId}
                     resolvedBy={resolverAuthorById.get(entry.id) ?? null}
+                    fixes={fixedBodyById.get(entry.id) ?? null}
                     readOnly={readOnly}
                   />
                 </Box>

@@ -157,6 +157,33 @@ describe('MachineLogPanel', () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it('shows a fix what it answers, in both directions', async () => {
+    // The link lived only in the data: a fix landed at the top of the log saying
+    // nothing about what it was for, and the item it closed said only that
+    // somebody had fixed it. Both ends now name the other.
+    const obs = note({
+      id: 'obs',
+      body: 'Coolant smells off.',
+      maintenance_kind: 'noticed',
+      author_name: 'Kurtis',
+    });
+    const fix = note({
+      id: 'fix',
+      body: 'Drained and recharged.',
+      resolves_note_id: 'obs',
+      author_name: 'Dana',
+    });
+    mockGetMachineLog.mockResolvedValue({ entries: [fix, obs], open: [] });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Drained and recharged.');
+
+    // Forward: the fix quotes the thing it fixed.
+    expect(screen.getByText(/Fixes:\s*Coolant smells off\./)).toBeInTheDocument();
+    // Back: the resolved item names who closed it.
+    expect(screen.getByText(/Fixed by Dana/)).toBeInTheDocument();
+  });
+
   it('names the author in the log but not while an item is outstanding', async () => {
     // §5: a list of outstanding items with names down the side is a list of who
     // reports the most problems. The name is deferred, not lost.

@@ -95,6 +95,10 @@ or triaging an issue. The rules that bind while writing code:
 - **Sentry is the error tracker; PostHog is product analytics.** Never add a second error
   tracker — `capture_exceptions` stays `false` in `instrumentation-client.ts`. Vercel has no
   JS error tracking at all, so it substitutes for neither.
+- **Vercel Web Analytics (`<Analytics />` in `app/layout.tsx`) is kept on purpose**, even
+  though it overlaps PostHog. It's the free tier and costs one script tag: basic pageview
+  counts and Web Vitals with zero per-feature instrumentation. PostHog owns the journeys,
+  funnels and retention. Don't remove either as "redundant".
 - **Never pass a raw Supabase error to `Sentry.captureException`.** It rejects with a plain
   object, which Sentry can't fingerprint — you get an issue titled `"e"` and the real
   message buried in a `__serialized__` extra. Wrap it: `captureException(toError(err, '…'))`

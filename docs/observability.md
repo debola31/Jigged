@@ -1,20 +1,42 @@
 # Observability
 
-Three tools, three layers. They are **not** redundant, but there is exactly one overlap
-you must not re-create.
+Four surfaces across three vendors. They answer different questions, and the two places
+they *do* overlap are handled deliberately — one avoided, one knowingly accepted.
 
-| Tool | Layer | Answers |
-|---|---|---|
-| **Vercel** (logs + analytics) | Infrastructure | Did the deploy work? Is the function slow? |
-| **Sentry** | Correctness | What broke, where in the code, for whom? |
-| **PostHog** | Behaviour | What did users do? Where did they drop off? |
+| Surface | Layer | Answers | Wired in |
+|---|---|---|---|
+| **Vercel Runtime Logs** | Infrastructure | Did the deploy succeed? Did the function throw or time out? | nothing to wire — platform |
+| **Vercel Web Analytics** | Basic traffic | How many pageviews? Which routes? Web Vitals? | `<Analytics />` in [`app/layout.tsx`](../app/layout.tsx) |
+| **Sentry** | Correctness | What broke, where in the code, for whom? | 3 config files + `instrumentation.ts` |
+| **PostHog** | Behaviour | What did users do? Where did they drop off? | [`instrumentation-client.ts`](../instrumentation-client.ts) |
 
-**Sentry owns error tracking. PostHog must not.** `capture_exceptions` is deliberately
-`false` in [`instrumentation-client.ts`](../instrumentation-client.ts) — Sentry has the
-grouping, breadcrumbs and source-map upload that make a solo triage queue workable, and
-PostHog's error tracking has no advanced grouping. Two trackers means double ingest and
-two places to look during an incident. Vercel has **no** JavaScript error tracking at all,
-so it is not a substitute for either.
+### Overlap 1 — error tracking: avoided
+
+**Sentry owns errors. PostHog must not.** `capture_exceptions` is deliberately `false` in
+[`instrumentation-client.ts`](../instrumentation-client.ts) — Sentry has the grouping,
+breadcrumbs and source-map upload that make a solo triage queue workable, and PostHog's
+error tracking has no advanced grouping. Two trackers means double ingest and two places to
+look during an incident. Turning it on would also make PostHog source-map upload a hard CI
+requirement; leaving it off deletes that work item.
+
+**Vercel has no JavaScript error tracking at all**, so it substitutes for neither. A
+client-side crash is invisible in Vercel logs.
+
+### Overlap 2 — basic web analytics: accepted on purpose
+
+Vercel Web Analytics and PostHog's web-analytics view genuinely overlap. **This is a
+deliberate choice, not an oversight — do not "clean it up".**
+
+- **Vercel Analytics** stays for at-a-glance pageview counts, per-route traffic and Web
+  Vitals. It's the free tier, zero-config, zero-maintenance, and it needs no instrumentation
+  per feature. One component in the root layout and it keeps working.
+- **PostHog** is where the analysis that actually informs product decisions lives: user
+  journeys, funnels, retention, drop-off, session replay, feature flags. Vercel can tell you
+  conversions fell; only PostHog can tell you where.
+
+The redundancy costs one script tag. Removing it would trade a free, always-correct traffic
+number for a marginal bundle saving and a dependency on PostHog events being instrumented
+correctly. Keep both.
 
 ---
 

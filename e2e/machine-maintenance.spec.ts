@@ -102,7 +102,7 @@ test.describe('Machine Maintenance', () => {
 
     const observation = `E2E way cover drags ${stamp()}`;
     await composer(page).fill(observation);
-    await page.getByRole('button', { name: /needs attention/i }).click();
+    await page.getByRole('checkbox', { name: /needs attention/i }).click();
     await addButton(page).click();
 
     // Pinned in the open list AND present on the timeline: two occurrences of one
@@ -136,7 +136,7 @@ test.describe('Machine Maintenance', () => {
 
     const observation = `E2E coolant smells off ${stamp()}`;
     await composer(page).fill(observation);
-    await page.getByRole('button', { name: /needs attention/i }).click();
+    await page.getByRole('checkbox', { name: /needs attention/i }).click();
     await addButton(page).click();
     await expect(page.getByText(observation)).toHaveCount(2, { timeout: 30_000 });
 

@@ -218,9 +218,9 @@ describe('MachineLogPanel', () => {
       render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
       await screen.findByText(/nothing logged for this machine yet/i);
 
-      expect(screen.getByRole('button', { name: /needs attention/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /needs attention/i })).toBeInTheDocument();
       for (const dead of ['cleaned', 'repaired', 'replaced', 'adjusted']) {
-        expect(screen.queryByRole('button', { name: new RegExp(`^${dead}$`, 'i') })).toBeNull();
+        expect(screen.queryByRole('checkbox', { name: new RegExp(`^${dead}$`, 'i') })).toBeNull();
       }
     });
 
@@ -247,7 +247,7 @@ describe('MachineLogPanel', () => {
       render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
       await screen.findByText(/nothing logged for this machine yet/i);
 
-      const flag = screen.getByRole('button', { name: /needs attention/i });
+      const flag = screen.getByRole('checkbox', { name: /needs attention/i });
       await userEvent.type(screen.getByPlaceholderText(/what did you do/i), 'Looked at it.');
       await userEvent.click(flag);
       await userEvent.click(flag);

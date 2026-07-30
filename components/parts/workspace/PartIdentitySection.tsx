@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -167,6 +168,17 @@ export default function PartIdentitySection({
         ...formData,
         part_name: formData.part_name.trim(),
         primary_unit: formData.primary_unit?.trim() || null,
+      });
+      // Captured here rather than in the workspace shell: this is the only place that
+      // calls createPart, so it's the one point where "a part was created" is true.
+      // Properties are the shape choices that drive later journeys (a stocked bought
+      // part implies inventory + procurement; a made part implies a routing) — never
+      // the part name, which is customer-identifying.
+      posthog.capture('part_created', {
+        source: formData.source,
+        is_stocked: formData.is_stocked,
+        has_reorder_point: formData.reorder_point !== null,
+        has_preferred_vendor: formData.preferred_vendor_id !== null,
       });
       onCreated?.(created);
     } catch (err) {

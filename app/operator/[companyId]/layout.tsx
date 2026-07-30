@@ -353,7 +353,9 @@ function OperatorShell({
           zIndex: 1, // above the fixed ambient backdrop
           flex: 1,
           mt: '48px', // Single-row AppBar height
-          mb: navVisible ? '56px' : 0, // BottomNavigation height
+          // BottomNavigation height plus whatever the device reserves at the bottom (the iOS home
+          // indicator). `viewportFit: 'cover'` in the root layout is what makes the inset non-zero.
+          mb: navVisible ? 'calc(56px + env(safe-area-inset-bottom))' : 0,
           overflow: 'auto',
           p: 2,
         }}
@@ -370,6 +372,11 @@ function OperatorShell({
             left: 0,
             right: 0,
             zIndex: 1000,
+            // Pad BELOW the tabs rather than shifting them up, so the bar's background still
+            // reaches the bottom edge of the screen. Without this the tabs sit under the iOS home
+            // indicator once the app is on a home screen — a 48px touch target you can't fully
+            // reach. Zero on every device without an inset, so desktop is unaffected.
+            pb: 'env(safe-area-inset-bottom)',
           }}
           elevation={3}
         >

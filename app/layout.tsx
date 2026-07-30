@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Space_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider, AuthProvider } from "@/components/providers";
@@ -15,6 +15,30 @@ const spaceMono = Space_Mono({
   variable: "--font-space-mono",
 });
 
+/**
+ * Viewport, declared rather than inherited.
+ *
+ * Next injects a default `width=device-width, initial-scale=1`, so the app was never shipping
+ * unscaled — what was missing was *control*. Two things matter for the shop floor:
+ *
+ *  - `viewportFit: 'cover'` lets the layout reach under the iOS home indicator and notch, which is
+ *    the precondition for the `env(safe-area-inset-*)` padding the operator bottom nav uses.
+ *  - `themeColor` tints the browser chrome to match the app instead of leaving a pale bar above a
+ *    dark UI.
+ *
+ * Deliberately NOT setting `maximumScale` or `userScalable: false`: pinch-zoom is an accessibility
+ * affordance, and this audience is 50–60-year-old shop owners reading under fluorescent light.
+ *
+ * It has to live in THIS file. `app/operator/[companyId]/layout.tsx` is `'use client'`, so it
+ * structurally cannot export viewport metadata.
+ */
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#111439', // theme.palette.background.default
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://jigged.app'),
   title: {
@@ -25,7 +49,10 @@ export const metadata: Metadata = {
     'A flexible data platform for small precision manufacturing shops. Real-time visibility, flexible inventory, and operators who actually log their work.',
   icons: {
     icon: '/icon.svg',
-    apple: '/apple-icon.png',
+    // `/apple-icon`, NOT `/apple-icon.png`. The route Next generates from `app/apple-icon.tsx` has
+    // no extension, and no such static file exists in `public/` — so this href 404'd and the
+    // home-screen icon was broken. Verified against the dev server: `.png` → 404, bare → 200.
+    apple: '/apple-icon',
   },
   openGraph: {
     title: 'Jigged — Manufacturing Operations System',

@@ -5,19 +5,22 @@ import {
   deleteFileFromStorage,
   getSignedUrl,
 } from '@/utils/storageHelpers';
+import type { StorageEntityType } from '@/utils/storageHelpers';
 import type { JobNoteMedia } from '@/types/operator';
 
 /**
  * Access layer for note media — photos (and, later, short videos) attached to a
  * `notes` entry. File bytes live in the private `attachments` storage bucket
- * under {companyId}/jobs/{jobId}/... (see utils/storageHelpers.ts, whose bucket
- * RLS already gates by the company folder); this module manages the `note_media`
- * metadata rows and ties the two together.
+ * under {companyId}/{entityType}/{entityId}/... (see utils/storageHelpers.ts,
+ * whose bucket RLS already gates by the company folder); this module manages the
+ * `note_media` metadata rows and ties the two together.
  *
  * The storage path still keys on the capturing job even for durable
  * part-subject notes: it is only a folder layout, and the company segment (which
  * is what the bucket RLS gates on) is unchanged. Repathing existing objects would
- * be a data migration with no functional benefit.
+ * be a data migration with no functional benefit. A machine-subject note has no
+ * job at all, so it files under work-centers instead — the same reasoning, not an
+ * exception to it.
  *
  * Mirrors partAttachmentsAccess.ts. Heavy media work (compression, EXIF fix,
  * dimension reading) happens in the browser BEFORE these calls — they only see
@@ -55,20 +58,31 @@ function rowToMedia(row: MediaRow): JobNoteMedia {
 }
 
 /**
- * Attach one (already-compressed) photo to a job note. Uploads to
- * {companyId}/jobs/{jobId}/... then records the metadata row. Rolls back the
- * storage object if the row insert fails so a failed attach never leaks an
- * orphaned file. `dims` (the compressed image's pixel size) is optional.
+ * Attach one (already-compressed) photo to a note of ANY subject. Uploads to
+ * {companyId}/{entityType}/{entityId}/... then records the metadata row. Rolls
+ * back the storage object if the row insert fails so a failed attach never leaks
+ * an orphaned file. `dims` (the compressed image's pixel size) is optional.
+ *
+ * The folder is a caller decision because a machine-subject note has no job to
+ * file under — its photos live beside the machine. The company segment, which is
+ * the only one the bucket RLS reads, is unchanged either way.
  */
-export async function addJobNoteMedia(
+export async function addNoteMedia(
   companyId: string,
-  jobId: string,
   noteId: string,
   file: File,
-  opts?: { dims?: { width: number; height: number } },
+  opts: {
+    folder: { entityType: StorageEntityType; entityId: string };
+    dims?: { width: number; height: number };
+  },
 ): Promise<JobNoteMedia> {
   const supabase = getSupabase();
-  const storagePath = generateStoragePath(companyId, 'jobs', jobId, file.name);
+  const storagePath = generateStoragePath(
+    companyId,
+    opts.folder.entityType,
+    opts.folder.entityId,
+    file.name,
+  );
   await uploadFileToStorage(storagePath, file);
 
   const { data, error } = await supabase
@@ -89,11 +103,30 @@ export async function addJobNoteMedia(
   if (error) {
     // Roll back the orphaned upload so a failed insert doesn't leak a file.
     await deleteFileFromStorage(storagePath).catch(() => {});
-    console.error('Error inserting job note media:', error);
+    console.error('Error inserting note media:', error);
     throw new Error('Failed to attach the photo. Please try again.');
   }
 
   return rowToMedia(data as unknown as MediaRow);
+}
+
+/**
+ * Attach a photo to a note captured on a job. Files under the capturing job even
+ * when the note's SUBJECT is a part — see the header: the folder is layout, not
+ * meaning, and repathing existing objects would be a data migration that bought
+ * nothing.
+ */
+export function addJobNoteMedia(
+  companyId: string,
+  jobId: string,
+  noteId: string,
+  file: File,
+  opts?: { dims?: { width: number; height: number } },
+): Promise<JobNoteMedia> {
+  return addNoteMedia(companyId, noteId, file, {
+    folder: { entityType: 'jobs', entityId: jobId },
+    dims: opts?.dims,
+  });
 }
 
 /** A fresh, time-limited URL for rendering a photo/thumbnail in the feed. */

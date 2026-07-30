@@ -125,11 +125,25 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Otherwise fetch it directly
+      // Otherwise fetch it directly.
       try {
         const name = await getStationName(stationId);
-        setStationName(name);
+        if (name === null) {
+          // The stored station names a machine that has been archived (or was
+          // never in this company). Forget it rather than sitting on a station
+          // with no name: the header would read "Select Station" while every
+          // station-gated surface still believed one was chosen, and nothing on
+          // the floor offers a way out of that.
+          clearStoredStation();
+          setStationId(null);
+          setStationName(null);
+        } else {
+          setStationName(name);
+        }
       } catch {
+        // A failed lookup is not evidence the machine is gone — most likely the
+        // shop wifi dropped. Keep the selection and leave the name blank; the
+        // next resolve fixes it.
         setStationName(null);
       }
       setLoading(false);

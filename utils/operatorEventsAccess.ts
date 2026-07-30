@@ -42,7 +42,22 @@ export type OperatorEventKind =
   | 'note_saved'
   | 'note_saved_with_photo'
   | 'photo_attached'
-  | 'completion_recorded';
+  | 'completion_recorded'
+  // Machine Maintenance. The composer moments (composer_focused, note_saved,
+  // note_saved_with_photo, photo_attached, composer_abandoned) are REUSED on the
+  // machine surface with workCenterId in context, so the same friction reading
+  // works across both containers and the two are comparable. Only these two are
+  // genuinely new:
+  //
+  //   machine_page_opened — the precondition for reading any null result. A
+  //     container nobody filled and a container nobody REACHED both look like
+  //     silence from outside; this is what tells them apart, and without it a
+  //     quiet four weeks cannot honestly be recorded as a kill.
+  //   noticed_resolved — the loop closing. Distinct from note_saved because an
+  //     entry that fixes something somebody else flagged is the behaviour the
+  //     module is actually betting on.
+  | 'machine_page_opened'
+  | 'noticed_resolved';
 
 export type OperatorEventContext = Record<string, string | number | boolean | null>;
 

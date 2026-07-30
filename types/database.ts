@@ -1493,8 +1493,10 @@ export type Database = {
           job_id: string | null
           job_operation_id: string | null
           job_part_id: string | null
+          maintenance_kind: string | null
           note_type: string
           part_id: string | null
+          resolves_note_id: string | null
           routing_operation_id: string | null
           subject_kind: string
           usage_count: number
@@ -1513,8 +1515,10 @@ export type Database = {
           job_id?: string | null
           job_operation_id?: string | null
           job_part_id?: string | null
+          maintenance_kind?: string | null
           note_type?: string
           part_id?: string | null
+          resolves_note_id?: string | null
           routing_operation_id?: string | null
           subject_kind: string
           usage_count?: number
@@ -1533,8 +1537,10 @@ export type Database = {
           job_id?: string | null
           job_operation_id?: string | null
           job_part_id?: string | null
+          maintenance_kind?: string | null
           note_type?: string
           part_id?: string | null
+          resolves_note_id?: string | null
           routing_operation_id?: string | null
           subject_kind?: string
           usage_count?: number
@@ -1603,6 +1609,13 @@ export type Database = {
             columns: ["part_id"]
             isOneToOne: false
             referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_resolves_fk"
+            columns: ["resolves_note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
             referencedColumns: ["id"]
           },
           {
@@ -3191,6 +3204,67 @@ export type Database = {
         }
         Relationships: []
       }
+      work_center_attachments: {
+        Row: {
+          company_id: string
+          created_at: string
+          file_name: string
+          id: string
+          kind: string
+          mime_type: string | null
+          size_bytes: number | null
+          storage_path: string
+          uploaded_by: string | null
+          work_center_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          file_name: string
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path: string
+          uploaded_by?: string | null
+          work_center_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          kind?: string
+          mime_type?: string | null
+          size_bytes?: number | null
+          storage_path?: string
+          uploaded_by?: string | null
+          work_center_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_center_attachments_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_center_attachments_uploader_fk"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_center_attachments_wc_fk"
+            columns: ["work_center_id"]
+            isOneToOne: false
+            referencedRelation: "work_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_centers: {
         Row: {
           company_id: string
@@ -3200,10 +3274,15 @@ export type Database = {
           id: string
           kind: string
           labor_rate: number | null
+          make: string | null
           metadata: Json | null
+          model: string | null
           name: string
+          purchased_on: string | null
+          serial_number: string | null
           updated_at: string
           vendor_id: string | null
+          year_built: number | null
         }
         Insert: {
           company_id: string
@@ -3213,10 +3292,15 @@ export type Database = {
           id?: string
           kind?: string
           labor_rate?: number | null
+          make?: string | null
           metadata?: Json | null
+          model?: string | null
           name: string
+          purchased_on?: string | null
+          serial_number?: string | null
           updated_at?: string
           vendor_id?: string | null
+          year_built?: number | null
         }
         Update: {
           company_id?: string
@@ -3226,10 +3310,15 @@ export type Database = {
           id?: string
           kind?: string
           labor_rate?: number | null
+          make?: string | null
           metadata?: Json | null
+          model?: string | null
           name?: string
+          purchased_on?: string | null
+          serial_number?: string | null
           updated_at?: string
           vendor_id?: string | null
+          year_built?: number | null
         }
         Relationships: [
           {

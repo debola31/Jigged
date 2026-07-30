@@ -12,6 +12,12 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
+import {
+  deleteFileFromStorage,
+  generateStoragePath,
+  getSignedUrls,
+  uploadFileToStorage,
+} from '@/utils/storageHelpers';
 import type {
   CreateLocationInput,
   DepleteOptions,
@@ -29,7 +35,7 @@ import type {
 import type { MaterialLocation } from '@/types/materialCheck';
 
 const LOCATION_COLUMNS =
-  'id, company_id, parent_id, name, kind, code, sort_order, created_at, updated_at';
+  'id, company_id, parent_id, name, kind, code, sort_order, photo_path, created_at, updated_at';
 
 /** Split an id list so a batched `.in()` stays inside PostgREST's URL limits. */
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -79,21 +85,100 @@ export interface LocationBoardData {
   locations: InventoryLocation[];
   /** Direct counts only — roll up with `rollUpOccupancy` before rendering. */
   directPartCounts: ReadonlyMap<string, number>;
+  /**
+   * `photo_path` → signed URL, for the locations that have a photo.
+   *
+   * Resolved here rather than per tile: the bucket is private, so each thumbnail needs a signed
+   * URL, and a board of 22 places would otherwise open 22 connections on every load. An absent
+   * key means "no URL" (no photo, or an unreadable object) and renders as the drawn tile.
+   */
+  photoUrls: ReadonlyMap<string, string>;
 }
 
+/** How long a board thumbnail's signed URL stays good. Matches the other media surfaces. */
+const PHOTO_URL_EXPIRY_SECONDS = 4 * 60 * 60;
+
 /**
- * Everything the storage board needs, in **exactly two requests** whatever the tree size.
+ * Everything the storage board needs, in a **fixed** number of requests whatever the tree size.
  *
- * Deliberately one function rather than two calls at the call site: it gives the manager a
- * single `useLoad` and gives the test a single thing to pin. A board that grew a request per
- * location would be the N+1 this shape exists to prevent — see the request-count test.
+ * Two `.from()` reads (locations + occupancy) plus, only when some location has a photo, one
+ * batched `createSignedUrls`. Deliberately one function rather than three calls at the call site:
+ * it gives the manager a single `useLoad` and gives the test a single thing to pin. A board that
+ * grew a request per location would be the N+1 this shape exists to prevent — see the
+ * request-count test.
  */
 export async function getLocationBoard(companyId: string): Promise<LocationBoardData> {
   const [locations, directPartCounts] = await Promise.all([
     getLocations(companyId),
     getLocationOccupancy(companyId),
   ]);
-  return { locations, directPartCounts };
+
+  const paths = locations
+    .map((l) => l.photo_path)
+    .filter((p): p is string => Boolean(p));
+  // Skipped entirely when nothing has a photo, which is every company today.
+  const photoUrls = paths.length > 0 ? await getSignedUrls(paths, PHOTO_URL_EXPIRY_SECONDS) : EMPTY_URLS;
+
+  return { locations, directPartCounts, photoUrls };
+}
+
+const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * Attach a photo to a location, replacing any previous one.
+ *
+ * Compression happens in the browser before this is called (`compressPhoto`), matching the job-feed
+ * pipeline — a phone photo is several MB of pixels nobody needs at thumbnail size.
+ *
+ * Upload first, then point the row at it, then delete the old object. That order means a failure
+ * anywhere leaves a *readable* location: a failed upload changes nothing, and a failed cleanup
+ * leaves an invisible orphan in the bucket rather than a row pointing at a file that isn't there.
+ * Same trade `note_media` makes deliberately.
+ */
+export async function setLocationPhoto(
+  companyId: string,
+  locationId: string,
+  file: File,
+  previousPath?: string | null,
+): Promise<InventoryLocation> {
+  const path = generateStoragePath(companyId, 'locations', locationId, file.name);
+  await uploadFileToStorage(path, file);
+
+  let updated: InventoryLocation;
+  try {
+    updated = await updateLocation(locationId, { photo_path: path });
+  } catch (e) {
+    // Don't leave an object nothing references.
+    await deleteFileFromStorage(path).catch(() => {});
+    throw e;
+  }
+
+  if (previousPath && previousPath !== path) {
+    await deleteFileFromStorage(previousPath).catch((err) =>
+      console.warn('Replaced a location photo but could not remove the old file:', err),
+    );
+  }
+  return updated;
+}
+
+/** Drop a location's photo. Clears the row first, so a failed file delete only orphans bytes. */
+export async function clearLocationPhoto(
+  locationId: string,
+  currentPath: string | null,
+): Promise<InventoryLocation> {
+  const updated = await updateLocation(locationId, { photo_path: null });
+  if (currentPath) {
+    await deleteFileFromStorage(currentPath).catch((err) =>
+      console.warn('Cleared a location photo but could not remove the file:', err),
+    );
+  }
+  return updated;
+}
+
+/** A signed URL for one location's photo — for the detail sheet, which shows one at a time. */
+export async function getLocationPhotoUrl(path: string): Promise<string | null> {
+  const urls = await getSignedUrls([path], PHOTO_URL_EXPIRY_SECONDS);
+  return urls.get(path) ?? null;
 }
 
 // ===========================================================================

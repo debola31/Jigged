@@ -258,12 +258,22 @@ export function StorageUnitShell({
   renderCell,
   headerRight,
   muted = false,
+  photoUrl,
 }: {
   node: BoardNode;
   renderCell: RenderCell;
   headerRight?: ReactNode;
   /** Dashed and dimmed — used for the system bucket, which isn't real furniture. */
   muted?: boolean;
+  /**
+   * A photo of the real thing, shown instead of nothing above the drawing.
+   *
+   * The drawing is inferred from a free-text `kind` — a guess at what the object looks like. A
+   * photograph is how someone recognises the shelf in front of them (§5.5 decision 5). It sits
+   * ABOVE the compartments rather than replacing them, because the compartments carry fill state
+   * and the photo carries identity.
+   */
+  photoUrl?: string | null;
 }) {
   const kind = unitKind(node.kind);
   const children = node.children;
@@ -309,6 +319,15 @@ export function StorageUnitShell({
         )}
         {headerRight}
       </Box>
+
+      {photoUrl && (
+        <Box
+          component="img"
+          src={photoUrl}
+          alt=""
+          sx={{ display: 'block', width: '100%', height: 96, objectFit: 'cover' }}
+        />
+      )}
 
       {/* A unit with nothing inside it gets no body at all. It used to render an empty padded box,
           which drew a blank rectangle under every flat location — and most real locations are

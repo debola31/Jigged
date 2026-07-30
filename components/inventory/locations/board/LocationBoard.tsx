@@ -76,6 +76,14 @@ export interface LocationBoardProps {
   /** Top-level locations, each with its subtree. */
   tree: InventoryLocationNode[];
   occupancy: OccupancyMap;
+  /**
+   * `photo_path` → signed URL, resolved in ONE batched request by `getLocationBoard`.
+   *
+   * Keyed by path rather than by location id so the board never has to care where the URL came
+   * from. Deliberately not plumbed into the list view: that's the find-one-name-among-121 view and
+   * it has to stay cheap.
+   */
+  photoUrls?: ReadonlyMap<string, string>;
   onOpen: (node: InventoryLocationNode) => void;
   onAddStorage: () => void;
 }
@@ -83,6 +91,7 @@ export interface LocationBoardProps {
 export default function LocationBoard({
   tree,
   occupancy,
+  photoUrls,
   onOpen,
   onAddStorage,
 }: LocationBoardProps) {
@@ -134,6 +143,7 @@ export default function LocationBoard({
               node={node}
               renderCell={renderCell}
               muted={isSystem}
+              photoUrl={node.photo_path ? photoUrls?.get(node.photo_path) : null}
               headerRight={
                 <Chip
                   size="small"

@@ -36,7 +36,11 @@ const node = (
 const renderBoard = (
   tree: InventoryLocationNode[],
   counts: Array<[string, number]> = [],
-  overrides: Partial<{ onOpen: () => void; onAddStorage: () => void }> = {},
+  overrides: Partial<{
+    onOpen: () => void;
+    onAddStorage: () => void;
+    photoUrls: ReadonlyMap<string, string>;
+  }> = {},
 ) => {
   const onOpen = overrides.onOpen ?? vi.fn();
   const onAddStorage = overrides.onAddStorage ?? vi.fn();
@@ -44,6 +48,7 @@ const renderBoard = (
     <LocationBoard
       tree={tree}
       occupancy={rollUpOccupancy(tree, new Map(counts))}
+      photoUrls={overrides.photoUrls}
       onOpen={onOpen}
       onAddStorage={onAddStorage}
     />,
@@ -155,5 +160,49 @@ describe('LocationBoard', () => {
 
     expect(screen.getByText('Unit 30')).toBeInTheDocument();
     expect(screen.queryByText(/\+\d+ more/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Photos on the tiles — §5.5 decision 5, "a photo of the actual rack beats any icon".
+ *
+ * The drawing is inferred from a free-text `kind`, i.e. a guess at what the object looks like. A
+ * photograph is how someone recognises the shelf in front of them.
+ */
+describe('LocationBoard — photos', () => {
+  const withPhoto = () =>
+    node({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', photo_path: 'co1/locations/cab3/a.jpg' });
+
+  it('shows the photo when a URL resolved for its path', () => {
+    renderBoard([withPhoto()], [], {
+      photoUrls: new Map([['co1/locations/cab3/a.jpg', 'https://signed/a']]),
+    });
+    expect(document.querySelector('img[src="https://signed/a"]')).not.toBeNull();
+  });
+
+  /** Signed URLs expire and objects can vanish; a missing one falls back to the drawing. */
+  it('falls back to the drawing when the path has no URL', () => {
+    renderBoard([withPhoto()], [], { photoUrls: new Map() });
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.getByText('Cabinet 3')).toBeInTheDocument();
+  });
+
+  it('draws nothing extra for a location with no photo', () => {
+    renderBoard([cabinetWithShelves()]);
+    expect(document.querySelector('img')).toBeNull();
+  });
+
+  /** The photo identifies the unit; the compartments carry fill state. Both, not either. */
+  it('keeps the compartments and their fill state alongside the photo', () => {
+    const shelfA = node({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3' }, [], 1);
+    const cab = node(
+      { id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', photo_path: 'p.jpg' },
+      [shelfA],
+    );
+    renderBoard([cab], [['shelf-a', 2]], { photoUrls: new Map([['p.jpg', 'https://signed/p']]) });
+
+    expect(document.querySelector('img[src="https://signed/p"]')).not.toBeNull();
+    expect(screen.getByText('Shelf A')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cabinet 3 — 2 parts' })).toBeInTheDocument();
   });
 });

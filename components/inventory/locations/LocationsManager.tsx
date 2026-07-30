@@ -33,6 +33,8 @@ import {
   updateLocation,
   duplicateLocation,
   deleteLocation,
+  setLocationPhoto,
+  clearLocationPhoto,
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
@@ -100,6 +102,7 @@ function indexTree(roots: InventoryLocationNode[]): Map<string, InventoryLocatio
 // Stable empty fallbacks so the tree/labels memos don't churn while loading.
 const EMPTY_LOCATIONS: InventoryLocation[] = [];
 const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
+const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
 
 interface LocationsManagerProps {
   companyId: string;
@@ -183,6 +186,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   });
   const locations = boardData?.locations ?? EMPTY_LOCATIONS;
   const directPartCounts = boardData?.directPartCounts ?? EMPTY_COUNTS;
+  const photoUrls = boardData?.photoUrls ?? EMPTY_URLS;
 
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
   // Sorted once here so the board and the list agree — `Unassigned` last in both. Sorting only
@@ -275,6 +279,22 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       setSheetId(null);
       setDeleteState({ open: true, node });
     },
+  };
+
+  /**
+   * Photo handlers.
+   *
+   * A full `reload()` afterwards rather than patching state: the board's signed URLs come from one
+   * batched read, and re-deriving them here would mean a second code path producing the same map.
+   */
+  const pickPhoto = async (node: InventoryLocationNode, file: File) => {
+    await setLocationPhoto(companyId, node.id, file, node.photo_path);
+    await reload();
+  };
+
+  const dropPhoto = async (node: InventoryLocationNode) => {
+    await clearLocationPhoto(node.id, node.photo_path);
+    await reload();
   };
 
   const submitForm = async (values: LocationFormValues) => {
@@ -416,6 +436,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
             <LocationBoard
               tree={tree}
               occupancy={occupancy}
+              photoUrls={photoUrls}
               onOpen={openSheet}
               onAddStorage={openTopLevelBuilder}
             />
@@ -438,7 +459,10 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         node={sheetNode}
         path={sheetPath}
         occupancy={occupancy}
+        photoUrl={sheetNode?.photo_path ? photoUrls.get(sheetNode.photo_path) ?? null : null}
         actions={sheetActions}
+        onPickPhoto={pickPhoto}
+        onClearPhoto={dropPhoto}
         onNavigate={openSheet}
         onClose={() => setSheetId(null)}
       />

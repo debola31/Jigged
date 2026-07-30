@@ -578,6 +578,7 @@ export type Database = {
           kind: string | null
           name: string
           parent_id: string | null
+          photo_path: string | null
           sort_order: number
           updated_at: string
         }
@@ -589,6 +590,7 @@ export type Database = {
           kind?: string | null
           name: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -600,6 +602,7 @@ export type Database = {
           kind?: string | null
           name?: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }

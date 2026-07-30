@@ -280,7 +280,13 @@ export default function WorkCenterDetailPage() {
         <Card elevation={2} sx={{ mt: 3 }}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              Maintenance
+              Maintenance log
+            </Typography>
+            {/* Sub-labelled, because the card is titled "Maintenance log" and an
+                upload button is not a log entry. Two named things beat one
+                heading that covers only half of what sits under it. */}
+            <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+              Manuals
             </Typography>
             <MachineManualsManager companyId={companyId} workCenterId={workCenterId} />
             <Divider sx={{ my: 2 }} />

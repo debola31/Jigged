@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@/__tests__/test-utils';
+import { render, screen, waitFor, within } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 const { mockGetMachineLog, mockGetMachineDetails, mockAddMachineNote, mockLogOperatorEvent } =
@@ -214,6 +214,40 @@ describe('MachineLogPanel', () => {
         .getByText('Old observation.')
         .compareDocumentPosition(screen.getByText('Something unrelated.')),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('renders an entry that is BOTH a reply and still open exactly once', async () => {
+    // The exactly-once invariant (§4.2) applied to the nested case. `openIds` is
+    // filtered out of replies as well as roots, because an entry pinned above
+    // must never also appear below.
+    //
+    // A resolver carries no flag of its own, so this row cannot be produced by
+    // the UI — replyWriter hard-codes maintenanceKind: null. That coupling is
+    // invisible from the render site, which is exactly why it is pinned here:
+    // add a kind chip to the reply composer and without the filter this entry
+    // renders twice, pinned AND nested, with nothing else catching it.
+    const root = note({ id: 'root', body: 'Root entry.', created_at: '2026-07-01T08:00:00Z' });
+    const replyStillOpen = note({
+      id: 'reply',
+      body: 'A reply that is itself flagged.',
+      resolves_note_id: 'root',
+      maintenance_kind: 'noticed',
+      created_at: '2026-07-02T08:00:00Z',
+    });
+    mockGetMachineLog.mockResolvedValue({
+      entries: [replyStillOpen, root],
+      // Derived exactly as deriveOpenItems would: noticed, and nothing resolves it.
+      open: [replyStillOpen],
+    });
+
+    render(<MachineLogPanel workCenterId="wc1" companyId="c1" />);
+    await screen.findByText('Root entry.');
+
+    expect(screen.getAllByText('A reply that is itself flagged.')).toHaveLength(1);
+    // And the one appearance is the pinned one.
+    expect(
+      within(screen.getByTestId('machine-open-items')).getByText('A reply that is itself flagged.'),
+    ).toBeInTheDocument();
   });
 
   it('names the author in the log but not while an item is outstanding', async () => {

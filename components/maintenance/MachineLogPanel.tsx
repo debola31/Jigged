@@ -234,7 +234,16 @@ export default function MachineLogPanel({
       .filter((e) => !e.resolves_note_id && !openIds.has(e.id))
       .map((root) => {
         // Oldest first within a thread — a conversation reads downward.
+        //
+        // `openIds` is applied to REPLIES as well as roots, and that symmetry is
+        // load-bearing: an entry pinned above must not also appear below, or the
+        // exactly-once invariant (§4.2) quietly stops holding. A reply is
+        // normally never open — a resolver carries no flag of its own — but that
+        // is true today only because replyWriter hard-codes maintenanceKind:
+        // null, which is invisible from here. Add a kind chip to the reply
+        // composer and without this filter the entry renders twice.
         const replies = (repliesByRoot.get(root.id) ?? [])
+          .filter((r) => !openIds.has(r.id))
           .slice()
           .sort((a, b) => a.created_at.localeCompare(b.created_at));
         const lastActivity = replies.length

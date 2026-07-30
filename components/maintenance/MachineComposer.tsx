@@ -5,8 +5,8 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
-import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { MaintenanceKind, MachineNote } from '@/types/machineMaintenance';
 import type { NoteCapture } from '@/hooks/useNoteCapture';
@@ -18,11 +18,11 @@ const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' 
  *
  * The text field, the photo picker, the dictation hint and the whole iOS
  * unreadable-file mitigation come from NoteCaptureFields — the same component
- * the step composer renders, not a copy of it. Only the one toggle is new here,
+ * the step composer renders, not a copy of it. Only the flag is new here,
  * and it lives in this component rather than in NoteCaptureFields because
  * "is this outstanding?" means nothing on a step note.
  *
- * ONE TOGGLE, NOT A TAXONOMY. An earlier draft offered five verbs (cleaned,
+ * ONE FLAG, NOT A TAXONOMY. An earlier draft offered five verbs (cleaned,
  * repaired, replaced, adjusted, noticed). Four of them had no reader anywhere in
  * the product — nothing filtered, grouped, ranked or counted by them, and §4.2
  * forbids grouping the timeline by kind — so they were five choices presented to
@@ -93,18 +93,40 @@ export default function MachineComposer({
           compact
         />
 
-        {/* One row: the flag and the commit. Two stacked full-width controls
-            cost three lines of a phone screen to say very little. */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
-          <Chip
-            icon={<ReportProblemOutlinedIcon />}
+        {/* A CHECKBOX, matching "Show completed" on the operator jobs list — the
+            one binary control operators already meet, down to the high-contrast
+            styling that reads on this dark background.
+
+            Not a Chip, which is what this was: everywhere else in the app a Chip
+            is a READ-ONLY LABEL (the flag on an entry card, "Internal" on a work
+            center, job statuses), so a tappable stateful one fights a meaning
+            people have already learned and reads as a label that wandered next to
+            a button. Not a Switch either: a switch says "applies now", and
+            nothing here happens until Add to log. A checkbox is exactly the
+            deferred, optional attribute of a form being filled in.
+
+            The label carries the colour when checked; the box alone is a small
+            state change to notice across a shop. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={kind === 'noticed'}
+                onChange={(e) => onKindChange(e.target.checked ? 'noticed' : null)}
+                sx={{
+                  color: 'rgba(255,255,255,0.6)',
+                  '&.Mui-checked': { color: 'warning.light' },
+                }}
+              />
+            }
             label="Needs attention"
-            onClick={() => onKindChange(kind === 'noticed' ? null : 'noticed')}
-            color={kind === 'noticed' ? 'warning' : 'default'}
-            variant={kind === 'noticed' ? 'filled' : 'outlined'}
-            // 48, not the Chip default: this is a tap target on a shop floor,
-            // often with gloves on, and it sits next to a 48px button.
-            sx={{ height: 48, borderRadius: 3, px: 0.5 }}
+            sx={{
+              mr: 0,
+              minHeight: 48,
+              '& .MuiFormControlLabel-label': {
+                color: kind === 'noticed' ? 'warning.light' : 'text.secondary',
+              },
+            }}
           />
           <Box sx={{ flex: 1 }} />
           <Button

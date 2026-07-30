@@ -86,6 +86,40 @@ If a backfill is genuinely impossible (truly lost history), prefer an explicit "
 
 ---
 
+### Observability: Sentry owns errors, and never lies about them
+
+Full runbook — CLI recipes, triage steps, and the traps that cost real debugging time — is
+in **[docs/observability.md](docs/observability.md)**. Read it before touching Sentry config
+or triaging an issue. The rules that bind while writing code:
+
+- **Sentry is the error tracker; PostHog is product analytics.** Never add a second error
+  tracker — `capture_exceptions` stays `false` in `instrumentation-client.ts`. Vercel has no
+  JS error tracking at all, so it substitutes for neither.
+- **Never pass a raw Supabase error to `Sentry.captureException`.** It rejects with a plain
+  object, which Sentry can't fingerprint — you get an issue titled `"e"` and the real
+  message buried in a `__serialized__` extra. Wrap it: `captureException(toError(err, '…'))`
+  from [`lib/supabaseErrors.ts`](lib/supabaseErrors.ts).
+- **"Couldn't check" is never "denied."** An access check that *fails* must not render as a
+  definitive negative. `verifyCompanyAccess` swallowing errors into `return false` is how one
+  dropped request showed "You don't have access to this company" to a user who did. Return a
+  definitive answer only for a definitive result; otherwise throw and give the UI a distinct
+  retryable state.
+- **Transient aborts are not failures.** `AbortError: Lock was stolen` is `@supabase/auth-js`
+  recovering an orphaned token-refresh lock — it means *superseded*, not *failed*. Classify
+  with `isTransientAbortError` and retry; never report it, never surface it as an error.
+- **The SDKs are off outside a production build** (`enabled: NODE_ENV === "production"`, and
+  a `"pytest" in sys.modules` guard on the backend). Don't remove those — 90% of the issue
+  queue was once this repo's own test runs, which is why nobody read the alerts.
+- **Every `ignoreErrors` entry needs a recorded reason** in `docs/observability.md`. A queue
+  you don't trust is worse than no queue.
+
+**Two gotchas worth knowing before you debug for an hour:** `sentry alert issues edit` is
+broken for this org (alert rules moved to the Workflow Engine — the old `rules/` endpoint is
+retired), and `--json` returns `{"data": [...]}`, so `jq 'length'` silently counts object
+keys. Both are covered in the runbook.
+
+---
+
 ### Deletion is archive (soft-delete), and never blocks
 
 Every user-facing entity (`parts`, `customers`, `vendors`, `work_centers`, `jobs`, `quotes`) has a nullable `deleted_at`. The UI "Delete" action sets `deleted_at` — it must **never** issue a hard `DELETE` and **never** block on a foreign-key reference. The row survives so quotes/jobs/shipments/BOMs that reference it keep resolving. See `docs/architecture.md` §16 for the full standard.
@@ -720,6 +754,7 @@ Product documentation is version-controlled in the `/docs` folder.
 | System Architecture | [docs/architecture.md](docs/architecture.md) |
 | Design System | [docs/design-system.md](docs/design-system.md) |
 | Operator Paperless Flow (journey spec) | [docs/operator-paperless-flow.md](docs/operator-paperless-flow.md) |
+| Observability (Sentry / PostHog / Vercel) | [docs/observability.md](docs/observability.md) |
 
 ### Module Specifications
 

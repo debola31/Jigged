@@ -698,7 +698,10 @@ export default function InventoryCountPage() {
                         <Typography variant="body1" noWrap>
                           {c.partName}
                         </Typography>
-                        {c.target.kind === 'location' && (
+                        {/* Company-wide, the location tells you where this row will be written.
+                            Place-scoped it's the same word on every row — the page title already
+                            said it — so it's noise. */}
+                        {!locationMode && c.target.kind === 'location' && (
                           <Typography variant="caption" color="text.secondary">
                             {c.target.locationName}
                           </Typography>

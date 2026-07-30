@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -106,6 +107,7 @@ interface LocationsManagerProps {
 }
 
 export default function LocationsManager({ companyId, companyName }: LocationsManagerProps) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /**
@@ -223,6 +225,10 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   // Every action closes the sheet first: they all open a modal of their own, and two stacked
   // surfaces on a tablet leaves nothing legible underneath.
   const sheetActions = {
+    onCountHere: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
+    },
     onAddChild: (node: InventoryLocationNode) => {
       setSheetId(null);
       setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
@@ -353,6 +359,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           Build visually
         </Button>
       </Box>
+
+      {/* The page never said what it was for, and a first-time reader could not tell — reasonably,
+          because almost every control on it is one-time setup. Two sentences: what you're looking
+          at, and the one thing here you come back to do. */}
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
+        Your storage, and what&apos;s in it. Tap anything to count it, put parts away, print its QR
+        label, or divide it up. Adding and removing stock happens on the part itself, or on the
+        shop floor by scanning a label.
+      </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 

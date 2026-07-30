@@ -27,6 +27,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 
@@ -40,6 +41,13 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 const parts = (n: number) => `${num(n)} part${n === 1 ? '' : 's'}`;
 
 export interface LocationSheetActions {
+  /**
+   * Open the place-scoped worksheet: count what's here, or send what doesn't belong elsewhere.
+   *
+   * The only action on this sheet that isn't setup, and the reason the board has a daily job at
+   * all — everything else here you do once when the shelf arrives.
+   */
+  onCountHere: (node: InventoryLocationNode) => void;
   onAddChild: (node: InventoryLocationNode) => void;
   onSubdivide: (node: InventoryLocationNode) => void;
   onPrintQR: (node: InventoryLocationNode) => void;
@@ -223,6 +231,19 @@ export default function LocationDetailSheet({
               live — so this is your put-away list, not a shelf.
             </Alert>
           )}
+
+          {/* The one recurring action, so it leads — and it's offered for the system bucket too,
+              where it's the *only* thing you can do and the most important thing on the page.
+              Everything below is setup you do once when the shelf arrives. */}
+          <Button
+            fullWidth
+            variant="contained"
+            startIcon={<FactCheckOutlinedIcon />}
+            onClick={() => actions.onCountHere(node)}
+            sx={{ mb: 2 }}
+          >
+            {node.kind === 'system' ? 'Put these away' : 'Count or put away'}
+          </Button>
 
           {node.children.length > 0 && (
             <>

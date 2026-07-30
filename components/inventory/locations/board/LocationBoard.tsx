@@ -105,7 +105,10 @@ export default function LocationBoard({
         // is missing here". Most real locations are flat (118 of 121 in their legacy export), so
         // that was the common case looking broken. Ragged heights are the honest shape.
         alignItems: 'start',
-        gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
+        // Tiles keep a readable width instead of stretching across a 5,000px monitor, where three
+        // of them floated in an ocean of empty space. `auto-fill` also means a shop with 22 places
+        // uses the width it has rather than being capped at three columns.
+        gridTemplateColumns: { xs: '1fr', sm: 'repeat(auto-fill, minmax(280px, 380px))' },
       }}
     >
       {/* Deliberately NOT truncated, unlike the preview's TOP_LIMIT. A preview of "24 of 40" is
@@ -139,14 +142,26 @@ export default function LocationBoard({
                 />
               }
             />
+            {/* Inside the tile's own border, not floating underneath it — sitting outside made the
+                caption read as a note about the board rather than about this one tile. */}
             {isSystem && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', px: 1.5, pb: 1 }}
+              <Box
+                sx={{
+                  border: 2,
+                  borderStyle: 'dashed',
+                  borderTop: 0,
+                  borderColor: 'divider',
+                  borderBottomLeftRadius: 4,
+                  borderBottomRightRadius: 4,
+                  px: 1.5,
+                  py: 1,
+                  mt: '-2px',
+                }}
               >
-                Parts with no recorded place yet — your put-away list, not a shelf.
-              </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Parts with no recorded place yet — your put-away list, not a shelf.
+                </Typography>
+              </Box>
             )}
           </ButtonBase>
         );
@@ -154,22 +169,24 @@ export default function LocationBoard({
 
       {/* Permanent, not first-run only: adding the second cabinet should be as easy as the
           first, and the wizard's own entry point is a toolbar button people don't find. */}
+      {/* Sized like a unit's header row, not like a whole unit. At 140px tall it was the biggest
+          thing on a board of flat locations, and — landing directly under Cabinet 3 in the grid
+          flow — read as though it belonged to that cabinet rather than to the board. */}
       <ButtonBase
         onClick={onAddStorage}
         sx={{
-          minHeight: 140,
+          minHeight: 56,
           border: 2,
           borderStyle: 'dashed',
           borderColor: 'divider',
           borderRadius: 1,
           display: 'flex',
-          flexDirection: 'column',
-          gap: 0.5,
+          gap: 1,
           color: 'text.secondary',
           '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
         }}
       >
-        <AddIcon />
+        <AddIcon fontSize="small" />
         <Typography variant="body2">Add storage</Typography>
       </ButtonBase>
     </Box>

@@ -8,7 +8,7 @@
  * one action-less row reading "Unassigned".
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '../../../test-utils';
+import { render, screen, routerMocks } from '../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
 // `importOriginal` below pulls in the real access module, which constructs a Supabase client at
@@ -274,5 +274,41 @@ describe('LocationsManager', () => {
     const arg = vi.mocked(generateLocationLabelSheet).mock.calls[0][0];
     expect(arg.heading).toBe('Vanguard Precision Works');
     expect(arg.labels.map((l) => l.id).sort()).toEqual(['cab3', 'shelf-a', 'shelf-b', 'yard']);
+  });
+});
+
+/**
+ * The board's daily job.
+ *
+ * On review, the board read as purposeless — and correctly, because every control on it was
+ * one-time setup. This is the route out to the place-scoped worksheet, which is the one thing here
+ * you come back to do.
+ */
+describe('LocationsManager — count or put away', () => {
+  it('says what the page is for, rather than leaving you to infer it', async () => {
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+    expect(screen.getByText(/Your storage, and what's in it/i)).toBeInTheDocument();
+  });
+
+  it('routes a real location to its own worksheet', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /count or put away/i }));
+
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=cab3');
+  });
+
+  /** The put-away entry a real shop needs most: `Unassigned` is where all 9,428 parts start. */
+  it('routes the put-away pile to the same worksheet', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Unassigned/ }));
+    await user.click(await screen.findByRole('button', { name: /put these away/i }));
+
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=un');
   });
 });

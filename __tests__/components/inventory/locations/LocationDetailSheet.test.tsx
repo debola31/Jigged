@@ -40,6 +40,7 @@ const node = (
 });
 
 const actions = () => ({
+  onCountHere: vi.fn(),
   onAddChild: vi.fn(),
   onSubdivide: vi.fn(),
   onPrintQR: vi.fn(),
@@ -222,5 +223,37 @@ describe('LocationDetailSheet — actions', () => {
     // …and explains what it is, because a huge count with no explanation just reads as alarming.
     expect(screen.getByText(/not a physical place/i)).toBeInTheDocument();
     await waitFor(() => expect(getLocationContents).toHaveBeenCalledWith('un'));
+  });
+});
+
+/**
+ * The board's daily job.
+ *
+ * Everything else on this sheet is setup you do once when the shelf arrives — which is exactly why
+ * the board read as purposeless on review. This is the one action you come back for, so it leads,
+ * and it is the *only* action offered for the system bucket.
+ */
+describe('LocationDetailSheet — count or put away', () => {
+  it('leads with it on a real location', async () => {
+    const user = userEvent.setup();
+    const cab = node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet' });
+    const { acts } = renderSheet(cab);
+
+    await user.click(screen.getByRole('button', { name: /count or put away/i }));
+    expect(acts.onCountHere).toHaveBeenCalledWith(cab);
+  });
+
+  /**
+   * The system bucket has no structural actions at all, so without this the sheet for the biggest
+   * thing on a real shop's board would offer literally nothing to do.
+   */
+  it('is the one action the system bucket does offer, worded for what it is', async () => {
+    const user = userEvent.setup();
+    const un = node({ id: 'un', name: 'Unassigned', kind: 'system' });
+    const { acts } = renderSheet(un);
+
+    expect(screen.queryByRole('button', { name: /count or put away/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /put these away/i }));
+    expect(acts.onCountHere).toHaveBeenCalledWith(un);
   });
 });

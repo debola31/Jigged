@@ -452,12 +452,16 @@ export default function OperatorOperationActionPage() {
               The earlier problem was the tinted box, not the label. */}
           {job.operation_instructions && (
             <Box sx={{ display: 'flex', gap: 0.75, mt: 0.5 }}>
+              {/* "Instructions" — the same word the admin sees when writing this
+                  field. ISA-101's consistency rule is about exactly this: an
+                  operator and an engineer talking about the same box should be
+                  using the same name for it. */}
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ flexShrink: 0, pt: '2px', textTransform: 'uppercase', letterSpacing: 0.4 }}
+                sx={{ flexShrink: 0, pt: '2px' }}
               >
-                Step
+                Instructions
               </Typography>
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
                 {job.operation_instructions}
@@ -517,6 +521,16 @@ export default function OperatorOperationActionPage() {
             </Box>
           )}
 
+
+          {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              Estimated:{' '}
+              {job.estimated_minutes < 60
+                ? `${Math.round(job.estimated_minutes)} min`
+                : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
+            </Typography>
+          )}
+
           {/* The way to the full step list. It used to be the job number itself,
               which cannot stay now that the whole card is one tap target — a link
               nested inside a button is invalid and swallows one of the two taps.
@@ -531,16 +545,6 @@ export default function OperatorOperationActionPage() {
           >
             View all steps for {job.job_number}
           </Button>
-
-          {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Estimated:{' '}
-              {job.estimated_minutes < 60
-                ? `${Math.round(job.estimated_minutes)} min`
-                : `${(job.estimated_minutes / 60).toFixed(1)} hrs`}
-            </Typography>
-          )}
-
           </Box>
           </Collapse>
       </Card>

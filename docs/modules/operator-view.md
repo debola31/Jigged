@@ -139,11 +139,12 @@ against a count computed over exactly the rows it admitted. So:
 - **No function touching `note_views` may accept a viewer parameter.** The three
   that touch it: `log_note_views` (returns `void` — a duplicate must be
   indistinguishable from a first view), `note_viewers(note_id)` (authors only, one
-  row per person, ordered by name, **no timestamps**). `my_note_view_digest()`
-  used to be the third but no longer touches the table at all — it sums
-  `notes.viewer_count`, so it is now `SECURITY INVOKER`. **It takes no arguments,
-  permanently**: a caller-supplied time window would be a bisection oracle for
-  when a note was read.
+  row per person, ordered by name, **no timestamps**). `my_note_digest()` used to
+  be the third — as `my_note_view_digest`, before it also began reporting helpful
+  marks — but no longer touches the table at all: it reads `notes.viewer_count`
+  and counts `note_reactions`, so it is `SECURITY INVOKER`. **It takes no
+  arguments, permanently**: a caller-supplied time window would be a bisection
+  oracle for when a note was read.
 - **`authenticated` has no UPDATE on `notes` at all** — notes are append-only today,
   so the whole privilege is revoked. Otherwise setting `viewer_count = 0` and
   returning later to read the delta is a one-bit read oracle per note. If note
@@ -342,6 +343,79 @@ path so there is never more than one composer on screen. This is a deliberate
 deviation from the plan's *"the note cannot be saved without completing"*, forced
 by the render branches rather than by preference.
 
+**The primary button says what it will do, and that closes a hole.** With a
+quantity it reads `RECORD COMPLETION` and submits the completion then the note.
+With **nothing finished but something typed** it reads `SAVE NOTE` and writes the
+note alone.
+
+That path is not a convenience. `qty > 0` is enforced, so an operator who
+finished zero pieces — *"machine down"*, *"waiting on material"*, *"tool chipped,
+swapping it"* — otherwise had two options and both were bad: stay silent and lose
+exactly the knowledge this workstream exists to capture, or **type a false
+quantity** to get the note saved. Corrupting the number that feeds costing and
+scheduling to satisfy a UI constraint is far worse than an extra code path. One
+field, one button, no second composer.
+
+### Density on the step screen
+
+This screen's failure mode is crowding, and the primary action is what gets
+pushed off the bottom. ISA-101 frames it as a Level 1 action display, not a
+Level 3 detail display: *"what does the operator need to know right now"*.
+
+- **The job card is one line** — `J-0007 · PROD-ACTUATOR-200` — and **the whole
+  card is the tap target**, with a decorative chevron as the affordance. A
+  separate chevron button would be a second control for one action, and nesting
+  it would be invalid markup. The expanded section sits **outside** that button
+  because it contains a real link (`View all steps for J-0007`), which is where
+  the traveler link moved to when the job number stopped being one.
+- **Expanded state is sticky** across steps via `sessionStorage`. Whether it
+  should persist across days as a remembered preference is undecided.
+- **Always visible, never behind the expander:** the part description, the
+  per-operation instructions, and **part progress** — "where am I on this part"
+  is the question a step screen exists to answer.
+- **`Parts finished` shares a row with Files and Playbook**, leading it, matched
+  to their 48px height. It leads because it is the input for the primary action
+  while those are reference; they keep their counts, which is what actually
+  advertises them.
+- **Capture is one row** — single-line field that grows, camera as an adjacent
+  icon. The dictation tip is a **caption, never an icon button**: nothing can
+  invoke the OS keyboard's dictation from a web page, so a mic icon beside a real
+  camera button is a false affordance.
+
+**The action is NOT pinned, by decision.** A fixed bar guaranteed reachability
+but overlaid the content beneath it. The protection is density instead, which is
+a weaker guarantee — measured at 440×956, collapsed the button clears the nav
+(bottom 495 vs 521); **expanded it does not** (629) and needs a scroll. Since the
+expander is sticky, an operator who expands once keeps it that way. **Measure
+before adding anything above that button** — that is exactly how it broke the
+first time.
+
+### Description vs instructions: no dimming, ever
+
+Two lines can carry the engineer's intent, and the app cannot tell which:
+`parts.description` and `job_operations.instructions`. Per-operation text is
+optional and frequently blank, so shops often put the instruction in the part
+description instead.
+
+So **neither is de-emphasised**, and the distinction is a dimmed **label**
+(`Instructions`, the same word the admin sees when writing the field) rather than
+weight or a tinted box. What is dimmed is chrome, never content.
+
+An earlier revision dimmed the description to make the instruction "the brighter
+one". That was wrong twice over: it asserted "reference, not instruction" exactly
+when that was false, and ISA-101 requires every emphasis to carry a defined
+meaning — de-emphasis used as a **guess** carries none, and NN/G's hierarchy work
+is explicit that muted text draws less attention. Emphasis stays reserved for
+states that genuinely mean "look here now": the over-quantity error and the
+station-mismatch warning.
+
+**The seed matters here.** `supabase/seed.sql` used to fill every routing step's
+`instructions` with `'<WorkCenter> operation'`. That made the box appear on every
+step of every demo, which teaches an operator the box is noise so they skip it on
+the day it says "torque to 40, not 45". Four steps now carry real shop
+instructions and the rest are NULL, so a usability session tells us about the
+design rather than about our test data.
+
 One implementation, two hosts: [`useNoteCapture`](../../hooks/useNoteCapture.ts)
 owns the draft, the photo pipeline (including the iOS unreadable-`File`
 mitigation) and the funnel events; [`NoteCaptureFields`](../../components/operator/NoteCaptureFields.tsx)
@@ -527,6 +601,9 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 
 - [ ] **Given** a colleague's note, **when** the operator taps Helpful, **then** the count moves immediately and the write follows — an optimistic toggle, because a thumbs-up that waits for shop wifi reads as broken — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** a failed write, **when** it rejects, **then** the button rolls back rather than leaving a lie on screen, with no toast — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
+- [ ] **Given** nothing finished and something typed, **when** the operator taps the primary button, **then** the note is saved with NO completion invented to carry it — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'saves a note alone when nothing was finished'` and `e2e/operator-completion.spec.ts`*.
+- [ ] **Given** an empty quantity and an empty note, **then** the button is disabled — the zero-quantity completion floor is unchanged — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'cannot record zero'`*.
+- [ ] **Given** the step screen, **when** it loads, **then** the job card is collapsed and expands IN PLACE without navigating — *verified by `__tests__/app/operator/OperationActionPage.test.tsx > 'collapses the job details by default, and opens them in place'`*.
 - [ ] **Given** the operator's OWN note, **when** it renders, **then** no control is offered — RLS forbids self-reaction, so the tap would be a guaranteed `42501` — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** a `confirmed` row, **when** the card renders, **then** it is excluded from the helpful count and its reactor is not named — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** any note, **when** looking for a negative option, **then** none exists on screen or in the schema — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.

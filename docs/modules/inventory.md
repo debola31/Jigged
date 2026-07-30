@@ -455,6 +455,46 @@ total beside the page, because it had no limit at all and was silently clipped b
 `max_rows` — invisible on a seed with 14 balance rows, wrong on a 9,428-part shop. It also
 excludes archived parts, which is what keeps it consistent with `inventory_location_occupancy`.
 
+`bulkPutAway` is the batched move behind put-away: **one atomic RPC, never chunked**, because a
+half-moved pile is worse than no move. It takes no quantity and no unit (it moves each part's whole
+balance), which is what lets it skip the per-part conversion read every other stock write needs —
+one request for N parts instead of 2N. The 1000-part cap lives in the RPC, not the UI, so no caller
+can loop around it. `setLocationPhoto` / `clearLocationPhoto` / `getLocationPhotoUrl` handle the
+photo, ordering their writes so a failure anywhere leaves a *readable* location rather than a row
+pointing at a file that isn't there.
+
+**`utils/inventoryCountAccess.ts`** — `loadCountCandidates` (company-wide) and
+`loadLocationCountCandidates` (one place, where nothing is excluded because there's no split-bin
+ambiguity); `refreshSystemQuantities` and `refreshLocationQuantities`, which must not be confused —
+the first reads `parts.quantity`, the roll-up across every bin, and using it for a shelf count would
+flag a variance on every row; `commitCount`, which routes each line to the write its target demands
+and collects per-line failures rather than aborting.
+
+**`components/scanner/LocationScanner.tsx`** — `getUserMedia` + `zxing-wasm`, reading **our location
+labels only** (parts have no barcode). The `.wasm` is served from our own origin via
+`scripts/copy-scanner-wasm.mjs`, not the library's CDN, because the surface that needs it is a phone
+on shop-floor wifi. Foreign codes are refused rather than guessed at.
+
+`bulkPutAway` is the batched move behind put-away: **one atomic RPC, never chunked**, because a
+half-moved pile is worse than no move. It takes no quantity and no unit (it moves each part's whole
+balance), which is what lets it skip the per-part conversion read every other stock write needs —
+one request for N parts instead of 2N. The 1000-part cap lives in the RPC, not the UI, so no caller
+can loop around it. `setLocationPhoto` / `clearLocationPhoto` handle the photo, ordering their writes
+so a failure anywhere leaves a *readable* location rather than a row pointing at a file that isn't
+there.
+
+**`utils/inventoryCountAccess.ts`** — `loadCountCandidates` (company-wide) and
+`loadLocationCountCandidates` (one place, where nothing is excluded because there's no split-bin
+ambiguity); `refreshSystemQuantities` and `refreshLocationQuantities`, which must not be confused —
+the first reads `parts.quantity`, the roll-up across every bin, and using it for a shelf count would
+flag a variance on every row; `commitCount`, which routes each line to the write its target demands
+and collects per-line failures rather than aborting.
+
+**`components/scanner/LocationScanner.tsx`** — `getUserMedia` + `zxing-wasm`, reading **our location
+labels only** (parts have no barcode). The `.wasm` is served from our own origin via
+`scripts/copy-scanner-wasm.mjs`, not the library's CDN, because the surface that needs it is a phone
+on shop-floor wifi. Foreign codes are refused rather than guessed at.
+
 **`utils/locationOccupancy.ts`** (pure) — `rollUpOccupancy` / `occupancyFor`. The
 `inventory_location_occupancy` view reports what sits *directly* at each location; this rolls it
 up the tree so a cabinet whose shelves are full is never reported empty. `occupancyFor`
@@ -592,18 +632,22 @@ contradicting PRD **FR-16** (*"System supports CSV upload for inventory items"*)
 You are adding or moving material and you say where it is. The place is created **at that
 moment** if it doesn't exist yet.
 
-**Today (after Phase 2):** the **board is permanent** — real places, rolled-up fill state, one
-tap into a detail sheet, an "Add storage" tile always in the grid, and the wizard demoted to an
-optional *"Subdivide this unit"*. Sibling names can no longer collide.
+**Today: ✅ CLOSED (Phase 2, 2026-07-30).** Everything this journey asked for exists:
 
-**Still missing, so J2 is NOT closed:**
+- The **board is permanent** — real places, rolled-up fill state, one tap into a detail sheet, an
+  "Add storage" tile always in the grid, photos of the actual furniture, and the wizard demoted to
+  an optional *"Subdivide this unit"*.
+- **A place is created at the moment you need it**, from the "where is it?" field itself —
+  `LocationPicker`'s *"Create «name»"*, shared by the part page, the operator bin view and put-away.
+  Held back until the sibling-name unique index existed, because a bare freeSolo create field is
+  exactly what produced `ST0CK` beside `STOCK`.
+- **Batch put-away** — the place-scoped worksheet, which at `Unassigned` is how a shop empties the
+  pile `trg_auto_track_stocked_part` created. See [J9](#j9--count-it): it turned out to be the same
+  surface as counting, not a separate one.
+- **Scanning a label** now says where something lives without leaving the app.
 
-- **Inline place-creation from a "where is it?" field.** Now unblocked — it was deliberately held
-  behind dedupe, since a freeSolo create field is exactly what produced `ST0CK`/`STOCK`.
-- **Batch "put these away"** — see [§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear).
-  Without it, a real shop's board is one `Unassigned` tile holding everything, which is why the
-  feature flag stays off for Contour.
-- **Photos** of the actual storage.
+Sibling names can no longer collide, so the decay this journey's evidence was built on
+(`STOCK`/`ST0CK`) is structurally prevented rather than discouraged.
 
 See [§5.5](#55-locations-keep-them-visual-change-when-they-appear).
 
@@ -843,6 +887,51 @@ before it goes back on the rack. The software should mirror that habit, not repl
 
 A **count sheet**: here is what we think is here, walk it, enter what you find, review the
 variance, commit. Committing writes `adjustment` rows with a reason.
+
+> ### Place-scoped as of 2026-07-30 — and it absorbed put-away
+>
+> §5.11 asked for the count to be *"recurring, assignable and **place-scoped**"*. The 2026-07-28
+> build was none of the third: it was part-first and company-wide. But you walk a shop **bin by
+> bin**, not part by part — so `?location=<id>` scopes the same worksheet to one place, reached
+> from a board tile, the detail sheet, or a scanned label.
+>
+> **Put-away turned out to be the same surface, not a neighbouring one.** Standing at a bin you do
+> two things: count what's there, and notice what doesn't belong. So beside *"Count N parts"* there
+> is a destination picker and *"Put N away"* — and at `Unassigned` that makes this screen how a shop
+> empties the pile `trg_auto_track_stocked_part` created, which is [§5.5 decision
+> 8](#55-locations-keep-them-visual-change-when-they-appear) and the thing gating the whole feature
+> for Contour. A separate put-away page was planned and would have been a second surface doing the
+> same job.
+>
+> Three consequences, all of them from standing at one place instead of reading a catalogue:
+>
+> - **Nothing is excluded here.** Company-wide, a part split across bins is *uncountable*: count 38
+>   against 10+20+10 and no bin defensibly absorbs the −2, so `resolveCountTarget` drops it. At one
+>   bin there is no ambiguity — *"Shelf A holds 830"* adjusts Shelf A and says nothing about Shelf B.
+>   **The parts the company-wide sheet has to name and skip are countable here**, which is a strict
+>   gain nobody planned for.
+> - **Search runs server-side.** `Unassigned` holds every part a real shop owns; you cannot filter
+>   9,428 rows in a browser, and `getLocationContents`' 200-row cap has no search or offset. Hence
+>   `getLocationContentsPage`.
+> - **The pre-save re-read had to change.** `refreshSystemQuantities` reads `parts.quantity`, the
+>   roll-up across every bin — using it for a shelf count would compare against the whole shop's
+>   total and flag a variance on every line. `refreshLocationQuantities` reads the bin.
+>
+> **The two write paths stay deliberately different**, and that is the point rather than an
+> inconsistency: counting commits line-by-line and reports per-line failures, because line 50 failing
+> must not invalidate lines 1–49. A move is one atomic RPC (`bulk_put_away`), because a half-moved
+> pile is worse than no move — you cannot tell what you already did.
+>
+> **Terminology: still "Count".** The industry term for counting a subset frequently is **"cycle
+> count"** ([Unleashed](https://www.unleashedsoftware.com/inventory-management-guide/cycle-count-inventory/)),
+> and *"audit"* is the broader, comprehensive, accounting-flavoured word
+> ([Fishbowl](https://www.fishbowlinventory.com/blog/inventory-audit-a-comprehensive-guide-with-best-practices-and-procedures)).
+> A shop owner would recognise "cycle count", but it is two words of jargon where one plain word
+> already works — the same reasoning that rejected *Variance* and *stock count* below. Recorded here
+> so a reader knows what we built; not in the UI.
+>
+> Still missing from §5.11's list: **recurring** and **assignable**. Place-scoping was the half that
+> changed the shape of the screen; a schedule and an assignee are additive and unstarted.
 
 > **Built 2026-07-28** at `/dashboard/{companyId}/inventory/count` — **two steps.** Choose the
 > parts you're counting, then count them on a **count sheet**: proper columns for
@@ -1247,11 +1336,16 @@ It is **against** the current timing and target:
    - **Fill state must roll up.** The occupancy view reports what sits *directly* at a location,
      so a cabinet whose shelves are full has no row at all. Reporting it empty would be worse
      than showing no fill state: it would send someone to fill an occupied shelf.
-2. **Setup goes incremental.** **NOT built, and that ordering is correct.** A place created
-   inline from a "where is it?" field is a freeSolo create field — exactly the mechanism that
-   produced `ST0CK`/`STOCK` in finding 2. It should land *after* dedupe (decision 7 below,
-   shipped in Phase 2), not before. Adding one piece of furniture to the board *is* built: an
-   "Add storage" tile lives permanently in the grid.
+2. **Setup goes incremental.** ✅ **BUILT (2026-07-30), and the ordering was correct.** A place
+   created inline from a "where is it?" field is a freeSolo create field — exactly the mechanism
+   that produced `ST0CK`/`STOCK` in finding 2 — so it landed *after* dedupe (decision 7), not
+   before. `LocationPicker`'s *"Create «name»"* is shared by the part page, the operator bin view
+   and put-away; the offer is **suppressed whenever a location already answers to that name**,
+   matched the same case- and whitespace-insensitive way the unique index compares, so it can never
+   offer something the DB would refuse. Creation makes a top-level location with no kind and no
+   code: the name is the identity, and a code is display-only since QR payloads carry the UUID.
+   Adding one piece of furniture to the board was already built — an "Add storage" tile lives
+   permanently in the grid.
 3. **The wizard survives, demoted.** ✅ **BUILT (Phase 2).** Count + name-pattern is genuinely
    right for *"this cabinet has 5 rows"* — keep `LevelConfigStep` as an optional **"subdivide
    this unit"** action on a unit already on the board. That also makes `VisualLocationBuilder`'s
@@ -1292,9 +1386,22 @@ It is **against** the current timing and target:
    > **Amended: split from photos.** This decision originally bundled fill state with *"a photo
    > of the actual rack beats any icon"*. The two have wildly different cost — fill state is one
    > view plus a pure function; photos are a bucket, an upload UI, thumbnails and mobile capture.
-   > Bundled, fill state would have been delayed behind media work for no reason. **Photos are
-   > now a separate, unscheduled item** (reuse `PartFilesSheet` / `NoteMediaGallery` when it
-   > comes).
+   > Bundled, fill state would have been delayed behind media work for no reason.
+   >
+   > **Photos then shipped separately, 2026-07-30.** A `photo_path` column on `inventory_locations`
+   > (not a table: one photo is what this decision asks for, and a column inherits the table's
+   > existing RLS *and* billing write-gate), reusing `compressPhoto` and the private `attachments`
+   > bucket. It renders **above** the compartments rather than replacing them — the photo carries
+   > identity, the compartments carry fill state. Board only, never the list view, which has to stay
+   > cheap. Every tile's signed URL comes from **one** batched `createSignedUrls`.
+   >
+   > Splitting them was worth it for a reason that only appeared during the build: **reading any
+   > attachment was broken on every fresh local stack and every preview branch.** `storage.objects`
+   > had INSERT and DELETE policies under migration control and **no SELECT policy at all** — it
+   > existed only in the prod snapshot. So part attachments and operator note photos were equally
+   > unreadable outside production, and nobody had noticed. Same failure mode
+   > `create_attachments_storage_bucket` fixed for the bucket; it fixed the bucket and missed the
+   > policy. Now under migration control.
 6. **Flat-vs-tree default — CLOSED, answered by decision 3.**
    [MRPeasy](https://www.mrpeasy.com/resources/user-manual/stock/settings/locations/) has no
    nesting at all and tells users to name locations `"Room 1, A1"`;
@@ -1323,7 +1430,8 @@ It is **against** the current timing and target:
    >   sequential, non-transactional `materializeLocationSpec`, leaving a partial tree — far
    >   worse than a duplicate sticker. What *is* worth fixing is the collision a human confuses:
    >   `['Left','Lower']` both derived `…-L`, and `explicitCodeIn` now yields `L`/`LO`.
-8. **"Put these away" — the batched move out of `Unassigned`. NOT BUILT; gates the rollout.**
+8. **"Put these away" — the batched move out of `Unassigned`.** ✅ **BUILT 2026-07-30. The rollout
+   gate below is now CLEARED.**
 
    > **New decision, added in Phase 2.** Decision 1 never mentioned `Unassigned`, which is the
    > largest omission in this section. `trg_auto_track_stocked_part` guarantees a top-level
@@ -1332,18 +1440,38 @@ It is **against** the current timing and target:
    > board is truthful but not yet useful, and it is **the most likely way the second attempt
    > fails like the first** (§9.3).
    >
-   > Phase 2 does what it honestly can: the tile is muted, sorted last, explained as *"your
-   > put-away list, not a shelf"*, and carries its rolled-up count — because *"9,428 parts,
+   > The board also does what it can without a bulk move: the tile is muted, sorted last, explained
+   > as *"your put-away list, not a shelf"*, and carries its rolled-up count — because *"9,428 parts,
    > nowhere in particular"* is precisely the diagnosis that motivates adding a cabinet.
    >
-   > A **batched** move is a real feature (does it move all of part X to one bin? bulk-assign a
-   > selection? a picker per part?) and deserves its own design pass. The per-part path exists,
-   > but nobody empties thousands of parts through it.
+   > ### How the design questions resolved
    >
-   > **So the gate is written down here: `inventory_locations` stays OFF for Contour until batch
-   > put-away exists.** The flag is already the mechanism, so this costs nothing — and it is the
-   > difference between a decision and a hope. Phase 2 ships the board; we test it internally and
-   > on the seed; the shop sees it when the board can actually be emptied into.
+   > This decision listed three: *does it move all of part X to one bin? bulk-assign a selection? a
+   > picker per part?* The answers, in order:
+   >
+   > - **All of part X, yes** — put-away means *"this lives here now"*, not *"split 40 across two
+   >   bins"*. Partial moves already have `transfer_stock`. That single simplification removes the
+   >   quantity argument, which removes unit conversion, which removes a per-part read: **one request
+   >   for N parts where looping the per-part path costs 2N**.
+   > - **Bulk-assign a selection, driven by search.** Not by paging: nobody assigns 9,428 parts, they
+   >   assign what they're holding. *"Search o-ring, take all 40, send them to Drawer 2"* finishes
+   >   Contour's real backlog in tens of operations, not thousands of decisions.
+   > - **No separate picker per part, and no separate page.** The surface is
+   >   [J9](#j9--count-it)'s place-scoped worksheet — because standing at a bin, counting what's
+   >   there and moving what doesn't belong are the same visit. A dedicated put-away page was planned
+   >   and would have been a second screen doing one job.
+   >
+   > `bulk_put_away` is one atomic RPC, capped at 1000 parts to bound how long it holds
+   > `part_location_stock` row locks. Atomicity is the whole point — a half-moved pile is worse than
+   > no move, because you can't tell what you already did — so the TS wrapper deliberately **never
+   > chunks** the array, and the cap is enforced in the DB where no future caller can loop around it.
+   >
+   > ### The gate, and its outcome
+   >
+   > ~~`inventory_locations` stays OFF for Contour until batch put-away exists.~~ **It exists.** The
+   > flag remains opt-in and off by default — that's its normal state, not a hold — and the board can
+   > now be emptied into, which is what the gate was protecting against. Turning it on for a pilot
+   > shop is a rollout decision, no longer a blocked one.
 9. **Thing-first is what the visual-inventory leader itself prescribes.** Sortly's
    [stockroom method](https://www.sortly.com/blog/how-to-organize-a-stockroom/) is ordered
    *"1. Create an inventory list → 2. Optimize storage space"* — storage is step **two** —
@@ -1480,8 +1608,24 @@ Buildable in a PWA, with a caveat that may be disqualifying:
   Safari **re-prompts on route navigation** at the same origin
   ([WebKit #185448](https://bugs.webkit.org/show_bug.cgi?id=185448)). A scanner that re-asks
   permission every navigation is worse than tapping a banner.
-- Their workaround is a cheap hedge available to us: **drop `apple-mobile-web-app-capable`**
-  so the home-screen icon opens in Safari rather than standalone.
+- ~~Their workaround is a cheap hedge available to us: **drop `apple-mobile-web-app-capable`**
+  so the home-screen icon opens in Safari rather than standalone.~~
+
+  > ### ⚠️ **CORRECTED 2026-07-30 — that hedge does not work any more**
+  >
+  > Since **iOS 16.4**, Safari honours the **web app manifest's `display` member** for Add to Home
+  > Screen, and `apple-mobile-web-app-capable` is the *legacy* mechanism it superseded. So dropping
+  > the meta tag no longer keeps an installed app in Safari — if the manifest says `standalone`, it
+  > installs standalone regardless.
+  >
+  > iOS also treats `standalone`, `fullscreen` and `minimal-ui` alike. **`display: 'browser'` is the
+  > only value that keeps the icon opening in Safari**, and that is what
+  > [`app/manifest.ts`](../../app/manifest.ts) now ships.
+  >
+  > This was caught by writing the manifest: the first draft omitted the meta tag *and* set
+  > `display: 'standalone'`, following this section — which would have installed standalone and
+  > walked the new scanner straight into the permission bug this hedge exists to avoid. The two
+  > halves cancelled out.
 
 **Which flow needs it:** walking up to one bin is ~2 taps either way. The workflow the current
 architecture cannot serve is **continuous scanning** — a count session ([J9](#j9--count-it))
@@ -1494,9 +1638,15 @@ Phase 2 — installed PWA + `getUserMedia` + zxing-wasm on the actual handsets t
 mode on current iOS?* If yes, PWA covers (b) and only (a) remains native-only. If no, cost
 native properly.
 
-Jigged has **no PWA manifest, no service worker, no `apple-mobile-web-app` meta and no
-viewport export** today. PWA basics ride along with Phase 2 either way — they are
-prerequisites for the spike.
+~~Jigged has **no PWA manifest, no service worker, no `apple-mobile-web-app` meta and no
+viewport export** today.~~ **Built 2026-07-30.**
+
+| | State |
+|---|---|
+| **PWA basics** | ✅ [`app/manifest.ts`](../../app/manifest.ts) · `viewport` export with `viewportFit: 'cover'` + `themeColor` · 192/512/maskable icons generated from one vector ([`lib/brandMark.tsx`](../../lib/brandMark.tsx)), no binary assets and nothing upscaled from the 96px logo · `env(safe-area-inset-bottom)` on the operator bottom nav, which sat under the iOS home indicator. Also fixed: `apple: '/apple-icon.png'` **404'd** — the generated route has no extension — so the home-screen icon was broken. Still **no service worker**: offline is a separate question and nothing here needs it. |
+| **(b) live in-app scanner** | ✅ [`LocationScanner`](../../components/scanner/LocationScanner.tsx) — `getUserMedia` + `zxing-wasm`, wired into the operator inventory home (where the scanner icon was decorative), the put-away destination, and the board. **It reads locations only**: parts have no barcode, so "scan a part" does not exist. Foreign codes are refused rather than guessed at. The `.wasm` is served from our own origin, not the library's CDN — a shop floor's wifi is exactly where a CDN fetch fails. |
+| **The spike's actual question** | ❌ **STILL OPEN, and it now has a concrete gate.** `display: 'browser'` is what makes the scanner work today. Flipping it to `'standalone'` is the deliverable: it is only safe once someone confirms, on the shop's own handsets, that camera permission survives navigation. Nothing testable from a desk settles this, and a working scanner is not evidence that it has been settled. |
+| **(a) scan → open our app directly** | ❌ Unchanged, and still native-only — Universal Links have no PWA equivalent. Note the in-app scanner sidesteps *most* of the pain (b) caused, so (a) alone is a much weaker case for going native than the two together were. |
 
 ### 5.11 Design for the sustain, not the setup
 
@@ -1558,7 +1708,7 @@ why that turned out to be unnecessary.)*
 [§5.2](#52-is-a-job-a-place--resolved-no) is resolved — a job is **not** a place. Build the
 simple depletion.
 
-### Phase 2 — locations reshaped ✅ **THE BOARD SLICE COMPLETE 2026-07-29**
+### Phase 2 — locations reshaped ✅ **COMPLETE 2026-07-30**
 
 **Shipped:** the permanent board with rolled-up fill state · the detail sheet that owns every
 action · the tree list demoted to a Board|List toggle (finally carrying a child count) · the
@@ -1573,22 +1723,42 @@ clipped by `max_rows` and didn't filter archived parts; `companyName` was never 
 label sheet printed with no heading; `materializeLocationSpec` re-validated the parent once per
 node.
 
-**Deliberately not in this slice, with reasons recorded in [§5.5](#55-locations-keep-them-visual-change-when-they-appear):**
+**Then completed 2026-07-30**, closing the four items the board slice had deferred:
+
+| Also shipped | Note |
+|---|---|
+| **Batch put-away** (decision 8) | `bulk_put_away` — one atomic RPC, whole-balance, DB-capped at 1000. Landed **inside J9's place-scoped worksheet**, not as its own page: counting a bin and moving what doesn't belong are one visit. **This clears the rollout gate.** |
+| **Place-scoped counting** ([J9](#j9--count-it)) | What §5.11 asked for all along. Also removes an exclusion — split-across-bins parts are countable at one bin, where the company-wide sheet must skip them. |
+| **Inline create-a-place** (decision 2) | `LocationPicker`, shared by three surfaces, with the create offer suppressed on a name match so it can't mint `ST0CK` beside `STOCK`. |
+| **Photos** (split out of decision 5) | `photo_path` column, batched signed URLs, board tiles only. |
+| **PWA basics + the scanner** ([§5.10](#510-native-app-deferred-scanning-case-must-be-spiked)) | Manifest (`display: 'browser'`, deliberately), viewport, generated icons, safe-area insets, and a real in-app scanner for our own location labels. |
+
+**Still deferred, deliberately:**
 
 | Deferred | Why |
 |---|---|
-| **Batch "put these away"** (§5.5 decision 8) | A real feature needing its own design pass. **It gates the rollout: `inventory_locations` stays OFF for Contour until it exists** — otherwise their board is one tile holding 9,428 parts. |
-| **Incremental create-a-place inline** (decision 2) | A freeSolo create field is the exact mechanism that produced `ST0CK`. Now unblocked, since dedupe shipped. |
-| **Photos of real storage** (split out of decision 5) | Bucket + upload UI + thumbnails + mobile capture. Bundling it would have delayed fill state, which was one view and a pure function. |
+| **The §5.10 spike's actual question** | Does iOS persist camera permission in a *standalone* PWA? Needs the shop's handsets. `display: 'browser'` is what makes the scanner work meanwhile, and flipping it is the gate. |
 | **Bar rack card** (decision 4) | §9 marks it *weakly refuted* — their 22 real places contain no rack. Open question, not an assertion. |
 | **Drag-to-reparent** | Serves a hierarchy 118/121 of their locations didn't have; the house precedent is arrow buttons, not drag. |
-| **PWA basics + scanner spike** ([§5.10](#510-native-app-deferred-scanning-case-must-be-spiked)) | Independent of the board; unchanged by this slice. |
+| **Recurring + assignable counts** (§5.11) | Place-scoping was the half that changed the screen's shape. A schedule and an assignee are additive. |
+| **Service worker / offline** | Nothing built needs it, and offline stock writes are a much larger question than a cache. |
 
-**Follow-ups this slice created, not yet filed:** `materializeLocationSpec` is still sequential
-and non-transactional (one multi-row insert or an RPC is the real fix); `getBalancesForParts`
-chunks part ids at 500 but 500 × 3 locations = 1,500 rows, so it can truncate the same way
-`getLocationContents` did; the board removes `TOP_LIMIT`, which is right, but implies eventual
-virtualisation past a few hundred units.
+**Bugs found while building, each pre-existing and none caught by a test:**
+
+| Found | Was |
+|---|---|
+| **No SELECT policy on `storage.objects`** in any migration | **Every attachment read broken on every fresh local stack and preview branch** — part files and operator photos too, not just the new photos. Existed only in the prod snapshot. |
+| `friendlyErrorMessage` ignored `check_violation` | Every stock RPC's hand-written message was replaced by a generic fallback. "Insufficient stock at source location (have 5, need 10)" surfaced as "Failed to update stock." |
+| `apple: '/apple-icon.png'` | 404 — the generated route has no extension. The home-screen icon was broken. |
+| The board's fill dot rendered at **zero width** | A bare `<span>` is `display: inline`, which ignores width. Right colour, invisible. jsdom has no layout engine, so only a browser could catch it. |
+| Subdivide interleaved new children with old | `sort_order` defaulted to 0, so Rows landed between existing Shelves. |
+
+**Follow-ups, now filed as issues rather than left in prose:** **#618**
+`materializeLocationSpec` is sequential and non-transactional (one multi-row insert or an RPC is the
+real fix — `bulk_put_away` is the shape to copy) · **#619** `getBalancesForParts` chunks part *ids*
+at 500, but 500 × 3 locations = 1,500 rows against `max_rows` 1000, so it can truncate silently the
+way `getLocationContents` did · **#620** the board deliberately removes `TOP_LIMIT`, which is right,
+but implies windowing past a few hundred units.
 
 ### Phase 3 — purchasing
 
@@ -1626,14 +1796,14 @@ point of the exercise.
 | Journey | PRD says | Docs said (pre-rewrite) | Built? |
 |---|---|---|---|
 | J1 opening balances | FR-16 `Should` — CSV upload for inventory items | silent | ✅ **built 2026-07-28** |
-| J2 where it lives | *(absent — no PRD requirement at all)* | AC only, no user story | ⚠️ inverted |
+| J2 where it lives | *(absent — no PRD requirement at all)* | AC only, no user story | ✅ **closed 2026-07-30** — was ⚠️ inverted; the board, inline create, put-away and photos all land |
 | J3 quote cost | FR-11 | in parts/routings docs | ✅ |
 | J4 material check | Flow 3 step 2 | silent | ✅ 2026-07-28 (top level only) |
 | J5 buy it | Flow 3 steps 4–5 | silent | ❌ |
 | J6 receive it | Admin persona; Flow 3 step 6 | silent | ❌ |
 | J7 issue to job *(incl. consumption)* | **Open Question 2 — the primary path**; FR-3 / Flow 1 step 1 | "Planned (#550)" | ✅ 2026-07-28 — bin checkout + job tag, read back by J4. Job-first entry built and reverted (see J7) |
 | J8 remnants | *(absent)* | silent | ❌ |
-| J9 count | success metric: 100% accuracy | silent | ✅ **built 2026-07-28** |
+| J9 count | success metric: 100% accuracy | silent | ✅ **built 2026-07-28**, place-scoped 2026-07-30 (§5.11's actual ask) |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, propose hiding | ⚠️ badge only |
 | J11 find it | *(absent)* | AC only | ✅ |
 | Traceability *(cut)* | *(absent)* | silent | ⛔ **cut** — no regulated customers |
@@ -1762,6 +1932,84 @@ automation-pending tag. **A checked box means the cited test exists and passes.*
   name `Unassigned` — *verified live against the local stack, 2026-07-29.* If the wrong row were
   renamed the failure would be silent: every stock RPC would write to a freshly-created empty
   bucket while the balances stayed behind.
+
+**Put away, and the place-scoped count (Phase 2, 2026-07-30)**
+
+- [x] **Given** several parts ticked at `Unassigned` and a destination chosen, **when** Put away
+  runs, **then** each part's **whole balance** moves, the source rows read 0, and **one**
+  `transfer_group_id` covers every ledger row of the batch — *verified live against the seed
+  (2 parts, 240 + 120 moved, 4 ledger rows, 1 group, actor stamped, zero rollup mismatches, board
+  7→5 and 1→3) AND by `__tests__/utils/inventoryLocationsAccess.test.ts > 'bulkPutAway'`*.
+- [x] **Given** any number of selected parts, **then** put-away issues **exactly one** RPC and never
+  more — *verified by `…> 'sends every part in ONE rpc call, whatever the count'`*. That test exists
+  to stop a future chunk loop silently un-guaranteeing atomicity.
+- [x] **Given** a failure partway through a batch, **then** **nothing** moves — *verified against
+  the local stack with a trigger that raises on the last part of a 4-part batch; Yard and Unassigned
+  both unchanged.*
+- [x] **Given** a batch over 1,000 parts, **then** the DB refuses it with a plain message, and
+  "Select all" is disabled before you can try — *verified live AND by
+  `…/InventoryCountPage.test.tsx > 'refuses to select-all past the cap'`*.
+- [x] **Given** a same-source-and-destination, an empty selection, or a cross-company destination,
+  **then** each is refused — *verified live against the local stack.*
+- [x] **Given** `?location=<id>`, **then** the sheet counts **that bin** — `systemQuantity` is the
+  balance there, not the company-wide roll-up, and the pre-save re-read uses
+  `refreshLocationQuantities` — *verified by `…/InventoryCountPage.test.tsx > 're-reads THIS bin
+  before saving, not the company-wide total'`*. Using the roll-up would flag a variance on every row.
+- [x] **Given** a completed move, **then** the list refetches from **offset 0** rather than reusing
+  the old page — *verified by `…> 'refetches from the start after a move'`*. Those rows just left this
+  location, so the result set shifted.
+- [x] **Given** a bin holding more parts than one page, **then** the sheet says so and search runs
+  server-side — *verified by `…> 'admits when the bin holds more than the page shows'` and
+  `…/inventoryLocationsAccess.test.ts > 'getLocationContentsPage'` (search, offset, exact total, and
+  that `referencedTable` is the embed **alias** — the table name type-checks and then fails at
+  runtime with `PGRST108`)*.
+
+**Creating a place inline**
+
+- [x] **Given** a name typed into a location picker that nothing answers to, **then** it offers to
+  create it; **given** a name that already exists case- or whitespace-insensitively, **then** the
+  offer is withheld — *verified by `__tests__/components/inventory/locations/LocationPicker.test.tsx`*.
+  The DB refuses the duplicate anyway; the point is never to offer what it would refuse.
+- [x] **Given** a destination picker, **then** the source and the `Unassigned` bucket are both
+  excluded — *verified by the same file.* You never put something away *into* the pile.
+
+**Photos**
+
+- [x] **Given** a photo picked for a location, **then** it is compressed client-side, stored at
+  `{company_id}/locations/{id}/…` and rendered on the board tile — *verified live (52KB image/jpeg
+  from a PNG, thumbnail on the tile with the compartments still below it) AND by
+  `…/LocationBoard.test.tsx > 'photos'`*.
+- [x] **Given** a board where several locations have photos, **then** every signed URL comes from
+  **one** `createSignedUrls` call, and none at all when nothing has a photo — *verified by
+  `…/inventoryLocationsAccess.test.ts > 'location photos'`*.
+- [x] **Given** a `photo_path` whose URL won't resolve, **then** the sheet says the photo couldn't
+  be loaded rather than showing an empty frame — *verified by `…/LocationDetailSheet.test.tsx`*. An
+  empty frame reads as "no photo" and invites adding a second one.
+- [x] **Given** any attachment in the bucket, **then** a company member can read it **on a fresh
+  local stack or preview branch** — *verified live; previously impossible, because the
+  `storage.objects` SELECT policy existed only in the prod snapshot.*
+
+**Scanning**
+
+- [x] **Given** a printed label generated exactly as the PDF prints it, **then** the real decoder
+  reads it back and the location id is recovered — *verified by
+  `__tests__/components/scanner/LocationScanner.test.tsx > 'printed label → decoder → location id'`,
+  which runs `zxing-wasm` against the same `.wasm` the app serves.* Testing the writer and reader
+  separately would both pass while no label in the shop scanned.
+- [x] **Given** a code that isn't ours — a shipping barcode, a vendor code, another system's QR, a
+  job-traveler QR — **then** it is refused, not guessed at — *verified by the same file (7 cases).*
+- [x] **Given** a blocked camera, **then** the message says where to fix it; **given** the dialog
+  closing, **then** every track is stopped — *verified by the same file AND live in the browser,
+  where a cameraless headless session produced exactly that message.*
+- [ ] **Given** the app installed to an iOS home screen with `display: 'standalone'`, **then**
+  camera permission survives navigation — **NOT VERIFIED, and not verifiable from a desk.** This is
+  §5.10's spike; `display: 'browser'` ships precisely because the answer is unknown.
+
+**PWA**
+
+- [x] **Given** the app, **then** `/manifest.webmanifest` serves with `display: 'browser'`, and
+  `/apple-icon`, `/icon-192`, `/icon-512` and `/icon-maskable` all resolve — *verified live; the
+  previous `apple-icon.png` href 404'd.*
 
 **Operator**
 
@@ -1911,7 +2159,7 @@ post-mortem and the opening-balance question — and the rest is Phase 2 input.
 | **Do service jobs carry a BOM line for the customer's material?** | [J4](#j4--job-kickoff-material-check) only | The last live question from the cut [Customer-supplied, cut](#cut--customer-supplied-material-whose-is-it). If yes, J4 needs one exclusion so those lines don't raise false shortages; if no, fully closed. Doesn't block Phase 1 either way. `custCode` is set on 51% of parts, but that likely means *"made for customer X"*, not *"customer supplied the material"* — **do not conflate them**. |
 | Is there a **bar rack**? | Phase 2 palette | Their 22 real places include `STOCK`, `SHELF`, `YARD`, `CABINET 3-10` — **no rack of any kind**. Now *weakly refuted*, but they hold material in feet and inches, so long stock lives somewhere. Don't add the card on a guess either way. **Phase 2 shipped without it**, and [§5.5 decision 4](#55-locations-keep-them-visual-change-when-they-appear) was amended to cite this open question rather than assert the opposite — the two sections used to contradict each other. A code comment in `storageTypes.tsx` carries the reasoning, so the card isn't re-added on intuition. |
 | What do `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` actually mean? | Phase 2 palette naming | Their vocabulary is opaque from outside, and it's the vocabulary that matters. One screen-share answers all of it — the card-sort in the discovery script is still the instrument. Phase 2's palette hedges by adding the *honest* single-level types (floor, yard, bench) so an opaque place doesn't have to be modelled as furniture. |
-| **How should thousands of parts leave `Unassigned` in bulk?** | The Phase 2 rollout itself | See [§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear). Not a palette question — a genuine design question (all of part X to one bin? bulk-assign a selection? a picker per part?). **Until it's answered, `inventory_locations` stays OFF for Contour**, because their board would otherwise be one tile holding 9,428 parts and four holding nothing. That is the most likely way the second attempt fails like the first, and we get one more attempt, not two. |
+| ~~**How should thousands of parts leave `Unassigned` in bulk?**~~ | ~~The Phase 2 rollout~~ | ✅ **ANSWERED and built, 2026-07-30.** All of part X to one bin (partial moves already have `transfer_stock`); bulk-assign a **search-driven** selection, because nobody assigns 9,428 parts — they assign what they're holding; and no separate picker or page, because it belongs in [J9](#j9--count-it)'s place-scoped worksheet. See [§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear). The rollout gate this was holding is cleared. |
 | Do they actually reuse drops? | [J8](#j8--cut-it-return-the-remnant) | Remnants lost their free ride when lots were cut, so this now has to justify itself |
 | Scan ten in a row? Dead zones? Whose phones? | [§5.10](#510-native-app-deferred-scanning-case-must-be-spiked) PWA-vs-native spike | Phase 2 only |
 | Label durability and placement | Label PDF | Implementation detail, not data model |
@@ -1940,17 +2188,27 @@ Worth pulling; do not cite numbers from either until someone has read them.
 
 ## 10. Next steps
 
-**Phase 1 complete (2026-07-28). Phase 2's board slice complete (2026-07-29).**
+**Phase 1 complete (2026-07-28). Phase 2 complete (2026-07-30).**
 
-The *why* layer this spec was written to diagnose now exists: numbers get in (J1, J9), get used
-on a job (J4), and record themselves as work happens (J7). Phase 2 went back to the *where*
-layer that was built first and reshaped it — the board is permanent, the wizard is demoted to
-Subdivide, and sibling names can no longer collide.
+The *why* layer this spec was written to diagnose exists: numbers get in (J1, J9), get used on a
+job (J4), and record themselves as work happens (J7). Phase 2 went back to the *where* layer and
+reshaped it: the board is permanent and has a daily job, the wizard is demoted to Subdivide,
+sibling names can't collide, places are created where you need them, storage has photos, counting
+is place-scoped, put-away exists, and a scan no longer leaves the app.
 
-**The next decision is not a build, it's a design pass: batch "put these away"**
-([§5.5 decision 8](#55-locations-keep-them-visual-change-when-they-appear)). It gates showing the
-board to Contour at all, and the flag being opt-in is what makes that gate real rather than
-aspirational. After it: create-a-place inline (unblocked now that dedupe shipped), then photos.
+**Six of the eleven journeys are closed; two are partial; three are untouched.** What's left is
+[Phase 3 — purchasing](#phase-3--purchasing) (J5 POs · J6 receiving · J10 buy list, issue #571,
+merged not parallelised) and [Phase 4](#phase-4--debt-paydown-and-remnants). The single largest
+remaining gap is **J10**: FR-2 marks it `Must` and it is still an alert badge with no buy list.
+
+**Two things are owed that aren't builds:**
+
+1. **§5.10's spike** — does iOS persist camera permission in a standalone PWA? It needs the shop's
+   handsets, and `display: 'browser'` is what makes the scanner work until it's answered. Flipping
+   that line is the deliverable.
+2. **A rollout decision.** The gate that kept `inventory_locations` off for Contour was batch
+   put-away, and that now exists. Whether to turn the flag on for them is a judgement call about
+   readiness, no longer a blocked one.
 
 **On the usability test: it is no longer a gate.** It was the right instrument when we had no
 evidence. We now have something better for the questions that mattered — 121 location rows and

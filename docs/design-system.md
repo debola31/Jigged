@@ -258,6 +258,36 @@ Reach for this when a component's **value is the depiction** and per-element con
 to shrink below the touch floor to preserve it. Prefer ordinary rows-with-buttons everywhere else:
 the extra tap is a real cost, justified here because the alternative is losing the drawing. It also
 matches the operator bin view's existing drill-down, so the two surfaces read the same way.
+
+**A photo goes above the drawing, not instead of it.** A location's photo carries *identity* — this
+is the shelf you're standing at — while the drawn compartments carry *state*. Replacing the drawing
+with the photo would trade fill state for recognisability when both are wanted. Photos also stay on
+the board and out of the list view: the list is the find-one-name-among-121 view and has to stay
+cheap, and a private-bucket thumbnail costs a signed URL. Resolve them in one batched call
+(`getSignedUrls`), never one request per tile.
+
+---
+
+## Setup pages need a recurring job, or say what they're for
+
+A page whose every control is one-time setup has nothing to bring anyone back, and a first-time
+reader can't tell what it's *for* — they see the controls, not the purpose. That's how the storage
+board landed on review: Add storage, Subdivide, Rename, Print labels, and no answer to "what am I
+supposed to do here?"
+
+Two fixes, and prefer the first:
+
+1. **Give it the recurring job it's missing.** The board's is counting and putting away, so that's
+   the sheet's first action and the only one offered for the `Unassigned` bucket. This is better
+   than explaining, because it makes the page worth returning to rather than merely legible.
+2. **Say plainly what the page is and isn't.** One or two sentences: what you're looking at, and
+   where the adjacent thing happens instead ("adding and removing stock happens on the part itself").
+   Naming what a page *doesn't* do is often the more useful half.
+
+The failure mode this guards against is documented in
+[`inventory.md` §5.11](modules/inventory.md#511-design-for-the-sustain-not-the-setup) — *"design for
+the sustain, not the setup"* — which the board contradicted while the spec that demanded it sat in
+the same repo.
 - **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically
   (add = success / remove = error / adjust = info) — they indicate the *selected
   mode*, not an action.

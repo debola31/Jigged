@@ -340,19 +340,23 @@ reversal note in [J7](#j7--issue-material-to-a-job).
 Inventory has **no dedicated item detail, create, edit, or import page.** It is a filtered view
 over `parts`; everything else is the Parts UI.
 
-#### Inventory list — `/dashboard/{companyId}/inventory`
+#### ~~Inventory list — `/dashboard/{companyId}/inventory`~~ — DELETED 2026-07-30
 
-[`app/dashboard/[companyId]/inventory/page.tsx`](../../app/dashboard/[companyId]/inventory/page.tsx)
+**Folded into `/parts`.** The sentence directly above was the whole argument and it sat here
+unread: *"It is a filtered view over `parts`; everything else is the Parts UI."* The page was
+`getStockedParts` — `parts WHERE is_stocked` — with three extra columns (Quantity, Status, Unit)
+and a client-side status filter. Its Import and Delete already existed on Parts, and **Add Item
+already redirected to `/parts/new`**. Two pages for one item master.
 
-AG Grid over `getStockedParts`. Columns: Part Name (pinned), Description, Quantity, Status,
-Unit, Updated. Status is derived at render via `deriveStockStatus(quantity, reorder_point)` and
-filtered client-side. 300 ms debounced search over name + description. Multi-select → bulk
-Delete (archive) and CSV Export.
+Parts now carries **On hand** (unit folded into the cell: `40 ea`, and `—` for a non-stocked
+part, because a made-to-order part has no stock level and printing `0` reads as "we're out")
+plus **Status**, plus a **Stock** filter seeded from `?status=` — which is what makes Parts the
+shop-wide shortage lens [J4](#j4--job-kickoff-material-check) had been linking to. `/inventory`
+redirects to `/parts`.
 
-- **Add Item** → `/parts/new?source=bought&stocked=1&from=inventory`
-- **Import** → `/parts/import` (the shared parts CSV importer)
-- **Locations** → `/inventory/locations` — only when `inventory_locations` is enabled
-- **Row click** → `/parts/{id}?from=inventory`
+The sidebar item became **Storage**, pointing at the board. See
+[§5.12](#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30) for why that
+word, and for the flag-off case where `Count Inventory` moves to the Parts toolbar.
 
 #### Part workspace — Inventory tab
 
@@ -394,10 +398,15 @@ fill line, the child list (each with its own fill state), and a lazily-loaded, e
 list of what's stored there. It navigates within itself via child rows and breadcrumb. All
 structural actions are suppressed for `kind === 'system'`.
 
-**The list** (`LocationTreeView`) survives as a finding aid: rows are navigators only, and they
-finally carry a child count and a fill chip.
+~~**The list** (`LocationTreeView`) survives as a finding aid.~~ **Deleted 2026-07-30** — an
+indented text tree is the opposite of the visual map decision 9's corrected research calls for,
+Cabinet 1 alone exploded into 15 rows, and at 12–18 places the board is strictly better. The
+board is the only view.
 
-Toolbar: **Board|List** · **Print all labels** · **New top-level location** · **Build visually**.
+Toolbar: **Print all labels** · **Count everything**. (Was **Board|List** · Scan · Print all
+labels · New top-level location · Build visually — five setup controls on a page whose governing
+principle is [§5.11 "design for the sustain, not the setup"](#511-design-for-the-sustain-not-the-setup).)
+Adding storage is the in-grid **Add storage** tile, and it is the only way in.
 
 **Build visually / Subdivide**
 ([`VisualLocationBuilder.tsx`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx))
@@ -696,6 +705,27 @@ A shop-wide **"Short for this week"** view aggregates the same computation acros
 > roll-up (`rollUpShortages`, with the test pinning on-hand-counted-once) are all in git at
 > **`87df208`**. Bring them back with J5, where "short" leads to a buy list.
 >
+> ### ⚠️ That removal left a live 404 in production for ~2 months
+>
+> **Found 2026-07-30, fixed the same day.** The page went away; **its entry point did not.**
+> `JobPartMaterialsCard` kept rendering a clickable *"N short"* warning chip pointing at
+> `/dashboard/{companyId}/inventory/shortages`, and `Header.tsx` kept a title mapping for the
+> route. `find app -path '*shortages*'` returned nothing. Any user clicking *"3 short"* got a
+> 404 — and **its test asserted that href**, so the suite was actively pinning the broken link
+> in place.
+>
+> Two lessons worth keeping, because neither is caught by tsc, lint or CI:
+>
+> 1. **Deferring a feature means removing its entry points too.** A link to a deleted route is
+>    invisible to every automated check we run — it's a valid string.
+> 2. **A test asserting a URL proves the string, not the route.** It passed for two months
+>    while the destination didn't exist.
+>
+> The fix needed no new page: the shop-wide shortage lens is **the Parts stock filter**, so the
+> chip now points at `/parts?status=low`. §5.12's merge supplied the surface this journey had
+> been missing — the columns were on `/inventory` all along, one page away from the link that
+> wanted them.
+>
 > **Three limitations, all stated on screen rather than left to be found in a wrong number:**
 >
 > 1. **Top-level materials only.** `parts_bom` is recursive but this compares one level, so a
@@ -910,6 +940,17 @@ variance, commit. Committing writes `adjustment` rows with a reason.
 >   bin there is no ambiguity — *"Shelf A holds 830"* adjusts Shelf A and says nothing about Shelf B.
 >   **The parts the company-wide sheet has to name and skip are countable here**, which is a strict
 >   gain nobody planned for.
+>
+>   > **And now reachable — 2026-07-30.** The gain above was real and *unreachable*: the
+>   > company-wide sheet named the held-back parts as **inert chips** and told you to "count these
+>   > at their locations", without saying which or offering a way to get there. The holding places
+>   > were computed in `resolveCountTarget` and then thrown away, collapsed into a reason string.
+>   >
+>   > The `excluded` branch now carries them, and each renders as a link into that place's
+>   > worksheet. **The capability was never missing; the route was.** Worth recording as a
+>   > pattern: a correctly-scoped limitation still reads as a dead end unless the UI says where
+>   > to go instead. (The same pass also fixed a silent truncation — it rendered the first 8
+>   > held-back parts and dropped the rest without saying so.)
 > - **Search runs server-side.** `Unassigned` holds every part a real shop owns; you cannot filter
 >   9,428 rows in a browser, and `getLocationContents`' 200-row cap has no search or offset. Hence
 >   `getLocationContentsPage`.
@@ -1316,8 +1357,8 @@ It is **against** the current timing and target:
 
 1. **The board becomes permanent.** ✅ **BUILT (Phase 2).** Today `LocationBoardPreview` draws
    something that does not exist yet and is never seen again; what you live with afterwards is
-   [`LocationTreeView.tsx`](../../components/inventory/locations/LocationTreeView.tsx), an
-   indented text list. Invert it — the board is the storage home screen, showing real places
+   `LocationTreeView.tsx` (since **deleted** — see the reshape note at the end of this section),
+   an indented text list. Invert it — the board is the storage home screen, showing real places
    with real contents and fill state.
 
    Shipped as [`LocationBoard`](../../components/inventory/locations/board/LocationBoard.tsx) +
@@ -1472,19 +1513,95 @@ It is **against** the current timing and target:
    > flag remains opt-in and off by default — that's its normal state, not a hold — and the board can
    > now be emptied into, which is what the gate was protecting against. Turning it on for a pilot
    > shop is a rollout decision, no longer a blocked one.
-9. **Thing-first is what the visual-inventory leader itself prescribes.** Sortly's
-   [stockroom method](https://www.sortly.com/blog/how-to-organize-a-stockroom/) is ordered
-   *"1. Create an inventory list → 2. Optimize storage space"* — storage is step **two** —
-   and it explicitly says not to map everything up front. Their
-   [labeling guide](https://www.sortly.com/blog/how-to-label-inventory/) gives **no guidance
-   at all** on aisle/shelf/bin address codes. The company whose entire product is visual
-   inventory does not lead with a storage hierarchy.
+9. **Thing-first sequencing — CORRECTED 2026-07-30. The original claim misread both of its
+   own sources.**
+
+   > **What this said, and why it was wrong.** It claimed *"the company whose entire product
+   > is visual inventory does not lead with a storage hierarchy"*, citing two Sortly pages.
+   > Both were re-read; **neither supports it**, and one points the other way.
+   >
+   > - The [labeling guide](https://www.sortly.com/blog/how-to-label-inventory/) is about
+   >   labeling **items**, not locations. It never mentions shelves, bins, racks or aisles.
+   >   Citing its silence on address codes was a **category error** — absence of evidence
+   >   read as evidence of absence.
+   > - The [stockroom method](https://www.sortly.com/blog/how-to-organize-a-stockroom/)
+   >   *prescribes* a storage hierarchy. Step 2 is **"Make the most of your storage space"**;
+   >   it orders shelves by frequency and weight (eye level / higher / heavy on the bottom),
+   >   recommends **"shelving dividers and drawers"**, says **"labels or other identifiers
+   >   can also clarify where inventory is stored"**, and — most relevant to us —
+   >   recommends you **"post maps, charts, and other documentation that show team members
+   >   exactly how inventory should be stocked."**
+   >
+   > **What survives:** only the sequencing. An inventory list is step 1, storage is step 2.
+   > That is about **onboarding order**, not about whether storage should be visual or nested.
+   >
+   > **What actually justifies the flat default:** finding 1 — **118 of 121** of Contour's
+   > legacy locations were flat, in a system that supported a `/` path separator. That is
+   > *their behaviour*, not borrowed authority, and it was always the stronger argument. This
+   > decision leaned on Sortly because it read as external validation; it wasn't.
+   >
+   > **What this changes downstream:** the visual thread gets *promoted*, not demoted. "Post
+   > a map that shows exactly how inventory should be stocked" is an endorsement of the board,
+   > and of photos as a place's primary identity (decision 5) — flat places each with a
+   > photograph *are* that map. It also gives issue **#421** real backing rather than only
+   > intuition.
+   >
+   > Recorded at length because the mistake was invisible: the citation looked authoritative,
+   > and a plan was built on it before anyone opened the links.
+
+> ### ⚠️ Reshaped again, 2026-07-30 — the page contradicted §5.11, and we shipped it anyway
+>
+> Phase 2 delivered the board, and the first reaction on opening it was *"I don't know what
+> this locations button is supposed to take me to."* That was correct, and the cause is
+> embarrassing in a specific way: **§5.11 is titled "Design for the sustain, not the setup",
+> and every control on the toolbar was setup** — Scan · Print all labels · New top-level
+> location · Build visually, plus a fifth setup entry as a grid tile. The page violated the
+> decision it was built under, and the decisions above describe the build without noticing.
+>
+> What changed, and what each amends:
+>
+> - **Three entry points to two flows, one duplicated (amends decisions 2 and 3).**
+>   `Build visually` and the in-grid `Add storage` tile called the **identical function**.
+>   There is now **one** way to add storage — the tile, opening the simple form: a name, an
+>   optional kind, one flat place. The multi-level builder survives *only* as Subdivide on a
+>   unit that already exists, which is what decision 3 prescribed in the first place; its
+>   top-level path is removed rather than left dormant. The empty state had the same disease
+>   in sharper form — `Build visually` and `Add manually` side by side, asking someone who has
+>   never seen the feature to choose between two flows before knowing what either produces.
+> - **The list view is cut (amends decision 1).** Decision 1 kept the tree "demoted to a
+>   Board|List toggle". Wrong call: an indented text tree is the *opposite* of the map decision
+>   9's corrected research asks for, Cabinet 1 alone exploded into 15 rows, and at 12–18 places
+>   the board is strictly better. A toggle with no good answer is a burden, not an option.
+>   `LocationTreeView` is deleted.
+> - **Scan is removed from this page.** Scanning a printed label is something you do standing
+>   at a shelf — an operator gesture, not an admin one at a desk. It became a tab-bar action in
+>   the operator layout, where one scanner now resolves **both** location labels and job
+>   travelers (see the unified-scanner decision below).
+> - **`Count everything` arrives, and the board becomes the hub.** With `/inventory` folded
+>   into Parts there is no sibling page to host the company-wide sheet, and §5.11 wanted the
+>   count place-scoped anyway. You reach a place's worksheet by tapping its tile; the
+>   company-wide sheet is one button here.
+> - **Photos become a place's primary identity (amends decision 5).** A place with no photo now
+>   carries a passive glyph on its tile, because a photographed place and an unphotographed one
+>   otherwise look identical from the board. Passive, not a button: the tile is one tap target
+>   and the sheet owns actions.
+>
+> **"Locations" was also the wrong word, and not merely a vague one.** Across
+> [Sortly](https://www.sortly.com/business-inventory-app/), Katana and
+> [MRPeasy](https://www.mrpeasy.com/resources/user-manual/stock/settings/locations/),
+> *"locations"* conventionally means **sites / warehouses** — "track inventory across multiple
+> locations". Jigged is single-site, so the label imported a meaning we don't have. The sidebar
+> item is now **Storage**; see the `/inventory`-folded-into-Parts decision for why that word
+> and not "Inventory".
 
 **Under full material control locations get *more* load-bearing, not less** — a remnant is a
 physical thing in a place, and *"is there a drop I can use"* is a spatial query.
 
 Revisit issue **#421** (3D diorama preview) against decision 1: a diorama of *real, occupied*
-storage is a different and better proposition than a diorama of a preview.
+storage is a different and better proposition than a diorama of a preview. Decision 9's
+correction strengthens this — *"post maps, charts… that show exactly how inventory should be
+stocked"* is the job a diorama would do. A spike ran on 2026-07-30; its recommendation is on
+the issue.
 
 **Drag-to-reparent: considered and cut.** Their data (118/121 flat) says a re-parent gesture
 serves a hierarchy they don't have; drag on a shop tablet is the most failure-prone interaction
@@ -1658,6 +1775,100 @@ step 5 *"establish standard operating procedures"* with periodic audits.
 Our equivalent is [J9](#j9--count-it). The count session is **not a reporting feature** —
 it is the ritual that keeps the other twelve journeys true. Spec it as recurring, assignable
 and place-scoped, not a one-off Adjust button.
+
+> **This section was violated by the page built under it, 2026-07-28 → corrected 2026-07-30.**
+>
+> The Storage board shipped with a toolbar in which **every control was setup**, which is the
+> exact failure this section names. Worth stating plainly, because writing the principle down
+> did not prevent it: the build followed the *decisions* (§5.5's numbered list) and nobody
+> re-read the *principle* they were meant to serve.
+>
+> The board's chrome is now two controls, and its daily job — tap a place, count what's there,
+> move what doesn't belong — is what the tiles are for. The test is simple and worth reusing on
+> any surface in this module: **if every control on a page is something you do once, the page
+> has no reason to be visited twice.**
+>
+> Still missing from this section's list: **recurring** and **assignable**. Place-scoping was
+> the half that changed the shape of the screen; a schedule and an assignee remain unstarted.
+
+---
+
+### 5.12 Two nouns: Parts is *what we have*, Storage is *where it lives* — 2026-07-30
+
+`/inventory` was deleted. It was **`getStockedParts` — i.e. `parts WHERE is_stocked` — plus
+three columns** (quantity, status, unit) and one filter (stock status, computed at render from
+`quantity + reorder_point`, never stored). Its toolbar was Import · Delete · Locations · Count,
+and Parts already had Import and bulk delete; it even delegated part creation to `/parts/new`.
+The two pages referenced each other as complements in their own source comments.
+
+**No unique capability. Two pages for one item master, which is why neither could be
+described.** Parts gained On hand + Status and a Stock filter; `/inventory` redirects to it.
+
+#### Why the sidebar says "Storage" and not "Inventory"
+
+In the industry **"inventory" means the items and their quantities, not the places** — Sortly's
+own feature is *"Inventory Photos: visually track inventory by adding photos of your **items**"*,
+the product category is "inventory management" (stock levels), and "physical inventory" is the
+act of counting items. Its stockroom method uses **"storage space"**, **"storage solutions"**,
+**"shelving"** for places.
+
+Decisively: **after this merge, Parts *is* the inventory.** A sidebar reading `Parts` (holding
+the quantities) beside `Inventory` (holding the shelves) would have the two labels swapped
+relative to their meanings. Familiarity argued for keeping the old word, but that only holds
+while Parts isn't the inventory — and now it is.
+
+Routes stay under `/inventory/*`. Renaming them is churn for no user-visible gain, and the QR
+payloads encode `/operator/...` paths, not these.
+
+#### The flag-off case
+
+`inventory_locations` gates the board, so a shop with the flag off has **no places at all**.
+There, the **Storage** nav item is hidden and `Count Inventory` moves to the **Parts** toolbar —
+the only place the reshape adds a control rather than removing one.
+
+#### One scanner for every Jigged QR
+
+Both QR kinds are deep links through the operator login passthrough, differing only by query
+string: `?location={uuid}` versus `?job={uuid}&part={uuid}`. The in-app scanner read only the
+first, so an operator holding a traveler sheet had to leave for the phone's camera — a different
+gesture for a near-identical piece of paper. [`lib/jiggedScan.ts`](../../lib/jiggedScan.ts)
+resolves either.
+
+> **A trap worth recording.** Older travelers still in circulation encode a **third** param,
+> `operation=`, and jump straight to that step's action view (current sheets omit it so the
+> operator picks). A parser that dropped it would have silently downgraded an old sheet to the
+> traveler index — making in-app scanning *worse* than the camera-app path those sheets were
+> printed for. Found by reading `login/page.tsx`'s `postLoginPath` rather than assuming the
+> routes; the handler now mirrors it exactly.
+
+Refusals are deliberate: a job id without a part id can't open a traveler, so it isn't one; a
+bare UUID is always a location, since a traveler needs two ids and guessing would be a coin
+flip.
+
+#### The operator tab bar, and what nearly got buried
+
+**Jobs · Inventory · Scan · My work.** Scan is a tab because it is the operator's most frequent
+physical gesture, and it opens a **dialog rather than navigating**, so scanning never loses the
+screen you were on — the point for the continuous flows (a count session, receiving a pallet)
+that motivated an in-app scanner at all.
+
+An earlier draft merged `My work` + `Profile` into one tab to free the slot. That was wrong:
+it puts an operator's own work behind a second tap to make room for account settings nobody
+opens mid-shift. **Profile moved to a header avatar instead** — it holds a read-only
+name/email card, Logout and Give Feedback, and the header already had the station picker.
+
+#### Operators see the same board
+
+The operator surface listed names, kinds and codes while the owner's page drew each unit with
+compartments, photo and fill state. Backwards: **the person who most needs to recognise a
+physical place is the one standing in front of it, and `CAB3-A` is not recognisable.** The
+operator page now renders `LocationBoard` itself — same component, same `getLocationBoard`
+request pair, same roll-up — so the two cannot drift.
+
+Two deliberate differences: `onAddStorage` is optional and omitted (creating places is an
+owner's job; an operator doing it mid-shift is how `MISC 8-25-21` gets into a location table —
+finding 2), and tapping a unit navigates into the existing bin view rather than opening a
+second actions sheet over it.
 
 ---
 

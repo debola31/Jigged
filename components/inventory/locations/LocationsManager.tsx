@@ -23,6 +23,7 @@ import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import AutoAwesomeMosaicOutlinedIcon from '@mui/icons-material/AutoAwesomeMosaicOutlined';
 import GridViewIcon from '@mui/icons-material/GridView';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
@@ -44,6 +45,7 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import LocationBoard, { boardOrder } from './board/LocationBoard';
 import LocationDetailSheet from './board/LocationDetailSheet';
+import LocationScanner from '@/components/scanner/LocationScanner';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -155,6 +157,8 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [sheetId, setSheetId] = useState<string | null>(null);
+
+  const [scanning, setScanning] = useState(false);
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -356,6 +360,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           </ToggleButton>
         </ToggleButtonGroup>
         <Box sx={{ flex: 1 }} />
+        {/* Scanning a label you already printed is faster than finding it in a grid of 22 — and
+            it's the same gesture the operator surface uses, so the two read alike. */}
+        <Button
+          variant="outlined"
+          startIcon={<QrCodeScannerIcon />}
+          onClick={() => setScanning(true)}
+        >
+          Scan
+        </Button>
         <Button
           variant="outlined"
           startIcon={<QrCode2Icon />}
@@ -453,6 +466,19 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           )}
         </>
       )}
+
+      <LocationScanner
+        open={scanning}
+        onClose={() => setScanning(false)}
+        onScan={(locationId) => {
+          // A label from another company decodes fine but isn't yours; the tree is already loaded,
+          // so refusing it costs nothing and beats opening an empty sheet.
+          const node = byNodeId.get(locationId);
+          if (!node) return false;
+          setScanning(false);
+          setSheetId(node.id);
+        }}
+      />
 
       <LocationDetailSheet
         open={sheetNode !== null}

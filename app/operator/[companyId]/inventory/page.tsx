@@ -12,10 +12,12 @@ import Stack from '@mui/material/Stack';
 import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import Button from '@mui/material/Button';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 
+import LocationScanner from '@/components/scanner/LocationScanner';
 import { getLocations } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
@@ -34,6 +36,7 @@ export default function OperatorWarehouseHomePage() {
   const companyId = params.companyId as string;
 
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const { data: locationsData, loading } = useLoad(
     () => getLocations(companyId),
@@ -57,10 +60,34 @@ export default function OperatorWarehouseHomePage() {
           Inventory
         </Typography>
       </Stack>
-      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 3, color: 'text.secondary' }}>
-        <QrCodeScannerIcon fontSize="small" />
-        <Typography variant="body2">Scan a printed label to jump straight to a bin.</Typography>
-      </Stack>
+      {/* This was a decorative icon beside a sentence — it described a capability the app didn't
+          have, since scanning meant leaving for the phone's camera app and coming back through the
+          login route. Now it's the button. */}
+      <Button
+        variant="contained"
+        size="large"
+        fullWidth
+        startIcon={<QrCodeScannerIcon />}
+        onClick={() => setScanning(true)}
+        sx={{ mb: 1, minHeight: 56 }}
+      >
+        Scan a label
+      </Button>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Or browse your storage below.
+      </Typography>
+
+      <LocationScanner
+        open={scanning}
+        onClose={() => setScanning(false)}
+        onScan={(locationId) => {
+          // Reject a code from another company rather than routing to a bin that will 404 — the
+          // location list is already loaded, so this costs nothing.
+          if (!locations.some((l) => l.id === locationId)) return false;
+          setScanning(false);
+          router.push(`/operator/${companyId}/inventory/locations/${locationId}`);
+        }}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

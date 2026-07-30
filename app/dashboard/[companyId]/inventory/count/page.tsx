@@ -74,6 +74,9 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import {
@@ -105,7 +108,9 @@ import {
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
+import LocationScanner from '@/components/scanner/LocationScanner';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import type {
   CountCandidate,
@@ -176,6 +181,7 @@ export default function InventoryCountPage() {
   /** Put-away state: the destination, and whether a move is in flight. */
   const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
   const [moving, setMoving] = useState(false);
+  const [scanningDest, setScanningDest] = useState(false);
 
   /** System quantities as the sheet loaded — compared to a fresh read at save, so we can say
    *  which parts moved underneath the count. */
@@ -648,6 +654,19 @@ export default function InventoryCountPage() {
                         }
                       />
                     </Box>
+                    {/* Standing at the shelf you're filling, its label is right in front of you —
+                        which is exactly the continuous-scan case §5.10 says the camera-app round
+                        trip can't serve. */}
+                    <Tooltip title="Scan the destination label">
+                      <IconButton
+                        sx={{ mt: 1.5 }}
+                        onClick={() => setScanningDest(true)}
+                        disabled={moving}
+                        aria-label="Scan the destination label"
+                      >
+                        <QrCodeScannerIcon />
+                      </IconButton>
+                    </Tooltip>
                     <Button
                       variant="outlined"
                       size="large"
@@ -662,6 +681,20 @@ export default function InventoryCountPage() {
                   </CardContent>
                 </Card>
               )}
+
+              <LocationScanner
+                open={scanningDest}
+                onClose={() => setScanningDest(false)}
+                title="Scan where these are going"
+                onScan={(scannedId) => {
+                  const dest = destinationOptions.find((o) => o.id === scannedId);
+                  // Not one of ours, or it's the bin we're standing at — either way, keep scanning
+                  // rather than silently picking a destination the RPC would reject.
+                  if (!dest || scannedId === locationId || dest.kind === SYSTEM_KIND) return false;
+                  setMoveTo(dest);
+                  setScanningDest(false);
+                }}
+              />
 
               {/* The page is capped, and `Unassigned` on a real shop holds every part they own —
                   so say what isn't shown rather than presenting a page as the whole bin. */}

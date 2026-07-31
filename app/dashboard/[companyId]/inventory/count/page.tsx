@@ -717,6 +717,12 @@ export default function InventoryCountPage() {
                 open={scanningDest}
                 onClose={() => setScanningDest(false)}
                 title="Scan where these are going"
+                /* So a label printed by another shop is refused with "belongs to a different
+                   company" instead of falling through to the generic "can't be used here" below.
+                   The check underneath would catch it anyway — it isn't in `destinationOptions` —
+                   but it can't tell that apart from "you scanned the bin you're standing at", and
+                   naming the actual cause is the difference between a useful message and a shrug. */
+                expectedCompanyId={companyId}
                 onScan={(scannedId) => {
                   const dest = destinationOptions.find((o) => o.id === scannedId);
                   // Not one of ours, or it's the bin we're standing at — either way, keep scanning

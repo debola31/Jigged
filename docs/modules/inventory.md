@@ -1600,8 +1600,39 @@ physical thing in a place, and *"is there a drop I can use"* is a spatial query.
 Revisit issue **#421** (3D diorama preview) against decision 1: a diorama of *real, occupied*
 storage is a different and better proposition than a diorama of a preview. Decision 9's
 correction strengthens this — *"post maps, charts… that show exactly how inventory should be
-stocked"* is the job a diorama would do. A spike ran on 2026-07-30; its recommendation is on
-the issue.
+stocked"* is the job a diorama would do.
+
+**The spike ran on 2026-07-30; full result on the issue. Three findings that outlive the
+decision:**
+
+1. **Real 3D is out on cost alone.** Measured gzipped: `three` alone **123 KB**, with
+   `@react-three/fiber` **230 KB**, with `drei` **289 KB** — for a read-only depiction on the least
+   frequent screen in the product. An inline-SVG isometric does the same job in **~1.4 KB of
+   markup and zero dependencies**.
+2. **CSS 3D flattens inside our own chrome, silently.** `overflow: hidden`, `opacity < 1`,
+   `filter`, and `backdrop-filter` on a `transform-style: preserve-3d` root all collapse the
+   subtree to flat — and `getComputedStyle().transformStyle` **still reports `preserve-3d`** in
+   every one of those cases, so the obvious debugging check confirms a lie. `contain: paint` is
+   safe, and the same property on an *ancestor* card is safe. `StorageUnitShell` sets
+   `overflow: hidden` and our cards use `backdrop-filter`, so a CSS-3D unit dropped into the
+   existing tile flattens today. **This matrix is Chromium-only — the WebKit run never completed,
+   and operators are on iPhones.**
+3. **Depth buys recognition and spends legibility.** In a labelled isometric cabinet the row
+   labels collide with each other and with filled compartments, back rows occlude front ones, and
+   at board scale the diagonal silhouettes tile into a pattern rather than a set of distinct
+   places. The flat board keeps every compartment individually legible and addressable.
+
+**What the drawing is actually for, post-photos.** A photo beats any drawing at recognition, but a
+photo cannot show **fill state** and doesn't exist until someone takes one. So the schematic's two
+real jobs are the fill-state canvas and the pre-photo placeholder — both of which the current flat
+drawing already does. That is the strongest argument for leaving this alone, and it is the falsifier
+to answer before building anything: *if the flat schematic already does both jobs, an isometric is
+decoration on a setup screen*, which is exactly what §5.11 says not to build.
+
+**Also corrected on the issue:** "no stored geometry" is a product choice (a stored layout is a
+second source of truth that drifts from the tree the moment a cabinet moves in real life), not a
+technical wall — and depicting a *kind* is a `kind` → shape lookup, **not** geometry, so the small
+version of the idea never touches the invariant.
 
 **Drag-to-reparent: considered and cut.** Their data (118/121 flat) says a re-parent gesture
 serves a hierarchy they don't have, and the house precedent is explicit — routings reorder with

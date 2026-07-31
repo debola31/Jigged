@@ -180,6 +180,24 @@ describe('LocationBoard — photos', () => {
     expect(document.querySelector('img[src="https://signed/a"]')).not.toBeNull();
   });
 
+  /**
+   * Regression pin, not an implementation detail. This shipped as `objectFit: cover` in a fixed
+   * 96px-tall full-width box — about 3:1 — so every photo was cropped to a horizontal slice of its
+   * own middle, and a portrait shot of a tall cabinet lost its top and bottom entirely. The photo
+   * exists so someone recognises the thing in front of them, which requires seeing all of it.
+   *
+   * The visible cost of `contain` is bars beside a portrait shot. Anyone tempted to remove those
+   * bars by going back to `cover` re-breaks recognition, so the fit is asserted rather than trusted.
+   */
+  it('scales the photo to fit rather than cropping it', () => {
+    renderBoard([withPhoto()], [], {
+      photoUrls: new Map([['co1/locations/cab3/a.jpg', 'https://signed/a']]),
+    });
+    const img = document.querySelector('img[src="https://signed/a"]');
+    expect(img).not.toBeNull();
+    expect(getComputedStyle(img as Element).objectFit).toBe('contain');
+  });
+
   /** Signed URLs expire and objects can vanish; a missing one falls back to the drawing. */
   it('falls back to the drawing when the path has no URL', () => {
     renderBoard([withPhoto()], [], { photoUrls: new Map() });

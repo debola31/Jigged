@@ -321,12 +321,29 @@ export function StorageUnitShell({
       </Box>
 
       {photoUrl && (
+        /* `contain`, NOT `cover`. This shipped as `cover` in a fixed 96px-tall, full-width box —
+           roughly 3:1 in a board tile. No phone takes a 3:1 photo, so every photo was cropped to a
+           horizontal slice of its own middle: a portrait shot of a tall cabinet showed about a
+           tenth of its height, with the top and bottom cut away. That defeats the entire purpose —
+           the photo is here so someone RECOGNISES the thing in front of them (§5.5 decision 5), and
+           a beheaded cabinet is harder to recognise than the drawing it sits above.
+           `contain` on a mat shows the whole object at the cost of bars beside a portrait shot.
+           Bars are a deliberate-looking frame; a slice reads as a broken image. */
         <Box
-          component="img"
-          src={photoUrl}
-          alt=""
-          sx={{ display: 'block', width: '100%', height: 96, objectFit: 'cover' }}
-        />
+          sx={{
+            height: 120,
+            bgcolor: 'action.hover',
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Box
+            component="img"
+            src={photoUrl}
+            alt=""
+            sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }}
+          />
+        </Box>
       )}
 
       {/* A unit with nothing inside it gets no body at all. It used to render an empty padded box,

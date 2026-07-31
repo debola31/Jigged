@@ -92,10 +92,15 @@ export default function LocationPhoto({
           component="img"
           src={url}
           alt={`Photo of ${locationName}`}
+          /* `contain` for the same reason as the board tile: `maxHeight` clamps a portrait phone
+             photo to roughly a third of its height, and `cover` then cropped the missing two-thirds
+             away rather than scaling to fit. The whole object has to be visible for the photo to do
+             its job. */
           sx={{
             width: '100%',
-            maxHeight: 200,
-            objectFit: 'cover',
+            height: 200,
+            objectFit: 'contain',
+            bgcolor: 'action.hover',
             borderRadius: 1,
             display: 'block',
             border: 1,

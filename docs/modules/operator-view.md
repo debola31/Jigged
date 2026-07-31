@@ -190,7 +190,7 @@ see this", not "nobody can".
   bank the total. Renders `null` at zero.
 
   **First run on a device announces nothing.** The mark lives in `localStorage`,
-  so it follows the *device*, not the person — a shop tablet, a replacement
+  so it follows the *device*, not the person — a replacement
   phone, a second browser or cleared site data all start empty. Defaulting to
   zero would render the whole history as new ("312 new views" after a year), and
   the banner's only asset is that its number is true. Instead the current total

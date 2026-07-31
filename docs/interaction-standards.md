@@ -58,7 +58,9 @@ the generic "low-stakes ⇒ no dialog" advice.
 | **Staged (explicit-Save) edit** — pricing-tier removal | Low | **No dialog.** Removal is in-memory until the user clicks Save; the dirty-state indicator + the option to walk away unsaved *is* the safety net. |
 
 > **Audience floor — why not "inline delete + Undo snackbar":** our users are
-> 50–60, often on tablets on a shop floor with divided attention. Auto-dismissing
+> 50–60, and on the operator surface they are on their own phone on a shop floor with
+> divided attention (see [the device model](../CLAUDE.md#who-uses-what-on-what--the-device-model)
+> — not tablets, which the docs used to assume). Auto-dismissing
 > snackbars are a documented accessibility/usability liability for exactly this
 > profile: WCAG 2.2.1 (Level A) treats a short auto-dismiss window as a timing
 > limit when the toast is the *only* recovery path ([W3C](https://www.w3.org/WAI/WCAG21/Understanding/timing-adjustable.html));
@@ -120,8 +122,16 @@ and always show status ([GitHub Primer — Saving](https://primer.style/product/
 - 🔻 **Navigation guard — low priority, narrow if at all.** The honest dirty-state
   indicator is the real protection. A `beforeunload` guard is a weak backstop:
   browsers show only a generic, non-customizable message (it can't name the
-  unsaved tier) and it is unreliable on mobile/tablet — our primary device — and
-  may not fire at all ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
+  unsaved tier), which is reason enough on its own.
+
+  > **Corrected 2026-07-31.** This also said `beforeunload` "is unreliable on
+  > mobile/tablet — **our primary device**". Both halves were wrong: there is no single
+  > primary device, and pricing tiers are edited on the **office computer**, where
+  > `beforeunload` is perfectly reliable
+  > ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
+  > The mobile-unreliability point still applies to the *operator* surface, which has no
+  > staged-save forms — so it argues for nothing here. The recommendation is unchanged, but
+  > it now rests only on the generic-message argument rather than on a false premise.
   If added at all, use a conditional in-app (Next.js) route guard attached **only
   while genuinely dirty** and removed once saved (MDN), to avoid the false-positive
   that trains users to ignore it (the Figma "already-saved-but-warned" pitfall).

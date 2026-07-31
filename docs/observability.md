@@ -185,7 +185,11 @@ which is strictly better anyway: the event never leaves the browser and never co
 against quota.
 
 > **Open question:** `legacy-browsers` is active on the frontend with `safari` in its list.
-> Shop-floor tablets are iPads. If any run an older iOS, this filter may be discarding
+> Operators are on **their own phones**, and in a machine shop a good share of those are
+> iPhones — so this is still a Safari exposure, just via personal handsets rather than the
+> shop-floor tablets this note originally assumed (corrected 2026-07-31; see
+> [the device model](../CLAUDE.md#who-uses-what-on-what--the-device-model)). If any run an
+> older iOS, this filter may be discarding
 > errors from exactly the devices that matter most. Not yet resolved.
 
 ### Plan and budget

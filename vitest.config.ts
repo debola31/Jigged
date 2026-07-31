@@ -36,8 +36,16 @@ export default defineConfig({
      * (`availableParallelism() - 1`) is 1–3 workers there; forcing 6 over-subscribed the runner
      * several times over and produced exactly the contention the setting was meant to remove.
      * `VisualLocationBuilder` then failed with `Unable to find role="button" and name
-     * /create 16 locations/i` — a state race, not a timeout, so `testTimeout` above did not
-     * cover it.
+     * /create 16 locations/i`.
+     *
+     * **Correction:** that failure was recorded here as *"a state race, not a timeout."* It is a
+     * timeout — just not this one. `findBy*` and `waitFor` are governed by Testing Library's
+     * `asyncUtilTimeout` (1000ms by default), not by `testTimeout`, and when it expires the error
+     * is a missing-element message that never mentions time. Setting `asyncUtilTimeout: 1`
+     * reproduces that exact message from this exact test. `__tests__/setup.ts` now raises it to
+     * 5s, which is the half of the contention fix this file could not reach. The `maxWorkers`
+     * warning stands regardless — over-subscribing a small runner was real, and the mis-diagnosis
+     * is why it looked like a component bug rather than the contention it caused.
      *
      * If local contention is ever worth capping again, it must be a genuine cap that cannot
      * inflate a small machine — `Math.min(6, availableParallelism() - 1)` — and it must be

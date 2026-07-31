@@ -49,6 +49,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -142,6 +143,24 @@ export default function InventoryCountPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
+  const { features, loading: featuresLoading } = useCompanyFeatures();
+
+  /**
+   * Where "back" goes depends on where counting is entered from, and that differs by flag.
+   *
+   * With locations ON there are two entry points and both are the board — `Count everything` in its
+   * toolbar, and `Count what's here` on a tile's sheet. With locations OFF there is no board at all
+   * (the Storage nav item is hidden and `/inventory/locations` redirects), so the only entry point
+   * is `Count Inventory` on the **Parts** toolbar.
+   *
+   * This used to be a single hardcoded push to `/dashboard/{id}/inventory`, which now redirects to
+   * Parts — so a user who arrived from Storage was silently dumped on a different page than the one
+   * they left. Labelling it "Back to storage" without this branch would just move the bug: it would
+   * send flag-off shops to a page that redirects them straight back out.
+   */
+  const backTo = features.inventory_locations
+    ? { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' }
+    : { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' };
 
   /** `?location=<id>` switches the whole sheet to place-scoped. See the module comment. */
   const locationId = searchParams.get('location');
@@ -515,12 +534,16 @@ export default function InventoryCountPage() {
 
   return (
     <Box sx={{ pb: step === 1 ? 12 : 4 }}>
+      {/* Hidden until the flag resolves rather than guessing a destination — an unresolved
+          `features` object reads as flag-off, so a default would render "Back to parts" and then
+          swap to "Back to storage", which is the same appear-then-change flicker the Parts toolbar
+          had to fix. A back button that changes where it goes is worse than one that arrives late. */}
       <Button
         startIcon={<ArrowBackIcon />}
-        onClick={() => router.push(`/dashboard/${companyId}/inventory`)}
-        sx={{ mb: 2 }}
+        onClick={() => router.push(backTo.href)}
+        sx={{ mb: 2, visibility: featuresLoading ? 'hidden' : 'visible' }}
       >
-        Back to inventory
+        {backTo.label}
       </Button>
 
       <Stepper activeStep={step} sx={{ mb: 4, maxWidth: 460 }}>

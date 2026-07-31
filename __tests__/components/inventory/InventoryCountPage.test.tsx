@@ -21,6 +21,17 @@ vi.mock('@/utils/inventoryCountAccess', () => ({
   commitCount: vi.fn(),
 }));
 
+// The back link's destination depends on the locations flag, and the real hook calls getCompany(),
+// which transitively builds a Supabase client and fails without env vars. Defaults to flag-on
+// because that is the configuration every other test in this file assumes.
+const mockUseCompanyFeatures = vi.fn(() => ({
+  features: { inventory_locations: true },
+  loading: false,
+}));
+vi.mock('@/hooks/useCompanyFeatures', () => ({
+  useCompanyFeatures: () => mockUseCompanyFeatures(),
+}));
+
 // The page reaches the locations access layer for put-away; unmocked it builds a real Supabase
 // client at import time and the whole file fails to load.
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
@@ -95,6 +106,13 @@ const chooseParts = async (user: ReturnType<typeof userEvent.setup>, ...partName
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // `clearAllMocks` clears call records but NOT implementations, so a `mockReturnValue` set inside
+  // one test leaks into every test after it. The flag-off back-link test sets one, so the flag-on
+  // default is re-pinned here rather than relied on from the `vi.fn(impl)` above.
+  mockUseCompanyFeatures.mockReturnValue({
+    features: { inventory_locations: true },
+    loading: false,
+  });
   window.localStorage.clear();
   asMock(loadCountCandidates).mockResolvedValue([
     cand({ partId: 'p1', partName: '4140 bar', systemQuantity: 40 }),
@@ -194,6 +212,37 @@ describe('choosing what to count', () => {
     await user.click(screen.getByRole('button', { name: 'Shelf B' }));
 
     expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=shelf-b');
+  });
+
+  /**
+   * The back link used to push `/dashboard/co1/inventory` unconditionally. That route now redirects
+   * to Parts, so anyone who reached counting from the Storage board was silently returned to a
+   * different page than the one they left.
+   *
+   * Both flag states are asserted deliberately: with locations OFF the only entry point is the
+   * `Count Inventory` button on the Parts toolbar, so sending those shops to Storage would just
+   * relocate the bug — `/inventory/locations` redirects them straight back out. A test of one state
+   * would have passed against the old hardcoded link.
+   */
+  it('returns to the storage board it was entered from', async () => {
+    const user = userEvent.setup();
+    asMock(loadCountCandidates).mockResolvedValue([cand({ partId: 'p1', partName: '4140 bar' })]);
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /back to storage/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations');
+  });
+
+  it('returns to parts when the shop has no storage board', async () => {
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { inventory_locations: false },
+      loading: false,
+    });
+    const user = userEvent.setup();
+    asMock(loadCountCandidates).mockResolvedValue([cand({ partId: 'p1', partName: '4140 bar' })]);
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /back to parts/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts');
+    expect(screen.queryByRole('button', { name: /back to storage/i })).not.toBeInTheDocument();
   });
 
   it('shows an empty state when nothing is stocked', async () => {

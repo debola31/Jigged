@@ -505,4 +505,11 @@ reflects the current BOM. There is no mark-consumed or mark-skipped action.
 
 > Note the unresolved contradiction: the snapshot is taken at creation, and the UI then
 > deliberately ignores it in favour of the live BOM. See
-> [Inventory Module](inventory.md#job_materials-is-write-only).
+> [Inventory Module](inventory.md) §5.9 — which resolves it: drop the table, back consumption
+> onto the ledger.
+
+<!-- Linked by section number, not an anchor. The old link pointed at a `#### job_materials is
+     write-only` heading that the 2026-07-31 condensation folded into §3's data-model table, and a
+     heading kept alive purely to satisfy an anchor is the kind of bloat that condensation removes.
+     §5.9 is the section that actually owns this decision. -->
+

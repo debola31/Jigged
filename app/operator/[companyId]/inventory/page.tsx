@@ -15,6 +15,7 @@ import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import { getLocationBoard, buildLocationTree } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy } from '@/utils/locationOccupancy';
 import LocationBoard, { boardOrder } from '@/components/inventory/locations/board/LocationBoard';
+import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 
 // Stable empty fallbacks so the tree/occupancy memos don't churn while the first load runs.
@@ -79,9 +80,29 @@ export default function OperatorWarehouseHomePage() {
           Inventory
         </Typography>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Tap a place to see what&apos;s in it, or use Scan to jump straight there from a label.
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Look up a part to find where it is, or browse the places below. Scan jumps straight to a
+        place from its label.
       </Typography>
+
+      {/*
+        Search leads; the board is the fallback.
+
+        The tab is called Inventory, and inventory means ITEMS — but this page opened as a board of
+        PLACES, which is Storage content under an Inventory label. Browsing place-by-place only
+        helps someone who already knows which place to open, and the commonest operator question is
+        the other way round: "we have this part somewhere — where?"
+
+        It also keeps Scan and Inventory from competing. Scan is a router — "take me to the thing
+        I'm holding". Inventory is a destination — "let me find something". Leading with a board
+        made this page a second way to navigate, which is Scan's job and it does it faster.
+      */}
+      <OperatorPartLookup
+        companyId={companyId}
+        onOpenLocation={(locationId) =>
+          router.push(`/operator/${companyId}/inventory/locations/${locationId}`)
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -103,14 +124,19 @@ export default function OperatorWarehouseHomePage() {
           </CardContent>
         </Card>
       ) : (
-        <LocationBoard
-          tree={tree}
-          occupancy={occupancy}
-          photoUrls={photoUrls}
-          onOpen={(node) =>
-            router.push(`/operator/${companyId}/inventory/locations/${node.id}`)
-          }
-        />
+        <>
+          <Typography variant="overline" color="text.secondary">
+            Browse places
+          </Typography>
+          <LocationBoard
+            tree={tree}
+            occupancy={occupancy}
+            photoUrls={photoUrls}
+            onOpen={(node) =>
+              router.push(`/operator/${companyId}/inventory/locations/${node.id}`)
+            }
+          />
+        </>
       )}
     </Box>
   );

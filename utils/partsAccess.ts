@@ -575,6 +575,16 @@ export interface PartSelectOption {
   description: string | null;
   has_routing: boolean;
   is_stocked: boolean;
+  /**
+   * Whether stock for this part is held per-location (`part_location_stock`) rather than as the
+   * single `quantity` above.
+   *
+   * Needed to answer "where is this?" honestly: an untracked part has no `part_location_stock`
+   * rows at all, so an empty balances result means "not tracked by place" for one part and
+   * "tracked, but none anywhere" for another. Without this flag those are indistinguishable, and
+   * the operator lookup would tell someone their stock is nowhere when it simply isn't binned.
+   */
+  is_location_tracked: boolean;
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
@@ -591,6 +601,7 @@ const PART_SELECT_COLUMNS = `
   part_name,
   description,
   is_stocked,
+  is_location_tracked,
   source,
   primary_unit,
   quantity,
@@ -606,6 +617,7 @@ function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
     description: p.description as string | null,
     has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
     is_stocked: p.is_stocked as boolean,
+    is_location_tracked: Boolean(p.is_location_tracked),
     source: p.source as 'made' | 'bought',
     primary_unit: p.primary_unit as string | null,
     quantity: Number(p.quantity ?? 0),

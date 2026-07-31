@@ -323,12 +323,16 @@ export function StorageUnitShell({
       {photoUrl && (
         /* `contain`, NOT `cover`. This shipped as `cover` in a fixed 96px-tall, full-width box —
            roughly 3:1 in a board tile. No phone takes a 3:1 photo, so every photo was cropped to a
-           horizontal slice of its own middle: a portrait shot of a tall cabinet showed about a
-           tenth of its height, with the top and bottom cut away. That defeats the entire purpose —
-           the photo is here so someone RECOGNISES the thing in front of them (§5.5 decision 5), and
-           a beheaded cabinet is harder to recognise than the drawing it sits above.
+           horizontal slice of its own middle. Measured in the browser on a real tile (mat 376×120)
+           with a 988×2048 phone photo: `cover` displayed **15% of the image height**, centred, with
+           the rest cut away. That defeats the entire purpose — the photo is here so someone
+           RECOGNISES the thing in front of them (§5.5 decision 5), and a beheaded cabinet is harder
+           to recognise than the drawing it sits above.
+
            `contain` on a mat shows the whole object at the cost of bars beside a portrait shot.
-           Bars are a deliberate-looking frame; a slice reads as a broken image. */
+           Bars are a deliberate-looking frame; a slice reads as a broken image. Verified by eye at
+           the extreme (1:2.07 aspect drew 58×120 in the 376px mat — narrow, but whole and clearly
+           intentional). A typical 3:4 or 4:3 shelf photo fills far more of the mat than that. */
         <Box
           sx={{
             height: 120,

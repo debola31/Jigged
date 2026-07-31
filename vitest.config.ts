@@ -8,6 +8,42 @@ export default defineConfig({
     setupFiles: ['./__tests__/setup.ts'],
     include: ['__tests__/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**'],
+    /**
+     * 15s, not vitest's 5s default.
+     *
+     * The suite was intermittently red with `Error: Test timed out in 5000ms.` on a rotating
+     * cast of tests — `VisualLocationBuilder`, `PartLocationActionModal`, `SignUp`,
+     * `ChangePassword`, `QuoteForm`, `PartTransactionJobTag` — every one of which passed on its
+     * own and every one of which is a multi-step `userEvent` flow. `userEvent` awaits React
+     * settling between each interaction, so a dozen sequential interactions cost real wall-clock,
+     * and under fork contention they crossed 5s.
+     *
+     * This does not hide hangs: a genuinely stuck test still fails, 10s later. What it stops is a
+     * suite that goes red for reasons unrelated to the code — which is worse than slow, because a
+     * red run you re-run out of habit is a red run you have stopped reading.
+     *
+     * Prefer a per-test timeout argument over raising this further; a test that needs more than
+     * 15s is telling you something about the test.
+     */
+    testTimeout: 15_000,
+    /**
+     * ⚠️ DO NOT set `maxWorkers` here. It was added in #630 and reverted the same day, because
+     * it turned main red on the first merge after eleven consecutive green runs.
+     *
+     * **`maxWorkers` is not a ceiling that defers to a smaller default — it is the number used.**
+     * The reverted comment claimed 6 would be "above their default and therefore a no-op" on CI.
+     * That is backwards. GitHub's hosted runners are small, so vitest's default
+     * (`availableParallelism() - 1`) is 1–3 workers there; forcing 6 over-subscribed the runner
+     * several times over and produced exactly the contention the setting was meant to remove.
+     * `VisualLocationBuilder` then failed with `Unable to find role="button" and name
+     * /create 16 locations/i` — a state race, not a timeout, so `testTimeout` above did not
+     * cover it.
+     *
+     * If local contention is ever worth capping again, it must be a genuine cap that cannot
+     * inflate a small machine — `Math.min(6, availableParallelism() - 1)` — and it must be
+     * proven on CI, not on a 10-core laptop. Two claims about CI behaviour were asserted without
+     * checking during that change; the third attempt should measure instead.
+     */
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

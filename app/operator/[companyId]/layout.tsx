@@ -469,14 +469,31 @@ function OperatorShell({
           elevation={3}
         >
           {/*
-            ⚠️ This bar is FULL. At the full complement it carries five destinations —
-            Jobs · Inventory · Scan · Maintenance · My work — which is the documented Material
-            Design ceiling for bottom navigation (3–5). Both Inventory and Maintenance are
-            flag-gated, so most shops see three or four.
+            ⚠️ This bar is FULL. At the full complement it carries five slots —
+            Jobs · Inventory · Scan · Maintenance · Me — which is the documented Material Design
+            ceiling for bottom navigation (3–5). Both Inventory and Maintenance are flag-gated, so
+            many shops see three or four.
 
-            A sixth needs something to leave, not another slot. Profile already moved to the
-            header avatar for exactly this reason; the next candidate is whichever destination
-            turns out to be visited least, measured rather than guessed.
+            A sixth needs something to leave, not another slot. Profile's contents already moved
+            into Me for exactly this reason; the next candidate is whichever destination turns out
+            to be visited least, measured rather than guessed.
+
+            ORDER, left to right, and why:
+              Jobs   — leftmost is the default landing and where a shift starts.
+              Scan   — the middle, because it is the most frequent gesture of the five and the
+                       centre of the bottom edge is the easiest place on a phone to hit. It is
+                       also an ACTION rather than a destination, which is the conventional use of
+                       a centre slot.
+              Me     — rightmost, the near-universal home for account/self.
+              Inventory / Maintenance fill the remaining two, both flag-gated.
+
+            ⚠️ minWidth: 0 on every action is LOAD-BEARING, not tidying. MUI defaults
+            `BottomNavigationAction` to `minWidth: 80` with `flex: 1`, and `min-width` blocks
+            flex-shrink — so five tabs demand 400px. Measured at a 375px viewport (iPhone SE, 12
+            mini, plenty of Androids) before this: the bar overflowed by 13px, `Jobs` began at
+            x = -12 with its icon partly off-screen, and `Me` ran past the right edge. Both damaged
+            slots were the ENDS, which is precisely where the default and the account live.
+            With minWidth: 0 the five share the width evenly and nothing clips.
           */}
           <BottomNavigation
             value={navValue}
@@ -486,7 +503,25 @@ function OperatorShell({
               bgcolor: 'rgba(17, 20, 57, 0.98)',
               '& .MuiBottomNavigationAction-root': {
                 color: 'rgba(255, 255, 255, 0.5)',
-                minWidth: 80,
+                /**
+                 * `'0px'`, NOT the 80 this used to carry (which was MUI's own default restated).
+                 *
+                 * `BottomNavigationAction` is `flex: 1`, and `min-width` blocks flex-shrink — so at
+                 * five slots the bar demanded 5 × 80 = 400px. Measured at a 375px viewport (iPhone
+                 * SE, 12 mini, plenty of Androids): the bar overflowed by 13px, `Jobs` began at
+                 * x = -12 with its icon partly off-screen, and `Me` ran past the right edge. Both
+                 * damaged slots were the ENDS — exactly where the default destination and the
+                 * account live.
+                 *
+                 * Note this had to change HERE and not on each action's own `sx`: this descendant
+                 * selector outranks the element's own class, so a per-action override is silently
+                 * ignored.
+                 *
+                 * Touch targets stay compliant — `minHeight: 56` on each action carries the 48px
+                 * floor vertically, and five slots across 375px is 75px each, still well above the
+                 * 48px minimum horizontally.
+                 */
+                minWidth: '0px',
                 '&.Mui-selected': {
                   color: 'primary.main',
                 },

@@ -272,10 +272,28 @@ function OperatorShell({
   const { features } = useCompanyFeatures();
   const pathname = usePathname();
   const router = useRouter();
+  /**
+   * ⚠️ Both of these hide a tab, which is a KNOWN DEVIATION from Apple's guidance: "Don't disable
+   * or hide tab bar buttons, even when their content is unavailable. Having tab bar buttons
+   * available in some cases but not others makes your app's interface appear unstable and
+   * unpredictable. If a section is empty, explain why its content is unavailable."
+   *
+   * Taken deliberately: these are not empty sections but genuine entitlement boundaries — a shop
+   * without the locations flag has no places at all, and `/inventory/locations` redirects. Showing
+   * a tab that explains why it doesn't work would be worse than not showing it.
+   *
+   * The cost is real, though, and it is why the tab ORDER is constrained: because MUI distributes
+   * slots evenly, changing the tab COUNT moves every tab's physical position. Keeping one optional
+   * tab on each side of Scan is what bounds that (see the note above the bar).
+   */
   const showInventory = Boolean(features.inventory_locations);
   // A machine IS a station, so the logbook only exists once one is selected —
   // deliberately NOT added to the navVisible escape list below, unlike inventory
   // and my-work. Without a station there is no machine to have a tab for.
+  //
+  // Note this one can flip DURING a session, when a station is picked or cleared — so the bar
+  // reflows mid-shift, unlike the flag-only gate above. The station is normally chosen once at
+  // login, before real work, which is what makes that acceptable.
   const showMaintenance = Boolean(features.machine_maintenance) && Boolean(stationId);
   // The warehouse is station-independent, so keep the nav (and a way out) on
   // inventory routes even before a station is picked.
@@ -555,15 +573,53 @@ function OperatorShell({
               you were on — which matters for the continuous flows (a count session, receiving
               a pallet) that motivated an in-app scanner at all.
 
-              **Placed third deliberately.** At the full complement — Jobs · Inventory · Scan ·
-              Maintenance · My work — this puts the most-used action dead centre, which is where
-              a thumb rests. With both flags off it degrades to Jobs · Scan · My work and stays
-              centred.
+              **Placed third deliberately, on the best-evidenced finding in this layout.** Not
+              "where the thumb rests" — the popular thumb-zone heat maps rest on a one-handed-use
+              claim Hoober himself walked back ("there's hardly any one-handed use for actually
+              touching the screen"; the 49% figure describes *holding*, not tapping). The finding
+              that survives is about accuracy, from millions of measured touches: **7 mm at the
+              centre of the screen versus 12 mm at the corners**, with taps also faster and more
+              confident toward the centre — partly device digitiser error, not thumb geometry. So
+              the most frequent gesture goes in the middle.
+
+              **Keep one flag-gated tab on EACH side of Scan.** Both Inventory and Maintenance are
+              optional, so the bar has four shapes. Flanking holds Scan within half a slot of
+              centre in every one of them, and it is the only arrangement that does — grouping the
+              optional pair together would pin Scan at position 2, off-centre always.
+
+              **Why it looks different from its neighbours.** Apple is explicit that "a tab bar
+              [is] to support navigation, not to provide actions", and Scan is an action. Material 3
+              sanctions the way out: a FAB for "the most important action on a screen" may be
+              "nested within" the navigation bar. So Scan wears a filled disc rather than a bare
+              glyph — enough to read as the action, without the raised protruding FAB that would
+              fight "professional, not trendy". Combined with not taking the tab selection, the
+              deviation is coherent rather than a violation.
+
+              Note the disc is VISUAL only: the hit area is the whole 75×56 slot either way, well
+              past the 48px floor. What it buys is a target that is easier to aim at, which is
+              precisely what the accuracy figures above are about.
             */}
             <BottomNavigationAction
               label="Scan"
               value="scan"
-              icon={<QrCodeScannerIcon />}
+              icon={
+                <Box
+                  sx={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: '50%',
+                    bgcolor: 'primary.main',
+                    display: 'grid',
+                    placeItems: 'center',
+                    // The parent sx dims every action to 50% white; Scan's glyph must stay full
+                    // strength against the filled disc. Scan is also never `Mui-selected` (it
+                    // opens a dialog), so it would otherwise be permanently dimmed.
+                    color: 'common.white',
+                  }}
+                >
+                  <QrCodeScannerIcon fontSize="small" />
+                </Box>
+              }
               sx={{ minHeight: 56 }}
             />
             {showMaintenance && (

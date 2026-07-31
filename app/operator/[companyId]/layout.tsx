@@ -15,10 +15,12 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import ListItemText from '@mui/material/ListItemText';
 import WorkIcon from '@mui/icons-material/Work';
-import PersonIcon from '@mui/icons-material/Person';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
+import LocationScanner from '@/components/scanner/LocationScanner';
+import { scanDestination } from '@/lib/jiggedScan';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -35,8 +37,10 @@ import type { AuthChangeEvent } from '@supabase/supabase-js';
  * Operator View layout.
  *
  * Mobile-first layout with:
- * - Top header with operator name, station display, and logout
- * - Bottom navigation bar (Jobs, Profile)
+ * - Top header with station picker and (for non-operators) a dashboard shortcut. Deliberately
+ *   exactly one icon button — see the note where the second one used to be.
+ * - Bottom navigation: Jobs · Inventory · Scan · Maintenance · Me. Five is the ceiling, which is
+ *   why Scan took Profile's slot and Profile's contents moved into Me.
  * - No sidebar (unlike admin dashboard)
  * - Uses Supabase Auth for session management
  * - OperatorStationProvider for shared station state
@@ -115,22 +119,62 @@ export default function OperatorLayout({
     };
   }, [companyId, router, pathname, supabase]);
 
-  // Update nav value based on current path
+  // Update nav value based on current path.
+  //
+  // `/profile` now redirects to `/my-work` (the "Me" tab), so it needs no branch of its own —
+  // the redirect lands on a path that already matches below. Keeping a `'profile'` branch here
+  // would have set a nav value no tab owns, which reads as "no tab selected".
   useEffect(() => {
-    if (pathname?.includes('/profile')) setNavValue('profile');
-    else if (pathname?.includes('/inventory')) setNavValue('inventory');
+    if (pathname?.includes('/inventory')) setNavValue('inventory');
     else if (pathname?.includes('/maintenance')) setNavValue('maintenance');
     else if (pathname?.includes('/my-work')) setNavValue('my-work');
     else setNavValue('jobs');
   }, [pathname]);
 
+  /** Scan opens over whatever you were doing; every other tab is a route. */
+  const [scanning, setScanning] = useState(false);
+
   const handleNavChange = (_event: React.SyntheticEvent, newValue: string) => {
+    // Scan is a modal action wearing a tab's clothes. Deliberately does NOT become the
+    // selected tab: you're still on Jobs (or wherever) with a scanner over the top, and
+    // leaving the selection where it was is what makes closing the dialog feel like
+    // dismissing something rather than navigating back.
+    if (newValue === 'scan') {
+      setScanning(true);
+      return;
+    }
+
     setNavValue(newValue);
     if (newValue === 'inventory') router.push(`/operator/${companyId}/inventory`);
     else if (newValue === 'maintenance') router.push(`/operator/${companyId}/maintenance`);
     else if (newValue === 'my-work') router.push(`/operator/${companyId}/my-work`);
-    else if (newValue === 'profile') router.push(`/operator/${companyId}/profile`);
     else router.push(`/operator/${companyId}/jobs`);
+  };
+
+  /**
+   * Where each kind of Jigged QR goes.
+   *
+   * Both are deep links the printed paper already encodes, so this mirrors what the login
+   * passthrough would have done — minus the camera-app round trip and the interstitial. The
+   * mapping itself lives in `scanDestination` so it is testable without mounting this layout, and
+   * so it can be compared against `postLoginPath` rather than silently drifting from it.
+   */
+  const handleScanLocation = (locationId: string) => {
+    setScanning(false);
+    router.push(scanDestination(companyId, { kind: 'location', locationId }));
+  };
+
+  const handleScanTraveler = ({
+    jobId,
+    jobPartId,
+    operationId,
+  }: {
+    jobId: string;
+    jobPartId: string;
+    operationId?: string;
+  }) => {
+    setScanning(false);
+    router.push(scanDestination(companyId, { kind: 'traveler', jobId, jobPartId, operationId }));
   };
 
   // Don't show header/nav on login page
@@ -179,6 +223,28 @@ export default function OperatorLayout({
         >
           {children}
         </OperatorShell>
+
+        {/*
+          Lives at the layout level, not on a page, because the tab bar owns it — so it opens
+          over whatever screen you were on and closing it returns you there. A Dialog portals
+          out of this position anyway, so being a sibling of the shell costs nothing.
+
+          Both handlers mirror the login passthrough's `postLoginPath`, which is what the
+          printed QR would have gone through: same destination, minus the camera-app round trip
+          and the login interstitial.
+        */}
+        <LocationScanner
+          open={scanning}
+          onClose={() => setScanning(false)}
+          onScan={handleScanLocation}
+          onScanTraveler={handleScanTraveler}
+          /* Without this, a label printed by ANOTHER shop decodes fine and both handlers below
+             push the route regardless — the operator lands on someone else's job or bin and gets
+             an RLS error page instead of "that isn't yours". The scanner now refuses it before
+             either handler runs. */
+          expectedCompanyId={companyId}
+          title="Scan a Jigged label"
+        />
       </OperatorChromeProvider>
     </OperatorStationProvider>
   );
@@ -312,7 +378,7 @@ function OperatorShell({
           </Box>
 
           {/* Right: dashboard shortcut for non-operators (admins/leads viewing
-              the operator view). Logout lives on the Profile tab, not here. */}
+              the operator view). */}
           {userRole !== 'operator' && (
             <IconButton
               color="inherit"
@@ -324,6 +390,21 @@ function OperatorShell({
               <DashboardIcon fontSize="small" />
             </IconButton>
           )}
+
+          {/*
+            NO second header icon button here.
+
+            An interim version of this change put Profile here as an IconButton next to the
+            dashboard one above, which put two small targets side by side with almost no gap.
+            That is the worst case in Fitts's law — small target, near-zero distance — and
+            because touch platforms resolve a tap to the *closest* control, missing one doesn't
+            do nothing, it fires the other. WCAG 2.5.8 measures this as centre-to-centre spacing
+            rather than visible gap, and Material asks for ≥8dp of clearance; a mis-tap here is a
+            slip, which no clearer label or tooltip can fix — only layout can.
+
+            Profile's contents moved into the "Me" tab instead, which removes the target rather
+            than shrinking the odds of hitting the wrong one.
+          */}
         </Toolbar>
 
         {/* Station Selector Menu */}
@@ -387,6 +468,16 @@ function OperatorShell({
           }}
           elevation={3}
         >
+          {/*
+            ⚠️ This bar is FULL. At the full complement it carries five destinations —
+            Jobs · Inventory · Scan · Maintenance · My work — which is the documented Material
+            Design ceiling for bottom navigation (3–5). Both Inventory and Maintenance are
+            flag-gated, so most shops see three or four.
+
+            A sixth needs something to leave, not another slot. Profile already moved to the
+            header avatar for exactly this reason; the next candidate is whichever destination
+            turns out to be visited least, measured rather than guessed.
+          */}
           <BottomNavigation
             value={navValue}
             onChange={onNavChange}
@@ -416,6 +507,30 @@ function OperatorShell({
                 sx={{ minHeight: 56 }}
               />
             )}
+            {/*
+              Scan is a tab, not a button buried on one screen.
+
+              It is the operator's most frequent physical gesture — you arrive at a shelf or
+              pick up a traveler sheet holding a piece of paper with a QR on it. Previously
+              the only in-app scanner lived on the inventory page and read location labels
+              only, so a traveler meant leaving the app for the phone's camera: a different
+              gesture for a near-identical piece of paper. One scanner, both kinds.
+
+              It opens a dialog rather than navigating, so scanning never loses the screen
+              you were on — which matters for the continuous flows (a count session, receiving
+              a pallet) that motivated an in-app scanner at all.
+
+              **Placed third deliberately.** At the full complement — Jobs · Inventory · Scan ·
+              Maintenance · My work — this puts the most-used action dead centre, which is where
+              a thumb rests. With both flags off it degrades to Jobs · Scan · My work and stays
+              centred.
+            */}
+            <BottomNavigationAction
+              label="Scan"
+              value="scan"
+              icon={<QrCodeScannerIcon />}
+              sx={{ minHeight: 56 }}
+            />
             {showMaintenance && (
               <BottomNavigationAction
                 label="Maintenance"
@@ -424,20 +539,32 @@ function OperatorShell({
                 sx={{ minHeight: 56 }}
               />
             )}
-            {/* "My work" is the operator's own contribution surface. Today that
-                is notes and photos; it is named for what it will hold, not only
-                for what is in it now. What it must NOT grow into is a record of
-                completions — see the header of the my-work page. */}
+            {/* "Me" — the operator's own contribution surface, with identity and account
+                actions folded in beneath it. Today the work is notes and photos. What it must
+                NOT grow into is a record of completions — see the header of the my-work page.
+
+                WHY THIS IS A MERGE AND NOT A DEMOTION. An interim version kept "My work" as its
+                own tab and pushed Profile into a header icon, on the argument that merging would
+                bury a primary daily surface behind a second tap. The measurement backs the
+                worry — NN/g found navigation hidden behind an icon used 44–56% of the time
+                against 89% for visible navigation — but it points at the wrong fix. Material's
+                bottom-nav guidance rules out a settings tab outright, so Profile never had a
+                legitimate claim on a slot, and the bar is capped at five. Keeping the slot and
+                putting the WORK at the top of it protects the surface; YouTube's and Strava's
+                "You" tabs are the same move, and Strava's merged Profile *and* Training.
+
+                The route stays `/my-work` deliberately — renaming routes is churn for no
+                user-visible gain (same call as keeping `/inventory/*`), and it keeps the Jobs
+                page's link and the E2E spec working.
+
+                The label is "Me", not "You": the app already says "My work", and mixing first
+                and second person across one surface is the inconsistency to avoid. The text
+                label always shows — an eye-tracking study in this audience's age band found
+                icon+text erases the recognition penalty that icon-only carries. */}
             <BottomNavigationAction
-              label="My work"
+              label="Me"
               value="my-work"
               icon={<StickyNote2OutlinedIcon />}
-              sx={{ minHeight: 56 }}
-            />
-            <BottomNavigationAction
-              label="Profile"
-              value="profile"
-              icon={<PersonIcon />}
               sx={{ minHeight: 56 }}
             />
           </BottomNavigation>

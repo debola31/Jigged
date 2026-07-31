@@ -241,12 +241,16 @@ insert into public.parts (id, company_id, part_name, description, source, is_sto
   ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought',true,'ea',1500,10,'30000000-0000-0000-0000-000000000002'),
   ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought',true,'ea',5000,10,'30000000-0000-0000-0000-000000000002'),
   ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought',true,'ea',2200,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought',true,'ea',60,10,'30000000-0000-0000-0000-000000000005'),
+  -- reorder_point 75 against 60 on hand, so this part sits in the LOW band. Deliberate: see the
+  -- note below the insert.
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought',true,'ea',60,75,'30000000-0000-0000-0000-000000000005'),
   -- Machined sub-components (made, stocked).
   ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made',true,'ea',25,10,null),
   ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made',true,'ea',40,10,null),
   ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made',true,'ea',30,10,null),
-  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made',true,'ea',35,10,null),
+  -- Second LOW-band part (35 on hand, reorder at 50), so the filter shows a list rather than a
+  -- single row.
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made',true,'ea',35,50,null),
   -- Sub-assemblies (made, stocked).
   ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made',true,'ea',12,10,null),
   ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made',true,'ea',8,10,null),
@@ -256,6 +260,29 @@ insert into public.parts (id, company_id, part_name, description, source, is_sto
   ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222','PROD-MANIFOLD-300','Valve Manifold M-300','made',false,'ea',0,null,null),
   ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'in',0,null,null)
 on conflict (id) do nothing;
+
+-- Why two parts carry a reorder_point ABOVE their quantity
+-- ────────────────────────────────────────────────────────
+-- Stock status is derived at render: 0 ⇒ out, 0 < qty <= reorder_point ⇒ low, else in stock
+-- (`components/inventory/StockStatusChip.tsx`). Before this, the seed could not produce a single
+-- `low` part, so the "Low" chip and the `/parts?status=low` filter — which is the shop-wide
+-- shortage view — were invisible in every dev and preview environment.
+--
+-- It wasn't simply missing data. Job material consumption below runs
+-- `set quantity = greatest(0, quantity - used)`, which drove ASM-GEARBOX, ASM-PUMPCORE,
+-- SUB-HOUSING and SUB-COVER from healthy quantities **straight to 0** — skipping the low band
+-- entirely — while everything else stayed at twice its reorder point or more. Measured on a
+-- reset stack: 10 in-stock, 8 out, **0 low**, with the nearest part at 20 against a reorder of 10.
+--
+-- So the fix raises `reorder_point` on two parts rather than lowering `quantity`. reorder_point is
+-- read only by the status derivation and the low-stock alert lists — never by cost or inventory
+-- math — so it cannot perturb BOM costs, count worksheets or put-away balances. Both chosen parts
+-- are ones job consumption does **not** touch, so the low band stays reachable even if the
+-- consumption above changes.
+--
+-- If you add a `low`-dependent spec, assert against these two (BUY-MOTOR-12V, SUB-BRACKET) rather
+-- than runtime-skipping when the list is empty — a skipped spec masked the May 2026 `jobs.status`
+-- regression.
 
 -- Part-level procurement tiers for bought parts (so compute_part_cost_at_qty
 -- resolves a cost). Vendor is a supplier label on the part

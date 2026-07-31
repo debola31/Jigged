@@ -1,15 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@/__tests__/test-utils';
+import { render, screen } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
-vi.mock('@/utils/partsAccess', () => ({ searchPartsForSelect: vi.fn() }));
+import type { PartSelectOption } from '@/utils/partsAccess';
+
 vi.mock('@/utils/inventoryLocationsAccess', () => ({ getBalancesForPart: vi.fn() }));
 
+/**
+ * Stub the shared picker, the way `MaterialRowEditor.test.tsx` does.
+ *
+ * What is worth testing here is the *answer* — where the part is, and the untracked-vs-empty
+ * distinction — not MUI's Autocomplete, which `PartAutocomplete` owns and quotes/jobs already
+ * exercise. The stub also records the props this component relies on, so the two that carry real
+ * meaning can be asserted: `kind="stocked"` and the ABSENCE of `onCreateNew`.
+ */
+let nextPick: PartSelectOption | null = null;
+const pickerProps: Record<string, unknown> = {};
+vi.mock('@/components/parts/PartAutocomplete', () => ({
+  __esModule: true,
+  default: (props: { onChange: (o: PartSelectOption | null) => void } & Record<string, unknown>) => {
+    Object.assign(pickerProps, props);
+    return (
+      <button type="button" onClick={() => props.onChange(nextPick)}>
+        pick-part
+      </button>
+    );
+  },
+}));
+
 import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
-import { searchPartsForSelect, type PartSelectOption } from '@/utils/partsAccess';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
 
-const mockSearch = vi.mocked(searchPartsForSelect);
 const mockBalances = vi.mocked(getBalancesForPart);
 
 const part = (over: Partial<PartSelectOption> = {}): PartSelectOption => ({
@@ -29,28 +50,26 @@ const onOpenLocation = vi.fn();
 const renderLookup = () =>
   render(<OperatorPartLookup companyId="co1" onOpenLocation={onOpenLocation} />);
 
-/** Type enough to clear the min-query floor and let the debounce fire. */
-const search = async (user: ReturnType<typeof userEvent.setup>, text = '6061') => {
-  await user.type(screen.getByLabelText('Find a part'), text);
-};
+/** Choose whatever `nextPick` holds, through the stubbed picker. */
+const pick = (user: ReturnType<typeof userEvent.setup>) =>
+  user.click(screen.getByRole('button', { name: 'pick-part' }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockSearch.mockResolvedValue([part()]);
+  for (const k of Object.keys(pickerProps)) delete pickerProps[k];
+  nextPick = part();
   mockBalances.mockResolvedValue([]);
 });
 
 describe('OperatorPartLookup — J11, "is this part in storage, and where?"', () => {
-  it('finds a part and shows every place it sits, with the full path', async () => {
+  it('shows every place the part sits, with the full path', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       { location_id: 'l1', location_name: 'Left', location_code: 'CAB1-R3-L', path: ['Cabinet 1', 'Row 3', 'Left'], quantity: 40 },
       { location_id: 'l2', location_name: 'Yard', location_code: 'YARD', path: ['Yard'], quantity: 200 },
     ]);
     renderLookup();
-    await search(user);
-
-    await user.click(await screen.findByText('RAW-AL6061-BLANK'));
+    await pick(user);
 
     expect(await screen.findByText('Left')).toBeInTheDocument();
     // "Left" is meaningless on its own — the ancestry is what sends someone to the right shelf.
@@ -66,8 +85,7 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
       { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12 },
     ]);
     renderLookup();
-    await search(user);
-    await user.click(await screen.findByText('RAW-AL6061-BLANK'));
+    await pick(user);
     await user.click(await screen.findByText('Yard'));
 
     expect(onOpenLocation).toHaveBeenCalledWith('l1');
@@ -81,13 +99,13 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
    */
   it('says an untracked part is not binned, never that it is nowhere', async () => {
     const user = userEvent.setup();
+    nextPick = part({ is_location_tracked: false, quantity: 240 });
     renderLookup();
-    mockSearch.mockResolvedValue([part({ is_location_tracked: false, quantity: 240 })]);
-    await search(user);
-    await user.click(await screen.findByText('RAW-AL6061-BLANK'));
+    await pick(user);
 
     expect(await screen.findByText(/isn't tracked by place/i)).toBeInTheDocument();
-    expect(screen.getByText(/240/)).toBeInTheDocument();
+    // The on-hand total must still be answered — that is the useful half of "no shelf for this".
+    expect(screen.getByText('240 ea')).toBeInTheDocument();
     expect(screen.queryByText(/none in any place/i)).not.toBeInTheDocument();
     // No point asking for balances that cannot exist.
     expect(mockBalances).not.toHaveBeenCalled();
@@ -97,43 +115,43 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([]);
     renderLookup();
-    await search(user);
-    await user.click(await screen.findByText('RAW-AL6061-BLANK'));
+    await pick(user);
 
     expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
     expect(screen.queryByText(/isn't tracked by place/i)).not.toBeInTheDocument();
   });
 
-  it('searches stocked parts only — a top-level product has no on-hand to find', async () => {
+  it('surfaces a failed read instead of showing an empty answer', async () => {
     const user = userEvent.setup();
+    mockBalances.mockRejectedValue(new Error('denied'));
     renderLookup();
-    await search(user);
-    await waitFor(() =>
-      expect(mockSearch).toHaveBeenCalledWith('co1', '6061', 'stocked', expect.any(Number)),
-    );
-  });
+    await pick(user);
 
-  it('does not search on one character, which would match most of the catalogue', async () => {
-    const user = userEvent.setup();
-    renderLookup();
-    await user.type(screen.getByLabelText('Find a part'), 'a');
-    await new Promise((r) => setTimeout(r, 400));
-    expect(mockSearch).not.toHaveBeenCalled();
-  });
-
-  it('says so when nothing matches, rather than showing an empty page', async () => {
-    const user = userEvent.setup();
-    mockSearch.mockResolvedValue([]);
-    renderLookup();
-    await search(user, 'zzzz');
-    expect(await screen.findByText(/no stocked part matches/i)).toBeInTheDocument();
-  });
-
-  it('surfaces a failed search instead of looking like no results', async () => {
-    const user = userEvent.setup();
-    mockSearch.mockRejectedValue(new Error('denied'));
-    renderLookup();
-    await search(user);
     expect(await screen.findByText('denied')).toBeInTheDocument();
+  });
+
+  it('clears the answer when the part is deselected', async () => {
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([
+      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12 },
+    ]);
+    renderLookup();
+    await pick(user);
+    expect(await screen.findByText('Yard')).toBeInTheDocument();
+
+    nextPick = null;
+    await pick(user);
+    expect(screen.queryByText('Yard')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Two picker props carry real meaning rather than styling, so they are pinned:
+   * a made top-level product has no on-hand and would only pad the list, and creating parts is
+   * not an operator's job — the same call the board makes by withholding "Add storage".
+   */
+  it('searches stocked parts only, and never offers to create one', async () => {
+    renderLookup();
+    expect(pickerProps.kind).toBe('stocked');
+    expect(pickerProps.onCreateNew).toBeUndefined();
   });
 });

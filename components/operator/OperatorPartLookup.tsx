@@ -14,6 +14,21 @@
  * `part_location_stock` all have membership-only SELECT policies with no role predicate, so an
  * operator could always read this. Only the UI was missing.
  *
+ * ## Why the shared picker, not a bespoke search box
+ *
+ * The first version was a plain search field with its own debounce and result list, and it was
+ * worse in a way that only shows on a real screen: type one character and **nothing happens** —
+ * no spinner, no hint, no options — until enough characters land to clear a minimum-query floor.
+ * The screen looked broken while it was working correctly.
+ *
+ * [`PartAutocomplete`](../parts/PartAutocomplete.tsx) is what quotes and jobs already use, so an
+ * operator meets one control rather than two, and it solves the feedback problem structurally
+ * rather than by adding another message: `openOnFocus` shows matches the moment the field is
+ * tapped, before a key is pressed, and the fetch carries a spinner.
+ *
+ * **`onCreateNew` is deliberately omitted**, which removes the "Create New Part" row. Creating
+ * parts is not an operator's job — same reasoning as the board withholding "Add storage".
+ *
  * ## The distinction this screen must not blur
  *
  * A part with **no rows** in `part_location_stock` is one of two very different things:
@@ -26,7 +41,7 @@
  * to return it.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -34,23 +49,13 @@ import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
-import IconButton from '@mui/material/IconButton';
-import InputAdornment from '@mui/material/InputAdornment';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import ClearIcon from '@mui/icons-material/Close';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import SearchIcon from '@mui/icons-material/Search';
 
-import { searchPartsForSelect, type PartSelectOption } from '@/utils/partsAccess';
+import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
-
-/** Long enough that a typing operator isn't firing a query per keystroke on shop wifi. */
-const DEBOUNCE_MS = 300;
-/** Below this a search matches most of the catalogue and tells you nothing. */
-const MIN_QUERY = 2;
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -61,63 +66,16 @@ export interface OperatorPartLookupProps {
 }
 
 export default function OperatorPartLookup({ companyId, onOpenLocation }: OperatorPartLookupProps) {
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [results, setResults] = useState<PartSelectOption[]>([]);
-  /** The query whose search has come back. Compared against `debounced` to derive the spinner. */
-  const [answered, setAnswered] = useState('');
   const [selected, setSelected] = useState<PartSelectOption | null>(null);
   const [balances, setBalances] = useState<PartLocationBalanceWithLocation[] | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  const active = debounced.length >= MIN_QUERY;
-
-  /**
-   * Request-id guard, not just a cancelled flag: two searches in flight can resolve out of order
-   * and the slower, older one would overwrite the newer results with stale matches.
-   */
-  const reqId = useRef(0);
-  useEffect(() => {
-    // Every setState below happens inside the async callback, never synchronously in the effect
-    // body — the shape `hooks/useLoad.ts` documents, and what `react-hooks/set-state-in-effect`
-    // is guarding. "Searching" and "no results yet" are DERIVED (see `searching` / `visible`)
-    // rather than written here, which is what makes the early return state-free.
-    if (!active) return;
-    const id = ++reqId.current;
-    // 'stocked' — an operator looking for material means something the shop holds. A made
-    // top-level product has no on-hand and would only pad the list.
-    searchPartsForSelect(companyId, debounced, 'stocked', 25)
-      .then((rows) => {
-        if (id !== reqId.current) return;
-        setResults(rows);
-        setError(null);
-      })
-      .catch((e) => {
-        if (id !== reqId.current) return;
-        setResults([]);
-        setError(e instanceof Error ? e.message : 'Could not search parts.');
-      })
-      .finally(() => {
-        // Marks THIS query answered, which is what ends the derived spinner. Set even on failure,
-        // or an error would spin forever.
-        if (id === reqId.current) setAnswered(debounced);
-      });
-  }, [companyId, debounced, active]);
-
-  /** Derived, so the effect never writes it: this query is in flight until it has been answered. */
-  const searching = active && answered !== debounced;
-  /** Stale matches from a previous query must not show under a query too short to have run. */
-  const visible = active && !searching ? results : [];
-
-  const openPart = (part: PartSelectOption) => {
+  const pick = (part: PartSelectOption | null) => {
     setSelected(part);
     setBalances(null);
+    setError(null);
+    if (!part) return;
     // An untracked part has no per-place rows by definition — asking would always return [] and
     // the empty state below would have to guess which kind of empty it was.
     if (!part.is_location_tracked) return;
@@ -128,46 +86,25 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
       .finally(() => setLoadingBalances(false));
   };
 
-  const reset = () => {
-    setQuery('');
-    setSelected(null);
-    setBalances(null);
-    setError(null);
-  };
-
   const total = useMemo(
     () => (balances ?? []).reduce((n, b) => n + Number(b.quantity ?? 0), 0),
     [balances],
   );
 
+  const places = balances ?? [];
+
   return (
     <Box sx={{ mb: 3 }}>
-      <TextField
-        fullWidth
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setSelected(null);
-        }}
-        placeholder="Find a part…"
-        // `htmlInput`, not a top-level `aria-label`: MUI puts top-level props on the FormControl
-        // wrapper, so the <input> itself would have no accessible name — a placeholder is not one.
-        slotProps={{ htmlInput: { 'aria-label': 'Find a part' } }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon color="action" />
-            </InputAdornment>
-          ),
-          endAdornment: query ? (
-            <InputAdornment position="end">
-              <IconButton aria-label="Clear search" onClick={reset} edge="end" size="small">
-                <ClearIcon fontSize="small" />
-              </IconButton>
-            </InputAdornment>
-          ) : null,
-        }}
-        sx={{ '& .MuiInputBase-root': { minHeight: 52 } }}
+      <PartAutocomplete
+        companyId={companyId}
+        value={selected}
+        onChange={pick}
+        // Stocked only: an operator looking for material means something the shop holds. A made
+        // top-level product has no on-hand and would only pad the list.
+        kind="stocked"
+        label="Find a part"
+        // `medium`, not the shared default `small` — this is a phone in a workshop.
+        size="medium"
       />
 
       {error && (
@@ -176,20 +113,12 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
         </Alert>
       )}
 
-      {/* A selected part replaces the result list — on a phone, showing both means neither fits. */}
-      {selected ? (
+      {selected && (
         <Box sx={{ mt: 2 }}>
-          <Typography sx={{ fontWeight: 700 }}>{selected.part_name}</Typography>
-          {selected.description && (
-            <Typography variant="body2" color="text.secondary">
-              {selected.description}
-            </Typography>
-          )}
-
           {!selected.is_location_tracked ? (
             /* NOT "nowhere". This part's stock simply isn't held per place, so the honest answer
-               is the total and where it isn't recorded — not an empty list implying it's missing. */
-            <Alert severity="info" sx={{ mt: 1.5 }}>
+               is the total and why there's no shelf — an empty list would imply it's missing. */
+            <Alert severity="info">
               <strong>
                 {num(selected.quantity)} {selected.primary_unit ?? ''}
               </strong>{' '}
@@ -200,26 +129,22 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
               <CircularProgress size={24} />
             </Box>
-          ) : (balances ?? []).length === 0 ? (
-            <Alert severity="warning" sx={{ mt: 1.5 }}>
-              None in any place right now.
-            </Alert>
+          ) : places.length === 0 ? (
+            <Alert severity="warning">None in any place right now.</Alert>
           ) : (
             <>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, mb: 0.5 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                 {num(total)} {selected.primary_unit ?? ''} across{' '}
-                {(balances ?? []).length === 1 ? '1 place' : `${(balances ?? []).length} places`}
+                {places.length === 1 ? '1 place' : `${places.length} places`}
               </Typography>
               <Stack spacing={1}>
-                {(balances ?? []).map((b) => (
+                {places.map((b) => (
                   <Card key={b.location_id} elevation={2}>
                     <CardActionArea
                       onClick={() => onOpenLocation(b.location_id)}
                       sx={{ minHeight: 56 }}
                     >
-                      <CardContent
-                        sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}
-                      >
+                      <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
                         <Box sx={{ flex: 1, minWidth: 0 }}>
                           <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
                           {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
@@ -242,44 +167,6 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
             </>
           )}
         </Box>
-      ) : (
-        <>
-          {searching && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-              <CircularProgress size={22} />
-            </Box>
-          )}
-          {!searching && active && visible.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-              No stocked part matches “{debounced}”.
-            </Typography>
-          )}
-          {visible.length > 0 && (
-            <Stack spacing={1} sx={{ mt: 1.5 }}>
-              {visible.map((p) => (
-                <Card key={p.id} elevation={2}>
-                  <CardActionArea onClick={() => openPart(p)} sx={{ minHeight: 56 }}>
-                    <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 600 }} noWrap>
-                          {p.part_name}
-                        </Typography>
-                        {p.description && (
-                          <Typography variant="caption" color="text.secondary" noWrap
-                            sx={{ display: 'block' }}
-                          >
-                            {p.description}
-                          </Typography>
-                        )}
-                      </Box>
-                      <KeyboardArrowRightIcon color="action" />
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              ))}
-            </Stack>
-          )}
-        </>
       )}
     </Box>
   );

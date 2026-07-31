@@ -1649,6 +1649,33 @@ From multi-day on-site observation at Contour Tool & Machine. **Reliable on stru
 on frequency and pain-ranking**, and it is the founder's model of the shop rather than the
 shop's own words — good enough for the structural decisions below, not for prioritisation.
 
+> ### Device model corrected — founder observation, 2026-07-31
+>
+> *"No one used a shop tablet in Contour or any shop I've seen"* — it is the machine's own **HMI**,
+> a **personal phone**, or the **office computer**.
+>
+> This matters because the docs had assumed shop-floor tablets in about a dozen places, two of
+> which called it *"our primary device"*. The canonical model now lives in
+> [CLAUDE.md](../../CLAUDE.md#who-uses-what-on-what--the-device-model): admin and user work
+> (Storage, Parts, Quotes, Jobs, all data setup) happens at an **office computer with a mouse**;
+> the operator surface is a **personal phone**; machine control is the machine's own HMI and is
+> **not a Jigged surface at all**.
+>
+> **Most touch conclusions survive**, because a phone is at least as constrained as a tablet — the
+> 48px floor, no hover-dependent UI, and high contrast all still hold, more strongly than before.
+> What changes is the reasoning available on the **admin** surface: hover exists there, bundle
+> weight is cheap there, and **drag is a perfectly ordinary interaction there** — which retires
+> §5.5's stated reason for cutting drag-to-reparent (*"drag on a shop tablet is the most
+> failure-prone interaction available"*). That cut may still be right on its other ground — 118 of
+> 121 locations are flat, so a re-parent gesture serves a hierarchy they don't have — but the
+> device half of the argument is withdrawn.
+>
+> Same correction applies to issue **#421**: an argument against a drag-to-place floor planner
+> based on tablet drag reliability does not hold if setup happens at a desk.
+>
+> Still unknown, and only an interview reaches it: **whose** phone, and whether operators mind
+> using a personal device for work.
+
 | Question | Answer | What it decided |
 |---|---|---|
 | Staged before the job, or grabbed at the machine? | **Grabbed at the machine** | [§5.2](#52-is-a-job-a-place--resolved-no) — a job is **not** a place. Cheaper branch. |

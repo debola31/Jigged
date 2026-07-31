@@ -230,11 +230,32 @@ Plain allowlisted single commands (`grep`, `cat`, `ls`, `find`, `awk`, `curl`, `
 
 **Framework:** Material-UI (MUI) v7+ with Material Design 3 principles
 
+### Who uses what, on what — the device model
+
+**There is no single "primary device". There are three surfaces, and two of them are ours.**
+Corrected 2026-07-31 from founder observation: *"no one used a shop tablet in Contour or any
+shop I've seen."* The docs had assumed shop-floor tablets throughout, and that was wrong.
+
+| Surface | Who | Device | What follows from it |
+|---|---|---|---|
+| **Admin & User** — Storage, Parts, Quotes, Jobs, all data setup | owner, salesperson, scheduler | **Office computer**, mouse + keyboard | Hover is available. Drag is viable. Bundle weight is cheap (office wifi). Dense tables are fine. |
+| **Operator** — jobs, scan, notes | shop floor | **Their own phone** | Touch only, no hover. Bundle weight is expensive (cellular). One-handed reach. Bright ambient light. |
+| **Machine control** | machinist at the machine | The machine's own **HMI** (Haas, Fanuc, …) | **Not a Jigged surface at all.** We never render here; don't design for it. |
+
+**How to apply:** decide which surface a change lands on before reasoning about its
+interaction. The two mistakes this table exists to prevent are (a) rejecting a mouse
+interaction on an admin screen because "touch is unreliable", and (b) treating a phone on
+cellular as though it had an office connection.
+
+Most existing touch rules survive the correction unchanged, because **a phone is at least as
+constrained as a tablet** — the 48px floor, no hover-dependent UI, and high contrast all still
+hold on the operator surface, and more strongly than before.
+
 ### Design Principles
 
 1. **Professional, Not Trendy** - Must appeal to 50-60 year old shop owners. Focus on clarity and function.
 2. **Substantial, Not Playful** - Industrial aesthetic. Cards should feel solid and grounded.
-3. **Readable in Bright Environments** - Ensure sufficient contrast for use under bright fluorescent lighting on tablets.
+3. **Readable in Bright Environments** - Ensure sufficient contrast for use under bright fluorescent lighting, on a phone held on the shop floor.
 4. **Single Dark Theme** - Optimized for shop floor environments with consistent dark UI.
 
 ### Quick Reference

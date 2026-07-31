@@ -123,7 +123,7 @@ The same surface serves both the first-time "bring my whole shop in" journey and
     affects and a concrete example, so that I understand it without a data analyst.
 14. As a shop owner, I want each problem to tell me exactly what to do about it, so that I
     can act instead of guess.
-15. As a shop owner with a vision impairment or on a bright shop-floor tablet, I want
+15. As a shop owner with a vision impairment, working at an office computer, I want
     severity shown by icon and words, not just color, so that I can tell what's urgent.
 16. As a shop owner, I do NOT want a wall of AI text or a green "all good" badge sitting
     next to a critical problem, so that I'm not misled or overwhelmed.
@@ -489,9 +489,10 @@ per-entity execute routes behind the pytest seam; one E2E through the whole jour
   - **Presenting AI-fix rationale** to a low-literacy user without inducing blind trust:
     reveal limits/uncertainty rather than confidence scores — the exact UI recipe is
     unvalidated and should be usability-tested with real owners.
-- **Personas.** Primary: the shop owner/admin (non-technical, 50–60, on desktop or a
-  bright-light shop tablet). Secondary: the Jigged white-glove migrator who currently does
-  the actual write, for whom the review is the pre-flight.
+- **Personas.** Primary: the shop owner/admin (non-technical, 50–60, at an **office computer**
+  — importing is data setup, and setup is not a shop-floor activity). Secondary: the Jigged
+  white-glove migrator who currently does the actual write, for whom the review is the
+  pre-flight.
 - **Source systems seen so far.** Tangle (real, from customer #1), plus JobBOSS/E2 and
   spreadsheets expected. The tool must not depend on prebuilt per-ERP signatures; detection
   is AI-first and may return "unknown" without degrading the review.

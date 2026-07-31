@@ -69,17 +69,17 @@ export default function PartWorkspace({
   const partId = params.partId as string | undefined;
   const { setTitle } = usePageTitle();
 
-  // Breadcrumb root reflects where the user entered from (Parts vs Inventory).
-  const partsListHref = useMemo(() => {
-    const from = searchParams.get('from');
-    if (from === 'inventory') return `/dashboard/${companyId}/inventory`;
-    return `/dashboard/${companyId}/parts`;
-  }, [companyId, searchParams]);
-
-  const partsListLabel = useMemo(
-    () => (searchParams.get('from') === 'inventory' ? 'Inventory' : 'Parts'),
-    [searchParams],
-  );
+  /**
+   * Breadcrumb root. There is only one parts list now.
+   *
+   * This used to branch on `?from=inventory` to a crumb reading "Inventory" and pointing at
+   * `/dashboard/{id}/inventory`. Both halves went stale when that page was deleted: the label named
+   * a page that no longer exists and the href redirected to Parts anyway. Nothing emits the param
+   * any more either — its producers were the deleted list's row-click and Add Item — so only a stale
+   * bookmark can carry it, and it now gets an honest "Parts" crumb instead of a mislabelled redirect.
+   */
+  const partsListHref = `/dashboard/${companyId}/parts`;
+  const partsListLabel = 'Parts';
 
   // BOM drill-down chain from `?back=id1,id2,id3` (oldest → most recent).
   const currentChain = useMemo(() => parseBackChain(searchParams), [searchParams]);

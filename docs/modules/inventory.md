@@ -63,6 +63,59 @@ the build the shop actually asked for — but they stop being the front door.
 
 ---
 
+## 1a. Who does what, and where
+
+Every action the product actually supports today, by actor. **This is the summary to read before
+§4**, which explains *why* each was designed the way it was and is ten times longer.
+Route names are relative to `/dashboard/{companyId}` or `/operator/{companyId}`.
+
+### Admin / office — computer, mouse
+
+| I want to… | Where | How |
+|---|---|---|
+| See what we have and what's short | `/parts` | `On hand` + `Status` columns; filter `Low` / `Out`. `?status=low` is the shop-wide shortage view. |
+| Name the places we already have | `/inventory/locations` (**Storage**) | `Add storage` tile → name it. Flat. `Subdivide` an existing unit only if it needs rows/bins. |
+| Make a place recognisable | Storage → tap tile → sheet | `Add a photo`. This is the place's identity — a photo beats the drawn icon. |
+| Print labels | Storage toolbar / tile sheet | `Print all labels`, or `Print QR` for one. |
+| Count one place | Storage → tap tile → `Count what's here` | Worksheet scoped to that place. Nothing is excluded — at one bin there is no split-part ambiguity. |
+| Put stray parts away | Same worksheet, at `Unassigned` | `Move N to…`. `Unassigned` **is** the put-away pile. |
+| Count the whole shop | Storage → `Count everything` | Pick parts, count, save. A part split across places is named and skipped — count it at its place instead. |
+| See where one part lives | `/parts/{id}` → Inventory tab | Per-location balances with full paths. |
+
+### Operator — own phone
+
+| I want to… | Where | How |
+|---|---|---|
+| Go to the shelf I'm standing at | `Scan` tab | Scan its label. Resolves location labels *and* job travellers. |
+| Browse what's in storage | `Inventory` tab | Board of places with photos + fill state. Tap to drill in. Read-only. |
+| Take stock out | Bin view → part card → `Remove` | Qty + unit + optional job tag. Over-removal records the shortfall and zeroes the count rather than blocking. |
+| Put stock in | Bin view → part card → `Add` | Qty + unit + notes. |
+| Put in a part that isn't here yet | Bin view → `Stock a part` | Picks a tracked part not already in this bin. |
+| Move stock to another place | Bin view → part card → `Move` | Any other place in the company. |
+| Correct a wrong number | Bin view → part card → `Adjust` | "Adjust stock (cycle count)" — set the true quantity. This *is* a one-part count. |
+
+### Not possible today — and each is a decision, not an oversight
+
+| Journey | Status |
+|---|---|
+| **Operator asks "is this part in storage, and where?"** | **No tool.** No part search on any operator surface; you must already know which place to open. Per-location balances are on the admin part page, and `AuthGuard` redirects operators out of `/dashboard`. This is J11, deliberately out of Phase 2 scope — but see the bug below. |
+| **Photograph a deposit as proof others can read later** | **Unbuilt and, until now, unrecorded.** `inventory_transactions` has no attachment column. Photos attach to *places* (identity), and operator photo capture exists only on job/part **notes** — which cannot tag a place. All three pieces exist; nothing connects them. A movement is currently evidenced by attribution (operator + timestamp + location snapshot), not by an image. |
+| **Operator counts or puts away a whole place** | **Office-only.** The place-scoped worksheet lives under `/dashboard`, which operators are redirected out of. So the recurring "work a place" job cannot be done by the person holding the phone. |
+| **See this bin's history — who took the last one** | **No surface.** `inventory_transactions` records operator, location and timestamps; the ledger is admin-only. |
+| **Reconcile a recorded discrepancy** | **No surface, no owner.** Over-removal sets `has_discrepancy` and nothing lists them. |
+
+> ### 🐞 One false promise in shipped UI
+> When a bin holds more parts than the cap, the operator bin view shows:
+> *"Showing the 200 largest of 9,428 parts here. **Scan or search a part** to reach one that
+> isn't listed."*
+>
+> Neither route exists. There is no part search on the operator app, and the scanner resolves
+> **locations and job travellers** — never a part into this bin. So the one screen that admits
+> the list is truncated tells the operator to do two things they cannot do. Either build part
+> lookup (J11) or change the copy; the current text is worse than saying nothing.
+
+---
+
 ## 2. Goal & non-goals
 
 ### Goal

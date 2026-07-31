@@ -355,6 +355,30 @@ describe('saving', () => {
     await waitFor(() => expect(refreshSystemQuantities).toHaveBeenCalledWith(['p1']));
   });
 
+  /**
+   * The exit that mattered most and had no coverage. It fires at the moment someone wants to go
+   * count the next shelf, and it used to push bare `/inventory` — which now redirects to Parts, so
+   * saving a place-scoped count dumped the counter on a parts list with the board gone.
+   */
+  it('returns to the storage board after saving, not to parts', async () => {
+    await enterAndSave('4140 bar', '38');
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations'),
+    );
+    expect(mockPush).not.toHaveBeenCalledWith('/dashboard/co1/inventory');
+  });
+
+  /** Same exit, and the same trap: with no board to return to, Parts is the correct landing. */
+  it('returns to parts after saving when the shop has no storage board', async () => {
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { inventory_locations: false },
+      loading: false,
+    });
+    await enterAndSave('4140 bar', '38');
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts'));
+  });
+
   // Save saves. The confirm dialog that used to sit here restated rows still visible behind it
   // and warned on nearly every line, so it was removed — see the note on save() in the page.
   it('commits straight from the sheet, with no confirm step', async () => {

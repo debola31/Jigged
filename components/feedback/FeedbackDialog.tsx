@@ -67,14 +67,14 @@ function getPageTitle(pathname: string): string {
     return 'Jobs';
   }
 
-  if (segments.includes('inventory')) {
-    if (segments.includes('new')) return 'New Inventory Item';
-    if (segments.includes('edit')) return 'Edit Inventory Item';
-    if (segments.includes('import')) return 'Import Inventory';
-    const idx = segments.indexOf('inventory');
-    if (idx < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[idx + 1])) return 'Inventory Details';
-    return 'Inventory';
-  }
+  // Only two `/inventory` routes exist — `/inventory/locations` (the Storage board) and
+  // `/inventory/count`. This block was a surviving copy of six branches Header.tsx already deleted
+  // as pointing at routes that never existed ('New/Edit Inventory Item', 'Import Inventory'), and
+  // its `idx + 1` fallback caught BOTH live routes — so every report filed from the Storage board or
+  // mid-count was tagged **"Inventory Details"**, the name of a page that was never built. That
+  // silently mis-buckets exactly the feedback these screens most need.
+  if (segments.includes('locations')) return 'Storage';
+  if (segments.includes('count')) return 'Count Inventory';
 
   if (segments.includes('settings')) return 'Settings';
   if (segments.includes('team')) return 'Team';

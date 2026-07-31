@@ -220,10 +220,17 @@ export default function OperatorBinViewPage() {
           <Stack spacing={1} sx={{ mt: 0.5 }}>
             {/* The list is capped. Saying so beats the silent `max_rows` clip this read used to
                 take — an operator seeing 200 of 9,428 needs to know the rest exist. */}
+            {/* No instruction here, deliberately. This used to end "Scan or search a part to reach
+                one that isn't listed" — and neither route exists: there is no part search anywhere
+                on the operator app, and the scanner resolves location labels and job travellers,
+                never a part into this bin. So the one message that admits the list is truncated was
+                telling the operator to do two impossible things.
+                Until part lookup (J11) ships, say what is true and stop there. If you build J11,
+                put the instruction back and point it at the real surface. */}
             {contentsTotal > contents.length && (
               <Alert severity="info">
-                Showing the {contents.length} largest of {num(contentsTotal)} parts here. Scan or
-                search a part to reach one that isn&apos;t listed.
+                Showing the {contents.length} largest of {num(contentsTotal)} parts here. The rest
+                are still counted — ask the office to look one up.
               </Alert>
             )}
             {contents.map((part) => (

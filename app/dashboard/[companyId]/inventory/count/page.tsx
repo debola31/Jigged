@@ -3,9 +3,12 @@
 /**
  * Inventory count sheet — journey J9 in docs/modules/inventory.md.
  *
- * "Inventory", not "stock": the nav item is Inventory, so a second word for the same thing is
- * one the user has to learn for no gain. ("Stocked" stays — that's the per-part flag, a real
- * distinct concept with its own switch on the part form.)
+ * "Inventory", not "stock" — but no longer for the reason first written here. That reason was
+ * "the nav item is Inventory", which stopped being true when the nav item became **Storage**
+ * (#622). It survives on the stronger ground: this screen counts **items**, and *inventory* is
+ * the industry's word for items and quantities, while *storage* means the places. Counting a
+ * shelf is an inventory action performed at a storage location. ("Stocked" stays — that's the
+ * per-part flag, a real distinct concept with its own switch on the part form.)
  *
  * TWO steps: choose what you're counting, then count it. Save commits — nothing in between.
  *
@@ -157,8 +160,13 @@ export default function InventoryCountPage() {
    * Parts — so a user who arrived from Storage was silently dumped on a different page than the one
    * they left. Labelling it "Back to storage" without this branch would just move the bug: it would
    * send flag-off shops to a page that redirects them straight back out.
+   *
+   * Used by all three exits from this flow — the Back button, the post-save redirect, and the
+   * "everything already matches" redirect. They were three separate copies of the same wrong
+   * literal; the post-save one mattered most, because it fires exactly when someone wants to go
+   * count the next shelf and it was dropping them on Parts with the board gone.
    */
-  const backTo = features.inventory_locations
+  const returnTo = features.inventory_locations
     ? { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' }
     : { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' };
 
@@ -390,7 +398,7 @@ export default function InventoryCountPage() {
     if (toCommit.length === 0) {
       clearDraft();
       setSnack({ msg: 'Everything already matches — nothing to save.', severity: 'success' });
-      router.push(`/dashboard/${companyId}/inventory`);
+      router.push(returnTo.href);
       return;
     }
 
@@ -411,7 +419,7 @@ export default function InventoryCountPage() {
               : ''),
           severity: 'success',
         });
-        router.push(`/dashboard/${companyId}/inventory`);
+        router.push(returnTo.href);
       } else {
         setSnack({
           msg: `Saved ${result.committed}. ${result.failures.length} could not be saved — ${result.failures[0].message}`,
@@ -540,10 +548,10 @@ export default function InventoryCountPage() {
           had to fix. A back button that changes where it goes is worse than one that arrives late. */}
       <Button
         startIcon={<ArrowBackIcon />}
-        onClick={() => router.push(backTo.href)}
+        onClick={() => router.push(returnTo.href)}
         sx={{ mb: 2, visibility: featuresLoading ? 'hidden' : 'visible' }}
       >
-        {backTo.label}
+        {returnTo.label}
       </Button>
 
       <Stepper activeStep={step} sx={{ mb: 4, maxWidth: 460 }}>

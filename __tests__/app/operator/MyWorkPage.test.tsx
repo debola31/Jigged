@@ -9,7 +9,35 @@ import type { MyContribution, MyNote } from '@/types/operator';
 vi.mock('@/utils/operatorAccess', () => ({
   getMyContribution: vi.fn(),
   getNoteViewers: vi.fn(),
+  // The "Me" tab resolves the operator's display name through this.
+  getCurrentMember: vi.fn(async () => ({ id: 'm1', name: 'Ada Lovelace', role: 'operator' })),
 }));
+
+// This page became the "Me" tab, so it now reaches identity + Log out — which pull in
+// `getCompany` and `getSupabase`. `lib/supabase` creates its client eagerly at module scope
+// whenever `window` exists, so in jsdom merely importing it fails without env vars.
+vi.mock('@/utils/companyAccess', () => ({
+  getCompany: vi.fn(async () => ({ id: 'co1', name: 'Vanguard Precision Works' })),
+}));
+// Both getters return the same stub: the page reaches one for Log out and the feedback insert, and
+// `useOperatorIdentity` reaches the other for the session. Stubbing only one left the identity load
+// throwing.
+//
+// The stub is built INSIDE the factory on purpose — `vi.mock` is hoisted above every `const` in
+// this file, so a factory closing over a module-scope helper fails with "cannot access before
+// initialization" before a single test runs.
+vi.mock('@/lib/supabase', () => {
+  const stub = () => ({
+    auth: {
+      getSession: async () => ({
+        data: { session: { user: { id: 'u1', email: 'ada@shop.test' } } },
+      }),
+      signOut: vi.fn(async () => ({ error: null })),
+    },
+    from: () => ({ insert: vi.fn(async () => ({ error: null })) }),
+  });
+  return { getSupabase: stub, getTypedSupabase: stub, supabase: null };
+});
 
 const mockGetMyContribution = vi.mocked(getMyContribution);
 const mockGetNoteViewers = vi.mocked(getNoteViewers);
@@ -214,5 +242,58 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Could not load your work/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * This page is the "Me" tab: the operator's work, with identity and account actions folded in
+ * beneath it now that Profile is no longer a bottom tab.
+ */
+describe('My Work — the "Me" tab', () => {
+  it('shows the work itself, not an account screen you have to leave', async () => {
+    mockGetMyContribution.mockResolvedValue(contribution());
+    render(<MyWorkPage />);
+
+    // The note is present on first paint — no second tap to reach your own work.
+    expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  /**
+   * The regression this guards is severe rather than cosmetic. The loading, error and empty
+   * states used to be early returns from the page component. Folding Profile in without moving
+   * them would have left a brand-new operator — zero notes, i.e. the common case — with no Log
+   * out button anywhere in the app, because Profile had just stopped being a tab.
+   */
+  it('can still log out with nothing written yet', async () => {
+    mockGetMyContribution.mockResolvedValue(contribution({ notes: [] }));
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText('Nothing written yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /log out/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /give feedback/i })).toBeInTheDocument();
+  });
+
+  it('can still log out when the work fails to load', async () => {
+    mockGetMyContribution.mockRejectedValue(new Error('denied'));
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText(/Could not load your work/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /log out/i })).toBeInTheDocument();
+  });
+
+  /**
+   * Log out is last and set apart, per NN/g's guidance on keeping a consequential option away
+   * from benign ones — operators repeating the same taps every shift slip into automaticity, and
+   * a mis-tap there is a slip that no clearer label fixes. Asserting document order keeps a
+   * future tidy-up from moving it back up next to Give feedback, which is where it used to be.
+   */
+  it('puts Log out after Give feedback, not beside it', async () => {
+    mockGetMyContribution.mockResolvedValue(contribution());
+    render(<MyWorkPage />);
+
+    const feedback = await screen.findByRole('button', { name: /give feedback/i });
+    const logout = screen.getByRole('button', { name: /log out/i });
+    expect(feedback.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -19,6 +19,11 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
+import {
+  OperatorIdentityRow,
+  OperatorAccountActions,
+} from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
 
@@ -205,11 +210,35 @@ export default function MyWorkPage() {
     [companyId],
   );
 
+  const { data: identity } = useOperatorIdentity(companyId);
+
+  /**
+   * This is the "Me" tab: identity, then the work, then account actions.
+   *
+   * The work is sandwiched rather than replaced — see `OperatorAccountBlock` for why the work
+   * has to lead and why Log out sits at the very bottom.
+   *
+   * The three loading/error/empty states are INSIDE `MyContribution` on purpose. They used to
+   * be early returns from this component, and leaving them there once Profile stopped being a
+   * tab would have meant a brand-new operator — the case with zero notes, i.e. the common one —
+   * had no Log out button anywhere in the app.
+   */
+  return (
+    <Box sx={{ pb: 4 }}>
+      <OperatorIdentityRow identity={identity} />
+      <MyContribution companyId={companyId} />
+      <OperatorAccountActions companyId={companyId} identity={identity} />
+    </Box>
+  );
+}
+
+/** The operator's own notes and their reception. Owns its own loading/error/empty states. */
+function MyContribution({ companyId }: { companyId: string }) {
   const { data, loading, error } = useLoad(() => getMyContribution(companyId), [companyId]);
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '30vh' }}>
         <CircularProgress />
       </Box>
     );
@@ -227,7 +256,7 @@ export default function MyWorkPage() {
 
   if (c.noteCount === 0) {
     return (
-      <Box sx={{ textAlign: 'center', py: 8, px: 2 }}>
+      <Box sx={{ textAlign: 'center', py: 6, px: 2 }}>
         <Typography variant="h6" color="text.secondary" gutterBottom>
           Nothing written yet
         </Typography>
@@ -239,7 +268,7 @@ export default function MyWorkPage() {
   }
 
   return (
-    <Box sx={{ pb: 4 }}>
+    <Box>
       {/* Contribution leads. What you put in comes before what came back —
           the point is that writing things down is the work, not a score. */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>

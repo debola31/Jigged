@@ -88,3 +88,7 @@ api/.coverage
 
 #Agents
 .agents/
+
+# Copied from node_modules by scripts/copy-scanner-wasm.mjs (postinstall) so the decoder and its
+# JS can never drift apart. Regenerate with `pnpm install`.
+public/wasm/

@@ -27,34 +27,23 @@ export default defineConfig({
      */
     testTimeout: 15_000,
     /**
-     * Cap concurrency below the machine's core count.
+     * ⚠️ DO NOT set `maxWorkers` here. It was added in #630 and reverted the same day, because
+     * it turned main red on the first merge after eleven consecutive green runs.
      *
-     * Vitest defaults to `availableParallelism() - 1` forks, so a 10-core laptop runs 9 jsdom
-     * workers, each with its own React renderer. The timeouts above are contention artefacts, so
-     * this attacks the cause rather than only widening the deadline.
+     * **`maxWorkers` is not a ceiling that defers to a smaller default — it is the number used.**
+     * The reverted comment claimed 6 would be "above their default and therefore a no-op" on CI.
+     * That is backwards. GitHub's hosted runners are small, so vitest's default
+     * (`availableParallelism() - 1`) is 1–3 workers there; forcing 6 over-subscribed the runner
+     * several times over and produced exactly the contention the setting was meant to remove.
+     * `VisualLocationBuilder` then failed with `Unable to find role="button" and name
+     * /create 16 locations/i` — a state race, not a timeout, so `testTimeout` above did not
+     * cover it.
      *
-     * **Measured, on this 10-core machine.** Wall-clock is unchanged — ~30s either way — but the
-     * aggregate in-worker test time drops from **105–127s to 74–80s**. That figure is summed
-     * across workers, so the fall is contention leaving the system: the same work, less of it
-     * spent waiting on a core. Fewer workers costing no wall-clock is counter-intuitive enough to
-     * be worth recording.
-     *
-     * CI runners have fewer cores than this, so 6 is usually above their default and therefore a
-     * no-op there rather than a throttle.
-     *
-     * Note this is the **vitest 4** spelling, and getting it wrong fails quietly. The first
-     * attempt used the v3 API, `poolOptions: { forks: { maxForks: 6 } }`, which no longer exists
-     * on `InlineConfig`. Vitest **silently ignores an unknown key** — the suite ran green and the
-     * setting did nothing, so the "before and after" timings I took were the same run twice.
-     * Only `tsc` caught it. If you change concurrency here, confirm the aggregate test time
-     * actually moves; a green suite proves nothing about whether the option took effect.
-     *
-     * Honest limitation: three clean runs after this change is not proof it fixed anything —
-     * two runs *before* it were clean too, because the flake is intermittent. What is solid is
-     * the captured error (`Test timed out in 5000ms`), which the timeout above definitively
-     * addresses; this cap is belt-and-braces at no measured cost.
+     * If local contention is ever worth capping again, it must be a genuine cap that cannot
+     * inflate a small machine — `Math.min(6, availableParallelism() - 1)` — and it must be
+     * proven on CI, not on a 10-core laptop. Two claims about CI behaviour were asserted without
+     * checking during that change; the third attempt should measure instead.
      */
-    maxWorkers: 6,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

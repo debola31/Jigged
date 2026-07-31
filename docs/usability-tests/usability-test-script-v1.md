@@ -241,8 +241,15 @@ Log Johnny into the app and land him on the dashboard. Say nothing for 30 second
 
 #### Follow-up questions
 
-- "Would you actually use this on the floor, or would you rather use a tablet or computer?"
+- "Would you actually use this on the floor, or would you rather use a computer?"
 - "Anything too small or hard to tap?"
+
+> **Partly answered already — 2026-07-31, founder observation.** *"No one used a shop tablet in
+> Contour or any shop I've seen"* — it is the machine's own HMI, a personal phone, or the office
+> computer. So don't ask this one open-ended as though tablets were live; ask it to **confirm the
+> phone**, and spend the time on the question we can't answer from outside: *whose* phone, and
+> whether they mind using it for work. See
+> [the device model](../../CLAUDE.md#who-uses-what-on-what--the-device-model).
 
 ---
 

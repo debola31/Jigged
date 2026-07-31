@@ -248,8 +248,10 @@ There is **no separate "Pricing tiers" reference section** — the editable quan
 **Actions — one row of standalone buttons (no overflow menu):** a contained
 **primary "Convert to Job"**, an outlined **Edit**, an outlined **View PDF**, and a
 red **Delete** icon button, laid out on a single row. Labelled buttons (rather than
-a hidden `⋮` icon menu) read better for the shop-floor tablet / older-user audience
-([NN/G](https://www.nngroup.com/articles/icon-usability/) on icon ambiguity).
+a hidden `⋮` icon menu) read better for the older-user audience
+([NN/G](https://www.nngroup.com/articles/icon-usability/) on icon ambiguity — which is about
+the icon being ambiguous, not about the device; the original wording said "shop-floor
+tablet", which quotes are not edited on).
 `Back to Quotes` stays top-left. **Edit** is gated by `converted_at` (locked after the first conversion so already-converted lines can't drift), but the convert action follows the **remaining unconverted lines**, not the binary flag:
 
 | Current State | Buttons shown |

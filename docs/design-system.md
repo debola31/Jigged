@@ -366,8 +366,15 @@ playful — industrial" principle. Reserve a colored border for a *semantic* sig
 
 When a submit/save button is disabled because the form is incomplete, **tell the
 user what's still missing** — a greyed-out button with no explanation is a dead
-end. The standard is an inline notice, **not** a hover tooltip: the app runs on
-shop-floor tablets where hover isn't available.
+end. The standard is an inline notice, **not** a hover tooltip.
+
+> **Reason corrected 2026-07-31, rule unchanged.** This said hover is unavailable because
+> "the app runs on shop-floor tablets". Forms are an **admin-surface** concern — office
+> computer, mouse — so hover *is* available (see
+> [the device model](../CLAUDE.md#who-uses-what-on-what--the-device-model)). The rule still
+> stands on the stronger argument it always had: a hover tooltip is **undiscoverable** —
+> you have to already suspect there is something to hover over — and it is unreachable by
+> keyboard. That is true of a mouse user at a desk too.
 
 - **`components/common/MissingFieldsNotice`** — render it just above the submit
   button with an `items: string[]` of the blocking reasons (it returns `null`
@@ -390,10 +397,11 @@ shop-floor tablets where hover isn't available.
 
 ### Placeholders
 
-**A placeholder must never resemble real data.** Our users are 50–60 year old
-shop owners on tablets; a greyed `25` in an empty Markup % field reads as a
-*pre-filled value*, not a hint, and ships wrong quotes. The misleading set —
-**banned**:
+**A placeholder must never resemble real data.** Our users are 50–60 year old shop owners;
+a greyed `25` in an empty Markup % field reads as a *pre-filled value*, not a hint, and
+ships wrong quotes. (This argument never depended on the device — it is about how a low-
+contrast number reads to anyone. The original wording said "on tablets", which was wrong
+about the device and irrelevant to the point.) The misleading set — **banned**:
 
 - Bare numbers: `placeholder="1"`, `placeholder="25"`.
 - Currency / value-shaped strings: `placeholder="$0.00"`, `placeholder="e.g. 5.50"`,

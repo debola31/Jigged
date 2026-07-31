@@ -54,7 +54,7 @@ const DECODE_INTERVAL_MS = 200;
  *
  * Re-exported here so existing importers and their test suite are untouched.
  */
-import { parseJiggedScan } from '@/lib/jiggedScan';
+import { foreignCompanyRejection, parseJiggedScan } from '@/lib/jiggedScan';
 
 export { locationIdFromScan, parseJiggedScan, type JiggedScan } from '@/lib/jiggedScan';
 
@@ -77,6 +77,20 @@ export interface LocationScannerProps {
     /** Present only on older travelers, which target a specific step. */
     operationId?: string;
   }) => boolean | void | Promise<boolean | void>;
+  /**
+   * The company this scanner belongs to. When set, a label whose payload names a *different*
+   * company is refused here and the handlers are never called.
+   *
+   * This is enforced in the component rather than left to each caller because the failure is
+   * silent otherwise: a foreign traveler QR decodes perfectly, and a caller that just pushes the
+   * route navigates the operator into another shop's job, relying on the destination page's RLS
+   * to fail. That produces an error screen instead of "that isn't yours", and only after a
+   * navigation.
+   *
+   * A payload with no company in it (a bare typed UUID) is *unverified*, not rejected — the
+   * caller's own data validation is still the backstop for that case.
+   */
+  expectedCompanyId?: string;
   title?: string;
 }
 
@@ -85,6 +99,7 @@ export default function LocationScanner({
   onClose,
   onScan,
   onScanTraveler,
+  expectedCompanyId,
   title = 'Scan a label',
 }: LocationScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -96,6 +111,27 @@ export default function LocationScanner({
   const [status, setStatus] = useState<'starting' | 'scanning' | 'error'>('starting');
   const [error, setError] = useState<string | null>(null);
   const [rejected, setRejected] = useState<string | null>(null);
+
+  /**
+   * The scan callbacks, held in refs so they are NOT effect dependencies.
+   *
+   * They used to be in the deps list below, and callers pass inline arrow functions — the
+   * operator layout does — which get a fresh identity on every parent render. That made *any*
+   * re-render of the parent while this dialog was open tear the effect down and back up:
+   * `stop()` releases every camera track, then `getUserMedia` starts over. On a phone that is a
+   * visible black flash and a lost half-second of aiming, mid-scan.
+   *
+   * Fixed here rather than with `useCallback` at each call site, because then the component is
+   * correct for every caller instead of correct only while each one remembers.
+   */
+  const onScanRef = useRef(onScan);
+  const onScanTravelerRef = useRef(onScanTraveler);
+  const expectedCompanyIdRef = useRef(expectedCompanyId);
+  useEffect(() => {
+    onScanRef.current = onScan;
+    onScanTravelerRef.current = onScanTraveler;
+    expectedCompanyIdRef.current = expectedCompanyId;
+  });
 
   const stop = useCallback(() => {
     if (timerRef.current) {
@@ -159,15 +195,24 @@ export default function LocationScanner({
               return;
             }
 
+            // Whose label is it? Checked before either handler runs, so a foreign code never
+            // becomes a navigation. The decision lives in `foreignCompanyRejection` because this
+            // loop cannot run under jsdom, and a tenant boundary should not be untestable.
+            const foreign = foreignCompanyRejection(text, scan, expectedCompanyIdRef.current);
+            if (foreign) {
+              setRejected(foreign);
+              return;
+            }
+
             // A traveler is only accepted where the caller can do something with one. Refusing
             // it out loud beats silently ignoring a code that decoded perfectly well — the
             // operator would just keep pointing the camera at it.
             if (scan.kind === 'traveler') {
-              if (!onScanTraveler) {
+              if (!onScanTravelerRef.current) {
                 setRejected('That’s a job traveler — scan a storage label here.');
                 return;
               }
-              const ok = await onScanTraveler({
+              const ok = await onScanTravelerRef.current({
                 jobId: scan.jobId,
                 jobPartId: scan.jobPartId,
                 operationId: scan.operationId,
@@ -180,7 +225,7 @@ export default function LocationScanner({
               return;
             }
 
-            const accepted = await onScan(scan.locationId);
+            const accepted = await onScanRef.current(scan.locationId);
             if (accepted === false) {
               setRejected('That label belongs to a different company.');
               return;
@@ -214,7 +259,7 @@ export default function LocationScanner({
       cancelled = true;
       stop();
     };
-  }, [open, onScan, onScanTraveler, stop]);
+  }, [open, stop]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>

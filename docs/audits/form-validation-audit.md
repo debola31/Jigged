@@ -22,10 +22,16 @@ Reusable building blocks added: [`lib/validators.ts`](../../lib/validators.ts),
 ## 1. Chosen UX pattern (and why)
 
 **Inline `MissingFieldsNotice` above the submit button**, listing each blocking
-reason — *not* a hover tooltip. Rationale: Jigged targets shop-floor tablets
-(touch) and 50–60-year-old users; hover tooltips aren't discoverable on touch and
-fail the clarity/accessibility goals in CLAUDE.md. We pair the summary notice with
-field-level `required` + `error`/`helperText` markers.
+reason — *not* a hover tooltip. Rationale: 50–60-year-old users, and a hover tooltip is
+**undiscoverable** (you must already suspect something is there to hover over) and
+unreachable by keyboard — failing the clarity/accessibility goals in CLAUDE.md. We pair the
+summary notice with field-level `required` + `error`/`helperText` markers.
+
+> **Corrected 2026-07-31.** This said "Jigged targets shop-floor tablets (touch)" and rested
+> the argument on hover being unavailable. Forms are an admin-surface concern — office
+> computer, mouse — so hover *is* available; see
+> [the device model](../../CLAUDE.md#who-uses-what-on-what--the-device-model). The conclusion
+> is unchanged because discoverability, not touch, was always the real reason.
 
 `ShipmentForm` (info-Alert listing blocking messages) was the pre-existing model
 for this; `QuoteForm` uses a button tooltip, kept as-is since it's a desktop-heavy

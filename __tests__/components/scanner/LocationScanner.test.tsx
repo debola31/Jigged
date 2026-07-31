@@ -72,7 +72,12 @@ describe('LocationScanner — camera', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    // `doUnmock` alone only affects FUTURE imports — it does not evict a module already in the
+    // registry, and the component imports `zxing-wasm/reader` dynamically while these tests run.
+    // The real protection is that the round trip now lives in its own file (vitest isolates the
+    // registry per file); this reset is belt-and-braces for anything added to this one later.
     vi.doUnmock('zxing-wasm/reader');
+    vi.resetModules();
   });
 
   /**
@@ -116,6 +121,40 @@ describe('LocationScanner — camera', () => {
     });
   });
 
+  /**
+   * The camera must survive the parent re-rendering.
+   *
+   * Callers pass inline arrow functions — the operator layout does — so every parent render hands
+   * this component new `onScan`/`onScanTraveler` identities. While those were effect dependencies,
+   * any such render tore the effect down and back up: `stop()` released every track, then
+   * `getUserMedia` ran again. On a phone that is a visible black flash and a lost half-second of
+   * aiming, in the middle of a scan.
+   *
+   * Re-rendering with fresh inline handlers is exactly what the layout does, so this asserts the
+   * camera is acquired once and the tracks are never stopped.
+   */
+  it('does not restart the camera when the parent re-renders', async () => {
+    const tracks = [track()];
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
+      getTracks: () => tracks,
+    } as unknown as MediaStream);
+
+    const { rerender } = render(
+      <LocationScanner open onClose={() => {}} onScan={() => {}} onScanTraveler={() => {}} />,
+    );
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
+
+    // Three more renders, each with brand-new function identities.
+    for (let i = 0; i < 3; i++) {
+      rerender(
+        <LocationScanner open onClose={() => {}} onScan={() => {}} onScanTraveler={() => {}} />,
+      );
+    }
+
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(tracks[0].stop).not.toHaveBeenCalled();
+  });
+
   it('asks for the rear camera, which is the one pointed at a shelf', async () => {
     vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
       getTracks: () => [],
@@ -148,37 +187,12 @@ describe('LocationScanner — camera', () => {
 });
 
 /**
- * The round trip: what we print, we can read.
+ * The round trip — "what we print, we can read" — lives in `scannerRoundTrip.test.ts`, NOT here.
  *
- * Everything above tests the two ends in isolation — `qrcode` writes the label, `zxing-wasm` reads a
- * code, `locationIdFromScan` parses the text. None of that proves the *chain* holds, and the chain
- * is what a scan actually is. If the printed error-correction level, size or payload ever stopped
- * being decodable, every test above would still pass while no label in the shop scanned.
- *
- * Uses the real decoder against the real `.wasm` the app serves, and the same `errorCorrectionLevel`
- * and width `locationLabelPdf` prints at.
+ * It must not share a file with the camera suite above: that suite `vi.doMock`s
+ * `zxing-wasm/reader` with a `readBarcodes` returning `[]`, the component imports that module
+ * dynamically mid-render, and `vi.doUnmock` cannot evict an already-imported module. The round
+ * trip then decoded with the mock and failed on `expected [] to have a length of 1` — on CI only,
+ * where contended workers let the mocked import land first. Vitest isolates the registry per
+ * FILE, so separation removes the race rather than narrowing it.
  */
-describe('printed label → decoder → location id', () => {
-  it('reads back a label generated exactly as the PDF prints it', async () => {
-    const QRCode = (await import('qrcode')).default;
-    const { readFile } = await import('node:fs/promises');
-    const { prepareZXingModule, readBarcodes } = await import('zxing-wasm/reader');
-
-    // The same file `scripts/copy-scanner-wasm.mjs` puts in public/ and the app loads at runtime.
-    const wasmBinary = await readFile('public/wasm/zxing_reader.wasm');
-    await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
-
-    const url = `http://localhost:3000/operator/co1/login?location=${UUID}`;
-    // errorCorrectionLevel 'H' and 320px match utils/locationLabelPdf.ts.
-    const png = await QRCode.toBuffer(url, { errorCorrectionLevel: 'H', width: 320 });
-
-    // The encoded bytes directly, not a Blob: jsdom's Blob shim has no `arrayBuffer()`, which the
-    // decoder calls. `readBarcodes` accepts a Uint8Array of an encoded image just as happily.
-    const results = await readBarcodes(new Uint8Array(png), { formats: ['QRCode'] });
-
-    expect(results).toHaveLength(1);
-    expect(results[0].text).toBe(url);
-    // And the parser gets the id back out of what the decoder actually returned.
-    expect(locationIdFromScan(results[0].text)).toBe(UUID);
-  }, 30_000);
-});

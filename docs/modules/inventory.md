@@ -1604,11 +1604,25 @@ stocked"* is the job a diorama would do. A spike ran on 2026-07-30; its recommen
 the issue.
 
 **Drag-to-reparent: considered and cut.** Their data (118/121 flat) says a re-parent gesture
-serves a hierarchy they don't have; drag on a shop tablet is the most failure-prone interaction
-available; and the house precedent is explicit — routings reorder with arrow buttons, no
-drag-and-drop. If it's ever wanted, the honest shape is a "Move into…" `Autocomplete` wiring the
-existing cycle-guarded `moveLocation`. Note that the demand this *looks* like is demand to move
-**stock**, not locations — and that UI already exists.
+serves a hierarchy they don't have, and the house precedent is explicit — routings reorder with
+arrow buttons, no drag-and-drop. If it's ever wanted, the honest shape is a "Move into…"
+`Autocomplete` wiring the existing cycle-guarded `moveLocation`. Note that the demand this
+*looks* like is demand to move **stock**, not locations — and that UI already exists.
+
+> **One of the original three reasons is withdrawn, 2026-07-31.** This also said *"drag on a
+> shop tablet is the most failure-prone interaction available"*. There is no shop tablet:
+> storage setup happens at an **office computer with a mouse**, where drag is an entirely
+> ordinary interaction (founder observation — see
+> [the device model](../../CLAUDE.md#who-uses-what-on-what--the-device-model)).
+>
+> The cut still stands on the two reasons that survive — the hierarchy isn't there, and the
+> house pattern is arrow buttons. But it now stands on two legs, not three, and anyone
+> reconsidering it should not be told drag is unreliable here.
+>
+> **This matters beyond drag.** The same false premise was used against a drag-to-place floor
+> plan for issue **#421**; that objection is withdrawn too. What remains against a facility map
+> is that a map's value scales with what you *can't* see from where you stand, and this shop has
+> 12–18 places that a small team learns in a week.
 
 ### 5.6 Lots — **RESOLVED: don't build them**
 

@@ -2201,7 +2201,6 @@ export type Database = {
           reconnect_required: boolean
           refresh_expires_at: string | null
           refresh_token: string
-          term_map: Json
           token_version: number
           updated_at: string
         }
@@ -2223,7 +2222,6 @@ export type Database = {
           reconnect_required?: boolean
           refresh_expires_at?: string | null
           refresh_token: string
-          term_map?: Json
           token_version?: number
           updated_at?: string
         }
@@ -2245,7 +2243,6 @@ export type Database = {
           reconnect_required?: boolean
           refresh_expires_at?: string | null
           refresh_token?: string
-          term_map?: Json
           token_version?: number
           updated_at?: string
         }

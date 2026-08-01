@@ -63,14 +63,14 @@ UPDATE public.jobs j
 -- ---------------------------------------------------------------------------
 -- 2. Per-connection QuickBooks facts Jigged has to discover and remember.
 -- ---------------------------------------------------------------------------
+-- Deliberately NO term_map cache. Terms are resolved live against QuickBooks at
+-- push time and listed live for the quote picker. A stored map would be a second
+-- list of terms that drifts from QuickBooks' own — exactly the problem this work
+-- exists to remove — to save a four-row query.
 ALTER TABLE public.quickbooks_connections
-    ADD COLUMN IF NOT EXISTS term_map jsonb NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS po_custom_field_id text,
     ADD COLUMN IF NOT EXISTS po_custom_field_name text,
     ADD COLUMN IF NOT EXISTS qb_settings_checked_at timestamptz;
-
-COMMENT ON COLUMN public.quickbooks_connections.term_map IS
-    'Jigged payment-term string -> QuickBooks Term Id, e.g. {"Net 30": "3"}. Populated by syncing QBO''s Term list on connect and lazily creating any term the shop uses that QBO lacks. Needed because SalesTermRef is a reference to a Term entity — you cannot push the string "Net 30". Match case-insensitively when resolving: QBO ships "Due on receipt" (lowercase r) and Jigged''s preset is "Due on Receipt", and a naive compare creates a near-duplicate. Verified live: POSTing a Term whose name already exists is REJECTED with HTTP 400, so resolve-then-create is required, not optional.';
 
 COMMENT ON COLUMN public.quickbooks_connections.po_custom_field_id IS
     'DefinitionId (1-3) of the sales custom field this shop uses for the customer PO number, discovered by reading Preferences.SalesFormsPrefs.CustomField and matching the field''s LABEL — never by position, since Intuit states definitions "may not appear in numeric order". NULL means the shop has not created one, which is the default state and must degrade silently: send no CustomField at all rather than guessing a slot. Jigged cannot create the field (verified: REST no-ops, GraphQL 403).';

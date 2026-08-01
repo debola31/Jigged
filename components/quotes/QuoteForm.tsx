@@ -38,6 +38,7 @@ import {
   addCustomPaymentTerm,
   removeCustomPaymentTerm,
 } from '@/utils/companyAccess';
+import { listQuickBooksTerms } from '@/utils/quickbooksAccess';
 import {
   createQuote,
   updateQuote,
@@ -298,6 +299,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // loaded in loadData. They render first in the payment-terms picker (each with
   // a remove control); choosing "Add New" and submitting a term appends here.
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
+  // Terms this company already has in QuickBooks. Empty when not connected,
+  // which is the common case and not a failure.
+  const [quickBooksTerms, setQuickBooksTerms] = useState<string[]>([]);
   /** The shop-wide default payment terms, used when the customer has none. */
   const [shopDefaultTerms, setShopDefaultTerms] = useState<string | null>(null);
   // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets
@@ -367,6 +371,25 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // QuickBooks' own payment terms, fetched OUTSIDE loadData on purpose. It is a
+  // round trip through our backend to Intuit, and putting it in that Promise.all
+  // would make the whole quote form wait on a third party to render. Instead the
+  // picker opens on the local presets and QuickBooks' terms fold in when they
+  // arrive — usually before anyone has reached the field.
+  //
+  // listQuickBooksTerms resolves to an empty list rather than rejecting, so a
+  // shop with no QuickBooks (most of them) takes the same path as a shop whose
+  // connection is momentarily down: the picker is simply the local list.
+  useEffect(() => {
+    let cancelled = false;
+    listQuickBooksTerms(companyId).then((res) => {
+      if (!cancelled) setQuickBooksTerms(res.terms.map((t) => t.name));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   // Edit-mode only: detect drift once on mount. The result is keyed by
   // line item id so each block can decide whether to render the chip.
@@ -463,23 +486,42 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     prefilledFrom[field] ? `From ${prefilledFrom[field]} — edit to override` : hint;
 
   /**
-   * Options for the payment-terms picker: the company's saved custom terms first
+   * Options for the payment-terms picker, most-authoritative first: the terms
+   * this company already has in QuickBooks, then its own saved custom terms
    * (each removable), then the built-in presets. If the quote already carries a
-   * custom term that isn't in the shop's saved list (e.g. an older quote), it's
-   * included too so the field can still display it.
+   * term in none of those (an older quote, say), it's included too so the field
+   * can still display it.
+   *
+   * QuickBooks leads because a term it already knows resolves to a real
+   * `SalesTermRef` on the invoice. Dedupe is CASE-INSENSITIVE and QuickBooks'
+   * spelling wins — it ships "Due on receipt" where our preset reads "Due on
+   * Receipt", and showing both would be two rows for one term.
+   *
+   * When there's no QuickBooks the list is exactly what it was before. That is
+   * the fallback, and it costs nothing: a term typed here is created in
+   * QuickBooks at push time anyway, so an unlisted term is never a dead end.
    */
   const paymentTermOptions = useMemo<PaymentTermOption[]>(() => {
-    const savedClean = savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t));
-    const opts: PaymentTermOption[] = [
-      ...savedClean.map((v) => ({ value: v, group: 'Your saved terms' })),
-      ...PAYMENT_TERM_PRESETS.map((v) => ({ value: v, group: 'Standard terms' })),
-    ];
+    const opts: PaymentTermOption[] = [];
+    const seen = new Set<string>();
+    const add = (list: ReadonlyArray<string>, group: string) => {
+      for (const value of list) {
+        const key = value.trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        opts.push({ value, group });
+      }
+    };
+    add(quickBooksTerms, 'In QuickBooks');
+    add(savedTerms, 'Your saved terms');
+    add(PAYMENT_TERM_PRESETS, 'Standard terms');
+
     const cur = formData.payment_terms.trim();
     if (cur && !opts.some((o) => o.value === cur)) {
       opts.unshift({ value: cur, group: 'This quote' });
     }
     return opts;
-  }, [savedTerms, formData.payment_terms]);
+  }, [quickBooksTerms, savedTerms, formData.payment_terms]);
 
   /**
    * Commit a payment term (picked from the list, or entered via the inline

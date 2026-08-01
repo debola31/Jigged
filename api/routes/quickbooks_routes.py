@@ -217,6 +217,40 @@ async def status(company_id: str, request: Request):
     )
 
 
+class TermsResponse(BaseModel):
+    """The connected company's QuickBooks payment terms, for the quote picker."""
+
+    connected: bool
+    terms: list[dict] = []
+
+
+@router.get("/{company_id}/terms", response_model=TermsResponse)
+async def terms(company_id: str, request: Request):
+    """List the Terms this company already has in QuickBooks.
+
+    Read-only, and deliberately NOT cached in our own table. A cached copy would
+    be a second list of terms that drifts from QuickBooks' — the exact problem
+    this endpoint exists to remove. The query is four rows and this is not an
+    AI call, so live is affordable.
+
+    Never raises for the ordinary "no QuickBooks" cases. A shop that hasn't
+    connected, or an Intuit outage, must not stop anyone from writing a quote:
+    the caller falls back to Jigged's own presets, and `resolve_term_id` still
+    creates whatever term is chosen at push time. Missing options degrade the
+    picker; they never block the quote.
+    """
+    await _verify_company_access(request, company_id)
+    db = _service_client()
+    conn = qb.get_connection(db, company_id)
+    if not _is_connected(conn) or conn.get("reconnect_required"):
+        return TermsResponse(connected=False)
+    try:
+        return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
+        return TermsResponse(connected=False)
+
+
 class PoFieldResponse(BaseModel):
     """State of this company's PO custom field in QuickBooks.
 

@@ -444,7 +444,6 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
     "connected_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
-    "term_map" jsonb DEFAULT '{}'::jsonb NOT NULL,
     "po_custom_field_id" text,
     "po_custom_field_name" text,
     "qb_settings_checked_at" timestamp with time zone,

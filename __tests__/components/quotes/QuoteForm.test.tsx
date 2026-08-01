@@ -67,6 +67,14 @@ vi.mock('@/utils/companyAccess', () => ({
   removeCustomPaymentTerm: (...args: unknown[]) => removeCustomPaymentTerm(...args),
 }));
 
+// QuickBooks' own payment terms, offered above the local presets when a shop is
+// connected. Defaults to "not connected" so these tests keep asserting the
+// local-only picker, which is what most shops see.
+const listQuickBooksTerms = vi.fn();
+vi.mock('@/utils/quickbooksAccess', () => ({
+  listQuickBooksTerms: (...args: unknown[]) => listQuickBooksTerms(...args),
+}));
+
 // Pricing tiers — return non-empty so the validation tier-check passes
 const getTiersWithComputedPrices = vi.fn();
 vi.mock('@/utils/partPricingTiersAccess', () => ({
@@ -169,6 +177,7 @@ describe('QuoteForm', () => {
     // No shop-wide default by default — the terms field starts empty, which is
     // what every assertion in this file was written against.
     getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
     addCustomPaymentTerm.mockResolvedValue([]);
     removeCustomPaymentTerm.mockResolvedValue([]);
   });
@@ -353,6 +362,65 @@ describe('QuoteForm', () => {
       'test-company-id',
       'Net 30, 1% late charge',
     );
+  });
+
+  it('offers the terms QuickBooks already has, above the local presets', async () => {
+    listQuickBooksTerms.mockResolvedValue({
+      connected: true,
+      terms: [
+        { id: '3', name: 'Net 30', due_days: 30 },
+        { id: '7', name: 'Net 45', due_days: 45 },
+      ],
+    });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+
+    // "Net 45" exists only in QuickBooks — it is offered because a term
+    // QuickBooks knows resolves to a real SalesTermRef on the invoice.
+    expect(await screen.findByRole('option', { name: 'Net 45' })).toBeInTheDocument();
+    // And it leads: options are ordered most-authoritative first.
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.indexOf('Net 45')).toBeLessThan(labels.indexOf('Net 60'));
+  });
+
+  // QuickBooks ships "Due on receipt"; our preset reads "Due on Receipt". Two
+  // rows for one term is the drift this whole feature exists to remove.
+  it('shows one row per term when QuickBooks spells it differently', async () => {
+    listQuickBooksTerms.mockResolvedValue({
+      connected: true,
+      terms: [{ id: '1', name: 'Due on receipt', due_days: 0 }],
+    });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    await screen.findByRole('option', { name: 'Due on receipt' });
+
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.filter((l) => l?.toLowerCase() === 'due on receipt')).toHaveLength(1);
+    // QuickBooks' spelling wins — it is the one that has to match on their side.
+    expect(labels).toContain('Due on receipt');
+    expect(labels).not.toContain('Due on Receipt');
+  });
+
+  it('falls back to the local presets when there is no QuickBooks', async () => {
+    // Already the default mock, but stated explicitly: this is what most shops
+    // see, and the picker must be complete without QuickBooks.
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    expect(await screen.findByRole('option', { name: 'Net 30' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Due on Receipt' })).toBeInTheDocument();
   });
 
   it('shows a highlighted "Add New" row at the bottom of the dropdown', async () => {
@@ -742,6 +810,7 @@ describe('QuoteForm — standing-terms resolution chain', () => {
     ]);
     getCustomPaymentTerms.mockResolvedValue([]);
     getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
     addCustomPaymentTerm.mockResolvedValue([]);
     removeCustomPaymentTerm.mockResolvedValue([]);
   });

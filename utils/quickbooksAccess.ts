@@ -377,3 +377,34 @@ export interface QuickBooksPoField {
 export function refreshQuickBooksPoField(companyId: string): Promise<QuickBooksPoField> {
   return qbRequest<QuickBooksPoField>(`/${companyId}/po-field/refresh`, { method: 'POST' });
 }
+
+/** A payment term as QuickBooks holds it. `due_days` is null for non-net terms. */
+export interface QuickBooksTerm {
+  id: string;
+  name: string;
+  due_days: number | null;
+}
+
+/**
+ * The connected company's QuickBooks payment terms, for the quote picker.
+ *
+ * Offering QuickBooks' own terms means the term chosen on a quote already
+ * exists on the other side, so `SalesTermRef` resolves against a real entity
+ * instead of a string we hope matches.
+ *
+ * Resolves — never rejects — when QuickBooks is absent or unreachable:
+ * `{ connected: false, terms: [] }`. The caller falls back to Jigged's presets.
+ * A shop with no QuickBooks must still be able to write a quote, and a term
+ * typed here is created in QuickBooks at push time regardless.
+ */
+export async function listQuickBooksTerms(
+  companyId: string,
+): Promise<{ connected: boolean; terms: QuickBooksTerm[] }> {
+  try {
+    return await qbRequest<{ connected: boolean; terms: QuickBooksTerm[] }>(
+      `/${companyId}/terms`,
+    );
+  } catch {
+    return { connected: false, terms: [] };
+  }
+}

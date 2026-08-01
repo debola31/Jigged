@@ -3,7 +3,11 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
-import { readCustomPaymentTerms, MAX_CUSTOM_PAYMENT_TERMS } from '@/lib/companyDefaults';
+import {
+  readCustomPaymentTerms,
+  readCompanyDefaultPaymentTerms,
+  MAX_CUSTOM_PAYMENT_TERMS,
+} from '@/lib/companyDefaults';
 import { toError } from '@/lib/supabaseErrors';
 
 export interface Company {
@@ -465,5 +469,48 @@ export async function removeCustomPaymentTerm(companyId: string, term: string): 
   const existing = await getCustomPaymentTerms(companyId);
   const next = existing.filter((t) => t !== term);
   await writeCustomPaymentTerms(companyId, next);
+  return next;
+}
+
+/**
+ * Read the shop-wide default payment terms. See readCompanyDefaultPaymentTerms
+ * for why this lives beside the numeric `defaults` block rather than in it.
+ */
+export async function getCompanyDefaultPaymentTerms(companyId: string): Promise<string | null> {
+  const company = await getCompany(companyId);
+  return readCompanyDefaultPaymentTerms(company);
+}
+
+/**
+ * Set (or clear) the shop-wide default payment terms.
+ *
+ * Read-modify-write of the whole settings object, mirroring
+ * writeCustomPaymentTerms — the outer spread is what keeps the sibling
+ * `features`, `defaults` and `custom_payment_terms` blocks alive; writing the
+ * key alone would silently drop every feature flag on the company.
+ *
+ * A blank value stores null rather than '', so "unset" has exactly one
+ * representation and the reader never has to distinguish empty from absent.
+ */
+export async function setCompanyDefaultPaymentTerms(
+  companyId: string,
+  terms: string,
+): Promise<string | null> {
+  const supabase = getSupabase();
+  const company = await getCompany(companyId);
+  if (!company) {
+    throw new Error('Company not found.');
+  }
+  const next = terms.trim() || null;
+  const settings = (company.settings ?? {}) as Record<string, unknown>;
+  const nextSettings = { ...settings, default_payment_terms: next } as Json;
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings: nextSettings, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating default payment terms:', error);
+    throw new Error(`Failed to save default payment terms: ${error.message}`);
+  }
   return next;
 }

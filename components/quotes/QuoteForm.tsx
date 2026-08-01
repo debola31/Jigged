@@ -34,6 +34,7 @@ import type { QuoteFormData } from '@/types/quote';
 import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
   getCustomPaymentTerms,
+  getCompanyDefaultPaymentTerms,
   addCustomPaymentTerm,
   removeCustomPaymentTerm,
 } from '@/utils/companyAccess';
@@ -297,6 +298,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // loaded in loadData. They render first in the payment-terms picker (each with
   // a remove control); choosing "Add New" and submitting a term appends here.
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
+  /** The shop-wide default payment terms, used when the customer has none. */
+  const [shopDefaultTerms, setShopDefaultTerms] = useState<string | null>(null);
   // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets
   // addingTerm, which reveals an inline field (below the picker) bound to
   // newTermDraft; submitting it selects + saves the term.
@@ -323,15 +326,19 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       const initialPartIds = Array.from(
         new Set(initialData.parts.map((p) => p.part_id).filter(Boolean)),
       );
-      const [customersData, hydratedParts, customTerms] = await Promise.all([
+      const [customersData, hydratedParts, customTerms, shopDefaultTerms] = await Promise.all([
         getAllCustomers(companyId),
         initialPartIds.length > 0
           ? getPartsForSelectByIds(initialPartIds)
           : Promise.resolve([]),
         // Best-effort: a failed load just means no saved-term suggestions.
         getCustomPaymentTerms(companyId).catch(() => [] as string[]),
+        // Best-effort too: without it a customer with no terms of their own just
+        // starts blank, which is exactly the pre-shop-default behaviour.
+        getCompanyDefaultPaymentTerms(companyId).catch(() => null),
       ]);
       setSavedTerms(customTerms);
+      setShopDefaultTerms(shopDefaultTerms);
       setCustomers([
         CREATE_NEW_CUSTOMER,
         ...customersData.map((c) => ({ id: c.id, name: c.name })),
@@ -441,18 +448,19 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   };
 
   /**
-   * Helper line under a standing-terms field. When the value was copied from
-   * the customer we say so by name; otherwise the field's own hint shows.
+   * Helper line under a standing-terms field. When the value was inherited we
+   * name WHICH LEVEL it came from — "Acme Industrial's standing terms" or "your
+   * shop default" — otherwise the field's own hint shows.
    *
    * This one line is what makes the inheritance visible rather than silent —
    * the distinction between this and the `markup_rates` module deleted in July
    * 2026, where a shared default was resolved at read time with nothing on
-   * screen to say where the number came from.
+   * screen to say where the number came from. Naming the level matters more now
+   * that there are two of them: "why does this say Net 30?" has two possible
+   * answers, and the user should not have to go looking for which.
    */
   const standingTermsHelper = (field: StandingTermField, hint: string) =>
-    prefilledFrom[field]
-      ? `From ${prefilledFrom[field]}’s standing terms — edit to override`
-      : hint;
+    prefilledFrom[field] ? `From ${prefilledFrom[field]} — edit to override` : hint;
 
   /**
    * Options for the payment-terms picker: the company's saved custom terms first
@@ -570,18 +578,39 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     // Resolve the standing terms and decide ownership ONCE, against the state
     // of this render, so the two setters below can't disagree about which
     // fields we're allowed to touch.
-    const standing: Record<StandingTermField, string | null> = {
-      payment_terms: pickPaymentTerms(customer),
-      lead_time_text: pickLeadTimeText(customer),
-      fob_point: pickFobPoint(customer),
+    //
+    // Payment terms have a two-level chain — the customer's own agreement, then
+    // the shop-wide default — because a shop typically has one house term with a
+    // handful of exceptions, so per-customer-only would mean retyping the house
+    // term onto nearly every customer. Lead time and FOB are customer-only:
+    // both are on the discovery watch list, and building a shop-wide default for
+    // a field we may delete would be spending the effort twice.
+    //
+    // `source` is the phrase shown under the field. It names WHICH LEVEL the
+    // value came from, and that visibility is the entire difference between this
+    // and the markup_rates module deleted in July 2026.
+    const customerTerms = pickPaymentTerms(customer);
+    const standing: Record<StandingTermField, { value: string | null; source: string }> = {
+      payment_terms: customerTerms
+        ? { value: customerTerms, source: `${customer?.name ?? 'this customer'}’s standing terms` }
+        : { value: shopDefaultTerms, source: 'your shop default' },
+      lead_time_text: {
+        value: pickLeadTimeText(customer),
+        source: `${customer?.name ?? 'this customer'}’s standing terms`,
+      },
+      fob_point: {
+        value: pickFobPoint(customer),
+        source: `${customer?.name ?? 'this customer'}’s standing terms`,
+      },
     };
     const nextTerms: Partial<Record<StandingTermField, string>> = {};
     const nextProvenance: Partial<Record<StandingTermField, string>> = {};
     for (const field of STANDING_TERM_FIELDS) {
       const ours = !formData[field]?.trim() || prefilledFrom[field] !== undefined;
-      if (ours && standing[field]) {
-        nextTerms[field] = standing[field] as string;
-        nextProvenance[field] = customer?.name ?? '';
+      const resolved = standing[field];
+      if (ours && resolved.value) {
+        nextTerms[field] = resolved.value;
+        nextProvenance[field] = resolved.source;
       }
     }
 

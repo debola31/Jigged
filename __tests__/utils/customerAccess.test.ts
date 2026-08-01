@@ -453,3 +453,29 @@ describe('standing terms — drift is reported, never applied', () => {
     expect(hasTermDrift('', 'Net 30')).toBe(true);
   });
 });
+
+describe('standing terms — drift is customer-scoped, not shop-scoped', () => {
+  // A quote that inherited the SHOP-WIDE default must not chip when the shop
+  // changes its house term. hasTermDrift takes the customer's standing terms as
+  // its second argument and nothing else, so the guarantee is structural: there
+  // is no parameter through which a company default could reach it.
+  //
+  // This matters because the failure is silent and wholesale — the day the shop
+  // moves from Net 30 to Net 45, every open quote that took the house term would
+  // light up at once. A chip that fires on everything is a chip people stop
+  // reading, which would also destroy the per-customer signal that IS worth
+  // showing. If someone later threads a company default into this comparison,
+  // this test is what should stop them.
+  it('reports nothing for a quote whose customer has no terms of their own', () => {
+    // The quote says "Net 30" because it inherited the shop default at create
+    // time. The customer has no standing terms, so there is nothing to drift
+    // from — regardless of what the shop default says today.
+    expect(hasTermDrift('Net 30', null)).toBe(false);
+  });
+
+  it('still reports drift once that customer is given terms of their own', () => {
+    // The moment there IS a per-customer agreement, a mismatch is meaningful
+    // again — this is the signal the chip exists for.
+    expect(hasTermDrift('Net 30', 'Net 60')).toBe(true);
+  });
+});

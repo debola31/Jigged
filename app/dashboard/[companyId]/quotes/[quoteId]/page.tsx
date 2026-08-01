@@ -256,6 +256,12 @@ export default function QuoteDetailPage() {
   // never applied, because the quote is an offer that was already sent.
   // A customer with no standing value for a field can't drift on it
   // (hasTermDrift returns false), so a shop that never fills these sees nothing.
+  //
+  // DELIBERATELY CUSTOMER-SCOPED. The shop-wide default payment terms are NOT
+  // compared here, and must not be added: a quote that inherited the house term
+  // would then chip on every open quote the day the shop changes its house term.
+  // Shop policy moving is not a per-customer promise changing, and a chip that
+  // fires on everything at once is a chip people learn to ignore.
   const termDrift = quote.customers
     ? (
         [

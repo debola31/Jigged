@@ -83,7 +83,14 @@ insert into public.companies (
    -- no preview deployment can display is a feature nobody can review — the
    -- reviewer sees an unchanged app and has to take the diff's word for it.
    -- Seed is local/preview-only, never prod, so this widens nothing real.
-   '{"features": {"data_import": true, "machine_maintenance": true}}'::jsonb)
+   --
+   -- default_payment_terms is the shop-wide fallback used when a customer has
+   -- no terms of their own. Seeded so both branches of the resolution chain are
+   -- reachable by hand: quote Northwind (has its own terms) and the field
+   -- credits the customer; quote Sierra Pump & Valve (has none) and it credits
+   -- the shop default instead.
+   '{"features": {"data_import": true, "machine_maintenance": true},
+     "default_payment_terms": "2/10 Net 30"}'::jsonb)
 on conflict (id) do nothing;
 
 -- Billing cache: the grandfather backfill in the stripe_billing_cache migration

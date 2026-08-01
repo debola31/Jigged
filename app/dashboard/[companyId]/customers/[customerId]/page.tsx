@@ -594,6 +594,52 @@ export default function CustomerDetailPage() {
           </Card>
         </Grid>
 
+        {/* Standing terms — read-only here, edited on the customer form.
+            These were previously enterable but invisible: you could save terms
+            and never see them again, which is the opposite of the "somewhere to
+            save it so I don't keep it in my head" the field exists for.
+            Values are prose, so body1 rather than the h6 the Related counts use. */}
+        <Grid size={{ xs: 12 }}>
+          <Card elevation={2}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                Terms
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Payment terms
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_payment_terms || '—'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Lead time
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_lead_time_text || '—'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    FOB point
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_fob_point || '—'}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                Applied to new quotes for this customer. Quotes you&rsquo;ve already
+                sent keep the terms they were created with.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Related entities */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>

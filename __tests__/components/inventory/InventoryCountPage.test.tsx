@@ -530,6 +530,24 @@ describe('counting one place', () => {
 
   afterEach(() => searchParams.delete('location'));
 
+  /**
+   * The draft key is company-wide and only the company-wide loader reads it back, so a
+   * place-scoped autosave was a silent data-destruction path: abandon a Shelf A count at 28,
+   * open the company-wide sheet later, accept the resume, and 28 gets committed against a
+   * company-wide on-hand of 830 — a −802 adjustment nobody asked for.
+   */
+  it('writes no draft, so a shelf count cannot resume as a company-wide one', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
+    await user.type(inputFor('BUY-ORING-214'), '28');
+
+    expect(window.localStorage.getItem('jigged.inventoryCount.co1')).toBeNull();
+  });
+
   it('names the place it is scoped to instead of the whole shop', async () => {
     renderPage();
     expect(await screen.findByText("What's in Shelf A?")).toBeInTheDocument();

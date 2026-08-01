@@ -39,28 +39,55 @@ import type { LocationHistoryEntry } from '@/types/inventoryLocations';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
-/** "3 Aug, 14:20" — a shelf's history is recent, so the year is noise. */
+/**
+ * Short by design: "08:12 PM" today, "29 Jul" before that.
+ *
+ * A feed row had been spending a whole line on "Jul 29 at 08:12 PM · Dev Seed User". The exact
+ * minute of a three-day-old movement answers nothing an operator asked — recency is the signal,
+ * and precision only matters for something that just happened.
+ */
 function when(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay
+    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 /**
- * Direction is carried by the sign AND the colour, never colour alone — the shop floor is bright
- * and some of these operators are 50–60. `adjustment` is neither in nor out, so it gets no sign.
+ * Colour means "the amount on hand changed", or "something is wrong". Nothing else.
+ *
+ * It used to mean four things — green in, amber out, blue moved, grey set — and in a put-away-heavy
+ * shop the blue was most of the screen, so the palette stopped separating anything. A **move
+ * changes no total**: the same stock is in a different place. It now renders neutral and lets the
+ * arrow and the word carry it, which leaves green and amber to mean what they say and keeps the
+ * warning chip as the only thing competing for attention.
+ *
+ * Direction is still carried by the sign as well as the colour, never colour alone — bright shop,
+ * readers aged 50–60.
  */
 function movement(e: LocationHistoryEntry): { label: string; color: string } {
   if (e.type === 'addition') return { label: `+${num(e.quantity)} ${e.unit}`, color: 'success.light' };
   if (e.type === 'depletion') return { label: `−${num(e.quantity)} ${e.unit}`, color: 'warning.light' };
-  // A folded move changes no shop total, so a sign would be a lie in whichever direction it pointed.
-  if (e.type === 'transfer') return { label: `${num(e.quantity)} ${e.unit} moved`, color: 'info.light' };
+  if (e.type === 'transfer') {
+    // A batch mixes units, so it is counted in parts rather than summed into a meaningless total.
+    const what = e.partCount && e.partCount > 1 ? `${e.partCount} parts` : `${num(e.quantity)} ${e.unit}`;
+    return { label: `${what} moved`, color: 'text.primary' };
+  }
   return { label: `set to ${num(e.quantity)} ${e.unit}`, color: 'text.secondary' };
+}
+
+/** Place · when · who, in that order — where it happened is what you scan for. */
+function meta(e: LocationHistoryEntry, showPlace?: boolean): string {
+  const place = e.fromName ? `${e.fromName} → ${e.locationName}` : e.locationName;
+  return [showPlace ? place : null, when(e.createdAt), e.actorName]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 export interface BinHistoryProps {
@@ -121,29 +148,22 @@ export default function BinHistory({
                       indent. Real CSS gap doesn't apply across a wrap. */}
                   <Stack direction="row" spacing={1} useFlexGap alignItems="baseline" flexWrap="wrap">
                     <Typography sx={{ fontWeight: 700, color: m.color }}>{m.label}</Typography>
-                    <Typography sx={{ fontWeight: 600 }} noWrap>
-                      {e.itemName}
-                    </Typography>
+                    {/* A batch row has no single part; its `itemName` is one arbitrary member. */}
+                    {!e.partCount && (
+                      <Typography sx={{ fontWeight: 600 }} noWrap>
+                        {e.itemName}
+                      </Typography>
+                    )}
                   </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                    {when(e.createdAt)}
-                    {/* No author on older rows — see the note at the top of this file. */}
-                    {e.actorName ? ` · ${e.actorName}` : ''}
+                  {/* ONE metadata line, not three. Place, time and author were each taking a line
+                      of their own, which is most of why fifteen rows ran to four phone screens.
+                      `body2` (14px) rather than `caption` (12px): there is one of these now
+                      instead of two, so it can afford to be legible in a bright shop.
+                      `locationName` is snapshotted on the row, so it still reads correctly after
+                      the place is deleted. */}
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'block' }}>
+                    {meta(e, showPlace)}
                   </Typography>
-                  {/* `locationName` is snapshotted on the row, so it still reads correctly after
-                      the place is deleted — at which point `locationId` is null and there is
-                      nowhere to send anyone, hence the plain text fallback. */}
-                  {showPlace && e.locationName && (
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: 'block', mt: 0.25 }}
-                    >
-                      {/* A move names both ends. The card goes to the destination — where the
-                          stock is now is the only half worth walking to. */}
-                      {e.fromName ? `${e.fromName} → ${e.locationName}` : e.locationName}
-                    </Typography>
-                  )}
                   {e.notes && (
                     <Typography variant="body2" sx={{ mt: 0.5 }}>
                       {e.notes}

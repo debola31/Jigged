@@ -826,6 +826,7 @@ describe('recent activity — one move, one row', () => {
     id: 'x',
     created_at: '2026-07-30T10:00:00Z',
     type: 'addition',
+    part_id: 'p1',
     item_name: 'BUY-BEARING-608ZZ',
     quantity: 580,
     unit: 'each',
@@ -902,5 +903,103 @@ describe('recent activity — one move, one row', () => {
     const [entry] = await getLocationHistory('l1');
     expect(entry.type).toBe('addition');
     expect(entry.notes).toContain('[Transfer from Unassigned]');
+  });
+});
+
+/**
+ * The bug this suite exists for. `bulk_put_away` mints ONE transfer_group_id before its loop
+ * (20260730010705_inventory_bulk_put_away.sql), so a 15-part put-away writes 30 rows sharing it.
+ * Keying the fold on the group alone treated the whole batch as a single pair: it dropped one row,
+ * folded one, and left 28 — the wall of rows folding exists to prevent. `transfer_stock` mints per
+ * call, which is why single put-aways looked correct and hid this.
+ */
+describe('recent activity — a batch shares one transfer group', () => {
+  const at = (n: number) => '2026-07-30T10:0' + n + ':00Z';
+  const leg = (partId: string, type: string, place: string, id: string) => ({
+    id,
+    created_at: at(1),
+    type,
+    part_id: partId,
+    item_name: partId.toUpperCase(),
+    quantity: 10,
+    unit: 'ea',
+    notes: type === 'depletion' ? 'Put away to Shelf A' : 'Put away from Unassigned',
+    operator_id: null,
+    photo_path: null,
+    has_discrepancy: false,
+    transfer_group_id: 'batch1',
+    location_id: type === 'depletion' ? 'sys' : 'l1',
+    location_name: place,
+  });
+
+  const batch = (n: number) =>
+    Array.from({ length: n }, (_, i) => [
+      leg('p' + i, 'addition', 'Shelf A', 'to' + i),
+      leg('p' + i, 'depletion', 'Unassigned', 'from' + i),
+    ]).flat();
+
+  it('collapses a whole batch to one row instead of leaving 2N-1', async () => {
+    queueFrom({ data: batch(15), error: null });
+
+    const entries = await getRecentActivity('co1');
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].type).toBe('transfer');
+    expect(entries[0].partCount).toBe(15);
+    expect(entries[0].fromName).toBe('Unassigned');
+    expect(entries[0].locationName).toBe('Shelf A');
+  });
+
+  /** A batch mixes units, so any total would be a number that means nothing. */
+  it('reports a batch as a count of parts, not a summed quantity', async () => {
+    queueFrom({ data: batch(3), error: null });
+
+    const [e] = await getRecentActivity('co1');
+    expect(e.quantity).toBe(0);
+    expect(e.partCount).toBe(3);
+    // `itemName` still holds one arbitrary member; the renderer is what must not show it.
+    expect(e.notes).toBeNull();
+  });
+
+  /** One part in the group is an ordinary single move and must keep its detail. */
+  it('still folds a one-part group the normal way', async () => {
+    queueFrom({ data: batch(1), error: null });
+
+    const [e] = await getRecentActivity('co1');
+    expect(e.partCount).toBeUndefined();
+    expect(e.itemName).toBe('P0');
+    expect(e.quantity).toBe(10);
+  });
+
+  /** The generated note restates the route the row already shows. Operator prose does not. */
+  it('drops the machine-written put-away note but keeps typed words', async () => {
+    queueFrom({ data: batch(1), error: null });
+    const [auto] = await getRecentActivity('co1');
+    expect(auto.notes).toBeNull();
+
+    const typed = batch(1);
+    typed[0].notes = 'Box was damaged, 2 set aside';
+    queueFrom({ data: typed, error: null });
+    const [prose] = await getRecentActivity('co1');
+    expect(prose.notes).toBe('Box was damaged, 2 set aside');
+  });
+});
+
+describe('reserved location kind', () => {
+  /** Typing "system" removes the whole structural-actions block, rename included, with no way back. */
+  it('refuses to create a location whose kind is the reserved word', async () => {
+    await expect(createLocation('co1', { name: 'Shelf A', kind: 'System ' })).rejects.toThrow(
+      /reserved/i,
+    );
+  });
+
+  it('refuses to rename a kind into it either', async () => {
+    await expect(updateLocation('l1', { kind: 'system' })).rejects.toThrow(/reserved/i);
+  });
+
+  /** Free text is the design (lib/locationKinds.ts); only the one word is reserved. */
+  it('still accepts an unrecognised kind, which degrades to a generic tile', async () => {
+    queueFrom({ data: loc({ id: 'l1', kind: '34r3' }), error: null });
+    await expect(createLocation('co1', { name: 'Shelf A', kind: '34r3' })).resolves.toBeTruthy();
   });
 });

@@ -320,10 +320,19 @@ export default function InventoryCountPage() {
   // ── Draft autosave ──────────────────────────────────────────────────────
   // Only while counting: a draft written before a scope exists, or after commit, would offer
   // to resume something meaningless.
+  //
+  // NEVER in place-scoped mode, and this is a data-loss guard rather than a tidy-up.
+  // The draft is keyed by company alone, and only the company-wide branch of the loader reads it
+  // back. So a Shelf A count that got abandoned would silently become the resume offer on the
+  // next company-wide count: the 28 you counted on one shelf reattaches to a part whose
+  // company-wide `parts.quantity` is 830, and committing writes a −802 adjustment with no warning.
+  // Place counts are one bin and short, and there is no resume path for them anyway, so the
+  // written draft was pure liability. If place-scoped resume is ever wanted, key the draft by
+  // scope — do not simply delete this guard.
   useEffect(() => {
-    if (step !== 1 || selectedIds.length === 0) return;
+    if (step !== 1 || selectedIds.length === 0 || locationMode) return;
     writeDraft(buildDraft(companyId, selectedIds, entries, Date.now()));
-  }, [step, selectedIds, entries, companyId]);
+  }, [step, selectedIds, entries, companyId, locationMode]);
 
   const clearDraft = useCallback(() => clearStoredDraft(companyId), [companyId]);
 

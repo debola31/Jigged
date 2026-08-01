@@ -55,3 +55,25 @@ export type LocationKind = (typeof LOCATION_KINDS)[number];
  * the string has exactly one definition.
  */
 export const SYSTEM_KIND = 'system';
+
+/**
+ * Guard the one reserved word, because typing it is unrecoverable.
+ *
+ * `kind` is free text on purpose (see above), and almost anything you type degrades gracefully:
+ * `unitKind` falls through to a generic drawing and nothing else cares. `system` is the exception.
+ * It is the marker for the auto-managed `Unassigned` bucket, and every surface treats that bucket
+ * as not-a-place — the destination pickers drop it, the operator lookup reports its contents as
+ * "not put away yet", the count sheet refuses it as a put-away target, and, fatally,
+ * `LocationDetailSheet` withholds the whole structural-actions block from it.
+ *
+ * Rename lives in that block. So a shelf you accidentally typed "system" into can no longer be
+ * renamed, subdivided or deleted, and there is no other edit path: the typo is permanent and the
+ * only fix is SQL. Rejecting it at the two write points costs nothing.
+ */
+export function isReservedKind(kind: string | null | undefined): boolean {
+  return (kind ?? '').trim().toLowerCase() === SYSTEM_KIND;
+}
+
+/** Shown wherever a reserved kind is refused, so the message is written once. */
+export const RESERVED_KIND_MESSAGE =
+  '"system" is reserved for the Unassigned pile. Pick another word — try shelf, bin or cabinet.';

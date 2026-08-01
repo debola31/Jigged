@@ -199,6 +199,16 @@ export interface LocationHistoryEntry {
   /** Set on both halves of a move, so the pair can be recognised as one action. */
   transferGroupId: string | null;
   /**
+   * Which part moved. Load-bearing for folding: `bulk_put_away` shares ONE `transfer_group_id`
+   * across every part in a batch, so the group alone does not identify a single move.
+   */
+  partId: string | null;
+  /**
+   * Set only on a folded `transfer` that collapsed a multi-part batch. When present the row
+   * summarises N parts and its `quantity` and `itemName` are meaningless — a batch mixes units.
+   */
+  partCount?: number;
+  /**
    * Null once the place is deleted; `locationName` survives it as a snapshot on the row.
    *
    * On a folded `transfer` this is the **destination** — where the stock is now, which is the

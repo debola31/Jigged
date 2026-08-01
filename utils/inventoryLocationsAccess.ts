@@ -11,6 +11,7 @@
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
+import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
 import {
   deleteFileFromStorage,
@@ -313,6 +314,10 @@ export async function createLocation(
   input: CreateLocationInput,
 ): Promise<InventoryLocation> {
   if (!input.name?.trim()) throw new Error('Location name is required');
+  // `system` is the marker for the auto-managed Unassigned bucket, and a location carrying it
+  // loses its entire structural-actions block — rename included — with no way back. See
+  // `isReservedKind`. Guarded here as well as in the form so no write path can set it.
+  if (isReservedKind(input.kind)) throw new Error(RESERVED_KIND_MESSAGE);
   await assertParentInCompany(input.parent_id, companyId);
   return insertLocation(companyId, input);
 }
@@ -321,6 +326,7 @@ export async function updateLocation(
   id: string,
   patch: UpdateLocationInput,
 ): Promise<InventoryLocation> {
+  if (isReservedKind(patch.kind)) throw new Error(RESERVED_KIND_MESSAGE);
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('inventory_locations')
@@ -1040,12 +1046,13 @@ export async function bulkPutAway(
  */
 /** Columns every movement view needs. One literal — a concatenation defeats the typed client. */
 const MOVEMENT_COLUMNS =
-  'id, created_at, type, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
+  'id, created_at, type, part_id, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
 
 interface MovementRow {
   id: string;
   created_at: string;
   type: string;
+  part_id: string | null;
   item_name: string;
   quantity: number;
   unit: string;
@@ -1101,6 +1108,7 @@ async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEnt
   return rows.map((r) => ({
     id: r.id,
     createdAt: r.created_at,
+    partId: r.part_id,
     type: r.type === 'addition' || r.type === 'depletion' ? r.type : 'adjustment',
     itemName: r.item_name,
     quantity: Number(r.quantity ?? 0),
@@ -1181,65 +1189,100 @@ export async function getRecentActivity(
 }
 
 /**
- * One move, one row.
+ * One move, one row — and one *batch*, one row.
  *
- * A transfer writes **two** rows sharing a `transfer_group_id` — a depletion at the source and an
- * addition at the destination — which is right for the ledger and wrong for a shop-wide feed: the
- * same event appears twice, back to back, with opposite signs. On a phone that is the difference
- * between a readable feed and a wall.
+ * A transfer writes **two** ledger rows sharing a `transfer_group_id`: a depletion at the source
+ * and an addition at the destination. Right for the ledger, wrong for a shop-wide feed, where the
+ * same event appears twice back to back with opposite signs.
+ *
+ * ## The group id is NOT unique per part
+ *
+ * `bulk_put_away` mints `v_group` **once, before its loop**
+ * ([migration](../supabase/migrations/20260730010705_inventory_bulk_put_away.sql)), so a 15-part
+ * put-away writes 30 rows all sharing one id. The first version of this function keyed on the
+ * group alone and therefore treated an entire batch as a single pair: it dropped one row, folded
+ * one, and left the other 28 — the exact wall of rows folding exists to prevent. `transfer_stock`
+ * mints its id per call, which is why single put-aways looked fine and hid the bug.
+ *
+ * So the unit of a move is `(transfer_group_id, part_id)`, and a group holding more than one part
+ * is a **batch**: it collapses to one row reading "15 parts moved", because fifteen rows with the
+ * same timestamp, same route and no photo are one action to the person who performed it. Tapping
+ * it goes to the destination, where the parts actually are.
  *
  * Folding is safe **only here**. `getLocationHistory` shows one bin, which sees exactly one leg of
- * any move, so there is nothing to fold and the remaining leg's direction is the true answer for
- * that place.
+ * any move, so there is nothing to fold and the remaining leg's direction is that place's truth.
  *
- * The destination leg is kept: it holds the photo (put-away photos are taken where the stock lands)
- * and it is the place worth walking to. A pair whose other half fell outside the fetch window
- * passes through unfolded rather than being dropped — a half-shown move beats a missing one.
+ * A group with legs on only one side — the other half fell outside the fetch window — passes
+ * through unfolded. A half-shown move beats a missing one.
  */
 function foldTransfers(entries: LocationHistoryEntry[]): LocationHistoryEntry[] {
-  const pairs = new Map<string, { from?: LocationHistoryEntry; to?: LocationHistoryEntry }>();
+  const byGroup = new Map<string, LocationHistoryEntry[]>();
   for (const e of entries) {
     if (!e.transferGroupId) continue;
-    const pair = pairs.get(e.transferGroupId) ?? {};
-    if (e.type === 'depletion') pair.from = e;
-    if (e.type === 'addition') pair.to = e;
-    pairs.set(e.transferGroupId, pair);
+    const g = byGroup.get(e.transferGroupId);
+    if (g) g.push(e);
+    else byGroup.set(e.transferGroupId, [e]);
   }
 
   const out: LocationHistoryEntry[] = [];
+  const emitted = new Set<string>();
+
   for (const e of entries) {
-    const pair = e.transferGroupId ? pairs.get(e.transferGroupId) : undefined;
-    // Only a complete pair folds. A half whose partner fell outside the fetch window stays as it
-    // is — a move shown from one end beats a move not shown at all.
-    if (!pair?.from || !pair.to) {
+    const group = e.transferGroupId ? byGroup.get(e.transferGroupId) : undefined;
+    if (!group) {
       out.push(e);
       continue;
     }
-    if (e === pair.from) continue;
-    if (e === pair.to) {
+
+    const arrivals = group.filter((g) => g.type === 'addition');
+    const departures = group.filter((g) => g.type === 'depletion');
+    if (arrivals.length === 0 || departures.length === 0) {
+      out.push(e);
+      continue;
+    }
+
+    // The group renders once, at the position of its newest member — entries arrive newest-first.
+    if (emitted.has(e.transferGroupId as string)) continue;
+    emitted.add(e.transferGroupId as string);
+
+    const parts = new Set(group.map((g) => g.partId).filter((id): id is string => Boolean(id)));
+    const lead = arrivals[0];
+    const from = departures[0];
+
+    if (parts.size > 1) {
       out.push({
-        ...e,
+        ...lead,
         type: 'transfer',
-        fromName: pair.from.locationName,
-        notes: stripTransferTag(e.notes),
+        fromName: from.locationName,
+        partCount: parts.size,
+        // No total: a batch mixes units, and "1,588 of six different things" is a number that
+        // means nothing. The count of parts is the honest summary.
+        quantity: 0,
+        // Both are per-part and would name one arbitrary member of the batch. `bulk_put_away`
+        // writes neither a photo nor an operator id anyway.
+        notes: null,
+        photoUrl: null,
       });
       continue;
     }
-    out.push(e);
+
+    out.push({
+      ...lead,
+      type: 'transfer',
+      fromName: from.locationName,
+      notes: stripAutoNote(lead.notes),
+    });
   }
   return out;
 }
 
-/**
- * Drop the `[Transfer from X]` the RPC appends, on a folded row only.
- *
- * The tag is generated by `transfer_stock` from a format string we own, so matching it is not
- * guesswork. It earns its place inside a single bin, where it is the only clue about the other
- * end — but a folded row already states the whole route, so keeping it prints the destination
- * twice in one card.
- */
-function stripTransferTag(notes: string | null): string | null {
+function stripAutoNote(notes: string | null): string | null {
   if (!notes) return notes;
-  const stripped = notes.replace(/\s*\[Transfer (?:to|from) [^\]]*\]$/, '').trim();
+  const stripped = notes
+    // `[Transfer to X]` / `[Transfer from Y]`, appended by `transfer_stock`.
+    .replace(/\s*\[Transfer (?:to|from) [^\]]*\]$/, '')
+    // The whole note when `bulk_put_away` wrote it — the row already states the route.
+    .replace(/^Put away (?:to|from) .*$/, '')
+    .trim();
   return stripped.length > 0 ? stripped : null;
 }

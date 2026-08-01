@@ -12,7 +12,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import type { InventoryLocation } from '@/types/inventoryLocations';
-import { LOCATION_KINDS } from '@/lib/locationKinds';
+import { isReservedKind, RESERVED_KIND_MESSAGE, LOCATION_KINDS } from '@/lib/locationKinds';
 
 // One vocabulary, shared with the builder's templates — see lib/locationKinds.ts for why the two
 // lists having nothing in common was a real problem and not just untidiness.
@@ -86,6 +86,12 @@ export default function LocationFormModal({
   const handleSubmit = async () => {
     if (!name.trim()) {
       setError('Name is required.');
+      return;
+    }
+    // Refused here as well as in the access layer: the form should say why rather than let the
+    // write succeed into a location nobody can edit again. See `isReservedKind`.
+    if (isReservedKind(kind)) {
+      setError(RESERVED_KIND_MESSAGE);
       return;
     }
     setSaving(true);

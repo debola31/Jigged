@@ -133,7 +133,8 @@ describe('BinHistory — the shop-wide feed', () => {
     );
 
     expect(screen.getByText('580 each moved')).toBeInTheDocument();
-    expect(screen.getByText('Unassigned → Shelf A')).toBeInTheDocument();
+    // Place, time and author share ONE metadata line now, so match within it.
+    expect(screen.getByText(/Unassigned → Shelf A/)).toBeInTheDocument();
     expect(screen.queryByText(/\+580|−580/)).not.toBeInTheDocument();
   });
 
@@ -151,12 +152,68 @@ describe('BinHistory — the shop-wide feed', () => {
       />,
     );
 
-    expect(screen.getByText('Old Rack')).toBeInTheDocument();
+    expect(screen.getByText(/Old Rack/)).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('uses the caller’s empty copy, which differs between one bin and the whole shop', () => {
     render(<BinHistory entries={[]} loading={false} emptyText="No stock has moved yet." />);
     expect(screen.getByText('No stock has moved yet.')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Density is a correctness property here, not taste: fifteen four-line rows ran to nearly four
+ * phone screens, which is the state the founder called "quite a lot to look at".
+ */
+describe('BinHistory — density and colour', () => {
+  it('spends one line on place, time and author together', () => {
+    render(
+      <BinHistory
+        entries={[entry({ actorName: 'Dev Seed User', locationId: 'l1', locationName: 'Shelf A' })]}
+        loading={false}
+        showPlace
+      />,
+    );
+
+    // One node carrying all three, not three nodes carrying one each.
+    const line = screen.getByText(/Shelf A ·/);
+    expect(line).toHaveTextContent('Dev Seed User');
+    expect(screen.queryByText('Dev Seed User')).toBeNull();
+  });
+
+  /** A move changes no total, so a hue would be claiming something happened to the stock level. */
+  it('gives a move no colour of its own', () => {
+    render(
+      <BinHistory
+        entries={[entry({ type: 'transfer', fromName: 'Unassigned', locationName: 'Shelf A' })]}
+        loading={false}
+        showPlace
+      />,
+    );
+    expect(screen.getByText(/moved/)).toHaveStyle({ color: 'rgb(255, 255, 255)' });
+  });
+
+  /** Fifteen rows with one timestamp, one route and no photo are ONE action to whoever did it. */
+  it('summarises a folded batch as a count of parts, with no arbitrary part name', () => {
+    render(
+      <BinHistory
+        entries={[
+          entry({
+            type: 'transfer',
+            partCount: 15,
+            itemName: 'BUY-BEARING-608ZZ',
+            fromName: 'Unassigned',
+            locationName: 'Shelf A',
+          }),
+        ]}
+        loading={false}
+        showPlace
+      />,
+    );
+
+    expect(screen.getByText('15 parts moved')).toBeInTheDocument();
+    // Naming one member of a batch is worse than naming none — it reads as the only thing moved.
+    expect(screen.queryByText('BUY-BEARING-608ZZ')).not.toBeInTheDocument();
   });
 });

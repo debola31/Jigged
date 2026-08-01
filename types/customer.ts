@@ -3,6 +3,26 @@ export interface Customer {
   company_id: string;
   name: string;
   website: string | null;
+  /**
+   * Standing terms — the customer's commercial defaults, copied onto a NEW
+   * quote at create time and editable there. They are never read by an
+   * existing quote at render time: a quote owns its own payment_terms /
+   * lead_time_text / fob_point from the moment it is created, so editing a
+   * customer here can't rewrite a document already sent. Drift between the
+   * two is surfaced as a chip, never applied (mirrors PricingBasisSnapshot).
+   *
+   * null means "no standing agreement recorded" — the quote field is left
+   * empty rather than guessed.
+   */
+  default_payment_terms: string | null;
+  default_lead_time_text: string | null;
+  /**
+   * Where title and risk transfer, as free text naming a place ("FOB
+   * Cleveland, OH"). Deliberately NOT an origin/destination enum, and
+   * deliberately separate from who *pays* the freight — that axis lives on
+   * jobs/shipments as freight_terms. Keep them apart in the UI too.
+   */
+  default_fob_point: string | null;
   // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
   // mirror the DB shape. Consumers (e.g. the customer detail page) already
   // handle null via formatDate(string | null).
@@ -67,6 +87,14 @@ export interface CustomerAddressFormData {
 export interface CustomerFormData {
   name: string;
   website: string;
+  /**
+   * Standing terms. Empty string means "not set" at the form layer and is
+   * normalised to NULL on write, so a cleared field genuinely clears the
+   * default rather than storing '' and prefilling blanks onto every quote.
+   */
+  default_payment_terms: string;
+  default_lead_time_text: string;
+  default_fob_point: string;
 }
 
 export type CustomerFilter = 'all' | 'active' | 'inactive';
@@ -130,11 +158,17 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
   name: '',
   website: '',
+  default_payment_terms: '',
+  default_lead_time_text: '',
+  default_fob_point: '',
 };
 
 export function customerToFormData(customer: Customer): CustomerFormData {
   return {
     name: customer.name,
     website: customer.website || '',
+    default_payment_terms: customer.default_payment_terms || '',
+    default_lead_time_text: customer.default_lead_time_text || '',
+    default_fob_point: customer.default_fob_point || '',
   };
 }

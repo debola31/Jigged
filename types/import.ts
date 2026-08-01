@@ -132,4 +132,11 @@ export const CUSTOMER_FIELDS: { key: string; label: string; required: boolean }[
   { key: 'state', label: 'State', required: false },
   { key: 'postal_code', label: 'Postal Code', required: false },
   { key: 'country', label: 'Country', required: false },
+  // Standing terms. Worth mapping on import because a legacy customer master
+  // almost always HAS a terms code — it's the one CRM field every job-shop ERP
+  // ships — so this arrives populated rather than needing to be typed per
+  // customer after the fact.
+  { key: 'default_payment_terms', label: 'Payment Terms', required: false },
+  { key: 'default_lead_time_text', label: 'Lead Time', required: false },
+  { key: 'default_fob_point', label: 'FOB Point', required: false },
 ];

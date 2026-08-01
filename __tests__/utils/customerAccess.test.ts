@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CustomerFormData, Customer } from '@/types/customer';
+import { EMPTY_CUSTOMER_FORM, type CustomerFormData, type Customer } from '@/types/customer';
+
+/** A Customer row with the standing-terms columns unset — the common case. */
+const NO_STANDING_TERMS = {
+  default_payment_terms: null,
+  default_lead_time_text: null,
+  default_fob_point: null,
+} as const;
 
 // Use vi.hoisted to define mock variables before vi.mock is called
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
@@ -61,6 +68,10 @@ import {
   softDeleteCustomer,
   pickBillingAddress,
   pickShippingAddress,
+  pickPaymentTerms,
+  pickLeadTimeText,
+  pickFobPoint,
+  hasTermDrift,
 } from '@/utils/customerAccess';
 import type { CustomerAddress } from '@/types/customer';
 
@@ -88,6 +99,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Customer One',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -96,6 +108,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Customer Two',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-02T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       },
@@ -150,6 +163,7 @@ describe('customerAccess utilities', () => {
       company_id: 'company-1',
       name: 'Customer One',
       website: null,
+      ...NO_STANDING_TERMS,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
@@ -175,6 +189,7 @@ describe('customerAccess utilities', () => {
       company_id: 'company-1',
       name: 'Customer One',
       website: null,
+      ...NO_STANDING_TERMS,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
@@ -245,6 +260,7 @@ describe('customerAccess utilities', () => {
 
   describe('createCustomer', () => {
     const mockFormData: CustomerFormData = {
+      ...EMPTY_CUSTOMER_FORM,
       name: 'New Customer',
       website: 'https://new.com',
     };
@@ -255,6 +271,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: mockFormData.name,
         website: mockFormData.website,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -282,6 +299,7 @@ describe('customerAccess utilities', () => {
 
   describe('updateCustomer', () => {
     const mockFormData: CustomerFormData = {
+      ...EMPTY_CUSTOMER_FORM,
       name: 'Updated Customer',
       website: '',
     };
@@ -292,6 +310,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Updated Customer',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
@@ -372,5 +391,65 @@ describe('address pickers', () => {
     expect(pickShippingAddress({ addresses: [bill, ship] })?.id).toBe('ship');
     // No ship-to flag but a billing default exists → ship where we bill.
     expect(pickShippingAddress({ addresses: [bill, addr({ id: 'x' })] })?.id).toBe('bill');
+  });
+});
+
+describe('standing terms — resolution for a NEW quote', () => {
+  it('returns the customer value for each standing term', () => {
+    const customer = {
+      default_payment_terms: 'Net 45',
+      default_lead_time_text: '4-6 weeks ARO',
+      default_fob_point: 'FOB Cleveland, OH',
+    };
+    expect(pickPaymentTerms(customer)).toBe('Net 45');
+    expect(pickLeadTimeText(customer)).toBe('4-6 weeks ARO');
+    expect(pickFobPoint(customer)).toBe('FOB Cleveland, OH');
+  });
+
+  it('treats unset, blank and whitespace-only as "no standing agreement"', () => {
+    // The quote field is then left empty rather than prefilled with '' — the
+    // shop is told nothing rather than told something wrong.
+    expect(pickPaymentTerms({ default_payment_terms: null })).toBeNull();
+    expect(pickPaymentTerms({ default_payment_terms: '' })).toBeNull();
+    expect(pickPaymentTerms({ default_payment_terms: '   ' })).toBeNull();
+    expect(pickLeadTimeText(null)).toBeNull();
+    expect(pickFobPoint(undefined)).toBeNull();
+  });
+
+  it('trims a stored value so a stray space never reads as drift later', () => {
+    expect(pickPaymentTerms({ default_payment_terms: '  Net 30  ' })).toBe('Net 30');
+  });
+});
+
+describe('standing terms — drift is reported, never applied', () => {
+  // The load-bearing guarantee of this whole feature: a quote is an offer that
+  // has already been emailed as a PDF, so moving the customer's standing terms
+  // must never change what that quote says. hasTermDrift only ever REPORTS a
+  // difference; nothing in the read path rewrites the quote. This is what
+  // separates these defaults from the markup_rates module deleted in July 2026,
+  // which resolved a shared default at READ time and so silently rewrote history.
+  it('reports drift when the customer default has moved away from the quote value', () => {
+    expect(hasTermDrift('Net 30', 'Net 60')).toBe(true);
+  });
+
+  it('reports no drift when they agree, ignoring case and surrounding space', () => {
+    expect(hasTermDrift('Net 30', 'Net 30')).toBe(false);
+    expect(hasTermDrift('net 30', 'Net 30')).toBe(false);
+    expect(hasTermDrift(' Net 30 ', 'Net 30')).toBe(false);
+  });
+
+  it('reports no drift when the customer has no standing value', () => {
+    // A shop that never fills these in must never see a drift chip — there is
+    // nothing to have drifted FROM.
+    expect(hasTermDrift('Net 30', null)).toBe(false);
+    expect(hasTermDrift('Net 30', '')).toBe(false);
+    expect(hasTermDrift('Net 30', '   ')).toBe(false);
+    expect(hasTermDrift(null, null)).toBe(false);
+  });
+
+  it('reports drift when the quote states nothing but the customer now has terms', () => {
+    // Worth surfacing: an older quote written before the standing terms existed.
+    expect(hasTermDrift(null, 'Net 30')).toBe(true);
+    expect(hasTermDrift('', 'Net 30')).toBe(true);
   });
 });

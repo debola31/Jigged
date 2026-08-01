@@ -467,6 +467,9 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
+          default_fob_point: string | null
+          default_lead_time_text: string | null
+          default_payment_terms: string | null
           deleted_at: string | null
           id: string
           name: string
@@ -476,6 +479,9 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string | null
+          default_fob_point?: string | null
+          default_lead_time_text?: string | null
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name: string
@@ -485,6 +491,9 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string | null
+          default_fob_point?: string | null
+          default_lead_time_text?: string | null
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name?: string
@@ -2603,6 +2612,7 @@ export type Database = {
           customer_name: string | null
           deleted_at: string | null
           expiration_date: string | null
+          fob_point: string | null
           id: string
           lead_time_text: string | null
           payment_terms: string | null
@@ -2626,6 +2636,7 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
+          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null
@@ -2649,6 +2660,7 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
+          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null

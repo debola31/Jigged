@@ -49,6 +49,9 @@ import {
   pickBillingAddress,
   pickShippingAddress,
   pickPrimaryContact,
+  pickPaymentTerms,
+  pickLeadTimeText,
+  pickFobPoint,
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier, resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
@@ -141,6 +144,15 @@ type PaymentTermOption = { value: string; group: string };
 const paymentTermFilter = createFilterOptions<PaymentTermOption>();
 /** Sentinel value for the "Add New" action row at the bottom of the picker. */
 const ADD_NEW_TERM = '__add_new_payment_term__';
+
+/**
+ * The quote fields that can be pre-filled from the customer's standing terms.
+ * All three share one mechanism — resolve at customer-select, show provenance,
+ * release ownership on edit — so they're driven off one list rather than three
+ * copies of the same branch.
+ */
+const STANDING_TERM_FIELDS = ['payment_terms', 'lead_time_text', 'fob_point'] as const;
+type StandingTermField = (typeof STANDING_TERM_FIELDS)[number];
 
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
@@ -255,6 +267,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const [shippingSameAsBilling, setShippingSameAsBilling] = useState<boolean>(
     () => initialData.shipping_address_id === initialData.billing_address_id,
   );
+
+  // Which standing-terms fields currently hold a value we copied from the
+  // customer, and whose name to credit in the helper line under the field.
+  // A field leaves this map as soon as the user edits it (handleFieldChange),
+  // which is what makes the inheritance VISIBLE rather than silent — and what
+  // stops a later customer switch from overwriting a hand-typed term.
+  // Never seeded in edit mode: an existing quote owns its terms outright.
+  const [prefilledFrom, setPrefilledFrom] = useState<
+    Partial<Record<StandingTermField, string>>
+  >({});
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -406,7 +428,31 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
   const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
+    // The user has taken ownership of this field — drop the "from their standing
+    // terms" provenance so the helper line stops claiming the value came from the
+    // customer, and so a later customer switch won't overwrite what they typed.
+    if (field in prefilledFrom) {
+      setPrefilledFrom((prev) => {
+        const next = { ...prev };
+        delete next[field as StandingTermField];
+        return next;
+      });
+    }
   };
+
+  /**
+   * Helper line under a standing-terms field. When the value was copied from
+   * the customer we say so by name; otherwise the field's own hint shows.
+   *
+   * This one line is what makes the inheritance visible rather than silent —
+   * the distinction between this and the `markup_rates` module deleted in July
+   * 2026, where a shared default was resolved at read time with nothing on
+   * screen to say where the number came from.
+   */
+  const standingTermsHelper = (field: StandingTermField, hint: string) =>
+    prefilledFrom[field]
+      ? `From ${prefilledFrom[field]}’s standing terms — edit to override`
+      : hint;
 
   /**
    * Options for the payment-terms picker: the company's saved custom terms first
@@ -484,6 +530,17 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * the resolved billing address. Common case (single default address)
    * → ON, disclosure hidden. Customers with separate billing/shipping
    * defaults → OFF, shipping disclosure visible.
+   *
+   * It also pre-populates the customer's STANDING TERMS — payment_terms,
+   * lead_time_text and fob_point.
+   *
+   * OVERWRITE RULE. Unlike the address/contact FKs, which MUST be replaced
+   * because they belong to a different customer and the integrity trigger
+   * would reject them, terms are free text the user may have typed. So a term
+   * is replaced only when it is empty, or when it is still the PREVIOUS
+   * customer's prefill (tracked in `prefilledFrom`). Anything the user typed
+   * survives a customer switch — the drift chip then shows it doesn't match
+   * the new customer's standing terms, rather than us destroying the edit.
    */
   const handleCustomerChange = (customerId: string) => {
     if (!customerId) {
@@ -510,13 +567,33 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
     const sameAsBilling = shippingId === billingId;
 
+    // Resolve the standing terms and decide ownership ONCE, against the state
+    // of this render, so the two setters below can't disagree about which
+    // fields we're allowed to touch.
+    const standing: Record<StandingTermField, string | null> = {
+      payment_terms: pickPaymentTerms(customer),
+      lead_time_text: pickLeadTimeText(customer),
+      fob_point: pickFobPoint(customer),
+    };
+    const nextTerms: Partial<Record<StandingTermField, string>> = {};
+    const nextProvenance: Partial<Record<StandingTermField, string>> = {};
+    for (const field of STANDING_TERM_FIELDS) {
+      const ours = !formData[field]?.trim() || prefilledFrom[field] !== undefined;
+      if (ours && standing[field]) {
+        nextTerms[field] = standing[field] as string;
+        nextProvenance[field] = customer?.name ?? '';
+      }
+    }
+
     setShippingSameAsBilling(sameAsBilling);
+    setPrefilledFrom(nextProvenance);
     setFormData((prev) => ({
       ...prev,
       customer_id: customerId,
       contact_id: contactId,
       billing_address_id: billingId,
       shipping_address_id: sameAsBilling ? billingId : shippingId,
+      ...nextTerms,
     }));
   };
 
@@ -1711,7 +1788,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 required
                 value={formData.lead_time_text}
                 onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
-                helperText={'e.g. “2–3 weeks” or “In stock”'}
+                helperText={standingTermsHelper('lead_time_text', 'e.g. “2–3 weeks” or “In stock”')}
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
@@ -1723,6 +1800,23 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 fullWidth
                 value={formData.expiration_date}
                 onChange={(e) => handleFieldChange('expiration_date', e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              {/* FOB point — WHERE title and risk transfer, as a named place.
+                  Deliberately free text and deliberately NOT an origin/destination
+                  enum, and deliberately separate from who PAYS the freight (that
+                  lives on the job and shipment). Conflating the two is the classic
+                  error in this domain, so they never share a control. Optional:
+                  plenty of shops quote without stating one. */}
+              <TextField
+                label="FOB point"
+                size="small"
+                fullWidth
+                value={formData.fob_point}
+                onChange={(e) => handleFieldChange('fob_point', e.target.value)}
+                helperText={standingTermsHelper('fob_point', 'e.g. “FOB our dock, Cleveland OH”')}
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>
@@ -1805,6 +1899,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     {...params}
                     label="Payment terms"
                     required
+                    helperText={prefilledFrom.payment_terms ? standingTermsHelper('payment_terms', '') : undefined}
                     InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
                   />
                 )}

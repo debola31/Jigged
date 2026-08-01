@@ -254,6 +254,67 @@ export default function CustomerForm({
         </CardContent>
       </Card>
 
+      {/* Terms & Lead Time — the customer's STANDING commercial defaults.
+          Called "Terms", not "Standing Terms": that's the header on every quote
+          and PO in this industry, and matching the shop's vocabulary is what
+          makes the screen read native rather than like software.
+
+          These are copied onto a NEW quote at create time and are editable
+          there. They are never read back by an existing quote, so changing them
+          here cannot rewrite a quote already sent — the quote detail page
+          surfaces any difference as a chip instead. */}
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 1 }}>
+            Terms &amp; Lead Time
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Applied to new quotes for this customer. Changing them here never
+            affects quotes you&rsquo;ve already sent. Leave blank if you have no
+            standing agreement.
+          </Typography>
+          <Grid container spacing={3}>
+            {/* Hints live in helperText, never placeholder: a greyed "Net 30"
+                or "4–6 weeks" inside an empty field reads as a pre-filled value
+                to this audience and would ship as real terms. See
+                docs/design-system.md "Placeholders". */}
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Payment terms"
+                value={formData.default_payment_terms}
+                onChange={handleChange('default_payment_terms')}
+                disabled={loading}
+                helperText="Such as Net 30, or 50% deposit."
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Lead time"
+                value={formData.default_lead_time_text}
+                onChange={handleChange('default_lead_time_text')}
+                disabled={loading}
+                helperText="However you normally phrase it on a quote."
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              {/* FOB is about where title and risk transfer — NOT about who pays
+                  the freight. That's a separate axis carried on the job and
+                  shipment; the two must never share a control. */}
+              <TextField
+                fullWidth
+                label="FOB point"
+                value={formData.default_fob_point}
+                onChange={handleChange('default_fob_point')}
+                disabled={loading}
+                helperText="Where title and risk transfer. Who pays the freight is set per order."
+              />
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
       {/* Initial contact — create mode only. Defaults to expanded; can be
           collapsed if the user plans to add contacts later from the detail page. */}
       {mode === 'create' && (

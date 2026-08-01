@@ -196,13 +196,17 @@ insert into public.work_centers (id, company_id, name, kind, vendor_id, labor_ra
 on conflict (id) do nothing;
 
 -- ── Customers (+ billing/shipping addresses + primary contact) ───────────────
-insert into public.customers (id, company_id, name) values
-  ('50000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Northwind Hydraulics'),
-  ('50000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','Cascade Robotics'),
-  ('50000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','Meridian Aerospace'),
-  ('50000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Granite Equipment Co'),
-  ('50000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BlueRidge Medical Devices'),
-  ('50000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Sierra Pump & Valve')
+-- Standing terms are set on SOME customers only, on purpose: a shop fills these
+-- in as agreements are struck, so the realistic state is partial. It also makes
+-- both branches reachable by hand — pick Northwind on a new quote and terms
+-- prefill with a provenance line; pick Sierra and the fields stay empty.
+insert into public.customers (id, company_id, name, default_payment_terms, default_lead_time_text, default_fob_point) values
+  ('50000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Northwind Hydraulics','Net 30','4-6 weeks ARO','FOB our dock, Milwaukee WI'),
+  ('50000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','Cascade Robotics','Net 45','6-8 weeks ARO',null),
+  ('50000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','Meridian Aerospace','2/10 Net 30',null,'FOB destination'),
+  ('50000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Granite Equipment Co','Net 30',null,null),
+  ('50000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BlueRidge Medical Devices','50% Deposit / Balance Net 30','8-10 weeks ARO',null),
+  ('50000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Sierra Pump & Valve',null,null,null)
 on conflict (id) do nothing;
 
 -- billing addresses (default_shipping true when the customer has no separate ship-to)

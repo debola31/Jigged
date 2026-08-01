@@ -3,14 +3,15 @@
 // Aliased to getSupabase so the existing call sites stay untouched. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import type {
-  Customer,
-  CustomerAddress,
-  CustomerFormData,
-  CustomerFilter,
-  CustomerWithRelations,
-  CustomerWithAddresses,
-  ImportResult,
+import {
+  EMPTY_CUSTOMER_FORM,
+  type Customer,
+  type CustomerAddress,
+  type CustomerFormData,
+  type CustomerFilter,
+  type CustomerWithRelations,
+  type CustomerWithAddresses,
+  type ImportResult,
 } from '@/types/customer';
 import type {
   CustomerContact,
@@ -292,6 +293,23 @@ export async function checkCustomerNameExists(
 }
 
 /**
+ * Map form data to the customer column set shared by insert, revive and update.
+ *
+ * Every optional field normalises '' → null: a cleared standing-terms field must
+ * genuinely clear the default, not store an empty string that would then prefill
+ * a blank onto every new quote and read as "set" to the drift check.
+ */
+function formDataToColumns(formData: CustomerFormData) {
+  return {
+    name: formData.name.trim(),
+    website: formData.website.trim() || null,
+    default_payment_terms: formData.default_payment_terms.trim() || null,
+    default_lead_time_text: formData.default_lead_time_text.trim() || null,
+    default_fob_point: formData.default_fob_point.trim() || null,
+  };
+}
+
+/**
  * Create a new customer. Optionally captures one initial contact (forced
  * to is_primary=true) — matches the VendorForm "Initial Contact" pattern.
  * Addresses are added separately from the detail page after creation.
@@ -307,8 +325,7 @@ export async function createCustomer(
     .from('customers')
     .insert({
       company_id: companyId,
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...formDataToColumns(formData),
     })
     .select()
     .single();
@@ -370,8 +387,7 @@ async function reviveArchivedCustomerByName(
   const { data, error } = await supabase
     .from('customers')
     .update({
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...formDataToColumns(formData),
       deleted_at: null,
       updated_at: new Date().toISOString(),
     })
@@ -396,8 +412,7 @@ export async function updateCustomer(
   const { data, error } = await supabase
     .from('customers')
     .update({
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...formDataToColumns(formData),
       updated_at: new Date().toISOString(),
     })
     .eq('id', customerId)
@@ -525,7 +540,10 @@ export async function bulkImportCustomers(
     try {
       await createCustomer(
         companyId,
-        { name: row.name.trim(), website: row.website ?? '' },
+        // Standing terms aren't part of this legacy client-side CSV shape —
+        // the backend importer (api/routes/import_routes.py) owns the mapped
+        // fields. Defaults stay unset rather than being invented per row.
+        { ...EMPTY_CUSTOMER_FORM, name: row.name.trim(), website: row.website ?? '' },
         row.contact,
       );
       results.imported++;
@@ -589,6 +607,62 @@ export function pickPrimaryContact<T extends { id: string; is_primary: boolean }
 ): T | null {
   if (!contacts || contacts.length === 0) return null;
   return contacts.find((c) => c.is_primary) ?? null;
+}
+
+/**
+ * The customer's STANDING TERMS — payment terms, lead time and FOB point,
+ * resolved for a NEW quote.
+ *
+ * These are siblings of pickBillingAddress / pickShippingAddress /
+ * pickPrimaryContact above and are used at exactly the same moment:
+ * QuoteForm.handleCustomerChange, when the user picks a customer. The value is
+ * copied into the quote's own column, shown in an editable field with a helper
+ * line naming where it came from, and never read again from the customer.
+ *
+ * That create-time-resolve-then-freeze shape is what separates this from the
+ * `markup_rates` module deleted in July 2026: that resolved a shared named
+ * entity at READ time, so editing a rate silently rewrote finished documents.
+ * Here, editing a customer's standing terms changes only the NEXT quote —
+ * existing quotes keep what they were issued with, and any difference is
+ * surfaced as a drift chip rather than applied.
+ *
+ * Each returns null when the customer has no standing value, so the caller
+ * leaves the field empty rather than guessing.
+ */
+export function pickPaymentTerms(
+  customer: Pick<Customer, 'default_payment_terms'> | null | undefined,
+): string | null {
+  return customer?.default_payment_terms?.trim() || null;
+}
+
+export function pickLeadTimeText(
+  customer: Pick<Customer, 'default_lead_time_text'> | null | undefined,
+): string | null {
+  return customer?.default_lead_time_text?.trim() || null;
+}
+
+export function pickFobPoint(
+  customer: Pick<Customer, 'default_fob_point'> | null | undefined,
+): string | null {
+  return customer?.default_fob_point?.trim() || null;
+}
+
+/**
+ * Does this quote's value still match the customer's current standing default?
+ *
+ * Returns false when the customer has no standing value (nothing to drift from)
+ * or when the two agree. A true result means the customer's default has moved
+ * since this quote was written — the UI shows a chip offering the new value and
+ * never applies it silently. Compared trimmed and case-insensitively so
+ * "net 30" vs "Net 30" isn't reported as drift.
+ */
+export function hasTermDrift(
+  quoteValue: string | null | undefined,
+  customerDefault: string | null | undefined,
+): boolean {
+  const std = customerDefault?.trim();
+  if (!std) return false;
+  return (quoteValue ?? '').trim().toLowerCase() !== std.toLowerCase();
 }
 
 // Helper re-exports so older callers that imported types from this file

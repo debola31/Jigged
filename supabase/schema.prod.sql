@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "deleted_at" timestamp with time zone,
+    "default_payment_terms" text,
+    "default_lead_time_text" text,
+    "default_fob_point" text,
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
     CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
 );
@@ -248,6 +251,7 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "contact_snapshot" jsonb,
     "lead_time_text" text,
     "deleted_at" timestamp with time zone,
+    "fob_point" text,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))

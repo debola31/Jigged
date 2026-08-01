@@ -3647,6 +3647,12 @@ export type Database = {
           quotes_count: number
         }[]
       }
+      playbook_rpc_execute_leaks: {
+        Args: never
+        Returns: {
+          role_name: string
+        }[]
+      }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }
         Returns: undefined

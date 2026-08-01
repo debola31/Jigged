@@ -3498,6 +3498,13 @@ export type Database = {
         Args: { p_company_id: string }
         Returns: Json
       }
+      function_execute_leaks: {
+        Args: never
+        Returns: {
+          function_name: string
+          role_name: string
+        }[]
+      }
       generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string

@@ -38,6 +38,15 @@ vi.mock('@/utils/operatorAccess', () => ({
 vi.mock('@/utils/partsAccess', () => ({
   getStockedParts: vi.fn().mockResolvedValue([]),
 }));
+// The action modal can now attach a photo, which pulls in storageHelpers -> lib/supabase, and that
+// module builds its client eagerly at import time whenever `window` exists. Stubbed rather than
+// mocking the whole Supabase client: these tests never exercise an upload.
+vi.mock('@/utils/storageHelpers', () => ({
+  generateStoragePath: (co: string, kind: string, id: string, name: string) =>
+    `${co}/${kind}/${id}/${name}`,
+  uploadFileToStorage: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/utils/jobsAccess', () => ({
   getAllJobs: vi.fn().mockResolvedValue([]),
 }));

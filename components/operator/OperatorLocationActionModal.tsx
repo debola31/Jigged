@@ -21,6 +21,8 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import MovementPhotoField from '@/components/operator/MovementPhotoField';
+import { generateStoragePath, uploadFileToStorage } from '@/utils/storageHelpers';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -99,6 +101,13 @@ export default function OperatorLocationActionModal({
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
   const [destination, setDestination] = useState<{ id: string; label: string } | null>(null);
+  /**
+   * Optional evidence, on the two actions where material physically lands somewhere. Not on
+   * `deplete` (nothing to show — the stock left) and not on `adjust` (a correction to a number,
+   * whose evidence is the count that produced it).
+   */
+  const [photo, setPhoto] = useState<File | null>(null);
+  const showPhoto = action === 'add' || action === 'move';
 
   const handleEnter = async () => {
     setQuantity('');
@@ -107,6 +116,7 @@ export default function OperatorLocationActionModal({
     setError(null);
     setJob(null);
     setDestination(null);
+    setPhoto(null);
     if (action !== 'deplete') return;
     setLoadingJobs(true);
     // loadTaggableJobs swallows failures — the tag is optional and must never block a removal.
@@ -129,12 +139,44 @@ export default function OperatorLocationActionModal({
     setSaving(true);
     setError(null);
     try {
+      /**
+       * Upload BEFORE the write, never after.
+       *
+       * `photo_path` is set at INSERT inside the RPC and is immutable afterwards, so there is no
+       * second step in which to attach it. The cost is that a failed RPC leaves an orphaned object
+       * in the bucket; the alternative — insert, upload, then UPDATE the path — needs the column to
+       * stay mutable, and evidence that can be swapped later is not evidence.
+       *
+       * A failed UPLOAD does abort the write, because saving silently without the photo the
+       * operator just attached would be a lie about what was recorded.
+       */
+      let photoPath: string | undefined;
+      if (photo && showPhoto) {
+        const path = generateStoragePath(companyId, 'inventory-transactions', locationId, photo.name);
+        try {
+          await uploadFileToStorage(path, photo);
+        } catch (e) {
+          // Named separately from the write's own failure. The shared mapper would render this as
+          // "Failed to update stock", which points at the quantity — so an operator would retype a
+          // number that was never the problem, on a shop-wifi upload that just needs retrying.
+          setError(
+            `Couldn't upload the photo (${
+              e instanceof Error ? e.message : 'unknown error'
+            }). Nothing was recorded — try again, or remove the photo and save.`,
+          );
+          setSaving(false);
+          return;
+        }
+        photoPath = path;
+      }
+
       if (action === 'add') {
         // operatorId on every write, not just depletion: bin history has to be able to name
         // who put something away, and `created_by` (an auth user) is unreadable from the browser.
         await addStockAtLocation(partId, locationId, qty, unit, {
           notes: notes || undefined,
           operatorId: operatorId || undefined,
+          photoPath,
         });
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
@@ -152,6 +194,7 @@ export default function OperatorLocationActionModal({
         await transferStock(partId, locationId, destination!.id, qty, unit, {
           notes: notes || undefined,
           operatorId: operatorId || undefined,
+          photoPath,
         });
       }
       posthog.capture('operator_inventory_stock_updated', {
@@ -242,6 +285,12 @@ export default function OperatorLocationActionModal({
             minRows={2}
             fullWidth
           />
+          {/* Below the notes, and never required. This flow runs dozens of times a shift; a photo
+              is the thing a ledger row cannot record — what the shelf looks like now — but an
+              unphotographed movement is the normal case. */}
+          {showPhoto && (
+            <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
+          )}
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>

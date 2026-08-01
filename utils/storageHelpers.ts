@@ -26,7 +26,19 @@ export function sanitizeFilename(filename: string): string {
  * load-bearing: the bucket's RLS gates on `foldername[1] = companyId`, so adding
  * an entity type here needs no new storage policy.
  */
-export type StorageEntityType = 'quotes' | 'jobs' | 'parts' | 'work-centers' | 'locations';
+export type StorageEntityType =
+  | 'quotes'
+  | 'jobs'
+  | 'parts'
+  | 'work-centers'
+  | 'locations'
+  /**
+   * Evidence photographed when stock moves. Filed under the LOCATION id, not the transaction's —
+   * the row does not exist yet when the file is uploaded, because `photo_path` is written at INSERT
+   * and is immutable afterwards. Grouping by place is the useful fallback anyway when someone has
+   * to go looking in the bucket.
+   */
+  | 'inventory-transactions';
 
 /**
  * Generate storage path with UUID prefix and sanitized filename

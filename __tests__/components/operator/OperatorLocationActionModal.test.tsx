@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
 import OperatorLocationActionModal from '@/components/operator/OperatorLocationActionModal';
-import { depleteStockAtLocation, transferStock } from '@/utils/inventoryLocationsAccess';
+import {
+  addStockAtLocation,
+  depleteStockAtLocation,
+  transferStock,
+} from '@/utils/inventoryLocationsAccess';
+import { uploadFileToStorage } from '@/utils/storageHelpers';
 import { getAllJobs } from '@/utils/jobsAccess';
 import type { JobWithRelations } from '@/types/job';
 
@@ -15,6 +20,24 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
 }));
+// The action modal can now attach a photo, which pulls in storageHelpers -> lib/supabase, and that
+// module builds its client eagerly at import time whenever `window` exists. Stubbed rather than
+// mocking the whole Supabase client: these tests never exercise an upload.
+// `compressPhoto` runs browser-image-compression, which needs canvas — jsdom has none, so the
+// real one throws and the field reports a failed pick instead of attaching. Pass the file through.
+vi.mock('@/utils/imageCompression', () => ({
+  compressPhoto: vi.fn(async (f: File) => ({ file: f })),
+}));
+// jsdom implements neither of these; the preview thumbnail needs both.
+if (!URL.createObjectURL) URL.createObjectURL = vi.fn(() => 'blob:preview');
+if (!URL.revokeObjectURL) URL.revokeObjectURL = vi.fn();
+
+vi.mock('@/utils/storageHelpers', () => ({
+  generateStoragePath: (co: string, kind: string, id: string, name: string) =>
+    `${co}/${kind}/${id}/${name}`,
+  uploadFileToStorage: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/utils/jobsAccess', () => ({ getAllJobs: vi.fn() }));
 
 const job = (over: { id: string; job_number: string; parts: string[] }) =>
@@ -140,5 +163,93 @@ describe('move', () => {
     renderModal({ action: 'adjust' });
     expect(screen.getByText(/adjust stock \(cycle count\)/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^adjust$/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Photo evidence on a movement.
+ *
+ * The ordering is the part worth pinning: `photo_path` is written at INSERT inside the RPC and is
+ * immutable afterwards, so the upload MUST complete first — there is no later step in which to
+ * attach one. Get it backwards and the column is silently always NULL.
+ */
+describe('photo evidence', () => {
+  const file = () => new File(['x'], 'shelf.jpg', { type: 'image/jpeg' });
+
+  it('offers a photo where material lands, and not where it does not', async () => {
+    // `add` puts material somewhere — there is a shelf to show.
+    renderModal({ action: 'add' });
+    expect(screen.getByRole('button', { name: /add a photo/i })).toBeInTheDocument();
+
+    // `deplete` takes it away (nothing to show) and `adjust` corrects a number (its evidence is
+    // the count that produced it).
+    for (const action of ['deplete', 'adjust'] as const) {
+      cleanup();
+      renderModal({ action });
+      expect(screen.queryByRole('button', { name: /add a photo/i })).not.toBeInTheDocument();
+    }
+  });
+
+  it('uploads BEFORE the write, and sends the path it just wrote', async () => {
+    const user = userEvent.setup();
+    renderModal({ action: 'add' });
+
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file());
+    await screen.findByText(/photo attached/i);
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '5');
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() => expect(addStockAtLocation).toHaveBeenCalled());
+    const path = vi.mocked(uploadFileToStorage).mock.calls[0][0];
+    expect(vi.mocked(uploadFileToStorage).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(addStockAtLocation).mock.invocationCallOrder[0],
+    );
+    expect(addStockAtLocation).toHaveBeenCalledWith(
+      'p1',
+      'loc1',
+      5,
+      'ea',
+      expect.objectContaining({ photoPath: path }),
+    );
+  });
+
+  /**
+   * A failed upload aborts the write. Saving anyway would record a movement without the photo the
+   * operator just attached — a quiet lie about what went in.
+   */
+  it('does not record the movement when the upload fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(uploadFileToStorage).mockRejectedValueOnce(new Error('offline'));
+    renderModal({ action: 'add' });
+
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file());
+    await screen.findByText(/photo attached/i);
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '5');
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+    // Names the PHOTO as the cause. The shared error mapper would have said "Failed to update
+    // stock", sending the operator to retype a quantity that was never the problem.
+    const msg = await screen.findByText(/couldn't upload the photo/i);
+    expect(msg).toHaveTextContent(/offline/i);
+    expect(msg).toHaveTextContent(/nothing was recorded/i);
+    expect(addStockAtLocation).not.toHaveBeenCalled();
+  });
+
+  it('records the movement with no photo at all, which is the normal case', async () => {
+    const user = userEvent.setup();
+    renderModal({ action: 'add' });
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '5');
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() =>
+      expect(addStockAtLocation).toHaveBeenCalledWith(
+        'p1',
+        'loc1',
+        5,
+        'ea',
+        expect.objectContaining({ photoPath: undefined }),
+      ),
+    );
+    expect(uploadFileToStorage).not.toHaveBeenCalled();
   });
 });

@@ -634,3 +634,135 @@ def test_po_field_pattern_matches_real_shop_labels():
         assert qb._PO_FIELD_PATTERN.search(label), label
     for label in ("Sales Rep", "Job #", "Crew", "Priority"):
         assert not qb._PO_FIELD_PATTERN.search(label), label
+
+
+def test_resolve_term_id_matches_the_truncated_name_it_created(monkeypatch):
+    """QBO caps Term.Name at 31 chars, so a longer Jigged term is stored short.
+
+    The lookup has to accept BOTH spellings. Matching only the full string would
+    miss the truncated row we created ourselves, re-POST the identical name, and
+    take QBO's duplicate-name 400 — so the first invoice on a job would carry a
+    SalesTermRef and every later one would silently carry none."""
+    long_term = "Net 30 from date of shipment, 1.5%/mo"
+    assert len(long_term) > qb._QB_TERM_NAME_MAX
+    stored = long_term[: qb._QB_TERM_NAME_MAX]
+
+    monkeypatch.setattr(
+        qb, "list_qb_terms", lambda db, cid: [{"id": "9", "name": stored, "due_days": 30}]
+    )
+
+    def _must_not_create(*args, **kwargs):
+        raise AssertionError("re-created a term that already exists in QuickBooks")
+
+    monkeypatch.setattr(qb, "qb_request", _must_not_create)
+    assert qb.resolve_term_id(None, "c1", long_term) == "9"
+
+
+def test_resolve_term_id_creates_within_the_name_cap(monkeypatch):
+    """A term QBO does not have is created under the truncated name — the same
+    string the lookup above will match on the next push."""
+    long_term = "Net 30 from date of shipment, 1.5%/mo"
+    monkeypatch.setattr(qb, "list_qb_terms", lambda db, cid: [])
+    sent: dict = {}
+
+    def _capture(db, cid, method, path, json_body=None):
+        sent.update(json_body or {})
+        return {"Term": {"Id": "12"}}
+
+    monkeypatch.setattr(qb, "qb_request", _capture)
+    assert qb.resolve_term_id(None, "c1", long_term) == "12"
+    assert sent["Name"] == long_term[: qb._QB_TERM_NAME_MAX]
+    assert len(sent["Name"]) <= qb._QB_TERM_NAME_MAX
+    assert sent["DueDays"] == 30
+
+
+def test_resolve_term_id_is_case_insensitive(monkeypatch):
+    """QBO ships "Due on receipt"; Jigged's preset is "Due on Receipt". A
+    case-sensitive compare would try to create it, and creating a Term whose
+    name already exists is rejected with HTTP 400 (verified live) — failing the
+    push on the most common term in the list."""
+    monkeypatch.setattr(
+        qb, "list_qb_terms", lambda db, cid: [{"id": "1", "name": "Due on receipt", "due_days": 0}]
+    )
+    assert qb.resolve_term_id(None, "c1", "Due on Receipt") == "1"
+
+
+def test_discover_po_custom_field_raises_when_it_cannot_ask(monkeypatch):
+    """"Couldn't check" must never be reported as "there is no field".
+
+    The caller persists this result, so swallowing the error would let one
+    Intuit blip wipe a correctly discovered field id and silently stop the PO
+    reaching invoices."""
+    def _boom(*args, **kwargs):
+        raise RuntimeError("intuit is down")
+
+    monkeypatch.setattr(qb, "qb_query", _boom)
+    with pytest.raises(RuntimeError):
+        qb.discover_po_custom_field(None, "c1")
+
+
+def test_discover_po_custom_field_reports_none_for_an_unconfigured_company(monkeypatch):
+    """An answered question with a negative answer IS returned as None — that is
+    the ordinary starting state, and it must stay distinguishable from the
+    unanswered case above."""
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: {"Preferences": [{}]})
+    assert qb.discover_po_custom_field(None, "c1") == {
+        "id": None, "name": None, "candidates": []
+    }
+
+
+def test_discover_po_custom_field_matches_label_not_slot(monkeypatch):
+    """Slot 1 is "Sales Rep" here and the PO lives in slot 3. Writing to a
+    guessed DefinitionId would overwrite whatever the shop keeps in that slot,
+    and the mapping cannot be reassigned afterwards."""
+    prefs = {
+        "Preferences": [
+            {
+                "SalesFormsPrefs": {
+                    "CustomField": [
+                        {
+                            "CustomField": [
+                                {"Name": "SalesFormsPrefs.UseSalesCustom1", "BooleanValue": True},
+                                {"Name": "SalesFormsPrefs.SalesCustomName1",
+                                 "StringValue": "Sales Rep"},
+                                {"Name": "SalesFormsPrefs.UseSalesCustom3", "BooleanValue": True},
+                                {"Name": "SalesFormsPrefs.SalesCustomName3",
+                                 "StringValue": "Customer PO #"},
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
+    found = qb.discover_po_custom_field(None, "c1")
+    assert found["id"] == "3"
+    assert found["name"] == "Customer PO #"
+    assert {c["name"] for c in found["candidates"]} == {"Sales Rep", "Customer PO #"}
+
+
+def test_discover_po_custom_field_ignores_a_disabled_slot(monkeypatch):
+    """A named-but-switched-off field does not print, so offering it would put
+    the PO somewhere nobody sees."""
+    prefs = {
+        "Preferences": [
+            {
+                "SalesFormsPrefs": {
+                    "CustomField": [
+                        {
+                            "CustomField": [
+                                {"Name": "SalesFormsPrefs.UseSalesCustom2", "BooleanValue": False},
+                                {"Name": "SalesFormsPrefs.SalesCustomName2",
+                                 "StringValue": "PO Number"},
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
+    found = qb.discover_po_custom_field(None, "c1")
+    assert found["id"] is None
+    assert found["candidates"] == []

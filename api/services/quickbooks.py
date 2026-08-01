@@ -494,6 +494,10 @@ def list_qb_terms(db: Client, company_id: str) -> list[dict]:
     ]
 
 
+# Intuit's documented maximum length for Term.Name.
+_QB_TERM_NAME_MAX = 31
+
+
 def resolve_term_id(db: Client, company_id: str, term_name: str) -> str | None:
     """Jigged's free-text payment term -> a QBO Term Id, creating the Term if absent.
 
@@ -510,9 +514,23 @@ def resolve_term_id(db: Client, company_id: str, term_name: str) -> str | None:
     if not wanted:
         return None
 
+    # Intuit documents a 31-character cap on Term.Name, so a longer Jigged term
+    # is created truncated. The lookup therefore has to accept BOTH spellings:
+    # matching only the full string would miss the truncated row we ourselves
+    # created, re-POST the identical name, and take QBO's duplicate-name 400 —
+    # so push #1 on a job would carry a SalesTermRef and every push after it
+    # would silently carry none.
+    #
+    # (The sandbox actually accepted 32- and 40-character names when probed, so
+    # the cap may not be enforced everywhere. Truncating is still the safer
+    # direction: a truncated label that resolves every time beats a full label
+    # that stops resolving the moment some environment does enforce it.)
+    qb_name = wanted[:_QB_TERM_NAME_MAX]
+    accepted = {wanted.casefold(), qb_name.casefold()}
+
     try:
         for t in list_qb_terms(db, company_id):
-            if t["name"].strip().casefold() == wanted.casefold():
+            if t["name"].strip().casefold() in accepted:
                 return t["id"]
     except Exception:  # noqa: BLE001
         logger.warning("QuickBooks term lookup failed for %r", wanted, exc_info=True)
@@ -528,7 +546,7 @@ def resolve_term_id(db: Client, company_id: str, term_name: str) -> str | None:
     try:
         created = qb_request(
             db, company_id, "POST", "term",
-            json_body={"Name": wanted[:31], "DueDays": due_days},
+            json_body={"Name": qb_name, "DueDays": due_days},
         )
         return created.get("Term", {}).get("Id")
     except Exception:  # noqa: BLE001
@@ -567,13 +585,15 @@ def discover_po_custom_field(db: Client, company_id: str) -> dict:
 
     Jigged CANNOT create the field. Verified live: the legacy Preferences write
     returns HTTP 200 and changes nothing, and the GraphQL Custom Fields API
-    answers 403 without a paid partner tier."""
+    answers 403 without a paid partner tier.
+
+    RAISES rather than returning id=None when the Preferences read itself fails.
+    "Couldn't check" is not "there is no field": swallowing the error here would
+    hand the caller a definitive negative for a question that was never answered,
+    and the caller persists this result — so a momentary Intuit outage would wipe
+    a correctly discovered field id and silently stop the PO reaching invoices."""
     out: dict = {"id": None, "name": None, "candidates": []}
-    try:
-        prefs = qb_query(db, company_id, "select * from Preferences").get("Preferences", [])
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not read QuickBooks Preferences", exc_info=True)
-        return out
+    prefs = qb_query(db, company_id, "select * from Preferences").get("Preferences", [])
     if not prefs:
         return out
 

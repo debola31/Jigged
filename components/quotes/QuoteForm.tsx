@@ -592,7 +592,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * survives a customer switch — the drift chip then shows it doesn't match
    * the new customer's standing terms, rather than us destroying the edit.
    */
-  const handleCustomerChange = (customerId: string) => {
+  const handleCustomerChange = (customerId: string, justCreated?: CustomerWithRelations) => {
     if (!customerId) {
       setFormData((prev) => ({
         ...prev,
@@ -606,7 +606,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     }
     if (customerId === formData.customer_id) return;
 
-    const customer = customersById.get(customerId);
+    // `justCreated` is the inline-create path handing us the row directly. It has
+    // to, because setCustomersById in the same event handler hasn't committed yet
+    // — reading the map here would miss the customer entirely and quietly prefill
+    // the shop default over the standing terms just typed into the modal.
+    const customer = justCreated ?? customersById.get(customerId);
     const billing = customer ? pickBillingAddress(customer) : null;
     const shipping = customer ? pickShippingAddress(customer) : null;
     const primary = customer ? pickPrimaryContact(customer.customer_contacts) : null;
@@ -648,12 +652,19 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     const nextTerms: Partial<Record<StandingTermField, string>> = {};
     const nextProvenance: Partial<Record<StandingTermField, string>> = {};
     for (const field of STANDING_TERM_FIELDS) {
+      // "Ours" = empty, or filled by a previous prefill. Anything the user typed
+      // themselves is theirs and survives a customer switch untouched.
       const ours = !formData[field]?.trim() || prefilledFrom[field] !== undefined;
+      if (!ours) continue;
       const resolved = standing[field];
-      if (ours && resolved.value) {
-        nextTerms[field] = resolved.value;
-        nextProvenance[field] = resolved.source;
-      }
+      // A field we own follows the new customer ALL THE WAY, including to empty.
+      // Clearing matters as much as filling: pick Acme (lead time "4 weeks"),
+      // realise it's the wrong customer, pick Beta (no lead time) — and Acme's
+      // "4 weeks" would otherwise sit there as Beta's quoted lead time. Worse, it
+      // would look hand-typed once its provenance marker went, so every later
+      // switch would refuse to correct it.
+      nextTerms[field] = resolved.value ?? '';
+      if (resolved.value) nextProvenance[field] = resolved.source;
     }
 
     setShippingSameAsBilling(sameAsBilling);
@@ -928,23 +939,24 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       ...prev.filter((c) => !c.isCreateNew),
       { id: customer.id, name: customer.name },
     ]);
-    // The new customer has no addresses or contacts yet; insert a blank
-    // CustomerWithRelations shell so handleCustomerChange's lookup hits
-    // and clears the previous customer's FKs. The salesperson will add
-    // address + contacts on the customer page before the quote prints.
+    // The new customer has no addresses or contacts yet, but it DOES carry the
+    // standing terms just typed into the modal. Build the shell once and hand it
+    // to handleCustomerChange directly — going via customersById would read this
+    // render's map, which the setter below hasn't updated yet.
+    const created: CustomerWithRelations = {
+      ...customer,
+      addresses: [],
+      customer_contacts: [],
+      primary_contact: null,
+      quotes_count: 0,
+      jobs_count: 0,
+    };
     setCustomersById((prev) => {
       const next = new Map(prev);
-      next.set(customer.id, {
-        ...customer,
-        addresses: [],
-        customer_contacts: [],
-        primary_contact: null,
-        quotes_count: 0,
-        jobs_count: 0,
-      });
+      next.set(customer.id, created);
       return next;
     });
-    handleCustomerChange(customer.id);
+    handleCustomerChange(customer.id, created);
     setCustomerModalOpen(false);
   };
 
@@ -1233,6 +1245,22 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             }}
             renderInput={(params) => <TextField {...params} label="Customer" required />}
           />
+
+          {/* Credit hold, at the moment the salesperson picks the customer.
+              Warns, never gates — nothing here touches canSubmit, and a held
+              customer can be quoted exactly as before. Quoting is the earlier
+              of the two places this can be caught: catching it at pack time
+              means the quote was already written, sent and worked. */}
+          {selectedCustomer?.credit_status === 'hold' && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {selectedCustomer.name} is on credit hold.
+              </Typography>
+              {selectedCustomer.credit_hold_note && (
+                <Typography variant="body2">{selectedCustomer.credit_hold_note}</Typography>
+              )}
+            </Alert>
+          )}
 
           {/* Customer contact + Billing address + Shipping address.
               Hidden until a customer is picked. */}

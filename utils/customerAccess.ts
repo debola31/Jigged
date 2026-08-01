@@ -394,10 +394,33 @@ async function reviveArchivedCustomerByName(
   // No archived match (or the collision was with a live customer) → let the caller throw.
   if (!existing || existing.deleted_at === null) return null;
 
+  // A revive is NOT a fresh create wearing the same name — it is the same
+  // relationship coming back, so what the shop already knew about it has to
+  // survive. The caller is always the CREATE form, which starts from
+  // EMPTY_CUSTOMER_FORM, so a blank field here means "didn't say", never
+  // "deliberately cleared". Writing the whole column set would wipe the archived
+  // row's standing terms with those blanks.
+  //
+  // Credit status is stronger still: it is NEVER written by a revive. Lifting a
+  // hold has to be a deliberate act on the customer page, not a side effect of
+  // someone re-typing the name into the quick-create modal — and credit_hold_note
+  // records why they were held, which the migration keeps on purpose so the next
+  // person can see what happened last time.
+  const filled = formDataToColumns(formData);
+  const revivePatch: Record<string, string | null> = { name: filled.name };
+  for (const key of [
+    'website',
+    'default_payment_terms',
+    'default_lead_time_text',
+    'default_fob_point',
+  ] as const) {
+    if (filled[key] !== null) revivePatch[key] = filled[key];
+  }
+
   const { data, error } = await supabase
     .from('customers')
     .update({
-      ...formDataToColumns(formData),
+      ...revivePatch,
       deleted_at: null,
       updated_at: new Date().toISOString(),
     })

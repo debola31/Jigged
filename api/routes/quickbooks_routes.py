@@ -291,8 +291,26 @@ async def refresh_po_field(company_id: str, request: Request):
     conn = qb.get_connection(db, company_id)
     if not _is_connected(conn):
         raise HTTPException(status_code=400, detail="QuickBooks is not connected.")
+    if conn.get("reconnect_required"):
+        raise HTTPException(
+            status_code=400,
+            detail="Reconnect QuickBooks first — we can't read your settings until then.",
+        )
 
-    found = qb.discover_po_custom_field(db, company_id)
+    # A failed read must NOT be written down. Persisting it would turn "we
+    # couldn't ask" into "you have no PO field", wiping an id that was correct
+    # a minute ago and silently dropping the PO from every later invoice. So the
+    # write happens only on a definitive answer, and a failure surfaces as a
+    # retryable error with the stored value untouched.
+    try:
+        found = qb.discover_po_custom_field(db, company_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read QuickBooks settings for %s", company_id, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Couldn't reach QuickBooks to check your settings. Try again in a moment.",
+        ) from exc
+
     db.table("quickbooks_connections").update(
         {
             "po_custom_field_id": found["id"],

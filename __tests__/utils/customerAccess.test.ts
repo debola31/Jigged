@@ -306,6 +306,87 @@ describe('customerAccess utilities', () => {
         code: '23505',
       });
     });
+
+    // A name collision with an ARCHIVED customer revives that row rather than
+    // blocking — name is the identity here. But a revive is the same
+    // relationship coming back, not a fresh customer wearing its name, so what
+    // the shop already knew has to survive the round trip.
+    describe('reviving an archived customer by name', () => {
+      const archived = { id: 'cust-old', deleted_at: '2026-01-15T00:00:00Z' };
+
+      /** insert → 23505, lookup → the archived row, update → the revived row. */
+      function stageRevive() {
+        const single = mockQueryBuilder.single as ReturnType<typeof vi.fn>;
+        const maybeSingle = mockQueryBuilder.maybeSingle as ReturnType<typeof vi.fn>;
+        single
+          .mockReturnValueOnce({ data: null, error: { code: '23505', message: 'dup' } })
+          .mockReturnValueOnce({
+            data: {
+              id: 'cust-old',
+              company_id: 'company-1',
+              name: 'Acme Industrial',
+              website: null,
+              ...NO_STANDING_TERMS,
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2026-02-01T00:00:00Z',
+            },
+            error: null,
+          });
+        maybeSingle.mockReturnValueOnce({ data: archived, error: null });
+      }
+
+      /** The column patch the revive actually sent. */
+      function revivePatch(): Record<string, unknown> {
+        const update = mockQueryBuilder.update as ReturnType<typeof vi.fn>;
+        return update.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      }
+
+      it('never touches the credit hold', async () => {
+        // The create form always starts from EMPTY_CUSTOMER_FORM, i.e.
+        // credit_status 'open'. Writing that would lift a hold as a side effect
+        // of someone re-typing the name into the quick-create modal, and destroy
+        // the note recording why they were held in the first place.
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+        });
+
+        const patch = revivePatch();
+        expect(patch).not.toHaveProperty('credit_status');
+        expect(patch).not.toHaveProperty('credit_hold_note');
+        expect(patch.deleted_at).toBeNull();
+      });
+
+      it('leaves standing terms alone when the form did not supply them', async () => {
+        // Blank on the create form means "didn't say", never "clear it" — there
+        // is nothing on that screen to clear, since the user is creating.
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+        });
+
+        const patch = revivePatch();
+        expect(patch).not.toHaveProperty('default_payment_terms');
+        expect(patch).not.toHaveProperty('default_lead_time_text');
+        expect(patch).not.toHaveProperty('default_fob_point');
+      });
+
+      it('does apply the values the form did supply', async () => {
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+          default_payment_terms: 'Net 45',
+        });
+
+        const patch = revivePatch();
+        expect(patch.default_payment_terms).toBe('Net 45');
+        expect(patch.name).toBe('Acme Industrial');
+        expect(patch).not.toHaveProperty('default_lead_time_text');
+      });
+    });
   });
 
   describe('updateCustomer', () => {

@@ -882,4 +882,176 @@ describe('QuoteForm — standing-terms resolution chain', () => {
     });
     expect(screen.queryByText(/edit to override/i)).not.toBeInTheDocument();
   });
+
+  // A prefilled value belongs to the customer that supplied it. Switching to a
+  // customer who has none must CLEAR it, not strand it — otherwise Acme's terms
+  // are quoted to Beta, and because the provenance line goes with it, the field
+  // then looks hand-typed and no later switch will correct it.
+  it('clears a prefilled term when the next customer has none', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        default_payment_terms: 'Net 60',
+        addresses: [],
+        customer_contacts: [],
+      },
+      { id: 'cust-2', name: 'Beta LLC', addresses: [], customer_contacts: [] },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+
+    await selectCustomer('Acme Corp');
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 60');
+    });
+
+    await selectCustomer('Beta LLC');
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('');
+    });
+    expect(screen.queryByText(/acme corp/i)).not.toBeInTheDocument();
+  });
+
+  // The correction has to survive a second hop: after clearing, the field must
+  // still be ours, so a third customer's real terms still land.
+  it('still applies the next customer’s terms after a clear', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        default_payment_terms: 'Net 60',
+        addresses: [],
+        customer_contacts: [],
+      },
+      { id: 'cust-2', name: 'Beta LLC', addresses: [], customer_contacts: [] },
+      {
+        id: 'cust-3',
+        name: 'Gamma Inc',
+        default_payment_terms: 'Net 15',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+
+    await selectCustomer('Acme Corp');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 60'),
+    );
+    await selectCustomer('Beta LLC');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue(''),
+    );
+    await selectCustomer('Gamma Inc');
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 15');
+    });
+    expect(screen.getByText(/from gamma inc.s standing terms/i)).toBeInTheDocument();
+  });
+
+  // A term the user typed is theirs, and a customer switch must not touch it.
+  it('leaves a hand-typed term alone when the customer changes', async () => {
+    getAllCustomers.mockResolvedValue([
+      { id: 'cust-1', name: 'Acme Corp', addresses: [], customer_contacts: [] },
+      {
+        id: 'cust-2',
+        name: 'Beta LLC',
+        default_payment_terms: 'Net 15',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('combobox', { name: /payment terms/i }));
+    await user.click(await screen.findByRole('option', { name: 'Net 30' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 30'),
+    );
+
+    await selectCustomer('Beta LLC');
+    // Beta has Net 15, but the user said Net 30 — their choice wins.
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 30'),
+    );
+  });
+
+  // Warns at the moment the customer is picked. Quoting is the earlier of the
+  // two places a hold can be caught — at pack time the quote is already written,
+  // sent and worked.
+  it('warns when the selected customer is on credit hold', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        credit_status: 'hold',
+        credit_hold_note: '90 days past due — check with Dana',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    expect(await screen.findByText(/Acme Corp is on credit hold/i)).toBeInTheDocument();
+    expect(screen.getByText(/90 days past due/i)).toBeInTheDocument();
+  });
+
+  it('shows no credit banner for a customer in good standing', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        credit_status: 'open',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    expect(screen.queryByText(/on credit hold/i)).not.toBeInTheDocument();
+  });
+
+  // "Warn, never gate" stated as the only thing that actually proves it: the
+  // submit button lands in the SAME state either way. Asserting it is simply
+  // enabled would be testing the blank form's own completeness rules, which
+  // disable it for unrelated reasons and would pass even if the hold did gate.
+  it('a credit hold leaves the submit button exactly as it was', async () => {
+    const customer = {
+      id: 'cust-1',
+      name: 'Acme Corp',
+      addresses: [],
+      customer_contacts: [],
+    };
+    const submitState = async (credit_status: string) => {
+      getAllCustomers.mockResolvedValue([{ ...customer, credit_status }]);
+      const { unmount } = render(<QuoteForm mode="create" initialData={initialBlank} />);
+      await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+      await selectCustomer('Acme Corp');
+      const disabled = screen
+        .getByRole('button', { name: /create quote|save/i })
+        .hasAttribute('disabled');
+      unmount();
+      return disabled;
+    };
+
+    expect(await submitState('hold')).toBe(await submitState('open'));
+  });
 });

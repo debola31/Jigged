@@ -104,10 +104,19 @@ export default function PartLocationInventory({
     return { id: created.id, label: created.name, kind: created.kind };
   };
 
-  // Move sources: only the locations where this part actually has stock.
+  /**
+   * Move sources: only the locations where this part actually has stock.
+   *
+   * The `> 0` is the part that was missing — this comment claimed the filter for months while the
+   * code mapped every balance row. Balances are never deleted (`transfer_stock` decrements,
+   * `bulk_put_away` sets 0), so every place the part has ever passed through survives at zero and
+   * was offered as a source. Picking one gets you as far as the RPC before it fails with
+   * "Insufficient stock at source location (have 0, need N)".
+   */
   const sourceBalances = useMemo<LocationBalanceOption[]>(
     () =>
       balances
+        .filter((b) => Number(b.quantity ?? 0) > 0)
         .map((b) => ({ id: b.location_id, label: b.path.join(' › ') || b.location_name, quantity: b.quantity }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [balances],

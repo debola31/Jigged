@@ -59,30 +59,34 @@ export interface CurrentMember {
 }
 
 /**
- * In-flight and resolved member lookups, keyed by company.
+ * IN-FLIGHT lookups only, keyed by company. Entries are dropped the moment they settle.
  *
- * This is a REQUEST cache, not a data cache — it exists because the answer is stable
- * for the lifetime of a session and because several components resolve it at once.
- * Mounting the "Me" tab used to call this twice concurrently (the identity hook and the
- * contribution loader), and each call opens with `auth.getSession()`, which `supabase-js`
+ * WHY THIS EXISTS. Every call opens with `auth.getSession()`, which `supabase-js`
  * serialises behind a `navigator.locks` acquisition and may refresh the token inside.
- * Duplicate callers therefore didn't just cost a round trip, they queued behind each
- * other on the one lock that gates every other request on the page.
+ * Mounting the "Me" tab fires three of these in one commit (the identity hook, the totals
+ * loader, the first-page loader), so duplicate callers didn't just cost a round trip —
+ * they queued against each other on the single lock that gates every other request on the
+ * page, which is what the tab's stall actually was. Sharing one flight collapses that to
+ * one lock acquisition.
  *
- * The promise is cached, not the value, so simultaneous callers share ONE flight rather
- * than racing to populate it. A rejected or null-resolving lookup is evicted so a
- * transient failure can't pin "not a member" for the rest of the session.
+ * WHY IT DOES NOT OUTLIVE THE FLIGHT. A session-length cache of this row is a cross-user
+ * data leak waiting to happen, and the app's shape makes it near-certain rather than
+ * theoretical: sign-out on the admin surface is `await signOut(); router.replace('/')`
+ * (components/layout/Header.tsx) and sign-in is `router.push` — every step a client
+ * navigation, so module state survives the whole sign-out/sign-in cycle. A retained entry
+ * would hand the next person the previous person's `user_company_access` row on a shared
+ * office computer, and this function is what pins `uploaded_by` / `author_id` on writes
+ * whose RLS policies require them to match the caller (utils/partAttachmentsAccess.ts,
+ * utils/workCenterAttachmentsAccess.ts) and what drives the admin-only delete affordances
+ * in FilesTab and JobFeed. Rather than maintain a list of every sign-out path that must
+ * remember to invalidate — one forgotten call site is a silent leak — the entry simply
+ * never outlives the request it was deduplicating. There is nothing to invalidate.
+ *
+ * The cost is one lookup per navigation instead of one per session, which is what the
+ * code did before the cache existed. The stall was never sequential calls; it was three
+ * concurrent ones.
  */
-const memberCache = new Map<string, Promise<CurrentMember | null>>();
-
-/**
- * Forget every cached member. Call on sign-out: the cache answers "who is acting", and
- * after a sign-out the honest answer is "nobody yet" — a stale entry would otherwise let
- * the next user inherit the previous one's membership row.
- */
-export function clearCurrentMemberCache(): void {
-  memberCache.clear();
-}
+const memberFlights = new Map<string, Promise<CurrentMember | null>>();
 
 /**
  * The signed-in user's user_company_access row for this company — used wherever
@@ -91,26 +95,17 @@ export function clearCurrentMemberCache(): void {
  * admins are all company members, and every one of them can act in the operator
  * view. (There is no separate "operators" table — that legacy table is gone.)
  *
- * Deduplicated per company for the session — see `memberCache`.
+ * Concurrent callers share one request — see `memberFlights`.
  */
 export function getCurrentMember(companyId: string): Promise<CurrentMember | null> {
-  const cached = memberCache.get(companyId);
-  if (cached) return cached;
+  const inFlight = memberFlights.get(companyId);
+  if (inFlight) return inFlight;
 
-  const flight = fetchCurrentMember(companyId).then(
-    (member) => {
-      // Don't cache a negative. "No session yet" is a normal state during startup, and
-      // pinning it would leave every later caller in this session acting as a non-member.
-      if (!member) memberCache.delete(companyId);
-      return member;
-    },
-    (err) => {
-      memberCache.delete(companyId);
-      throw err;
-    },
-  );
+  const flight = fetchCurrentMember(companyId).finally(() => {
+    memberFlights.delete(companyId);
+  });
 
-  memberCache.set(companyId, flight);
+  memberFlights.set(companyId, flight);
   return flight;
 }
 
@@ -1857,7 +1852,18 @@ export async function getMyContributionTotals(
     // Auto-logged entries are not somebody's contribution.
     .eq('note_type', 'user');
 
-  if (error || !data) return empty;
+  // THROW, don't return zeroes. A failed count and a genuine zero are different
+  // facts, and rendering the first as the second tells an operator their notes are
+  // gone. The caller has an error state; give it something to show.
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not load your work.',
+      }),
+    );
+  }
+  if (!data) return empty;
 
   const rows = data as unknown as Array<{
     viewer_count: number;
@@ -1934,7 +1940,21 @@ export async function getMyNotesPage(
     .order('id', { ascending: false })
     .range(offset, offset + limit - 1);
 
-  if (error || !data) return empty;
+  // THROW rather than resolving to an empty page. Swallowing this is worse here than
+  // anywhere else in the file: an empty page reads as `hasMore: false`, which retires
+  // the Show more button, so a single dropped request on a flaky shop connection made
+  // every remaining note look deleted — with no error and no way back short of leaving
+  // the tab. The caller's catch is what shows the retry, and it can only fire if this
+  // rejects.
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not load your notes.',
+      }),
+    );
+  }
+  if (!data) return empty;
 
   type Row = {
     id: string;

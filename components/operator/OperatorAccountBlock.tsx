@@ -74,7 +74,6 @@ import FeedbackDialog from '@/components/feedback/FeedbackDialog';
 // `auth.signOut` is used here, which is schema-independent.
 import { getTypedSupabase } from '@/lib/supabase';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
-import { clearCurrentMemberCache } from '@/utils/operatorAccess';
 
 export interface OperatorIdentity {
   name: string;
@@ -106,9 +105,6 @@ export function OperatorIdentityRow({
     // Clears the persisted station (localStorage) on explicit logout — same store
     // OperatorStationContext uses.
     clearStoredStation();
-    // And the in-memory member lookup, which answers "who is acting" and must not
-    // outlive the session that made it true.
-    clearCurrentMemberCache();
     const supabase = getTypedSupabase();
     // Local scope — sign out ONLY this device. An operator logging out here must not revoke
     // their session on their other devices (which surfaced as a forced re-login when marking

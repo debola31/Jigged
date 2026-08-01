@@ -31,7 +31,6 @@ import { OperatorStationProvider, useStationContext } from '@/components/operato
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
-import { clearCurrentMemberCache } from '@/utils/operatorAccess';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 /**
@@ -142,10 +141,10 @@ export default function OperatorLayout({
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'SIGNED_OUT') {
-        // Drop the cached member with the validation guard — both are answers about a
-        // user who is no longer signed in.
+        // Drop the validation answer — it was about a user who is no longer signed in.
+        // (`getCurrentMember` needs no equivalent: it only ever caches a request that is
+        // still in flight, so it has nothing that can outlive a session.)
         validatedFor.current = null;
-        clearCurrentMemberCache();
         router.push(`/operator/${companyId}/login`);
       }
     });

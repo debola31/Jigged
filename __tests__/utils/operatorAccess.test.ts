@@ -48,7 +48,7 @@ import {
   markOperationReceived,
   revertOperationCompletion,
   getOutsideOpsForCompany,
-  clearCurrentMemberCache,
+  getCurrentMember,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -74,11 +74,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockQueryBuilder.data = null;
   mockQueryBuilder.error = null;
-  // `getCurrentMember` dedupes per company for the lifetime of a session, and a module
-  // lives longer than a test. Without this, the first test to resolve a member for a
-  // company pins that answer for every later one — which is exactly how the
-  // "not a member" case started passing a member.
-  clearCurrentMemberCache();
 });
 
 describe('getAllStationsOperatorJobs', () => {
@@ -549,6 +544,58 @@ describe('getOutsideOpsForCompany', () => {
   });
 });
 
+
+/**
+ * `getCurrentMember` shares one request between simultaneous callers, and keeps nothing
+ * afterwards.
+ *
+ * Both halves matter and they pull against each other. The sharing is the point: every
+ * call opens with `auth.getSession()`, which supabase-js serialises behind a
+ * `navigator.locks` acquisition, so the three callers the "Me" tab fires in one commit
+ * used to queue against each other on the lock that gates every other request on the page.
+ *
+ * Not retaining it is equally the point. A session-length cache of this row is a
+ * cross-user leak on a shared office computer: sign-out is `router.replace` and sign-in is
+ * `router.push`, so module state survives the whole cycle, and this row is what pins
+ * `uploaded_by` / `author_id` on writes whose RLS requires them to match the caller.
+ */
+describe('getCurrentMember request sharing', () => {
+  it('collapses simultaneous callers into ONE round trip', async () => {
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+
+    const [a, b, c] = await Promise.all([
+      getCurrentMember('c1'),
+      getCurrentMember('c1'),
+      getCurrentMember('c1'),
+    ]);
+
+    expect(a).toEqual(b);
+    expect(b).toEqual(c);
+    // One session read and one table read, not three of each.
+    expect(mockSupabase.auth.getSession).toHaveBeenCalledTimes(1);
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps nothing once the request settles, so the next caller re-reads', async () => {
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+    await getCurrentMember('c1');
+
+    // A different person is signed in now. Nothing may be inherited from the last one.
+    mockQueryBuilder.data = { id: 'acc-you', name: 'Priya', user_id: 'auth-user-2', role: 'admin' };
+    const second = await getCurrentMember('c1');
+
+    expect(second?.id).toBe('acc-you');
+    expect(mockSupabase.auth.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not pin a failure — a later call can still succeed', async () => {
+    mockQueryBuilder.data = null;
+    expect(await getCurrentMember('c1')).toBeNull();
+
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+    expect((await getCurrentMember('c1'))?.id).toBe('acc-me');
+  });
+});
 
 describe('reactions', () => {
   // getCurrentMember resolves via a single() on user_company_access.

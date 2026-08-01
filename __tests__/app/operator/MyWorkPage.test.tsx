@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within, routerMocks } from '@/__tests__/test-utils';
+import { render, screen, within, waitFor, routerMocks } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 import MyWorkPage from '@/app/operator/[companyId]/my-work/page';
@@ -17,8 +17,6 @@ vi.mock('@/utils/operatorAccess', () => ({
   getNoteViewers: vi.fn(),
   // The "Me" tab resolves the operator's display name through this.
   getCurrentMember: vi.fn(async () => ({ id: 'm1', name: 'Ada Lovelace', role: 'operator' })),
-  // Log out drops the cached member along with the session.
-  clearCurrentMemberCache: vi.fn(),
   MY_NOTES_PAGE_SIZE: 10,
 }));
 
@@ -351,6 +349,35 @@ describe('My Work — paging', () => {
     expect(await screen.findByText(/Could not load more notes/)).toBeInTheDocument();
     expect(screen.getByText('First note')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+  });
+
+  /**
+   * The retry above only works because `getMyNotesPage` REJECTS on a query failure.
+   *
+   * It used to swallow the error and resolve `{notes: [], hasMore: false}`, which took the
+   * success path here: nothing appended, `hasMore` false, Show more removed from the DOM,
+   * no error shown. One dropped request on a shop connection therefore made every
+   * remaining note look deleted, on a screen that otherwise read as settled. The guard is
+   * in the access layer (a rejected promise), so this asserts the component's half: an
+   * empty page that is genuinely the end must retire the button, and only a rejection may
+   * surface the retry — the two must not be conflated.
+   */
+  it('treats a genuinely empty last page as the end, not as a failure', async () => {
+    const user = userEvent.setup();
+    stage({ notes: [note({ id: 'n1', body: 'First note' })], hasMore: true });
+    render(<MyWorkPage />);
+
+    await screen.findByText('First note');
+    mockGetNotesPage.mockResolvedValue({ notes: [], hasMore: false });
+
+    await user.click(screen.getByRole('button', { name: /show more/i }));
+
+    // Button retires, and NO error is claimed — nothing actually went wrong.
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Could not load more notes/)).not.toBeInTheDocument();
+    expect(screen.getByText('First note')).toBeInTheDocument();
   });
 });
 

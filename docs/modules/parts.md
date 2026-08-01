@@ -205,15 +205,26 @@ Editing model — markup % is the source of truth:
 - Editing **markup %** recomputes the displayed unit price directly.
 - Editing **unit price** back-calculates the markup % and stores it as the new source of truth. There is no lock concept; subsequent routing changes still propagate.
 
-**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button with an "Unsaved changes" hint — mirroring the bought-part Cost card. Each save also auto-logs a `pricing` note to the Activity feed.
+**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button — mirroring the bought-part Cost card. Each save also auto-logs a `pricing` note to the Activity feed.
+
+Unsaved edits are surfaced two ways (see [interaction-standards §2](../interaction-standards.md#2-saving)): the edited row gets an amber `3px` left accent — the same accent the incomplete BOM/routing rows use, one rung below their red — and a **sticky footer** appears at the bottom of the card naming the count with **Discard** and **Save pricing**. The footer is absent entirely when there is nothing staged, so its appearance is itself the signal. This replaced a caption-sized grey "Unsaved changes" hint that users did not see.
+
+"Unsaved" is **derived**, not latched: the card snapshots the persisted values it was seeded from and compares live rows against it, so reverting an edit by hand (1 → 10 → 1) clears the state rather than demanding a save that would write nothing.
 
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing/BOM panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's displayed base cost and unit price against the new cost basis.
+
+**Staged edits survive that refresh.** `refreshKey` invalidates *derived* data only — the cost breakdown and the per-tier base costs. It deliberately does **not** re-seed the editable tier rows or clear the dirty flag while an edit is staged. Before this guard existed, saving an operation while a Min qty sat unsaved silently reverted it (interaction-standards §2, invariant 1). A genuine part change still reloads, since the dirty flag belongs to the part being edited.
+
+**Batch size commits via its own explicit Save** (`updatePartCostingBatchQuantity`), not on blur. It reads like a harmless scalar, but `compute_part_cost_at_qty` values this part as a made child at exactly this quantity in every parent's BOM — a fat-fingered 30 → 300 silently re-costs every parent and flows into their quotes. That makes it financial data under [interaction-standards §2](../interaction-standards.md#2-saving), and financial data does not auto-save.
+
+Being a staged surface, it gets the **same** unsaved affordance as the tier tables: an amber outline on the field plus the shared `UnsavedChangesBar` (Discard + **Save batch size**) at the bottom of the Cost card. It previously had a lone Save button and no unsaved marker — the "some cards prompt you, some don't" inconsistency this standard exists to remove.
 
 ▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
 
 For **bought** parts, the workspace shows a **Cost** card with a single **Preferred vendor** picker (the *only* preferred-vendor control — it is no longer duplicated on the part-details/identity card; that field now appears only in the create flow) and a per-vendor qty-break cost-tier sheet (Min qty / Unit cost).
 
-- **Explicit Save** — cost is financial data, so edits are committed via a **Save costs** button (with an "Unsaved changes" hint), not auto-saved on blur, matching the made-part Pricing card. Deletes and additions are reconciled against the persisted sheet on save.
+- **Explicit Save** — cost is financial data, so edits are committed via a **Save costs** button, not auto-saved on blur, matching the made-part Pricing card. Deletes and additions are reconciled against the persisted sheet on save. Unsaved edits get the same amber row accent + sticky Discard/Save footer as the Pricing card.
+- **The vendor picker is auto-save, and now looks like it.** Picking a preferred vendor writes immediately, while the tier sheet below is staged — two save models in one card, which [interaction-standards §2](../interaction-standards.md#2-saving) forbids when the user can't tell them apart. The picker keeps auto-save (it's a single non-financial label, the right mode for it) but sits in its own bordered block with its own `SaveStatus` and helper text ("Saved as soon as you pick it"), so the two models read as two sections.
 - **No-cost state** — when the selected vendor has no saved tier yet, the sheet shows **one empty starter row highlighted red** plus a short red prompt ("Add at least one cost tier so this part can be priced and quoted."), replacing the previous yellow banner/"Add first tier" bubble. The red styling uses the theme `error` palette (never a hardcoded hex).
 - **Indicator clears on save** — the panel calls an `onSaved` callback so the workspace re-derives priceability immediately; the "Needs cost" chip (and the red prompt) clear on Save **without a page reload**. (Previously the chip lingered until reload because the panel had no refresh callback.)
 

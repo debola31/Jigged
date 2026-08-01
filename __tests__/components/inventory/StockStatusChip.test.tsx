@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import { render } from '../../test-utils';
 import StockStatusChip, {
   deriveStockStatus,
+  shortfall,
 } from '@/components/inventory/StockStatusChip';
 
 describe('deriveStockStatus', () => {
@@ -51,5 +52,34 @@ describe('StockStatusChip', () => {
   it('renders "In stock" label for status="in_stock"', () => {
     render(<StockStatusChip status="in_stock" />);
     expect(screen.getByText('In stock')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Powers the "Short by" column on `?status=low`. Derived like `deriveStockStatus`, never stored,
+ * so the two cannot disagree about whether a part is short.
+ */
+describe('shortfall', () => {
+  it('is the gap to the reorder point', () => {
+    expect(shortfall(4, 10)).toBe(6);
+  });
+
+  /** At the line IS on the buy list. Collapsing equality to null drops the row it exists to catch. */
+  it('is zero at the line, not null', () => {
+    expect(shortfall(10, 10)).toBe(0);
+  });
+
+  it('is null above the line', () => {
+    expect(shortfall(50, 10)).toBeNull();
+  });
+
+  /** No reorder point is not a shortfall of the whole quantity — the question does not apply. */
+  it('is null when no reorder point is set', () => {
+    expect(shortfall(0, null)).toBeNull();
+    expect(shortfall(0, undefined)).toBeNull();
+  });
+
+  it('treats a missing quantity as none on hand', () => {
+    expect(shortfall(null, 10)).toBe(10);
   });
 });

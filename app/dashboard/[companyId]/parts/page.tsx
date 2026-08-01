@@ -19,7 +19,13 @@ import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import Chip from '@mui/material/Chip';
-import StockStatusChip, { deriveStockStatus } from '@/components/inventory/StockStatusChip';
+import StockStatusChip, { deriveStockStatus, shortfall } from '@/components/inventory/StockStatusChip';
+
+/** Module scope so the memoised `columnDefs` doesn't have to carry it as a dependency. */
+const formatDate = (val: string | null | undefined): string => {
+  if (!val) return '—';
+  return new Date(val).toLocaleDateString();
+};
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
@@ -322,15 +328,19 @@ export default function PartsPage() {
     }
   };
 
-  const formatDate = (val: string | null | undefined): string => {
-    if (!val) return '—';
-    return new Date(val).toLocaleDateString();
-  };
-
-  // Column set is intentionally minimal: this page is a finder, the detail
-  // page is the workspace. Engineering signals (routing, BOM, sub-assembly
-  // badges, calculated cost) live on the detail page.
-  const columnDefs: ColDef<PartRow>[] = [
+  /**
+   * Column set is intentionally minimal: this page is a finder, the detail page is the workspace.
+   * Engineering signals (routing, BOM, sub-assembly badges, calculated cost) live there.
+   *
+   * The exception is the shortage lens. `?status=low` and `?status=out` are where an owner goes
+   * to answer "what do I need to buy", and a status chip alone does not answer it — you need the
+   * line you fell under and how far under you are. Those two columns appear ONLY on that lens,
+   * because on the full catalogue they would be empty for most rows.
+   *
+   * Memoised on `stockFilter`: without it AG Grid receives a new `columnDefs` array identity on
+   * every render and rebuilds the header.
+   */
+  const columnDefs = useMemo<ColDef<PartRow>[]>(() => [
     {
       field: 'part_name',
       headerName: 'Part Name',
@@ -434,13 +444,52 @@ export default function PartsPage() {
         );
       },
     },
+    // ── Shortage-lens columns ────────────────────────────────────────────
+    ...(stockFilter === 'low' || stockFilter === 'out'
+      ? [
+          {
+            field: 'reorder_point' as const,
+            headerName: 'Reorder at',
+            width: 130,
+            type: 'rightAligned',
+            valueFormatter: (params: { value: unknown; data?: PartRow }) => {
+              if (params.value === null || params.value === undefined) return '—';
+              const n = (params.value as number).toLocaleString(undefined, {
+                maximumFractionDigits: 4,
+              });
+              return params.data?.primary_unit ? `${n} ${params.data.primary_unit}` : n;
+            },
+          },
+        ]
+      : []),
+    // "Short by" only on `low`. On `out` it would restate the reorder point on every row, since
+    // a part with nothing on hand is short by exactly that.
+    ...(stockFilter === 'low'
+      ? [
+          {
+            colId: 'short_by',
+            headerName: 'Short by',
+            width: 130,
+            type: 'rightAligned',
+            valueGetter: (params: { data?: PartRow }) =>
+              shortfall(params.data?.quantity, params.data?.reorder_point),
+            valueFormatter: (params: { value: unknown; data?: PartRow }) => {
+              if (params.value === null || params.value === undefined) return '—';
+              const n = (params.value as number).toLocaleString(undefined, {
+                maximumFractionDigits: 4,
+              });
+              return params.data?.primary_unit ? `${n} ${params.data.primary_unit}` : n;
+            },
+          },
+        ]
+      : []),
     {
       field: 'updated_at',
       headerName: 'Updated',
       width: 140,
       valueFormatter: (params) => formatDate(params.value as string | null | undefined),
     },
-  ];
+  ], [stockFilter]);
 
   const renderEmptyState = () => {
     const isFiltered =

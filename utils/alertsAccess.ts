@@ -136,18 +136,43 @@ export async function getAtRiskJobs(companyId: string): Promise<AtRiskJob[]> {
   return atRisk;
 }
 
+/**
+ * How many candidate rows the badge will scan. Not a display cap — the badge shows however many
+ * of these turn out to be low, which is normally far fewer.
+ */
+export const LOW_STOCK_SCAN_LIMIT = 500;
+
 export async function getLowStockPartsAlerts(
   companyId: string
 ): Promise<InventoryAlert[]> {
   const supabase = getSupabase();
 
+  /**
+   * Bounded, and ordered so the bound keeps the parts that matter. Issue #619's sibling.
+   *
+   * This read was unbounded over every stocked part with a reorder point. On a 9,428-part
+   * catalogue that is both a heavy read for a header badge and, worse, **silently truncated** at
+   * PostgREST's `max_rows` of 1,000 — which returns whichever rows the planner happened to emit
+   * first, so a genuinely-out part could be missing from the badge with no error anywhere.
+   *
+   * `ascending: true` on quantity means the cap keeps the emptiest shelves, so the truncation
+   * that remains drops the *least* urgent rows rather than an arbitrary set.
+   *
+   * The low test itself stays in JS below because it compares two COLUMNS
+   * (`quantity <= reorder_point`), which PostgREST cannot express as a filter. That is also why
+   * this returns `truncated` rather than an exact total: a `count: 'exact'` here would count
+   * parts that HAVE a reorder point, not parts that are under it, and reporting that as
+   * "N parts are low" would be a wrong number stated confidently.
+   */
   const { data, error } = await supabase
     .from('parts')
     .select('id, part_name, quantity, reorder_point, primary_unit')
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .eq('is_stocked', true)
-    .not('reorder_point', 'is', null);
+    .not('reorder_point', 'is', null)
+    .order('quantity', { ascending: true })
+    .limit(LOW_STOCK_SCAN_LIMIT);
 
   if (error) throw error;
 

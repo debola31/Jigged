@@ -89,10 +89,12 @@ export interface LocationBoardProps {
   /**
    * Omit to hide the "Add storage" tile entirely.
    *
-   * The operator surface reuses this board so the person at the shelf sees the same drawn
-   * units, photos and fill state as the owner does — but creating storage is an owner's job,
-   * and an operator tapping "Add storage" mid-shift is how `MISC 8-25-21` gets into a location
-   * table (§5.5 finding 2). Read-only is the honest shape there, not a disabled button.
+   * Creating storage is an owner's job, and someone tapping "Add storage" mid-shift is how
+   * `MISC 8-25-21` gets into a location table (§5.5 finding 2). Read-only is the honest shape
+   * for anyone who shouldn't be making places, not a disabled button.
+   *
+   * NOTE: the operator surface no longer renders this board at all (2026-07-31) — its Inventory
+   * tab became item-first. This prop kept its reason for existing; only the example changed.
    */
   onAddStorage?: () => void;
 }

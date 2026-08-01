@@ -28,16 +28,21 @@ import {
   updateLocation,
   duplicateLocation,
   deleteLocation,
+  moveLocation,
   setLocationPhoto,
   clearLocationPhoto,
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
+import LocationPicker, { type LocationPickerOption } from './LocationPicker';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import LocationBoard, { boardOrder } from './board/LocationBoard';
 import LocationDetailSheet from './board/LocationDetailSheet';
+
+/** Sentinel for "no parent". A picker option needs an id, and `null` is not one. */
+const TOP_LEVEL = '__top__';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -256,10 +261,75 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         setToast(e instanceof Error ? e.message : 'Failed to duplicate location.');
       }
     },
+    onMove: (node: InventoryLocationNode) => {
+      setSheetId(null);
+      setMoveState({ open: true, node });
+    },
     onDelete: (node: InventoryLocationNode) => {
       setSheetId(null);
       setDeleteState({ open: true, node });
     },
+  };
+
+  /**
+   * Re-parent a place.
+   *
+   * `moveLocation` shipped with the first locations migration, complete with cycle detection and
+   * tests, and never had a caller — so a cabinet created under the wrong parent was permanent and
+   * the only remedy was deleting the subtree and rebuilding it. Drag-to-reparent stays cut
+   * (§5.5); this is the same picker the rest of the app uses.
+   *
+   * The options exclude the node itself AND its descendants. `moveLocation` refuses a cycle
+   * anyway, but offering a destination that will be rejected is a worse experience than not
+   * offering it — the guard is the backstop, not the interface.
+   */
+  const [moveState, setMoveState] = useState<{ open: boolean; node: InventoryLocationNode | null }>({
+    open: false,
+    node: null,
+  });
+  const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
+  const [moving, setMoving] = useState(false);
+
+  const moveOptions = useMemo<LocationPickerOption[]>(() => {
+    const node = moveState.node;
+    if (!node) return [];
+    const banned = new Set<string>([node.id]);
+    // One pass is enough: `locations` is parent-before-child by `sort_order` only by accident, so
+    // walk ancestry per row instead of trusting order.
+    const isUnder = (id: string | null): boolean => {
+      let cursor = id;
+      const guard = new Set<string>();
+      while (cursor && !guard.has(cursor)) {
+        if (cursor === node.id) return true;
+        guard.add(cursor);
+        cursor = byId.get(cursor)?.parent_id ?? null;
+      }
+      return false;
+    };
+    return [
+      { id: TOP_LEVEL, label: 'Top level (not inside anything)', kind: null },
+      ...locations
+        .filter((l) => !banned.has(l.id) && !isUnder(l.parent_id))
+        .map((l) => ({ id: l.id, label: computePath(l.id, byId).join(' › '), kind: l.kind }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [moveState.node, locations, byId]);
+
+  const confirmMove = async () => {
+    const node = moveState.node;
+    if (!node || !moveTo) return;
+    setMoving(true);
+    try {
+      await moveLocation(node.id, moveTo.id === TOP_LEVEL ? null : moveTo.id, companyId);
+      await reload();
+      setToast(`Moved ${node.name}.`);
+      setMoveState({ open: false, node: null });
+      setMoveTo(null);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Failed to move location.');
+    } finally {
+      setMoving(false);
+    }
   };
 
   /**
@@ -472,6 +542,43 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
         }}
       />
+
+      <Dialog
+        open={moveState.open}
+        onClose={() => {
+          setMoveState({ open: false, node: null });
+          setMoveTo(null);
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Move {moveState.node?.name}</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            Everything inside it moves too, and the stock goes with it — this changes where a
+            place sits, not what is in it.
+          </DialogContentText>
+          <LocationPicker
+            label="Move it into"
+            options={moveOptions}
+            value={moveTo}
+            onChange={setMoveTo}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setMoveState({ open: false, node: null });
+              setMoveTo(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button variant="contained" disabled={!moveTo || moving} onClick={confirmMove}>
+            Move
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>
         <DialogTitle>Delete location?</DialogTitle>

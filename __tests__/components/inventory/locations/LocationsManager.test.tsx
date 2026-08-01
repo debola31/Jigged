@@ -30,6 +30,11 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
     updateLocation: vi.fn(),
     duplicateLocation: vi.fn(async () => [{ id: 'dup' }]),
     deleteLocation: vi.fn(),
+    // Re-parenting: the sheet's new "Move into…" reaches this.
+    moveLocation: vi.fn(),
+    // The sheet now mounts PlaceHistory, which reads a place's ledger on expand. Unmocked it is
+    // `undefined` in every test here, not just the ones that expand it.
+    getLocationHistory: vi.fn(async () => []),
     // Subdivide runs the real builder, so its write has to be stubbed here too.
     materializeLocationSpec: vi.fn(async () => [{ id: 'new' }]),
   };

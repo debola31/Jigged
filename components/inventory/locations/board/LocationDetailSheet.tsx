@@ -27,6 +27,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
+import PlaceHistory from './PlaceHistory';
+import DriveFileMoveOutlinedIcon from '@mui/icons-material/DriveFileMoveOutlined';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
@@ -54,6 +56,16 @@ export interface LocationSheetActions {
   onPrintQR: (node: InventoryLocationNode) => void;
   onDuplicate: (node: InventoryLocationNode) => void;
   onEdit: (node: InventoryLocationNode) => void;
+  /**
+   * Re-parent this place.
+   *
+   * `moveLocation` has existed since the first locations migration — with cycle detection and
+   * tests — and has never had a caller. So a cabinet added under the wrong parent was permanent,
+   * and the only fix was to delete the subtree and rebuild it. Drag-to-reparent was deliberately
+   * cut (§5.5: 118 of 121 shops are flat, and drag is the most failure-prone interaction we
+   * could pick); a picker is the house pattern and costs one button.
+   */
+  onMove: (node: InventoryLocationNode) => void;
   onDelete: (node: InventoryLocationNode) => void;
 }
 
@@ -361,6 +373,14 @@ export default function LocationDetailSheet({
                   >
                     Duplicate
                   </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<DriveFileMoveOutlinedIcon />}
+                    onClick={() => actions.onMove(node)}
+                    sx={{ flex: 1, minWidth: 150 }}
+                  >
+                    Move into…
+                  </Button>
                 </Stack>
                 <Button
                   variant="text"
@@ -374,6 +394,14 @@ export default function LocationDetailSheet({
               </Stack>
             </>
           )}
+
+          {/* Offered for the system bucket too, unlike everything above it. `Unassigned` is not a
+              shelf you can rename or label, but it is the pile everything passes through — so
+              what moved through it is the most useful history on the board.
+              `key` per place: the panel keeps its own loaded state, and two shelves must not
+              share one. */}
+          <Divider sx={{ my: 1.5 }} />
+          <PlaceHistory key={node.id} locationId={node.id} locationName={node.name} />
         </Box>
       )}
     </Drawer>

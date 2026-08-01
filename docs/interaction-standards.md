@@ -184,12 +184,9 @@ inconsistency that teaches users the markers elsewhere are decoration. Both are
 persistent; never a timed toast (§1's audience floor).
 
 - **At the changed input** — mark *where* the change is, not just that one
-  exists. In a table, the same `3px` left accent the incomplete BOM and routing
-  rows use, one rung down that ladder: `error.main` = broken, **`warning.main` =
-  wants your attention**, `transparent` = fine. For a standalone field, an amber
-  outline (`unsavedFieldSx`). An unsaved edit is the middle rung; it is *not* a
-  mistake and must not read as one — red is reserved for broken on purpose
-  (`design-system.md` §"subtractive vs destructive").
+  exists, using the shared status ladder below. An unsaved edit is the middle
+  rung; it is *not* a mistake and must not read as one — red is reserved for
+  broken on purpose (`design-system.md` §"subtractive vs destructive").
 - **At the section** — [`components/common/UnsavedChangesBar`](../components/common/UnsavedChangesBar.tsx):
   a sticky bar naming the count with **Discard** and **Save**. Use the shared
   component; do not hand-roll one. It is rendered only when dirty rather than
@@ -200,6 +197,30 @@ persistent; never a timed toast (§1's audience floor).
 Name the commit button after the thing (`Save pricing`, `Save costs`,
 `Save batch size`), not a generic "Save" — the bar can be far from the field
 that owns it.
+
+### The row status ladder — same colours, geometry follows the container
+
+One colour scale carries "what is the state of this row/field", everywhere:
+
+| Colour | Means | Example |
+|---|---|---|
+| `error.main` | **Broken** — blocks something downstream | a BOM material with no cost on file; an operation missing a labor rate |
+| `warning.main` | **Wants your attention** — not wrong yet | an unsaved edit; a placeholder operation with no work centre chosen |
+| `divider` / `transparent` | Fine | everything else |
+
+**The colours are the standard; the geometry is whatever the container
+supports** — a bordered card row takes a `1px` colored border
+(`RoutingOperationRow`, `PartBomPanel`), a table row takes a `3px` colored left
+accent, since you cannot cleanly border a `<tr>` (the pricing tiers). A
+standalone field takes a colored outline. Don't read a specific border width as
+part of the rule.
+
+> **Corrected 2026-07-31.** This section previously described "the `3px` left
+> accent the incomplete BOM **and routing** rows use". The routing rows never
+> used a left accent — [`RoutingOperationRow`](../components/routings/RoutingOperationRow.tsx)
+> has always drawn a full `1px` border. Only `PartBomPanel` had the left accent,
+> and it has since moved to the bordered-card shape to match the operation rows
+> it sits beside. The colour ladder was, and remains, genuinely shared.
 
 ### Dirty state is derived, never latched
 

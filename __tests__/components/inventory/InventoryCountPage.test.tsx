@@ -13,9 +13,14 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchParams,
 }));
 
+vi.mock('@/utils/operatorAccess', () => ({
+  getCurrentMember: vi.fn(async () => ({ id: 'member-1', name: 'Owner' })),
+}));
+
 vi.mock('@/utils/inventoryCountAccess', () => ({
   loadCountCandidates: vi.fn(),
   loadLocationCountCandidates: vi.fn(),
+  loadPartAtLocationCandidate: vi.fn(),
   refreshSystemQuantities: vi.fn(),
   refreshLocationQuantities: vi.fn(),
   commitCount: vi.fn(),
@@ -28,6 +33,21 @@ const mockUseCompanyFeatures = vi.fn(() => ({
   features: { inventory_locations: true },
   loading: false,
 }));
+/**
+ * Stub the shared picker, the way the operator lookup tests do. What matters here is that
+ * choosing a part puts a row on the sheet, not MUI's Autocomplete — and the real one imports
+ * `partsAccess`, which builds a Supabase client at module scope.
+ */
+let nextAddPick: { id: string; part_name: string } | null = null;
+vi.mock('@/components/parts/PartAutocomplete', () => ({
+  __esModule: true,
+  default: (props: { onChange: (o: unknown) => void; disabled?: boolean }) => (
+    <button type="button" disabled={props.disabled} onClick={() => props.onChange(nextAddPick)}>
+      add-part
+    </button>
+  ),
+}));
+
 vi.mock('@/hooks/useCompanyFeatures', () => ({
   useCompanyFeatures: () => mockUseCompanyFeatures(),
 }));
@@ -36,6 +56,9 @@ vi.mock('@/hooks/useCompanyFeatures', () => ({
 // client at import time and the whole file fails to load.
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   PUT_AWAY_MAX: 1000,
+  // Small on purpose: the pager only renders past one page, and a fixture of 100 rows to prove
+  // it would slow every test in this file.
+  LOCATION_PAGE_SIZE: 2,
   bulkPutAway: vi.fn(),
   createLocation: vi.fn(),
   getLocations: vi.fn(async () => []),
@@ -48,6 +71,7 @@ import {
   refreshSystemQuantities,
   refreshLocationQuantities,
   commitCount,
+  loadPartAtLocationCandidate,
 } from '@/utils/inventoryCountAccess';
 import { bulkPutAway, getLocations } from '@/utils/inventoryLocationsAccess';
 import type { CountCandidate } from '@/types/inventoryCount';
@@ -211,7 +235,11 @@ describe('choosing what to count', () => {
 
     await user.click(screen.getByRole('button', { name: 'Shelf B' }));
 
-    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=shelf-b');
+    // `&part=` makes this the one-row sheet the copy promises ("count them where they
+    // actually are") rather than the whole bin; `&from=count` returns here, not to Storage.
+    expect(mockPush).toHaveBeenCalledWith(
+      '/dashboard/co1/inventory/count?location=shelf-b&part=p9&from=count',
+    );
   });
 
   /**
@@ -551,7 +579,11 @@ describe('counting one place', () => {
   it('names the place it is scoped to instead of the whole shop', async () => {
     renderPage();
     expect(await screen.findByText("What's in Shelf A?")).toBeInTheDocument();
-    expect(loadLocationCountCandidates).toHaveBeenCalledWith(LOC, 'Shelf A', { search: '' });
+    expect(loadLocationCountCandidates).toHaveBeenCalledWith(LOC, 'Shelf A', {
+      search: '',
+      offset: 0,
+      limit: 2,
+    });
   });
 
   it('reads this bin, not every stocked part in the company', async () => {
@@ -654,13 +686,52 @@ describe('counting one place', () => {
     expect(refreshSystemQuantities).not.toHaveBeenCalled();
   });
 
-  it('admits when the bin holds more than the page shows', async () => {
+  /**
+   * It used to *admit* the cap — "showing 100 of 9,428, search to narrow it down" — which was
+   * honest and still left `Unassigned` uncountable, and that is the bin that most needs
+   * emptying because the auto-track trigger seeds a row there for every stocked part.
+   */
+  it('pages through a bin instead of showing one capped page', async () => {
+    const user = userEvent.setup();
     asMock(loadLocationCountCandidates).mockResolvedValue({
-      candidates: [here('BUY-ORING-214', 828)],
+      candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
       total: 9428,
     });
     renderPage();
-    expect(await screen.findByText(/showing 1 of 9,428 parts here/i)).toBeInTheDocument();
+
+    expect(await screen.findByText(/1–2 of 9,428 here/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: /next/i }));
+
+    await waitFor(() =>
+      expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(LOC, 'Shelf A', {
+        search: '',
+        offset: 2,
+        limit: 2,
+      }),
+    );
+  });
+
+  /** A tick on page 1 must survive turning to page 2 — the sheet holds rows, not indexes. */
+  it('keeps what is already ticked when the page turns', async () => {
+    const user = userEvent.setup();
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
+      total: 9428,
+    });
+    renderPage();
+    await screen.findByText(/1–2 of 9,428 here/i);
+
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [here('SOMETHING-ELSE', 3)],
+      total: 9428,
+    });
+    await user.click(screen.getByRole('button', { name: /next/i }));
+
+    await screen.findByText('SOMETHING-ELSE');
+    expect(screen.getByRole('button', { name: /count 1 part$/i })).toBeEnabled();
   });
 
   // The RPC caps the array to bound how long it holds row locks; say so before someone selects
@@ -753,5 +824,92 @@ describe('counting one place — the sheet outlives the search', () => {
     await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
 
     expect(inputFor('BUY-ORING-214')).toHaveValue(800);
+  });
+});
+
+/**
+ * The row a bin read cannot produce. `getLocationContentsPage` filters `.gt('quantity', 0)`, so
+ * "the system says zero and I am holding twelve" had no row to type a number into — the most
+ * valuable thing a count discovers was unrepresentable.
+ */
+describe('counting one place — adding a part that is not listed', () => {
+  const LOC3 = 'loc-shelf-a';
+
+  beforeEach(() => {
+    searchParams.set('location', LOC3);
+    asMock(getLocations).mockResolvedValue([
+      { id: LOC3, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
+    ]);
+    asMock(loadLocationCountCandidates).mockResolvedValue({ candidates: [], total: 0 });
+    nextAddPick = { id: 'p-missing', part_name: 'BUY-DOWEL-3MM' };
+    asMock(loadPartAtLocationCandidate).mockResolvedValue(
+      cand({
+        partId: 'p-missing',
+        quantity: undefined,
+        systemQuantity: 0,
+        unit: 'ea',
+        target: { kind: 'location', locationId: LOC3, locationName: 'Shelf A' },
+      } as Partial<CountCandidate> & { partId: string }),
+    );
+  });
+
+  afterEach(() => searchParams.delete('location'));
+
+  it('puts a part the bin does not hold onto the sheet, already ticked', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    await user.click(screen.getByRole('button', { name: 'add-part' }));
+
+    await waitFor(() =>
+      expect(loadPartAtLocationCandidate).toHaveBeenCalledWith('co1', 'p-missing', LOC3, 'Shelf A'),
+    );
+    // Ticked on arrival: you added it because you are holding it.
+    expect(await screen.findByRole('button', { name: /count 1 part$/i })).toBeEnabled();
+  });
+
+  /**
+   * The toolbar used to live inside the `countable.length === 0` ternary, so a server search
+   * matching nothing unmounted the search field along with everything else — leaving no way to
+   * clear the term you had just typed, and nowhere to add the part you were looking for.
+   */
+  it('keeps the toolbar when the bin reads empty', async () => {
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    expect(screen.getByRole('button', { name: 'add-part' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search what/i)).toBeInTheDocument();
+  });
+
+  it('says so when the part cannot be added, rather than failing silently', async () => {
+    const user = userEvent.setup();
+    asMock(loadPartAtLocationCandidate).mockRejectedValue(
+      new Error("BUY-DOWEL-3MM isn't tracked by place, so it can't be counted at one."),
+    );
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    await user.click(screen.getByRole('button', { name: 'add-part' }));
+    expect(await screen.findByText(/isn't tracked by place/i)).toBeInTheDocument();
+  });
+});
+
+/** A count session is a human assertion about a shelf, so the ledger must say whose. */
+describe('count runs are attributed', () => {
+  it('passes the acting member to every line it commits', async () => {
+    const user = userEvent.setup();
+    // The file's default fixture already provides "4140 bar"; only the refresh needs pinning.
+    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 40]]));
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    await chooseParts(user, '4140 bar');
+    await user.type(inputFor('4140 bar'), '38');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [, opts] = asMock(commitCount).mock.calls[0];
+    expect(opts.operatorId).toBe('member-1');
   });
 });

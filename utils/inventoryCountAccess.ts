@@ -249,7 +249,14 @@ export async function refreshSystemQuantities(partIds: string[]): Promise<Map<st
  */
 export async function commitCount(
   variances: CountVariance[],
-  onProgress?: (p: CountCommitProgress) => void,
+  /**
+   * An options bag rather than more positionals, matching `addStockAtLocation` and its siblings.
+   *
+   * `operatorId` names who ran the count in the ledger. Without it a count session — the one
+   * movement whose author matters most, because it is a human assertion about a shelf rather
+   * than a consequence of a job — lands anonymous.
+   */
+  { onProgress, operatorId }: { onProgress?: (p: CountCommitProgress) => void; operatorId?: string | null } = {},
 ): Promise<CountCommitResult> {
   const failures: CountCommitResult['failures'] = [];
   let committed = 0;
@@ -260,6 +267,9 @@ export async function commitCount(
 
     try {
       if (v.candidate.target.kind === 'aggregate') {
+        // Deliberately unattributed: `adjustPartStock` writes the aggregate ledger, which §5.4
+        // intends to retire once every shop is location-tracked. Widening its signature to carry
+        // an operator would be work invested in the path being removed.
         await adjustPartStock(v.candidate.partId, v.counted, v.candidate.unit, countNote(v));
       } else if (v.candidate.target.kind === 'location') {
         await adjustStockAtLocation(
@@ -267,7 +277,7 @@ export async function commitCount(
           v.candidate.target.locationId,
           v.counted,
           v.candidate.unit,
-          { notes: countNote(v) },
+          { notes: countNote(v), operatorId },
         );
       } else {
         // Excluded lines are filtered out before commit; treat reaching here as a bug.

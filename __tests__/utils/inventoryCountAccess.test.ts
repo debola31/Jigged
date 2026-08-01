@@ -147,7 +147,7 @@ describe('commitCount resilience', () => {
     const seen: string[] = [];
     await commitCount(
       [variance('p1', 1, { kind: 'aggregate' }), variance('p2', 2, { kind: 'aggregate' })],
-      (p) => seen.push(`${p.done}/${p.total}:${p.currentPartName}`),
+      { onProgress: (p) => seen.push(`${p.done}/${p.total}:${p.currentPartName}`) },
     );
     expect(seen).toEqual(['0/2:P1', '1/2:P2', '2/2:']);
   });
@@ -213,5 +213,28 @@ describe('loadPartAtLocationCandidate', () => {
     await expect(loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
       /RAW-AL6061-BLANK.*tracked by place/i,
     );
+  });
+});
+
+describe('commitCount attribution', () => {
+  /** A count is a human assertion about a shelf, so the ledger has to say whose. */
+  it('threads the operator onto every place-scoped line', async () => {
+    await commitCount(
+      [variance('p1', 5, { kind: 'location', locationId: 'loc-a', locationName: 'Shelf A' })],
+      { operatorId: 'member-1' },
+    );
+
+    const opts = asMock(adjustStockAtLocation).mock.calls[0].at(-1);
+    expect(opts.operatorId).toBe('member-1');
+  });
+
+  /**
+   * The aggregate branch stays unattributed on purpose: `adjustPartStock` writes the roll-up
+   * ledger that §5.4 intends to retire once every shop is location-tracked, so widening its
+   * signature would be work invested in the path being removed.
+   */
+  it('leaves the aggregate path alone', async () => {
+    await commitCount([variance('p1', 5, { kind: 'aggregate' })], { operatorId: 'member-1' });
+    expect(asMock(adjustPartStock).mock.calls[0]).toHaveLength(4);
   });
 });

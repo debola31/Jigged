@@ -99,10 +99,14 @@ import {
   commitCount,
   loadCountCandidates,
   loadLocationCountCandidates,
+  loadPartAtLocationCandidate,
   refreshLocationQuantities,
   refreshSystemQuantities,
 } from '@/utils/inventoryCountAccess';
+import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import {
+  LOCATION_PAGE_SIZE,
   PUT_AWAY_MAX,
   bulkPutAway,
   createLocation,
@@ -165,13 +169,62 @@ export default function InventoryCountPage() {
    * literal; the post-save one mattered most, because it fires exactly when someone wants to go
    * count the next shelf and it was dropping them on Parts with the board gone.
    */
-  const returnTo = features.inventory_locations
-    ? { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' }
-    : { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' };
-
   /** `?location=<id>` switches the whole sheet to place-scoped. See the module comment. */
   const locationId = searchParams.get('location');
   const locationMode = Boolean(locationId);
+
+  /**
+   * `?part=<id>` narrows a place-scoped count to ONE part — the sheet you reach from "Count here"
+   * on the part page. Meaningless without a location: counting a part means counting it somewhere.
+   */
+  const partIdParam = searchParams.get('part');
+  const partScope = Boolean(locationId && partIdParam);
+  const [partName, setPartName] = useState('');
+
+  /**
+   * Where "back" goes, and where a finished count lands.
+   *
+   * `?from=` is set by whoever sent you here, because the destination is not derivable: the same
+   * one-row sheet is reachable from a part page and from an excluded-part chip on another count,
+   * and dumping someone on Storage from either is the bug this branch already exists to prevent.
+   *
+   * Only the last branch depends on the feature flag, which is why the Back button's
+   * hide-until-resolved guard is scoped to it — the others are correct immediately, and hiding
+   * them too made the button disappear on a page that never needed to wait.
+   */
+  const from = searchParams.get('from');
+  const returnTo = partScope && partIdParam
+    ? { href: `/dashboard/${companyId}/parts/${partIdParam}?tab=inventory`, label: 'Back to part', flagged: false }
+    : from === 'count'
+      ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count', flagged: false }
+      : from === 'parts'
+        ? { href: `/dashboard/${companyId}/parts`, label: 'Back to parts', flagged: false }
+        : features.inventory_locations
+          ? { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage', flagged: true }
+          : { href: `/dashboard/${companyId}/parts`, label: 'Back to parts', flagged: true };
+
+  /**
+   * Which page of this bin we are looking at.
+   *
+   * `Unassigned` holds every stocked part the shop owns, and it is the bin that most needs
+   * emptying — so a hard cap of one page made the single most important place uncountable. The
+   * justification for paging is query cost, not DOM weight: `getLocationContentsPage` pairs an
+   * exact count with a range, and this is an office computer.
+   */
+  const [page, setPage] = useState(0);
+  const [paging, setPaging] = useState(false);
+  /** Bumped to force a re-read after a write that changed what is here. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /**
+   * Remounts the add-a-part picker after each pick.
+   *
+   * `PartAutocomplete` keeps its own `inputValue`, and it is a controlled-`value` component with
+   * nothing to control here — we consume the pick and hold no selection. Passing `value={null}`
+   * alone leaves the typed text sitting in the box after the row has been added. A key change is
+   * the honest reset.
+   */
+  const [addNonce, setAddNonce] = useState(0);
+  const [addingPart, setAddingPart] = useState(false);
 
   const [locationName, setLocationName] = useState('');
   const [allLocations, setAllLocations] = useState<InventoryLocation[]>([]);
@@ -180,9 +233,13 @@ export default function InventoryCountPage() {
   // /inventory/* route, which is both wrong and confusing mid-count.
   const { setTitle } = usePageTitle();
   useEffect(() => {
-    setTitle(locationMode && locationName ? `Count ${locationName}` : 'Count Inventory');
+    // Guard against the empty string: `partName` is only known after the one-row load resolves,
+    // and "Count  in Shelf A" is worse than the generic title for the moment in between.
+    if (partScope && partName && locationName) setTitle(`Count ${partName} in ${locationName}`);
+    else if (locationMode && locationName) setTitle(`Count ${locationName}`);
+    else setTitle('Count Inventory');
     return () => setTitle(null);
-  }, [setTitle, locationMode, locationName]);
+  }, [setTitle, locationMode, locationName, partScope, partName]);
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -247,10 +304,31 @@ export default function InventoryCountPage() {
   const [progress, setProgress] = useState<CountCommitProgress | null>(null);
   const [snack, setSnack] = useState<{ msg: string; severity: 'success' | 'error' } | null>(null);
 
+  /**
+   * Who is running this count, so the ledger names them.
+   *
+   * Its OWN effect, keyed on the company. Folding it into the loader would re-fetch the member on
+   * every page turn and every keystroke of the debounced search, for a value that cannot change
+   * while the page is open.
+   */
+  const [operatorId, setOperatorId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentMember(companyId)
+      .then((m) => !cancelled && setOperatorId(m?.id ?? null))
+      .catch(() => !cancelled && setOperatorId(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
+
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A separate flag from `loading`: that one swaps the whole page for a spinner, which on a
+      // page turn would throw away the toolbar and the pager you just pressed.
+      setPaging(true);
       try {
         // Place-scoped: read one page of THIS bin's contents. `serverSearch` is a dependency, so
         // typing re-runs this against the server — `Unassigned` holds every part a shop owns and
@@ -266,10 +344,31 @@ export default function InventoryCountPage() {
           setAllLocations(locations);
           setLocationName(here.name);
 
+          // One part at one place: skip the picker entirely and go straight to a one-row sheet.
+          // There is nothing to choose, so making someone tick a single checkbox first would be
+          // a step that exists only because the other mode has one.
+          if (partIdParam) {
+            const only = await loadPartAtLocationCandidate(
+              companyId,
+              partIdParam,
+              locationId,
+              here.name,
+            );
+            if (cancelled) return;
+            setPartName(only.partName);
+            setCandidates([only]);
+            setHereTotal(1);
+            setSelected(new Map([[only.partId, only]]));
+            setEntries({});
+            rememberOpenedWith([only]);
+            setStep(1);
+            return;
+          }
+
           const { candidates: found, total } = await loadLocationCountCandidates(
             locationId,
             here.name,
-            { search: serverSearch },
+            { search: serverSearch, offset: page * LOCATION_PAGE_SIZE, limit: LOCATION_PAGE_SIZE },
           );
           if (cancelled) return;
           setCandidates(found);
@@ -297,18 +396,25 @@ export default function InventoryCountPage() {
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your stocked parts.');
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setPaging(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [companyId, locationId, serverSearch, rememberOpenedWith]);
+  }, [companyId, locationId, partIdParam, serverSearch, page, reloadKey, rememberOpenedWith]);
 
   // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
   // is unconditional so the two modes don't need different effect shapes.
   useEffect(() => {
-    const id = setTimeout(() => setServerSearch(search.trim()), 300);
+    const id = setTimeout(() => {
+      setServerSearch(search.trim());
+      // A new term is a new result set; staying on page 3 of the old one shows nothing.
+      setPage(0);
+    }, 300);
     return () => clearTimeout(id);
   }, [search]);
 
@@ -402,6 +508,43 @@ export default function InventoryCountPage() {
       return next;
     });
 
+  /**
+   * Put a part on the sheet that this bin does not think it holds.
+   *
+   * The whole point of a count. `getLocationContentsPage` filters `.gt('quantity', 0)`, so the
+   * single most valuable discovery — *the system says zero and I am holding twelve* — was not
+   * merely hard to record, it was unrepresentable: the row did not exist to type a number into.
+   *
+   * `loadPartAtLocationCandidate` reads the real balance rather than assuming zero, which matters
+   * for the mirror case: confirming an empty shelf against a system that says twelve has to be
+   * able to commit, and a delta of zero is dropped.
+   */
+  const addPartHere = async (option: PartSelectOption | null) => {
+    if (!option || !locationId) return;
+    setAddNonce((n) => n + 1);
+
+    if (selected.has(option.id)) {
+      setSnack({ msg: `${option.part_name} is already on the sheet.`, severity: 'success' });
+      return;
+    }
+    setAddingPart(true);
+    try {
+      const c = await loadPartAtLocationCandidate(companyId, option.id, locationId, locationName);
+      setSelected((prev) => new Map(prev).set(c.partId, c));
+      // Prepend so it is visible without hunting: it is not on this page of the server list, and
+      // may not be on any page.
+      setCandidates((prev) => [c, ...prev.filter((x) => x.partId !== c.partId)]);
+      rememberOpenedWith([c]);
+    } catch (e) {
+      setSnack({
+        msg: e instanceof Error ? e.message : 'Could not add that part.',
+        severity: 'error',
+      });
+    } finally {
+      setAddingPart(false);
+    }
+  };
+
   const setCount = (partId: string, raw: string) =>
     setEntries((prev) => {
       const next = { ...prev };
@@ -466,7 +609,7 @@ export default function InventoryCountPage() {
     setCommitting(true);
     setProgress({ done: 0, total: toCommit.length, currentPartName: '' });
     try {
-      const result = await commitCount(toCommit, setProgress);
+      const result = await commitCount(toCommit, { onProgress: setProgress, operatorId });
       clearDraft();
       if (result.failures.length === 0) {
         const moved = toCommit.filter((v) => v.movedSinceOpened).length;
@@ -509,6 +652,13 @@ export default function InventoryCountPage() {
       // Refetch from the START. These parts have just left this location, so the result set
       // shifted — holding the previous page's offset would silently skip whatever moved up.
       setSelected(new Map());
+      setEntries({});
+      setMoveTo(null);
+      // The rows just left this bin, so the result set shifted under the current offset. Reusing
+      // it would silently skip whatever moved up into it.
+      openedWithRef.current = new Map();
+      setPage(0);
+      setReloadKey((k) => k + 1);
       setEntries({});
       setMoveTo(null);
       const { candidates: found, total } = await loadLocationCountCandidates(
@@ -610,11 +760,14 @@ export default function InventoryCountPage() {
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => router.push(returnTo.href)}
-        sx={{ mb: 2, visibility: featuresLoading ? 'hidden' : 'visible' }}
+        sx={{ mb: 2, visibility: returnTo.flagged && featuresLoading ? 'hidden' : 'visible' }}
       >
         {returnTo.label}
       </Button>
 
+      {/* No stepper in part-scope: there is one row, already chosen, so "Pick / Count" describes
+          a journey that does not happen. */}
+      {!partScope && (
       <Stepper activeStep={step} sx={{ mb: 4, maxWidth: 460 }}>
         {STEPS.map((label) => (
           <Step key={label}>
@@ -622,6 +775,7 @@ export default function InventoryCountPage() {
           </Step>
         ))}
       </Stepper>
+      )}
 
       {loadError && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -672,8 +826,11 @@ export default function InventoryCountPage() {
         </Alert>
       )}
 
-      {/* ── Step 1: what are you counting? ───────────────────────────────── */}
-      {step === 0 && (
+      {/* ── Step 1: what are you counting? ───────────────────────────────────
+          Suppressed entirely in part-scope: there is one row and it is already chosen. Leaving
+          it mounted also put "Nothing to count yet — mark a few parts as stocked" directly under
+          the error Alert whenever the one-row load threw, since that path never reaches step 1. */}
+      {step === 0 && !partScope && (
         <Box>
           <Typography variant="body1" sx={{ mb: 0.5 }}>
             {locationMode
@@ -686,7 +843,11 @@ export default function InventoryCountPage() {
               : 'One part or the whole shop — whatever you’re walking right now. You can always count the rest later.'}
           </Typography>
 
-          {countable.length === 0 ? (
+          {/* The toolbar stays mounted in place-scoped mode even with no rows. The search runs
+              against the SERVER here, so a term that matches nothing emptied `countable`, which
+              unmounted the search field along with everything else — leaving no way to clear the
+              term you had just typed. Only the list area is allowed to go empty. */}
+          {countable.length === 0 && !locationMode ? (
             <Card elevation={2}>
               <CardContent sx={{ p: 6, textAlign: 'center' }}>
                 <Inventory2OutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
@@ -708,6 +869,23 @@ export default function InventoryCountPage() {
                   onChange={(e) => setSearch(e.target.value)}
                   sx={{ width: 300 }}
                 />
+                {/* Only place-scoped. A shop-wide count already lists every stocked part, so
+                    there is nothing that could be missing from it. */}
+                {locationMode && (
+                  <Box sx={{ width: 320 }}>
+                    <PartAutocomplete
+                      key={addNonce}
+                      companyId={companyId}
+                      value={null}
+                      onChange={addPartHere}
+                      kind="stocked"
+                      label="Found something not listed?"
+                      size="small"
+                      disabled={addingPart}
+                      helperText="Adds it to this sheet even if the system says none is here."
+                    />
+                  </Box>
+                )}
                 <Box sx={{ flex: 1 }} />
                 <Button
                   // A UNION with what is already ticked, because "select all" on page 3 must not
@@ -723,7 +901,10 @@ export default function InventoryCountPage() {
                   // Say so here rather than letting someone select 2,000 and be told no.
                   disabled={visible.length > PUT_AWAY_MAX}
                 >
-                  Select all{visible.length !== countable.length ? ' shown' : ''}
+                  {/* In place-scoped mode `visible === countable` by construction, so the old
+                      comparison never fired and the label always read "Select all" even on
+                      page 1 of 95. Key it off whether a pager exists. */}
+                  Select all{hereTotal > LOCATION_PAGE_SIZE || visible.length !== countable.length ? ' shown' : ''}
                 </Button>
                 <Button
                   variant="contained"
@@ -812,15 +993,47 @@ export default function InventoryCountPage() {
                 }}
               />
 
-              {/* The page is capped, and `Unassigned` on a real shop holds every part they own —
-                  so say what isn't shown rather than presenting a page as the whole bin. */}
-              {locationMode && hereTotal > countable.length && (
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  Showing {countable.length} of {num(hereTotal)} parts here. Search to narrow it
-                  down — putting a batch away removes it from this list.
-                </Alert>
+              {/* A pager, not a notice. Saying "showing 100 of 9,428, search to narrow it down"
+                  was honest and still left `Unassigned` — the bin that most needs emptying,
+                  because the auto-track trigger seeds a row there for every stocked part —
+                  impossible to work through. Ticks survive a page turn: the sheet holds the
+                  chosen rows themselves, not indexes into this list. */}
+              {locationMode && hereTotal > LOCATION_PAGE_SIZE && (
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  sx={{ mb: 2, flexWrap: 'wrap' }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    {page * LOCATION_PAGE_SIZE + 1}–
+                    {Math.min((page + 1) * LOCATION_PAGE_SIZE, hereTotal)} of {num(hereTotal)} here
+                  </Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Button
+                    size="small"
+                    disabled={paging || page === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    size="small"
+                    disabled={paging || (page + 1) * LOCATION_PAGE_SIZE >= hereTotal}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </Stack>
               )}
 
+              {countable.length === 0 ? (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {search.trim()
+                    ? `Nothing here matches “${search.trim()}”.`
+                    : `${locationName} is empty.`}
+                </Alert>
+              ) : (
               <Card elevation={2}>
                 <Stack divider={<Divider />}>
                   {visible.map((c) => (
@@ -863,6 +1076,7 @@ export default function InventoryCountPage() {
                   ))}
                 </Stack>
               </Card>
+              )}
 
               {/*
                 Parts held back — and now reachable, which is the difference between naming
@@ -900,7 +1114,10 @@ export default function InventoryCountPage() {
                               label={l.name}
                               onClick={() =>
                                 router.push(
-                                  `/dashboard/${companyId}/inventory/count?location=${l.id}`,
+                                  // `&part=` makes this the one-row sheet the copy above
+                                  // promises ("count them where they actually are"), and
+                                  // `&from=count` brings you back here rather than to Storage.
+                                  `/dashboard/${companyId}/inventory/count?location=${l.id}&part=${c.partId}&from=count`,
                                 )
                               }
                             />

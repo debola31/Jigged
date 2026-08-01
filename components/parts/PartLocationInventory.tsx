@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -9,7 +10,10 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 import AddIcon from '@mui/icons-material/Add';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
@@ -58,6 +62,7 @@ export default function PartLocationInventory({
   companyId,
   onStockChanged,
 }: PartLocationInventoryProps) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [action, setAction] = useState<LocationAction | null>(null);
 
@@ -178,6 +183,32 @@ export default function PartLocationInventory({
               <Typography sx={{ fontWeight: 600 }}>
                 {b.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })} {primaryUnit}
               </Typography>
+              {/*
+                The door counting never had from a part.
+
+                Place-scoped counting has worked since 2026-07-30, but both its entry points were
+                on the Storage board — so the obvious move, "I don't believe this number, count
+                it", had no route from the number you are doubting.
+
+                On EVERY row including zero ones: "the system says zero and I am holding twelve"
+                is the most valuable thing a count discovers, and the one-row sheet reads the
+                balance rather than assuming it, so a zero row is countable.
+              */}
+              <Tooltip title={`Count ${part.part_name} in ${b.location_name}`}>
+                <IconButton
+                  aria-label={`Count in ${b.location_name}`}
+                  onClick={() =>
+                    router.push(
+                      `/dashboard/${companyId}/inventory/count?location=${b.location_id}&part=${partId}`,
+                    )
+                  }
+                  // The theme has no MuiIconButton size override, so 48px is set here rather
+                  // than assumed.
+                  sx={{ ml: 1, width: 48, height: 48 }}
+                >
+                  <FactCheckOutlinedIcon />
+                </IconButton>
+              </Tooltip>
             </Paper>
           ))}
         </Stack>

@@ -21,7 +21,6 @@ import MenuItem from '@mui/material/MenuItem';
 import Chip from '@mui/material/Chip';
 import StockStatusChip, { deriveStockStatus } from '@/components/inventory/StockStatusChip';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -96,7 +95,6 @@ export default function PartsPage() {
   const companyId = params.companyId as string;
 
   const searchParams = useSearchParams();
-  const { features, loading: featuresLoading } = useCompanyFeatures();
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -583,26 +581,27 @@ export default function PartsPage() {
 
         <Box sx={{ flex: 1 }} />
 
-        {/* Only when locations are OFF. With the flag on, counting is reached from the
-            Storage board — you count a place, not a catalogue (inventory.md §5.11). With
-            it off there are no places, so the company-wide count is the only count and
-            this is now its only home, since /inventory folded into this page.
+        {/* Unconditional now.
 
-            `!featuresLoading` matters: without it the button renders during the flag's
-            load window and then vanishes, because an unresolved `features` object makes
-            `!features.inventory_locations` true. Caught on the preview — a control that
-            appears and then disappears is worse than one that was never there. The sidebar
-            solves the same problem with a Skeleton in the item's slot; here the honest
-            answer is to show nothing until we know. */}
-        {!featuresLoading && !features.inventory_locations && (
-          <Button
-            variant="outlined"
-            startIcon={<FactCheckOutlinedIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
-          >
-            Count Inventory
-          </Button>
-        )}
+            It used to render ONLY when locations were off, on the reasoning that with the flag
+            on you count a place rather than a catalogue and would reach it from the Storage
+            board. In practice that meant turning locations ON **removed** the entry point most
+            people look for, and left counting reachable from exactly one screen — the founder
+            looked for it here and concluded place-scoped counting did not exist.
+
+            Both are true at once: a place-scoped count starts from a place, and a shop-wide
+            count starts from the catalogue. This is the catalogue. `?from=parts` brings you
+            back here rather than to Storage.
+
+            This also drops the `featuresLoading` guard that existed only to stop the button
+            appearing and then vanishing — with nothing to gate on, there is nothing to wait for. */}
+        <Button
+          variant="outlined"
+          startIcon={<FactCheckOutlinedIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/inventory/count?from=parts`)}
+        >
+          Count Inventory
+        </Button>
 
         <Button
           variant="outlined"

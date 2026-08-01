@@ -96,45 +96,133 @@ the generic "low-stakes ⇒ no dialog" advice.
 
 ## 2. Saving
 
-**Rule:** pick the model by **control type**, apply it the same way everywhere,
-and always show status ([GitHub Primer — Saving](https://primer.style/product/ui-patterns/saving/), [GitLab Pajamas — Saving & feedback](https://design.gitlab.com/patterns/saving-and-feedback/)).
+**Rule:** pick the model by **what is being edited**, apply it the same way
+everywhere, always show status, and never let one section destroy another's
+work ([GitHub Primer — Saving](https://primer.style/product/ui-patterns/saving/), [GitLab Pajamas — Saving & feedback](https://design.gitlab.com/patterns/saving-and-feedback/)).
 
-- **Auto-save** imperative, low-risk, easily-reversible inline edits (identity
-  fields, routing operations, BOM, unit conversions, transaction notes).
-- **Explicit Save** for declarative / **financial** inputs. Pricing tiers feed
-  quotes, so they use a Save button + dirty state — auto-save is the wrong
-  default for financial data ([GitLab](https://design.gitlab.com/patterns/saving-and-feedback/), [Figma — autosave pitfalls](https://www.figma.com/blog/behind-the-feature-autosave/)).
+### The three modes
+
+| Mode | Applies to | Commits on | Indicator |
+|---|---|---|---|
+| **Auto-save** | a single, independently-valid, non-financial value: identity fields, transaction notes, costing **batch size**, preferred vendor | blur (text/number) or change (toggle/select) | `SaveStatus` |
+| **Row editor → Save/Cancel**, then persists immediately | a multi-field record only valid as a *set*: routing operations, BOM materials, unit conversions | the editor's own Save | `SaveStatus` on the panel |
+| **Staged explicit Save** | **financial** data that feeds quotes: pricing tiers, procurement cost tiers | the card's Save button | dirty row accent + sticky footer (below) |
+
+Auto-save is wrong for financial data ([GitLab](https://design.gitlab.com/patterns/saving-and-feedback/), [Figma — autosave pitfalls](https://www.figma.com/blog/behind-the-feature-autosave/)); a row
+editor is the right shape for a record whose fields are meaningless
+individually, and it is what Polaris recommends for independently-editable
+sections of one page. This leaves the part page with exactly **two**
+explicit-Save surfaces, both tier tables — so a Save button reliably means
+"this is money."
+
 - **One shared indicator:** [`components/common/SaveStatus.tsx`](../components/common/SaveStatus.tsx)
   — "Saving… / Saved", in an `aria-live="polite"` region. Reuse it on every
   saving surface; don't hand-roll per-section badges.
 - Never mix auto-save and explicit-save **within one form/section** in a way the
   user can't predict — that's the direct cause of "did it save?" ([Primer](https://primer.style/product/ui-patterns/saving/)).
+  If one control in a staged card genuinely belongs in auto-save mode (the
+  preferred-vendor picker in the bought-part Cost card), give it its own
+  bordered block and its own `SaveStatus` so the two models read as two
+  sections, not one ambiguous card.
+
+### Invariant 1 — section isolation
+
+> **A save in one section must never discard unsaved draft state in another.** A
+> refresh signal may invalidate **derived / read-only** data (computed costs,
+> rollups, breakdowns). It must never re-seed **user-editable draft** state or
+> clear a dirty flag.
+
+This is the rule the standard was missing, and its absence cost a real customer
+real work. The part page broadcasts one page-wide `refreshKey` after every
+mutation; `PartPricing` consumed it by re-seeding its editable tier rows from
+the database and calling `setDirty(false)`. So typing a new Min qty and *then*
+editing an operation — two cards sitting side by side — silently reverted the
+typed value. The old rule only forbade mixing models *within* a section, and
+said nothing about one section reaching into another.
+
+The fix shape: gate the draft re-seed on "not dirty" (and on the record not
+having actually changed), while leaving the derived-data refetches on the
+refresh signal untouched. See `PartPricing.tsx`'s load effect, and the
+regression test in
+[`__tests__/components/parts/PartPricing.test.tsx`](../__tests__/components/parts/PartPricing.test.tsx).
+
+### Invariant 2 — exit guard
+
+> **Leaving a surface that holds staged changes must confirm, not discard.**
+> That includes in-app navigation and **tab switches**, not just page unload —
+> conditionally-rendered tabs unmount their panels, which is silent data loss
+> wearing a different hat.
+
+Attach the guard **only while genuinely dirty** and remove it on save, so it
+never produces the false positive that trains users to click through
+([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
+`PartWorkspace` owns this: staged-save panels report dirty state up via
+`onDirtyChange`, and a tab switch while dirty raises a Keep-editing / Discard
+dialog.
+
+### Making "unsaved" visible
+
+A dirty indicator only works if it is seen. The original one — `variant="caption"`
+in `text.secondary`, at the bottom of the tier table, next to a `size="small"`
+button — was not, and that is *why* the change was still unsaved when the wipe
+hit. Attention is on the field being typed, not the card chrome
+([NN/g — Change Blindness](https://www.nngroup.com/articles/change-blindness/):
+put feedback next to where the user is working), and users routinely miss a
+separate commit button beside a field they just filled in
+([Baymard — avoid "Apply" buttons](https://baymard.com/blog/checkout-usability-apply-buttons)).
+
+Two signals, both persistent (never a timed toast — see §1's audience floor):
+
+- **At the row** — the same `3px` left accent the incomplete BOM and routing
+  rows use, one rung down that ladder: `error.main` = broken, **`warning.main` =
+  wants your attention**, `transparent` = fine. An unsaved edit is the middle
+  rung; it is *not* a mistake and must not read as one. Red is reserved for
+  broken on purpose (`design-system.md` §"subtractive vs destructive").
+- **At the card** — a sticky footer that appears only when dirty, naming the
+  count and offering **Discard** and **Save**. It is hidden when clean rather
+  than disabled-and-visible: with nothing to save the action is genuinely
+  irrelevant, not blocked (§4 rule 3), and a permanently-present Save button
+  carries no signal. Its *appearance* is what tells the user work is pending.
 
 ### Current state
 - ✅ `SaveStatus` adopted in identity, routing, BOM, procurement, transaction
-  notes. Pricing is explicit-Save.
-- ❌ **Undo-after-save for pricing — not pursued.** GitLab Pajamas advises against
-  auto-saving financial data ([Pajamas](https://design.gitlab.com/usability/saving-and-feedback)),
+  notes. Pricing + procurement tiers are explicit-Save.
+- ✅ **Section isolation** enforced in both tier tables, with a regression test
+  that fails if the guard is removed.
+- ✅ **Exit guard**: tab-switch confirmation + conditional `beforeunload`, both
+  driven by `onDirtyChange` reporting into `PartWorkspace`.
+- ✅ **Batch size auto-saves on blur.** It used to have its own Save button
+  inside the Cost card — a third staged-save surface for a value that is a
+  costing assumption, not a price. Moving it to auto-save is what makes "a Save
+  button means money" true rather than approximately true.
+- ❌ **Undo-after-save for pricing — still not pursued.** GitLab Pajamas advises
+  against auto-saving financial data ([Pajamas](https://design.gitlab.com/usability/saving-and-feedback)),
   so explicit Save stays. With an explicit Save button **plus** a visible dirty
-  indicator already in place, a separate post-save Undo is redundant — the
-  deliberate action *is* the safeguard, and a tier is trivially re-edited and
-  re-saved (and doesn't touch existing quotes; see §1).
-- 🔻 **Navigation guard — low priority, narrow if at all.** The honest dirty-state
-  indicator is the real protection. A `beforeunload` guard is a weak backstop:
-  browsers show only a generic, non-customizable message (it can't name the
-  unsaved tier), which is reason enough on its own.
+  indicator, a separate post-save Undo is redundant — the deliberate action *is*
+  the safeguard, and a tier is trivially re-edited and re-saved (and doesn't
+  touch existing quotes; see §1).
 
-  > **Corrected 2026-07-31.** This also said `beforeunload` "is unreliable on
-  > mobile/tablet — **our primary device**". Both halves were wrong: there is no single
-  > primary device, and pricing tiers are edited on the **office computer**, where
-  > `beforeunload` is perfectly reliable
-  > ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
-  > The mobile-unreliability point still applies to the *operator* surface, which has no
-  > staged-save forms — so it argues for nothing here. The recommendation is unchanged, but
-  > it now rests only on the generic-message argument rather than on a false premise.
-  If added at all, use a conditional in-app (Next.js) route guard attached **only
-  while genuinely dirty** and removed once saved (MDN), to avoid the false-positive
-  that trains users to ignore it (the Figma "already-saved-but-warned" pitfall).
+  > **Corrected 2026-07-31 (second correction).** This section previously also
+  > carried a 🔻 item deprioritizing a navigation guard, on the grounds that
+  > *"the honest dirty-state indicator is the real protection."* **That claim is
+  > now falsified.** A customer lost a staged tier edit with the dirty indicator
+  > present and working — because (a) a sibling panel's save wiped the draft
+  > without any navigation at all, and (b) the indicator was too quiet to be
+  > read. Both halves are now addressed: invariant 1 removes the wipe, invariant
+  > 2 adds the guard, and the row accent + sticky footer make the state legible.
+  >
+  > The old entry's one surviving argument — that `beforeunload` shows only a
+  > generic, non-customizable message
+  > ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event))
+  > — is real but is an argument for *also* guarding in-app exits with a dialog
+  > that can name what's at stake, not for guarding nothing. A generic warning
+  > still beats silent loss.
+  >
+  > **Known gap:** in-app *route* navigation (breadcrumb, links in the
+  > completeness banner) is still unguarded. Next.js App Router exposes no
+  > router-event hook, so covering it means intercepting link clicks; that is
+  > deliberately not built rather than half-built. The tab switch — by far the
+  > most common way to leave — is guarded.
 
 ---
 

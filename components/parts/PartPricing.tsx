@@ -17,6 +17,7 @@ import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
 import { unitShortLabel } from '@/lib/standardUnits';
 import {
@@ -43,6 +44,12 @@ interface PartPricingProps {
   part: Part;
   /** Bumped by the parent whenever the routing changes — triggers a reload + recompute. */
   refreshKey?: number;
+  /**
+   * Reports whether this card is holding staged tier edits, so the workspace can
+   * confirm before a tab switch or page unload throws them away
+   * (interaction-standards.md §2, exit guard). Must be referentially stable.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
   /**
    * Drill-down chain on the page hosting this card — passed through to
    * `pushPartToChain` when building the href on each "Heads up" warning
@@ -76,6 +83,14 @@ interface EditRow {
   /** null when materials are incomplete or the breakdown is missing — render
    * "—" rather than $0. See `RoutingCostBreakdown.materials_complete`. */
   baseCostPerUnit: number | null;
+  /**
+   * This row holds a staged edit the user hasn't saved yet. Drives the amber
+   * left accent so the unsaved change is marked AT the row the user typed in,
+   * not only in the card footer — attention is on the field, not the chrome
+   * (interaction-standards.md §2). Set by the edit handlers, cleared by a
+   * (re)load. Never persisted.
+   */
+  dirty?: boolean;
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -166,6 +181,7 @@ export default function PartPricing({
   refreshKey = 0,
   currentChain = [],
   onPricingChanged,
+  onDirtyChange,
 }: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
@@ -192,6 +208,14 @@ export default function PartPricing({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [dirty, setDirty] = useState(false);
+  // Mirrors `dirty` for the load effect's isolation guard. Written synchronously
+  // everywhere `dirty` is set (never in an effect), so the guard can't silently
+  // depend on effect-declaration order within a commit.
+  const dirtyRef = useRef(false);
+  // Which part the tier rows currently hold. A genuine part change must reload
+  // even if the previous part left staged edits behind; a sibling-panel refresh
+  // on the SAME part must not.
+  const loadedPartIdRef = useRef<string | null>(null);
   const saving = saveState === 'saving';
 
   // Costing lot size — the production run this part's cost amortizes over, and
@@ -203,15 +227,17 @@ export default function PartPricing({
   const [costingDirty, setCostingDirty] = useState(false);
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
-  const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
     const n = parseFloat(costingQtyStr);
     return Number.isFinite(n) && n > 0 ? n : 1;
   })();
   const costingUnit = unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit');
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (opts?: { showSpinner?: boolean }) => {
+    // Only the first load of a given part shows the spinner. A silent reload
+    // (sibling panel saved, or our own save landed) keeps the table on screen
+    // instead of collapsing it to a spinner and back.
+    if (opts?.showSpinner !== false) setLoading(true);
     setError(null);
     try {
       // Only the persisted markup tiers load here. The cost breakdown is owned
@@ -239,6 +265,7 @@ export default function PartPricing({
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
       setRows(seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
       setDirty(false);
+      dirtyRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
     } finally {
@@ -250,9 +277,30 @@ export default function PartPricing({
     // Data-fetch-on-mount false positive: loadAll's setState all runs post-await
     // (documented class in eslint.config.mjs). loadAll seeds the EDITABLE tier
     // rows, so useLoad (immutable data) doesn't fit — kept as-is.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadAll();
-  }, [loadAll, refreshKey]);
+    //
+    // SECTION ISOLATION (docs/interaction-standards.md §2). A `refreshKey` bump
+    // is a SIBLING panel reporting that it saved — a routing operation, a BOM
+    // row, a preferred-vendor pick. That legitimately changes the DERIVED base
+    // cost, which the two effects below refetch. It must never re-seed these
+    // rows from the database: doing so silently discarded staged tier edits
+    // (type a Min qty, then save an operation, and the typed value reverted
+    // with no warning — the reported bug).
+    //
+    // A real part change still reloads: `dirty` belongs to the part we were
+    // editing, so it must not keep the NEXT part's tiers off screen.
+    const partChanged = loadedPartIdRef.current !== partId;
+    if (!partChanged && dirtyRef.current) return;
+    loadedPartIdRef.current = partId;
+    void loadAll({ showSpinner: partChanged });
+  }, [loadAll, partId, refreshKey]);
+
+  // Publish staged-edit state to the workspace, which owns the exit guard. The
+  // cleanup clears it on unmount so a discarded draft can't leave the guard
+  // armed forever.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   // Keep the refs current for loadAll (tierBaseCostsRef) and the base-cost fetch
   // guard (partIdRef) — written here, not during render.
@@ -358,6 +406,7 @@ export default function PartPricing({
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
     setDirty(true);
+    dirtyRef.current = true;
     setSaveState('idle');
   };
 
@@ -404,24 +453,13 @@ export default function PartPricing({
       } catch (noteErr) {
         console.error('Failed to log pricing note:', noteErr);
       }
-      // Reload so newly-inserted rows pick up real ids.
-      const fresh = await getTiersForPart(partId);
-      setRows(
-        fresh.map((t) =>
-          recomputeRow(
-            {
-              id: t.id,
-              sequence: t.sequence,
-              quantity: String(t.quantity),
-              markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-              unitPrice: '',
-              baseCostPerUnit: null,
-            },
-            tierBaseCosts,
-          ),
-        ),
-      );
+      // Clear dirty first: the reload below re-seeds these rows, and the
+      // isolation guard deliberately refuses to re-seed while dirty.
       setDirty(false);
+      dirtyRef.current = false;
+      // Reload so newly-inserted rows pick up real ids. Silent — the table
+      // stays on screen rather than collapsing to a spinner.
+      await loadAll({ showSpinner: false });
       setSaveState('saved');
       // Refresh the parent so the workspace "missing markup" banner reflects
       // the new markup instead of going stale.
@@ -433,13 +471,26 @@ export default function PartPricing({
     }
   };
 
+  /**
+   * Drop staged tier edits and re-seed from the database. The counterpart to
+   * Save in the unsaved-changes footer: the user needs a deliberate way to back
+   * out that isn't "navigate away and hope nothing was kept".
+   */
+  const handleDiscard = (): void => {
+    setDirty(false);
+    dirtyRef.current = false;
+    setSaveState('idle');
+    setError(null);
+    void loadAll({ showSpinner: false });
+  };
+
   const handleQuantityChange = (idx: number, value: string): void => {
     // Tier minimum quantities are decimal-capable (universal, up to 4 dp) so a
     // part sold by length/weight/volume can set a fractional break like 0.32.
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
+      next[idx] = { ...recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts), dirty: true };
       return next;
     });
   };
@@ -448,7 +499,10 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
+      next[idx] = {
+        ...recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts),
+        dirty: true,
+      };
       return next;
     });
   };
@@ -468,7 +522,7 @@ export default function PartPricing({
         const back = calculateMarkupFromUnitPrice(base, unitPrice);
         if (back !== null) markupStr = String(back);
       }
-      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr };
+      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr, dirty: true };
       return next;
     });
   };
@@ -482,6 +536,7 @@ export default function PartPricing({
         markupPercent: '',
         unitPrice: '',
         baseCostPerUnit: 0,
+        dirty: true,
       };
       return [...prev, recomputeRow(row, tierBaseCosts)];
     });
@@ -491,21 +546,42 @@ export default function PartPricing({
     updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleCostingSave = async (): Promise<void> => {
+  /**
+   * Batch size auto-saves on blur (interaction-standards.md §2, auto-save mode).
+   * It's a single scalar costing assumption — not a price, independently valid,
+   * trivially reversible — so it takes the same treatment as the identity
+   * fields rather than its own Save button. That leaves the two tier tables as
+   * the only explicit-Save surfaces on the part page, which is the whole point:
+   * a Save button here means "this is money".
+   *
+   * Deliberately does NOT call onPricingChanged: the batch size doesn't affect
+   * this part's own pricing tiers (their base is at the order qty) or its
+   * priceability — only its value as a component on OTHER parts' pages. A
+   * refresh here would just re-fetch the same numbers and flicker.
+   */
+  const handleCostingBlur = async (): Promise<void> => {
+    if (!costingDirty) return;
     setCostingSaveState('saving');
     try {
       await updatePartCostingBatchQuantity(partId, costingQty);
       setCostingSaveState('saved');
       setCostingDirty(false);
-      // Deliberately NOT calling onPricingChanged: the batch size doesn't affect
-      // this part's own pricing tiers (their base is at the order qty) or its
-      // priceability — only its value as a component on OTHER parts' pages. A
-      // refresh here would just re-fetch the same numbers and flicker.
     } catch (err) {
       setCostingSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
     }
   };
+
+  // "2 unsaved changes" tells the user how much is at stake; a bare "Unsaved
+  // changes" doesn't. Removing a row leaves no dirty row to count, so fall back
+  // to the generic phrasing rather than claiming zero.
+  const dirtyRowCount = rows.filter((r) => r.dirty).length;
+  const unsavedLabel =
+    dirtyRowCount === 0
+      ? 'Unsaved changes'
+      : dirtyRowCount === 1
+        ? '1 unsaved change'
+        : `${dirtyRowCount} unsaved changes`;
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   // total_setup_cost is the one-time setup; amortize it over the batch here so
@@ -612,20 +688,13 @@ export default function PartPricing({
                   setCostingDirty(true);
                   setCostingSaveState('idle');
                 }}
+                onBlur={() => void handleCostingBlur()}
                 type="number"
                 size="small"
                 inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
                 sx={{ width: 170 }}
               />
               <SaveStatus state={costingSaveState} />
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleCostingSave}
-                disabled={!costingDirty || costingSaving}
-              >
-                Save
-              </Button>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
               Setup spreads across the run this part is made in. This quantity is
@@ -714,7 +783,22 @@ export default function PartPricing({
               <TableBody>
                 {rows.map((row, idx) => {
                   return (
-                    <TableRow key={row.id ?? `tier-${idx}`}>
+                    <TableRow
+                      key={row.id ?? `tier-${idx}`}
+                      sx={{
+                        // The same 3px left accent the incomplete BOM rows and
+                        // routing rows use, one rung down that ladder:
+                        // error.main = broken, warning.main = wants your
+                        // attention, transparent = fine. An unsaved edit is the
+                        // middle rung — it is not a mistake, so it must not
+                        // read like one. Transparent (not absent) when clean so
+                        // the row doesn't shift when the accent appears.
+                        '& > td:first-of-type': {
+                          borderLeft: '3px solid',
+                          borderLeftColor: row.dirty ? 'warning.main' : 'transparent',
+                        },
+                      }}
+                    >
                       <TableCell sx={{ minWidth: 90 }}>
                         <TextField
                           size="small"
@@ -770,23 +854,50 @@ export default function PartPricing({
             <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
               Add tier
             </Button>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              {dirty && saveState !== 'saving' && (
-                <Typography variant="caption" color="text.secondary">
-                  Unsaved changes
-                </Typography>
-              )}
-              <SaveStatus state={saveState} />
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleSave}
-                disabled={!dirty || saving}
-              >
-                Save pricing
+            {!dirty && <SaveStatus state={saveState} />}
+          </Box>
+
+          {/* Unsaved-changes footer. Sticky, so it stays on screen while the
+              user scrolls the tier table instead of sitting below the fold
+              where the old caption-sized grey hint went unread — that is how a
+              staged edit got lost. Persistent, never auto-dismissing (§1's
+              audience floor rules out timed toasts as a recovery path). */}
+          {dirty && (
+            <Box
+              sx={{
+                position: 'sticky',
+                bottom: 0,
+                zIndex: 2,
+                mt: 2,
+                px: 2,
+                py: 1.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+                flexWrap: 'wrap',
+                borderTop: '2px solid',
+                borderColor: 'warning.main',
+                borderRadius: 1,
+                // Matches the sticky Header's frosted treatment — the card's
+                // `background.paper` is deliberately translucent, so rows would
+                // otherwise scroll visibly through this bar.
+                bgcolor: 'background.paper',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <EditOutlinedIcon fontSize="small" sx={{ color: 'warning.main' }} />
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {unsavedLabel}
+              </Typography>
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" onClick={handleDiscard} disabled={saving}>
+                Discard
+              </Button>
+              <Button variant="contained" size="small" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save pricing'}
               </Button>
             </Box>
-          </Box>
+          )}
             </>
           )}
         </CardContent>

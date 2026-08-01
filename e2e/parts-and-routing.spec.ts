@@ -12,7 +12,7 @@ test.describe('Parts and Routing workflow', () => {
   const partName = `E2E-${uniqueSuffix}`;
   const partDescription = `E2E Test Part ${uniqueSuffix}`;
 
-  test('create part, add routing with operations, verify cost', async ({ page }) => {
+  test('create part, add routing with operations, verify cost and pricing isolation', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
@@ -100,6 +100,55 @@ test.describe('Parts and Routing workflow', () => {
 
     // Still on the part detail page — no redirects in the new inline flow.
     await expect(page).toHaveURL(/\/parts\/(?!new)[^/]+$/);
+
+    // ── Step 3b: A staged pricing edit survives a sibling panel's auto-save ──
+    //
+    // The reported bug: type a Min qty in the Pricing card, then edit an
+    // operation. The routing auto-save bumps the page-wide refreshKey, which
+    // used to re-seed the tier rows from the DB and silently revert the typed
+    // value. Pricing and Operations sit side by side, so the user watches it
+    // happen. See interaction-standards.md §2, invariant 1.
+
+    const pricingCard = page
+      .locator('.MuiCard-root')
+      .filter({ has: page.getByRole('heading', { name: /^Pricing$/ }) });
+
+    // Tier row inputs are Min qty / Markup % / Unit price, in that order.
+    const minQty = pricingCard.getByRole('textbox').first();
+    await expect(minQty).toBeVisible({ timeout: 15_000 });
+    await minQty.fill('250');
+
+    // The staged state is announced by the sticky footer, not a grey caption.
+    await expect(pricingCard.getByText(/unsaved change/i)).toBeVisible();
+
+    // Now make the sibling save that used to wipe it: change the operation's
+    // cycle time, exactly like the customer did.
+    await page.getByRole('button', { name: /Edit operation/i }).first().click();
+    await page.getByLabel(/Cycle minutes per unit/i).fill('5');
+    // In edit mode the row editor's primary action is "Save changes"
+    // ("Add to routing" is the create-mode label).
+    await page.getByRole('button', { name: /Save changes/i }).click();
+    await expect(page.getByText(/All changes saved/i)).toBeVisible({ timeout: 15_000 });
+    // Confirm the sibling save actually landed before judging its effect on us.
+    // The new cycle time renders in both the panel summary line and the row, so
+    // take the first match rather than tripping strict mode.
+    await expect(page.getByText(/run 5 min\/unit/i).first()).toBeVisible({ timeout: 15_000 });
+
+    // The staged tier edit is still there, and still staged.
+    await expect(minQty).toHaveValue('250');
+    await expect(pricingCard.getByText(/unsaved change/i)).toBeVisible();
+
+    // Commit it, then prove it actually reached the database rather than only
+    // the UI — the reload-after-save convention from docs/testing/Testing-gaps.md.
+    await pricingCard.getByRole('button', { name: /Save pricing/i }).click();
+    await page.reload();
+
+    const minQtyAfterReload = page
+      .locator('.MuiCard-root')
+      .filter({ has: page.getByRole('heading', { name: /^Pricing$/ }) })
+      .getByRole('textbox')
+      .first();
+    await expect(minQtyAfterReload).toHaveValue('250', { timeout: 15_000 });
 
     // ── Step 4: Navigate back to parts list and verify ──
 

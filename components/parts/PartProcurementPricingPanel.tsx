@@ -61,13 +61,25 @@ interface EditRow {
   tempKey?: string;
   quantity: string;
   cost: string;
-  /**
-   * This row holds a staged edit not yet written to the database. Drives the
-   * amber left accent so the unsaved change is marked AT the row the user typed
-   * in, not only in the card footer. Set by the edit handlers, cleared when the
-   * rows re-sync from the persisted tiers. Never persisted.
-   */
-  dirty?: boolean;
+}
+
+/**
+ * The persisted values a set of rows was seeded from. "Unsaved" is DERIVED by
+ * comparing live rows against this, never latched on edit — so typing 1 → 10 → 1
+ * settles back to clean instead of nagging for a save that would write nothing.
+ */
+interface CostSnapshot {
+  quantity: string;
+  cost: string;
+}
+
+function snapshotRows(rows: EditRow[]): CostSnapshot[] {
+  return rows.map((r) => ({ quantity: r.quantity.trim(), cost: r.cost.trim() }));
+}
+
+function rowDiffersFromBaseline(row: EditRow, base: CostSnapshot | undefined): boolean {
+  if (!base) return true; // a row with no counterpart is newly added
+  return row.quantity.trim() !== base.quantity || row.cost.trim() !== base.cost;
 }
 
 function parseNumber(s: string): number | null {
@@ -122,15 +134,19 @@ export default function PartProcurementPricingPanel({
   // auto-save). `dirty` tracks unsaved tier edits; `saveState` drives the
   // SaveStatus chip + the Save button's disabled state.
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [dirty, setDirty] = useState(false);
+  // The persisted values `rows` was seeded from. Dirty is derived against this
+  // rather than latched, so undoing an edit by hand clears it.
+  const [baseline, setBaseline] = useState<CostSnapshot[]>([]);
   const saving = saveState === 'saving';
+  const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
+  const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
   // The vendor picker auto-saves, so it needs its OWN status. Sharing the tier
   // sheet's `saveState` would announce "Saved" about the wrong thing — the
   // exact "did it save?" ambiguity §2 is trying to prevent.
   const [vendorSaveState, setVendorSaveState] = useState<SaveState>('idle');
 
+  // Only resets the "Saved" chip — dirtiness itself is derived from `baseline`.
   const markDirty = () => {
-    setDirty(true);
     setSaveState('idle');
   };
 
@@ -173,16 +189,17 @@ export default function PartProcurementPricingPanel({
   // starter row so the user fills the cost in directly (rendered red below).
   // Resets `dirty` — these rows mirror the DB.
   const seedRowsFrom = useCallback((list: ProcurementTier[]) => {
-    setRows(
+    const seeded: EditRow[] =
       list.length === 0
         ? [{ tempKey: tempId(), quantity: '', cost: '' }]
         : list.map((t) => ({
             id: t.id,
             quantity: String(t.min_quantity),
             cost: String(t.cost_per_unit),
-          })),
-    );
-    setDirty(false);
+          }));
+    setRows(seeded);
+    // These rows now mirror the database, so they become the clean baseline.
+    setBaseline(snapshotRows(seeded));
   }, []);
 
   useEffect(() => {
@@ -205,7 +222,7 @@ export default function PartProcurementPricingPanel({
   const addRow = () => {
     setRowsAt((prev) => [
       ...prev,
-      { tempKey: tempId(), quantity: '', cost: '', dirty: true },
+      { tempKey: tempId(), quantity: '', cost: '' },
     ]);
     markDirty();
   };
@@ -232,7 +249,7 @@ export default function PartProcurementPricingPanel({
 
   // "2 unsaved changes" tells the user how much is at stake. Removing a row
   // leaves no dirty row to count, so fall back to the generic phrasing.
-  const dirtyRowCount = rows.filter((r) => r.dirty).length;
+  const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
   const unsavedLabel =
     dirtyRowCount === 0
       ? 'Unsaved changes'
@@ -461,7 +478,7 @@ export default function PartProcurementPricingPanel({
                         // An unsaved edit is the middle rung — not a mistake.
                         '& > td:first-of-type': {
                           borderLeft: '3px solid',
-                          borderLeftColor: row.dirty ? 'warning.main' : 'transparent',
+                          borderLeftColor: dirtyRowFlags[idx] ? 'warning.main' : 'transparent',
                         },
                       }}
                     >
@@ -474,7 +491,7 @@ export default function PartProcurementPricingPanel({
                             const v = e.target.value;
                             setRowsAt((prev) =>
                               prev.map((r, i) =>
-                                i === idx ? { ...r, quantity: v, dirty: true } : r,
+                                i === idx ? { ...r, quantity: v } : r,
                               ),
                             );
                             markDirty();
@@ -492,7 +509,7 @@ export default function PartProcurementPricingPanel({
                             const v = e.target.value;
                             setRowsAt((prev) =>
                               prev.map((r, i) =>
-                                i === idx ? { ...r, cost: v, dirty: true } : r,
+                                i === idx ? { ...r, cost: v } : r,
                               ),
                             );
                             markDirty();

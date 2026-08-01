@@ -200,11 +200,13 @@ Editing model — markup % is the source of truth:
 
 Unsaved edits are surfaced two ways (see [interaction-standards §2](../interaction-standards.md#2-saving)): the edited row gets an amber `3px` left accent — the same accent the incomplete BOM/routing rows use, one rung below their red — and a **sticky footer** appears at the bottom of the card naming the count with **Discard** and **Save pricing**. The footer is absent entirely when there is nothing staged, so its appearance is itself the signal. This replaced a caption-sized grey "Unsaved changes" hint that users did not see.
 
+"Unsaved" is **derived**, not latched: the card snapshots the persisted values it was seeded from and compares live rows against it, so reverting an edit by hand (1 → 10 → 1) clears the state rather than demanding a save that would write nothing.
+
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing/BOM panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's displayed base cost and unit price against the new cost basis.
 
 **Staged edits survive that refresh.** `refreshKey` invalidates *derived* data only — the cost breakdown and the per-tier base costs. It deliberately does **not** re-seed the editable tier rows or clear the dirty flag while an edit is staged. Before this guard existed, saving an operation while a Min qty sat unsaved silently reverted it (interaction-standards §2, invariant 1). A genuine part change still reloads, since the dirty flag belongs to the part being edited.
 
-**Batch size auto-saves on blur** (`updatePartCostingBatchQuantity`) rather than behind its own Save button. It's a costing assumption, not a price — the two tier tables are the only explicit-Save surfaces on the page.
+**Batch size commits via its own explicit Save** (`updatePartCostingBatchQuantity`), not on blur. It reads like a harmless scalar, but `compute_part_cost_at_qty` values this part as a made child at exactly this quantity in every parent's BOM — a fat-fingered 30 → 300 silently re-costs every parent and flows into their quotes. That makes it financial data under [interaction-standards §2](../interaction-standards.md#2-saving), and financial data does not auto-save.
 
 ▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
 

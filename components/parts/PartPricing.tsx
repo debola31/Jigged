@@ -83,14 +83,33 @@ interface EditRow {
   /** null when materials are incomplete or the breakdown is missing — render
    * "—" rather than $0. See `RoutingCostBreakdown.materials_complete`. */
   baseCostPerUnit: number | null;
-  /**
-   * This row holds a staged edit the user hasn't saved yet. Drives the amber
-   * left accent so the unsaved change is marked AT the row the user typed in,
-   * not only in the card footer — attention is on the field, not the chrome
-   * (interaction-standards.md §2). Set by the edit handlers, cleared by a
-   * (re)load. Never persisted.
-   */
-  dirty?: boolean;
+}
+
+/**
+ * The persisted values a set of rows was seeded from. "Unsaved" is DERIVED by
+ * comparing the live rows against this, never tracked as a sticky flag — so
+ * typing 1 → 10 → 1 ends up genuinely clean again instead of nagging for a save
+ * that would write nothing.
+ *
+ * Only quantity + markup are compared: they are what `replaceTiersForPart`
+ * persists. `unitPrice` is derived (base × markup) and `baseCostPerUnit` is a
+ * fetched display value, so neither can differ without markup differing too.
+ */
+interface TierSnapshot {
+  quantity: string;
+  markupPercent: string;
+}
+
+function snapshotRows(rows: EditRow[]): TierSnapshot[] {
+  return rows.map((r) => ({
+    quantity: r.quantity.trim(),
+    markupPercent: r.markupPercent.trim(),
+  }));
+}
+
+function rowDiffersFromBaseline(row: EditRow, base: TierSnapshot | undefined): boolean {
+  if (!base) return true; // a row with no counterpart is newly added
+  return row.quantity.trim() !== base.quantity || row.markupPercent.trim() !== base.markupPercent;
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -207,16 +226,21 @@ export default function PartPricing({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [dirty, setDirty] = useState(false);
-  // Mirrors `dirty` for the load effect's isolation guard. Written synchronously
-  // everywhere `dirty` is set (never in an effect), so the guard can't silently
-  // depend on effect-declaration order within a commit.
+  // The persisted values `rows` was seeded from. Dirty state is derived against
+  // this rather than latched on edit, so undoing an edit by hand clears it.
+  const [baseline, setBaseline] = useState<TierSnapshot[]>([]);
+  // Mirrors the derived `dirty` for the load effect's isolation guard. Kept
+  // current by the publish effect below, which MUST stay declared above the load
+  // effect — React runs effects in declaration order within a commit.
   const dirtyRef = useRef(false);
   // Which part the tier rows currently hold. A genuine part change must reload
   // even if the previous part left staged edits behind; a sibling-panel refresh
   // on the SAME part must not.
   const loadedPartIdRef = useRef<string | null>(null);
   const saving = saveState === 'saving';
+
+  const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
+  const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
 
   // Costing lot size — the production run this part's cost amortizes over, and
   // the quantity it's valued at when consumed as a component. Drives the live
@@ -227,6 +251,7 @@ export default function PartPricing({
   const [costingDirty, setCostingDirty] = useState(false);
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
+  const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
     const n = parseFloat(costingQtyStr);
     return Number.isFinite(n) && n > 0 ? n : 1;
@@ -263,8 +288,10 @@ export default function PartPricing({
       // A never-configured part shows a single unfilled row to fill in — NOT
       // dirty, so Save stays disabled until the user actually edits it.
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
-      setRows(seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
-      setDirty(false);
+      const recomputed = seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current));
+      setRows(recomputed);
+      // These rows now mirror the database, so they become the clean baseline.
+      setBaseline(snapshotRows(recomputed));
       dirtyRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
@@ -294,10 +321,13 @@ export default function PartPricing({
     void loadAll({ showSpinner: partChanged });
   }, [loadAll, partId, refreshKey]);
 
-  // Publish staged-edit state to the workspace, which owns the exit guard. The
-  // cleanup clears it on unmount so a discarded draft can't leave the guard
-  // armed forever.
+  // Publish staged-edit state to the workspace, which owns the exit guard, and
+  // keep `dirtyRef` current for the load effect's isolation guard. MUST remain
+  // declared above that effect — effects run in declaration order per commit.
+  // The cleanup clears the parent's flag on unmount so a discarded draft can't
+  // leave the guard armed forever.
   useEffect(() => {
+    dirtyRef.current = dirty;
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
@@ -405,8 +435,8 @@ export default function PartPricing({
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
-    setDirty(true);
-    dirtyRef.current = true;
+    // No dirty flag to set — it's derived from `baseline` on the next render,
+    // which is what makes an edit-then-undo settle back to clean.
     setSaveState('idle');
   };
 
@@ -453,9 +483,9 @@ export default function PartPricing({
       } catch (noteErr) {
         console.error('Failed to log pricing note:', noteErr);
       }
-      // Clear dirty first: the reload below re-seeds these rows, and the
-      // isolation guard deliberately refuses to re-seed while dirty.
-      setDirty(false);
+      // Clear the guard first: the reload below re-seeds these rows, and the
+      // isolation guard deliberately refuses to re-seed while dirty. (The
+      // rendered dirty state clears on its own once loadAll resets `baseline`.)
       dirtyRef.current = false;
       // Reload so newly-inserted rows pick up real ids. Silent — the table
       // stays on screen rather than collapsing to a spinner.
@@ -477,7 +507,6 @@ export default function PartPricing({
    * out that isn't "navigate away and hope nothing was kept".
    */
   const handleDiscard = (): void => {
-    setDirty(false);
     dirtyRef.current = false;
     setSaveState('idle');
     setError(null);
@@ -490,7 +519,7 @@ export default function PartPricing({
     if (!isValidQuantityInput(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = { ...recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts), dirty: true };
+      next[idx] = recomputeRow({ ...next[idx], quantity: value }, tierBaseCosts);
       return next;
     });
   };
@@ -499,10 +528,7 @@ export default function PartPricing({
     if (value !== '' && !/^\d*\.?\d*$/.test(value)) return;
     updateRows((prev) => {
       const next = [...prev];
-      next[idx] = {
-        ...recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts),
-        dirty: true,
-      };
+      next[idx] = recomputeRow({ ...next[idx], markupPercent: value }, tierBaseCosts);
       return next;
     });
   };
@@ -522,7 +548,7 @@ export default function PartPricing({
         const back = calculateMarkupFromUnitPrice(base, unitPrice);
         if (back !== null) markupStr = String(back);
       }
-      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr, dirty: true };
+      next[idx] = { ...row, unitPrice: value, markupPercent: markupStr };
       return next;
     });
   };
@@ -536,7 +562,6 @@ export default function PartPricing({
         markupPercent: '',
         unitPrice: '',
         baseCostPerUnit: 0,
-        dirty: true,
       };
       return [...prev, recomputeRow(row, tierBaseCosts)];
     });
@@ -547,20 +572,21 @@ export default function PartPricing({
   };
 
   /**
-   * Batch size auto-saves on blur (interaction-standards.md §2, auto-save mode).
-   * It's a single scalar costing assumption — not a price, independently valid,
-   * trivially reversible — so it takes the same treatment as the identity
-   * fields rather than its own Save button. That leaves the two tier tables as
-   * the only explicit-Save surfaces on the part page, which is the whole point:
-   * a Save button here means "this is money".
+   * Batch size commits via an explicit Save, NOT auto-save on blur.
+   *
+   * It looks like a harmless scalar, but `compute_part_cost_at_qty` values this
+   * part as a made child at exactly this quantity in every parent's BOM
+   * (`v_child_val_qty := v_bom.child_costing_batch_quantity`). So a fat-fingered
+   * 30 → 300 silently re-costs every parent part and flows into their quoted
+   * prices. That is financial data by §2's own test, and financial data does not
+   * auto-save.
    *
    * Deliberately does NOT call onPricingChanged: the batch size doesn't affect
    * this part's own pricing tiers (their base is at the order qty) or its
    * priceability — only its value as a component on OTHER parts' pages. A
    * refresh here would just re-fetch the same numbers and flicker.
    */
-  const handleCostingBlur = async (): Promise<void> => {
-    if (!costingDirty) return;
+  const handleCostingSave = async (): Promise<void> => {
     setCostingSaveState('saving');
     try {
       await updatePartCostingBatchQuantity(partId, costingQty);
@@ -575,7 +601,7 @@ export default function PartPricing({
   // "2 unsaved changes" tells the user how much is at stake; a bare "Unsaved
   // changes" doesn't. Removing a row leaves no dirty row to count, so fall back
   // to the generic phrasing rather than claiming zero.
-  const dirtyRowCount = rows.filter((r) => r.dirty).length;
+  const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
   const unsavedLabel =
     dirtyRowCount === 0
       ? 'Unsaved changes'
@@ -688,13 +714,20 @@ export default function PartPricing({
                   setCostingDirty(true);
                   setCostingSaveState('idle');
                 }}
-                onBlur={() => void handleCostingBlur()}
                 type="number"
                 size="small"
                 inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
                 sx={{ width: 170 }}
               />
               <SaveStatus state={costingSaveState} />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleCostingSave}
+                disabled={!costingDirty || costingSaving}
+              >
+                Save
+              </Button>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
               Setup spreads across the run this part is made in. This quantity is
@@ -795,7 +828,7 @@ export default function PartPricing({
                         // the row doesn't shift when the accent appears.
                         '& > td:first-of-type': {
                           borderLeft: '3px solid',
-                          borderLeftColor: row.dirty ? 'warning.main' : 'transparent',
+                          borderLeftColor: dirtyRowFlags[idx] ? 'warning.main' : 'transparent',
                         },
                       }}
                     >

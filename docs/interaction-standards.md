@@ -104,16 +104,23 @@ work ([GitHub Primer — Saving](https://primer.style/product/ui-patterns/saving
 
 | Mode | Applies to | Commits on | Indicator |
 |---|---|---|---|
-| **Auto-save** | a single, independently-valid, non-financial value: identity fields, transaction notes, costing **batch size**, preferred vendor | blur (text/number) or change (toggle/select) | `SaveStatus` |
+| **Auto-save** | a single, independently-valid, non-financial value: identity fields, transaction notes, preferred vendor | blur (text/number) or change (toggle/select) | `SaveStatus` |
 | **Row editor → Save/Cancel**, then persists immediately | a multi-field record only valid as a *set*: routing operations, BOM materials, unit conversions | the editor's own Save | `SaveStatus` on the panel |
-| **Staged explicit Save** | **financial** data that feeds quotes: pricing tiers, procurement cost tiers | the card's Save button | dirty row accent + sticky footer (below) |
+| **Staged explicit Save** | **financial** data — anything that moves money downstream: pricing tiers, procurement cost tiers, costing **batch size** | the card's Save button | dirty row accent + sticky footer (below) |
 
 Auto-save is wrong for financial data ([GitLab](https://design.gitlab.com/patterns/saving-and-feedback/), [Figma — autosave pitfalls](https://www.figma.com/blog/behind-the-feature-autosave/)); a row
 editor is the right shape for a record whose fields are meaningless
 individually, and it is what Polaris recommends for independently-editable
-sections of one page. This leaves the part page with exactly **two**
-explicit-Save surfaces, both tier tables — so a Save button reliably means
-"this is money."
+sections of one page.
+
+> **"Financial" means downstream effect, not field type.** Batch size looks like
+> a harmless scalar and was briefly reclassified as auto-save on that basis. It
+> isn't: `compute_part_cost_at_qty` values this part as a made child at exactly
+> this quantity in **every parent's BOM**
+> (`v_child_val_qty := v_bom.child_costing_batch_quantity`), so a fat-fingered
+> 30 → 300 silently re-costs every parent and flows into their quoted prices.
+> The test is not "is this a price?" but **"can a typo here change what a
+> customer is charged?"** If yes, it stages behind a Save button.
 
 - **One shared indicator:** [`components/common/SaveStatus.tsx`](../components/common/SaveStatus.tsx)
   — "Saving… / Saved", in an `aria-live="polite"` region. Reuse it on every
@@ -191,10 +198,14 @@ Two signals, both persistent (never a timed toast — see §1's audience floor):
   that fails if the guard is removed.
 - ✅ **Exit guard**: tab-switch confirmation + conditional `beforeunload`, both
   driven by `onDirtyChange` reporting into `PartWorkspace`.
-- ✅ **Batch size auto-saves on blur.** It used to have its own Save button
-  inside the Cost card — a third staged-save surface for a value that is a
-  costing assumption, not a price. Moving it to auto-save is what makes "a Save
-  button means money" true rather than approximately true.
+- ✅ **Dirty state is derived, never latched.** Both tier tables keep a snapshot
+  of the values they were seeded from and compare against it. Typing 1 → 10 → 1
+  settles back to clean instead of demanding a save that would write nothing —
+  a bar that nags over a no-op is a bar users learn to click past, which is the
+  failure this whole section exists to prevent.
+- ✅ **Batch size stays explicit-Save**, and the reasoning is recorded above
+  rather than left implicit — it was briefly moved to auto-save on the (wrong)
+  grounds that it is a costing assumption rather than a price.
 - ❌ **Undo-after-save for pricing — still not pursued.** GitLab Pajamas advises
   against auto-saving financial data ([Pajamas](https://design.gitlab.com/usability/saving-and-feedback)),
   so explicit Save stays. With an explicit Save button **plus** a visible dirty

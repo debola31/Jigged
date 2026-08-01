@@ -200,17 +200,66 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true));
   });
 
-  it('auto-saves the batch size on blur instead of behind a Save button', async () => {
+  it('clears the unsaved state when an edit is manually reverted', async () => {
+    // Dirty is derived from the persisted baseline, not latched on first
+    // keystroke — so typing over a value and typing it back is genuinely clean.
+    // Nagging for a save that would write nothing trains users to ignore the bar.
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const qty = await minQtyInput();
+    await waitFor(() => expect(qty).toHaveValue('100'));
+
+    await user.clear(qty);
+    await user.type(qty, '250');
+    expect(await screen.findByText(/unsaved change/i)).toBeInTheDocument();
+
+    await user.clear(qty);
+    await user.type(qty, '100');
+
+    await waitFor(() => expect(screen.queryByText(/unsaved change/i)).toBeNull());
+    expect(screen.queryByRole('button', { name: /Save pricing/i })).toBeNull();
+  });
+
+  it('tells the workspace it is clean again after a manual revert', async () => {
+    // Otherwise the exit guard stays armed and blocks a tab switch over nothing.
+    const onDirtyChange = vi.fn();
+    render(
+      <PartPricing
+        companyId="c1"
+        part={part}
+        refreshKey={0}
+        onDirtyChange={onDirtyChange}
+      />,
+    );
+
+    const qty = await minQtyInput();
+    await waitFor(() => expect(qty).toHaveValue('100'));
+    await user.clear(qty);
+    await user.type(qty, '250');
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true));
+
+    onDirtyChange.mockClear();
+    await user.clear(qty);
+    await user.type(qty, '100');
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(false));
+  });
+
+  it('keeps batch size behind an explicit Save — it re-costs every parent part', async () => {
+    // `compute_part_cost_at_qty` values this part as a made child at exactly
+    // this quantity in every parent's BOM, so a fat-fingered 30 -> 300 silently
+    // reprices them. That makes it financial data, which never auto-saves.
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     const batch = await screen.findByLabelText(/Batch size/i);
     await user.clear(batch);
     await user.type(batch, '25');
 
-    // Not written while still focused — blur is the commit point.
+    // Blur must NOT commit it.
+    await user.tab();
     expect(mockUpdatePartCostingBatchQuantity).not.toHaveBeenCalled();
 
-    await user.tab();
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() =>
       expect(mockUpdatePartCostingBatchQuantity).toHaveBeenCalledWith('p1', 25),

@@ -639,6 +639,7 @@ export type Database = {
           notes: string | null
           operator_id: string | null
           part_id: string | null
+          photo_path: string | null
           quantity: number
           transfer_group_id: string | null
           type: string
@@ -659,6 +660,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity: number
           transfer_group_id?: string | null
           type: string
@@ -679,6 +681,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity?: number
           transfer_group_id?: string | null
           type?: string
@@ -3380,7 +3383,9 @@ export type Database = {
           p_converted_quantity: number
           p_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_unit: string
         }
@@ -3393,6 +3398,7 @@ export type Database = {
           p_location_id: string
           p_new_quantity: number
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
           p_unit: string
         }
@@ -3702,7 +3708,9 @@ export type Database = {
           p_converted_quantity: number
           p_from_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_to_location_id: string
           p_unit: string

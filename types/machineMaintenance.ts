@@ -47,10 +47,20 @@ export interface MachineNote {
   /** Set when this entry is the fix for an earlier 'noticed' one on this machine. */
   resolves_note_id: string | null;
   created_at: string;
+  /**
+   * When the author last changed the body; null means never edited (#628).
+   *
+   * Only the BODY is editable — `maintenance_kind` and `resolves_note_id` are
+   * immutable under the guard trigger, so an author can fix the wording of what
+   * they noticed but can never un-notice it or re-point a fix at a different item.
+   * That is what keeps the derived-open list (§4.4) trustworthy.
+   */
+  edited_at: string | null;
   author_name: string | null;
   /**
    * Author's user_company_access id. Needed because reacting to your own note is
    * refused by RLS, so the control has to be hidden there rather than fail on tap.
+   * Also decides whether Edit (author only) and Delete (author or admin) show.
    */
   author_id: string | null;
   /**

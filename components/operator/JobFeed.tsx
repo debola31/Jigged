@@ -16,9 +16,17 @@ import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import CloseIcon from '@mui/icons-material/Close';
-import { getJobNotes, getCurrentMember } from '@/utils/operatorAccess';
+import { getJobNotes, getCurrentMember, updateNoteBody } from '@/utils/operatorAccess';
 import NoteReactions from '@/components/operator/NoteReactions';
-import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
+import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
+import NoteEditDialog from '@/components/notes/NoteEditDialog';
+import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
+import {
+  getJobNoteMediaUrl,
+  deleteJobNote,
+  deleteJobNoteMedia,
+} from '@/utils/jobNoteMediaAccess';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
@@ -103,6 +111,11 @@ export default function JobFeed({
   const [pendingNotes, setPendingNotes] = useState<JobNote[]>([]);
 
   const [operatorId, setOperatorId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [editingNote, setEditingNote] = useState<JobNote | null>(null);
+  const [deletingNote, setDeletingNote] = useState<JobNote | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   // Signed URLs for media thumbnails, keyed by media id (fetched on demand).
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
@@ -151,7 +164,10 @@ export default function JobFeed({
   useEffect(() => {
     let active = true;
     getCurrentMember(companyId).then((op) => {
-      if (active && op) setOperatorId(op.id);
+      if (active && op) {
+        setOperatorId(op.id);
+        setIsAdmin(op.role === 'admin');
+      }
     });
     return () => {
       active = false;
@@ -293,9 +309,33 @@ export default function JobFeed({
                       <Chip size="small" label={note.operation_label} variant="outlined" />
                     )}
                   </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                    {formatTimestamp(note.created_at)}
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatTimestamp(note.created_at)}
+                      <NoteEditedMark editedAt={note.edited_at} />
+                    </Typography>
+                    {/* 'event' notes are the auto-logged audit trail (e.g. an
+                        order-quantity change) — never editable, never deletable.
+                        RLS refuses them too, so this gate stops a guaranteed
+                        42501 rendering as a broken button. */}
+                    {!readOnly && note.note_type === 'user' && (
+                      <NoteActionsMenu
+                        canEdit={operatorId !== null && note.author_id === operatorId}
+                        canDelete={
+                          operatorId !== null &&
+                          (note.author_id === operatorId || isAdmin)
+                        }
+                        onEdit={() => {
+                          setRowError(null);
+                          setEditingNote(note);
+                        }}
+                        onDelete={() => {
+                          setRowError(null);
+                          setDeletingNote(note);
+                        }}
+                      />
+                    )}
+                  </Box>
                 </Box>
 
                 {/* The observed element is the BODY, deliberately. Observing the
@@ -391,6 +431,70 @@ export default function JobFeed({
           )}
         </DialogContent>
       </Dialog>
+
+      {editingNote && (
+      <NoteEditDialog
+        key={editingNote.id}
+        open
+        initialBody={editingNote.body}
+        media={editingNote.media}
+        saving={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setEditingNote(null);
+          setRowError(null);
+        }}
+        onSave={async ({ body, removedMediaIds }) => {
+          if (!editingNote) return;
+          setRowBusy(true);
+          setRowError(null);
+          try {
+            // Body first: it is the statement most likely to be refused (RLS, or
+            // the billing gate on a lapsed shop), so it fails before anything
+            // irreversible happens to the photos.
+            await updateNoteBody(editingNote.id, body);
+            for (const id of removedMediaIds) {
+              const m = editingNote.media.find((x) => x.id === id);
+              if (m) await deleteJobNoteMedia({ id: m.id, storage_path: m.storage_path });
+            }
+            setEditingNote(null);
+            await load();
+          } catch (err) {
+            setRowError(err instanceof Error ? err.message : 'Could not save that change.');
+          } finally {
+            setRowBusy(false);
+          }
+        }}
+      />
+      )}
+
+      <NoteDeleteDialog
+        open={deletingNote !== null}
+        deleting={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setDeletingNote(null);
+          setRowError(null);
+        }}
+        onConfirm={async () => {
+          if (!deletingNote) return;
+          setRowBusy(true);
+          setRowError(null);
+          try {
+            await deleteJobNote(deletingNote.id);
+            setDeletingNote(null);
+            // Also clears any optimistic copy still in pendingNotes: the merge
+            // drops pending entries the reload no longer returns, so a deleted
+            // note cannot linger as a ghost row.
+            setPendingNotes((prev) => prev.filter((n) => n.id !== deletingNote.id));
+            await load();
+          } catch (err) {
+            setRowError(err instanceof Error ? err.message : 'Could not delete that note.');
+          } finally {
+            setRowBusy(false);
+          }
+        }}
+      />
     </Card>
   );
 }

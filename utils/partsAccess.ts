@@ -1717,6 +1717,38 @@ export async function getPartTransactions(
 // PART NOTES + ACTIVITY FEED
 // ============================================================
 
+// One read shape for every part_comments path (read, insert, update). Hoisted when
+// editing arrived and made it a third copy — mirrors JOB_NOTE_SELECT in
+// operatorAccess and MACHINE_NOTE_SELECT in machineMaintenanceAccess.
+const PART_COMMENT_SELECT =
+  'id, part_id, body, created_at, edited_at, author_id, note_type, ' +
+  'author:user_company_access(name)';
+
+type PartCommentRow = {
+  id: string;
+  part_id: string;
+  body: string;
+  created_at: string;
+  edited_at: string | null;
+  author_id: string | null;
+  note_type: string;
+  author: { name: string | null } | { name: string | null }[] | null;
+};
+
+function mapPartCommentRow(n: PartCommentRow): PartNote {
+  const author = Array.isArray(n.author) ? n.author[0] : n.author;
+  return {
+    id: n.id,
+    part_id: n.part_id,
+    body: n.body,
+    created_at: n.created_at,
+    edited_at: n.edited_at,
+    author_id: n.author_id,
+    author_name: author?.name ?? null,
+    note_type: (n.note_type as PartNoteType) ?? 'user',
+  };
+}
+
 /**
  * Notes on a part, newest-first. Mirrors getJobNotes (operatorAccess).
  */
@@ -1725,7 +1757,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
 
   const { data, error } = await supabase
     .from('part_comments')
-    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
+    .select(PART_COMMENT_SELECT)
     .eq('part_id', partId)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
@@ -1735,28 +1767,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
     throw error;
   }
 
-  type NoteRow = {
-    id: string;
-    part_id: string;
-    body: string;
-    created_at: string;
-    author_id: string | null;
-    note_type: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-
-  return ((data ?? []) as NoteRow[]).map((n) => {
-    const author = Array.isArray(n.author) ? n.author[0] : n.author;
-    return {
-      id: n.id,
-      part_id: n.part_id,
-      body: n.body,
-      created_at: n.created_at,
-      author_id: n.author_id,
-      author_name: author?.name ?? null,
-      note_type: (n.note_type as PartNoteType) ?? 'user',
-    };
-  });
+  return ((data ?? []) as unknown as PartCommentRow[]).map(mapPartCommentRow);
 }
 
 /**
@@ -1786,7 +1797,7 @@ export async function addPartNote(
       body: trimmed,
       note_type: noteType,
     })
-    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
+    .select(PART_COMMENT_SELECT)
     .single();
 
   if (error) {
@@ -1794,26 +1805,40 @@ export async function addPartNote(
     throw error;
   }
 
-  type NoteRow = {
-    id: string;
-    part_id: string;
-    body: string;
-    created_at: string;
-    author_id: string | null;
-    note_type: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-  const n = data as NoteRow;
-  const author = Array.isArray(n.author) ? n.author[0] : n.author;
-  return {
-    id: n.id,
-    part_id: n.part_id,
-    body: n.body,
-    created_at: n.created_at,
-    author_id: n.author_id,
-    author_name: author?.name ?? null,
-    note_type: (n.note_type as PartNoteType) ?? 'user',
-  };
+  return mapPartCommentRow(data as unknown as PartCommentRow);
+}
+
+/**
+ * Edit the body of a part comment you wrote (#628).
+ *
+ * RLS restricts this to the author and to `note_type = 'user'`; the column-scoped
+ * grant restricts it to `body`, and a BEFORE UPDATE trigger stamps `edited_at`.
+ * So an auto-logged 'pricing' entry is not editable, and nothing here can change
+ * authorship or type — the audit trail stays an audit trail.
+ *
+ * Blank is refused before the round trip. Unlike a job/machine note, a part comment
+ * has no media, so an empty one has nothing left to be: `part_comments_body_not_blank`
+ * requires a non-blank NOT NULL body unconditionally.
+ */
+export async function updatePartNote(noteId: string, body: string): Promise<PartNote> {
+  const supabase = getSupabase();
+
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Comment cannot be empty.');
+
+  const { data, error } = await supabase
+    .from('part_comments')
+    .update({ body: trimmed })
+    .eq('id', noteId)
+    .select(PART_COMMENT_SELECT)
+    .single();
+
+  if (error) {
+    console.error('Error updating part note:', error);
+    throw error;
+  }
+
+  return mapPartCommentRow(data as unknown as PartCommentRow);
 }
 
 /**

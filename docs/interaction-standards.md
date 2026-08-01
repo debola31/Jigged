@@ -87,6 +87,26 @@ the generic "low-stakes ⇒ no dialog" advice.
   and it does **not** alter existing quotes (line items snapshot `unit_price`; the
   `source_tier_id` FK is `ON DELETE SET NULL`), so it is not the financial hazard
   it appears to be.
+- ✅ Note / comment delete ([#628](https://github.com/debola31/Jigged/issues/628)):
+  confirmation dialog on every surface. `notes` and `part_comments` have no
+  `deleted_at`, so this is a hard delete outside the Architecture §16 archive
+  standard and there is no restore — squarely the "immediately-persisted row
+  delete" row above. The part Activity tab previously deleted a comment on a single
+  click with no confirmation at all; that gap was closed in the same PR.
+- ✅ Note / comment **edit** affordance is deliberately shaped per surface, and this
+  is the one place the standard splits by device rather than by stakes:
+  - *Operator surfaces* (job feed, Playbook sheet, machine log) use a single 48px
+    overflow (kebab) opening Edit / Delete. Those note headers already carry an
+    author, an optional step chip and a timestamp, and already wrap at 375px; two
+    more 48px targets push every header onto a third line. MUI `MenuItem`s clear
+    48px, so the touch floor is met at the point of *choice* — which is where it
+    matters, since a mis-tap on a kebab is harmless and a mis-tap on a bare trash
+    icon is not.
+  - *Office surfaces* (part Activity) keep the destructive control **shown at rest**
+    as an error-coloured trash icon, with a plain edit icon beside it and delete
+    rightmost. Burying delete in a kebab there would regress the red-at-rest and
+    delete-sits-last rules above; desktop has the width and the hover, so the phone
+    constraint does not apply.
 - 🔄 **Superseded:** the earlier target of "drop the BOM dialog + add Undo
   snackbars to BOM/tier/operation" is reversed after UX research (the audience
   floor above). We keep dialogs on destructive row deletes; ephemeral Undo is not

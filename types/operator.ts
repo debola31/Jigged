@@ -261,6 +261,15 @@ export interface JobNote {
    */
   note_type: 'user' | 'event';
   created_at: string;
+  /**
+   * When the author last changed the body; null means never edited (#628).
+   *
+   * NEVER written by the client — `notes.edited_at` carries no UPDATE grant, and
+   * the database stamps it in a BEFORE UPDATE trigger. It is a claim made to other
+   * readers that the text is not the original, so the one party with a motive to
+   * suppress it must not be able to.
+   */
+  edited_at: string | null;
   /** Author display name (from user_company_access.name); null if unknown. */
   author_name: string | null;
   /**
@@ -268,6 +277,9 @@ export interface JobNote {
    * forbids reacting to your OWN note, so the thumbs-up must be hidden there —
    * otherwise the tap is a guaranteed 42501 that reads as a broken button.
    * Matching on author_name instead breaks on two people with the same name.
+   *
+   * Also decides whether Edit and Delete are offered: edit is author-only, delete
+   * is author-or-admin (#628).
    */
   author_id: string | null;
   /**
@@ -353,6 +365,11 @@ export interface MyNote {
   id: string;
   body: string | null;
   created_at: string;
+  /**
+   * When the author last changed the body; null means never edited (#628).
+   * Server-stamped, never client-written. See JobNote.edited_at.
+   */
+  edited_at: string | null;
   /** "Op 20 · Mill" when the note carries a step, else null. */
   operation_label: string | null;
   /** Part the note is durably attached to, when it has one. */

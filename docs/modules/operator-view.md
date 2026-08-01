@@ -145,12 +145,32 @@ against a count computed over exactly the rows it admitted. So:
   and counts `note_reactions`, so it is `SECURITY INVOKER`. **It takes no
   arguments, permanently**: a caller-supplied time window would be a bisection
   oracle for when a note was read.
-- **`authenticated` has no UPDATE on `notes` at all** — notes are append-only today,
-  so the whole privilege is revoked. Otherwise setting `viewer_count = 0` and
-  returning later to read the delta is a one-bit read oracle per note. If note
-  editing is ever added it needs a permissive policy **and** a column-scoped grant
-  that excludes `viewer_count`, `usage_count`, `company_id`, `author_id` and every
-  subject column.
+- **`authenticated` has UPDATE on exactly one column of `notes`: `body`.** Notes were
+  append-only until #628; editing was added on the terms this section set in advance —
+  a permissive author-only policy **and** a column-scoped grant. The grant *names* the
+  one editable column rather than *excluding* a list, which is the stronger form: a
+  column added to `notes` next year is non-updatable by default instead of relying on
+  somebody remembering to extend a denylist. `viewer_count` and `usage_count` remain
+  unwritable by any browser role, so setting `viewer_count = 0` and returning later to
+  read the delta is still impossible.
+  - **An edit never resets a note's reach**, and that was the live design question.
+    A reset is superficially fairer — "7 people read this" after a rewrite refers to
+    7 people who read different words — but it is the exact oracle this section
+    exists to deny: an author edits at 9:00, glances at 9:15, and any increment says
+    somebody read it in those fifteen minutes; `note_viewers()` then supplies the
+    name, defeating its no-timestamps rule. It would also not have worked
+    mechanically, since `note_views_bump_counts()` recounts rather than increments
+    and the next read restores the true total. The honesty cost is carried by an
+    `edited_at` column and a "· edited" marker instead.
+  - `edited_at` is **stamped by a `BEFORE UPDATE` trigger and granted to nobody**.
+    The marker is a claim made to other readers, so the one party with a motive to
+    suppress it must not be able to write it. The same trigger refuses any browser
+    UPDATE touching a column other than `body` — a backstop against a future blanket
+    `GRANT`, not against a bad policy. It skips non-browser roles by `current_user`,
+    because `note_views_bump_counts()` legitimately writes the counters as the table
+    owner; without that skip every note read would 500.
+  - `note_counter_write_leaks()` asserts the whole property in CI, so a future
+    `GRANT ALL ON public.notes` fails the build rather than silently re-opening it.
 - `user_company_access` UPDATE/INSERT **are** column-scoped, to
   `(name, role, email, pin_hash)`. Without that, an admin flags everyone-but-one
   with `excluded_from_metrics`, watches whose reads still count, and has a full
@@ -173,6 +193,16 @@ to publishing any count. The design denies every amplifier — no per-job breakd
 no timestamps in the named list, no read timeline, no realtime stream. Jigged staff
 with prod access can read the table as `postgres`; the promise is "your boss cannot
 see this", not "nobody can".
+
+**Second residual, added with #628:** exposing Delete hands an author a crude version
+of the reset that editing deliberately refuses — delete the note, repost it, and the
+copy starts at `viewer_count` 0. That path is not new; RLS has always permitted an
+author to delete their own note, and only the UI was missing. It stays acceptable
+because it is **loud** where an edit-triggered reset would have been silent: the note
+visibly disappears and comes back, loses its reactions and its photos, and jumps to
+the top of the feed. Anyone using it as a polling oracle is doing so in full view of
+everyone reading the same feed. The distinction worth preserving is silence, not
+irreversibility.
 
 ### What comes back to the author
 

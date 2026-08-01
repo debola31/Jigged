@@ -7,7 +7,6 @@ import {
   countNote,
   countableCandidates,
   commonUnit,
-  countedTally,
   draftKey,
   excludedCandidates,
   parseDraft,
@@ -138,13 +137,6 @@ describe('commonUnit', () => {
 
   it('returns null for an empty sheet', () => {
     expect(commonUnit([])).toBeNull();
-  });
-});
-
-describe('countedTally', () => {
-  it('counts entries, and zero is a real count rather than "unanswered"', () => {
-    expect(countedTally({ a: 5, c: 0 })).toBe(2);
-    expect(countedTally({})).toBe(0);
   });
 });
 

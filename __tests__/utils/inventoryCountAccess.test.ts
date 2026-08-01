@@ -17,12 +17,41 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
   getLocations: vi.fn(),
 }));
+/**
+ * A chainable stub rather than `{}`: `loadPartAtLocationCandidate` and
+ * `refreshLocationQuantities` both go through `.from()`, and each test queues the results its
+ * reads should see, in order.
+ */
+const { sbState, sbMock } = vi.hoisted(() => {
+  type Result = { data: unknown; error: unknown };
+  const st: { queue: Result[]; calls: Record<string, unknown[]>[] } = { queue: [], calls: [] };
+  const builder = (result: Result) => {
+    const b: Record<string, unknown> = {};
+    const seen: Record<string, unknown[]> = {};
+    st.calls.push(seen);
+    ['select', 'eq', 'in', 'is', 'gt', 'order', 'limit', 'range', 'maybeSingle', 'single'].forEach(
+      (m) => {
+        b[m] = vi.fn((...args: unknown[]) => {
+          seen[m] = args;
+          return b;
+        });
+      },
+    );
+    b.then = (resolve: (v: unknown) => unknown) => resolve(result);
+    return b;
+  };
+  return {
+    sbState: st,
+    sbMock: { from: vi.fn(() => builder(st.queue.shift() ?? { data: null, error: null })) },
+  };
+});
+
 vi.mock('@/lib/supabase', () => ({
-  getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
+  getSupabase: () => sbMock,
+  getTypedSupabase: () => sbMock,
 }));
 
-import { commitCount } from '@/utils/inventoryCountAccess';
+import { commitCount, loadPartAtLocationCandidate } from '@/utils/inventoryCountAccess';
 import { adjustPartStock } from '@/utils/partsAccess';
 import { adjustStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import type { CountVariance } from '@/types/inventoryCount';
@@ -43,6 +72,8 @@ const variance = (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  sbState.queue = [];
+  sbState.calls = [];
   asMock(adjustPartStock).mockResolvedValue({});
   asMock(adjustStockAtLocation).mockResolvedValue({});
 });
@@ -119,5 +150,68 @@ describe('commitCount resilience', () => {
       (p) => seen.push(`${p.done}/${p.total}:${p.currentPartName}`),
     );
     expect(seen).toEqual(['0/2:P1', '1/2:P2', '2/2:']);
+  });
+});
+
+/**
+ * "Count here" from the part page. The interesting case is the one the ordinary bin read cannot
+ * reach: the system says zero, and you are standing there holding twelve.
+ */
+describe('loadPartAtLocationCandidate', () => {
+  const part = (over: Record<string, unknown> = {}) => ({
+    id: 'p1',
+    part_name: 'RAW-AL6061-BLANK',
+    description: 'Aluminium blank',
+    primary_unit: 'ea',
+    is_location_tracked: true,
+    ...over,
+  });
+
+  it('reads the balance rather than assuming zero', async () => {
+    sbState.queue = [
+      { data: part(), error: null },
+      { data: [{ part_id: 'p1', quantity: 12 }], error: null },
+    ];
+
+    const c = await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
+
+    expect(c.systemQuantity).toBe(12);
+    expect(c.target).toEqual({ kind: 'location', locationId: 'l1', locationName: 'Shelf A' });
+  });
+
+  /**
+   * The row `getLocationContentsPage` filters away with `.gt('quantity', 0)`, which is exactly
+   * why this loader exists. Zero must survive so a real count can correct it.
+   */
+  it('still returns a candidate when the part has no balance here', async () => {
+    sbState.queue = [{ data: part(), error: null }, { data: [], error: null }];
+
+    const c = await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
+    expect(c.systemQuantity).toBe(0);
+  });
+
+  /** Archive is a soft delete; a by-id read that ignores it resurrects deleted parts. */
+  it('scopes the read to the company and skips archived parts', async () => {
+    sbState.queue = [{ data: part(), error: null }, { data: [], error: null }];
+    await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
+
+    const read = sbState.calls[0];
+    expect(read.eq).toBeDefined();
+    expect(read.is).toEqual(['deleted_at', null]);
+  });
+
+  it('says so when the part is gone', async () => {
+    sbState.queue = [{ data: null, error: null }];
+    await expect(loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
+      /no longer exists/i,
+    );
+  });
+
+  /** Mirrors the RPC guard here, so it fails before the sheet is filled in rather than after. */
+  it('refuses a part that is not tracked by place, naming it', async () => {
+    sbState.queue = [{ data: part({ is_location_tracked: false }), error: null }];
+    await expect(loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
+      /RAW-AL6061-BLANK.*tracked by place/i,
+    );
   });
 });

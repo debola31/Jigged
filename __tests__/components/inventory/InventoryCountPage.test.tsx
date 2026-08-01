@@ -675,3 +675,83 @@ describe('counting one place', () => {
     expect(screen.getByRole('button', { name: /select all/i })).toBeDisabled();
   });
 });
+
+/**
+ * The sheet must survive the list it came from being replaced.
+ *
+ * `candidates` is swapped wholesale by a debounced search (and, now, by turning a page), and
+ * `save()` used to build its variances by mapping over that array. A number typed for a part that
+ * then fell out of the result set was **silently never committed** — no warning, no failure, just
+ * fewer changes than you made. Holding the chosen candidates by value is what fixes it.
+ */
+describe('counting one place — the sheet outlives the search', () => {
+  const LOC2 = 'loc-shelf-a';
+  const hereRow = (partId: string, quantity: number): CountCandidate =>
+    cand({
+      partId,
+      quantity: undefined,
+      systemQuantity: quantity,
+      unit: 'ea',
+      target: { kind: 'location', locationId: LOC2, locationName: 'Shelf A' },
+    } as Partial<CountCandidate> & { partId: string });
+
+  beforeEach(() => {
+    searchParams.set('location', LOC2);
+    asMock(getLocations).mockResolvedValue([
+      { id: LOC2, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
+    ]);
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [hereRow('BUY-ORING-214', 828), hereRow('BUY-BEARING-608ZZ', 580)],
+      total: 2,
+    });
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map());
+  });
+
+  afterEach(() => searchParams.delete('location'));
+
+  it('commits a count typed before a search that dropped the row', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
+    await user.type(inputFor('BUY-ORING-214'), '800');
+
+    // The server list is replaced by something that does not contain the counted part.
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [hereRow('SOMETHING-ELSE', 5)],
+      total: 1,
+    });
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['BUY-ORING-214', 828]]));
+
+    await user.click(screen.getByRole('button', { name: /save|commit|finish/i }));
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [variances] = asMock(commitCount).mock.calls[0];
+    expect(variances).toHaveLength(1);
+    expect(variances[0].candidate.partId).toBe('BUY-ORING-214');
+    expect(variances[0].counted).toBe(800);
+  });
+
+  /** Untick then re-tick must not make someone type the number again. */
+  it('keeps a typed number when a row is unticked', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Shelf A?");
+
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
+    await user.type(inputFor('BUY-ORING-214'), '800');
+    expect(screen.getByText(/1 of 1 counted/i)).toBeInTheDocument();
+
+    // Back to the picker, untick, re-tick, forward again. Two "Back" buttons exist (the page
+    // header's and the sheet footer's); the footer one is the step control.
+    await user.click(screen.getAllByRole('button', { name: /^back$/i }).at(-1) as HTMLElement);
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
+    await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
+
+    expect(inputFor('BUY-ORING-214')).toHaveValue(800);
+  });
+});

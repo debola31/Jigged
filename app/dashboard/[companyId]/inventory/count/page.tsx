@@ -90,7 +90,6 @@ import {
   committableVariances,
   countableCandidates,
   commonUnit,
-  countedTally,
   excludedCandidates,
   readDraft,
   rowDelta,
@@ -190,7 +189,17 @@ export default function InventoryCountPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<CountCandidate[]>([]);
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  /**
+   * The chosen parts, BY VALUE — not a list of ids into `candidates`.
+   *
+   * This is a data-loss fix, not a refactor. `candidates` is replaced wholesale whenever the
+   * server list changes (a debounced search today, a page turn as of this change), and `save()`
+   * built its variances by mapping over `candidates`. So a number typed for a part that then fell
+   * out of the result set was **silently never committed** — no warning, no failure, the sheet
+   * just reported fewer changes than you made. Holding the candidate itself means the sheet
+   * survives anything that happens to the list it came from.
+   */
+  const [selected, setSelected] = useState<Map<string, CountCandidate>>(new Map());
   const [entries, setEntries] = useState<CountEntries>({});
   const [search, setSearch] = useState('');
 
@@ -213,6 +222,22 @@ export default function InventoryCountPage() {
   /** System quantities as the sheet loaded — compared to a fresh read at save, so we can say
    *  which parts moved underneath the count. */
   const openedWithRef = useRef<Map<string, number>>(new Map());
+
+  /**
+   * Remember what the system said when each row was FIRST seen — first-seen-wins.
+   *
+   * This is what `movedSinceOpened` compares against, i.e. "somebody else changed this while you
+   * were counting". Re-seeding the whole map on every load would reset that baseline every time
+   * the list reloaded, so turning to page 2 and back would erase the evidence that a part moved
+   * under you. Only rows never seen before get recorded.
+   */
+  const rememberOpenedWith = useCallback((rows: CountCandidate[]) => {
+    for (const c of rows) {
+      if (!openedWithRef.current.has(c.partId)) {
+        openedWithRef.current.set(c.partId, c.systemQuantity);
+      }
+    }
+  }, []);
 
   const [resume, setResume] = useState<{ partIds: string[]; entries: CountEntries; savedAt: number } | null>(
     null,
@@ -249,14 +274,14 @@ export default function InventoryCountPage() {
           if (cancelled) return;
           setCandidates(found);
           setHereTotal(total);
-          openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
+          rememberOpenedWith(found);
           return;
         }
 
         const found = await loadCountCandidates(companyId);
         if (cancelled) return;
         setCandidates(found);
-        openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
+        rememberOpenedWith(found);
 
         // Offer a resume only for parts that still exist, so numbers can't reattach to the
         // wrong row after the catalogue changes.
@@ -278,7 +303,7 @@ export default function InventoryCountPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, locationId, serverSearch]);
+  }, [companyId, locationId, serverSearch, rememberOpenedWith]);
 
   // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
   // is unconditional so the two modes don't need different effect shapes.
@@ -298,16 +323,35 @@ export default function InventoryCountPage() {
     return q ? countable.filter((c) => c.partName.toLowerCase().includes(q)) : countable;
   }, [countable, search, locationMode]);
 
-  /** The chosen parts, in list order. */
+  /**
+   * The chosen parts, alphabetical.
+   *
+   * Sorted rather than "in list order" because the list order no longer exists once a sheet can
+   * span pages — and a sheet whose rows move when you turn a page is worse than one that never
+   * matched the grid.
+   */
   const sheet = useMemo(
-    () => countable.filter((c) => selectedIds.includes(c.partId)),
-    [countable, selectedIds],
+    () =>
+      countableCandidates([...selected.values()]).sort((a, b) =>
+        a.partName.localeCompare(b.partName),
+      ),
+    [selected],
   );
 
   /** One unit for the whole sheet, or null when mixed — decides footer vs per-row. */
   const sheetUnit = useMemo(() => commonUnit(sheet), [sheet]);
 
-  const counted = countedTally(entries);
+  /**
+   * Counted rows ON THE SHEET, not keys in `entries`.
+   *
+   * `countedTally(entries)` counted a number you had typed and then unticked, so "12 of 10
+   * counted" was reachable. Deriving from the sheet keeps the tally honest without destroying
+   * the entry — untick, re-tick, and your number is still there.
+   */
+  const counted = useMemo(
+    () => sheet.filter((c) => entries[c.partId] !== undefined).length,
+    [sheet, entries],
+  );
   const changes = useMemo(
     () =>
       sheet.filter((c) => {
@@ -330,9 +374,9 @@ export default function InventoryCountPage() {
   // written draft was pure liability. If place-scoped resume is ever wanted, key the draft by
   // scope — do not simply delete this guard.
   useEffect(() => {
-    if (step !== 1 || selectedIds.length === 0 || locationMode) return;
-    writeDraft(buildDraft(companyId, selectedIds, entries, Date.now()));
-  }, [step, selectedIds, entries, companyId, locationMode]);
+    if (step !== 1 || selected.size === 0 || locationMode) return;
+    writeDraft(buildDraft(companyId, [...selected.keys()], entries, Date.now()));
+  }, [step, selected, entries, companyId, locationMode]);
 
   const clearDraft = useCallback(() => clearStoredDraft(companyId), [companyId]);
 
@@ -348,10 +392,15 @@ export default function InventoryCountPage() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [committing]);
 
-  const toggle = (partId: string) =>
-    setSelectedIds((prev) =>
-      prev.includes(partId) ? prev.filter((id) => id !== partId) : [...prev, partId],
-    );
+  const toggle = (c: CountCandidate) =>
+    setSelected((prev) => {
+      const next = new Map(prev);
+      // Unticking drops the row from the sheet but deliberately leaves `entries[partId]` alone,
+      // so re-ticking restores the number rather than making someone type it again.
+      if (next.has(c.partId)) next.delete(c.partId);
+      else next.set(c.partId, c);
+      return next;
+    });
 
   const setCount = (partId: string, raw: string) =>
     setEntries((prev) => {
@@ -388,10 +437,13 @@ export default function InventoryCountPage() {
       const fresh = locationId
         ? await refreshLocationQuantities(locationId, Object.keys(entries))
         : await refreshSystemQuantities(Object.keys(entries));
-      const updated = candidates.map((c) =>
+      // From the SHEET. Mapping over `candidates` was the bug: a part typed on a page or search
+      // you have since navigated away from is no longer in that array, and its correction was
+      // dropped without a word.
+      const updated = sheet.map((c) =>
         fresh.has(c.partId) ? { ...c, systemQuantity: fresh.get(c.partId) as number } : c,
       );
-      setCandidates(updated);
+      setSelected(new Map(updated.map((c) => [c.partId, c])));
       toCommit = committableVariances(buildVariances(updated, entries, openedWithRef.current));
     } catch (e) {
       setSnack({
@@ -449,14 +501,14 @@ export default function InventoryCountPage() {
    * is worse than no move at all, because you can't tell what you already did.
    */
   const putAway = async () => {
-    if (!locationId || !moveTo || selectedIds.length === 0) return;
+    if (!locationId || !moveTo || selected.size === 0) return;
     setMoving(true);
     try {
-      const res = await bulkPutAway(locationId, moveTo.id, selectedIds);
+      const res = await bulkPutAway(locationId, moveTo.id, [...selected.keys()]);
 
       // Refetch from the START. These parts have just left this location, so the result set
       // shifted — holding the previous page's offset would silently skip whatever moved up.
-      setSelectedIds([]);
+      setSelected(new Map());
       setEntries({});
       setMoveTo(null);
       const { candidates: found, total } = await loadLocationCountCandidates(
@@ -466,7 +518,7 @@ export default function InventoryCountPage() {
       );
       setCandidates(found);
       setHereTotal(total);
-      openedWithRef.current = new Map(found.map((c) => [c.partId, c.systemQuantity]));
+      rememberOpenedWith(found);
 
       setSnack({
         msg:
@@ -596,7 +648,15 @@ export default function InventoryCountPage() {
                 size="small"
                 variant="contained"
                 onClick={() => {
-                  setSelectedIds(resume.partIds);
+                  // Rehydrate from the loaded candidates — a draft stores ids, and the sheet
+                  // now needs the rows themselves.
+                  setSelected(
+                    new Map(
+                      candidates
+                        .filter((c) => resume.partIds.includes(c.partId))
+                        .map((c) => [c.partId, c]),
+                    ),
+                  );
                   setEntries(resume.entries);
                   setResume(null);
                   setStep(1);
@@ -650,7 +710,15 @@ export default function InventoryCountPage() {
                 />
                 <Box sx={{ flex: 1 }} />
                 <Button
-                  onClick={() => setSelectedIds(visible.map((c) => c.partId))}
+                  // A UNION with what is already ticked, because "select all" on page 3 must not
+                  // silently drop pages 1 and 2.
+                  onClick={() =>
+                    setSelected((prev) => {
+                      const next = new Map(prev);
+                      for (const c of visible) next.set(c.partId, c);
+                      return next;
+                    })
+                  }
                   // The RPC refuses more than PUT_AWAY_MAX to bound how long it holds row locks.
                   // Say so here rather than letting someone select 2,000 and be told no.
                   disabled={visible.length > PUT_AWAY_MAX}
@@ -660,12 +728,12 @@ export default function InventoryCountPage() {
                 <Button
                   variant="contained"
                   size="large"
-                  disabled={selectedIds.length === 0}
+                  disabled={selected.size === 0}
                   onClick={() => setStep(1)}
                 >
-                  {selectedIds.length === 0
+                  {selected.size === 0
                     ? 'Count'
-                    : `Count ${selectedIds.length} ${selectedIds.length === 1 ? 'part' : 'parts'}`}
+                    : `Count ${selected.size} ${selected.size === 1 ? 'part' : 'parts'}`}
                 </Button>
               </Box>
 
@@ -686,10 +754,10 @@ export default function InventoryCountPage() {
                         disabled={moving}
                         onCreate={createDestination}
                         helperText={
-                          selectedIds.length === 0
+                          selected.size === 0
                             ? 'Tick something above first.'
-                            : `Moves everything each part has here — ${selectedIds.length} ${
-                                selectedIds.length === 1 ? 'part' : 'parts'
+                            : `Moves everything each part has here — ${selected.size} ${
+                                selected.size === 1 ? 'part' : 'parts'
                               }.`
                         }
                       />
@@ -711,12 +779,14 @@ export default function InventoryCountPage() {
                       variant="outlined"
                       size="large"
                       sx={{ mt: 1 }}
-                      disabled={moving || !moveTo || selectedIds.length === 0}
+                      // The cap belongs on the ACTION, not only the select-all button: ticking
+                      // rows one at a time across pages can reach it without ever pressing that.
+                      disabled={moving || !moveTo || selected.size === 0 || selected.size > PUT_AWAY_MAX}
                       onClick={putAway}
                     >
                       {moving
                         ? 'Putting away…'
-                        : `Put ${selectedIds.length || ''} away`.replace('  ', ' ')}
+                        : `Put ${selected.size || ''} away`.replace('  ', ' ')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -756,7 +826,7 @@ export default function InventoryCountPage() {
                   {visible.map((c) => (
                     <Box
                       key={c.partId}
-                      onClick={() => toggle(c.partId)}
+                      onClick={() => toggle(c)}
                       sx={{
                         display: 'flex',
                         alignItems: 'center',
@@ -769,7 +839,7 @@ export default function InventoryCountPage() {
                       }}
                     >
                       <Checkbox
-                        checked={selectedIds.includes(c.partId)}
+                        checked={selected.has(c.partId)}
                         tabIndex={-1}
                         inputProps={{ 'aria-label': `Count ${c.partName}` }}
                       />

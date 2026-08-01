@@ -111,6 +111,67 @@ export async function loadLocationCountCandidates(
 }
 
 /**
+ * One part, at one place — the sheet you get from "Count here" on the part page.
+ *
+ * ## Why this cannot reuse the paged read
+ *
+ * `loadLocationCountCandidates` is built on `getLocationContentsPage`, which filters
+ * `.gt('quantity', 0)`. That is right for browsing a bin and wrong here: the whole reason to
+ * count one part at one place is usually that you think the number is wrong, and the most
+ * valuable case — *the system says zero and I am holding twelve* — is precisely the row that
+ * filter removes. This reads the part directly and asks for its balance separately.
+ *
+ * ## The balance is READ, never assumed
+ *
+ * A tempting shortcut is `systemQuantity: 0` when the part has no row at this place. It is wrong
+ * in a way that fails silently: `committableVariances` drops any line whose delta is 0, so
+ * counting 12 against an assumed 0 works, but counting **0** against a real balance of 12 would
+ * compute a delta of −12 correctly, while counting 0 against an assumed 0 computes 0 and commits
+ * nothing at all. The count that confirms an empty shelf has to be able to write.
+ */
+export async function loadPartAtLocationCandidate(
+  companyId: string,
+  partId: string,
+  locationId: string,
+  locationName: string,
+): Promise<CountCandidate> {
+  const supabase = getSupabase();
+
+  // Its own read rather than `getPartsForSelectByIds`, which filters neither by company nor by
+  // `deleted_at` — a by-id helper for a picker that has already scoped its options. Same line
+  // count here, and it closes both gaps.
+  const { data, error } = await supabase
+    .from('parts')
+    .select('id, part_name, description, primary_unit, is_location_tracked')
+    .eq('id', partId)
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error loading the part to count:', error);
+    throw error;
+  }
+  if (!data) throw new Error('That part no longer exists.');
+  // Mirrors the RPC's own guard, before the round trip rather than after it — the commit would
+  // fail with `part % is not location-tracked` once the whole sheet had been filled in.
+  if (!data.is_location_tracked) {
+    throw new Error(`${data.part_name} isn't tracked by place, so it can't be counted at one.`);
+  }
+
+  const balances = await refreshLocationQuantities(locationId, [partId]);
+
+  return {
+    partId,
+    partName: data.part_name,
+    description: data.description,
+    unit: data.primary_unit ?? 'ea',
+    systemQuantity: balances.get(partId) ?? 0,
+    target: { kind: 'location', locationId, locationName },
+  };
+}
+
+/**
  * Re-read the balances AT ONE LOCATION before committing a place-scoped count.
  *
  * The company-wide sibling below reads `parts.quantity`, which is the roll-up across every bin —

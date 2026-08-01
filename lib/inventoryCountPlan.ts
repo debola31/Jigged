@@ -99,11 +99,6 @@ export function commonUnit(candidates: CountCandidate[]): string | null {
   return candidates.every((c) => c.unit === first) ? first : null;
 }
 
-/** How many parts carry a number. Drives the footer's running tally. */
-export function countedTally(entries: CountEntries): number {
-  return Object.keys(entries).length;
-}
-
 /**
  * The delta for one row, or null when it hasn't been counted.
  *

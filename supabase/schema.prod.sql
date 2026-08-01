@@ -307,6 +307,11 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
     "deleted_at" timestamp with time zone,
     "is_hot" boolean NOT NULL DEFAULT false,
+    "freight_terms" text,
+    "customer_carrier_account_id" uuid,
+    "ship_via" text,
+    "shipping_instructions" text,
+    CONSTRAINT "jobs_freight_terms_check" CHECK (((freight_terms IS NULL) OR (freight_terms = ANY (ARRAY['prepaid'::text, 'collect'::text, 'third_party'::text, 'customer_arranged'::text])))),
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -359,9 +364,14 @@ CREATE TABLE IF NOT EXISTS "public"."shipments"
     "customer_name" text,
     "bill_to_address" jsonb,
     "ship_to_address" jsonb,
+    "freight_terms" text,
+    "customer_carrier_account_id" uuid,
+    "freight_account_snapshot" jsonb,
     CONSTRAINT "shipments_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipments_packing_slip_company_unique" UNIQUE (company_id, packing_slip_number),
-    CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text]))))
+    CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text])))),
+    CONSTRAINT "shipments_freight_terms_check" CHECK (((freight_terms IS NULL) OR (freight_terms = ANY (ARRAY['prepaid'::text, 'collect'::text, 'third_party'::text, 'customer_arranged'::text])))),
+    CONSTRAINT "shipments_freight_terms_method_check" CHECK (((freight_terms IS NULL) OR (shipping_method = ANY (ARRAY['shipment'::text, 'dropship'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_fulfillment_audit"

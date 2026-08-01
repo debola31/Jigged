@@ -1273,11 +1273,13 @@ export type Database = {
           contact_snapshot: Json | null
           created_at: string | null
           created_by: string | null
+          customer_carrier_account_id: string | null
           customer_id: string | null
           customer_name: string | null
           customer_po_number: string | null
           deleted_at: string | null
           due_date: string | null
+          freight_terms: string | null
           fulfillment_status: string
           id: string
           invoicing_status: string
@@ -1286,7 +1288,9 @@ export type Database = {
           production_status: string
           quote_id: string | null
           ship_to_address: Json | null
+          ship_via: string | null
           shipping_address_id: string | null
+          shipping_instructions: string | null
           started_at: string | null
           status_changed_at: string | null
           updated_at: string | null
@@ -1300,11 +1304,13 @@ export type Database = {
           contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
           deleted_at?: string | null
           due_date?: string | null
+          freight_terms?: string | null
           fulfillment_status: string
           id?: string
           invoicing_status?: string
@@ -1313,7 +1319,9 @@ export type Database = {
           production_status: string
           quote_id?: string | null
           ship_to_address?: Json | null
+          ship_via?: string | null
           shipping_address_id?: string | null
+          shipping_instructions?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
@@ -1327,11 +1335,13 @@ export type Database = {
           contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
           deleted_at?: string | null
           due_date?: string | null
+          freight_terms?: string | null
           fulfillment_status?: string
           id?: string
           invoicing_status?: string
@@ -1340,7 +1350,9 @@ export type Database = {
           production_status?: string
           quote_id?: string | null
           ship_to_address?: Json | null
+          ship_via?: string | null
           shipping_address_id?: string | null
+          shipping_instructions?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
@@ -1365,6 +1377,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "customer_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_customer_carrier_account_id_fkey"
+            columns: ["customer_carrier_account_id"]
+            isOneToOne: false
+            referencedRelation: "customer_carrier_accounts"
             referencedColumns: ["id"]
           },
           {
@@ -2967,8 +2986,11 @@ export type Database = {
           company_id: string
           created_at: string
           created_by: string | null
+          customer_carrier_account_id: string | null
           customer_id: string
           customer_name: string | null
+          freight_account_snapshot: Json | null
+          freight_terms: string | null
           id: string
           job_id: string
           one_time_address: Json | null
@@ -2986,8 +3008,11 @@ export type Database = {
           company_id: string
           created_at?: string
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id: string
           customer_name?: string | null
+          freight_account_snapshot?: Json | null
+          freight_terms?: string | null
           id?: string
           job_id: string
           one_time_address?: Json | null
@@ -3005,8 +3030,11 @@ export type Database = {
           company_id?: string
           created_at?: string
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string
           customer_name?: string | null
+          freight_account_snapshot?: Json | null
+          freight_terms?: string | null
           id?: string
           job_id?: string
           one_time_address?: Json | null
@@ -3024,6 +3052,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_customer_carrier_account_id_fkey"
+            columns: ["customer_carrier_account_id"]
+            isOneToOne: false
+            referencedRelation: "customer_carrier_accounts"
             referencedColumns: ["id"]
           },
           {
@@ -3535,7 +3570,9 @@ export type Database = {
         Args: {
           p_carrier: string
           p_company_id: string
+          p_customer_carrier_account_id?: string
           p_customer_id: string
+          p_freight_terms?: string
           p_line_items: Json
           p_notes?: string
           p_one_time_address: Json
@@ -3545,6 +3582,7 @@ export type Database = {
         }
         Returns: string
       }
+      dearmor: { Args: { "": string }; Returns: string }
       delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
         Args: {
@@ -3570,6 +3608,8 @@ export type Database = {
         Args: { p_company_id: string }
         Returns: Json
       }
+      gen_random_uuid: { Args: never; Returns: string }
+      gen_salt: { Args: { "": string }; Returns: string }
       generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string
@@ -3710,6 +3750,10 @@ export type Database = {
           jobs_count: number
           quotes_count: number
         }[]
+      }
+      pgp_armor_headers: {
+        Args: { "": string }
+        Returns: Record<string, unknown>[]
       }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }

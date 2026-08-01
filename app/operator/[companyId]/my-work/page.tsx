@@ -15,6 +15,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import LaunchIcon from '@mui/icons-material/Launch';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -30,10 +31,7 @@ import NoteEditDialog from '@/components/notes/NoteEditDialog';
 import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
-import {
-  OperatorIdentityRow,
-  OperatorAccountActions,
-} from '@/components/operator/OperatorAccountBlock';
+import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
 
@@ -124,13 +122,35 @@ function NoteRow({
                 stable column to scan down, present whether or not the note
                 carries a part. */}
             <ReachRow note={note} />
-            {note.part_name && (
+            {/* THE SUBJECT, in one stable slot. A `notes` row has exactly one subject —
+                a part, a job, or a machine — and this list mixes all three, because all
+                three are things the operator wrote.
+
+                Machine entries used to render nothing here. They carry no part and no
+                operation, and unlike a job note they carry no job number either (the
+                CHECK constraint forbids it), so a maintenance entry appeared as a bare
+                sentence with nothing anywhere on the row saying it was about a machine.
+                Job notes are deliberately left bare: their subject is the job, and the
+                job reference already sits quietly beside the date — see the note there
+                for why it stays quiet rather than becoming a heading. */}
+            {(note.part_name || note.machine_name) && (
               <Typography variant="subtitle2" fontWeight={700} noWrap>
-                {note.part_name}
+                {note.part_name ?? note.machine_name}
               </Typography>
             )}
             {note.operation_label && (
               <Chip size="small" label={note.operation_label} variant="outlined" />
+            )}
+            {/* What they did to the machine, when they said. Optional by design, so a
+                classified entry gets a chip and an unclassified one simply doesn't. */}
+            {note.maintenance_kind && (
+              <Chip
+                size="small"
+                variant="outlined"
+                icon={<BuildOutlinedIcon />}
+                label={note.maintenance_kind}
+                sx={{ textTransform: 'capitalize' }}
+              />
             )}
             {note.photo_count > 0 && (
               <Chip
@@ -349,22 +369,25 @@ export default function MyWorkPage() {
   const { data: identity } = useOperatorIdentity(companyId);
 
   /**
-   * This is the "Me" tab: identity, then the work, then account actions.
+   * This is the "Me" tab: who you are and the two account actions, then the work.
    *
-   * The work is sandwiched rather than replaced — see `OperatorAccountBlock` for why the work
-   * has to lead, and why Log out now rides in the identity row instead of at the very bottom.
+   * Both account actions sit ABOVE the work now. They used to sandwich it — Log out last,
+   * Give feedback just before it — on the reasoning that the work must lead and a
+   * consequential action should be slightly slow to reach. The work still leads visually
+   * (a name, an email and a small link are not what the eye lands on), but "below the
+   * list" stopped being a place at all once the list could page: a pilot's feedback
+   * channel that only appears after ten notes and a Show more is a channel nobody uses,
+   * and a Log out you cannot reach is not a safe Log out.
    *
-   * The three loading/error/empty states are INSIDE `MyContribution` on purpose. They used to
-   * be early returns from this component, and leaving them there once Profile stopped being a
-   * tab would have meant a brand-new operator — the case with zero notes, i.e. the common one —
-   * had no Log out button anywhere in the app. That still holds: Log out lives above the work
-   * now, but Give feedback below it depends on the same thing.
+   * This also means neither action depends on the work loading. `MyContribution` owns its
+   * own loading/error/empty states rather than early-returning from here, which is what
+   * kept a brand-new operator — zero notes, the common case — from losing Log out
+   * entirely; now the ordering makes that structural rather than merely careful.
    */
   return (
     <Box sx={{ pb: 4 }}>
       <OperatorIdentityRow companyId={companyId} identity={identity} />
       <MyContribution companyId={companyId} />
-      <OperatorAccountActions identity={identity} />
     </Box>
   );
 }

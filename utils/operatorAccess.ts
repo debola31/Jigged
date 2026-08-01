@@ -1916,10 +1916,15 @@ export async function getMyNotesPage(
   const { data, error } = await supabase
     .from('notes')
     .select(
-      'id, body, created_at, edited_at, viewer_count, usage_count, ' +
+      'id, body, created_at, edited_at, viewer_count, usage_count, maintenance_kind, ' +
         'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
         'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
         'part:parts(part_name), ' +
+        // The machine, for maintenance entries. Those are `notes` rows too
+        // (subject_kind='work_center'), so they land in this list like anything else the
+        // operator wrote — but they carry no part, no operation and no job, so without
+        // this they rendered as a bare sentence with nothing saying what it was about.
+        'work_center:work_centers!notes_work_center_fk(name), ' +
         // Read-only here: RLS forbids reacting to your own note, so on My work
         // these are reception rather than an available action.
         'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
@@ -1963,9 +1968,11 @@ export async function getMyNotesPage(
     edited_at: string | null;
     viewer_count: number;
     usage_count: number;
+    maintenance_kind: string | null;
     operation: StepRel;
     captured_operation: StepRel;
     part: { part_name: string | null } | { part_name: string | null }[] | null;
+    work_center: { name: string | null } | { name: string | null }[] | null;
     reactions: ReactionRel[] | null;
     job: JobRel;
     captured_job: JobRel;
@@ -1977,6 +1984,7 @@ export async function getMyNotesPage(
 
   const notes: MyNote[] = (data as unknown as Row[]).map((r) => {
     const part = Array.isArray(r.part) ? r.part[0] : r.part;
+    const workCenter = Array.isArray(r.work_center) ? r.work_center[0] : r.work_center;
     const job = oneJob(r.job) ?? oneJob(r.captured_job);
     return {
       id: r.id,
@@ -1989,6 +1997,8 @@ export async function getMyNotesPage(
       // captured at is the readable label.
       operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),
       part_name: part?.part_name ?? null,
+      machine_name: workCenter?.name ?? null,
+      maintenance_kind: r.maintenance_kind,
       photo_count: (r.media ?? []).length,
       reactions: mapReactions(r.reactions),
       viewer_count: r.viewer_count,

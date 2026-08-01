@@ -3,11 +3,15 @@
 /**
  * The identity and account half of the operator's "Me" tab.
  *
- * Two exports, meant to sandwich the operator's own work:
+ * One export, above the operator's own work:
  *
- *   <OperatorIdentityRow />      one row — who you are, and the way out
+ *   <OperatorIdentityRow />      who you are, the way out, and the way to reach us
  *   … the operator's notes …     the reason the tab exists
- *   <OperatorAccountActions />   feedback
+ *
+ * It used to be two, sandwiching the work, with Give feedback and then Log out below the
+ * note list. That stopped being tenable once the list paged: an action below an unbounded
+ * (and now paged) list is not "slightly slower to reach", it is unreachable, and a pilot's
+ * feedback channel that only appears after a Show more is a channel nobody uses.
  *
  * ## Why identity is one row and not a card
  *
@@ -45,10 +49,16 @@
  * The slip risk the old placement guarded against came specifically from Log out sitting
  * ADJACENT to a benign button an operator taps often. At the end of a row whose only other
  * content is static text, there is nothing to slip from: it is the sole tap target in its row,
- * ≥48px, and the nearest other control is the header's dashboard shortcut roughly 64px above —
- * past both WCAG 2.5.8's 24px centre-to-centre floor and Material's 8dp clearance. That is the
- * same reasoning `app/operator/[companyId]/layout.tsx` uses to forbid a second icon button in
- * the header, applied rather than contradicted.
+ * ≥48px, and its neighbours are the header's dashboard shortcut roughly 64px above and the
+ * Give feedback link below and hard left — diagonally opposite, never beside. Both clear WCAG
+ * 2.5.8's 24px centre-to-centre floor and Material's 8dp by a wide margin. That is the same
+ * reasoning `app/operator/[companyId]/layout.tsx` uses to forbid a second icon button in the
+ * header, applied rather than contradicted.
+ *
+ * This is a real constraint on future edits, not decoration: Give feedback is deliberately a
+ * SIBLING of the identity row rather than a child of it. Moving it inside — to sit next to the
+ * icon, which is the obvious tidy-up — reintroduces exactly the adjacency this is avoiding.
+ * The test `leaves Log out with no neighbouring tap target to slip from` fails if you do.
  *
  * It is deliberately NOT behind a confirmation dialog, and moving it up does not change that:
  * logging out is recoverable by logging back in, and a dialog on a recoverable action is the
@@ -61,7 +71,6 @@ import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
 import Tooltip from '@mui/material/Tooltip';
@@ -100,6 +109,8 @@ export function OperatorIdentityRow({
   identity: OperatorIdentity | null;
 }) {
   const router = useRouter();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const handleLogout = async () => {
     // Clears the persisted station (localStorage) on explicit logout — same store
@@ -114,12 +125,12 @@ export function OperatorIdentityRow({
   };
 
   return (
+    <>
     <Box
       sx={{
         display: 'flex',
         alignItems: 'center',
         gap: 1.5,
-        mb: 2,
         minHeight: 48,
       }}
     >
@@ -162,46 +173,60 @@ export function OperatorIdentityRow({
         </IconButton>
       </Tooltip>
     </Box>
-  );
-}
 
-export function OperatorAccountActions({ identity }: { identity: OperatorIdentity | null }) {
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+    {/*
+      Give feedback, at the top and always on screen.
 
-  return (
-    <Box sx={{ mt: 4 }}>
-      <Divider sx={{ mb: 2 }} />
+      It used to be a full-width button at the very bottom of the tab, under the
+      operator's whole note list, which is the one place a pilot's feedback channel
+      must not be: the people most likely to have something to say are the ones who
+      never scrolled that far. Being small is the trade for being permanent — this is
+      a secondary action that must be FINDABLE, not prominent, and a full-width button
+      up here would outrank the operator's own work, which the tab exists for.
 
+      A SIBLING of the identity row, not a child of it. Log out has to stay the only
+      tap target in that row — that isolation is what replaced the old "put it last"
+      distance argument (see the note at the top of this file), and a link sitting
+      beside it would give a habituated thumb something to slip from. Here it is below
+      and hard left, diagonally opposite the icon.
+    */}
+    <Box sx={{ mb: 2, pl: 7 }}>
       <Button
-        variant="outlined"
-        startIcon={<FeedbackIcon />}
         onClick={() => setFeedbackOpen(true)}
-        fullWidth
-        sx={{ minHeight: 48 }}
+        startIcon={<FeedbackIcon fontSize="small" />}
+        size="small"
+        sx={{
+          minHeight: 40,
+          px: 0.5,
+          textTransform: 'none',
+          color: 'text.secondary',
+          '&:hover': { bgcolor: 'transparent', color: 'primary.light' },
+        }}
       >
         Give feedback
       </Button>
-
-      <FeedbackDialog
-        open={feedbackOpen}
-        onClose={() => setFeedbackOpen(false)}
-        onSuccess={() => {
-          setFeedbackOpen(false);
-          setFeedbackSuccess(true);
-        }}
-        userId={identity?.userId}
-      />
-      <Snackbar
-        open={feedbackSuccess}
-        autoHideDuration={4000}
-        onClose={() => setFeedbackSuccess(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="success" onClose={() => setFeedbackSuccess(false)}>
-          Thanks for your feedback!
-        </Alert>
-      </Snackbar>
     </Box>
+
+    <FeedbackDialog
+      open={feedbackOpen}
+      onClose={() => setFeedbackOpen(false)}
+      onSuccess={() => {
+        setFeedbackOpen(false);
+        setFeedbackSuccess(true);
+      }}
+      userId={identity?.userId}
+    />
+    <Snackbar
+      open={feedbackSuccess}
+      autoHideDuration={4000}
+      onClose={() => setFeedbackSuccess(false)}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+      <Alert severity="success" onClose={() => setFeedbackSuccess(false)}>
+        Thanks for your feedback!
+      </Alert>
+    </Snackbar>
+    </>
   );
 }
+

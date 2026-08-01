@@ -58,6 +58,8 @@ function note(over: Partial<MyNote> = {}): MyNote {
     edited_at: null,
     operation_label: 'Op 20 · Mill',
     part_name: 'BRKT-1042',
+    machine_name: null,
+    maintenance_kind: null,
     job_id: 'job-1',
     job_number: 'J-0042',
     photo_count: 0,
@@ -66,6 +68,29 @@ function note(over: Partial<MyNote> = {}): MyNote {
     usage_count: 0,
     ...over,
   };
+}
+
+/**
+ * A maintenance entry, as it really arrives here.
+ *
+ * Maintenance is not a separate store: an entry is a `notes` row with
+ * subject_kind='work_center', so it lands in the operator's own list beside their part and
+ * job notes. The DB CHECK constraint permits exactly one subject, so a machine entry has NO
+ * part, NO operation and NO job — which is why it needs the machine name to say anything at
+ * all about what it concerns.
+ */
+function machineNote(over: Partial<MyNote> = {}): MyNote {
+  return note({
+    id: 'm1',
+    body: 'Blade guard rattling at speed.',
+    part_name: null,
+    operation_label: null,
+    job_id: null,
+    job_number: null,
+    machine_name: 'Bandsaw',
+    maintenance_kind: 'noticed',
+    ...over,
+  });
 }
 
 /**
@@ -393,6 +418,62 @@ describe('My Work — the "Me" tab', () => {
     // The note is present on first paint — no second tap to reach your own work.
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  /**
+   * A maintenance entry has no part, no operation and no job — the CHECK constraint on
+   * `notes` allows exactly one subject and a machine entry's is the work center. Before the
+   * machine name was selected, such an entry rendered as a bare sentence with nothing
+   * anywhere on the row saying what it was about, sitting in a list where every other row
+   * announced a part or a job. It was indistinguishable from a note whose context had been
+   * lost.
+   */
+  it('names the machine on a maintenance entry, which has no other subject', async () => {
+    stage({ notes: [machineNote()] });
+    render(<MyWorkPage />);
+
+    const row = (await screen.findAllByRole('listitem'))[0];
+    expect(within(row).getByText('Bandsaw')).toBeInTheDocument();
+    expect(within(row).getByText('noticed')).toBeInTheDocument();
+    // Nothing invented: a machine entry has no job to point at.
+    expect(within(row).queryByText(/J-\d+/)).not.toBeInTheDocument();
+  });
+
+  it('leaves an unclassified maintenance entry without a kind chip', async () => {
+    // Classifying is optional and null is a common, legal state — so absence must render
+    // as absence, not as a placeholder.
+    stage({ notes: [machineNote({ maintenance_kind: null })] });
+    render(<MyWorkPage />);
+
+    const row = (await screen.findAllByRole('listitem'))[0];
+    expect(within(row).getByText('Bandsaw')).toBeInTheDocument();
+    expect(within(row).queryByText(/noticed|cleaned|repaired|adjusted|replaced/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the part name for a part note, unchanged', async () => {
+    stage({ notes: [note()] });
+    render(<MyWorkPage />);
+
+    const row = (await screen.findAllByRole('listitem'))[0];
+    expect(within(row).getByText('BRKT-1042')).toBeInTheDocument();
+    expect(within(row).getByText('Op 20 · Mill')).toBeInTheDocument();
+  });
+
+  /**
+   * Give feedback moved above the work. It used to sit under the operator's entire note
+   * list, which is the one place a pilot's feedback channel must not be: once the list
+   * pages, reaching it means ten notes and a Show more, and the operators most likely to
+   * have something to say are the ones who never scrolled that far.
+   */
+  it('puts Give feedback above the work, not after it', async () => {
+    stage();
+    render(<MyWorkPage />);
+
+    const feedback = await screen.findByRole('button', { name: /give feedback/i });
+    const firstNote = screen.getAllByRole('listitem')[0];
+    expect(
+      feedback.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('puts the email in the identity row, not in a caption further down', async () => {

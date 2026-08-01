@@ -375,6 +375,23 @@ export interface MyNote {
   /** Part the note is durably attached to, when it has one. */
   part_name: string | null;
   /**
+   * Machine this was logged against, for maintenance entries.
+   *
+   * Maintenance is not a separate store — an entry is a `notes` row with
+   * subject_kind='work_center', so it lands in the operator's own list beside their
+   * part and job notes. But that subject carries no part, no operation and no job, so
+   * without the machine name the row rendered as a bare sentence with nothing anywhere
+   * on it saying what it was about. Mutually exclusive with `part_name` and with
+   * `job_number` — the CHECK constraint on `notes` allows exactly one subject.
+   */
+  machine_name: string | null;
+  /**
+   * How the author classified a maintenance entry ('cleaned', 'repaired', 'replaced',
+   * 'adjusted', 'noticed'). Null is legal and common — classifying is optional, and
+   * the DB constraint only permits a value at all on a work_center note.
+   */
+  maintenance_kind: string | null;
+  /**
    * The job this note was written on — job_id for a job-subject note,
    * captured_job_id for a durable part-subject one. Null once that job is
    * deleted (provenance is ON DELETE SET NULL: the knowledge outlives its

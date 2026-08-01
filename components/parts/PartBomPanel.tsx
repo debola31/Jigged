@@ -561,13 +561,23 @@ export default function PartBomPanel({
                         targetPartId: child.id,
                         chain: pushPartToChain(currentChain, partId, child.id),
                       })}
-                      underline="always"
-                      color="primary.main"
+                      // Reads as ordinary row text and reveals itself as a link
+                      // on hover — the same treatment as a part name in a
+                      // quote's line items. Permanently-blue underlined names
+                      // fought the row for attention and were harder to read
+                      // against the dark card than plain white text.
+                      //
+                      // Colour is therefore NOT the link affordance here; the
+                      // chevron is, and it is always visible. Focus gets the
+                      // same underline as hover so the cue isn't mouse-only.
+                      underline="hover"
+                      color="inherit"
                       sx={{
                         fontWeight: 500,
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 0.25,
+                        '&:focus-visible': { textDecoration: 'underline' },
                       }}
                     >
                       {child.part_name}

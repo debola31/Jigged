@@ -116,8 +116,10 @@ how inventory modules rot (§5.11). Write side and setup: J1 seeding, J2 where t
 quoting boundary, J8 remnants — twelve journeys (§4).
 
 **Cut, as decisions:** traceability — no certs, heat numbers or regulated customers, so the lot layer
-went with it (§5.6). Customer-supplied material — real and frequent but **never stocked** (arrives
-with the job, is worked, leaves): a job attribute.
+went with it (§5.6); re-confirmed 2026-08-01, Contour does not want it either. Kept on the radar for
+**customer #2**, not for this shop — [#642](https://github.com/debola31/Jigged/issues/642).
+Customer-supplied material — real and frequent but **never stocked** (arrives with the job, is
+worked, leaves): a job attribute.
 
 ### Explicit non-goals (deliberate, decided)
 
@@ -289,7 +291,7 @@ Two journeys specced, then cut **2026-07-27**; kept without numbers, outside J1�
 
 | Cut | Why | Consequence | Reopen if |
 |---|---|---|---|
-| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. |
+| **Traceability** (heat numbers, certs) | Contour keeps neither; no regulated customers | Kills the lot/cert layer [§5.6](#56-lots--resolved-dont-build-them) made Phase 4's spine. **No lots**: stock is a quantity of an item at a place. [J8](#j8--cut-it-return-the-remnant) remnants must justify themselves on material cost alone; [J6](#j6--receive-it) is delivery-vs-PO matching only — no cert, heat field or attachment. | An aerospace/defense/medical customer appears — a real build, not a toggle. **Widened 2026-08-01** ([#642](https://github.com/debola31/Jigged/issues/642)): also fires on a **prospect** needing it during customer-#2 acquisition, which is likelier to come first and arrives as a deadline rather than a request. Contour itself still does not want it. [Heat-lot research](https://precisionam.com/articles/quality-compliance/aerospace-precision-machining-traceability/) stays cited in J6. |
 | **Customer-supplied material** | Frequent on service one-offs but **never stocked**: arrives with the job, leaves with the part — no balance, nothing to count. A *job* attribute; an ownership flag would have crossed every read path (on-hand, reorder, counts, buy list) for something that never behaves like stock. Same test as job-as-place, [§5.2](#52-is-a-job-a-place--resolved-no). | Survivor in [J4](#j4--job-kickoff-material-check): a service job whose BOM lists customer material shows a false shortage. Whether such lines exist is open in [§9](#9-what-we-know-and-what-we-still-dont); if so, exclude on the BOM line or job — never on stock. Doesn't block Phase 1. | It starts being *stored* between delivery and use. |
 
 ---
@@ -353,7 +355,22 @@ Under full material control locations get *more* load-bearing: a remnant is a ph
 
 ### 5.6 Lots — **RESOLVED: don't build them**
 
-The earlier draft put a lot layer between item and location (heat/lot as a quantity at a place; a remnant as its child lot), so traceability *and* remnant reuse fell out of one shape. **Contour keeps no certs or heat numbers and serves no regulated customers (validated 2026-07-27)** — no justification. Stock is a quantity of an item at a place, nothing between. Knock-ons: **J8 remnants must stand alone** (an explicit remnant concept, worth building only once they're confirmed to reuse drops); customer-supplied material needed no lot either and was cut outright, never being stocked. **Reopen with Traceability** if a regulated customer appears.
+The earlier draft put a lot layer between item and location (heat/lot as a quantity at a place; a remnant as its child lot), so traceability *and* remnant reuse fell out of one shape. **Contour keeps no certs or heat numbers and serves no regulated customers (validated 2026-07-27)** — no justification *then*. Stock is a quantity of an item at a place, nothing between. Knock-ons: **J8 remnants must stand alone** (an explicit remnant concept, worth building only once they're confirmed to reuse drops); customer-supplied material needed no lot either and was cut outright, never being stocked.
+
+> **The finding stands for Contour. Widened 2026-08-01 — [#642](https://github.com/debola31/Jigged/issues/642).**
+>
+> Re-checked directly: Contour keeps no traceability, does not use it, and **does not want it**. So
+> nothing above is qualified — the 2026-07-27 validation holds, and this stays cut.
+>
+> What is new is not a Contour want but a **product** one: the founder rates lot tracing a
+> nice-to-have, and it may be required by **customer #2**, whose acquisition is the current focus.
+> That widens the reopen trigger from *"an existing regulated customer appears"* to include **a
+> prospect who needs it during a sales conversation** — a real distinction, because the second is
+> the one likely to arrive first, and it arrives as a deadline rather than a request.
+>
+> Unchanged: it is a data-model change (a third dimension on `part_location_stock`, which is
+> `UNIQUE(part_id, location_id)` today) belonging with **[J6 Receive](#j6--receive-it)**, where
+> heat/lot and the cert PDF are captured. Nothing shipped forecloses it; every addition is additive.
 
 ### 5.7 Quoting never touches stock
 
@@ -551,7 +568,7 @@ Founder observation, **Contour Tool & Machine**, 2026-07-27 — reliable on stru
 | **Operator** moves material | J7 on the operator path |
 | **Mixed units** — `each`, ft/in | FR-1 conversion load-bearing |
 | **Balances start at zero**; legacy *"questionable"* | J1 out of Phase 1; J9 = onboarding |
-| **No certs/heat/regulated** | Traceability + lots cut |
+| **No certs/heat/regulated** *(2026-07-27, re-confirmed 2026-08-01 — they do not want it either)* | Traceability + lots cut. Live only as a **customer-#2** consideration ([#642](https://github.com/debola31/Jigged/issues/642)), not a Contour need. |
 | **Customer-supplied: lots, never stocked** | Job attribute; no ownership flag |
 | **~10 ±4 places** (cabinets, shelving) | Wizard's 16 over-built |
 | **Tried counting before** | J9 rescues a lapsed practice |

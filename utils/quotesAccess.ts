@@ -1349,6 +1349,12 @@ export async function convertQuoteToJob(
       is_hot: options.hot ?? false,
       due_date: dueDate,
       customer_po_number: customerPoNumber,
+      // The commercial term this order was sold on, frozen onto the job.
+      // Unlike freight below, this IS carried: the quote genuinely stated it,
+      // the customer accepted it by issuing the PO, and it has to survive to
+      // the QuickBooks invoice — which until now sent no terms at all and let
+      // QBO silently apply a company default nobody in Jigged could see.
+      payment_terms: quote.payment_terms,
       // Carry the quote's billing/shipping address + contact onto the job so
       // it has a shippable address of its own. Editable on the job afterwards
       // (utils/jobsAccess.ts updateJobAddressContact) without touching the quote.

@@ -167,6 +167,20 @@ export default function PushToQuickBooksDialog({
       }
       // Take the user straight to the invoice that was just created (or already
       // existed) in QuickBooks, rather than only flashing a notification.
+      //
+      // This is worth doing now in a way it wasn't before. The link is built as
+      // /login?deeplinkcompanyid=…&pagereq=invoice?txnId=… rather than
+      // /app/invoice?txnId=…, and the difference decides what happens in the
+      // usual case where the user has been in Jigged and has no QuickBooks
+      // session in this browser. The old shape lost the transaction id at
+      // Intuit's sign-in bounce and dropped them on a blank NEW invoice, in
+      // whichever company they happened to be signed into. The new shape carries
+      // both the transaction and the company across that bounce, so the worst
+      // case is now "sign in, land on the right invoice".
+      //
+      // The link is also stored on the invoice record, so this tab is a
+      // convenience rather than the only route — a blocked popup, a closed tab,
+      // or an abandoned sign-in all stay recoverable from the job page.
       if (result.url) {
         if (invoiceWindow) invoiceWindow.location.href = result.url;
         else window.open(result.url, '_blank', 'noopener,noreferrer');

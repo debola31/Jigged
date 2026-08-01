@@ -311,6 +311,7 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "customer_carrier_account_id" uuid,
     "ship_via" text,
     "shipping_instructions" text,
+    "payment_terms" text,
     CONSTRAINT "jobs_freight_terms_check" CHECK (((freight_terms IS NULL) OR (freight_terms = ANY (ARRAY['prepaid'::text, 'collect'::text, 'third_party'::text, 'customer_arranged'::text])))),
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
@@ -443,6 +444,10 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
     "connected_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "term_map" jsonb DEFAULT '{}'::jsonb NOT NULL,
+    "po_custom_field_id" text,
+    "po_custom_field_name" text,
+    "qb_settings_checked_at" timestamp with time zone,
     CONSTRAINT "quickbooks_connections_pkey" PRIMARY KEY (id),
     CONSTRAINT "quickbooks_connections_company_id_key" UNIQUE (company_id),
     CONSTRAINT "quickbooks_connections_environment_check" CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text])))

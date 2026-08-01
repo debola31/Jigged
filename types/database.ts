@@ -1285,6 +1285,7 @@ export type Database = {
           invoicing_status: string
           is_hot: boolean
           job_number: string
+          payment_terms: string | null
           production_status: string
           quote_id: string | null
           ship_to_address: Json | null
@@ -1316,6 +1317,7 @@ export type Database = {
           invoicing_status?: string
           is_hot?: boolean
           job_number: string
+          payment_terms?: string | null
           production_status: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -1347,6 +1349,7 @@ export type Database = {
           invoicing_status?: string
           is_hot?: boolean
           job_number?: string
+          payment_terms?: string | null
           production_status?: string
           quote_id?: string | null
           ship_to_address?: Json | null
@@ -2190,11 +2193,15 @@ export type Database = {
           default_item_id: string | null
           environment: string
           id: string
+          po_custom_field_id: string | null
+          po_custom_field_name: string | null
           qb_company_name: string | null
+          qb_settings_checked_at: string | null
           realm_id: string
           reconnect_required: boolean
           refresh_expires_at: string | null
           refresh_token: string
+          term_map: Json
           token_version: number
           updated_at: string
         }
@@ -2208,11 +2215,15 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
+          po_custom_field_id?: string | null
+          po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_settings_checked_at?: string | null
           realm_id: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null
           refresh_token: string
+          term_map?: Json
           token_version?: number
           updated_at?: string
         }
@@ -2226,11 +2237,15 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
+          po_custom_field_id?: string | null
+          po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_settings_checked_at?: string | null
           realm_id?: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null
           refresh_token?: string
+          term_map?: Json
           token_version?: number
           updated_at?: string
         }
@@ -3582,7 +3597,6 @@ export type Database = {
         }
         Returns: string
       }
-      dearmor: { Args: { "": string }; Returns: string }
       delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
         Args: {
@@ -3608,8 +3622,6 @@ export type Database = {
         Args: { p_company_id: string }
         Returns: Json
       }
-      gen_random_uuid: { Args: never; Returns: string }
-      gen_salt: { Args: { "": string }; Returns: string }
       generate_direct_job_number: {
         Args: { company_uuid: string }
         Returns: string
@@ -3750,10 +3762,6 @@ export type Database = {
           jobs_count: number
           quotes_count: number
         }[]
-      }
-      pgp_armor_headers: {
-        Args: { "": string }
-        Returns: Record<string, unknown>[]
       }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }

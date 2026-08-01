@@ -303,14 +303,18 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
         assert d1["already_existed"] is False
         assert d1["qb_invoice_id"] == "INV-1"
         # A QBO deep link is returned + stored (sandbox connection -> sandbox host).
-        assert d1["url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
+        # The /login?pagereq= shape, not /app/invoice?txnId=: only this form
+        # carries the transaction id through QBO's unauthenticated sign-in
+        # bounce (verified by redirect trace), and deeplinkcompanyid pins the
+        # company so the link can't open a different QBO company's invoice.
+        assert d1["url"] == "https://sandbox.qbo.intuit.com/login?deeplinkcompanyid=realm-rt&pagereq=invoice%3FtxnId%3DINV-1"
 
         r2 = await _post(seeded_user_a["access_token"], path, body)
         assert r2.status_code == 200, r2.text
         d2 = r2.json()
         assert d2["already_existed"] is True
         assert d2["qb_invoice_id"] == "INV-1"
-        assert d2["url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
+        assert d2["url"] == "https://sandbox.qbo.intuit.com/login?deeplinkcompanyid=realm-rt&pagereq=invoice%3FtxnId%3DINV-1"
 
         assert calls["n"] == 1  # QBO invoice created exactly once
         links = (
@@ -321,7 +325,7 @@ async def test_invoice_push_is_idempotent(supabase_admin, seeded_user_a, monkeyp
             .data
         )
         assert len(links) == 1 and links[0]["status"] == "created"
-        assert links[0]["qb_invoice_url"] == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=INV-1"
+        assert links[0]["qb_invoice_url"] == "https://sandbox.qbo.intuit.com/login?deeplinkcompanyid=realm-rt&pagereq=invoice%3FtxnId%3DINV-1"
 
         # The per-part line snapshot is persisted (the Jigged-side qty-invoiced truth)...
         line_items = (

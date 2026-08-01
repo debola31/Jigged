@@ -86,6 +86,13 @@ export interface Job {
   // middle of three grains — customer default resolves onto the job at
   // conversion, the job resolves onto the shipment at pack time. Without this
   // layer the packer re-derives a customer default that may contradict the PO.
+  /**
+   * Payment terms this order was sold on, copied from the quote at conversion.
+   * Pushed to QuickBooks as SalesTermRef. Distinct from
+   * customers.default_payment_terms, which only ever seeds a NEW quote — a job
+   * keeps what it was converted with.
+   */
+  payment_terms: string | null;
   freight_terms: FreightTerms | null;
   customer_carrier_account_id: string | null;
   /** Carrier/service in the PO's own words ("UPS Ground", "their truck"). */

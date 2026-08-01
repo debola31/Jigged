@@ -238,7 +238,7 @@ async def _load_gated_job(db: Client, company_id: str, job_id: str) -> dict:
         db.table("jobs")
         .select(
             "id, company_id, customer_id, job_number, customer_po_number, "
-            "quote_id, billing_address_id"
+            "quote_id, billing_address_id, payment_terms"
         )
         .eq("id", job_id)
         .eq("company_id", company_id)
@@ -458,6 +458,18 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             )
 
         item_ref = qb.resolve_default_item(db, company_id, conn)
+
+        # Terms the job was sold on -> a QBO Term Id. Best-effort by design: a
+        # term that cannot be resolved or created returns None and the invoice
+        # goes out exactly as it did before this existed, rather than failing.
+        sales_term_id = (
+            qb.resolve_term_id(db, company_id, job["payment_terms"])
+            if job.get("payment_terms")
+            else None
+        )
+
+        # The shop's PO custom field, if they have made one. Read from the cached
+        # discovery on the connection — Preferences is not re-read per push.
         payload = qb.quote_to_invoice_payload(
             customer_ref=customer_ref,
             item_ref=item_ref,
@@ -465,9 +477,14 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             customer_po_number=job.get("customer_po_number"),
             bill_addr=bill_addr,
             lines=lines,
+            sales_term_id=sales_term_id,
+            po_custom_field_id=conn.get("po_custom_field_id"),
+            po_custom_field_name=conn.get("po_custom_field_name"),
         )
         result = qb.create_invoice(db, company_id, payload, request_id)
-        invoice_url = qb.invoice_deep_link(conn.get("environment", ""), result["id"])
+        invoice_url = qb.invoice_deep_link(
+            conn.get("environment", ""), result["id"], conn.get("realm_id")
+        )
     except HTTPException:
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
         raise

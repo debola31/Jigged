@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import re
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -478,6 +479,127 @@ def resolve_default_item(db: Client, company_id: str, conn: dict | None = None) 
     return item_id
 
 
+def list_qb_terms(db: Client, company_id: str) -> list[dict]:
+    """Every active Term in the connected company: [{id, name, due_days}, ...].
+
+    QBO ships five (Due on receipt, Net 10/15/30/60) and a shop may have added
+    more. Jigged offers these as the payment-terms picker options so that any
+    term chosen on a quote already exists in QBO and SalesTermRef always
+    resolves — no mapping table, no drift."""
+    rows = qb_query(db, company_id, "select * from Term where Active = true").get("Term", [])
+    return [
+        {"id": t["Id"], "name": t.get("Name", ""), "due_days": t.get("DueDays")}
+        for t in rows
+        if t.get("Name")
+    ]
+
+
+def resolve_term_id(db: Client, company_id: str, term_name: str) -> str | None:
+    """Jigged's free-text payment term -> a QBO Term Id, creating the Term if absent.
+
+    CASE-INSENSITIVE on purpose. QBO ships "Due on receipt" (lowercase r) while
+    Jigged's preset reads "Due on Receipt"; a case-sensitive compare would decide
+    the term is missing and try to create it — and creating a Term whose name
+    already exists is REJECTED with HTTP 400 (verified live), so the push would
+    fail on the single most common term in the list.
+
+    Returns None rather than raising when the term cannot be resolved or created:
+    a mis-typed term must not block an invoice, it just means QBO derives the due
+    date the way it did before any of this existed."""
+    wanted = (term_name or "").strip()
+    if not wanted:
+        return None
+
+    try:
+        for t in list_qb_terms(db, company_id):
+            if t["name"].strip().casefold() == wanted.casefold():
+                return t["id"]
+    except Exception:  # noqa: BLE001
+        logger.warning("QuickBooks term lookup failed for %r", wanted, exc_info=True)
+        return None
+
+    # Not in QBO yet — create it. Only plain net-days terms can be expressed;
+    # anything else still creates as a NAME with a due date, which is enough for
+    # SalesTermRef to resolve and for the label to print. QBO's Term entity has
+    # no concept of a deposit or an instalment schedule, so a term like
+    # "50% Deposit / Balance Net 30" keeps its name and its net-30 date and
+    # loses only the 50% — which Jigged does not model either.
+    due_days = _parse_net_days(wanted)
+    try:
+        created = qb_request(
+            db, company_id, "POST", "term",
+            json_body={"Name": wanted[:31], "DueDays": due_days},
+        )
+        return created.get("Term", {}).get("Id")
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not create QuickBooks term %r", wanted, exc_info=True)
+        return None
+
+
+def _parse_net_days(term_name: str) -> int:
+    """Best-effort net-days from a free-text term. Falls back to 0 (due on
+    receipt), which is the conservative direction: a term we cannot read should
+    ask for payment sooner rather than silently extending credit."""
+    m = re.search(r"net\s*(\d{1,3})", term_name, re.IGNORECASE)
+    if m:
+        return min(int(m.group(1)), 999)
+    return 0
+
+
+# A shop's own label for the PO field — "PO Number", "Customer PO #", "PO #".
+_PO_FIELD_PATTERN = re.compile(r"\bp\.?\s?o\.?\b|purchase\s*order", re.IGNORECASE)
+
+
+def discover_po_custom_field(db: Client, company_id: str) -> dict:
+    """Find the sales custom field this shop uses for the customer PO number.
+
+    Returns {"id": "1"|"2"|"3"|None, "name": str|None, "candidates": [...]}.
+
+    Matches on the field's LABEL, never on its position: Intuit states custom
+    field definitions "may not appear in numeric order in the Preferences
+    response body", so index-based access is a latent bug.
+
+    Returning id=None is the normal case, not an error — an unconfigured company
+    reports only three booleans (UseSalesCustom1/2/3), all false, with no name
+    entries at all. Jigged then sends no CustomField, because writing to a
+    guessed DefinitionId silently overwrites whatever the shop actually keeps in
+    that slot and the mapping cannot be reassigned afterwards.
+
+    Jigged CANNOT create the field. Verified live: the legacy Preferences write
+    returns HTTP 200 and changes nothing, and the GraphQL Custom Fields API
+    answers 403 without a paid partner tier."""
+    out: dict = {"id": None, "name": None, "candidates": []}
+    try:
+        prefs = qb_query(db, company_id, "select * from Preferences").get("Preferences", [])
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read QuickBooks Preferences", exc_info=True)
+        return out
+    if not prefs:
+        return out
+
+    blocks = (prefs[0].get("SalesFormsPrefs") or {}).get("CustomField") or []
+    enabled: dict[str, bool] = {}
+    names: dict[str, str] = {}
+    for block in blocks:
+        for f in block.get("CustomField", []) or []:
+            name = f.get("Name") or ""
+            slot = name[-1]
+            if slot not in "123":
+                continue
+            if name.startswith("SalesFormsPrefs.UseSalesCustom"):
+                enabled[slot] = bool(f.get("BooleanValue"))
+            elif name.startswith("SalesFormsPrefs.SalesCustomName"):
+                names[slot] = f.get("StringValue") or ""
+
+    for slot, label in sorted(names.items()):
+        if not enabled.get(slot):
+            continue
+        out["candidates"].append({"id": slot, "name": label})
+        if out["id"] is None and _PO_FIELD_PATTERN.search(label):
+            out["id"], out["name"] = slot, label
+    return out
+
+
 def _customer_summary(c: dict) -> dict:
     return {"qb_id": c["Id"], "display_name": c.get("DisplayName")}
 
@@ -723,10 +845,50 @@ def load_firm_invoice_lines(
 
 
 # ───────────────────────── Mapping + invoice creation ─────────────────────────
-def invoice_deep_link(environment: str, invoice_id: str) -> str:
-    """Deep link into the QBO web app for a specific invoice."""
-    base = "https://app.qbo.intuit.com" if environment == "production" else "https://app.sandbox.qbo.intuit.com"
-    return f"{base}/app/invoice?txnId={invoice_id}"
+def invoice_deep_link(environment: str, invoice_id: str, realm_id: str | None = None) -> str:
+    """Deep link into the QBO web app for a specific invoice.
+
+    USES /login?pagereq=, NOT /app/invoice?txnId=, and the difference is the
+    whole reason this function has a docstring.
+
+    Opening a QBO deep link in a fresh tab — which is exactly what happens right
+    after a push, when the user has been in Jigged and not in QuickBooks — hits
+    an unauthenticated bounce to accounts.intuit.com. QBO carries the intended
+    destination across that bounce in a `qbo.deeplink` cookie on .intuit.com,
+    and the URL shape decides what goes into it. Traced live against sandbox:
+
+        /app/invoice?txnId=172
+            -> qbo.deeplink={"pagereq":"invoice"}          <- transaction lost
+
+        /login?deeplinkcompanyid=<realm>&pagereq=invoice%3FtxnId%3D172
+            -> qbo.deeplink={"pagereq":"invoice?txnId=172"} <- preserved
+            -> and account_id_hint=<realm> added to the sign-in URL
+
+    So the old blank-new-invoice symptom was not Intuit throwing the target
+    away; it was QBO faithfully restoring "invoice" — the new-invoice page —
+    because that was all we ever told it.
+
+    `deeplinkcompanyid` also fixes a live correctness bug independent of the
+    query string: the old link named no company, so a user signed into a
+    DIFFERENT QBO company followed it straight into that company's invoice with
+    the same numeric id — someone else's financial document — or an unhelpful
+    "this transaction has been deleted". Shop owners routinely hold more than
+    one QBO company (their shop, a second entity, their accountant's).
+
+    Undocumented on developer.intuit.com, but first-party: Intuit's own
+    SampleApp-TimeTracking_Invoicing-Java builds this exact shape, their help
+    articles use it for signed-out users, and their ideas board names the
+    endpoint. Treated as best-effort — the caller keeps the invoice id, so a
+    plain /app/invoice?txnId= link remains reconstructible if Intuit ever
+    retires `pagereq`.
+
+    realm_id is optional only so existing callers keep compiling; pass it.
+    """
+    base = "https://qbo.intuit.com" if environment == "production" else "https://sandbox.qbo.intuit.com"
+    if not realm_id:
+        return f"{base}/app/invoice?txnId={invoice_id}"
+    pagereq = urllib.parse.quote(f"invoice?txnId={invoice_id}", safe="")
+    return f"{base}/login?deeplinkcompanyid={realm_id}&pagereq={pagereq}"
 
 
 def quote_to_invoice_payload(
@@ -737,6 +899,9 @@ def quote_to_invoice_payload(
     customer_po_number: str | None = None,
     bill_addr: dict | None,
     lines: list[dict],
+    sales_term_id: str | None = None,
+    po_custom_field_id: str | None = None,
+    po_custom_field_name: str | None = None,
 ) -> dict:
     """Pure transform: firm lines -> QBO Invoice JSON. Every line references the one
     shared item; the part identity lives in the Description. TaxCodeRef=NON because an
@@ -745,7 +910,31 @@ def quote_to_invoice_payload(
     DocNumber is intentionally omitted -> QBO auto-assigns the next invoice number, so
     Jigged never collides with the shop's existing/manual/previous-system numbering. The
     Jigged job number is stamped into PrivateNote for traceability + QBO-side search, along
-    with the customer's PO number (also appended to each line Description) when present."""
+    with the customer's PO number (also appended to each line Description) when present.
+
+    TERMS. `sales_term_id` becomes SalesTermRef, and DueDate is deliberately NOT sent:
+    verified in the sandbox that when both are supplied DueDate WINS while the term is
+    still stored, so an invoice can print "Terms: Net 60" beside a due date seven days
+    out. Sending the term alone lets QBO derive the date (Net 60 on a 2026-08-01 invoice
+    produced 2026-09-30, correctly). Sending NEITHER — what this code did until now — is
+    the worst option: five real sandbox invoices all came back with SalesTermRef null and
+    a due date of exactly TxnDate + 30 from a QBO company default that nobody in Jigged
+    chose or could see.
+
+    PO NUMBER lands in up to three places, because no single one is both universal and
+    prominent:
+      * every line's Description  — prints, needs no setup, works on every QBO plan, and
+        is what the pilot shop's AP department is already paying from. Never removed.
+      * CustomerMemo              — the QBO UI's "Message on invoice". VERIFIED printing:
+        a probe invoice's PDF rendered it under "Note to customer". Free, no setup.
+      * a sales CustomField       — only when the shop has created one and Jigged has
+        DISCOVERED its DefinitionId. Never guessed: writing to an unmatched slot silently
+        overwrites whatever the shop keeps there and the mapping cannot be reassigned.
+        Jigged cannot create the field itself — verified that the legacy Preferences write
+        returns HTTP 200 and does nothing, and that the GraphQL Custom Fields API answers
+        403 without a paid partner tier.
+    PrivateNote keeps the PO too, but only for internal traceability and QBO-side search:
+    Intuit documents it as "does not appear on the invoice to the customer"."""
     po_suffix = f" (PO Number: {customer_po_number})" if customer_po_number else ""
     qb_lines: list[dict] = []
     for ln in lines:
@@ -774,6 +963,28 @@ def quote_to_invoice_payload(
             }
         )
     payload: dict = {"CustomerRef": {"value": customer_ref}, "Line": qb_lines}
+
+    # SalesTermRef only — never alongside DueDate. See the docstring: supplying
+    # both lets them disagree on the printed invoice.
+    if sales_term_id:
+        payload["SalesTermRef"] = {"value": sales_term_id}
+
+    if customer_po_number:
+        # Prints as "Note to customer" — the one prominent placement that needs
+        # no configuration on any QBO plan.
+        payload["CustomerMemo"] = {"value": f"PO Number: {customer_po_number}"}
+        # Only when discovery found a real field. A missing id means the shop has
+        # not made one, and the correct behaviour is to send nothing at all.
+        if po_custom_field_id:
+            field: dict = {
+                "DefinitionId": po_custom_field_id,
+                "Type": "StringType",
+                "StringValue": customer_po_number,
+            }
+            if po_custom_field_name:
+                field["Name"] = po_custom_field_name
+            payload["CustomField"] = [field]
+
     note_parts: list[str] = []
     if job_number:
         note_parts.append(f"Jigged job {job_number}")

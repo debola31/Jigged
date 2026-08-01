@@ -7,7 +7,6 @@
 
 import type {
   CountCandidate,
-  CountDraft,
   CountEntries,
   CountTarget,
   CountVariance,
@@ -193,99 +192,23 @@ export function countNote(v: CountVariance): string {
   return `Inventory count — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
 }
 
-// ── Draft persistence ────────────────────────────────────────────────────────
-
-/**
- * Bumped to 4 when `entries` moved from part-id keys to row keys (`countRowKey`).
- *
- * A v3 draft's keys are bare part ids, which for a location row no longer match anything — so
- * without the bump a resumed draft would restore *some* numbers and silently drop the rest.
- * A version mismatch discards it, which is the honest outcome: you lose an abandoned draft
- * rather than resuming a half-populated sheet you cannot tell is half-populated.
- */
-export const DRAFT_VERSION = 4 as const;
-
-export function draftKey(companyId: string): string {
-  return `jigged.inventoryCount.${companyId}`;
-}
-
-export function buildDraft(
-  companyId: string,
-  /** Row keys — see `countRowKey`. Named `partIds` on the stored shape for back-compat. */
-  partIds: string[],
-  entries: CountEntries,
-  now: number,
-): CountDraft {
-  return { version: DRAFT_VERSION, companyId, partIds, entries, savedAt: now };
-}
-
-/**
- * Parse a stored draft, returning null for anything unusable.
- *
- * Deliberately strict: a draft from an older shape, another company, or corrupted storage is
- * discarded rather than half-restored. Losing an in-progress count is annoying; resuming one
- * with numbers attached to the wrong parts would be worse.
- */
-export function parseDraft(raw: string | null, companyId: string): CountDraft | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<CountDraft>;
-    if (parsed.version !== DRAFT_VERSION) return null;
-    if (parsed.companyId !== companyId) return null;
-    if (typeof parsed.savedAt !== 'number') return null;
-    if (!Array.isArray(parsed.partIds)) return null;
-    if (!parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
-      return null;
-    }
-    return parsed as CountDraft;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * localStorage, or null where it isn't usable.
- *
- * Absent during SSR, and *also* absent or throwing in private-browsing modes and some
- * embedded webviews — a real runtime case, not just a test artefact. A count must work
- * without a draft; losing resume is a downgrade, not a failure.
- */
-export function safeStorage(): Storage | null {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-export function readDraft(companyId: string): CountDraft | null {
-  const store = safeStorage();
-  if (!store) return null;
-  try {
-    return parseDraft(store.getItem(draftKey(companyId)), companyId);
-  } catch {
-    return null;
-  }
-}
-
-/** Persist a draft. Silent on failure — a full or blocked store must not interrupt counting. */
-export function writeDraft(draft: CountDraft): void {
-  const store = safeStorage();
-  if (!store) return;
-  try {
-    store.setItem(draftKey(draft.companyId), JSON.stringify(draft));
-  } catch {
-    /* quota exceeded or blocked — the count continues in memory */
-  }
-}
-
-export function clearDraft(companyId: string): void {
-  const store = safeStorage();
-  if (!store) return;
-  try {
-    store.removeItem(draftKey(companyId));
-  } catch {
-    /* nothing to clean up */
-  }
-}
+// ── Draft persistence: REMOVED 2026-08-01 ────────────────────────────────────
+//
+// The whole feature is gone — `DRAFT_VERSION`, `draftKey`, `buildDraft`, `parseDraft`,
+// `safeStorage`, `readDraft`, `writeDraft`, `clearDraft` and the `CountDraft` type.
+//
+// Founder's call, verbatim: "we should remove this unfinished counting feature — it only proves
+// annoying, if a user moves away from the page that's them discarding the operation and doing
+// something else."
+//
+// That reading is right, and the code had been arguing with it for a while. Navigating away is a
+// deliberate act; treating it as an accident meant the next count opened with an interruption
+// asking about a decision the user had already made. The banner also could not be trusted at
+// face value — a place-scoped count had to be excluded from writing a draft at all, because the
+// key was company-wide and the resume prompt lived only on the company-wide branch, so an
+// abandoned Shelf A count would have come back as a company-wide one and committed a wildly
+// wrong adjustment. That guard is gone with the feature it was guarding.
+//
+// If resume is ever wanted again it should be a real count SESSION on the server — something you
+// can assign, hand over and pick up on another device — not a browser-local snapshot keyed by
+// company. localStorage was never the right home for work that two people might share.

@@ -57,21 +57,6 @@ export interface CountCandidate {
  */
 export type CountEntries = Record<string, number>;
 
-/**
- * The persisted draft. Versioned so a shape change is discarded rather than half-restored.
- *
- * Carries the chosen scope as well as the entries: a count of five parts with two filled in
- * is still a count of five, and resuming needs to know that.
- */
-export interface CountDraft {
-  version: 4;
-  companyId: string;
-  /** The parts in this count, in sheet order. */
-  partIds: string[];
-  entries: CountEntries;
-  /** ms epoch — shown as "unfinished count from …" on return. */
-  savedAt: number;
-}
 
 /** A counted part paired with what it will do, computed fresh at save. */
 export interface CountVariance {

@@ -84,17 +84,13 @@ import Tooltip from '@mui/material/Tooltip';
 
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import {
-  buildDraft,
   buildVariances,
-  clearDraft as clearStoredDraft,
   committableVariances,
   countRowKey,
   countableCandidates,
   commonUnit,
   excludedCandidates,
-  readDraft,
   rowDelta,
-  writeDraft,
 } from '@/lib/inventoryCountPlan';
 import {
   commitCount,
@@ -311,9 +307,6 @@ export default function InventoryCountPage() {
     }
   }, []);
 
-  const [resume, setResume] = useState<{ partIds: string[]; entries: CountEntries; savedAt: number } | null>(
-    null,
-  );
   const [checking, setChecking] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [progress, setProgress] = useState<CountCommitProgress | null>(null);
@@ -411,18 +404,6 @@ export default function InventoryCountPage() {
         if (cancelled) return;
         setCandidates(found);
         rememberOpenedWith(found);
-
-        // Offer a resume only for parts that still exist, so numbers can't reattach to the
-        // wrong row after the catalogue changes.
-        const draft = readDraft(companyId);
-        if (draft) {
-          const known = new Set(found.map(countRowKey));
-          const partIds = draft.partIds.filter((id) => known.has(id));
-          const kept = Object.fromEntries(
-            Object.entries(draft.entries).filter(([id]) => known.has(id)),
-          );
-          if (partIds.length > 0) setResume({ partIds, entries: kept, savedAt: draft.savedAt });
-        }
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your stocked parts.');
       } finally {
@@ -496,25 +477,6 @@ export default function InventoryCountPage() {
       }).length,
     [sheet, entries],
   );
-
-  // ── Draft autosave ──────────────────────────────────────────────────────
-  // Only while counting: a draft written before a scope exists, or after commit, would offer
-  // to resume something meaningless.
-  //
-  // NEVER in place-scoped mode, and this is a data-loss guard rather than a tidy-up.
-  // The draft is keyed by company alone, and only the company-wide branch of the loader reads it
-  // back. So a Shelf A count that got abandoned would silently become the resume offer on the
-  // next company-wide count: the 28 you counted on one shelf reattaches to a part whose
-  // company-wide `parts.quantity` is 830, and committing writes a −802 adjustment with no warning.
-  // Place counts are one bin and short, and there is no resume path for them anyway, so the
-  // written draft was pure liability. If place-scoped resume is ever wanted, key the draft by
-  // scope — do not simply delete this guard.
-  useEffect(() => {
-    if (step !== 1 || selected.size === 0 || locationMode) return;
-    writeDraft(buildDraft(companyId, [...selected.keys()], entries, Date.now()));
-  }, [step, selected, entries, companyId, locationMode]);
-
-  const clearDraft = useCallback(() => clearStoredDraft(companyId), [companyId]);
 
   // Leaving mid-count loses nothing (the draft is saved), but leaving mid-save stops the write
   // loop partway with no way to tell which parts landed.
@@ -671,7 +633,6 @@ export default function InventoryCountPage() {
 
     // The refresh can empty this: someone else may have already set a part to what you counted.
     if (toCommit.length === 0) {
-      clearDraft();
       setSnack({ msg: 'Everything already matches — nothing to save.', severity: 'success' });
       router.push(returnTo.href);
       return;
@@ -681,7 +642,6 @@ export default function InventoryCountPage() {
     setProgress({ done: 0, total: toCommit.length, currentPartName: '' });
     try {
       const result = await commitCount(toCommit, { onProgress: setProgress, operatorId });
-      clearDraft();
       if (result.failures.length === 0) {
         const moved = toCommit.filter((v) => v.movedSinceOpened).length;
         setSnack({
@@ -856,49 +816,6 @@ export default function InventoryCountPage() {
       {loadError && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {loadError}
-        </Alert>
-      )}
-
-      {resume && step === 0 && (
-        <Alert
-          severity="info"
-          sx={{ mb: 3 }}
-          action={
-            <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                onClick={() => {
-                  clearDraft();
-                  setResume(null);
-                }}
-              >
-                Discard
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                onClick={() => {
-                  // Rehydrate from the loaded candidates — a draft stores ids, and the sheet
-                  // now needs the rows themselves.
-                  setSelected(
-                    new Map(
-                      candidates
-                        .filter((c) => resume.partIds.includes(countRowKey(c)))
-                        .map((c) => [countRowKey(c), c]),
-                    ),
-                  );
-                  setEntries(resume.entries);
-                  setResume(null);
-                  setStep(1);
-                }}
-              >
-                Resume
-              </Button>
-            </Stack>
-          }
-        >
-          You have an unfinished count from {new Date(resume.savedAt).toLocaleString()} —{' '}
-          {Object.keys(resume.entries).length} of {resume.partIds.length} counted.
         </Alert>
       )}
 

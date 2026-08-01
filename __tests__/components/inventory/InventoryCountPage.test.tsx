@@ -65,7 +65,6 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   getLocations: vi.fn(async () => []),
 }));
 
-import { DRAFT_VERSION } from '@/lib/inventoryCountPlan';
 import InventoryCountPage from '@/app/dashboard/[companyId]/inventory/count/page';
 import {
   loadCountCandidates,
@@ -472,61 +471,10 @@ describe('saving', () => {
   });
 });
 
-describe('draft', () => {
-  const storeDraft = (partIds: string[], entries: Record<string, number>) =>
-    window.localStorage.setItem(
-      'jigged.inventoryCount.co1',
-      JSON.stringify({ version: DRAFT_VERSION, companyId: 'co1', partIds, entries, savedAt: Date.now() }),
-    );
-
-  it('offers to resume, reporting how far the count got', async () => {
-    storeDraft(['p1', 'p2'], { p1: 38 });
-    renderPage();
-    expect(await screen.findByText(/1 of 2 counted/i)).toBeInTheDocument();
-
-    await userEvent.setup().click(screen.getByRole('button', { name: /resume/i }));
-    // Straight back to the sheet, scope and entries restored.
-    expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
-    expect(inputFor('4140 bar')).toHaveValue(38);
-    expect(inputFor('6061 plate')).toHaveValue(null);
-  });
-
-  it('can be discarded to start clean', async () => {
-    storeDraft(['p1'], { p1: 38 });
-    renderPage();
-    await screen.findByText(/unfinished count/i);
-
-    await userEvent.setup().click(screen.getByRole('button', { name: /discard/i }));
-    await waitFor(() => expect(screen.queryByText(/unfinished count/i)).not.toBeInTheDocument());
-  });
-
-  it('ignores a draft from another company', async () => {
-    window.localStorage.setItem(
-      'jigged.inventoryCount.co1',
-      JSON.stringify({
-        version: DRAFT_VERSION,
-        companyId: 'SOMEONE-ELSE',
-        partIds: ['p1'],
-        entries: { p1: 5 },
-        savedAt: Date.now(),
-      }),
-    );
-    renderPage();
-    await screen.findByText('4140 bar');
-    expect(screen.queryByText(/unfinished count/i)).not.toBeInTheDocument();
-  });
-
-  it('drops parts that no longer exist rather than misattaching their numbers', async () => {
-    storeDraft(['deleted-part', 'p1'], { 'deleted-part': 99, p1: 7 });
-    renderPage();
-    await screen.findByText(/unfinished count/i);
-
-    await userEvent.setup().click(screen.getByRole('button', { name: /resume/i }));
-    expect(await screen.findByText('1 of 1 counted')).toBeInTheDocument();
-    expect(inputFor('4140 bar')).toHaveValue(7);
-  });
-});
-
+/**
+ * The `draft` block is gone: the unfinished-count banner was removed 2026-08-01. Navigating away
+ * is a deliberate act, and the page no longer treats it as an accident to recover from.
+ */
 /**
  * Place-scoped mode — `?location=<id>`.
  *

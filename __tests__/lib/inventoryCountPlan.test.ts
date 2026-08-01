@@ -1,21 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildDraft,
   buildVariances,
-  clearDraft,
   committableVariances,
   countNote,
   countRowKey,
   countableCandidates,
   commonUnit,
-  draftKey,
   excludedCandidates,
-  parseDraft,
-  readDraft,
   resolveCountTarget,
   rowDelta,
-  safeStorage,
-  writeDraft,
   type LocationBalance,
 } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
@@ -226,65 +219,10 @@ describe('countNote', () => {
   });
 });
 
-describe('draft persistence', () => {
-  const entries: CountEntries = { a: 3 };
-
-  it('round-trips a draft', () => {
-    const draft = buildDraft('co1', ['a'], entries, 1000);
-    expect(parseDraft(JSON.stringify(draft), 'co1')).toEqual(draft);
-  });
-
-  it('namespaces the key by company', () => {
-    expect(draftKey('co1')).not.toBe(draftKey('co2'));
-  });
-
-  it('discards a draft belonging to another company', () => {
-    const draft = buildDraft('co1', ['a'], entries, 1000);
-    expect(parseDraft(JSON.stringify(draft), 'co2')).toBeNull();
-  });
-
-  it('discards an older shape rather than half-restoring it', () => {
-    // v2 dropped partIds when the sheet briefly had no scope step; v3 needs them back.
-    const v2 = JSON.stringify({ version: 2, companyId: 'co1', entries, savedAt: 1 });
-    expect(parseDraft(v2, 'co1')).toBeNull();
-  });
-
-  it('survives corrupted or absent storage', () => {
-    expect(parseDraft('not json', 'co1')).toBeNull();
-    expect(parseDraft(null, 'co1')).toBeNull();
-    expect(parseDraft(JSON.stringify({ version: 3, companyId: 'co1' }), 'co1')).toBeNull();
-    // entries present but scope missing — can't tell how big the count was meant to be.
-    expect(
-      parseDraft(JSON.stringify({ version: 3, companyId: 'co1', entries, savedAt: 1 }), 'co1'),
-    ).toBeNull();
-  });
-});
-
-describe('storage helpers when localStorage is unavailable', () => {
-  // Private-browsing modes and some embedded webviews either omit localStorage or throw on
-  // access. A count has to keep working there — resume is the only thing lost.
-  it('reads null, and writing or clearing is a no-op rather than a crash', () => {
-    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    Object.defineProperty(window, 'localStorage', {
-      get() {
-        throw new Error('access denied');
-      },
-      configurable: true,
-    });
-
-    const draft = buildDraft('co1', ['a'], { a: 3 }, 1);
-    expect(safeStorage()).toBeNull();
-    expect(readDraft('co1')).toBeNull();
-    expect(() => writeDraft(draft)).not.toThrow();
-    expect(() => clearDraft('co1')).not.toThrow();
-
-    if (original) Object.defineProperty(window, 'localStorage', original);
-  });
-});
-
 /**
- * The key a counted number is stored under. Load-bearing once a sheet can hold the same part
- * more than once — the all-places sheet has BUY-ORING-214 for Shelf A and again for Shelf B.
+ * Draft persistence was removed 2026-08-01 along with the resume banner — see the note at the
+ * bottom of lib/inventoryCountPlan.ts. Its tests went with it rather than being left asserting
+ * a feature nobody can reach.
  */
 describe('countRowKey', () => {
   const at = (locationId: string) => ({

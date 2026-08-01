@@ -57,20 +57,48 @@ door.
 
 Every action the product actually supports today, by actor. **This is the summary to read before
 §4**, which explains *why* each was designed the way it was and is ten times longer.
+
+> **Rebuilt 2026-08-01.** The admin table previously listed eight rows and **not one of them was a
+> stock write** — its only part-page entry was "See where one part lives", while that same tab has
+> always done Add / Remove / Move / Adjust. It under-reported the built surface by roughly half,
+> named three buttons that do not exist (`Count what's here`, `Move N to…`), and was the section a
+> reader would go to first. Verified against the code, row by row.
 Route names are relative to `/dashboard/{companyId}` or `/operator/{companyId}`.
 
 ### Admin / office — computer, mouse
 
+There is **no page called Inventory** — `/inventory` is a 307 redirect to `/parts`. The owner's
+inventory work lives under three nouns: **Parts** (what we have), the **part detail → Inventory
+tab** (where every stock write happens), and **Storage** (where it lives). Storage and everything
+flag-gated below appear only when `inventory_locations` is on for the company — **on for Contour**,
+off by default elsewhere, and only the founder flips it.
+
 | I want to… | Where | How |
 |---|---|---|
-| See what we have and what's short | `/parts` | `On hand` + `Status` columns; filter `Low` / `Out`. `?status=low` is the shop-wide shortage view. |
-| Name the places we already have | `/inventory/locations` (**Storage**) | `Add storage` tile → name it. Flat. `Subdivide` an existing unit only if it needs rows/bins. |
-| Make a place recognisable | Storage → tap tile → sheet | `Add a photo`. This is the place's identity — a photo beats the drawn icon. |
-| Print labels | Storage toolbar / tile sheet | `Print all labels`, or `Print QR` for one. |
-| Count one place | Storage → tap tile → `Count what's here` | Worksheet scoped to that place. Nothing is excluded — at one bin there is no split-part ambiguity. |
-| Put stray parts away | Same worksheet, at `Unassigned` | `Move N to…`. `Unassigned` **is** the put-away pile. |
-| Count the whole shop | Storage → `Count everything` | Pick parts, count, save. A part split across places is named and skipped — count it at its place instead. |
+| Decide we stock a part at all | `/parts/{id}` → workspace | `Stocked`, primary unit, reorder point. The Inventory tab does not exist until `Stocked` is on. |
+| See what we have and what's short | `/parts` | `On hand` + `Status` columns; filter `Low` / `Out`. `?status=low` adds **Reorder at** and **Short by**. |
+| Get a stock list in | `/parts` → `Import` | On-hand, unit and reorder point from CSV. An existing location-tracked part's quantity is **skipped**, and the skip is reported. |
+| **Add / remove / adjust stock** | `/parts/{id}` → Inventory tab | The four buttons. Until receiving (J6) exists **this is how stock gets in**. |
+| **Move stock between places** | Same tab → `Move` | Source picker lists only places that hold some. |
+| **Tag a removal to a job** | Same tab → `Remove` → job picker | Restored 2026-07-28 (#59). |
 | See where one part lives | `/parts/{id}` → Inventory tab | Per-location balances with full paths. |
+| **Read a part's ledger** | Same tab → history table | Date, type, qty, job, place, notes (editable), **who did it**, and any movement photo. |
+| Name the places we already have | Storage | `Add storage` tile → name it. Flat. `Subdivide` an existing unit only if it needs rows/bins. |
+| Make a place recognisable | Storage → tap tile → sheet | `Add a photo`. |
+| **Reorganise a place** | Storage → tile sheet | `Rename`, `Duplicate`, `Add one inside`, **`Move into…`** (re-parent), `Delete` (empty subtrees only). |
+| Print labels | Storage toolbar / tile sheet | `Print all labels`, or `Print QR` for one. |
+| **See what happened in one place** | Storage → tile sheet → `Recent activity` | Movements with author and photo. Offered for `Unassigned` too. |
+| Count one place | Storage → tap tile → `Count or put away` | Worksheet scoped to that place, paginated. |
+| **Count one part at one place** | `/parts/{id}` → Inventory tab → the icon on a balance row | Offered on **every** row including zeros. |
+| **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |
+| Put stray parts away | Place worksheet, at `Unassigned` | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. |
+| Count the whole shop | `/parts` → `Count Inventory`, or Storage → `Count everything` | Two doors, both unconditional. |
+| **Add a part the bin read didn't return** | Place worksheet → `Found something not listed?` | The "system says zero, I'm holding twelve" case. |
+| Check a job has material | `/jobs/{id}` | `JobPartMaterialsCard`. Top-level BOM only; no on-order. |
+
+**Not built on this surface:** receiving against a PO (J5/J6 — no schema at all), a vendor-grouped
+buy list, reorder email (PRD FR-2 is a `Must`), filtering or exporting the ledger (FR-13), a
+discrepancy queue, a shop-wide movement feed, and scheduled or assigned counts.
 
 ### Operator — own phone
 
@@ -171,9 +199,9 @@ Per part by `is_location_tracked`; unification is intent (§5.4).
 No item detail/create/edit/import page of its own; that is all Parts UI.
 
 - ~~`/inventory` list~~ **deleted 2026-07-30**, redirects to `/parts`: a second parts list with no unique capability. Parts carries **On hand** (`—` not `0` for non-stocked, since `0` reads as "we're out"), **Status**, and a Stock filter seeded from `?status=` — the shortage lens J4 links to. Sidebar says **Storage** (§5.12).
-- **Part → Inventory tab** ([`InventoryTab.tsx`](../../components/parts/workspace/tabs/InventoryTab.tsx)) when `is_stocked`: untracked → Add/Remove/Adjust (`PartTransactionModal`), tracked → `PartLocationInventory` (+ move). **Gap:** no job selector — #59 shipped in March on the since-deleted `/inventory/[itemId]`, so only an operator at a bin can tag a job; restoring the control is not the fix (J7).
+- **Part → Inventory tab** ([`InventoryTab.tsx`](../../components/parts/workspace/tabs/InventoryTab.tsx)) when `is_stocked`: untracked → Add/Remove/Adjust (`PartTransactionModal`), tracked → `PartLocationInventory` (+ move). **No longer a gap** — this said "no job selector … only an operator at a bin can tag a job", which was true when written and was repaired on 2026-07-28: `JobTagPicker` is on both engines (`PartTransactionModal`, `PartLocationActionModal`). §1 already recorded the repair; §3 did not, and the two sat contradicting each other.
 - **`/inventory/locations`** (flag-gated) — [`LocationsManager`](../../components/inventory/locations/LocationsManager.tsx): board only (list view **deleted 2026-07-30**, §5.5), `LocationDetailSheet` owning every action, the in-grid **Add storage** tile the only way in, toolbar just **Print all labels** · **Count everything** (§5.11).
-- **Build visually / Subdivide** — one [`VisualLocationBuilder`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx) modal: storage type, then ≤4 levels against a read-only preview → `materializeLocationSpec`. `parentId` swaps in `SUBDIVISION_TYPES`, so subdividing Cabinet 3 can't yield `Cabinet 3 › Cabinet 1`. **Gap:** structure-first — storage modelled before any item exists (§5.5).
+- **Subdivide** — one [`VisualLocationBuilder`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx) modal: storage type, then ≤4 levels against a read-only preview → `materializeLocationSpec`. `parentId` swaps in `SUBDIVISION_TYPES`, so subdividing Cabinet 3 can't yield `Cabinet 3 › Cabinet 1`. **"Build visually" is NOT live** — `subdividing = parentId !== null` is always true because the only caller passes a parent, so the 10-card `STORAGE_TYPES` palette and the title `Build storage visually` never render. This line used to claim both were live; §5.5 says the opposite and §5.5 is right. **Superseded 2026-08-01:** the founder has decided the drawn board and this builder are both to be replaced — see the open question below.
 - **Operator** — `/operator/{companyId}/inventory` is the warehouse home (browse top-level places; the flag hides this nav tab); `…/inventory/locations/{locationId}` is **the QR target** (leaf = contents with Add/Remove/Set), reached through `…/login?location={id}`. Operator removals are always graceful (clamp to 0, flag `has_discrepancy`), stamped `operator_id`, job tag optional.
 - QR labels encode the location **UUID**, never `code` (`locationLabelPdf.buildLocationScanUrl`): A4, 2 × 5, 34 mm at error-correction H, `kind='system'` excluded.
 
@@ -187,7 +215,7 @@ Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inve
 - `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `refreshLocationQuantities` is the per-place one.
 - `getLowStockPartsAlerts` — `quantity <= reorder_point` filtered in JS; `critical` at 0, `high` at ≤50%, else `medium`; feeds the header `AlertBadge`.
 - `setLocationPhoto` / `clearLocationPhoto` / `getLocationPhotoUrl` order their writes so a failure anywhere leaves a *readable* location rather than a row pointing at a file that isn't there.
-- `LocationScanner` is wired into the operator Scan tab, the put-away destination picker and the owner's board (the operator inventory home no longer has one). It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
+- `LocationScanner` is wired into the operator Scan tab and the put-away destination picker on the place-scoped count worksheet. **Not the owner's Storage board** — an earlier revision of this line said it was; grep says two references, both above. It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
 
 ### Flag · archive · dead code
 

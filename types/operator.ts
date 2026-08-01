@@ -404,8 +404,14 @@ export interface MyNote {
  * Deliberately carries no completion count, streak, average or anything
  * comparable against another person — see the surveillance guardrail in
  * docs. This screen is where a leaderboard would want to grow, and it must not.
+ *
+ * SEPARATE FROM THE NOTE LIST ON PURPOSE. These totals used to be reduced from
+ * the fetched rows, which was only correct while the list was every row the
+ * operator had ever written. Now that the list is paged, deriving them from what
+ * happens to be loaded would quietly turn "notes you have written" into "notes
+ * currently on screen" — a number that grows as you tap Show more.
  */
-export interface MyContribution {
+export interface MyContributionTotals {
   noteCount: number;
   photoCount: number;
   /**
@@ -415,7 +421,13 @@ export interface MyContribution {
    * can read by design.
    */
   peopleReached: number;
+}
+
+/** One page of the operator's own notes, newest first. */
+export interface MyNotesPage {
   notes: MyNote[];
+  /** Whether another page exists after this one. */
+  hasMore: boolean;
 }
 
 /** A named reader of one of your own notes. Authors only — see note_viewers(). */

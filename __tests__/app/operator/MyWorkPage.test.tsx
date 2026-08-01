@@ -3,14 +3,23 @@ import { render, screen, within, routerMocks } from '@/__tests__/test-utils';
 import userEvent from '@testing-library/user-event';
 
 import MyWorkPage from '@/app/operator/[companyId]/my-work/page';
-import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
-import type { MyContribution, MyNote } from '@/types/operator';
+import {
+  getMyContributionTotals,
+  getMyNotesPage,
+  getNoteViewers,
+  MY_NOTES_PAGE_SIZE,
+} from '@/utils/operatorAccess';
+import type { MyContributionTotals, MyNote } from '@/types/operator';
 
 vi.mock('@/utils/operatorAccess', () => ({
-  getMyContribution: vi.fn(),
+  getMyContributionTotals: vi.fn(),
+  getMyNotesPage: vi.fn(),
   getNoteViewers: vi.fn(),
   // The "Me" tab resolves the operator's display name through this.
   getCurrentMember: vi.fn(async () => ({ id: 'm1', name: 'Ada Lovelace', role: 'operator' })),
+  // Log out drops the cached member along with the session.
+  clearCurrentMemberCache: vi.fn(),
+  MY_NOTES_PAGE_SIZE: 10,
 }));
 
 // This page became the "Me" tab, so it now reaches identity + Log out — which pull in
@@ -39,7 +48,8 @@ vi.mock('@/lib/supabase', () => {
   return { getSupabase: stub, getTypedSupabase: stub, supabase: null };
 });
 
-const mockGetMyContribution = vi.mocked(getMyContribution);
+const mockGetTotals = vi.mocked(getMyContributionTotals);
+const mockGetNotesPage = vi.mocked(getMyNotesPage);
 const mockGetNoteViewers = vi.mocked(getNoteViewers);
 
 function note(over: Partial<MyNote> = {}): MyNote {
@@ -47,6 +57,7 @@ function note(over: Partial<MyNote> = {}): MyNote {
     id: 'n1',
     body: 'Clamp on the boss, not the flange — it walks.',
     created_at: '2026-07-20T14:00:00Z',
+    edited_at: null,
     operation_label: 'Op 20 · Mill',
     part_name: 'BRKT-1042',
     job_id: 'job-1',
@@ -59,27 +70,40 @@ function note(over: Partial<MyNote> = {}): MyNote {
   };
 }
 
-function contribution(over: Partial<MyContribution> = {}): MyContribution {
-  const notes = over.notes ?? [note()];
-  return {
+/**
+ * Stage the two loads the page makes. `totals` covers every note the operator has ever
+ * written; `notes` is only the first page. They are deliberately separate arguments here
+ * because the whole point of the split is that they CAN disagree — see the paging tests.
+ */
+function stage({
+  notes = [note()],
+  totals = {},
+  hasMore = false,
+}: {
+  notes?: MyNote[];
+  totals?: Partial<MyContributionTotals>;
+  hasMore?: boolean;
+} = {}) {
+  mockGetTotals.mockResolvedValue({
     noteCount: notes.length,
     photoCount: 0,
     peopleReached: 0,
-    ...over,
-    notes,
-  };
+    ...totals,
+  });
+  mockGetNotesPage.mockResolvedValue({ notes, hasMore });
 }
 
 beforeEach(() => {
   routerMocks.push.mockClear();
-  mockGetMyContribution.mockReset();
+  mockGetTotals.mockReset();
+  mockGetNotesPage.mockReset();
   mockGetNoteViewers.mockReset();
   mockGetNoteViewers.mockResolvedValue([]);
 });
 
 describe('My Work', () => {
   it('shows what the operator wrote', async () => {
-    mockGetMyContribution.mockResolvedValue(contribution({ photoCount: 2 }));
+    stage({ totals: { photoCount: 2 } });
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
@@ -94,7 +118,7 @@ describe('My Work', () => {
     // looking at when they wrote it, let alone go and check. The link lives in
     // the expanded state so the row itself stays one compact tap target.
     const user = userEvent.setup();
-    mockGetMyContribution.mockResolvedValue(contribution());
+    stage();
     render(<MyWorkPage />);
 
     await user.click(await screen.findByText(/Clamp on the boss/));
@@ -110,7 +134,7 @@ describe('My Work', () => {
     // author is most likely to be checking up on — no viewers AND no way back to
     // the job. There is always something behind the tap now.
     const user = userEvent.setup();
-    mockGetMyContribution.mockResolvedValue(contribution());
+    stage();
     render(<MyWorkPage />);
 
     await user.click(await screen.findByText(/Clamp on the boss/));
@@ -124,9 +148,7 @@ describe('My Work', () => {
   it('survives a note whose job has been deleted', async () => {
     // Provenance is ON DELETE SET NULL: the knowledge outlives its origin, so a
     // missing job must cost the link, never the note.
-    mockGetMyContribution.mockResolvedValue(
-      contribution({ notes: [note({ job_id: null, job_number: null })] }),
-    );
+    stage({ notes: [note({ job_id: null, job_number: null })] });
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
@@ -138,7 +160,7 @@ describe('My Work', () => {
     // three of your notes contributes three. Labelling that "people" overstates
     // it; a distinct-people figure would need the note_views rows, which no
     // browser role can read by design.
-    mockGetMyContribution.mockResolvedValue(contribution({ peopleReached: 5 }));
+    stage({ totals: { peopleReached: 5 } });
     render(<MyWorkPage />);
 
     expect(await screen.findByText('views')).toBeInTheDocument();
@@ -149,9 +171,7 @@ describe('My Work', () => {
     // Once both numbers are honestly labelled "viewed", a second one earns
     // nothing — it reads as a puzzle rather than a signal. usage_count stays on
     // the row for the Playbook to rank by; it is not the operator's business here.
-    mockGetMyContribution.mockResolvedValue(
-      contribution({ notes: [note({ viewer_count: 4, usage_count: 11 })] }),
-    );
+    stage({ notes: [note({ viewer_count: 4, usage_count: 11 })] });
     render(<MyWorkPage />);
 
     await screen.findByText(/Clamp on the boss/);
@@ -164,7 +184,7 @@ describe('My Work', () => {
     // An earlier pass rendered "Not used yet" under every note; seven of those
     // down a real screen is a column of apologies. A count reads the same at
     // zero as at four — it just hasn't moved yet.
-    mockGetMyContribution.mockResolvedValue(contribution());
+    stage();
     render(<MyWorkPage />);
 
     await screen.findByText(/Clamp on the boss/);
@@ -177,9 +197,7 @@ describe('My Work', () => {
     // note_viewers() is the single window through which a reader's name is ever
     // exposed. It must never fire as part of a list render.
     const user = userEvent.setup();
-    mockGetMyContribution.mockResolvedValue(
-      contribution({ notes: [note({ viewer_count: 2, usage_count: 1 })] }),
-    );
+    stage({ notes: [note({ viewer_count: 2, usage_count: 1 })] });
     mockGetNoteViewers.mockResolvedValue([
       { viewer_name: 'Diego', job_number: 'J-0004' },
       { viewer_name: 'Priya', job_number: 'J-0006' },
@@ -202,13 +220,10 @@ describe('My Work', () => {
     // screen is exactly where a leaderboard wants to grow. Nothing here may
     // reflect an operator's pace or standing back at them, or rank them against
     // anyone else.
-    mockGetMyContribution.mockResolvedValue(
-      contribution({
-        photoCount: 3,
-        peopleReached: 5,
-        notes: [note({ viewer_count: 5, usage_count: 9 })],
-      }),
-    );
+    stage({
+      notes: [note({ viewer_count: 5, usage_count: 9 })],
+      totals: { photoCount: 3, peopleReached: 5 },
+    });
     const { container } = render(<MyWorkPage />);
 
     await screen.findByText(/Clamp on the boss/);
@@ -229,7 +244,7 @@ describe('My Work', () => {
   });
 
   it('invites a first note rather than showing an empty scoreboard', async () => {
-    mockGetMyContribution.mockResolvedValue(contribution({ notes: [] }));
+    stage({ notes: [] });
     render(<MyWorkPage />);
 
     expect(await screen.findByText('Nothing written yet')).toBeInTheDocument();
@@ -238,7 +253,8 @@ describe('My Work', () => {
   });
 
   it('does not put a backend failure in front of an operator as a blank page', async () => {
-    mockGetMyContribution.mockRejectedValue(new Error('denied'));
+    mockGetTotals.mockRejectedValue(new Error('denied'));
+    mockGetNotesPage.mockRejectedValue(new Error('denied'));
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Could not load your work/)).toBeInTheDocument();
@@ -246,17 +262,127 @@ describe('My Work', () => {
 });
 
 /**
+ * Paging, and the trap it sets.
+ *
+ * The list is a page at a time, but the summary card is about everything the operator has
+ * ever written. Those totals used to be reduced out of the fetched rows, which was only
+ * correct while "the fetched rows" meant "all of them". Deriving them from a page would turn
+ * the operator's note count into a count of what happens to be rendered — a number that
+ * climbs as they tap Show more, wearing the label of a number about their work.
+ */
+describe('My Work — paging', () => {
+  it('reports every note in the summary, not just the page on screen', async () => {
+    stage({ notes: [note()], totals: { noteCount: 37, photoCount: 12, peopleReached: 9 }, hasMore: true });
+    render(<MyWorkPage />);
+
+    await screen.findByText(/Clamp on the boss/);
+    // One note rendered, thirty-seven written.
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getByText('37')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+  });
+
+  it('asks for the first page only, and asks by page size', async () => {
+    stage();
+    render(<MyWorkPage />);
+
+    await screen.findByText(/Clamp on the boss/);
+    expect(mockGetNotesPage).toHaveBeenCalledTimes(1);
+    expect(mockGetNotesPage).toHaveBeenCalledWith('test-company-id');
+    expect(MY_NOTES_PAGE_SIZE).toBe(10);
+  });
+
+  it('appends the next page on Show more rather than replacing what is there', async () => {
+    const user = userEvent.setup();
+    stage({ notes: [note({ id: 'n1', body: 'First note' })], hasMore: true });
+    render(<MyWorkPage />);
+
+    await screen.findByText('First note');
+    mockGetNotesPage.mockResolvedValue({
+      notes: [note({ id: 'n2', body: 'Second note' })],
+      hasMore: false,
+    });
+
+    await user.click(screen.getByRole('button', { name: /show more/i }));
+
+    // Both pages on screen — the first must not be discarded.
+    expect(await screen.findByText('Second note')).toBeInTheDocument();
+    expect(screen.getByText('First note')).toBeInTheDocument();
+    // Offset is where the loaded list ends, not a page counter that can drift.
+    expect(mockGetNotesPage).toHaveBeenLastCalledWith('test-company-id', { offset: 1 });
+  });
+
+  it('stops offering Show more once the last page comes back', async () => {
+    const user = userEvent.setup();
+    stage({ notes: [note({ id: 'n1', body: 'First note' })], hasMore: true });
+    render(<MyWorkPage />);
+
+    await screen.findByText('First note');
+    mockGetNotesPage.mockResolvedValue({
+      notes: [note({ id: 'n2', body: 'Second note' })],
+      hasMore: false,
+    });
+    await user.click(screen.getByRole('button', { name: /show more/i }));
+    await screen.findByText('Second note');
+
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  it('offers no Show more when the first page is the whole list', async () => {
+    stage({ hasMore: false });
+    render(<MyWorkPage />);
+
+    await screen.findByText(/Clamp on the boss/);
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded pages when one extra page fails', async () => {
+    // A failed Show more must cost the tap, not the notes already on screen.
+    const user = userEvent.setup();
+    stage({ notes: [note({ id: 'n1', body: 'First note' })], hasMore: true });
+    render(<MyWorkPage />);
+
+    await screen.findByText('First note');
+    mockGetNotesPage.mockRejectedValue(new Error('offline'));
+
+    await user.click(screen.getByRole('button', { name: /show more/i }));
+
+    expect(await screen.findByText(/Could not load more notes/)).toBeInTheDocument();
+    expect(screen.getByText('First note')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+  });
+});
+
+/**
  * This page is the "Me" tab: the operator's work, with identity and account actions folded in
- * beneath it now that Profile is no longer a bottom tab.
+ * around it now that Profile is no longer a bottom tab.
  */
 describe('My Work — the "Me" tab', () => {
   it('shows the work itself, not an account screen you have to leave', async () => {
-    mockGetMyContribution.mockResolvedValue(contribution());
+    stage();
     render(<MyWorkPage />);
 
     // The note is present on first paint — no second tap to reach your own work.
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
     expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  it('puts the email in the identity row, not in a caption further down', async () => {
+    // It used to read "Signed in as …" near the bottom of the page. That was a second,
+    // worse home for a fact that is plainly identity — and it was behind the whole note
+    // list, so the one time it matters (reading your address out to support) it was the
+    // hardest thing on the screen to reach.
+    stage();
+    render(<MyWorkPage />);
+
+    const email = await screen.findByText('ada@shop.test');
+    expect(email).toBeInTheDocument();
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument();
+
+    // Above the work, not below it.
+    const firstNote = screen.getAllByRole('listitem')[0];
+    expect(email.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   /**
@@ -266,7 +392,7 @@ describe('My Work — the "Me" tab', () => {
    * out button anywhere in the app, because Profile had just stopped being a tab.
    */
   it('can still log out with nothing written yet', async () => {
-    mockGetMyContribution.mockResolvedValue(contribution({ notes: [] }));
+    stage({ notes: [] });
     render(<MyWorkPage />);
 
     expect(await screen.findByText('Nothing written yet')).toBeInTheDocument();
@@ -275,7 +401,8 @@ describe('My Work — the "Me" tab', () => {
   });
 
   it('can still log out when the work fails to load', async () => {
-    mockGetMyContribution.mockRejectedValue(new Error('denied'));
+    mockGetTotals.mockRejectedValue(new Error('denied'));
+    mockGetNotesPage.mockRejectedValue(new Error('denied'));
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Could not load your work/)).toBeInTheDocument();
@@ -283,17 +410,34 @@ describe('My Work — the "Me" tab', () => {
   });
 
   /**
-   * Log out is last and set apart, per NN/g's guidance on keeping a consequential option away
-   * from benign ones — operators repeating the same taps every shift slip into automaticity, and
-   * a mis-tap there is a slip that no clearer label fixes. Asserting document order keeps a
-   * future tidy-up from moving it back up next to Give feedback, which is where it used to be.
+   * Log out moved from "last on the page, set apart" to "an isolated icon in the identity row",
+   * and the safety argument moved with it — from DISTANCE to ISOLATION.
+   *
+   * The old placement put it below the operator's entire note list, which is unbounded. Once
+   * the list pages, distance stops meaning "slightly slower to reach" and starts meaning "past
+   * however many Show mores it takes", which is not a safety property, it is a broken control.
+   *
+   * The slip NN/g's proximity guidance protects against is a mis-tap onto a consequential
+   * action from a benign one BESIDE it. So what this asserts is the replacement invariant:
+   * Log out is the only thing you can tap in that row. Nothing adjacent means nothing to slip
+   * from — which is the same reasoning the operator layout uses to forbid a second icon button
+   * in the header, applied rather than contradicted.
    */
-  it('puts Log out after Give feedback, not beside it', async () => {
-    mockGetMyContribution.mockResolvedValue(contribution());
+  it('leaves Log out with no neighbouring tap target to slip from', async () => {
+    stage();
     render(<MyWorkPage />);
 
-    const feedback = await screen.findByRole('button', { name: /give feedback/i });
-    const logout = screen.getByRole('button', { name: /log out/i });
-    expect(feedback.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const logout = await screen.findByRole('button', { name: /log out/i });
+    const row = logout.parentElement!;
+
+    // Sole interactive element in its row.
+    expect(within(row).getAllByRole('button')).toHaveLength(1);
+    expect(within(row).queryAllByRole('link')).toHaveLength(0);
+
+    // And reachable before the work rather than after it — the point of the move.
+    const firstNote = screen.getAllByRole('listitem')[0];
+    expect(
+      logout.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

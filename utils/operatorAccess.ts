@@ -34,7 +34,8 @@ import type {
   JobNote,
   JobNoteMedia,
   PartPreviousNote,
-  MyContribution,
+  MyContributionTotals,
+  MyNotesPage,
   MyNote,
   NoteViewer,
   NoteReaction,
@@ -44,14 +45,7 @@ import type {
 // CURRENT USER (the signed-in company member — ANY role)
 // ============================================================================
 
-/**
- * The signed-in user's user_company_access row for this company — used wherever
- * we need the acting member's account id (job-note author, operation completer,
- * activity attribution). Intentionally NOT role-filtered: operators, users, and
- * admins are all company members, and every one of them can act in the operator
- * view. (There is no separate "operators" table — that legacy table is gone.)
- */
-export async function getCurrentMember(companyId: string): Promise<{
+export interface CurrentMember {
   id: string;
   name: string | null;
   user_id: string;
@@ -62,7 +56,65 @@ export async function getCurrentMember(companyId: string): Promise<{
    * round trip for a value that is on the row we are already fetching.
    */
   role: string | null;
-} | null> {
+}
+
+/**
+ * In-flight and resolved member lookups, keyed by company.
+ *
+ * This is a REQUEST cache, not a data cache — it exists because the answer is stable
+ * for the lifetime of a session and because several components resolve it at once.
+ * Mounting the "Me" tab used to call this twice concurrently (the identity hook and the
+ * contribution loader), and each call opens with `auth.getSession()`, which `supabase-js`
+ * serialises behind a `navigator.locks` acquisition and may refresh the token inside.
+ * Duplicate callers therefore didn't just cost a round trip, they queued behind each
+ * other on the one lock that gates every other request on the page.
+ *
+ * The promise is cached, not the value, so simultaneous callers share ONE flight rather
+ * than racing to populate it. A rejected or null-resolving lookup is evicted so a
+ * transient failure can't pin "not a member" for the rest of the session.
+ */
+const memberCache = new Map<string, Promise<CurrentMember | null>>();
+
+/**
+ * Forget every cached member. Call on sign-out: the cache answers "who is acting", and
+ * after a sign-out the honest answer is "nobody yet" — a stale entry would otherwise let
+ * the next user inherit the previous one's membership row.
+ */
+export function clearCurrentMemberCache(): void {
+  memberCache.clear();
+}
+
+/**
+ * The signed-in user's user_company_access row for this company — used wherever
+ * we need the acting member's account id (job-note author, operation completer,
+ * activity attribution). Intentionally NOT role-filtered: operators, users, and
+ * admins are all company members, and every one of them can act in the operator
+ * view. (There is no separate "operators" table — that legacy table is gone.)
+ *
+ * Deduplicated per company for the session — see `memberCache`.
+ */
+export function getCurrentMember(companyId: string): Promise<CurrentMember | null> {
+  const cached = memberCache.get(companyId);
+  if (cached) return cached;
+
+  const flight = fetchCurrentMember(companyId).then(
+    (member) => {
+      // Don't cache a negative. "No session yet" is a normal state during startup, and
+      // pinning it would leave every later caller in this session acting as a non-member.
+      if (!member) memberCache.delete(companyId);
+      return member;
+    },
+    (err) => {
+      memberCache.delete(companyId);
+      throw err;
+    },
+  );
+
+  memberCache.set(companyId, flight);
+  return flight;
+}
+
+async function fetchCurrentMember(companyId: string): Promise<CurrentMember | null> {
   const supabase = getSupabase();
 
   const { data: { session } } = await supabase.auth.getSession();
@@ -1763,7 +1815,68 @@ export async function getPartPreviousNotes(
 // ============================================================================
 
 /**
- * What the caller has written, and how far it has travelled.
+ * How many of the caller's own notes load at a time on the "Me" tab.
+ *
+ * Ten, where the completed-jobs list above uses fifty, because the two caps are
+ * solving different problems. That one is bounding a query; this one is bounding
+ * a SCROLL — "Give feedback" sits under this list, and the whole point of paging
+ * it is that the end of the page stays about a screen away on a phone. Fifty
+ * blurred cards would page the query and still bury the button.
+ */
+export const MY_NOTES_PAGE_SIZE = 10;
+
+/**
+ * The totals on the "Me" tab's summary card.
+ *
+ * A SEPARATE QUERY FROM THE LIST, deliberately. These used to be reduced from the
+ * fetched note rows, which was only honest while the list was unbounded. Once the
+ * list pages, deriving them from the loaded rows would mean the operator's note
+ * count climbed every time they tapped Show more — a number about the UI wearing
+ * the label of a number about their work.
+ *
+ * Two columns and one embed, against the seven relations the list select needs:
+ * this exists to be cheap enough to run alongside the first page. `photoCount`
+ * needs the media rows counted per note, and `peopleReached` needs each row's
+ * viewer_count summed; neither is expressible as a PostgREST `count`.
+ */
+export async function getMyContributionTotals(
+  companyId: string,
+): Promise<MyContributionTotals> {
+  const supabase = getSupabase();
+
+  const empty: MyContributionTotals = { noteCount: 0, photoCount: 0, peopleReached: 0 };
+
+  const member = await getCurrentMember(companyId);
+  if (!member) return empty;
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('viewer_count, media:note_media(id)')
+    .eq('company_id', companyId)
+    .eq('author_id', member.id)
+    // Auto-logged entries are not somebody's contribution.
+    .eq('note_type', 'user');
+
+  if (error || !data) return empty;
+
+  const rows = data as unknown as Array<{
+    viewer_count: number;
+    media: Array<{ id: string }> | null;
+  }>;
+
+  return {
+    noteCount: rows.length,
+    photoCount: rows.reduce((n, r) => n + (r.media ?? []).length, 0),
+    // Summed rather than distinct, and labelled "views" in the UI for exactly
+    // that reason: the per-note numbers it adds up are visible right below it.
+    // Distinct people across all notes would need the view rows, which are
+    // deliberately unreadable by any browser role.
+    peopleReached: rows.reduce((n, r) => n + r.viewer_count, 0),
+  };
+}
+
+/**
+ * What the caller has written, and how far it has travelled — one page of it.
  *
  * This is the return half of the loop: an operator writes something down and,
  * without this, nothing ever comes back. The login banner says "3 people used
@@ -1775,19 +1888,23 @@ export async function getPartPreviousNotes(
  * that no operator-facing surface ever reflects their pace or standing back at
  * them. Their own output and its reception, nothing else.
  *
- * viewer_count and usage_count are columns on the row, so the whole screen is
- * one round trip — no per-note count queries.
+ * viewer_count and usage_count are columns on the row, so a page is one round
+ * trip — no per-note count queries.
+ *
+ * PAGED SINCE #6xx. This used to fetch every note the operator had ever written,
+ * with all seven embeds, and render the lot. It was the only operator screen
+ * putting a `backdrop-filter` card inside an uncapped `.map()`, so the cost grew
+ * without bound in both the query and the compositor. `hasMore` is derived from a
+ * full page coming back rather than from a count, matching the activity feed.
  */
-export async function getMyContribution(companyId: string): Promise<MyContribution> {
+export async function getMyNotesPage(
+  companyId: string,
+  { offset = 0, limit = MY_NOTES_PAGE_SIZE }: { offset?: number; limit?: number } = {},
+): Promise<MyNotesPage> {
   const supabase = getSupabase();
 
   const member = await getCurrentMember(companyId);
-  const empty: MyContribution = {
-    noteCount: 0,
-    photoCount: 0,
-    peopleReached: 0,
-    notes: [],
-  };
+  const empty: MyNotesPage = { notes: [], hasMore: false };
   if (!member) return empty;
 
   const { data, error } = await supabase
@@ -1811,7 +1928,11 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     .eq('author_id', member.id)
     // Auto-logged entries are not somebody's contribution.
     .eq('note_type', 'user')
-    .order('created_at', { ascending: false });
+    // `id` breaks ties: two notes saved in the same millisecond would otherwise
+    // sort unstably between pages, which is how a row goes missing or repeats.
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error || !data) return empty;
 
@@ -1855,16 +1976,11 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     };
   });
 
-  return {
-    noteCount: notes.length,
-    photoCount: notes.reduce((n, x) => n + x.photo_count, 0),
-    // Summed rather than distinct, and labelled "views" in the UI for exactly
-    // that reason: the per-note numbers it adds up are visible right below it.
-    // Distinct people across all notes would need the view rows, which are
-    // deliberately unreadable by any browser role.
-    peopleReached: notes.reduce((n, x) => n + x.viewer_count, 0),
-    notes,
-  };
+  // A full page means there is probably another one; a short page means there
+  // certainly isn't. Same rule the activity feed uses. It can show Show more once
+  // on an exact multiple of the page size, which costs one empty fetch and is
+  // preferable to paying for an exact count on every page.
+  return { notes, hasMore: notes.length === limit };
 }
 
 /**

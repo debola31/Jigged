@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -19,12 +19,16 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import { getMyContribution, getNoteViewers, updateNoteBody } from '@/utils/operatorAccess';
+import {
+  getMyContributionTotals,
+  getMyNotesPage,
+  getNoteViewers,
+  updateNoteBody,
+} from '@/utils/operatorAccess';
 import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
 import NoteEditDialog from '@/components/notes/NoteEditDialog';
 import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
 import {
   OperatorIdentityRow,
@@ -316,10 +320,19 @@ export default function MyWorkPage() {
   const params = useParams();
   const companyId = params.companyId as string;
 
-  useSetOperatorChrome(
-    { back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } },
-    [companyId],
-  );
+  /*
+   * NO `useSetOperatorChrome({ back })` HERE, deliberately.
+   *
+   * Me is a tab root, and a tab root has no "back". The bottom bar already is the way
+   * between tabs, so an arrow up here pointed at Jobs — a destination one tap away in
+   * the nav — and made a top-level destination read like a page you had wandered into.
+   * Declaring no chrome makes the header fall through to the Jigged mark, which is what
+   * Jobs, Inventory and Maintenance have always shown; Me was the only tab opting out.
+   *
+   * The other entry point, NoteUsageBanner on the jobs page, uses a plain `router.push`
+   * rather than `useOperatorNav().push`, so it doesn't bump the chrome depth counter
+   * either — that route lands on the same back-less root, with no special case.
+   */
 
   const { data: identity } = useOperatorIdentity(companyId);
 
@@ -327,28 +340,81 @@ export default function MyWorkPage() {
    * This is the "Me" tab: identity, then the work, then account actions.
    *
    * The work is sandwiched rather than replaced — see `OperatorAccountBlock` for why the work
-   * has to lead and why Log out sits at the very bottom.
+   * has to lead, and why Log out now rides in the identity row instead of at the very bottom.
    *
    * The three loading/error/empty states are INSIDE `MyContribution` on purpose. They used to
    * be early returns from this component, and leaving them there once Profile stopped being a
    * tab would have meant a brand-new operator — the case with zero notes, i.e. the common one —
-   * had no Log out button anywhere in the app.
+   * had no Log out button anywhere in the app. That still holds: Log out lives above the work
+   * now, but Give feedback below it depends on the same thing.
    */
   return (
     <Box sx={{ pb: 4 }}>
-      <OperatorIdentityRow identity={identity} />
+      <OperatorIdentityRow companyId={companyId} identity={identity} />
       <MyContribution companyId={companyId} />
-      <OperatorAccountActions companyId={companyId} identity={identity} />
+      <OperatorAccountActions identity={identity} />
     </Box>
   );
 }
 
-/** The operator's own notes and their reception. Owns its own loading/error/empty states. */
+/**
+ * The operator's own notes and their reception. Owns its own loading/error/empty states.
+ *
+ * Two loads, not one: the summary totals cover EVERY note the operator has written, while
+ * the list below is a page at a time. Reducing the totals out of the loaded rows would make
+ * "5 notes" mean "5 notes currently rendered" and climb on every Show more.
+ */
 function MyContribution({ companyId }: { companyId: string }) {
-  const { data, loading, error, reload } = useLoad(
-    () => getMyContribution(companyId),
-    [companyId],
+  const {
+    data: totals,
+    loading,
+    error,
+    reload: reloadTotals,
+  } = useLoad(() => getMyContributionTotals(companyId), [companyId]);
+
+  const {
+    data: firstPage,
+    error: pageError,
+    reload: reloadFirstPage,
+  } = useLoad(() => getMyNotesPage(companyId), [companyId]);
+
+  // Pages 2..n, appended. `useLoad` has no append semantics — it replaces — so the extra
+  // pages accumulate here and the first page stays owned by the hook, which keeps
+  // `reload()` after an edit or delete meaning "go back to one fresh page".
+  const [extraPages, setExtraPages] = useState<MyNote[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
+
+  const notes = useMemo(
+    () => [...(firstPage?.notes ?? []), ...extraPages],
+    [firstPage, extraPages],
   );
+  const hasMore = !exhausted && Boolean(firstPage?.hasMore);
+
+  /** Re-read from scratch after an edit or a delete, so the totals and the list agree. */
+  const refresh = useCallback(async () => {
+    setExtraPages([]);
+    setExhausted(false);
+    setMoreError(false);
+    await Promise.all([reloadTotals(), reloadFirstPage()]);
+  }, [reloadTotals, reloadFirstPage]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const next = await getMyNotesPage(companyId, { offset: notes.length });
+      setExtraPages((prev) => [...prev, ...next.notes]);
+      if (!next.hasMore) setExhausted(true);
+    } catch {
+      // Keep what is already on screen and offer the tap again — a failed extra page
+      // must not discard the pages that loaded.
+      setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [companyId, notes.length]);
 
   if (loading) {
     return (
@@ -358,7 +424,7 @@ function MyContribution({ companyId }: { companyId: string }) {
     );
   }
 
-  if (error) {
+  if (error || pageError) {
     return (
       <Box sx={{ p: 1 }}>
         <Alert severity="error">Could not load your work. Try again.</Alert>
@@ -366,7 +432,7 @@ function MyContribution({ companyId }: { companyId: string }) {
     );
   }
 
-  const c = data ?? { noteCount: 0, photoCount: 0, peopleReached: 0, jobsReached: 0, notes: [] };
+  const c = totals ?? { noteCount: 0, photoCount: 0, peopleReached: 0 };
 
   if (c.noteCount === 0) {
     return (
@@ -435,10 +501,30 @@ function MyContribution({ companyId }: { companyId: string }) {
       {/* A real list: it is one semantically, screen readers announce the count,
           and each card becomes an addressable item rather than an anonymous div. */}
       <Box component="ul" sx={{ mt: 0.5, listStyle: 'none', p: 0, m: 0 }}>
-        {c.notes.map((n) => (
-          <NoteRow key={n.id} note={n} companyId={companyId} onChanged={reload} />
+        {notes.map((n) => (
+          <NoteRow key={n.id} note={n} companyId={companyId} onChanged={refresh} />
         ))}
       </Box>
+
+      {/*
+        Show more, not infinite scroll. Everything below this list — Give feedback — moves
+        further away with each page, so growing the list has to be something the operator
+        asks for. Auto-loading on scroll would make the bottom of the page unreachable by
+        design, which is the exact complaint paging was meant to answer.
+      */}
+      {hasMore && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+          <Button onClick={loadMore} disabled={loadingMore} sx={{ minHeight: 48 }}>
+            {loadingMore ? <CircularProgress size={20} /> : 'Show more'}
+          </Button>
+        </Box>
+      )}
+
+      {moreError && (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          Could not load more notes. Try again.
+        </Alert>
+      )}
     </Box>
   );
 }

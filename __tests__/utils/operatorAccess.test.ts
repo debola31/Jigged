@@ -48,6 +48,7 @@ import {
   markOperationReceived,
   revertOperationCompletion,
   getOutsideOpsForCompany,
+  clearCurrentMemberCache,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -73,6 +74,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockQueryBuilder.data = null;
   mockQueryBuilder.error = null;
+  // `getCurrentMember` dedupes per company for the lifetime of a session, and a module
+  // lives longer than a test. Without this, the first test to resolve a member for a
+  // company pins that answer for every later one — which is exactly how the
+  // "not a member" case started passing a member.
+  clearCurrentMemberCache();
 });
 
 describe('getAllStationsOperatorJobs', () => {

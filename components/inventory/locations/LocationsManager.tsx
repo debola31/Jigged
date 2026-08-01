@@ -38,7 +38,7 @@ import LocationFormModal, { type LocationFormValues } from './LocationFormModal'
 import LocationPicker, { type LocationPickerOption } from './LocationPicker';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
-import LocationBoard, { boardOrder } from './board/LocationBoard';
+import LocationTable, { placeOrder } from './LocationTable';
 import LocationDetailSheet from './board/LocationDetailSheet';
 
 /** Sentinel for "no parent". A picker option needs an id, and `null` is not one. */
@@ -178,7 +178,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   // Sorted once here so the board and the list agree — `Unassigned` last in both. Sorting only
   // inside the board left the list leading with the put-away pile, which is the impression the
   // board's ordering exists to avoid.
-  const tree = useMemo(() => buildLocationTree(locations).sort(boardOrder), [locations]);
+  const tree = useMemo(() => buildLocationTree(locations).sort(placeOrder), [locations]);
   const byNodeId = useMemo(() => indexTree(tree), [tree]);
   const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
@@ -369,45 +369,78 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     }
   };
 
-  const printAllLabels = async () => {
-    if (allLabels.length === 0) {
+  /** Rows ticked in the table, for bulk label printing. Owned here so the toolbar can read it. */
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+
+  const printLabels = async (labels: LocationLabel[], filename: string) => {
+    if (labels.length === 0) {
       setToast('No locations to print yet.');
       return;
     }
     const doc = await generateLocationLabelSheet({
       companyId,
       baseUrl: window.location.origin,
-      labels: allLabels,
+      labels,
       heading: companyName,
     });
-    doc.save('inventory-labels.pdf');
+    doc.save(filename);
+  };
+
+  /**
+   * Just the ticked rows — NOT their descendants.
+   *
+   * Deliberately unlike the drawer's "Print QR", which collects the node plus everything under it
+   * because you asked about one place and meant the shelf and its bins. Here you ticked exactly
+   * what you can see, and a collapsed subtree is excluded from selection for the same reason.
+   */
+  const printSelectedLabels = async () => {
+    const wanted = allLabels.filter((l) => selectedIds.has(l.id));
+    await printLabels(wanted, 'inventory-labels-selected.pdf');
+  };
+
+  const printAllLabels = async () => {
+    if (allLabels.length === 0) {
+      setToast('No locations to print yet.');
+      return;
+    }
+    await printLabels(allLabels, 'inventory-labels.pdf');
   };
 
   return (
     <Box>
       {/*
-        Toolbar — single row, and deliberately almost empty.
+        Toolbar.
 
-        It used to hold five setup controls (Scan · Print all labels · New top-level
-        location · Build visually, plus a Board|List toggle) on a page whose own spec
-        section is titled "Design for the sustain, not the setup". What went:
+        It once held five setup controls — Scan · Print all labels · New top-level location ·
+        Build visually, plus a Board|List toggle — on a page whose own spec section is titled
+        "Design for the sustain, not the setup". Scan left because scanning a printed label is
+        something you do standing at a shelf, so it belongs to the operator. `Build visually`
+        left because it called the identical function as the in-grid Add tile.
 
-        - **Board|List toggle** — an indented text tree is the opposite of the map the
-          research asks for, and Cabinet 1 alone exploded into 15 rows. At the ~12–18
-          places a real shop has, the board is strictly better; the choice was a burden.
-        - **Scan** — scanning a printed label is an operator gesture at a shelf, not an
-          admin gesture at a desk. It lives in the operator tab bar now.
-        - **New top-level location** and **Build visually** — these were two entry points
-          to two different creation flows, and `Build visually` called the *identical*
-          function as the in-grid "Add storage" tile. Now there is one way to add storage:
-          that tile. Multi-level lives on only as Subdivide, on a unit that already exists.
+        **The Board|List toggle is worth a correction.** It was removed on the reasoning that
+        "an indented text tree is the opposite of the map the research asks for, and Cabinet 1
+        alone exploded into 15 rows". The second half was an artefact of the WIZARD, not of
+        lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in one pass. And the map it
+        was protecting turned out to draw nothing for a flat shop. The list won in the end —
+        see the note at the top of `LocationTable`. There is no toggle now because there is
+        nothing to toggle between.
 
-        What arrived is `Count everything`, because the board is now the hub: the
-        company-wide sheet is reached from here rather than from a sibling button on a
-        page that no longer exists.
+        `Add storage` moved here from the board's in-grid tile: a table has no grid to hold a
+        tile, and a toolbar button is where every other "new thing" in this product lives.
       */}
+      {/* Hidden entirely with no places: `Print all labels` has nothing to print, `Count
+          everything` has nothing to count, and a second `Add storage` would sit a few hundred
+          pixels above the one in the empty-state card. One screen, one call to action. */}
+      {tree.length > 0 && (
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <Box sx={{ flex: 1 }} />
+        {/* Selection-driven, and the single biggest thing a table gives that the board could not:
+            re-labelling twenty places was twenty trips through a drawer. #648 named it. */}
+        {selectedIds.size > 0 && (
+          <Button variant="outlined" startIcon={<QrCode2Icon />} onClick={printSelectedLabels}>
+            Print {selectedIds.size} label{selectedIds.size === 1 ? '' : 's'}
+          </Button>
+        )}
         <Button
           variant="outlined"
           startIcon={<QrCode2Icon />}
@@ -415,6 +448,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           disabled={loading || allLabels.length === 0}
         >
           Print all labels
+        </Button>
+        {/* Was an in-grid tile on the board. A table has no grid to put a tile in, and a toolbar
+            button is where every other "new thing" on this product lives. */}
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+        >
+          Add storage
         </Button>
         <Button
           variant="outlined"
@@ -424,12 +466,13 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           Count everything
         </Button>
       </Box>
+      )}
 
       {/* The page never said what it was for, and a first-time reader could not tell — reasonably,
           because almost every control on it is one-time setup. Two sentences: what you're looking
           at, and the one thing here you come back to do. */}
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
-        Your storage, and what&apos;s in it. Tap anything to count it, put parts away, print its QR
+        Your storage, and what&apos;s in it. Click a place to count it, put parts away, print its QR
         label, or divide it up. Adding and removing stock happens on the part itself, or on the
         shop floor by scanning a label.
       </Typography>
@@ -476,19 +519,15 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
             </Alert>
           )}
 
-          {/* The single way to add storage. It opens the *simple* form — a name and an
-              optional kind, creating one flat place — not the multi-level builder it used
-              to call. 118 of Contour's 121 legacy locations were flat, in a system that
-              supported nesting, so a wizard is the wrong primary path. A 5-row cabinet is
-              now two comprehensible steps: create "Cabinet 1", then Subdivide it. */}
-          <LocationBoard
+          <LocationTable
             tree={tree}
             occupancy={occupancy}
-            photoUrls={photoUrls}
             onOpen={openSheet}
-            onAddStorage={() =>
-              setFormState({ open: true, location: null, parentId: null, parentPath: [] })
+            onCountHere={(node) =>
+              router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
             }
+            selectedIds={selectedIds}
+            onSelectedChange={setSelectedIds}
           />
         </>
       )}

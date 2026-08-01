@@ -205,7 +205,7 @@ describe('LocationDetailSheet — actions', () => {
     const cab = node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet' });
     const { acts } = renderSheet(cab);
 
-    await user.click(screen.getByRole('button', { name: /subdivide this unit/i }));
+    await user.click(screen.getByRole('button', { name: /divide it up/i }));
     await user.click(screen.getByRole('button', { name: /add one inside/i }));
     await user.click(screen.getByRole('button', { name: /print qr/i }));
     await user.click(screen.getByRole('button', { name: /rename/i }));

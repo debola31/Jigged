@@ -35,7 +35,9 @@ export type OperatorLocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 const TITLES: Record<OperatorLocationAction, string> = {
   add: 'Add stock',
   deplete: 'Remove stock',
-  adjust: 'Adjust stock (cycle count)',
+  // See the note on the owner-side modal: "cycle count" is jargon, and this one is read
+  // on a phone by whoever is standing at the shelf.
+  adjust: 'Set the true quantity',
   move: 'Move stock to another location',
 };
 

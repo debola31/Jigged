@@ -26,23 +26,6 @@ export interface InventoryLocationNode extends InventoryLocation {
   depth: number;
 }
 
-/**
- * The minimum a storage-board drawing needs.
- *
- * `InventoryLocationNode` satisfies this structurally (real rows), and `LocationSpecNode`
- * converts via `specToBoard` (unsaved structure, keyed rather than id'd). Both shapes exist on
- * purpose: the builder must preview storage that does not exist yet, while the board draws what
- * does — and §5.5's promise is that they look the same, so the drawing is shared even though
- * the data isn't.
- */
-export interface BoardNode {
-  id: string;
-  name: string;
-  kind: string | null;
-  code: string | null;
-  children: BoardNode[];
-}
-
 export interface CreateLocationInput {
   parent_id?: string | null;
   name: string;

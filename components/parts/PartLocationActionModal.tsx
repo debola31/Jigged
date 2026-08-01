@@ -47,7 +47,9 @@ export interface LocationBalanceOption extends LocationOption {
 const TITLES: Record<LocationAction, string> = {
   add: 'Add stock at a location',
   deplete: 'Remove stock from a location',
-  adjust: 'Set stock at a location (cycle count)',
+  // No "(cycle count)": warehouse jargon, shipped to a shop owner. Same register as the
+  // "1 item needs adjusting" copy this product already watched fail.
+  adjust: 'Set the true quantity at a location',
   move: 'Move stock between locations',
 };
 

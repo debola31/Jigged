@@ -338,7 +338,7 @@ export default function LocationDetailSheet({
                   startIcon={<AutoAwesomeMosaicOutlinedIcon />}
                   onClick={() => actions.onSubdivide(node)}
                 >
-                  Subdivide this unit…
+                  Divide it up…
                 </Button>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Button

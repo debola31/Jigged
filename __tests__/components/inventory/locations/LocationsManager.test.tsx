@@ -87,12 +87,17 @@ beforeEach(() => {
 });
 
 describe('LocationsManager', () => {
-  it('loads locations and occupancy in one request pair and rolls it onto the board', async () => {
+  it('loads locations and occupancy in one request pair and rolls it up the tree', async () => {
     render(<LocationsManager companyId="co1" />);
 
-    // Cabinet 3 holds nothing directly; its shelves hold 3 between them.
-    expect(await screen.findByRole('button', { name: 'Cabinet 3 — 3 parts' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Yard — 1 part' })).toBeInTheDocument();
+    // Cabinet 3 holds nothing DIRECTLY; its shelves hold 3 between them. The roll-up is the
+    // reason a full cabinet never reads empty, and it survived the board being deleted.
+    expect(await screen.findByRole('button', { name: 'Cabinet 3' })).toBeInTheDocument();
+    expect(screen.getByText('3 parts')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Yard' })).toBeInTheDocument();
+    // Several places hold one part each in the fixture; the roll-up on Cabinet 3 above is the
+    // assertion that matters here.
+    expect(screen.getAllByText('1 part').length).toBeGreaterThan(0);
     expect(getLocationBoard).toHaveBeenCalledTimes(1);
     expect(getLocationBoard).toHaveBeenCalledWith('co1');
   });
@@ -208,14 +213,12 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
+    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
 
-    // Title proves parentPath; the absence of container cards proves the palette swap.
-    expect(await screen.findByText('Subdivide Cabinet 3')).toBeInTheDocument();
-    expect(screen.queryByText('Cabinet')).not.toBeInTheDocument();
+    // Title proves parentPath. There is no palette step to click through any more.
+    expect(await screen.findByText('Divide up Cabinet 3')).toBeInTheDocument();
 
-    await user.click(screen.getByText('Rows'));
-    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
 
     const [, parentId, spec] = vi.mocked(materializeLocationSpec).mock.calls[0];
     expect(parentId).toBe('cab3');
@@ -234,9 +237,8 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
-    await user.click(screen.getByText('Rows'));
-    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
+    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
 
     // Shelf A and Shelf B carry sort_order 0 in the fixture, so the run must start at 1.
     const startSortOrder = vi.mocked(materializeLocationSpec).mock.calls[0][3];
@@ -269,9 +271,8 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /subdivide this unit/i }));
-    await user.click(screen.getByText('Rows'));
-    await user.click(await screen.findByRole('button', { name: /create 5 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
+    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
 
     const spec = vi.mocked(materializeLocationSpec).mock.calls[0][2];
     expect(spec.map((n) => n.name)).toEqual(['Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8']);

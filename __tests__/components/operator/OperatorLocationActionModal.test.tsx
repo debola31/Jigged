@@ -161,7 +161,7 @@ describe('move', () => {
   // One action, one name across both surfaces — this said "Set" where admin says "Adjust".
   it('calls the cycle-count action Adjust, matching the admin page', async () => {
     renderModal({ action: 'adjust' });
-    expect(screen.getByText(/adjust stock \(cycle count\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/set the true quantity/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^adjust$/i })).toBeInTheDocument();
   });
 });

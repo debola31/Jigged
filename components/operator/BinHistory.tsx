@@ -29,7 +29,9 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
+import CardActionArea from '@mui/material/CardActionArea';
 import CircularProgress from '@mui/material/CircularProgress';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
@@ -56,6 +58,8 @@ function when(iso: string): string {
 function movement(e: LocationHistoryEntry): { label: string; color: string } {
   if (e.type === 'addition') return { label: `+${num(e.quantity)} ${e.unit}`, color: 'success.light' };
   if (e.type === 'depletion') return { label: `−${num(e.quantity)} ${e.unit}`, color: 'warning.light' };
+  // A folded move changes no shop total, so a sign would be a lie in whichever direction it pointed.
+  if (e.type === 'transfer') return { label: `${num(e.quantity)} ${e.unit} moved`, color: 'info.light' };
   return { label: `set to ${num(e.quantity)} ${e.unit}`, color: 'text.secondary' };
 }
 
@@ -63,9 +67,25 @@ export interface BinHistoryProps {
   entries: LocationHistoryEntry[] | null;
   loading: boolean;
   error?: string | null;
+  /**
+   * Show WHERE each movement happened. Off inside one bin — every row would repeat the place you
+   * are already looking at — and on for the shop-wide feed, where it is the whole point.
+   */
+  showPlace?: boolean;
+  /** When given, the place becomes the tap target: a movement row is a way to reach its bin. */
+  onOpenLocation?: (locationId: string) => void;
+  /** Copy for the empty state, which differs between one bin and the whole shop. */
+  emptyText?: string;
 }
 
-export default function BinHistory({ entries, loading, error }: BinHistoryProps) {
+export default function BinHistory({
+  entries,
+  loading,
+  error,
+  showPlace,
+  onOpenLocation,
+  emptyText = 'Nothing recorded here yet.',
+}: BinHistoryProps) {
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
@@ -79,7 +99,7 @@ export default function BinHistory({ entries, loading, error }: BinHistoryProps)
   if (!entries || entries.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
-        Nothing recorded here yet.
+        {emptyText}
       </Typography>
     );
   }
@@ -88,12 +108,18 @@ export default function BinHistory({ entries, loading, error }: BinHistoryProps)
     <Stack component="ul" spacing={1} sx={{ listStyle: 'none', p: 0, m: 0 }}>
       {entries.map((e) => {
         const m = movement(e);
-        return (
-          <Card component="li" key={e.id} elevation={2}>
+        // In the shop-wide feed a row is also the way to its place, and on a phone that target
+        // has to be the whole card — a caption-height text link is under 20px in a bright shop.
+        // Inside one bin there is nowhere to go, so the card stays inert rather than pretending.
+        const goTo = showPlace && onOpenLocation && e.locationId ? e.locationId : null;
+        const body = (
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
               <Stack direction="row" spacing={1} alignItems="flex-start">
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap">
+                  {/* `useFlexGap`, because `spacing` is margin-based: on a narrow phone the part
+                      name wraps to its own line and keeps the left margin, reading as a stray
+                      indent. Real CSS gap doesn't apply across a wrap. */}
+                  <Stack direction="row" spacing={1} useFlexGap alignItems="baseline" flexWrap="wrap">
                     <Typography sx={{ fontWeight: 700, color: m.color }}>{m.label}</Typography>
                     <Typography sx={{ fontWeight: 600 }} noWrap>
                       {e.itemName}
@@ -104,6 +130,20 @@ export default function BinHistory({ entries, loading, error }: BinHistoryProps)
                     {/* No author on older rows — see the note at the top of this file. */}
                     {e.actorName ? ` · ${e.actorName}` : ''}
                   </Typography>
+                  {/* `locationName` is snapshotted on the row, so it still reads correctly after
+                      the place is deleted — at which point `locationId` is null and there is
+                      nowhere to send anyone, hence the plain text fallback. */}
+                  {showPlace && e.locationName && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', mt: 0.25 }}
+                    >
+                      {/* A move names both ends. The card goes to the destination — where the
+                          stock is now is the only half worth walking to. */}
+                      {e.fromName ? `${e.fromName} → ${e.locationName}` : e.locationName}
+                    </Typography>
+                  )}
                   {e.notes && (
                     <Typography variant="body2" sx={{ mt: 0.5 }}>
                       {e.notes}
@@ -119,6 +159,7 @@ export default function BinHistory({ entries, loading, error }: BinHistoryProps)
                     />
                   )}
                 </Box>
+                {goTo && <KeyboardArrowRightIcon color="action" sx={{ alignSelf: 'center' }} />}
                 {e.photoUrl && (
                   <Box
                     component="img"
@@ -140,6 +181,16 @@ export default function BinHistory({ entries, loading, error }: BinHistoryProps)
                 )}
               </Stack>
             </CardContent>
+        );
+        return (
+          <Card component="li" key={e.id} elevation={2}>
+            {goTo ? (
+              <CardActionArea onClick={() => onOpenLocation?.(goTo)} aria-label={`Open ${e.locationName}`}>
+                {body}
+              </CardActionArea>
+            ) : (
+              body
+            )}
           </Card>
         );
       })}

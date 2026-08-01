@@ -27,7 +27,7 @@ const { state, mockSupabase } = vi.hoisted(() => {
     // (`.is('part.deleted_at', null)`, `.limit(n)`) actually reached PostgREST.
     const seen: Record<string, unknown[]> = {};
     s.calls.push(seen);
-    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'gt', 'ilike', 'order', 'limit', 'range', 'single', 'maybeSingle'].forEach(
+    ['select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'ilike', 'order', 'limit', 'range', 'single', 'maybeSingle'].forEach(
       (m) => {
         b[m] = vi.fn((...args: unknown[]) => {
           seen[m] = args;
@@ -87,6 +87,8 @@ import {
   setLocationPhoto,
   clearLocationPhoto,
   resolveScan,
+  getRecentActivity,
+  getLocationHistory,
 } from '@/utils/inventoryLocationsAccess';
 import {
   deleteFileFromStorage,
@@ -811,5 +813,94 @@ describe('location photos', () => {
 
     // Must not throw: the location is already photo-less, which is what the user asked for.
     await expect(clearLocationPhoto('cab', 'co1/locations/cab/old.jpg')).resolves.toBeTruthy();
+  });
+});
+
+/**
+ * A transfer writes TWO ledger rows sharing a `transfer_group_id` — a depletion at the source and
+ * an addition at the destination. Correct for the ledger, wrong for a shop-wide feed, where the
+ * same event then appears twice in a row with opposite signs.
+ */
+describe('recent activity — one move, one row', () => {
+  const txn = (over: Record<string, unknown>) => ({
+    id: 'x',
+    created_at: '2026-07-30T10:00:00Z',
+    type: 'addition',
+    item_name: 'BUY-BEARING-608ZZ',
+    quantity: 580,
+    unit: 'each',
+    notes: null,
+    operator_id: null,
+    photo_path: null,
+    has_discrepancy: false,
+    transfer_group_id: null,
+    location_id: 'l1',
+    location_name: 'Shelf A',
+    ...over,
+  });
+
+  const pair = [
+    txn({ id: 'to', type: 'addition', transfer_group_id: 'g1', location_id: 'l1', location_name: 'Shelf A', notes: 'Put away [Transfer from Unassigned]' }),
+    txn({ id: 'from', type: 'depletion', transfer_group_id: 'g1', location_id: 'sys', location_name: 'Unassigned', notes: 'Put away [Transfer to Shelf A]' }),
+  ];
+
+  it('folds a transfer pair into a single row naming both ends', async () => {
+    queueFrom({ data: pair, error: null });
+
+    const [entry, ...rest] = await getRecentActivity('co1');
+
+    expect(rest).toHaveLength(0);
+    expect(entry.type).toBe('transfer');
+    expect(entry.fromName).toBe('Unassigned');
+    // The destination is kept: it holds the put-away photo and is the half worth walking to.
+    expect(entry.locationName).toBe('Shelf A');
+    expect(entry.locationId).toBe('l1');
+  });
+
+  /** The folded row states the route, so the RPC's generated tag would print it twice. */
+  it('drops the [Transfer from X] tag the RPC appends, keeping the operator’s own words', async () => {
+    queueFrom({ data: pair, error: null });
+
+    const [entry] = await getRecentActivity('co1');
+    expect(entry.notes).toBe('Put away');
+  });
+
+  /** A move whose other leg fell outside the window is still a move that happened. */
+  it('leaves a half-pair alone rather than dropping it', async () => {
+    queueFrom({ data: [pair[1]], error: null });
+
+    const [entry] = await getRecentActivity('co1');
+    expect(entry.type).toBe('depletion');
+    expect(entry.fromName).toBeUndefined();
+    // In isolation the tag is the ONLY clue about the other end, so it stays.
+    expect(entry.notes).toContain('[Transfer to Shelf A]');
+  });
+
+  it('leaves plain additions and depletions untouched', async () => {
+    queueFrom({ data: [txn({ id: 'a' }), txn({ id: 'd', type: 'depletion' })], error: null });
+
+    const entries = await getRecentActivity('co1');
+    expect(entries.map((e) => e.type)).toEqual(['addition', 'depletion']);
+  });
+
+  /** Folding halves the row count, so a limit applied before it would render a half-empty feed. */
+  it('over-fetches so the fold cannot shrink the page below the limit', async () => {
+    queueFrom({ data: [], error: null });
+    await getRecentActivity('co1', 15);
+
+    expect(state.calls.at(-1)?.limit).toEqual([30]);
+  });
+
+  /**
+   * Folding is for the shop-wide feed ONLY. One bin sees exactly one leg of any move, and that
+   * leg's direction is the true answer for that place — an "in" at the destination is not a
+   * transfer as far as the destination is concerned.
+   */
+  it('never folds inside a single bin', async () => {
+    queueFrom({ data: [pair[0]], error: null });
+
+    const [entry] = await getLocationHistory('l1');
+    expect(entry.type).toBe('addition');
+    expect(entry.notes).toContain('[Transfer from Unassigned]');
   });
 });

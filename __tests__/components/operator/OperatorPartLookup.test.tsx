@@ -4,7 +4,21 @@ import userEvent from '@testing-library/user-event';
 
 import type { PartSelectOption } from '@/utils/partsAccess';
 
-vi.mock('@/utils/inventoryLocationsAccess', () => ({ getBalancesForPart: vi.fn() }));
+/** Module-scope browser client; the import alone throws in jsdom without this. */
+vi.mock('@/lib/supabase', () => ({
+  getSupabase: () => ({}),
+  getTypedSupabase: () => ({}),
+}));
+
+/**
+ * Partial mock: only the two fetches are stubbed. `computePathNames` stays real — the put-away
+ * picker's labels ARE that walk, so replacing it would test the mock instead of the paths.
+ */
+vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/inventoryLocationsAccess')>()),
+  getBalancesForPart: vi.fn(),
+  getLocations: vi.fn(),
+}));
 
 /**
  * Stub the shared picker, the way `MaterialRowEditor.test.tsx` does.
@@ -29,9 +43,10 @@ vi.mock('@/components/parts/PartAutocomplete', () => ({
 }));
 
 import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
-import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
+import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 
 const mockBalances = vi.mocked(getBalancesForPart);
+const mockLocations = vi.mocked(getLocations);
 
 const part = (over: Partial<PartSelectOption> = {}): PartSelectOption => ({
   id: 'p1',
@@ -59,6 +74,7 @@ beforeEach(() => {
   for (const k of Object.keys(pickerProps)) delete pickerProps[k];
   nextPick = part();
   mockBalances.mockResolvedValue([]);
+  mockLocations.mockResolvedValue([]);
 });
 
 describe('OperatorPartLookup — J11, "is this part in storage, and where?"', () => {
@@ -224,5 +240,65 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     await pick(user);
 
     expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The picker is the way through when scanning isn't available — no shelf yet, no printed label,
+ * or no usable camera. Scanning stays the default because it is the only destination signal that
+ * is physically self-verifying: you can only scan a label you are standing at.
+ */
+describe('OperatorPartLookup — the put-away picker', () => {
+  const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('button', { name: /put it away/i }));
+  };
+
+  it('loads the places only when asked, not on every lookup', async () => {
+    const user = userEvent.setup();
+    mockLocations.mockResolvedValue([
+      { id: 'l1', company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, photo_path: null, created_at: '', updated_at: '' },
+    ]);
+    renderLookup();
+    await pick(user);
+    // Most lookups end at a shelf card; paying for the whole location table every time is waste.
+    expect(mockLocations).not.toHaveBeenCalled();
+
+    await openPicker(user);
+    expect(mockLocations).toHaveBeenCalledWith('co1');
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Put away RAW-AL6061-BLANK');
+  });
+
+  /** Offered on every tracked part, because a missing label is as good a reason as a missing shelf. */
+  it('is offered even when the part is already shelved', async () => {
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([
+      { location_id: 'l1', location_name: 'Shelf A', location_code: null, path: ['Shelf A'], quantity: 40, kind: 'shelf' },
+    ]);
+    renderLookup();
+    await pick(user);
+
+    expect(await screen.findByRole('button', { name: /put it away/i })).toBeInTheDocument();
+  });
+
+  /** There is no per-place row to put anything into, so the picker would be a dead end. */
+  it('is withheld for a part that is not tracked by place', async () => {
+    const user = userEvent.setup();
+    nextPick = part({ is_location_tracked: false });
+    renderLookup();
+    await pick(user);
+    await screen.findByText(/isn't tracked by place/i);
+
+    expect(screen.queryByRole('button', { name: /put it away/i })).not.toBeInTheDocument();
+  });
+
+  it('reports a failed places load instead of opening an empty picker', async () => {
+    const user = userEvent.setup();
+    mockLocations.mockRejectedValue(new Error('no places for you'));
+    renderLookup();
+    await pick(user);
+    await openPicker(user);
+
+    expect(await screen.findByText('no places for you')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

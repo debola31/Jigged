@@ -47,14 +47,18 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
+import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
-import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
+import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
+import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';
+import type { InventoryLocation } from '@/types/inventoryLocations';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
@@ -64,18 +68,32 @@ export interface OperatorPartLookupProps {
   companyId: string;
   /** Tapping a place navigates there — the whole point is to end up at the shelf. */
   onOpenLocation: (locationId: string) => void;
+  /**
+   * Fires whenever a part is chosen or cleared, so the page can put itself in one mode or the
+   * other. Someone who has picked a part is mid-task; the shop-wide activity feed underneath is
+   * noise at that moment, and hiding it is what keeps this screen from becoming a wall.
+   */
+  onSelectionChange?: (part: PartSelectOption | null) => void;
 }
 
-export default function OperatorPartLookup({ companyId, onOpenLocation }: OperatorPartLookupProps) {
+export default function OperatorPartLookup({
+  companyId,
+  onOpenLocation,
+  onSelectionChange,
+}: OperatorPartLookupProps) {
   const [selected, setSelected] = useState<PartSelectOption | null>(null);
   const [balances, setBalances] = useState<PartLocationBalanceWithLocation[] | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [putAwayOpen, setPutAwayOpen] = useState(false);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [loadingPlaces, setLoadingPlaces] = useState(false);
 
   const pick = (part: PartSelectOption | null) => {
     setSelected(part);
     setBalances(null);
     setError(null);
+    onSelectionChange?.(part);
     if (!part) return;
     // An untracked part has no per-place rows by definition — asking would always return [] and
     // the empty state below would have to guess which kind of empty it was.
@@ -114,6 +132,30 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
     () => places.reduce((n, b) => n + Number(b.quantity ?? 0), 0),
     [places],
   );
+
+  /**
+   * Loaded on demand — most lookups end at a shelf card and never open the picker — and the
+   * dialog opens only once the places are in hand.
+   *
+   * The first cut opened it immediately and closed it again if the fetch failed, which put an
+   * empty picker on screen for as long as the request took and then snatched it away. The wait
+   * belongs on the button, where a spinner explains it.
+   */
+  const openPutAway = async () => {
+    if (locations.length > 0) {
+      setPutAwayOpen(true);
+      return;
+    }
+    setLoadingPlaces(true);
+    try {
+      setLocations(await getLocations(companyId));
+      setPutAwayOpen(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load the places.');
+    } finally {
+      setLoadingPlaces(false);
+    }
+  };
 
   return (
     <Box sx={{ mb: 3 }}>
@@ -201,7 +243,35 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
               </Stack>
             </>
           )}
+
+          {/* Available on every tracked part, not just homeless ones: it is also the way through
+              when a label has come off or the phone has no camera. Low-emphasis on purpose —
+              scanning the shelf is the better input and stays the default. */}
+          {selected.is_location_tracked && !loadingBalances && (
+            <Button
+              startIcon={
+                loadingPlaces ? <CircularProgress size={18} color="inherit" /> : <PlaceOutlinedIcon />
+              }
+              onClick={openPutAway}
+              disabled={loadingPlaces}
+              sx={{ mt: 1.5, minHeight: 48 }}
+            >
+              Put it away&hellip;
+            </Button>
+          )}
         </Box>
+      )}
+
+      {selected && (
+        <PutAwayPickerDialog
+          open={putAwayOpen}
+          partName={selected.part_name}
+          unit={selected.primary_unit}
+          locations={locations}
+          balances={balances ?? []}
+          onClose={() => setPutAwayOpen(false)}
+          onChoose={onOpenLocation}
+        />
       )}
     </Box>
   );

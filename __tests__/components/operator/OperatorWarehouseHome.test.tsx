@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
-import OperatorWarehouseHomePage from '@/app/operator/[companyId]/inventory/page';
-import { getLocationBoard } from '@/utils/inventoryLocationsAccess';
+import type { PartSelectOption } from '@/utils/partsAccess';
+import type { LocationHistoryEntry } from '@/types/inventoryLocations';
 
 const mockPush = vi.fn();
 
@@ -17,99 +17,123 @@ vi.mock('next/navigation', () => ({
 /**
  * `lib/supabase` creates its browser client eagerly at module scope, so importing the real
  * access layer in jsdom throws "Your project's URL and API key are required" before any test
- * runs. Stubbing the two getters is the established pattern in this repo (see
- * `__tests__/utils/operatorAccess.test.ts`) and is what makes `importOriginal` below possible.
+ * runs. Stubbing the two getters is the established pattern in this repo.
  */
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
   getTypedSupabase: () => ({}),
 }));
 
+vi.mock('@/utils/inventoryLocationsAccess', () => ({
+  getRecentActivity: vi.fn(),
+  getBalancesForPart: vi.fn().mockResolvedValue([]),
+  getLocations: vi.fn().mockResolvedValue([]),
+}));
+
 /**
- * `getLocationBoard`, not `getLocations`. The operator surface now renders the SAME
- * `LocationBoard` the owner's Storage page does — drawn units, photos, rolled-up fill state —
- * so it needs the same data: locations plus per-location part counts plus one batched set of
- * signed photo URLs. A parallel list implementation was what let the two surfaces drift.
- *
- * Only the fetch is stubbed. `buildLocationTree` stays real, because the thing worth asserting
- * is that a real tree renders a board — stubbing it would test the mock.
+ * Stub the shared picker, as `OperatorPartLookup.test.tsx` does — what matters on THIS page is
+ * which of the two modes is showing, not MUI's Autocomplete.
  */
-vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/utils/inventoryLocationsAccess')>();
-  return { ...actual, getLocationBoard: vi.fn() };
-});
+vi.mock('@/components/parts/PartAutocomplete', () => ({
+  __esModule: true,
+  default: (props: { onChange: (o: PartSelectOption | null) => void }) => (
+    <button
+      type="button"
+      onClick={() =>
+        props.onChange({
+          id: 'p1',
+          part_name: 'RAW-AL6061-BLANK',
+          description: null,
+          has_routing: false,
+          is_stocked: true,
+          is_location_tracked: true,
+          source: 'bought',
+          primary_unit: 'ea',
+          quantity: 240,
+        })
+      }
+    >
+      pick-part
+    </button>
+  ),
+}));
 
-const loc = (over: {
-  id: string;
-  name: string;
-  parent_id?: string | null;
-  code?: string | null;
-  kind?: string | null;
-}) => ({
-  id: over.id,
-  company_id: 'co1',
-  parent_id: over.parent_id ?? null,
-  name: over.name,
-  kind: over.kind ?? 'cabinet',
-  code: over.code ?? null,
-  sort_order: 0,
-  photo_path: null,
-  created_at: '',
-  updated_at: '',
-});
+import OperatorWarehouseHomePage from '@/app/operator/[companyId]/inventory/page';
+import { getRecentActivity } from '@/utils/inventoryLocationsAccess';
 
-const board = (
-  locations: ReturnType<typeof loc>[],
-  directPartCounts: ReadonlyMap<string, number> = new Map(),
-) => ({ locations, directPartCounts, photoUrls: new Map<string, string>() });
+const entry = (over: Partial<LocationHistoryEntry> = {}): LocationHistoryEntry => ({
+  id: 't1',
+  type: 'addition',
+  quantity: 7,
+  unit: 'ea',
+  notes: null,
+  createdAt: '2026-07-30T14:20:00Z',
+  actorName: 'Dev Seed User',
+  photoUrl: null,
+  itemName: 'RAW-AL6061-BLANK',
+  locationId: 'l1',
+  locationName: 'Shelf A',
+  hasDiscrepancy: false,
+  ...over,
+});
 
 const renderPage = () =>
   render(<OperatorWarehouseHomePage />, {
     wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
   });
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getRecentActivity).mockResolvedValue([]);
+});
 
-describe('OperatorWarehouseHomePage', () => {
-  it('draws top-level units as board tiles and drills into the bin view', async () => {
-    vi.mocked(getLocationBoard).mockResolvedValue(
-      board([
-        loc({ id: 'cab1', name: 'Cabinet 1', code: 'C01' }),
-        loc({ id: 'shelfa', name: 'Shelf A', parent_id: 'cab1' }),
-      ]),
-    );
+describe('OperatorWarehouseHomePage — item-first Inventory tab', () => {
+  it('leads with recent activity when nothing is selected', async () => {
+    vi.mocked(getRecentActivity).mockResolvedValue([entry()]);
     renderPage();
 
-    // The unit is one tap target — a compartment can't be, at ~6px tall (§5.5 decision 1) —
-    // so the child appears as a cell inside the tile rather than as a root row.
-    const tile = await screen.findByRole('button', { name: /^Cabinet 1/ });
-    await userEvent.click(tile);
+    expect(await screen.findByText('+7 ea')).toBeInTheDocument();
+    expect(screen.getByText('RAW-AL6061-BLANK')).toBeInTheDocument();
+  });
 
-    expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/cab1');
+  /** The one thing the drawn board did that nothing else does: reach a bin whose label came off. */
+  it('taps through from a movement to the place it happened in', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getRecentActivity).mockResolvedValue([entry()]);
+    renderPage();
+
+    // The whole card is the target, not a caption-height link — under 20px in a bright shop.
+    await user.click(await screen.findByRole('button', { name: 'Open Shelf A' }));
+    expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/l1');
+  });
+
+  /** Mid-lookup the shop-wide feed is noise — this is what keeps the page from becoming a wall. */
+  it('hides the feed once a part is chosen', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getRecentActivity).mockResolvedValue([entry({ itemName: 'SOMETHING-ELSE' })]);
+    renderPage();
+    await screen.findByText('SOMETHING-ELSE');
+
+    await user.click(screen.getByRole('button', { name: 'pick-part' }));
+
+    expect(screen.queryByText('SOMETHING-ELSE')).not.toBeInTheDocument();
+    expect(screen.queryByText(/recent activity/i)).not.toBeInTheDocument();
   });
 
   /** Creating storage is an owner's job; an operator doing it mid-shift is how MISC 8-25-21 happens. */
   it('offers no way to add storage', async () => {
-    vi.mocked(getLocationBoard).mockResolvedValue(board([loc({ id: 'cab1', name: 'Cabinet 1' })]));
     renderPage();
-    await screen.findByRole('button', { name: /^Cabinet 1/ });
+    await screen.findByText(/no stock has moved yet/i);
 
     expect(screen.queryByRole('button', { name: /add storage/i })).not.toBeInTheDocument();
   });
 
-  /** Scanning is a tab-bar action in the layout now — it resolves travelers too, which a
-   *  button on this one page never could. */
-  it('has no scan button of its own', async () => {
-    vi.mocked(getLocationBoard).mockResolvedValue(board([loc({ id: 'cab1', name: 'Cabinet 1' })]));
+  /**
+   * An empty feed must not read as "the shop is empty" — it is a brand-new install, and the copy
+   * points at the action that fills it.
+   */
+  it('tells a new shop what to do instead of showing an empty board', async () => {
     renderPage();
-    await screen.findByRole('button', { name: /^Cabinet 1/ });
-
-    expect(screen.queryByRole('button', { name: /scan a label/i })).not.toBeInTheDocument();
-  });
-
-  it('shows an empty state when no locations exist', async () => {
-    vi.mocked(getLocationBoard).mockResolvedValue(board([]));
-    renderPage();
-    expect(await screen.findByText(/No storage locations yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/scan a shelf label to put something away/i)).toBeInTheDocument();
   });
 });

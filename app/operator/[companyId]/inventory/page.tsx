@@ -1,76 +1,64 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+/**
+ * The operator Inventory tab — item-first, which is what makes its own label true.
+ *
+ * ## What it used to be, and why that was wrong
+ *
+ * It rendered the owner's `LocationBoard`: a drawn map of *places*, read-only. That is Storage
+ * content under an Inventory label, and industry usage is consistent — *inventory* means items and
+ * quantities, *storage* means places. Every action an operator actually takes here is an **item**
+ * action: find one, put one away, take one out. The tab now matches the noun.
+ *
+ * Dropping the board cost less than it looks. With 12–18 places you are standing among, walking
+ * beats scrolling a picture of furniture three feet away — and Scan already reaches a place faster
+ * *and* proves you are at it, so the board was competing with the better tool. The one thing the
+ * board did that nothing else does — reach a bin whose label has come off — survives as the tap
+ * target on every activity row.
+ *
+ * ## Two modes, never both
+ *
+ * Idle → the shop-wide feed. Part selected → that part's places, feed hidden. The feed is the
+ * genuinely phone-shaped thing here: what a phone knows that you do not is what changed while you
+ * were somewhere else. Mid-lookup it is noise, and showing both is how this screen becomes a wall.
+ */
+
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
 import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 
-import { getLocationBoard, buildLocationTree } from '@/utils/inventoryLocationsAccess';
-import { rollUpOccupancy } from '@/utils/locationOccupancy';
-import LocationBoard, { boardOrder } from '@/components/inventory/locations/board/LocationBoard';
+import { getRecentActivity } from '@/utils/inventoryLocationsAccess';
 import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
-import type { InventoryLocation } from '@/types/inventoryLocations';
+import BinHistory from '@/components/operator/BinHistory';
+import type { PartSelectOption } from '@/components/parts/PartAutocomplete';
 
-// Stable empty fallbacks so the tree/occupancy memos don't churn while the first load runs.
-const EMPTY_LOCATIONS: InventoryLocation[] = [];
-const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
-const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
-
-/**
- * Operator "warehouse home" — the root of the Inventory tab.
- *
- * ## Why this is the same board the owner sees
- *
- * It used to be a plain list of names, kinds and codes, while the owner's Storage page drew
- * each unit with its compartments, its photo and its fill state. That split was backwards:
- * the person who most needs to *recognise* a physical place is the one standing in front of
- * it, and `CAB3-A` is not recognisable. §5.5 decision 1's promise — "what you preview is what
- * you live with" — has to extend to the people at the shelf, so this renders `LocationBoard`
- * directly rather than a parallel implementation that would drift.
- *
- * Two deliberate differences from the owner's board:
- *
- * - **No "Add storage" tile.** Creating places is an owner's job. An operator adding one
- *   mid-shift is exactly how `MISC 8-25-21` gets into a location table (§5.5 finding 2).
- * - **No detail sheet.** Tapping a unit navigates into the existing bin view, which already
- *   owns the take/return actions, rather than opening a second actions surface on top of it.
- *
- * Scanning is no longer here either: it's a tab-bar action in the operator layout, where it
- * resolves both location labels *and* job travelers. A button on this one page could only
- * ever read locations, and only if you'd already navigated here.
- */
 export default function OperatorWarehouseHomePage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
 
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Two modes, never both at once.
+   *
+   * With a part chosen you are mid-task — the shop-wide feed underneath becomes noise, and showing
+   * it is exactly how this screen would turn into a wall. Idle, the feed IS the page.
+   */
+  const [selectedPart, setSelectedPart] = useState<PartSelectOption | null>(null);
 
-  // getLocationBoard, not getLocations: the board needs per-location part counts for fill
-  // state and one batched set of signed photo URLs. Same single request pair the owner's page
-  // makes, so the two can't disagree about what's in a place.
-  const { data: boardData, loading } = useLoad(() => getLocationBoard(companyId), [companyId], {
+  const { data: activity, loading } = useLoad(() => getRecentActivity(companyId), [companyId], {
     onError: (e) => {
-      setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
+      setError(e instanceof Error ? e.message : 'Could not load recent activity.');
     },
   });
 
-  const locations = boardData?.locations ?? EMPTY_LOCATIONS;
-  const directPartCounts = boardData?.directPartCounts ?? EMPTY_COUNTS;
-  const photoUrls = boardData?.photoUrls ?? EMPTY_URLS;
-
-  // Sorted with the same comparator as the owner's board, so `Unassigned` lands last in both.
-  const tree = useMemo(() => buildLocationTree(locations).sort(boardOrder), [locations]);
-  // Rolled up: a cabinet whose shelves hold stock must read as occupied, or an operator gets
-  // sent to fill a shelf that's already full.
-  const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
+  const openLocation = (locationId: string) =>
+    router.push(`/operator/${companyId}/inventory/locations/${locationId}`);
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -81,27 +69,13 @@ export default function OperatorWarehouseHomePage() {
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Look up a part to find where it is, or browse the places below. Scan jumps straight to a
-        place from its label.
+        Look up a part to find where it is. Scan a shelf label to go straight there.
       </Typography>
 
-      {/*
-        Search leads; the board is the fallback.
-
-        The tab is called Inventory, and inventory means ITEMS — but this page opened as a board of
-        PLACES, which is Storage content under an Inventory label. Browsing place-by-place only
-        helps someone who already knows which place to open, and the commonest operator question is
-        the other way round: "we have this part somewhere — where?"
-
-        It also keeps Scan and Inventory from competing. Scan is a router — "take me to the thing
-        I'm holding". Inventory is a destination — "let me find something". Leading with a board
-        made this page a second way to navigate, which is Scan's job and it does it faster.
-      */}
       <OperatorPartLookup
         companyId={companyId}
-        onOpenLocation={(locationId) =>
-          router.push(`/operator/${companyId}/inventory/locations/${locationId}`)
-        }
+        onOpenLocation={openLocation}
+        onSelectionChange={setSelectedPart}
       />
 
       {error && (
@@ -110,33 +84,30 @@ export default function OperatorWarehouseHomePage() {
         </Alert>
       )}
 
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress />
-        </Box>
-      ) : tree.length === 0 ? (
-        <Card elevation={2}>
-          <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            <WarehouseOutlinedIcon sx={{ fontSize: 44, color: 'text.disabled', mb: 1 }} />
-            <Typography color="text.secondary">
-              No storage locations yet. Once they&apos;re set up, you can browse them here.
-            </Typography>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
+      {/*
+        Recent activity replaces the drawn board that used to sit here.
+
+        A board is a map of places you are standing among — with 12–18 of them, walking beats
+        scrolling a picture of furniture that is three feet away, and it competed with Scan, which
+        reaches a place faster and proves you are actually at it. What a phone genuinely knows that
+        you do not is WHAT CHANGED WHILE YOU WERE ELSEWHERE. Every row taps through to its place,
+        so this is also how you reach a bin whose label has come off.
+      */}
+      {!selectedPart && (
+        <Box sx={{ mt: 1 }}>
           <Typography variant="overline" color="text.secondary">
-            Browse places
+            Recent activity
           </Typography>
-          <LocationBoard
-            tree={tree}
-            occupancy={occupancy}
-            photoUrls={photoUrls}
-            onOpen={(node) =>
-              router.push(`/operator/${companyId}/inventory/locations/${node.id}`)
-            }
-          />
-        </>
+          <Box sx={{ mt: 0.5 }}>
+            <BinHistory
+              entries={activity}
+              loading={loading}
+              showPlace
+              onOpenLocation={openLocation}
+              emptyText="No stock has moved yet. Scan a shelf label to put something away."
+            />
+          </Box>
+        </Box>
       )}
     </Box>
   );

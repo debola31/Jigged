@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@/__tests__/test-utils';
 
+import userEvent from '@testing-library/user-event';
 import BinHistory from '@/components/operator/BinHistory';
 import type { LocationHistoryEntry } from '@/types/inventoryLocations';
 
@@ -86,5 +87,76 @@ describe('BinHistory — "what happened here, and who did it"', () => {
   it('is a list, so the count is announced and each row is addressable', () => {
     render(<BinHistory entries={[entry(), entry({ id: 't2' })]} loading={false} />);
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  });
+});
+
+/**
+ * The shop-wide feed adds two things a single bin has no use for: WHERE each movement happened,
+ * and a way to get there. Inside one bin both would be noise — every row would name the place you
+ * are already standing in, and point at it.
+ */
+describe('BinHistory — the shop-wide feed', () => {
+  it('names the place and makes the whole card the way to it', async () => {
+    const user = userEvent.setup();
+    const onOpenLocation = vi.fn();
+    render(
+      <BinHistory
+        entries={[entry({ locationId: 'l1', locationName: 'Cabinet 3 › Shelf A' })]}
+        loading={false}
+        showPlace
+        onOpenLocation={onOpenLocation}
+      />,
+    );
+
+    // A caption-height text link is under 20px on a phone; the card is the target.
+    await user.click(screen.getByRole('button', { name: 'Open Cabinet 3 › Shelf A' }));
+    expect(onOpenLocation).toHaveBeenCalledWith('l1');
+  });
+
+  it('says nothing about where, inside a single bin', () => {
+    render(<BinHistory entries={[entry({ locationName: 'Shelf A' })]} loading={false} />);
+
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /** A folded move changes no shop total, so a sign would be wrong in either direction. */
+  it('shows a folded move as a route, unsigned', () => {
+    render(
+      <BinHistory
+        entries={[
+          entry({ type: 'transfer', quantity: 580, unit: 'each', fromName: 'Unassigned', locationId: 'l1', locationName: 'Shelf A' }),
+        ]}
+        loading={false}
+        showPlace
+      />,
+    );
+
+    expect(screen.getByText('580 each moved')).toBeInTheDocument();
+    expect(screen.getByText('Unassigned → Shelf A')).toBeInTheDocument();
+    expect(screen.queryByText(/\+580|−580/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * `locationName` is snapshotted on the row so it survives the place being deleted — at which
+   * point `locationId` is null and there is nowhere to send anyone.
+   */
+  it('still names a deleted place, but offers no way to walk to it', () => {
+    render(
+      <BinHistory
+        entries={[entry({ locationId: null, locationName: 'Old Rack' })]}
+        loading={false}
+        showPlace
+        onOpenLocation={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Old Rack')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('uses the caller’s empty copy, which differs between one bin and the whole shop', () => {
+    render(<BinHistory entries={[]} loading={false} emptyText="No stock has moved yet." />);
+    expect(screen.getByText('No stock has moved yet.')).toBeInTheDocument();
   });
 });

@@ -77,7 +77,9 @@ Route names are relative to `/dashboard/{companyId}` or `/operator/{companyId}`.
 | I want to… | Where | How |
 |---|---|---|
 | Go to the shelf I'm standing at | `Scan` tab | Scan its label. Resolves location labels *and* job travellers. |
-| Browse what's in storage | `Inventory` tab | Board of places with photos + fill state. Tap to drill in. Read-only. |
+| Find where a part is | `Inventory` tab | `PartAutocomplete` (same control as quotes/jobs) → every place holding it, with path + quantity. Tap a place to go there. Stock in the put-away pile is called out separately, never as a shelf. |
+| See what changed while I was elsewhere | `Inventory` tab | Shop-wide recent-activity feed, newest first, with photos. Each row taps through to its place — which is also how you reach a bin whose label came off. Hidden while a part is selected. |
+| Put something away without a label to scan | `Inventory` tab → part → `Put it away…` | Destination picker showing what each place already holds. **Navigates**, doesn't write — the movement is recorded at the bin. Fallback only; scanning the shelf is the better input. |
 | Take stock out | Bin view → part card → `Remove` | Qty + unit + optional job tag. Over-removal records the shortfall and zeroes the count rather than blocking. |
 | Put stock in | Bin view → part card → `Add` | Qty + unit + notes. |
 | Put in a part that isn't here yet | Bin view → `Stock a part` | Picks a tracked part not already in this bin. |
@@ -88,21 +90,17 @@ Route names are relative to `/dashboard/{companyId}` or `/operator/{companyId}`.
 
 | Journey | Status |
 |---|---|
-| **Operator asks "is this part in storage, and where?"** | **No tool.** No part search on any operator surface; you must already know which place to open. Per-location balances are on the admin part page, and `AuthGuard` redirects operators out of `/dashboard`. This is J11, deliberately out of Phase 2 scope — but see the bug below. |
-| **Photograph a deposit as proof others can read later** | **Unbuilt and, until now, unrecorded.** `inventory_transactions` has no attachment column. Photos attach to *places* (identity), and operator photo capture exists only on job/part **notes** — which cannot tag a place. All three pieces exist; nothing connects them. A movement is currently evidenced by attribution (operator + timestamp + location snapshot), not by an image. |
+| **Photograph a deposit as proof others can read later** | **Built 2026-07-31.** `inventory_transactions.photo_path`, written at INSERT inside the RPC (a column set by UPDATE later would have to stay mutable, which recreates editable evidence). Upload-then-RPC, so a failed write orphans an object rather than pointing a row at nothing. |
 | **Operator counts or puts away a whole place** | **Office-only.** The place-scoped worksheet lives under `/dashboard`, which operators are redirected out of. So the recurring "work a place" job cannot be done by the person holding the phone. |
-| **See this bin's history — who took the last one** | **No surface.** `inventory_transactions` records operator, location and timestamps; the ledger is admin-only. |
+| **See this bin's history — who took the last one** | **Built 2026-07-31.** `BinHistory` under the bin view; the shop-wide version is the Inventory tab's feed. Required populating `operator_id` on add/adjust/transfer first — only `deplete` wrote it, and `created_by` is an `auth.users` id the browser cannot read. Rows predating that render **without** an author rather than "Unknown". |
 | **Reconcile a recorded discrepancy** | **No surface, no owner.** Over-removal sets `has_discrepancy` and nothing lists them. |
 
-> ### 🐞 One false promise in shipped UI
-> When a bin holds more parts than the cap, the operator bin view shows:
-> *"Showing the 200 largest of 9,428 parts here. **Scan or search a part** to reach one that
-> isn't listed."*
->
-> Neither route exists. There is no part search on the operator app, and the scanner resolves
-> **locations and job travellers** — never a part into this bin. So the one screen that admits
-> the list is truncated tells the operator to do two things they cannot do. Either build part
-> lookup (J11) or change the copy; the current text is worse than saying nothing.
+> ### ✅ The false promise, and how it closed
+> The operator bin view's truncation notice used to read *"Showing the 200 largest of 9,428 parts
+> here. **Scan or search a part** to reach one that isn't listed"* — and neither route existed.
+> Stripped to *"ask the office"* on 2026-07-30, then restored 2026-07-31 as a link to the part
+> lookup, which is a route that now does exist. Worth keeping as a pattern: copy that names a
+> capability is a promise, and the fix while it is unbuilt is to say less, not to say it anyway.
 
 ---
 
@@ -189,7 +187,7 @@ Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inve
 - `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `refreshLocationQuantities` is the per-place one.
 - `getLowStockPartsAlerts` — `quantity <= reorder_point` filtered in JS; `critical` at 0, `high` at ≤50%, else `medium`; feeds the header `AlertBadge`.
 - `setLocationPhoto` / `clearLocationPhoto` / `getLocationPhotoUrl` order their writes so a failure anywhere leaves a *readable* location rather than a row pointing at a file that isn't there.
-- `LocationScanner` is wired into the operator Scan tab, the operator inventory home (where its icon had been decorative), the put-away destination picker and the board. It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
+- `LocationScanner` is wired into the operator Scan tab, the put-away destination picker and the owner's board (the operator inventory home no longer has one). It reads our location labels only (parts have no barcode) and refuses foreign codes; its `zxing-wasm` `.wasm` is self-hosted, not from the library CDN, because the consumer is a phone on shop wifi.
 
 ### Flag · archive · dead code
 
@@ -281,7 +279,19 @@ Owner: below the reorder point an item lands on the buy list, on-order visible s
 
 ### J11 — Find it
 
-Anyone. **Not built** — previously *"built, and it works"*; withdrawn because the half that exists serves the office, not the floor ([§1a](#1a-who-does-what-and-where)). A **location** QR opens the bin view (contents, add/remove/set) and per-location balances sit on the admin part page, but there is **no part lookup on any operator surface**: you must know which place to open, `AuthGuard` redirects operators out of `/dashboard`, and the scanner resolves locations and job travellers, never a part. The truncated-bin copy (*"Scan or search a part"*) promises two routes that don't exist — build part lookup or change the copy.
+Anyone. **Built 2026-07-31** on the operator Inventory tab — the third status this journey has had, so the history is worth keeping: *"built, and it works"* (wrong, the office half only), then **not built** (right), now built on both sides.
+
+[`OperatorPartLookup`](../../components/operator/OperatorPartLookup.tsx) reuses the same `PartAutocomplete` quotes and jobs use, with `kind="stocked"` and **no** `onCreateNew` — creating parts is not an operator's job. A bespoke search box was written first and thrown away: it showed nothing at all until a minimum-query floor was cleared, so the screen looked broken while working correctly. `openOnFocus` plus the shared spinner fixes that structurally.
+
+**No migration and no policy change was needed** — `parts`, `inventory_locations` and `part_location_stock` all have membership-only SELECT with no role predicate. Only the UI was missing.
+
+Three answers, which a first cut collapsed into one and got wrong (it showed *"240 ea across 1 place — Unassigned"*, presenting the put-away pile as a shelf):
+
+| State | Answer |
+|---|---|
+| Not location-tracked | The on-hand total, and *why* there is no shelf. Never "nowhere" — that reads as missing. |
+| Tracked, sitting in `Unassigned` | Called out first and separately: *"N not put away yet."* |
+| Tracked, on shelves | Each place with its full path and quantity; zero-quantity pass-through rows excluded, or the count sends someone to an empty shelf. |
 
 ---
 
@@ -476,8 +486,8 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 | Routes stay `/inventory/*` | Churn for no user-visible gain; QR payloads encode `/operator/...`. |
 | Flag off (`inventory_locations`) | **Storage** nav hides and `Count Inventory` moves to the Parts toolbar — the reshape's only added control (no board = no places at all). |
 | One scanner for every Jigged QR — [`lib/jiggedScan.ts`](../../lib/jiggedScan.ts) | Both are login-passthrough deep links differing only by query string: `?location={uuid}` vs `?job={uuid}&part={uuid}`; before, a traveler sent the operator out to the phone camera. **Trap:** older sheets carry a third param, `operation=`, jumping to that step's action view (current sheets omit it so the operator picks) — dropping it would silently downgrade them to the traveler index, worse than the camera path they were printed for; caught by reading `login/page.tsx`'s `postLoginPath`. Refusals: a job id without a part id isn't a traveler; a bare UUID is always a location (travelers need two ids, so guessing is a coin flip). |
-| Operator tabs **Jobs · Inventory · Scan · My work**; Profile → header avatar | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. An earlier draft merged `My work` into `Profile` for the slot; withdrawn because it buries an operator's own work for settings nobody opens mid-shift. Avatar: read-only name/email, Logout, Give Feedback. |
-| Operators render the same `LocationBoard` | They got names/kinds/codes while owners got units drawn with compartments, photo and fill state — backwards, since whoever most needs to recognise a place stands in front of it and `CAB3-A` isn't recognisable. Same component, same `getLocationBoard` request pair, same roll-up, so no drift. Differences: `onAddStorage` omitted (an operator creating places mid-shift is how `MISC 8-25-21` enters a location table — finding 2), and tapping a unit opens the bin view, not a second actions sheet. |
+| Operator tabs **Jobs · Inventory · Scan · Maintenance · Me** (PR #636) | Scan is a tab (most frequent physical gesture) opening a **dialog, not a navigation**, so scanning never loses the screen — the point for continuous flows. It had to take a slot: Material caps bottom nav at 3–5 and both flags on already filled five. `Me` merges My work + Profile and **leads with work**, identity demoted to one compact row and Logout last — Material disallows a settings tab outright, NN/g measured hidden nav at 44–56% usage vs 89% visible, and YouTube's "You" / Strava's "You" are the exact precedent (both also pulled the avatar out of the header). The earlier withdrawal ("burying work behind settings") was right about the risk and wrong about the only fix.
+| ~~Operators render the same `LocationBoard`~~ → **operator board removed 2026-07-31** | The reasoning that put it there was sound (whoever most needs to *recognise* a place stands in front of it, and `CAB3-A` isn't recognisable) and it still holds — for the **owner's** Storage page, which keeps the board. What it never established is that an operator needs a *map of places* at all. Industry usage is consistent: *inventory* = items and quantities, *storage* = places, and every operator action here is an item action. The tab was Storage content under an Inventory label. It also competed with Scan, which reaches a place faster **and** proves you are standing at it — and with 12–18 places you are among, walking beats scrolling a picture of furniture three feet away. Replaced by a part lookup (J11) over a shop-wide activity feed; the one thing the board did that nothing else did — reach a bin whose label came off — survives as the tap target on every activity row. |
 
 ---
 
@@ -509,7 +519,7 @@ Twelve journeys plus the two cut. "Docs said" = this doc **before the rewrite** 
 | J8 remnants | *absent* | silent | ❌ |
 | J9 count | metric: 100% accuracy | silent | ✅ 2026-07-28, place-scoped 2026-07-30 (§5.11's actual ask) |
 | J10 don't run out | **FR-2 `Must`** | FR-2 `Should`, partial, proposed hiding | ⚠️ badge only |
-| J11 find it | *absent* | AC only | ✅ |
+| J11 find it | *absent* | AC only | ✅ 2026-07-31 — operator part lookup; the office half predated it |
 | Traceability *(cut)* | *absent* | silent | ⛔ cut — no regulated customers |
 | Customer-supplied *(cut)* | *absent* | *absent* | ⛔ cut — frequent, never stocked |
 
@@ -539,7 +549,8 @@ Pinned by tests, not by prose.
 | Area | Enforced by |
 |---|---|
 | Stock status + chip; delete-as-archive, single and bulk | `__tests__/components/inventory/StockStatusChip.test.tsx`, `__tests__/utils/partsAccess.test.ts` |
-| Locations — balances, RPC wrappers, unit conversion, board request budget, contents paging, `bulkPutAway`, photo signed URLs | `__tests__/utils/inventoryLocationsAccess.test.ts` |
+| Locations — balances, RPC wrappers, unit conversion, board request budget, contents paging, `bulkPutAway`, photo signed URLs, **transfer folding** | `__tests__/utils/inventoryLocationsAccess.test.ts` |
+| J11 lookup (three answers, put-away picker), bin + shop-wide history, movement photo | `__tests__/components/operator/{OperatorPartLookup,OperatorWarehouseHome,PutAwayPickerDialog,BinHistory,MovementPhotoField}.test.tsx` |
 | Occupancy roll-up, subdivide numbering, board/sheet/builder/form/picker rules | `__tests__/utils/{locationOccupancy,locationSpec}.test.ts`, `__tests__/components/inventory/locations/*.test.tsx` |
 | J9 count plan, commit routing, bin-scoped count, draft resume | `__tests__/lib/inventoryCountPlan.test.ts`, `__tests__/utils/inventoryCountAccess.test.ts`, `__tests__/components/inventory/InventoryCountPage.test.tsx` |
 | J4 material check | `__tests__/components/jobs/JobPartMaterialsCard.test.tsx`, `__tests__/utils/materialCheckAccess.test.ts` |

@@ -181,7 +181,12 @@ export interface StockWriteOptions {
 export interface LocationHistoryEntry {
   id: string;
   createdAt: string;
-  type: 'addition' | 'depletion' | 'adjustment';
+  /**
+   * `transfer` is a synthetic type produced only by the shop-wide feed, where both halves of a
+   * move are visible and get folded into one row. A single bin never sees it — standing in the
+   * source you saw a depletion, standing in the destination an addition, and both are true.
+   */
+  type: 'addition' | 'depletion' | 'adjustment' | 'transfer';
   itemName: string;
   quantity: number;
   unit: string;
@@ -193,7 +198,14 @@ export interface LocationHistoryEntry {
   hasDiscrepancy: boolean;
   /** Set on both halves of a move, so the pair can be recognised as one action. */
   transferGroupId: string | null;
-  /** Null once the place is deleted; `locationName` survives it as a snapshot on the row. */
+  /**
+   * Null once the place is deleted; `locationName` survives it as a snapshot on the row.
+   *
+   * On a folded `transfer` this is the **destination** — where the stock is now, which is the
+   * only one of the two worth walking to.
+   */
   locationId: string | null;
   locationName: string | null;
+  /** Where a folded `transfer` came from. Absent on every other type. */
+  fromName?: string | null;
 }

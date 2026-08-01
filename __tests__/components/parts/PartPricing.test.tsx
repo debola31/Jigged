@@ -259,10 +259,57 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     await user.tab();
     expect(mockUpdatePartCostingBatchQuantity).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+    await user.click(screen.getByRole('button', { name: /Save batch size/i }));
 
     await waitFor(() =>
       expect(mockUpdatePartCostingBatchQuantity).toHaveBeenCalledWith('p1', 25),
     );
+  });
+
+  it('gives batch size the same unsaved affordance as the tier tables', async () => {
+    // It's a staged explicit-Save surface, so it gets the identical treatment —
+    // a lone Save button with no unsaved marker was the inconsistency that made
+    // the tier tables' own hint easy to dismiss as decoration.
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const batch = await screen.findByLabelText(/Batch size/i);
+    expect(screen.queryByRole('button', { name: /Save batch size/i })).toBeNull();
+
+    await user.clear(batch);
+    await user.type(batch, '25');
+
+    expect(await screen.findByText(/unsaved change/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save batch size/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Discard/i })).toBeEnabled();
+  });
+
+  it('clears the batch-size unsaved state on a manual revert', async () => {
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const batch = await screen.findByLabelText(/Batch size/i);
+    await user.clear(batch);
+    await user.type(batch, '25');
+    await screen.findByText(/unsaved change/i);
+
+    await user.clear(batch);
+    await user.type(batch, '1');
+
+    await waitFor(() => expect(screen.queryByText(/unsaved change/i)).toBeNull());
+    expect(mockUpdatePartCostingBatchQuantity).not.toHaveBeenCalled();
+  });
+
+  it('discards a staged batch size back to the persisted value', async () => {
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    const batch = await screen.findByLabelText(/Batch size/i);
+    await user.clear(batch);
+    await user.type(batch, '25');
+    await screen.findByText(/unsaved change/i);
+
+    await user.click(screen.getByRole('button', { name: /Discard/i }));
+
+    await waitFor(() => expect(batch).toHaveValue(1));
+    expect(screen.queryByText(/unsaved change/i)).toBeNull();
+    expect(mockUpdatePartCostingBatchQuantity).not.toHaveBeenCalled();
   });
 });

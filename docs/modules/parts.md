@@ -208,6 +208,8 @@ Unsaved edits are surfaced two ways (see [interaction-standards §2](../interact
 
 **Batch size commits via its own explicit Save** (`updatePartCostingBatchQuantity`), not on blur. It reads like a harmless scalar, but `compute_part_cost_at_qty` values this part as a made child at exactly this quantity in every parent's BOM — a fat-fingered 30 → 300 silently re-costs every parent and flows into their quotes. That makes it financial data under [interaction-standards §2](../interaction-standards.md#2-saving), and financial data does not auto-save.
 
+Being a staged surface, it gets the **same** unsaved affordance as the tier tables: an amber outline on the field plus the shared `UnsavedChangesBar` (Discard + **Save batch size**) at the bottom of the Cost card. It previously had a lone Save button and no unsaved marker — the "some cards prompt you, some don't" inconsistency this standard exists to remove.
+
 ▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
 
 For **bought** parts, the workspace shows a **Cost** card with a single **Preferred vendor** picker (the *only* preferred-vendor control — it is no longer duplicated on the part-details/identity card; that field now appears only in the create flow) and a per-vendor qty-break cost-tier sheet (Min qty / Unit cost).

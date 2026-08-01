@@ -19,8 +19,8 @@ import Autocomplete from '@mui/material/Autocomplete';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
+import UnsavedChangesBar from '@/components/common/UnsavedChangesBar';
 import {
   getTiersForPart,
   addTier as addTierApi,
@@ -250,12 +250,6 @@ export default function PartProcurementPricingPanel({
   // "2 unsaved changes" tells the user how much is at stake. Removing a row
   // leaves no dirty row to count, so fall back to the generic phrasing.
   const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
-  const unsavedLabel =
-    dirtyRowCount === 0
-      ? 'Unsaved changes'
-      : dirtyRowCount === 1
-        ? '1 unsaved change'
-        : `${dirtyRowCount} unsaved changes`;
 
   const handleSave = async () => {
     // Fully-empty rows (both fields blank) are "not filled in yet" — drop them
@@ -579,45 +573,13 @@ export default function PartProcurementPricingPanel({
               below the fold and went unread, which is how a staged edit got
               silently discarded. */}
           {dirty && (
-            <Box
-              sx={{
-                position: 'sticky',
-                bottom: 0,
-                zIndex: 2,
-                mt: 2,
-                px: 2,
-                py: 1.5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                flexWrap: 'wrap',
-                borderTop: '2px solid',
-                borderColor: 'warning.main',
-                borderRadius: 1,
-                bgcolor: 'background.paper',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              <EditOutlinedIcon fontSize="small" sx={{ color: 'warning.main' }} />
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {unsavedLabel}
-              </Typography>
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" onClick={handleDiscard} disabled={saving}>
-                Discard
-              </Button>
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleSave}
-                disabled={saving}
-                startIcon={
-                  saving ? <CircularProgress size={16} color="inherit" /> : undefined
-                }
-              >
-                {saving ? 'Saving…' : 'Save costs'}
-              </Button>
-            </Box>
+            <UnsavedChangesBar
+              count={dirtyRowCount}
+              saveLabel="Save costs"
+              saving={saving}
+              onSave={() => void handleSave()}
+              onDiscard={handleDiscard}
+            />
           )}
         </>
       )}

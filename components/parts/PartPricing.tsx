@@ -17,7 +17,6 @@ import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import Link from 'next/link';
 import AddIcon from '@mui/icons-material/Add';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
 import { unitShortLabel } from '@/lib/standardUnits';
 import {
@@ -38,6 +37,7 @@ import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
+import UnsavedChangesBar, { unsavedFieldSx } from '@/components/common/UnsavedChangesBar';
 
 interface PartPricingProps {
   companyId: string;
@@ -248,8 +248,18 @@ export default function PartPricing({
   const [costingQtyStr, setCostingQtyStr] = useState<string>(
     String(part.costing_batch_quantity ?? 1),
   );
-  const [costingDirty, setCostingDirty] = useState(false);
+  /**
+   * The persisted batch size this field was seeded from. Kept locally rather
+   * than read straight off `part`, because saving it deliberately does NOT
+   * refresh the parent — so the prop stays stale and would keep the field
+   * looking dirty forever. Same derive-don't-latch rule as the tier tables:
+   * typing 30 → 302 → 30 settles back to clean.
+   */
+  const [costingBaseline, setCostingBaseline] = useState<string>(
+    String(part.costing_batch_quantity ?? 1),
+  );
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
+  const costingDirty = costingQtyStr.trim() !== costingBaseline.trim();
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
   const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
@@ -341,9 +351,10 @@ export default function PartPricing({
 
   // Re-seed the costing-qty field when the persisted part value changes.
   useEffect(() => {
+    const persisted = String(part.costing_batch_quantity ?? 1);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCostingQtyStr(String(part.costing_batch_quantity ?? 1));
-    setCostingDirty(false);
+    setCostingQtyStr(persisted);
+    setCostingBaseline(persisted);
     setCostingSaveState('idle');
   }, [part.costing_batch_quantity]);
 
@@ -591,23 +602,24 @@ export default function PartPricing({
     try {
       await updatePartCostingBatchQuantity(partId, costingQty);
       setCostingSaveState('saved');
-      setCostingDirty(false);
+      // The parent is deliberately not refreshed (see above), so `part` keeps
+      // the old value — advance the local baseline or the field stays "dirty".
+      setCostingBaseline(String(costingQty));
     } catch (err) {
       setCostingSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
     }
   };
 
-  // "2 unsaved changes" tells the user how much is at stake; a bare "Unsaved
-  // changes" doesn't. Removing a row leaves no dirty row to count, so fall back
-  // to the generic phrasing rather than claiming zero.
+  /** Put the batch size back to the persisted value. */
+  const handleCostingDiscard = (): void => {
+    setCostingQtyStr(costingBaseline);
+    setCostingSaveState('idle');
+  };
+
+  // Removing a row leaves no dirty row to count; UnsavedChangesBar falls back
+  // to generic phrasing rather than claiming zero.
   const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
-  const unsavedLabel =
-    dirtyRowCount === 0
-      ? 'Unsaved changes'
-      : dirtyRowCount === 1
-        ? '1 unsaved change'
-        : `${dirtyRowCount} unsaved changes`;
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   // total_setup_cost is the one-time setup; amortize it over the batch here so
@@ -711,23 +723,16 @@ export default function PartPricing({
                 value={costingQtyStr}
                 onChange={(e) => {
                   setCostingQtyStr(e.target.value);
-                  setCostingDirty(true);
                   setCostingSaveState('idle');
                 }}
                 type="number"
                 size="small"
                 inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
-                sx={{ width: 170 }}
+                // Marks the changed input itself — the single-field counterpart
+                // to the tier rows' left accent.
+                sx={{ width: 170, ...(costingDirty ? unsavedFieldSx : {}) }}
               />
               <SaveStatus state={costingSaveState} />
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleCostingSave}
-                disabled={!costingDirty || costingSaving}
-              >
-                Save
-              </Button>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
               Setup spreads across the run this part is made in. This quantity is
@@ -778,6 +783,19 @@ export default function PartPricing({
                   </Typography>
                 </Box>
               </Box>
+            )}
+
+            {/* Batch size is staged-explicit-Save like the tier tables (it
+                re-costs every parent part), so it gets the identical unsaved
+                affordance rather than a lone Save button in the header. No
+                count — a single field. */}
+            {costingDirty && (
+              <UnsavedChangesBar
+                saveLabel="Save batch size"
+                saving={costingSaving}
+                onSave={() => void handleCostingSave()}
+                onDiscard={handleCostingDiscard}
+              />
             )}
           </CardContent>
         </Card>
@@ -890,46 +908,14 @@ export default function PartPricing({
             {!dirty && <SaveStatus state={saveState} />}
           </Box>
 
-          {/* Unsaved-changes footer. Sticky, so it stays on screen while the
-              user scrolls the tier table instead of sitting below the fold
-              where the old caption-sized grey hint went unread — that is how a
-              staged edit got lost. Persistent, never auto-dismissing (§1's
-              audience floor rules out timed toasts as a recovery path). */}
           {dirty && (
-            <Box
-              sx={{
-                position: 'sticky',
-                bottom: 0,
-                zIndex: 2,
-                mt: 2,
-                px: 2,
-                py: 1.5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.5,
-                flexWrap: 'wrap',
-                borderTop: '2px solid',
-                borderColor: 'warning.main',
-                borderRadius: 1,
-                // Matches the sticky Header's frosted treatment — the card's
-                // `background.paper` is deliberately translucent, so rows would
-                // otherwise scroll visibly through this bar.
-                bgcolor: 'background.paper',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              <EditOutlinedIcon fontSize="small" sx={{ color: 'warning.main' }} />
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {unsavedLabel}
-              </Typography>
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" onClick={handleDiscard} disabled={saving}>
-                Discard
-              </Button>
-              <Button variant="contained" size="small" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save pricing'}
-              </Button>
-            </Box>
+            <UnsavedChangesBar
+              count={dirtyRowCount}
+              saveLabel="Save pricing"
+              saving={saving}
+              onSave={() => void handleSave()}
+              onDiscard={handleDiscard}
+            />
           )}
             </>
           )}

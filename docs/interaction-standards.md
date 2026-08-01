@@ -178,18 +178,44 @@ put feedback next to where the user is working), and users routinely miss a
 separate commit button beside a field they just filled in
 ([Baymard — avoid "Apply" buttons](https://baymard.com/blog/checkout-usability-apply-buttons)).
 
-Two signals, both persistent (never a timed toast — see §1's audience floor):
+**Every staged explicit-Save surface shows both signals. No exceptions** — a
+staged surface with only a Save button and no unsaved marker is the
+inconsistency that teaches users the markers elsewhere are decoration. Both are
+persistent; never a timed toast (§1's audience floor).
 
-- **At the row** — the same `3px` left accent the incomplete BOM and routing
+- **At the changed input** — mark *where* the change is, not just that one
+  exists. In a table, the same `3px` left accent the incomplete BOM and routing
   rows use, one rung down that ladder: `error.main` = broken, **`warning.main` =
-  wants your attention**, `transparent` = fine. An unsaved edit is the middle
-  rung; it is *not* a mistake and must not read as one. Red is reserved for
-  broken on purpose (`design-system.md` §"subtractive vs destructive").
-- **At the card** — a sticky footer that appears only when dirty, naming the
-  count and offering **Discard** and **Save**. It is hidden when clean rather
-  than disabled-and-visible: with nothing to save the action is genuinely
+  wants your attention**, `transparent` = fine. For a standalone field, an amber
+  outline (`unsavedFieldSx`). An unsaved edit is the middle rung; it is *not* a
+  mistake and must not read as one — red is reserved for broken on purpose
+  (`design-system.md` §"subtractive vs destructive").
+- **At the section** — [`components/common/UnsavedChangesBar`](../components/common/UnsavedChangesBar.tsx):
+  a sticky bar naming the count with **Discard** and **Save**. Use the shared
+  component; do not hand-roll one. It is rendered only when dirty rather than
+  disabled-and-visible — with nothing to save the action is genuinely
   irrelevant, not blocked (§4 rule 3), and a permanently-present Save button
   carries no signal. Its *appearance* is what tells the user work is pending.
+
+Name the commit button after the thing (`Save pricing`, `Save costs`,
+`Save batch size`), not a generic "Save" — the bar can be far from the field
+that owns it.
+
+### Dirty state is derived, never latched
+
+> Compare the live values against a snapshot of what they were seeded from.
+> Never set a `dirty` flag on first keystroke and wait for a save to clear it.
+
+Latched flags survive the user undoing their own edit, so typing 1 → 10 → 1
+leaves the bar demanding a save that would write nothing. **A bar that nags over
+a no-op is a bar users learn to click past** — which recreates the exact
+inattention this section exists to prevent. Deriving it also makes Discard
+trivial and keeps the row markers, the bar, and the exit guard from ever
+disagreeing with each other.
+
+Where a save deliberately does *not* refresh its parent (the batch size does
+not), keep the baseline **locally** and advance it on save — reading it off a
+stale prop leaves the field looking dirty forever.
 
 ### Current state
 - ✅ `SaveStatus` adopted in identity, routing, BOM, procurement, transaction
@@ -198,11 +224,11 @@ Two signals, both persistent (never a timed toast — see §1's audience floor):
   that fails if the guard is removed.
 - ✅ **Exit guard**: tab-switch confirmation + conditional `beforeunload`, both
   driven by `onDirtyChange` reporting into `PartWorkspace`.
-- ✅ **Dirty state is derived, never latched.** Both tier tables keep a snapshot
-  of the values they were seeded from and compare against it. Typing 1 → 10 → 1
-  settles back to clean instead of demanding a save that would write nothing —
-  a bar that nags over a no-op is a bar users learn to click past, which is the
-  failure this whole section exists to prevent.
+- ✅ **Dirty state is derived, never latched** on all three staged surfaces.
+- ✅ **All three staged surfaces share `UnsavedChangesBar`** — pricing tiers,
+  procurement cost tiers, and batch size. Batch size was the last holdout: it
+  had a lone Save button with no unsaved marker at all, which is precisely the
+  "some cards prompt you, some don't" inconsistency that started this work.
 - ✅ **Batch size stays explicit-Save**, and the reasoning is recorded above
   rather than left implicit — it was briefly moved to auto-save on the (wrong)
   grounds that it is a costing assumption rather than a price.

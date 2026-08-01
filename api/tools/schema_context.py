@@ -446,6 +446,16 @@ SENSITIVE_TABLES = frozenset({
     "demo_data_templates",
     "quickbooks_connections",
     "quickbooks_customer_map",
+    # The customer's own carrier account number — their shared secret, not ours.
+    # "Which customers ship on their own UPS account?" is a reasonable question
+    # for an owner to type, and answering it from this table would put account
+    # numbers into an AI response and into ai_chat_queries. Triple-blocked, the
+    # same way the quickbooks_* tables are: absent from ALLOWED_TABLES (the
+    # primary boundary), REVOKEd from jigged_ai_readonly in the migration
+    # (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new public
+    # table, so that revoke is load-bearing, not decorative), and no
+    # ai_readonly_select policy. This entry is the whole-word backstop.
+    "customer_carrier_accounts",
     "quickbooks_invoice_links",
     # Read-tracking and capture-funnel instrumentation. "Which operators read the
     # setup notes?" is a natural question for a shop owner to type, and answering

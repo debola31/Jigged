@@ -244,6 +244,23 @@ insert into public.customer_contacts (id, customer_id, name, role, email, phone,
   ('53000000-0000-0000-0000-000000000006','50000000-0000-0000-0000-000000000006','Marco Diaz','shipping_receiving','recv@sierrapump.example','555-0123',true)
 on conflict (id) do nothing;
 
+-- Carrier accounts: the customer's own account, so their freight bills to them.
+-- Two customers only, and deliberately covering both shapes —
+--   Northwind: third_party, so the account number is REQUIRED and present.
+--   Meridian:  recipient with NO account number, the LTL / Ground Collect case
+--              the nullable column exists for.
+-- Everyone else has none, which is the majority state and must render as a
+-- plain "no carrier accounts" rather than anything that looks unfinished.
+-- Exactly one account each, so pickCarrierAccount resolves; add a second to a
+-- customer by hand to see the "which account?" prompt.
+insert into public.customer_carrier_accounts
+  (id, company_id, customer_id, carrier, bill_to_party, account_number, account_postal_code, account_country_code, notes) values
+  ('54000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','50000000-0000-0000-0000-000000000001',
+   'UPS','third_party','4A72W9','53202','US','Ground only. They query anything air-freighted.'),
+  ('54000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','50000000-0000-0000-0000-000000000003',
+   'R+L Carriers','recipient',null,null,'US','LTL — billed to them on the BOL, no account number needed.')
+on conflict (id) do nothing;
+
 -- ── Parts ────────────────────────────────────────────────────────────────────
 -- part uuid: 60000000-…-0000000000NN  (NN 01..18). Made-part routing uuid: 70000000-…-NN.
 -- Bought parts (raw blanks + components), stocked, with a preferred vendor.

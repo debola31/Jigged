@@ -157,6 +157,26 @@ CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
     CONSTRAINT "customer_addresses_pkey" PRIMARY KEY (id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."customer_carrier_accounts"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "customer_id" uuid NOT NULL,
+    "carrier" text NOT NULL,
+    "bill_to_party" text NOT NULL,
+    "account_number" text,
+    "account_postal_code" text,
+    "account_country_code" text DEFAULT 'US'::text NOT NULL,
+    "notes" text,
+    "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+    "deleted_at" timestamp with time zone,
+    CONSTRAINT "customer_carrier_accounts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "customer_carrier_accounts_bill_to_party_check" CHECK ((bill_to_party = ANY (ARRAY['recipient'::text, 'third_party'::text]))),
+    CONSTRAINT "customer_carrier_accounts_carrier_not_blank" CHECK ((length(btrim(carrier)) > 0)),
+    CONSTRAINT "customer_carrier_accounts_account_required" CHECK (((bill_to_party <> 'third_party'::text) OR ((account_number IS NOT NULL) AND (length(btrim(account_number)) > 0))))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."customer_contacts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -3399,6 +3419,12 @@ ALTER TABLE "public"."company_order_counters"
 ALTER TABLE "public"."customer_addresses"
     ADD CONSTRAINT "customer_addresses_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."customer_carrier_accounts"
+    ADD CONSTRAINT "customer_carrier_accounts_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."customer_carrier_accounts"
+    ADD CONSTRAINT "customer_carrier_accounts_customer_fk" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."customer_contacts"
     ADD CONSTRAINT "customer_contacts_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
@@ -3828,6 +3854,8 @@ CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (n
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_addresses USING btree (customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE is_primary;
+CREATE INDEX IF NOT EXISTS idx_customer_carrier_accounts_customer ON public.customer_carrier_accounts USING btree (customer_id) WHERE (deleted_at IS NULL);
+
 CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_live_by_company ON public.customers USING btree (company_id) WHERE (deleted_at IS NULL);

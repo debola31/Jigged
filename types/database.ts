@@ -416,6 +416,66 @@ export type Database = {
           },
         ]
       }
+      customer_carrier_accounts: {
+        Row: {
+          account_country_code: string
+          account_number: string | null
+          account_postal_code: string | null
+          bill_to_party: string
+          carrier: string
+          company_id: string
+          created_at: string
+          customer_id: string
+          deleted_at: string | null
+          id: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_country_code?: string
+          account_number?: string | null
+          account_postal_code?: string | null
+          bill_to_party: string
+          carrier: string
+          company_id: string
+          created_at?: string
+          customer_id: string
+          deleted_at?: string | null
+          id?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_country_code?: string
+          account_number?: string | null
+          account_postal_code?: string | null
+          bill_to_party?: string
+          carrier?: string
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          deleted_at?: string | null
+          id?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_carrier_accounts_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_carrier_accounts_customer_fk"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_contacts: {
         Row: {
           created_at: string

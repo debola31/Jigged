@@ -868,6 +868,11 @@ def invoice_deep_link(environment: str, invoice_id: str, realm_id: str | None = 
     away; it was QBO faithfully restoring "invoice" — the new-invoice page —
     because that was all we ever told it.
 
+    CONFIRMED END TO END, not just on the wire: opened in a private window with
+    no Intuit session, signed in, and landed on the intended invoice. The cookie
+    trace above proves the id survives the bounce; that test proves QBO consumes
+    it afterwards.
+
     `deeplinkcompanyid` also fixes a live correctness bug independent of the
     query string: the old link named no company, so a user signed into a
     DIFFERENT QBO company followed it straight into that company's invoice with

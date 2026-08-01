@@ -217,6 +217,65 @@ async def status(company_id: str, request: Request):
     )
 
 
+class PoFieldResponse(BaseModel):
+    """State of this company's PO custom field in QuickBooks.
+
+    `configured` false is the normal starting state, not an error — the shop has
+    to create the field themselves in the QuickBooks UI, and Jigged genuinely
+    cannot do it for them (see the endpoint docstring).
+    """
+
+    configured: bool
+    field_id: str | None = None
+    field_name: str | None = None
+    # Every enabled sales custom field, so the settings card can show the shop
+    # which of their three slots are taken and by what.
+    candidates: list[dict] = []
+    slots_used: int = 0
+
+
+@router.post("/{company_id}/po-field/refresh", response_model=PoFieldResponse)
+async def refresh_po_field(company_id: str, request: Request):
+    """Re-read QuickBooks Preferences and remember which custom field holds the PO.
+
+    EXPLICITLY USER-TRIGGERED. This is the "I've set it up, check again" button
+    on the settings card — never called on mount or on a push, because it is a
+    round trip to Intuit for a value that changes only when a human edits their
+    QuickBooks settings.
+
+    Jigged CANNOT create the field. Both paths were tested against a live
+    sandbox rather than assumed:
+      * the legacy REST Preferences write returns HTTP 200 and silently changes
+        nothing — three body shapes tried, all no-ops, confirmed by re-read;
+      * the GraphQL Custom Fields API answers 403 without a paid Silver partner
+        tier, whose sandbox host does not resolve at all.
+    Intuit's own capability matrix agrees: "Create custom field names | UI: Yes |
+    API: No". So the shop creates it, and this endpoint finds it.
+    """
+    await _verify_company_access(request, company_id, require_admin=True)
+    db = _service_client()
+    conn = qb.get_connection(db, company_id)
+    if not _is_connected(conn):
+        raise HTTPException(status_code=400, detail="QuickBooks is not connected.")
+
+    found = qb.discover_po_custom_field(db, company_id)
+    db.table("quickbooks_connections").update(
+        {
+            "po_custom_field_id": found["id"],
+            "po_custom_field_name": found["name"],
+            "qb_settings_checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("company_id", company_id).execute()
+
+    return PoFieldResponse(
+        configured=found["id"] is not None,
+        field_id=found["id"],
+        field_name=found["name"],
+        candidates=found["candidates"],
+        slots_used=len(found["candidates"]),
+    )
+
+
 @router.post("/{company_id}/disconnect")
 async def disconnect(company_id: str, request: Request):
     await _verify_company_access(request, company_id, require_admin=True)

@@ -71,7 +71,7 @@ describe('commitCount routing', () => {
       'loc-a',
       12,
       'ft',
-      'Inventory count — counted 12 ft (recorded as 10 ft)',
+      { notes: 'Inventory count — counted 12 ft (recorded as 10 ft)' },
     );
     // The direct write would be rejected by enforce_tracked_part_quantity — we must not try.
     expect(adjustPartStock).not.toHaveBeenCalled();

@@ -21,6 +21,7 @@ import {
 import type {
   CreateLocationInput,
   DepleteOptions,
+  StockWriteOptions,
   InventoryLocation,
   InventoryLocationNode,
   LocationContent,
@@ -832,7 +833,7 @@ export async function addStockAtLocation(
   locationId: string,
   quantity: number,
   unit: string,
-  notes?: string,
+  opts: StockWriteOptions = {},
 ): Promise<StockMutationResult> {
   const { primaryUnit, conversions } = await loadConversionContext(partId);
   const converted = convertToBaseUnit(quantity, unit, primaryUnit, conversions);
@@ -844,7 +845,11 @@ export async function addStockAtLocation(
     p_quantity: quantity,
     p_unit: unit,
     p_converted_quantity: converted,
-    p_notes: notes,
+    p_notes: opts.notes,
+    // Written at INSERT — there is no later step that can attach either, because the RPC's row is
+    // immutable except for notes. See StockWriteOptions.
+    p_operator_id: opts.operatorId ?? undefined,
+    p_photo_path: opts.photoPath ?? undefined,
   });
   if (error) {
     console.error('Error adding stock at location:', error);
@@ -888,7 +893,9 @@ export async function adjustStockAtLocation(
   locationId: string,
   newQuantity: number,
   unit: string,
-  notes?: string,
+  // No `photoPath`: an adjustment corrects a NUMBER, it is not a physical movement anyone can
+  // photograph. Its evidence is the count that produced it.
+  opts: Omit<StockWriteOptions, 'photoPath'> = {},
 ): Promise<StockMutationResult> {
   const { primaryUnit, conversions } = await loadConversionContext(partId);
   const converted = convertToBaseUnit(newQuantity, unit, primaryUnit, conversions);
@@ -900,7 +907,8 @@ export async function adjustStockAtLocation(
     p_new_quantity: newQuantity,
     p_unit: unit,
     p_converted_new_quantity: converted,
-    p_notes: notes,
+    p_notes: opts.notes,
+    p_operator_id: opts.operatorId ?? undefined,
   });
   if (error) {
     console.error('Error adjusting stock at location:', error);
@@ -915,7 +923,7 @@ export async function transferStock(
   toLocationId: string,
   quantity: number,
   unit: string,
-  notes?: string,
+  opts: StockWriteOptions = {},
 ): Promise<TransferResult> {
   const { primaryUnit, conversions } = await loadConversionContext(partId);
   const converted = convertToBaseUnit(quantity, unit, primaryUnit, conversions);
@@ -928,7 +936,10 @@ export async function transferStock(
     p_quantity: quantity,
     p_unit: unit,
     p_converted_quantity: converted,
-    p_notes: notes,
+    p_notes: opts.notes,
+    // Both halves of the pair get the same author and the same photo — one person moved it.
+    p_operator_id: opts.operatorId ?? undefined,
+    p_photo_path: opts.photoPath ?? undefined,
   });
   if (error) {
     console.error('Error transferring stock:', error);

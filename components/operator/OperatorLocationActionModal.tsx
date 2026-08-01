@@ -130,7 +130,12 @@ export default function OperatorLocationActionModal({
     setError(null);
     try {
       if (action === 'add') {
-        await addStockAtLocation(partId, locationId, qty, unit, notes || undefined);
+        // operatorId on every write, not just depletion: bin history has to be able to name
+        // who put something away, and `created_by` (an auth user) is unreadable from the browser.
+        await addStockAtLocation(partId, locationId, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+        });
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
           graceful: true,
@@ -139,9 +144,15 @@ export default function OperatorLocationActionModal({
           jobId: job?.id || undefined, // tie to the job, not an operation
         });
       } else if (action === 'adjust') {
-        await adjustStockAtLocation(partId, locationId, qty, unit, notes || undefined);
+        await adjustStockAtLocation(partId, locationId, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+        });
       } else {
-        await transferStock(partId, locationId, destination!.id, qty, unit, notes || undefined);
+        await transferStock(partId, locationId, destination!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+        });
       }
       posthog.capture('operator_inventory_stock_updated', {
         action,

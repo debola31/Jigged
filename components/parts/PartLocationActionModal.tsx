@@ -196,7 +196,7 @@ export default function PartLocationActionModal({
     setError(null);
     try {
       if (action === 'add') {
-        await addStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
+        await addStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
         // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
@@ -208,9 +208,9 @@ export default function PartLocationActionModal({
           jobId: job?.id || undefined,
         });
       } else if (action === 'adjust') {
-        await adjustStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
+        await adjustStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
       } else {
-        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, notes || undefined);
+        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, { notes: notes || undefined });
       }
       posthog.capture('inventory_stock_updated', {
         action,

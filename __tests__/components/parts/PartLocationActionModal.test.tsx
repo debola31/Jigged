@@ -63,7 +63,7 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l2', 1, 'ea', undefined),
+      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l2', 1, 'ea', { notes: undefined }),
     );
   });
 
@@ -95,7 +95,7 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l3', 1, 'ea', undefined),
+      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l3', 1, 'ea', { notes: undefined }),
     );
   });
 });

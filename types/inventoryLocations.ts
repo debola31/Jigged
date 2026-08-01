@@ -150,3 +150,24 @@ export interface DepleteOptions {
   jobOperationId?: string;
   operatorId?: string;
 }
+
+/**
+ * Everything a stock write can carry besides the numbers.
+ *
+ * `operatorId` is `user_company_access.id`, NOT an auth user id. It is what lets bin history name
+ * who did this: `created_by` holds the auth user, which the browser cannot resolve to a name —
+ * there is no FK to embed through and no policy that would allow the lookup.
+ */
+export interface StockWriteOptions {
+  notes?: string;
+  operatorId?: string | null;
+  /**
+   * Storage path of a photo taken as evidence of the movement.
+   *
+   * **Upload first, then call.** The path is written at INSERT inside the RPC and is immutable
+   * afterwards, so there is no second step in which to attach it. A failed RPC therefore leaves an
+   * orphaned object in the bucket — the accepted cost, because the alternative ordering needs the
+   * column to stay mutable, and evidence that can be swapped afterwards is not evidence.
+   */
+  photoPath?: string | null;
+}

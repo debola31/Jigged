@@ -206,7 +206,7 @@ export async function commitCount(
           v.candidate.target.locationId,
           v.counted,
           v.candidate.unit,
-          countNote(v),
+          { notes: countNote(v) },
         );
       } else {
         // Excluded lines are filtered out before commit; treat reaching here as a bug.

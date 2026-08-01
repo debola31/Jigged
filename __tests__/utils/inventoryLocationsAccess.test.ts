@@ -243,7 +243,7 @@ describe('RPC wrappers', () => {
   it('addStockAtLocation passes through quantity when unit === primary', async () => {
     queueFrom(partCtx());
     state.rpc = { data: { location_balance: 12, part_quantity: 12 }, error: null };
-    const res = await addStockAtLocation('part1', 'loc1', 12, 'ft', 'received');
+    const res = await addStockAtLocation('part1', 'loc1', 12, 'ft', { notes: 'received' });
     expect(mockSupabase.rpc).toHaveBeenCalledWith('add_stock_at_location', {
       p_part_id: 'part1',
       p_location_id: 'loc1',
@@ -294,7 +294,7 @@ describe('RPC wrappers', () => {
   it('adjustStockAtLocation calls adjust with the new converted quantity', async () => {
     queueFrom(partCtx());
     state.rpc = { data: { location_balance: 5, part_quantity: 5 }, error: null };
-    await adjustStockAtLocation('part1', 'loc1', 5, 'ft', 'cycle count');
+    await adjustStockAtLocation('part1', 'loc1', 5, 'ft', { notes: 'cycle count' });
     expect(mockSupabase.rpc).toHaveBeenCalledWith('adjust_stock_at_location', {
       p_part_id: 'part1',
       p_location_id: 'loc1',

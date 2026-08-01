@@ -321,6 +321,7 @@ export default function OperatorBinViewPage() {
         locationId={node.id}
         locationName={node.name}
         excludePartIds={contents.map((c) => c.part_id)}
+        operatorId={operatorId}
         onClose={() => setReceiveOpen(false)}
         onDone={reload}
       />

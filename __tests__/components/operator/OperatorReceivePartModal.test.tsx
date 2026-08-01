@@ -23,6 +23,7 @@ const renderModal = (props: Partial<React.ComponentProps<typeof OperatorReceiveP
       locationId="loc1"
       locationName="Bin 3"
       excludePartIds={['pC']}
+      operatorId="op1"
       onClose={vi.fn()}
       onDone={vi.fn()}
       {...props}
@@ -66,7 +67,12 @@ describe('OperatorReceivePartModal', () => {
     await userEvent.click(screen.getByRole('button', { name: /^add$/i }));
 
     await waitFor(() =>
-      expect(addStockAtLocation).toHaveBeenCalledWith('pA', 'loc1', 10, 'ea', undefined),
+      // Receiving into a bin is a put-away, so it carries an author like every other
+      // operator write — bin history cannot name `created_by` (an auth user id).
+      expect(addStockAtLocation).toHaveBeenCalledWith('pA', 'loc1', 10, 'ea', {
+        notes: undefined,
+        operatorId: 'op1',
+      }),
     );
     expect(onDone).toHaveBeenCalled();
   });

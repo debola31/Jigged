@@ -115,7 +115,12 @@ describe('move', () => {
     await user.click(screen.getByRole('button', { name: /^move$/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'loc1', 'loc3', 4, 'ea', undefined),
+      // operatorId now rides on every operator write, not just depletion — bin history
+      // has to be able to name who moved it.
+      expect(transferStock).toHaveBeenCalledWith('p1', 'loc1', 'loc3', 4, 'ea', {
+        notes: undefined,
+        operatorId: 'op1',
+      }),
     );
   });
 

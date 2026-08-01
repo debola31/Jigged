@@ -3506,6 +3506,12 @@ export type Database = {
         }
         Returns: string
       }
+      definer_writers_missing_write_gate: {
+        Args: never
+        Returns: {
+          function_name: string
+        }[]
+      }
       delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
         Args: {
@@ -3578,6 +3584,10 @@ export type Database = {
         }[]
       }
       get_user_company_ids: { Args: never; Returns: string[] }
+      inv_assert_can_write: {
+        Args: { p_company_id: string }
+        Returns: undefined
+      }
       inv_assert_location_in_company: {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined

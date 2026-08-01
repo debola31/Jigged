@@ -105,8 +105,25 @@ export function commonUnit(candidates: CountCandidate[]): string | null {
  * Used for the inline feedback that replaced the separate review page — the number appears on
  * the row the moment it's typed, which is when it's actually useful.
  */
+/**
+ * The key a counted number is stored under.
+ *
+ * **Not the part id.** A sheet can hold the same part more than once — that is the whole point of
+ * counting a part across every place it sits in, where BUY-ORING-214 appears for Shelf A and again
+ * for Shelf B. Keying by part alone made those two rows share one number, so typing 828 for Shelf A
+ * silently wrote 828 to Shelf B as well and committed both.
+ *
+ * An `aggregate` row has no place, so the part id IS its identity. An `excluded` row is never
+ * counted, and falls through to the same shape harmlessly.
+ */
+export function countRowKey(candidate: CountCandidate): string {
+  return candidate.target.kind === 'location'
+    ? `${candidate.partId}::${candidate.target.locationId}`
+    : candidate.partId;
+}
+
 export function rowDelta(candidate: CountCandidate, entries: CountEntries): number | null {
-  const counted = entries[candidate.partId];
+  const counted = entries[countRowKey(candidate)];
   if (counted === undefined) return null;
   return counted - candidate.systemQuantity;
 }
@@ -126,12 +143,13 @@ export function buildVariances(
   const out: CountVariance[] = [];
 
   for (const candidate of candidates) {
-    const counted = entries[candidate.partId];
+    const key = countRowKey(candidate);
+    const counted = entries[key];
     if (counted === undefined) continue;
     if (candidate.target.kind === 'excluded') continue;
 
     const delta = counted - candidate.systemQuantity;
-    const opened = openedWith.get(candidate.partId);
+    const opened = openedWith.get(key);
     out.push({
       candidate,
       counted,
@@ -177,7 +195,15 @@ export function countNote(v: CountVariance): string {
 
 // ── Draft persistence ────────────────────────────────────────────────────────
 
-export const DRAFT_VERSION = 3 as const;
+/**
+ * Bumped to 4 when `entries` moved from part-id keys to row keys (`countRowKey`).
+ *
+ * A v3 draft's keys are bare part ids, which for a location row no longer match anything — so
+ * without the bump a resumed draft would restore *some* numbers and silently drop the rest.
+ * A version mismatch discards it, which is the honest outcome: you lose an abandoned draft
+ * rather than resuming a half-populated sheet you cannot tell is half-populated.
+ */
+export const DRAFT_VERSION = 4 as const;
 
 export function draftKey(companyId: string): string {
   return `jigged.inventoryCount.${companyId}`;
@@ -185,6 +211,7 @@ export function draftKey(companyId: string): string {
 
 export function buildDraft(
   companyId: string,
+  /** Row keys — see `countRowKey`. Named `partIds` on the stored shape for back-compat. */
   partIds: string[],
   entries: CountEntries,
   now: number,

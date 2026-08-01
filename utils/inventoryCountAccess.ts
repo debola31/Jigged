@@ -14,6 +14,7 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { getStockedParts, adjustPartStock } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
+  getBalancesForPart,
   getBalancesForParts,
   getLocationContentsPage,
   getLocations,
@@ -169,6 +170,76 @@ export async function loadPartAtLocationCandidate(
     systemQuantity: balances.get(partId) ?? 0,
     target: { kind: 'location', locationId, locationName },
   };
+}
+
+/**
+ * One part, EVERY place it sits — the sheet the excluded-part chips have been promising.
+ *
+ * ## The gap this closes
+ *
+ * A part whose stock is split across bins is deliberately kept off the company-wide sheet: a
+ * single total has no unambiguous home, and writing it would have to guess which shelf absorbed
+ * the difference. The picker says so and offers a chip per place — but each chip was a separate
+ * one-row sheet, so counting a part in three places meant three trips out through the picker and
+ * three saves. For the one journey that *is* part-first ("where has this gone?"), that is the
+ * long way round.
+ *
+ * This returns one candidate per place, each targeting its own location, so the existing commit
+ * path already does the right thing: `commitCount` routes every line through
+ * `adjustStockAtLocation` for ITS location, and no line touches another shelf.
+ *
+ * ## Only places that hold some
+ *
+ * A part that has passed through a bin keeps a zero balance row forever (`transfer_stock`
+ * decrements, `bulk_put_away` sets 0), and putting every historical shelf on the sheet would send
+ * someone to look at empties. A place that genuinely should be counted but reads zero is reachable
+ * the other way — open that bin's sheet and use "Found something not listed?".
+ */
+export async function loadPartEverywhereCandidates(
+  companyId: string,
+  partId: string,
+): Promise<{ partName: string; candidates: CountCandidate[] }> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts')
+    .select('id, part_name, description, primary_unit, is_location_tracked')
+    .eq('id', partId)
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error loading the part to count:', error);
+    throw error;
+  }
+  if (!data) throw new Error('That part no longer exists.');
+  if (!data.is_location_tracked) {
+    throw new Error(`${data.part_name} isn't tracked by place, so it can't be counted at one.`);
+  }
+
+  const balances = await getBalancesForPart(partId);
+  const unit = data.primary_unit ?? 'ea';
+
+  const candidates = balances
+    .filter((b) => Number(b.quantity ?? 0) > 0)
+    .map((b) => ({
+      partId,
+      partName: data.part_name,
+      // The PLACE is the sub-line here, not the description: every row shares the part, so the
+      // description would repeat on all of them while the one thing that differs went unlabelled.
+      description: b.path.join(' › ') || b.location_name,
+      unit,
+      systemQuantity: Number(b.quantity ?? 0),
+      target: {
+        kind: 'location' as const,
+        locationId: b.location_id,
+        locationName: b.location_name,
+      },
+    }))
+    .sort((a, b) => a.description!.localeCompare(b.description as string));
+
+  return { partName: data.part_name, candidates };
 }
 
 /**

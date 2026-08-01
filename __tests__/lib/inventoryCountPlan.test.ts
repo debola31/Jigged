@@ -5,6 +5,7 @@ import {
   clearDraft,
   committableVariances,
   countNote,
+  countRowKey,
   countableCandidates,
   commonUnit,
   draftKey,
@@ -278,5 +279,65 @@ describe('storage helpers when localStorage is unavailable', () => {
     expect(() => clearDraft('co1')).not.toThrow();
 
     if (original) Object.defineProperty(window, 'localStorage', original);
+  });
+});
+
+/**
+ * The key a counted number is stored under. Load-bearing once a sheet can hold the same part
+ * more than once — the all-places sheet has BUY-ORING-214 for Shelf A and again for Shelf B.
+ */
+describe('countRowKey', () => {
+  const at = (locationId: string) => ({
+    partId: 'p1',
+    partName: 'BUY-ORING-214',
+    description: null,
+    unit: 'ea',
+    systemQuantity: 828,
+    target: { kind: 'location' as const, locationId, locationName: locationId },
+  });
+
+  it('separates the same part at two places', () => {
+    expect(countRowKey(at('shelf-a'))).not.toBe(countRowKey(at('shelf-b')));
+  });
+
+  it('is just the part id when there is no place', () => {
+    expect(
+      countRowKey({ ...at('x'), target: { kind: 'aggregate' } }),
+    ).toBe('p1');
+  });
+
+  /**
+   * The bug this prevents: keyed by part alone, both rows read one entry, so typing 800 for
+   * Shelf A committed 800 to Shelf B as well — against a completely different recorded quantity.
+   */
+  it('keeps two places on one sheet from sharing a number', () => {
+    const shelfA = at('shelf-a');
+    const shelfB = { ...at('shelf-b'), systemQuantity: 552 };
+    const entries = { [countRowKey(shelfA)]: 800, [countRowKey(shelfB)]: 500 };
+
+    expect(rowDelta(shelfA, entries)).toBe(-28);
+    expect(rowDelta(shelfB, entries)).toBe(-52);
+
+    const variances = buildVariances([shelfA, shelfB], entries, new Map());
+    expect(variances.map((v) => [v.candidate.target.kind === 'location' ? v.candidate.target.locationId : '', v.counted, v.delta]))
+      .toEqual([
+        ['shelf-a', 800, -28],
+        ['shelf-b', 500, -52],
+      ]);
+  });
+
+  /** `movedSinceOpened` must compare per row, or one shelf's drift flags the other. */
+  it('tracks the opened-with baseline per place', () => {
+    const shelfA = at('shelf-a');
+    const shelfB = { ...at('shelf-b'), systemQuantity: 552 };
+    const opened = new Map([
+      [countRowKey(shelfA), 828],
+      [countRowKey(shelfB), 600], // somebody moved 48 out of Shelf B while we counted
+    ]);
+    const entries = { [countRowKey(shelfA)]: 828, [countRowKey(shelfB)]: 552 };
+
+    const [a, b] = buildVariances([shelfA, shelfB], entries, opened);
+    expect(a.movedSinceOpened).toBe(false);
+    expect(b.movedSinceOpened).toBe(true);
   });
 });

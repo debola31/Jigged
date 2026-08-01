@@ -127,6 +127,12 @@ export default function PartLocationInventory({
     [balances],
   );
 
+  /** A part in one place is not "split"; counting it there is counting it everywhere. */
+  const placesWithStock = useMemo(
+    () => balances.filter((b) => Number(b.quantity ?? 0) > 0).length,
+    [balances],
+  );
+
   const unitOptions = useMemo(
     () => Array.from(new Set([primaryUnit, ...getStandardUnitsForUnit(primaryUnit)])).filter(Boolean),
     [primaryUnit],
@@ -156,6 +162,20 @@ export default function PartLocationInventory({
         <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setAction('adjust')}>
           Adjust
         </Button>
+        {/* Only once the stock is actually split. With everything in one place the per-row
+            "Count here" beside it already IS counting it everywhere, and two controls that do
+            the same thing is worse than one. */}
+        {placesWithStock > 1 && (
+          <Button
+            variant="outlined"
+            startIcon={<FactCheckOutlinedIcon />}
+            onClick={() =>
+              router.push(`/dashboard/${companyId}/inventory/count?part=${partId}`)
+            }
+          >
+            Count all {placesWithStock} places
+          </Button>
+        )}
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

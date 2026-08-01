@@ -88,6 +88,7 @@ import {
   buildVariances,
   clearDraft as clearStoredDraft,
   committableVariances,
+  countRowKey,
   countableCandidates,
   commonUnit,
   excludedCandidates,
@@ -100,6 +101,7 @@ import {
   loadCountCandidates,
   loadLocationCountCandidates,
   loadPartAtLocationCandidate,
+  loadPartEverywhereCandidates,
   refreshLocationQuantities,
   refreshSystemQuantities,
 } from '@/utils/inventoryCountAccess';
@@ -179,6 +181,17 @@ export default function InventoryCountPage() {
    */
   const partIdParam = searchParams.get('part');
   const partScope = Boolean(locationId && partIdParam);
+  /**
+   * `?part=<id>` with NO location: one part, every place it sits, on one sheet.
+   *
+   * The journey the excluded-part chips have been describing. A split part is kept off the
+   * company-wide sheet because a single total has no unambiguous home — but each chip was its own
+   * one-row sheet, so a part in three places meant three trips through the picker. Every row
+   * targets its own location, so `commitCount` already writes each to its own shelf.
+   */
+  const everywhereScope = Boolean(partIdParam && !locationId);
+  /** Either part-first mode: no picker, one pre-chosen set, straight to the sheet. */
+  const partFirst = partScope || everywhereScope;
   const [partName, setPartName] = useState('');
 
   /**
@@ -193,7 +206,7 @@ export default function InventoryCountPage() {
    * them too made the button disappear on a page that never needed to wait.
    */
   const from = searchParams.get('from');
-  const returnTo = partScope && partIdParam
+  const returnTo = partFirst && partIdParam
     ? { href: `/dashboard/${companyId}/parts/${partIdParam}?tab=inventory`, label: 'Back to part', flagged: false }
     : from === 'count'
       ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count', flagged: false }
@@ -236,10 +249,11 @@ export default function InventoryCountPage() {
     // Guard against the empty string: `partName` is only known after the one-row load resolves,
     // and "Count  in Shelf A" is worse than the generic title for the moment in between.
     if (partScope && partName && locationName) setTitle(`Count ${partName} in ${locationName}`);
+    else if (everywhereScope && partName) setTitle(`Count ${partName} everywhere`);
     else if (locationMode && locationName) setTitle(`Count ${locationName}`);
     else setTitle('Count Inventory');
     return () => setTitle(null);
-  }, [setTitle, locationMode, locationName, partScope, partName]);
+  }, [setTitle, locationMode, locationName, partScope, everywhereScope, partName]);
 
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -290,8 +304,9 @@ export default function InventoryCountPage() {
    */
   const rememberOpenedWith = useCallback((rows: CountCandidate[]) => {
     for (const c of rows) {
-      if (!openedWithRef.current.has(c.partId)) {
-        openedWithRef.current.set(c.partId, c.systemQuantity);
+      const key = countRowKey(c);
+      if (!openedWithRef.current.has(key)) {
+        openedWithRef.current.set(key, c.systemQuantity);
       }
     }
   }, []);
@@ -377,6 +392,21 @@ export default function InventoryCountPage() {
           return;
         }
 
+        if (partIdParam) {
+          const { partName: name, candidates: rows } = await loadPartEverywhereCandidates(
+            companyId,
+            partIdParam,
+          );
+          if (cancelled) return;
+          setPartName(name);
+          setCandidates(rows);
+          setSelected(new Map(rows.map((c) => [countRowKey(c), c])));
+          setEntries({});
+          rememberOpenedWith(rows);
+          setStep(1);
+          return;
+        }
+
         const found = await loadCountCandidates(companyId);
         if (cancelled) return;
         setCandidates(found);
@@ -386,7 +416,7 @@ export default function InventoryCountPage() {
         // wrong row after the catalogue changes.
         const draft = readDraft(companyId);
         if (draft) {
-          const known = new Set(found.map((c) => c.partId));
+          const known = new Set(found.map(countRowKey));
           const partIds = draft.partIds.filter((id) => known.has(id));
           const kept = Object.fromEntries(
             Object.entries(draft.entries).filter(([id]) => known.has(id)),
@@ -455,7 +485,7 @@ export default function InventoryCountPage() {
    * the entry — untick, re-tick, and your number is still there.
    */
   const counted = useMemo(
-    () => sheet.filter((c) => entries[c.partId] !== undefined).length,
+    () => sheet.filter((c) => entries[countRowKey(c)] !== undefined).length,
     [sheet, entries],
   );
   const changes = useMemo(
@@ -501,10 +531,11 @@ export default function InventoryCountPage() {
   const toggle = (c: CountCandidate) =>
     setSelected((prev) => {
       const next = new Map(prev);
-      // Unticking drops the row from the sheet but deliberately leaves `entries[partId]` alone,
-      // so re-ticking restores the number rather than making someone type it again.
-      if (next.has(c.partId)) next.delete(c.partId);
-      else next.set(c.partId, c);
+      // Unticking drops the row from the sheet but deliberately leaves its entry alone, so
+      // re-ticking restores the number rather than making someone type it again.
+      const key = countRowKey(c);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, c);
       return next;
     });
 
@@ -530,7 +561,7 @@ export default function InventoryCountPage() {
     setAddingPart(true);
     try {
       const c = await loadPartAtLocationCandidate(companyId, option.id, locationId, locationName);
-      setSelected((prev) => new Map(prev).set(c.partId, c));
+      setSelected((prev) => new Map(prev).set(countRowKey(c), c));
       // Prepend so it is visible without hunting: it is not on this page of the server list, and
       // may not be on any page.
       setCandidates((prev) => [c, ...prev.filter((x) => x.partId !== c.partId)]);
@@ -545,11 +576,11 @@ export default function InventoryCountPage() {
     }
   };
 
-  const setCount = (partId: string, raw: string) =>
+  const setCount = (rowKey: string, raw: string) =>
     setEntries((prev) => {
       const next = { ...prev };
-      if (raw === '') delete next[partId];
-      else next[partId] = Number(raw);
+      if (raw === '') delete next[rowKey];
+      else next[rowKey] = Number(raw);
       return next;
     });
 
@@ -574,19 +605,59 @@ export default function InventoryCountPage() {
     setChecking(true);
     let toCommit: CountVariance[];
     try {
-      // Place-scoped counts must re-read the balance AT THIS BIN. `refreshSystemQuantities` reads
-      // `parts.quantity`, the roll-up across every location — using it here would compare a shelf
-      // count against the whole shop's total and report a variance on every line.
-      const fresh = locationId
-        ? await refreshLocationQuantities(locationId, Object.keys(entries))
-        : await refreshSystemQuantities(Object.keys(entries));
-      // From the SHEET. Mapping over `candidates` was the bug: a part typed on a page or search
-      // you have since navigated away from is no longer in that array, and its correction was
-      // dropped without a word.
-      const updated = sheet.map((c) =>
-        fresh.has(c.partId) ? { ...c, systemQuantity: fresh.get(c.partId) as number } : c,
-      );
-      setSelected(new Map(updated.map((c) => [c.partId, c])));
+      /**
+       * Re-read what the system believes, PER ROW, against the thing that row is about.
+       *
+       * A location row must be re-read at ITS bin: `refreshSystemQuantities` reads
+       * `parts.quantity`, the roll-up across every place, so using it for a shelf row compares a
+       * shelf count against the whole shop's total and reports a variance on every line.
+       *
+       * Driven off each row's own target rather than a page-level `locationId`, because the
+       * all-places sheet has no single location — its rows span several. Keying off the page
+       * would have sent every one of them down the roll-up branch.
+       *
+       * The rows come from the SHEET, not from `candidates`: a part typed on a page or search you
+       * have since navigated away from is no longer in that array, and its correction used to be
+       * dropped without a word.
+       */
+      const countedRows = sheet.filter((c) => entries[countRowKey(c)] !== undefined);
+
+      const partIdsByLocation = new Map<string, string[]>();
+      const aggregateIds: string[] = [];
+      for (const c of countedRows) {
+        if (c.target.kind === 'location') {
+          const ids = partIdsByLocation.get(c.target.locationId) ?? [];
+          ids.push(c.partId);
+          partIdsByLocation.set(c.target.locationId, ids);
+        } else if (c.target.kind === 'aggregate') {
+          aggregateIds.push(c.partId);
+        }
+      }
+
+      const [locationReads, aggregateFresh] = await Promise.all([
+        Promise.all(
+          [...partIdsByLocation].map(async ([locId, ids]) => {
+            const m = await refreshLocationQuantities(locId, ids);
+            return [locId, m] as const;
+          }),
+        ),
+        aggregateIds.length > 0
+          ? refreshSystemQuantities(aggregateIds)
+          : Promise.resolve(new Map<string, number>()),
+      ]);
+      const freshByLocation = new Map(locationReads);
+
+      const updated = sheet.map((c) => {
+        if (entries[countRowKey(c)] === undefined) return c;
+        const q =
+          c.target.kind === 'location'
+            ? freshByLocation.get(c.target.locationId)?.get(c.partId)
+            : c.target.kind === 'aggregate'
+              ? aggregateFresh.get(c.partId)
+              : undefined;
+        return q === undefined ? c : { ...c, systemQuantity: q };
+      });
+      setSelected(new Map(updated.map((c) => [countRowKey(c), c])));
       toCommit = committableVariances(buildVariances(updated, entries, openedWithRef.current));
     } catch (e) {
       setSnack({
@@ -647,7 +718,12 @@ export default function InventoryCountPage() {
     if (!locationId || !moveTo || selected.size === 0) return;
     setMoving(true);
     try {
-      const res = await bulkPutAway(locationId, moveTo.id, [...selected.keys()]);
+      // `.values()`, not `.keys()`: the map is keyed by row now, and the RPC wants part ids.
+      const res = await bulkPutAway(
+        locationId,
+        moveTo.id,
+        [...selected.values()].map((c) => c.partId),
+      );
 
       // Refetch from the START. These parts have just left this location, so the result set
       // shifted — holding the previous page's offset would silently skip whatever moved up.
@@ -767,7 +843,7 @@ export default function InventoryCountPage() {
 
       {/* No stepper in part-scope: there is one row, already chosen, so "Pick / Count" describes
           a journey that does not happen. */}
-      {!partScope && (
+      {!partFirst && (
       <Stepper activeStep={step} sx={{ mb: 4, maxWidth: 460 }}>
         {STEPS.map((label) => (
           <Step key={label}>
@@ -807,8 +883,8 @@ export default function InventoryCountPage() {
                   setSelected(
                     new Map(
                       candidates
-                        .filter((c) => resume.partIds.includes(c.partId))
-                        .map((c) => [c.partId, c]),
+                        .filter((c) => resume.partIds.includes(countRowKey(c)))
+                        .map((c) => [countRowKey(c), c]),
                     ),
                   );
                   setEntries(resume.entries);
@@ -830,7 +906,7 @@ export default function InventoryCountPage() {
           Suppressed entirely in part-scope: there is one row and it is already chosen. Leaving
           it mounted also put "Nothing to count yet — mark a few parts as stocked" directly under
           the error Alert whenever the one-row load threw, since that path never reaches step 1. */}
-      {step === 0 && !partScope && (
+      {step === 0 && !partFirst && (
         <Box>
           <Typography variant="body1" sx={{ mb: 0.5 }}>
             {locationMode
@@ -893,7 +969,7 @@ export default function InventoryCountPage() {
                   onClick={() =>
                     setSelected((prev) => {
                       const next = new Map(prev);
-                      for (const c of visible) next.set(c.partId, c);
+                      for (const c of visible) next.set(countRowKey(c), c);
                       return next;
                     })
                   }
@@ -1027,59 +1103,13 @@ export default function InventoryCountPage() {
                 </Stack>
               )}
 
-              {countable.length === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  {search.trim()
-                    ? `Nothing here matches “${search.trim()}”.`
-                    : `${locationName} is empty.`}
-                </Alert>
-              ) : (
-              <Card elevation={2}>
-                <Stack divider={<Divider />}>
-                  {visible.map((c) => (
-                    <Box
-                      key={c.partId}
-                      onClick={() => toggle(c)}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1,
-                        px: 2,
-                        py: 1,
-                        minHeight: 56,
-                        cursor: 'pointer',
-                        '&:hover': { bgcolor: 'action.hover' },
-                      }}
-                    >
-                      <Checkbox
-                        checked={selected.has(c.partId)}
-                        tabIndex={-1}
-                        inputProps={{ 'aria-label': `Count ${c.partName}` }}
-                      />
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="body1" noWrap>
-                          {c.partName}
-                        </Typography>
-                        {/* Company-wide, the location tells you where this row will be written.
-                            Place-scoped it's the same word on every row — the page title already
-                            said it — so it's noise. */}
-                        {!locationMode && c.target.kind === 'location' && (
-                          <Typography variant="caption" color="text.secondary">
-                            {c.target.locationName}
-                          </Typography>
-                        )}
-                      </Box>
-                      <Typography variant="body2" color="text.secondary">
-                        {num(c.systemQuantity)} {c.unit}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Stack>
-              </Card>
-              )}
-
               {/*
-                Parts held back — and now reachable, which is the difference between naming
+                Parts held back — ABOVE the list, not below it.
+
+                This sat under all 14 rows, so the founder scrolled straight past it, reached the
+                sheet, and reasonably concluded that counting a part across several places did not
+                exist. An exception that changes what you can do is not a footnote to the normal
+                case; burying it is how a built capability reads as missing. — and now reachable, which is the difference between naming
                 a limitation and leaving a dead end.
 
                 The copy already said "count these at their locations"; the chips were inert,
@@ -1089,7 +1119,7 @@ export default function InventoryCountPage() {
                 the route was missing.
               */}
               {excluded.length > 0 && (
-                <Alert severity="info" sx={{ mt: 3 }}>
+                <Alert severity="info" sx={{ mb: 3 }}>
                   <Typography variant="body2" sx={{ mb: 1.5 }}>
                     {excluded.length} {excluded.length === 1 ? 'part is' : 'parts are'} not on this
                     sheet — their stock sits in more than one place, so a single total has no
@@ -1104,6 +1134,20 @@ export default function InventoryCountPage() {
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
                           {c.partName}
                         </Typography>
+                        {/* Leads, because counting all of a split part's places in one pass is
+                            the point — the per-place chips beside it are for when you only
+                            happen to be standing at one of them. */}
+                        <Chip
+                          size="small"
+                          color="primary"
+                          clickable
+                          label="Count all places"
+                          onClick={() =>
+                            router.push(
+                              `/dashboard/${companyId}/inventory/count?part=${c.partId}&from=count`,
+                            )
+                          }
+                        />
                         {c.target.kind === 'excluded' &&
                           c.target.locations.map((l) => (
                             <Chip
@@ -1131,6 +1175,57 @@ export default function InventoryCountPage() {
                     </Typography>
                   )}
                 </Alert>
+              )}
+
+              {countable.length === 0 ? (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  {search.trim()
+                    ? `Nothing here matches “${search.trim()}”.`
+                    : `${locationName} is empty.`}
+                </Alert>
+              ) : (
+              <Card elevation={2}>
+                <Stack divider={<Divider />}>
+                  {visible.map((c) => (
+                    <Box
+                      key={countRowKey(c)}
+                      onClick={() => toggle(c)}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        px: 2,
+                        py: 1,
+                        minHeight: 56,
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      <Checkbox
+                        checked={selected.has(countRowKey(c))}
+                        tabIndex={-1}
+                        inputProps={{ 'aria-label': `Count ${c.partName}` }}
+                      />
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body1" noWrap>
+                          {c.partName}
+                        </Typography>
+                        {/* Company-wide, the location tells you where this row will be written.
+                            Place-scoped it's the same word on every row — the page title already
+                            said it — so it's noise. */}
+                        {!locationMode && c.target.kind === 'location' && (
+                          <Typography variant="caption" color="text.secondary">
+                            {c.target.locationName}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        {num(c.systemQuantity)} {c.unit}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Card>
               )}
             </>
           )}
@@ -1190,7 +1285,10 @@ export default function InventoryCountPage() {
                     // has been actioned, and tinting the ground behind the figures only costs
                     // them contrast.
                     return (
-                      <TableRow key={c.partId}>
+                      // `countRowKey`, not `partId`: the all-places sheet holds the SAME part
+                      // once per shelf, and React's duplicate-key warning is explicit that it
+                      // "may cause children to be duplicated and/or omitted".
+                      <TableRow key={countRowKey(c)}>
                         <TableCell sx={{ width: '99%' }}>
                           <Typography variant="body2" sx={{ fontWeight: 500 }}>
                             {c.partName}
@@ -1209,8 +1307,8 @@ export default function InventoryCountPage() {
                           <TextField
                             type="number"
                             size="small"
-                            value={entries[c.partId] ?? ''}
-                            onChange={(e) => setCount(c.partId, e.target.value)}
+                            value={entries[countRowKey(c)] ?? ''}
+                            onChange={(e) => setCount(countRowKey(c), e.target.value)}
                             placeholder="—"
                             inputProps={{
                               min: 0,
@@ -1300,7 +1398,7 @@ export default function InventoryCountPage() {
           {/* No step-0 to go back TO in part-scope: the picker is suppressed there, so this
               button rendered a blank page under the header. Caught in the browser, not by a
               test — the step-0 block is conditional and the footer was not. */}
-          {!partScope && <Button onClick={() => setStep(0)}>Back</Button>}
+          {!partFirst && <Button onClick={() => setStep(0)}>Back</Button>}
           <Typography variant="body1" sx={{ fontWeight: 600 }}>
             {counted} of {sheet.length} counted
           </Typography>

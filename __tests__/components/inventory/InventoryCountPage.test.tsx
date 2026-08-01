@@ -21,6 +21,7 @@ vi.mock('@/utils/inventoryCountAccess', () => ({
   loadCountCandidates: vi.fn(),
   loadLocationCountCandidates: vi.fn(),
   loadPartAtLocationCandidate: vi.fn(),
+  loadPartEverywhereCandidates: vi.fn(),
   refreshSystemQuantities: vi.fn(),
   refreshLocationQuantities: vi.fn(),
   commitCount: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   getLocations: vi.fn(async () => []),
 }));
 
+import { DRAFT_VERSION } from '@/lib/inventoryCountPlan';
 import InventoryCountPage from '@/app/dashboard/[companyId]/inventory/count/page';
 import {
   loadCountCandidates,
@@ -72,6 +74,7 @@ import {
   refreshLocationQuantities,
   commitCount,
   loadPartAtLocationCandidate,
+  loadPartEverywhereCandidates,
 } from '@/utils/inventoryCountAccess';
 import { bulkPutAway, getLocations } from '@/utils/inventoryLocationsAccess';
 import type { CountCandidate } from '@/types/inventoryCount';
@@ -473,7 +476,7 @@ describe('draft', () => {
   const storeDraft = (partIds: string[], entries: Record<string, number>) =>
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
-      JSON.stringify({ version: 3, companyId: 'co1', partIds, entries, savedAt: Date.now() }),
+      JSON.stringify({ version: DRAFT_VERSION, companyId: 'co1', partIds, entries, savedAt: Date.now() }),
     );
 
   it('offers to resume, reporting how far the count got', async () => {
@@ -501,7 +504,7 @@ describe('draft', () => {
     window.localStorage.setItem(
       'jigged.inventoryCount.co1',
       JSON.stringify({
-        version: 3,
+        version: DRAFT_VERSION,
         companyId: 'SOMEONE-ELSE',
         partIds: ['p1'],
         entries: { p1: 5 },
@@ -978,5 +981,106 @@ describe('counting one part at one place', () => {
     renderPage();
     expect(await screen.findByText(/isn't tracked by place/i)).toBeInTheDocument();
     expect(screen.queryByText(/nothing to count yet/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * `?part=<id>` with no location: one part, every place it sits, on one sheet.
+ *
+ * The journey the excluded-part chips describe. Its hazard is that the SAME part appears on
+ * several rows, which broke every part-id-keyed assumption on the page at once.
+ */
+describe('counting one part everywhere', () => {
+  const row = (locationId: string, name: string, qty: number): CountCandidate =>
+    cand({
+      partId: 'p-split',
+      partName: 'BUY-ORING-214',
+      quantity: undefined,
+      description: name,
+      systemQuantity: qty,
+      unit: 'ea',
+      target: { kind: 'location', locationId, locationName: name },
+    } as Partial<CountCandidate> & { partId: string });
+
+  beforeEach(() => {
+    searchParams.set('part', 'p-split');
+    asMock(loadPartEverywhereCandidates).mockResolvedValue({
+      partName: 'BUY-ORING-214',
+      candidates: [row('shelf-a', 'Shelf A', 828), row('shelf-b', 'Shelf B', 552)],
+    });
+    asMock(refreshLocationQuantities).mockImplementation(async (locId: string) =>
+      new Map([['p-split', locId === 'shelf-a' ? 828 : 552]]),
+    );
+    asMock(commitCount).mockResolvedValue({ committed: 2, failures: [] });
+  });
+
+  afterEach(() => searchParams.delete('part'));
+
+  it('opens straight onto a row per place, with no picker', async () => {
+    renderPage();
+    await screen.findByText('Shelf A');
+    expect(screen.getByText('Shelf B')).toBeInTheDocument();
+    expect(screen.queryByText(/pick the parts/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/0 of 2 counted/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The bug the row key exists to prevent: keyed by part alone, both rows read one entry, so
+   * typing 800 for Shelf A silently committed 800 to Shelf B too — against a different recorded
+   * quantity, which is a −52 adjustment nobody made.
+   */
+  it('keeps each shelf’s number to itself', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Shelf A');
+
+    const [inputA, inputB] = screen.getAllByRole('spinbutton');
+    await user.type(inputA, '800');
+    await user.type(inputB, '500');
+
+    expect(inputA).toHaveValue(800);
+    expect(inputB).toHaveValue(500);
+    expect(await screen.findByText(/2 of 2 counted/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Each row must be re-read at ITS bin. Keying the refresh off a page-level location would send
+   * every row down the `parts.quantity` roll-up branch and report a variance on all of them.
+   */
+  it('re-reads every shelf separately before committing', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Shelf A');
+
+    const [inputA, inputB] = screen.getAllByRole('spinbutton');
+    await user.type(inputA, '800');
+    await user.type(inputB, '500');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-a', ['p-split']);
+    expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-b', ['p-split']);
+    expect(refreshSystemQuantities).not.toHaveBeenCalled();
+
+    const [variances] = asMock(commitCount).mock.calls[0];
+    expect(
+      variances.map((v: { candidate: CountCandidate; counted: number; delta: number }) => [
+        v.candidate.target.kind === 'location' ? v.candidate.target.locationId : '',
+        v.counted,
+        v.delta,
+      ]),
+    ).toEqual([
+      ['shelf-a', 800, -28],
+      ['shelf-b', 500, -52],
+    ]);
+  });
+
+  it('goes back to the part, not to storage', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Shelf A');
+
+    await user.click(screen.getByRole('button', { name: /back to part/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts/p-split?tab=inventory');
   });
 });

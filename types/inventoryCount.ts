@@ -49,7 +49,8 @@ export interface CountCandidate {
 }
 
 /**
- * What's been typed so far: partId → counted quantity.
+ * What's been typed so far: **row key** → counted quantity — see `countRowKey`. Not the part id:
+ * one sheet can hold the same part at several places.
  *
  * A missing key means "not counted" — never coerced to 0, so a part you walked past keeps its
  * balance rather than being zeroed by an abandoned sheet.
@@ -63,7 +64,7 @@ export type CountEntries = Record<string, number>;
  * is still a count of five, and resuming needs to know that.
  */
 export interface CountDraft {
-  version: 3;
+  version: 4;
   companyId: string;
   /** The parts in this count, in sheet order. */
   partIds: string[];

@@ -534,6 +534,10 @@ export async function getBalancesForPart(
         location_code: loc?.code ?? null,
         path: computePathNames(r.location_id, byId),
         quantity: Number(r.quantity),
+        // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,
+        // "where does this part live?" answers "Unassigned" — which is precisely the answer
+        // "nowhere yet", presented as though it were a place.
+        kind: loc?.kind ?? null,
       };
     })
     .sort((a, b) => a.path.join(' / ').localeCompare(b.path.join(' / ')));
@@ -1027,41 +1031,46 @@ export async function bulkPutAway(
  * Three requests, all batched, regardless of how many rows come back: the page, the distinct
  * authors, and one signed-URL call for every photo.
  */
-export async function getLocationHistory(
-  locationId: string,
-  limit = 20,
-): Promise<LocationHistoryEntry[]> {
-  const supabase = getSupabase();
+/** Columns every movement view needs. One literal — a concatenation defeats the typed client. */
+const MOVEMENT_COLUMNS =
+  'id, created_at, type, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id, location_id, location_name';
 
-  const { data, error } = await supabase
-    .from('inventory_transactions')
-    // One literal, never a concatenation: the typed client parses this string at compile time to
-    // infer the row shape, and a `'a, b' + 'c'` expression defeats that — it degrades silently to
-    // `GenericStringError[]`, which is what tsc caught here.
-    .select('id, created_at, type, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id')
-    .eq('location_id', locationId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+interface MovementRow {
+  id: string;
+  created_at: string;
+  type: string;
+  item_name: string;
+  quantity: number;
+  unit: string;
+  notes: string | null;
+  operator_id: string | null;
+  photo_path: string | null;
+  has_discrepancy: boolean;
+  transfer_group_id: string | null;
+  location_id: string | null;
+  location_name: string | null;
+}
 
-  if (error) {
-    console.error('Error fetching location history:', error);
-    throw error;
-  }
-
-  const rows = (data ?? []) as Array<{
-    id: string;
-    created_at: string;
-    type: string;
-    item_name: string;
-    quantity: number;
-    unit: string;
-    notes: string | null;
-    operator_id: string | null;
-    photo_path: string | null;
-    has_discrepancy: boolean;
-    transfer_group_id: string | null;
-  }>;
+/**
+ * Resolve the two things a movement row cannot carry itself: the author's name and a viewable
+ * photo URL.
+ *
+ * ## Why the author needs a separate query
+ *
+ * `operator_id` has **no foreign key** — `inventory_transactions`' only FKs are `company_id`,
+ * `job_id`, `job_operation_id` and `part_id` — so the PostgREST embed the notes feed uses
+ * (`author:user_company_access(name)`) cannot work here: an embed needs a declared relationship.
+ * Adding the FK would be tidier, but it needs the existing column values validated first.
+ *
+ * `created_by` is no help either: it holds an `auth.users` id the browser cannot read at all. A
+ * movement written before `operator_id` was populated on add/adjust/transfer therefore has no
+ * author, and is returned with none rather than a guess.
+ *
+ * Two batched requests regardless of row count: the distinct authors, and one signed-URL call.
+ */
+async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEntry[]> {
   if (rows.length === 0) return [];
+  const supabase = getSupabase();
 
   const actorIds = [...new Set(rows.map((r) => r.operator_id).filter((v): v is string => !!v))];
   const photoPaths = rows.map((r) => r.photo_path).filter((v): v is string => !!v);
@@ -1070,7 +1079,9 @@ export async function getLocationHistory(
     actorIds.length > 0
       ? supabase.from('user_company_access').select('id, name').in('id', actorIds)
       : Promise.resolve({ data: [], error: null }),
-    photoPaths.length > 0 ? getSignedUrls(photoPaths, PHOTO_URL_EXPIRY_SECONDS) : Promise.resolve(EMPTY_URLS),
+    photoPaths.length > 0
+      ? getSignedUrls(photoPaths, PHOTO_URL_EXPIRY_SECONDS)
+      : Promise.resolve(EMPTY_URLS),
   ]);
 
   // A failed name lookup must not take the history down with it — the movements are the point,
@@ -1092,5 +1103,67 @@ export async function getLocationHistory(
     photoUrl: r.photo_path ? photoUrls.get(r.photo_path) ?? null : null,
     hasDiscrepancy: Boolean(r.has_discrepancy),
     transferGroupId: r.transfer_group_id,
+    locationId: r.location_id,
+    // Snapshotted on the row by `trg_snapshot_txn_location`, so it still reads correctly after a
+    // location is deleted and `location_id` goes NULL.
+    locationName: r.location_name,
   }));
+}
+
+/**
+ * What has happened in ONE place lately.
+ *
+ * Until this existed there was no operator-side ledger view at all — movements lived in
+ * `inventory_transactions` and could only be read from the admin part page, which is what made a
+ * photo on a put-away write-only. It also answers "who took the last one?"
+ */
+export async function getLocationHistory(
+  locationId: string,
+  limit = 20,
+): Promise<LocationHistoryEntry[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    .select(MOVEMENT_COLUMNS)
+    .eq('location_id', locationId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error fetching location history:', error);
+    throw error;
+  }
+  return hydrateMovements((data ?? []) as unknown as MovementRow[]);
+}
+
+/**
+ * What has happened anywhere in the shop lately.
+ *
+ * This is what replaces browsing a drawn board on the operator surface. A board is a map of places
+ * you are standing among — with 12–18 of them, walking beats scrolling. What a phone genuinely
+ * knows that you do not is *what changed while you were elsewhere*, and every row here is a tap
+ * straight to the place it happened in, so it doubles as the way to reach a bin whose label is
+ * missing.
+ *
+ * Rows with no `location_id` (an aggregate, non-location-tracked movement) are excluded — they
+ * name no place to go to.
+ */
+export async function getRecentActivity(
+  companyId: string,
+  limit = 15,
+): Promise<LocationHistoryEntry[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    .select(MOVEMENT_COLUMNS)
+    .eq('company_id', companyId)
+    .not('location_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error fetching recent inventory activity:', error);
+    throw error;
+  }
+  return hydrateMovements((data ?? []) as unknown as MovementRow[]);
 }

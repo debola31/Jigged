@@ -55,6 +55,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
+import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -86,12 +87,33 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
       .finally(() => setLoadingBalances(false));
   };
 
-  const total = useMemo(
-    () => (balances ?? []).reduce((n, b) => n + Number(b.quantity ?? 0), 0),
+  /**
+   * Three different answers, which the first version collapsed into one and got wrong.
+   *
+   * It rendered every `part_location_stock` row as somewhere the part "lives", so a seeded part
+   * showed **"240 ea across 1 place — Unassigned"**. That reads as a shelf. `Unassigned` is the
+   * put-away pile (`kind='system'`): 240 on hand and homeless is the OPPOSITE of 240 on a shelf,
+   * and it is exactly the case an operator holding the part needs to see.
+   *
+   * A zero row is not a location either. Balances are never deleted — `transfer_stock` decrements
+   * and `bulk_put_away` sets 0 — so a place the part has merely *passed through* keeps a row
+   * forever. Counting those inflates "across N places" and sends someone to an empty shelf.
+   */
+  // Each memo depends on `balances` directly. A shared `const all = balances ?? []` reads better
+  // but defeats the point: the `?? []` mints a new array identity every render, so both memos
+  // would recompute on every one.
+  const places = useMemo(
+    () => (balances ?? []).filter((b) => b.kind !== SYSTEM_KIND && Number(b.quantity ?? 0) > 0),
     [balances],
   );
-
-  const places = balances ?? [];
+  const unassigned = useMemo(
+    () => (balances ?? []).find((b) => b.kind === SYSTEM_KIND && Number(b.quantity ?? 0) > 0) ?? null,
+    [balances],
+  );
+  const total = useMemo(
+    () => places.reduce((n, b) => n + Number(b.quantity ?? 0), 0),
+    [places],
+  );
 
   return (
     <Box sx={{ mb: 3 }}>
@@ -129,14 +151,27 @@ export default function OperatorPartLookup({ companyId, onOpenLocation }: Operat
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
               <CircularProgress size={24} />
             </Box>
-          ) : places.length === 0 ? (
+          ) : places.length === 0 && !unassigned ? (
             <Alert severity="warning">None in any place right now.</Alert>
           ) : (
             <>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                {num(total)} {selected.primary_unit ?? ''} across{' '}
-                {places.length === 1 ? '1 place' : `${places.length} places`}
-              </Typography>
+              {/* Stock sitting in the put-away pile is called out FIRST and separately. It is the
+                  one state that tells an operator holding this part what to do — and the previous
+                  version rendered it as though `Unassigned` were a shelf they could walk to. */}
+              {unassigned && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  <strong>
+                    {num(unassigned.quantity)} {selected.primary_unit ?? ''}
+                  </strong>{' '}
+                  not put away yet.
+                </Alert>
+              )}
+              {places.length > 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  {num(total)} {selected.primary_unit ?? ''} on{' '}
+                  {places.length === 1 ? '1 shelf' : `${places.length} shelves`}
+                </Typography>
+              )}
               <Stack spacing={1}>
                 {places.map((b) => (
                   <Card key={b.location_id} elevation={2}>

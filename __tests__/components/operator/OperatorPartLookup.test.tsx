@@ -65,8 +65,8 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
   it('shows every place the part sits, with the full path', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
-      { location_id: 'l1', location_name: 'Left', location_code: 'CAB1-R3-L', path: ['Cabinet 1', 'Row 3', 'Left'], quantity: 40 },
-      { location_id: 'l2', location_name: 'Yard', location_code: 'YARD', path: ['Yard'], quantity: 200 },
+      { location_id: 'l1', location_name: 'Left', location_code: 'CAB1-R3-L', path: ['Cabinet 1', 'Row 3', 'Left'], quantity: 40, kind: 'shelf' },
+      { location_id: 'l2', location_name: 'Yard', location_code: 'YARD', path: ['Yard'], quantity: 200, kind: 'shelf' },
     ]);
     renderLookup();
     await pick(user);
@@ -76,13 +76,13 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     expect(screen.getByText('Cabinet 1 › Row 3 › Left')).toBeInTheDocument();
     expect(screen.getByText('40 ea')).toBeInTheDocument();
     expect(screen.getByText('200 ea')).toBeInTheDocument();
-    expect(screen.getByText(/240 ea across 2 places/)).toBeInTheDocument();
+    expect(screen.getByText(/240 ea on 2 shelves/)).toBeInTheDocument();
   });
 
   it('navigates to the place, which is the point of looking it up', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
-      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12 },
+      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12, kind: 'shelf' },
     ]);
     renderLookup();
     await pick(user);
@@ -133,7 +133,7 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
   it('clears the answer when the part is deselected', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
-      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12 },
+      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12, kind: 'shelf' },
     ]);
     renderLookup();
     await pick(user);
@@ -153,5 +153,76 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     renderLookup();
     expect(pickerProps.kind).toBe('stocked');
     expect(pickerProps.onCreateNew).toBeUndefined();
+  });
+});
+
+/**
+ * The three answers to "where is this?", which the first version collapsed into one.
+ *
+ * It rendered every `part_location_stock` row as somewhere the part lives, so a part sitting in the
+ * put-away pile showed "240 ea across 1 place — Unassigned". `Unassigned` is `kind='system'`: it is
+ * the pile, not a shelf, and 240 homeless is the opposite of 240 shelved. Balances are also never
+ * deleted, so a place the part merely passed through keeps a zero row forever.
+ */
+describe('OperatorPartLookup — where it lives vs where it is piled', () => {
+  const shelf = (over = {}) => ({
+    location_id: 'l1',
+    location_name: 'Shelf A',
+    location_code: 'A',
+    path: ['Cabinet 1', 'Shelf A'],
+    quantity: 40,
+    kind: 'shelf',
+    ...over,
+  });
+  const pile = (qty = 240) => ({
+    location_id: 'sys',
+    location_name: 'Unassigned',
+    location_code: null,
+    path: ['Unassigned'],
+    quantity: qty,
+    kind: 'system',
+    ...{},
+  });
+
+  it('calls the put-away pile what it is, never a place the part lives', async () => {
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([pile(240)]);
+    renderLookup();
+    await pick(user);
+
+    expect(await screen.findByText(/not put away yet/i)).toBeInTheDocument();
+    // The old copy. "Unassigned" must never be presented as a shelf to walk to.
+    expect(screen.queryByText(/across 1 place/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/on 1 shelf/i)).not.toBeInTheDocument();
+  });
+
+  it('counts only shelves in the total, so nobody is sent to an empty one', async () => {
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([
+      shelf({ quantity: 40 }),
+      // Passed through here once; the row survives at zero forever.
+      shelf({ location_id: 'l2', location_name: 'Yard', path: ['Yard'], quantity: 0 }),
+      pile(200),
+    ]);
+    renderLookup();
+    await pick(user);
+
+    expect(await screen.findByText(/40 ea on 1 shelf/i)).toBeInTheDocument();
+    expect(screen.getByText('Shelf A')).toBeInTheDocument();
+    expect(screen.queryByText('Yard')).not.toBeInTheDocument();
+    // Both states shown, not merged: 40 shelved AND 200 still to put away.
+    expect(screen.getByText(/not put away yet/i)).toBeInTheDocument();
+  });
+
+  it('still says nowhere when there is genuinely nothing anywhere', async () => {
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([
+      shelf({ quantity: 0 }),
+      pile(0),
+    ]);
+    renderLookup();
+    await pick(user);
+
+    expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
   });
 });

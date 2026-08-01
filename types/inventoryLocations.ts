@@ -93,6 +93,11 @@ export interface PartLocationBalanceWithLocation {
   /** Full path, root → leaf, e.g. ['Cabinet 1', 'Row 3', 'Left']. */
   path: string[];
   quantity: number;
+  /**
+   * The location's kind. `'system'` marks the `Unassigned` bucket, which is NOT a place — it is
+   * the put-away pile. A caller answering "where does this live?" must not present it as a shelf.
+   */
+  kind: string | null;
 }
 
 /** A part stored at a given location, for the bin/scan view contents list. */
@@ -188,4 +193,7 @@ export interface LocationHistoryEntry {
   hasDiscrepancy: boolean;
   /** Set on both halves of a move, so the pair can be recognised as one action. */
   transferGroupId: string | null;
+  /** Null once the place is deleted; `locationName` survives it as a snapshot on the row. */
+  locationId: string | null;
+  locationName: string | null;
 }

@@ -913,3 +913,70 @@ describe('count runs are attributed', () => {
     expect(opts.operatorId).toBe('member-1');
   });
 });
+
+/**
+ * One part at one place, reached from the part page's "Count here".
+ */
+describe('counting one part at one place', () => {
+  const LOC4 = 'loc-shelf-a';
+
+  beforeEach(() => {
+    searchParams.set('location', LOC4);
+    searchParams.set('part', 'p1');
+    asMock(getLocations).mockResolvedValue([
+      { id: LOC4, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
+    ]);
+    asMock(loadPartAtLocationCandidate).mockResolvedValue(
+      cand({
+        partId: 'p1',
+        partName: '4140 bar',
+        quantity: undefined,
+        systemQuantity: 580,
+        unit: 'ea',
+        target: { kind: 'location', locationId: LOC4, locationName: 'Shelf A' },
+      } as Partial<CountCandidate> & { partId: string }),
+    );
+  });
+
+  afterEach(() => {
+    searchParams.delete('location');
+    searchParams.delete('part');
+  });
+
+  it('goes straight to a one-row sheet with nothing to pick', async () => {
+    renderPage();
+    expect(await screen.findByText('4140 bar')).toBeInTheDocument();
+    expect(inputFor('4140 bar')).toBeInTheDocument();
+    expect(screen.queryByText(/pick the parts/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Found in the browser, not by a test: step 0 is suppressed in part-scope, so the footer's
+   * "Back" rendered a blank page under the header. The only way out is back to the part.
+   */
+  it('offers no step-back into a picker that is not there', async () => {
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    expect(screen.queryByRole('button', { name: /^Back$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /back to part/i })).toBeInTheDocument();
+  });
+
+  it('sends you back to the part it came from', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    await user.click(screen.getByRole('button', { name: /back to part/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts/p1?tab=inventory');
+  });
+
+  it('surfaces a part that cannot be counted here instead of an empty sheet', async () => {
+    asMock(loadPartAtLocationCandidate).mockRejectedValue(
+      new Error("4140 bar isn't tracked by place, so it can't be counted at one."),
+    );
+    renderPage();
+    expect(await screen.findByText(/isn't tracked by place/i)).toBeInTheDocument();
+    expect(screen.queryByText(/nothing to count yet/i)).not.toBeInTheDocument();
+  });
+});

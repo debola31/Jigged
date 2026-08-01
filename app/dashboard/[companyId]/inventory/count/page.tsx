@@ -1297,7 +1297,10 @@ export default function InventoryCountPage() {
             zIndex: (t) => t.zIndex.appBar - 1,
           }}
         >
-          <Button onClick={() => setStep(0)}>Back</Button>
+          {/* No step-0 to go back TO in part-scope: the picker is suppressed there, so this
+              button rendered a blank page under the header. Caught in the browser, not by a
+              test — the step-0 block is conditional and the footer was not. */}
+          {!partScope && <Button onClick={() => setStep(0)}>Back</Button>}
           <Typography variant="body1" sx={{ fontWeight: 600 }}>
             {counted} of {sheet.length} counted
           </Typography>

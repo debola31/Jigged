@@ -171,3 +171,21 @@ export interface StockWriteOptions {
    */
   photoPath?: string | null;
 }
+
+/** One movement in a place's history, with its author and photo already resolved. */
+export interface LocationHistoryEntry {
+  id: string;
+  createdAt: string;
+  type: 'addition' | 'depletion' | 'adjustment';
+  itemName: string;
+  quantity: number;
+  unit: string;
+  notes: string | null;
+  /** Null when the movement predates operator attribution, or the name could not be read. */
+  actorName: string | null;
+  /** Signed URL, or null when there is no photo — or the object has gone. */
+  photoUrl: string | null;
+  hasDiscrepancy: boolean;
+  /** Set on both halves of a move, so the pair can be recognised as one action. */
+  transferGroupId: string | null;
+}

@@ -22,6 +22,7 @@ import type {
   CreateLocationInput,
   DepleteOptions,
   StockWriteOptions,
+  LocationHistoryEntry,
   InventoryLocation,
   InventoryLocationNode,
   LocationContent,
@@ -999,3 +1000,97 @@ export async function bulkPutAway(
   return data as unknown as PutAwayResult;
 }
 
+
+// ===========================================================================
+// Bin history
+// ===========================================================================
+
+/**
+ * What has happened in one place lately.
+ *
+ * Until now there was **no operator-side ledger view at all** — the history existed in
+ * `inventory_transactions` and could only be read from the admin part page. That made a photo on a
+ * movement write-only: worth taking, impossible to look at. This is the read half.
+ *
+ * ## Why the author needs a second query
+ *
+ * `operator_id` has **no foreign key** (`inventory_transactions`' only FKs are `company_id`,
+ * `job_id`, `job_operation_id`, `part_id`), so the PostgREST embed the notes feed uses —
+ * `author:user_company_access(name)` — cannot work here: an embed needs a declared relationship.
+ * Hence one extra round trip to resolve ids to names. Adding the FK would be the tidier fix, but it
+ * needs the existing column values validated first, so it is deliberately not done here.
+ *
+ * `created_by` is no help: it holds an `auth.users` id, which the browser cannot read at all.
+ * A movement written before `operator_id` was populated on add/adjust/transfer simply has no
+ * author, and renders as such rather than guessing.
+ *
+ * Three requests, all batched, regardless of how many rows come back: the page, the distinct
+ * authors, and one signed-URL call for every photo.
+ */
+export async function getLocationHistory(
+  locationId: string,
+  limit = 20,
+): Promise<LocationHistoryEntry[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    // One literal, never a concatenation: the typed client parses this string at compile time to
+    // infer the row shape, and a `'a, b' + 'c'` expression defeats that — it degrades silently to
+    // `GenericStringError[]`, which is what tsc caught here.
+    .select('id, created_at, type, item_name, quantity, unit, notes, operator_id, photo_path, has_discrepancy, transfer_group_id')
+    .eq('location_id', locationId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error fetching location history:', error);
+    throw error;
+  }
+
+  const rows = (data ?? []) as Array<{
+    id: string;
+    created_at: string;
+    type: string;
+    item_name: string;
+    quantity: number;
+    unit: string;
+    notes: string | null;
+    operator_id: string | null;
+    photo_path: string | null;
+    has_discrepancy: boolean;
+    transfer_group_id: string | null;
+  }>;
+  if (rows.length === 0) return [];
+
+  const actorIds = [...new Set(rows.map((r) => r.operator_id).filter((v): v is string => !!v))];
+  const photoPaths = rows.map((r) => r.photo_path).filter((v): v is string => !!v);
+
+  const [actors, photoUrls] = await Promise.all([
+    actorIds.length > 0
+      ? supabase.from('user_company_access').select('id, name').in('id', actorIds)
+      : Promise.resolve({ data: [], error: null }),
+    photoPaths.length > 0 ? getSignedUrls(photoPaths, PHOTO_URL_EXPIRY_SECONDS) : Promise.resolve(EMPTY_URLS),
+  ]);
+
+  // A failed name lookup must not take the history down with it — the movements are the point,
+  // the names are the caption.
+  const nameById = new Map<string, string>();
+  for (const a of (actors.data ?? []) as Array<{ id: string; name: string | null }>) {
+    if (a.name) nameById.set(a.id, a.name);
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    type: r.type === 'addition' || r.type === 'depletion' ? r.type : 'adjustment',
+    itemName: r.item_name,
+    quantity: Number(r.quantity ?? 0),
+    unit: r.unit,
+    notes: r.notes,
+    actorName: r.operator_id ? nameById.get(r.operator_id) ?? null : null,
+    photoUrl: r.photo_path ? photoUrls.get(r.photo_path) ?? null : null,
+    hasDiscrepancy: Boolean(r.has_discrepancy),
+    transferGroupId: r.transfer_group_id,
+  }));
+}

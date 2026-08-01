@@ -21,7 +21,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
-import { resolveScan, getLocations } from '@/utils/inventoryLocationsAccess';
+import { resolveScan, getLocations, getLocationHistory } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
@@ -31,6 +31,7 @@ import OperatorLocationActionModal, {
   type OperatorLocationAction,
 } from '@/components/operator/OperatorLocationActionModal';
 import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
+import BinHistory from '@/components/operator/BinHistory';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -98,6 +99,22 @@ export default function OperatorBinViewPage() {
    * that the operator's context is already known — making them wait after tapping Move would
    * undo that. It's one small read of a tree a shop has a couple of dozen nodes in.
    */
+  /**
+   * Recent movements here. Keyed on the same `locationId` as the scan, and reloaded by the same
+   * `reload` the action modals call — so a put-away you just recorded appears without a refresh,
+   * which is the whole point of showing it to the person who made it.
+   */
+  const {
+    data: history,
+    loading: historyLoading,
+    reload: reloadHistory,
+  } = useLoad(() => getLocationHistory(locationId), [locationId]);
+
+  /** Both, always: a movement changes the contents AND adds a history row. */
+  const reloadAll = async () => {
+    await Promise.all([reload(), reloadHistory()]);
+  };
+
   const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
   const moveDestinations = useMemo(() => {
     const list = allLocations ?? [];
@@ -296,6 +313,18 @@ export default function OperatorBinViewPage() {
         )}
       </Box>
 
+      {/* Recent movements, last. The contents above answer "what is here now"; this answers
+          "what happened here", including the photo whoever moved it left behind. Before this there
+          was no operator-side ledger view at all, which is what made a movement photo write-only. */}
+      <Box sx={{ mt: 4 }}>
+        <Typography variant="overline" color="text.secondary">
+          Recent activity
+        </Typography>
+        <Box sx={{ mt: 0.5 }}>
+          <BinHistory entries={history} loading={historyLoading} />
+        </Box>
+      </Box>
+
       {modal && (
         <OperatorLocationActionModal
           open
@@ -311,7 +340,7 @@ export default function OperatorBinViewPage() {
           moveDestinations={moveDestinations}
           operatorId={operatorId}
           onClose={() => setModal(null)}
-          onDone={reload}
+          onDone={reloadAll}
         />
       )}
 
@@ -323,7 +352,7 @@ export default function OperatorBinViewPage() {
         excludePartIds={contents.map((c) => c.part_id)}
         operatorId={operatorId}
         onClose={() => setReceiveOpen(false)}
-        onDone={reload}
+        onDone={reloadAll}
       />
     </Box>
   );

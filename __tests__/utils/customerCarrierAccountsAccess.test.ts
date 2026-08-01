@@ -13,6 +13,8 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import { pickCarrierAccount } from '@/utils/customerCarrierAccountsAccess';
+import { resolveFreightLine } from '@/utils/shipmentsAccess';
+import { describeShipmentFreight } from '@/types/shipment';
 import {
   toBillToParty,
   maskAccountNumber,
@@ -121,5 +123,150 @@ describe('describeFreightAccount — masked for print, full for the bench', () =
     expect(describeFreightAccount(ltl, { mask: true })).toBe(
       'Bill receiver (their account) — R+L Carriers',
     );
+  });
+});
+
+describe('resolveFreightLine — the job wins over the customer default', () => {
+  const ups = account({ id: 'ups', carrier: 'UPS', bill_to_party: 'third_party' });
+  const ltl = account({ id: 'ltl', carrier: 'R+L', bill_to_party: 'recipient', account_number: null });
+
+  it('uses the account the JOB named, even when the customer has others', () => {
+    // The PO said this one. That is the most specific instruction we have, and
+    // re-deriving from the customer default at pack time would contradict it.
+    const r = resolveFreightLine({
+      jobFreightTerms: 'third_party',
+      jobCarrierAccountId: 'ups',
+      customerAccounts: [ups, ltl],
+    });
+    expect(r.account?.id).toBe('ups');
+    expect(r.terms).toBe('third_party');
+    expect(r.source).toBe('job');
+    expect(r.requiresChoice).toBe(false);
+  });
+
+  it("honours the job's prepaid even for a customer who normally ships collect", () => {
+    // "This one prepaid, we're in a hurry" is an ordinary thing for a PO to say.
+    // prepaid needs no account, so there is nothing to choose.
+    const r = resolveFreightLine({
+      jobFreightTerms: 'prepaid',
+      jobCarrierAccountId: null,
+      customerAccounts: [ups],
+    });
+    expect(r.terms).toBe('prepaid');
+    expect(r.account).toBeNull();
+    expect(r.requiresChoice).toBe(false);
+    expect(r.source).toBe('job');
+  });
+
+  it('falls back to the customer standing arrangement when the job is silent', () => {
+    const r = resolveFreightLine({
+      jobFreightTerms: null,
+      jobCarrierAccountId: null,
+      customerAccounts: [ups],
+    });
+    expect(r.account?.id).toBe('ups');
+    expect(r.terms).toBe('third_party');
+    expect(r.source).toBe('customer');
+  });
+
+  it('derives collect (not third_party) from a bill-receiver account', () => {
+    const r = resolveFreightLine({
+      jobFreightTerms: null,
+      jobCarrierAccountId: null,
+      customerAccounts: [ltl],
+    });
+    expect(r.terms).toBe('collect');
+    expect(r.account?.id).toBe('ltl');
+  });
+
+  it('asks instead of guessing when the customer has two accounts', () => {
+    // The expensive silent failure: billing to whichever row sorted first.
+    const r = resolveFreightLine({
+      jobFreightTerms: null,
+      jobCarrierAccountId: null,
+      customerAccounts: [ups, ltl],
+    });
+    expect(r.account).toBeNull();
+    expect(r.requiresChoice).toBe(true);
+  });
+
+  it('still asks when the job says collect but not which account', () => {
+    // Terms alone are not enough for collect/third_party — someone has to say
+    // whose account, and with two candidates we must not pick.
+    const r = resolveFreightLine({
+      jobFreightTerms: 'collect',
+      jobCarrierAccountId: null,
+      customerAccounts: [ups, ltl],
+    });
+    expect(r.terms).toBe('collect');
+    expect(r.account).toBeNull();
+    expect(r.requiresChoice).toBe(true);
+  });
+
+  it('is inert for a customer with no accounts — we pay, exactly as before', () => {
+    const r = resolveFreightLine({
+      jobFreightTerms: null,
+      jobCarrierAccountId: null,
+      customerAccounts: [],
+    });
+    expect(r).toEqual({ terms: null, account: null, requiresChoice: false, source: 'none' });
+  });
+});
+
+describe('describeShipmentFreight — everything printed comes from the snapshot', () => {
+  it('prints the last 4 only', () => {
+    expect(
+      describeShipmentFreight({
+        freight_terms: 'third_party',
+        freight_account_snapshot: {
+          carrier: 'UPS',
+          bill_to_party: 'third_party',
+          has_account: true,
+          account_last4: '72W9',
+        },
+      }),
+    ).toBe('Bill third party — UPS ••••72W9');
+  });
+
+  it('says an account is on file when it was too short to reveal any of it', () => {
+    // A 4-character account has no last-4 worth showing, but the dock still
+    // needs to know the freight bills to them rather than riding on the BOL.
+    expect(
+      describeShipmentFreight({
+        freight_terms: 'collect',
+        freight_account_snapshot: {
+          carrier: 'FedEx',
+          bill_to_party: 'recipient',
+          has_account: true,
+          account_last4: null,
+        },
+      }),
+    ).toBe('Freight collect (their account) — FedEx (account on file)');
+  });
+
+  it('names just the carrier when there is no account (LTL on the BOL)', () => {
+    expect(
+      describeShipmentFreight({
+        freight_terms: 'collect',
+        freight_account_snapshot: {
+          carrier: 'R+L Carriers',
+          bill_to_party: 'recipient',
+          has_account: false,
+          account_last4: null,
+        },
+      }),
+    ).toBe('Freight collect (their account) — R+L Carriers');
+  });
+
+  it('returns null with no freight at all, so the row is omitted not blank', () => {
+    expect(
+      describeShipmentFreight({ freight_terms: null, freight_account_snapshot: null }),
+    ).toBeNull();
+  });
+
+  it('handles terms with no account — prepaid needs none', () => {
+    expect(
+      describeShipmentFreight({ freight_terms: 'prepaid', freight_account_snapshot: null }),
+    ).toBe('We pay (prepaid)');
   });
 });

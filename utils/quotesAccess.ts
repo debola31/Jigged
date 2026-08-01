@@ -1355,6 +1355,14 @@ export async function convertQuoteToJob(
       billing_address_id: quote.billing_address_id,
       shipping_address_id: quote.shipping_address_id,
       contact_id: quote.contact_id,
+      // FREIGHT IS DELIBERATELY LEFT NULL HERE, unlike the address/contact above.
+      // jobs.freight_terms means "what the customer's PO said for this order".
+      // Seeding it from their standing arrangement would make the job assert
+      // something the PO may never have stated, and resolveFreightLine would
+      // then report the value as coming from the job when it really came from
+      // the customer. Left null, the fallback happens at ship time with honest
+      // provenance, and the job's Freight section stays empty until someone
+      // types what the PO actually says.
       created_by: user.id,
     })
     .select('id, job_number')

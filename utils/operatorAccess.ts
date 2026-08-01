@@ -55,6 +55,13 @@ export async function getCurrentMember(companyId: string): Promise<{
   id: string;
   name: string | null;
   user_id: string;
+  /**
+   * The caller's role in THIS company. Selected here rather than through a second
+   * query because every note surface already calls this to resolve `id`, and
+   * delete gating needs author-or-admin (#628). `useUserRole` would issue a second
+   * round trip for a value that is on the row we are already fetching.
+   */
+  role: string | null;
 } | null> {
   const supabase = getSupabase();
 
@@ -63,7 +70,7 @@ export async function getCurrentMember(companyId: string): Promise<{
 
   const { data: member } = await supabase
     .from('user_company_access')
-    .select('id, name, user_id')
+    .select('id, name, user_id, role')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
@@ -1298,7 +1305,7 @@ export async function getJobPartsOverview(
 const JOB_NOTE_SELECT =
   'id, subject_kind, job_id, job_operation_id, captured_job_id, ' +
   'captured_job_operation_id, part_id, routing_operation_id, ' +
-  'viewer_count, usage_count, body, note_type, created_at, ' +
+  'viewer_count, usage_count, body, note_type, created_at, edited_at, ' +
   'author_id, author:user_company_access(name), ' +
   // Reactions embed because they are PUBLIC within the shop — the deliberate
   // opposite of note_views, which has no client read path at any level. Count and
@@ -1351,6 +1358,7 @@ type JobNoteRow = {
   body: string | null;
   note_type: string | null;
   created_at: string;
+  edited_at: string | null;
   author_id: string | null;
   author: { name: string | null } | { name: string | null }[] | null;
   reactions: ReactionRel[] | null;
@@ -1402,6 +1410,7 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
     body: n.body,
     note_type: n.note_type === 'event' ? 'event' : 'user',
     created_at: n.created_at,
+    edited_at: n.edited_at,
     author_name: author?.name ?? null,
     subject_kind: n.subject_kind === 'part' || n.subject_kind === 'work_center'
       ? n.subject_kind
@@ -1558,6 +1567,60 @@ export async function addJobNote(
   return mapJobNoteRow(data as unknown as JobNoteRow);
 }
 
+/**
+ * Edit the body of a note you wrote (#628).
+ *
+ * ONE function for every `notes` surface. The job feed, the Playbook sheet, My work
+ * and the machine logbook are four READ shapes over one table; a second update
+ * function would be a second place for the blank-body rule to drift out of step.
+ *
+ * WHAT THIS CANNOT DO, and it is structural rather than a convention here: the
+ * browser holds `GRANT UPDATE (body)` and nothing else, so `viewer_count`,
+ * `usage_count`, `author_id`, `note_type`, `maintenance_kind`, `resolves_note_id`
+ * and every subject column are unwritable — not merely "not written by this
+ * function". Editing therefore NEVER resets a note's reach. That is deliberate:
+ * a resettable counter would hand an author a timed read-oracle on their own notes
+ * (see the migration header and docs/modules/operator-view.md). The honesty cost of
+ * keeping the count is carried by `edited_at` and the "· edited" marker instead.
+ *
+ * `edited_at` is likewise absent from the payload — the database stamps it in a
+ * BEFORE UPDATE trigger, and only when the body actually changed, so a no-op
+ * re-save leaves the note unmarked.
+ *
+ * `body` may be null for a media-only note (the `notes_body_blank_or_null` CHECK
+ * permits NULL but not blank), so blank normalises to null here. Callers must
+ * refuse an empty body on a note with no media — an empty note is a delete, and
+ * the UI offers that instead.
+ *
+ * Returns only the two columns that can have changed. Every caller already holds
+ * the note it is editing, so patching `{ body, edited_at }` into it is cheaper and
+ * less error-prone than re-selecting one of four different embed shapes here.
+ */
+export async function updateNoteBody(
+  noteId: string,
+  body: string | null,
+): Promise<{ body: string | null; edited_at: string | null }> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('notes')
+    .update({ body: body?.trim() || null })
+    .eq('id', noteId)
+    .select('body, edited_at')
+    .single();
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not save that change.',
+      }),
+    );
+  }
+
+  return data as { body: string | null; edited_at: string | null };
+}
+
 /** Resolve a step's identity for the RPC's legacy step-name fallback. */
 async function getStepIdentity(
   jobOperationId: string,
@@ -1575,6 +1638,7 @@ type PlaybookRow = {
   id: string;
   body: string | null;
   created_at: string;
+  edited_at: string | null;
   note_type: string | null;
   subject_kind: string;
   routing_operation_id: string | null;
@@ -1679,6 +1743,7 @@ export async function getPartPreviousNotes(
     body: r.body,
     note_type: r.note_type === 'event' ? 'event' : 'user',
     created_at: r.created_at,
+    edited_at: r.edited_at,
     author_name: r.author_name,
     author_id: r.author_id,
     reactions: mapReactions(r.reactions),
@@ -1728,7 +1793,7 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
   const { data, error } = await supabase
     .from('notes')
     .select(
-      'id, body, created_at, viewer_count, usage_count, ' +
+      'id, body, created_at, edited_at, viewer_count, usage_count, ' +
         'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
         'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
         'part:parts(part_name), ' +
@@ -1754,6 +1819,7 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     id: string;
     body: string | null;
     created_at: string;
+    edited_at: string | null;
     viewer_count: number;
     usage_count: number;
     operation: StepRel;
@@ -1775,6 +1841,7 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
       id: r.id,
       body: r.body,
       created_at: r.created_at,
+      edited_at: r.edited_at,
       job_id: job?.id ?? null,
       job_number: job?.job_number ?? null,
       // A durable part-subject note has no step of its own; the step it was

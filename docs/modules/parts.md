@@ -174,6 +174,15 @@ An **editable, maturity-adaptive workspace** (`PartWorkspace`) — not a read-on
 - **Usage** — jobs and quotes that reference this part.
 - **Files** — engineering attachments (`?tab=files`, always visible).
 - **Activity** — the part Notes + transaction feed (its slug stays `history` for back-compat).
+  A `user` comment is **editable by its author and deletable by its author or a company admin**
+  ([#628](https://github.com/debola31/Jigged/issues/628)); an edited one renders "· edited". Edit is
+  author-only on purpose, asymmetric with delete: an admin who could reword somebody else's comment
+  would change what it says without changing whose name is on it. Auto-logged `pricing` entries are
+  neither editable nor deletable — they are the audit trail, and the RLS policies exclude them by
+  `note_type` rather than trusting the UI to hide the control. `part_comments` also carries a
+  column-scoped `UPDATE (body)` grant and a guard trigger, so an edit cannot reach `author_id` or
+  `note_type`; its legacy blanket `GRANT ALL` (which included `TRUNCATE`) was narrowed in the same
+  migration.
 
 A sticky header shows the part name and a completeness/priceability chip. Delete lives in the header; it **archives** the part (never disabled, never blocked — even when quotes/jobs/BOM parents reference it) and detaches it from other parts' BOMs so their costs recompute. See `docs/architecture.md` §16.
 

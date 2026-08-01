@@ -15,8 +15,13 @@ import CircularProgress from '@mui/material/CircularProgress';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CloseIcon from '@mui/icons-material/Close';
-import { getPartPreviousNotes, getCurrentMember } from '@/utils/operatorAccess';
+import { getPartPreviousNotes, getCurrentMember, updateNoteBody } from '@/utils/operatorAccess';
+import { deleteJobNote, deleteJobNoteMedia } from '@/utils/jobNoteMediaAccess';
 import NoteReactions from '@/components/operator/NoteReactions';
+import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
+import NoteEditDialog from '@/components/notes/NoteEditDialog';
+import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
 import NoteMediaGallery from '@/components/operator/NoteMediaGallery';
@@ -52,11 +57,17 @@ function NoteRow({
   observe,
   companyId,
   memberId,
+  isAdmin,
+  onEdit,
+  onDelete,
 }: {
   note: PartPreviousNote;
   observe: (id: string) => (el: HTMLElement | null) => void;
   companyId: string;
   memberId: string | null;
+  isAdmin: boolean;
+  onEdit: (note: PartPreviousNote) => void;
+  onDelete: (note: PartPreviousNote) => void;
 }) {
   return (
     <Box>
@@ -70,7 +81,16 @@ function NoteRow({
         <Box sx={{ flex: 1 }} />
         <Typography variant="caption" color="text.secondary">
           {note.job_number} · {formatTimestamp(note.created_at)}
+          <NoteEditedMark editedAt={note.edited_at} />
         </Typography>
+        {note.note_type === 'user' && (
+          <NoteActionsMenu
+            canEdit={memberId !== null && note.author_id === memberId}
+            canDelete={memberId !== null && (note.author_id === memberId || isAdmin)}
+            onEdit={() => onEdit(note)}
+            onDelete={() => onDelete(note)}
+          />
+        )}
       </Box>
       {note.body && (
         <Typography ref={observe(note.id)} variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
@@ -149,17 +169,31 @@ export default function PartNotesSheet({
   // Who is reading. Needed to know whether they have already marked a note
   // helpful, and to hide the control on their own notes (RLS forbids reacting to
   // them, so the button would be a guaranteed failure).
-  const { data: memberId } = useLoad(
-    async () => (open ? ((await getCurrentMember(companyId))?.id ?? null) : null),
+  const { data: member } = useLoad(
+    async () => (open ? await getCurrentMember(companyId) : null),
     [companyId, open],
   );
+  const memberId = member?.id ?? null;
+  const isAdmin = member?.role === 'admin';
+
+  // Edit / delete state (#628). The Playbook is a READ surface, so these live
+  // behind the per-note overflow menu rather than adding any standing chrome.
+  const [editingNote, setEditingNote] = useState<PartPreviousNote | null>(null);
+  const [deletingNote, setDeletingNote] = useState<PartPreviousNote | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   // THE surface the read-back loop exists to measure: knowledge from a previous
   // run, being read on a new one. excludeJobId is the job the operator is
   // standing in, so it is the right read context for the per-job dedupe.
   const { observe } = useNoteDwell(companyId, excludeJobId, open);
 
-  const { data, loading, error } = useLoad(
+  const {
+    data,
+    loading,
+    error,
+    reload,
+  } = useLoad(
     () =>
       getPartPreviousNotes(partId, companyId, {
         excludeJobId,
@@ -249,12 +283,87 @@ export default function PartNotesSheet({
             {notes.map((note, idx) => (
               <Box key={note.id}>
                 {idx > 0 && <Divider sx={{ my: 1.5 }} />}
-                <NoteRow note={note} observe={observe} companyId={companyId} memberId={memberId} />
+                <NoteRow
+                  note={note}
+                  observe={observe}
+                  companyId={companyId}
+                  memberId={memberId}
+                  isAdmin={isAdmin}
+                  onEdit={(n) => {
+                    setRowError(null);
+                    setEditingNote(n);
+                  }}
+                  onDelete={(n) => {
+                    setRowError(null);
+                    setDeletingNote(n);
+                  }}
+                />
               </Box>
             ))}
           </Box>
         )}
       </Box>
+
+      {editingNote && (
+      <NoteEditDialog
+        key={editingNote.id}
+        open
+        initialBody={editingNote.body}
+        media={editingNote.media}
+        saving={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setEditingNote(null);
+          setRowError(null);
+        }}
+        onSave={async ({ body, removedMediaIds }) => {
+          if (!editingNote) return;
+          setRowBusy(true);
+          setRowError(null);
+          try {
+            await updateNoteBody(editingNote.id, body);
+            for (const id of removedMediaIds) {
+              const m = editingNote.media.find((x) => x.id === id);
+              if (m) await deleteJobNoteMedia({ id: m.id, storage_path: m.storage_path });
+            }
+            setEditingNote(null);
+            // Refetch rather than patch: the RPC ranks by usage and helpful marks
+            // with a recency guard, so the list's ORDER is server-owned. Editing
+            // cannot move a note (the ranking reads created_at, never edited_at)
+            // but re-reading keeps one refresh path for both edit and delete.
+            await reload();
+          } catch (err) {
+            setRowError(err instanceof Error ? err.message : 'Could not save that change.');
+          } finally {
+            setRowBusy(false);
+          }
+        }}
+      />
+      )}
+
+      <NoteDeleteDialog
+        open={deletingNote !== null}
+        deleting={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setDeletingNote(null);
+          setRowError(null);
+        }}
+        onConfirm={async () => {
+          if (!deletingNote) return;
+          setRowBusy(true);
+          setRowError(null);
+          try {
+            await deleteJobNote(deletingNote.id);
+            setDeletingNote(null);
+            await reload();
+          } catch (err) {
+            setRowError(err instanceof Error ? err.message : 'Could not delete that note.');
+          } finally {
+            setRowBusy(false);
+          }
+        }}
+      />
     </Dialog>
   );
 }

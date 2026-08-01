@@ -13,10 +13,13 @@ vi.mock('@/utils/operatorAccess', () => ({
   getJobNotes: vi.fn(),
   addJobNote: vi.fn(),
   getCurrentMember: vi.fn(),
+  updateNoteBody: vi.fn(),
 }));
 vi.mock('@/utils/jobNoteMediaAccess', () => ({
   addJobNoteMedia: vi.fn(),
   getJobNoteMediaUrl: vi.fn(),
+  deleteJobNote: vi.fn(),
+  deleteJobNoteMedia: vi.fn(),
 }));
 vi.mock('@/utils/imageCompression', () => ({ compressPhoto: vi.fn() }));
 // Dwell tracking imports the Supabase client at module scope; it has its own
@@ -39,6 +42,7 @@ function makeNote(over: Partial<JobNote> = {}): JobNote {
     body: 'existing note',
     note_type: 'user',
     created_at: '2026-07-01T10:00:00.000Z',
+    edited_at: null,
     author_name: 'Op',
     author_id: 'them',
     reactions: [],
@@ -273,5 +277,82 @@ describe('JobFeed — capture funnel events', () => {
     expect(
       mock(logOperatorEvent).mock.calls.some((c: unknown[]) => c[1] === 'composer_abandoned'),
     ).toBe(false);
+  });
+});
+
+// ============================================================================
+// Edit / delete affordances (#628)
+// ============================================================================
+// The permission rules are the part worth testing here: getting them wrong
+// offers an action that RLS will refuse, which reads to an operator as a broken
+// button rather than as a boundary.
+
+describe('note actions', () => {
+  const menuFor = () => screen.queryByRole('button', { name: /Actions for this note/i });
+
+  it('offers no actions on somebody else’s note', async () => {
+    mock(getJobNotes).mockResolvedValue([makeNote({ author_id: 'them' })]);
+    renderFeed();
+    await screen.findByText('existing note');
+
+    expect(menuFor()).not.toBeInTheDocument();
+  });
+
+  it('offers Edit and Delete on your own note', async () => {
+    const user = userEvent.setup();
+    mock(getJobNotes).mockResolvedValue([makeNote({ author_id: 'op1' })]);
+    renderFeed();
+    await screen.findByText('existing note');
+
+    await user.click(menuFor()!);
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('offers Delete but NOT Edit to an admin on somebody else’s note', async () => {
+    const user = userEvent.setup();
+    mock(getCurrentMember).mockResolvedValue({ id: 'boss', name: 'Boss', role: 'admin' });
+    mock(getJobNotes).mockResolvedValue([makeNote({ author_id: 'them' })]);
+    renderFeed();
+    await screen.findByText('existing note');
+
+    await user.click(menuFor()!);
+    // Deliberately asymmetric: an admin rewriting somebody else's note would
+    // change what it says without changing whose name is on it.
+    expect(screen.queryByRole('menuitem', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('offers nothing on an auto-logged event note, even to its own author', async () => {
+    mock(getJobNotes).mockResolvedValue([
+      makeNote({ author_id: 'op1', note_type: 'event', body: 'Order quantity changed' }),
+    ]);
+    renderFeed();
+    await screen.findByText('Order quantity changed');
+
+    // 'event' rows are the audit trail. RLS refuses them too, so the control
+    // would be a guaranteed 42501.
+    expect(menuFor()).not.toBeInTheDocument();
+  });
+
+  it('offers nothing on the read-only traveler feed', async () => {
+    mock(getJobNotes).mockResolvedValue([makeNote({ author_id: 'op1' })]);
+    renderFeed({ readOnly: true });
+    await screen.findByText('existing note');
+
+    expect(menuFor()).not.toBeInTheDocument();
+  });
+
+  it('marks an edited note, and leaves an unedited one unmarked', async () => {
+    mock(getJobNotes).mockResolvedValue([
+      makeNote({ id: 'a', body: 'was corrected', edited_at: '2026-08-01T10:00:00Z' }),
+      makeNote({ id: 'b', body: 'never touched', edited_at: null }),
+    ]);
+    renderFeed();
+    await screen.findByText('was corrected');
+
+    // One mark for the one edited note — the counter deliberately does not
+    // reset on an edit, so this is what tells a reader the words changed.
+    expect(screen.getAllByText(/edited/)).toHaveLength(1);
   });
 });

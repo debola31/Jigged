@@ -61,6 +61,7 @@ function row(over: Record<string, unknown> = {}) {
     maintenance_kind: 'noticed',
     resolves_note_id: null,
     created_at: '2026-07-01T00:00:00Z',
+    edited_at: null,
     viewer_count: 3,
     author_id: 'acc-1',
     author: { name: 'Kurtis' },
@@ -170,6 +171,24 @@ describe('getMachineLog', () => {
     mockQueryBuilder.error = { message: 'boom' };
     await expect(getMachineLog('wc1', 'c1')).rejects.toThrow('boom');
   });
+});
+
+describe('edited entries (#628)', () => {
+  it('carries edited_at through to the mapped entry', async () => {
+    mockQueryBuilder.data = [row({ edited_at: '2026-08-01T09:00:00Z' })];
+    const log = await getMachineLog('wc1', 'c1');
+    expect(log.entries[0].edited_at).toBe('2026-08-01T09:00:00Z');
+  });
+
+  it('leaves edited_at null on an entry nobody has corrected', async () => {
+    mockQueryBuilder.data = [row()];
+    const log = await getMachineLog('wc1', 'c1');
+    expect(log.entries[0].edited_at).toBeNull();
+  });
+
+  // The delete-a-resolver case — an item returning to "Needs attention" — is
+  // already covered by deriveOpenItems' "re-opens it when the fix is removed",
+  // which is that behaviour as pure logic. Not duplicated here.
 });
 
 describe('addMachineNote', () => {

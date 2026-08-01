@@ -16,8 +16,14 @@ import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import LaunchIcon from '@mui/icons-material/Launch';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import { getMyContribution, getNoteViewers } from '@/utils/operatorAccess';
+import { getMyContribution, getNoteViewers, updateNoteBody } from '@/utils/operatorAccess';
+import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
+import NoteEditDialog from '@/components/notes/NoteEditDialog';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
+import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
 import {
@@ -67,11 +73,24 @@ function ReachRow({ note }: { note: MyNote }) {
   );
 }
 
-function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
+function NoteRow({
+  note,
+  companyId,
+  onChanged,
+}: {
+  note: MyNote;
+  companyId: string;
+  /** Refetch the contribution list after an edit or a delete. */
+  onChanged: () => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewers, setViewers] = useState<NoteViewer[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Names are fetched only when the author asks for them. note_viewers() is the
   // one narrow window through which any reader's name is ever exposed — it is
@@ -123,6 +142,7 @@ function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
             <Typography variant="caption" color="text.secondary">
               {note.job_number ? `${note.job_number} · ` : ''}
               {formatDate(note.created_at)}
+              <NoteEditedMark editedAt={note.edited_at} />
             </Typography>
           </Box>
 
@@ -171,19 +191,110 @@ function NoteRow({ note, companyId }: { note: MyNote; companyId: string }) {
             </>
           )}
 
+          {/* THE PRIMARY HOME FOR EDIT AND DELETE (#628), and the one surface that
+              needs no permission test at all: getMyContribution already filters to
+              author_id = me AND note_type = 'user', so every note on this screen is
+              unconditionally the caller's own editable note.
+
+              Full-width buttons rather than the kebab used in the feeds, because
+              the card is one big CardActionArea and a button cannot nest inside a
+              button — the same constraint that put navigation down here in the
+              first place. */}
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              mt: note.viewer_count > 0 ? 1.5 : 0,
+            }}
+          >
+            <Button
+              variant="outlined"
+              fullWidth
+              startIcon={<EditOutlinedIcon />}
+              onClick={() => setEditing(true)}
+              sx={{ minHeight: 48 }}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              fullWidth
+              startIcon={<DeleteOutlineIcon />}
+              onClick={() => setConfirmingDelete(true)}
+              sx={{ minHeight: 48 }}
+            >
+              Delete
+            </Button>
+          </Box>
+
           {note.job_id && note.job_number && (
             <Button
               variant="outlined"
               fullWidth
               startIcon={<LaunchIcon />}
               onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
-              sx={{ minHeight: 48, mt: note.viewer_count > 0 ? 1.5 : 0 }}
+              sx={{ minHeight: 48, mt: 1.5 }}
             >
               Open {note.job_number}
             </Button>
           )}
         </Box>
       </Collapse>
+
+      {/* My work renders photo_count, not thumbnails — you cannot pick a photo to
+          remove that you cannot see — so no media is passed and the dialog is
+          text-only here. Removing individual photos lives on the three surfaces
+          that actually show them. */}
+      <NoteEditDialog
+        open={editing}
+        initialBody={note.body}
+        saving={busy}
+        error={actionError}
+        onClose={() => {
+          setEditing(false);
+          setActionError(null);
+        }}
+        onSave={async ({ body }) => {
+          setBusy(true);
+          setActionError(null);
+          try {
+            await updateNoteBody(note.id, body);
+            setEditing(false);
+            onChanged();
+          } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'Could not save that change.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+
+      <NoteDeleteDialog
+        open={confirmingDelete}
+        deleting={busy}
+        error={actionError}
+        onClose={() => {
+          setConfirmingDelete(false);
+          setActionError(null);
+        }}
+        onConfirm={async () => {
+          setBusy(true);
+          setActionError(null);
+          try {
+            // Reuses the existing helper, which reads the media storage paths
+            // BEFORE the cascade drops the rows and then removes the files. It has
+            // existed unused since the media work; this is its first caller.
+            await deleteJobNote(note.id);
+            setConfirmingDelete(false);
+            onChanged();
+          } catch (err) {
+            setActionError(err instanceof Error ? err.message : 'Could not delete that note.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
     </Card>
   );
 }
@@ -234,7 +345,10 @@ export default function MyWorkPage() {
 
 /** The operator's own notes and their reception. Owns its own loading/error/empty states. */
 function MyContribution({ companyId }: { companyId: string }) {
-  const { data, loading, error } = useLoad(() => getMyContribution(companyId), [companyId]);
+  const { data, loading, error, reload } = useLoad(
+    () => getMyContribution(companyId),
+    [companyId],
+  );
 
   if (loading) {
     return (
@@ -322,7 +436,7 @@ function MyContribution({ companyId }: { companyId: string }) {
           and each card becomes an addressable item rather than an anonymous div. */}
       <Box component="ul" sx={{ mt: 0.5, listStyle: 'none', p: 0, m: 0 }}>
         {c.notes.map((n) => (
-          <NoteRow key={n.id} note={n} companyId={companyId} />
+          <NoteRow key={n.id} note={n} companyId={companyId} onChanged={reload} />
         ))}
       </Box>
     </Box>

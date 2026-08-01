@@ -39,7 +39,10 @@ export default function MachineOpenItems({
   items,
   companyId,
   memberId,
+  isAdmin = false,
   onLogFix,
+  onEditItem,
+  onDeleteItem,
   replyingToId = null,
   renderReply,
   readOnly = false,
@@ -47,8 +50,20 @@ export default function MachineOpenItems({
   items: MachineNote[];
   companyId: string;
   memberId: string | null;
+  /** Widens delete (not edit) to any entry in the shop. */
+  isAdmin?: boolean;
   /** Absent in read-only (office) rendering, where there is nothing to act on. */
   onLogFix?: (item: MachineNote) => void;
+  /**
+   * Author-only edit of an outstanding item's wording (#628).
+   *
+   * Safe against §5's rule that this block must not name who raised what: the
+   * action menu shows only on the reader's OWN entry, so it reveals nothing they
+   * did not already know, and `hideAuthor` still suppresses every name. What §5
+   * forbids is a column of names read straight down, and that stays impossible.
+   */
+  onEditItem?: (item: MachineNote) => void;
+  onDeleteItem?: (item: MachineNote) => void;
   /** Item whose reply composer is open, if any. */
   replyingToId?: string | null;
   /** Renders the inline reply composer, directly beneath its item. */
@@ -85,6 +100,9 @@ export default function MachineOpenItems({
                 entry={item}
                 companyId={companyId}
                 memberId={memberId}
+                isAdmin={isAdmin}
+                onEdit={onEditItem ? () => onEditItem(item) : undefined}
+                onDelete={onDeleteItem ? () => onDeleteItem(item) : undefined}
                 isOpen
                 hideAuthor
                 // Hidden while its own reply is open: the composer sitting

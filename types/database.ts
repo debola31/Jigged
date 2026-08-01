@@ -1489,6 +1489,7 @@ export type Database = {
           company_id: string
           corrects_note_id: string | null
           created_at: string
+          edited_at: string | null
           id: string
           job_id: string | null
           job_operation_id: string | null
@@ -1511,6 +1512,7 @@ export type Database = {
           company_id: string
           corrects_note_id?: string | null
           created_at?: string
+          edited_at?: string | null
           id?: string
           job_id?: string | null
           job_operation_id?: string | null
@@ -1533,6 +1535,7 @@ export type Database = {
           company_id?: string
           corrects_note_id?: string | null
           created_at?: string
+          edited_at?: string | null
           id?: string
           job_id?: string | null
           job_operation_id?: string | null
@@ -1743,6 +1746,7 @@ export type Database = {
           body: string
           company_id: string
           created_at: string
+          edited_at: string | null
           id: string
           note_type: string
           part_id: string
@@ -1752,6 +1756,7 @@ export type Database = {
           body: string
           company_id: string
           created_at?: string
+          edited_at?: string | null
           id?: string
           note_type?: string
           part_id: string
@@ -1761,6 +1766,7 @@ export type Database = {
           body?: string
           company_id?: string
           created_at?: string
+          edited_at?: string | null
           id?: string
           note_type?: string
           part_id?: string
@@ -3592,6 +3598,13 @@ export type Database = {
           stored_viewers: number
         }[]
       }
+      note_counter_write_leaks: {
+        Args: never
+        Returns: {
+          column_name: string
+          role_name: string
+        }[]
+      }
       note_viewers: {
         Args: { p_note_id: string }
         Returns: {
@@ -3613,6 +3626,7 @@ export type Database = {
           body: string
           corrects_note_id: string
           created_at: string
+          edited_at: string
           id: string
           job_number: string
           media: Json

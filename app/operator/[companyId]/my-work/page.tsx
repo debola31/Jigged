@@ -250,8 +250,17 @@ function NoteRow({
           remove that you cannot see — so no media is passed and the dialog is
           text-only here. Removing individual photos lives on the three surfaces
           that actually show them. */}
+      {/* MOUNTED ONLY WHILE OPEN, like every other call site (JobFeed, PartNotesSheet,
+          MachineLogPanel all render `{editingNote && <NoteEditDialog open .../>}`).
+          This screen was the exception: it kept one edit dialog and one delete dialog
+          mounted per note row at open={false}, so a list of ten notes carried twenty
+          idle dialog subtrees. They rendered null, which is why nobody noticed — and
+          which is also why the render loop inside NoteEditDialog was invisible while it
+          held a core down. The loop is fixed at its source, but a dialog nobody has
+          opened should not be mounted at all. */}
+      {editing && (
       <NoteEditDialog
-        open={editing}
+        open
         initialBody={note.body}
         saving={busy}
         error={actionError}
@@ -273,9 +282,11 @@ function NoteRow({
           }
         }}
       />
+      )}
 
+      {confirmingDelete && (
       <NoteDeleteDialog
-        open={confirmingDelete}
+        open
         deleting={busy}
         error={actionError}
         onClose={() => {
@@ -299,6 +310,7 @@ function NoteRow({
           }
         }}
       />
+      )}
     </Card>
   );
 }

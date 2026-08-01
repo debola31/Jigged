@@ -31,7 +31,7 @@ import type {
 // is a stronger guarantee than remembering not to render it.
 const MACHINE_NOTE_SELECT =
   'id, work_center_id, body, maintenance_kind, resolves_note_id, ' +
-  'created_at, viewer_count, author_id, ' +
+  'created_at, edited_at, viewer_count, author_id, ' +
   'author:user_company_access(name), ' +
   'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
   'media:note_media(id, note_id, storage_path, thumbnail_path, kind, mime_type, width, height)';
@@ -45,6 +45,7 @@ type MachineNoteRow = {
   maintenance_kind: string | null;
   resolves_note_id: string | null;
   created_at: string;
+  edited_at: string | null;
   viewer_count: number;
   author_id: string | null;
   author: { name: string | null } | { name: string | null }[] | null;
@@ -87,6 +88,7 @@ function rowToNote(row: MachineNoteRow): MachineNote {
     maintenance_kind: narrowKind(row.maintenance_kind),
     resolves_note_id: row.resolves_note_id,
     created_at: row.created_at,
+    edited_at: row.edited_at,
     author_name: author?.name ?? null,
     author_id: row.author_id,
     viewer_count: row.viewer_count,

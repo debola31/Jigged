@@ -1,6 +1,6 @@
 -- ============================================================
 -- Jigged Manufacturing Data Platform - Database Schema
--- Generated: 2026-07-28T19:47:45Z
+-- Generated: 2026-08-01T00:54:19Z
 -- Schemas: public, storage
 -- ============================================================
 
@@ -385,7 +385,7 @@ CREATE TABLE IF NOT EXISTS "public"."operator_events"
     "context" jsonb NOT NULL DEFAULT '{}'::jsonb,
     "occurred_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "operator_events_pkey" PRIMARY KEY (id),
-    CONSTRAINT "operator_events_kind_check" CHECK ((kind = ANY (ARRAY['app_opened'::text, 'station_selected'::text, 'op_card_opened'::text, 'prior_notes_opened'::text, 'composer_focused'::text, 'composer_abandoned'::text, 'note_saved'::text, 'note_saved_with_photo'::text, 'photo_attached'::text, 'completion_recorded'::text])))
+    CONSTRAINT "operator_events_kind_check" CHECK ((kind = ANY (ARRAY['app_opened'::text, 'station_selected'::text, 'op_card_opened'::text, 'prior_notes_opened'::text, 'composer_focused'::text, 'composer_abandoned'::text, 'note_saved'::text, 'note_saved_with_photo'::text, 'photo_attached'::text, 'completion_recorded'::text, 'machine_page_opened'::text, 'noticed_resolved'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
@@ -795,11 +795,17 @@ CREATE TABLE IF NOT EXISTS "public"."work_centers"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     "deleted_at" timestamp with time zone,
+    "make" text,
+    "model" text,
+    "serial_number" text,
+    "year_built" integer,
+    "purchased_on" date,
     CONSTRAINT "work_centers_pkey" PRIMARY KEY (id),
     CONSTRAINT "work_centers_unique_per_company" UNIQUE (company_id, name),
     CONSTRAINT "work_centers_external_requires_vendor" CHECK (((kind = 'internal'::text) OR (vendor_id IS NOT NULL))),
     CONSTRAINT "work_centers_internal_no_vendor" CHECK (((kind = 'external'::text) OR (vendor_id IS NULL))),
-    CONSTRAINT "work_centers_kind_check" CHECK ((kind = ANY (ARRAY['internal'::text, 'external'::text])))
+    CONSTRAINT "work_centers_kind_check" CHECK ((kind = ANY (ARRAY['internal'::text, 'external'::text]))),
+    CONSTRAINT "work_centers_year_built_sane" CHECK (((year_built IS NULL) OR ((year_built >= 1900) AND (year_built <= 2200))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."routing_operations"
@@ -909,10 +915,15 @@ CREATE TABLE IF NOT EXISTS "public"."notes"
     "corrects_note_id" uuid,
     "viewer_count" integer NOT NULL DEFAULT 0,
     "usage_count" integer NOT NULL DEFAULT 0,
+    "maintenance_kind" text,
+    "resolves_note_id" uuid,
     CONSTRAINT "notes_pkey" PRIMARY KEY (id),
     CONSTRAINT "notes_body_blank_or_null" CHECK (((body IS NULL) OR (length(btrim(body)) > 0))),
+    CONSTRAINT "notes_maintenance_kind_valid" CHECK (((maintenance_kind IS NULL) OR ((subject_kind = 'work_center'::text) AND (maintenance_kind = ANY (ARRAY['cleaned'::text, 'repaired'::text, 'replaced'::text, 'adjusted'::text, 'noticed'::text]))))),
     CONSTRAINT "notes_no_self_correction" CHECK (((corrects_note_id IS NULL) OR (corrects_note_id <> id))),
+    CONSTRAINT "notes_no_self_resolution" CHECK (((resolves_note_id IS NULL) OR (resolves_note_id <> id))),
     CONSTRAINT "notes_note_type_check" CHECK ((note_type = ANY (ARRAY['user'::text, 'event'::text]))),
+    CONSTRAINT "notes_resolves_is_machine" CHECK (((resolves_note_id IS NULL) OR (subject_kind = 'work_center'::text))),
     CONSTRAINT "notes_subject_valid" CHECK (
 CASE subject_kind
     WHEN 'job'::text THEN ((job_id IS NOT NULL) AND ((job_operation_id IS NULL) OR (job_part_id IS NOT NULL)) AND (part_id IS NULL) AND (routing_operation_id IS NULL) AND (work_center_id IS NULL))
@@ -965,6 +976,22 @@ CREATE TABLE IF NOT EXISTS "public"."note_views"
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "note_views_pkey" PRIMARY KEY (id),
     CONSTRAINT "note_views_note_viewer_job_key" UNIQUE NULLS NOT DISTINCT (note_id, viewer_id, job_id)
+);
+
+CREATE TABLE IF NOT EXISTS "public"."work_center_attachments"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "work_center_id" uuid NOT NULL,
+    "storage_path" text NOT NULL,
+    "file_name" text NOT NULL,
+    "kind" text NOT NULL DEFAULT 'other'::text,
+    "mime_type" text,
+    "size_bytes" bigint,
+    "uploaded_by" uuid,
+    "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT "work_center_attachments_pkey" PRIMARY KEY (id),
+    CONSTRAINT "work_center_attachments_kind_check" CHECK ((kind = ANY (ARRAY['pdf'::text, 'image'::text, 'other'::text])))
 );
 
 -- ============================================================
@@ -1024,6 +1051,7 @@ ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."vendor_contacts" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."vendors" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."waitlist" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "public"."work_center_attachments" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."work_centers" ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
@@ -3268,6 +3296,52 @@ CREATE POLICY "anon_update_waitlist"
     USING (true)
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS "billing_gate_delete" ON "public"."work_center_attachments";
+CREATE POLICY "billing_gate_delete"
+    ON "public"."work_center_attachments"
+    AS RESTRICTIVE
+    FOR DELETE
+    TO authenticated
+    USING (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_insert" ON "public"."work_center_attachments";
+CREATE POLICY "billing_gate_insert"
+    ON "public"."work_center_attachments"
+    AS RESTRICTIVE
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "billing_gate_update" ON "public"."work_center_attachments";
+CREATE POLICY "billing_gate_update"
+    ON "public"."work_center_attachments"
+    AS RESTRICTIVE
+    FOR UPDATE
+    TO authenticated
+    USING (company_can_write(company_id))
+    WITH CHECK (company_can_write(company_id));
+
+DROP POLICY IF EXISTS "work_center_attachments_delete" ON "public"."work_center_attachments";
+CREATE POLICY "work_center_attachments_delete"
+    ON "public"."work_center_attachments"
+    FOR DELETE
+    TO authenticated
+    USING (((uploaded_by = get_operator_access_id(company_id)) OR is_company_admin(company_id)));
+
+DROP POLICY IF EXISTS "work_center_attachments_insert" ON "public"."work_center_attachments";
+CREATE POLICY "work_center_attachments_insert"
+    ON "public"."work_center_attachments"
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)) AND (uploaded_by = get_operator_access_id(company_id))));
+
+DROP POLICY IF EXISTS "work_center_attachments_select" ON "public"."work_center_attachments";
+CREATE POLICY "work_center_attachments_select"
+    ON "public"."work_center_attachments"
+    FOR SELECT
+    TO authenticated
+    USING ((company_id IN ( SELECT get_user_company_ids() AS get_user_company_ids)));
+
 DROP POLICY IF EXISTS "ai_readonly_select" ON "public"."work_centers";
 CREATE POLICY "ai_readonly_select"
     ON "public"."work_centers"
@@ -3585,6 +3659,9 @@ ALTER TABLE "public"."notes"
     ADD CONSTRAINT "notes_part_fk" FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."notes"
+    ADD CONSTRAINT "notes_resolves_fk" FOREIGN KEY (resolves_note_id) REFERENCES notes(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."notes"
     ADD CONSTRAINT "notes_routing_operation_fk" FOREIGN KEY (routing_operation_id) REFERENCES routing_operations(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."notes"
@@ -3803,6 +3880,15 @@ ALTER TABLE "public"."vendor_contacts"
 ALTER TABLE "public"."vendors"
     ADD CONSTRAINT "vendors_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."work_center_attachments"
+    ADD CONSTRAINT "work_center_attachments_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."work_center_attachments"
+    ADD CONSTRAINT "work_center_attachments_uploader_fk" FOREIGN KEY (uploaded_by) REFERENCES user_company_access(id) ON DELETE SET NULL;
+
+ALTER TABLE "public"."work_center_attachments"
+    ADD CONSTRAINT "work_center_attachments_wc_fk" FOREIGN KEY (work_center_id) REFERENCES work_centers(id) ON DELETE RESTRICT;
+
 ALTER TABLE "public"."work_centers"
     ADD CONSTRAINT "work_centers_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
@@ -3874,6 +3960,7 @@ CREATE INDEX IF NOT EXISTS idx_notes_author ON public.notes USING btree (author_
 CREATE INDEX IF NOT EXISTS idx_notes_captured_job ON public.notes USING btree (captured_job_id, created_at DESC) WHERE (captured_job_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_notes_job_created ON public.notes USING btree (job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notes_part_step ON public.notes USING btree (part_id, routing_operation_id, created_at DESC) WHERE (part_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_notes_resolves ON public.notes USING btree (resolves_note_id) WHERE (resolves_note_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_notes_work_center ON public.notes USING btree (work_center_id, created_at DESC) WHERE (work_center_id IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_operator_events_company_time ON public.operator_events USING btree (company_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_part_attachments_part_created ON public.part_attachments USING btree (part_id, created_at DESC);
@@ -3938,6 +4025,7 @@ CREATE INDEX IF NOT EXISTS idx_vendors_company ON public.vendors USING btree (co
 CREATE INDEX IF NOT EXISTS idx_vendors_live_by_company ON public.vendors USING btree (company_id) WHERE (deleted_at IS NULL);
 CREATE INDEX IF NOT EXISTS waitlist_created_at_idx ON public.waitlist USING btree (created_at);
 CREATE INDEX IF NOT EXISTS waitlist_email_idx ON public.waitlist USING btree (email);
+CREATE INDEX IF NOT EXISTS idx_work_center_attachments_wc ON public.work_center_attachments USING btree (work_center_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_work_centers_company ON public.work_centers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_work_centers_company_kind ON public.work_centers USING btree (company_id, kind);
 CREATE INDEX IF NOT EXISTS idx_work_centers_live_by_company ON public.work_centers USING btree (company_id) WHERE (deleted_at IS NULL);
@@ -6276,21 +6364,26 @@ $function$
 
 ;
 
-CREATE OR REPLACE FUNCTION public.my_note_view_digest(p_tz text)
- RETURNS integer
+CREATE OR REPLACE FUNCTION public.my_note_digest()
+ RETURNS TABLE(views integer, helpful integer)
  LANGUAGE sql
- STABLE SECURITY DEFINER
+ STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-  -- count DISTINCT viewer_id, not count(*). With job_id in the dedupe key three rows
-  -- can be one person on three jobs, and count(*) would render "3 people used your
-  -- notes" for a single reader — the exact overstatement this design exists to prevent.
-  SELECT count(DISTINCT v.viewer_id)::integer
-  FROM public.notes n
-  JOIN public.note_views v ON v.note_id = n.id
-  WHERE n.author_id IS NOT NULL
-    AND n.author_id = public.get_operator_access_id(n.company_id)
-    AND v.created_at >= (date_trunc('week', now() AT TIME ZONE p_tz) AT TIME ZONE p_tz);
+  WITH mine AS (
+    SELECT n.id, n.viewer_count
+    FROM public.notes n
+    WHERE n.author_id IS NOT NULL
+      AND n.author_id = public.get_operator_access_id(n.company_id)
+  )
+  SELECT
+    COALESCE((SELECT SUM(m.viewer_count) FROM mine m), 0)::integer,
+    COALESCE((
+      SELECT count(*)
+      FROM public.note_reactions x
+      JOIN mine m ON m.id = x.note_id
+      WHERE x.kind = 'helpful'
+    ), 0)::integer;
 $function$
 
 ;
@@ -6444,6 +6537,7 @@ CREATE OR REPLACE FUNCTION public.notes_validate_subject()
 AS $function$
 DECLARE
   v_part uuid;
+  v_ok   boolean;
 BEGIN
   IF NEW.job_id IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM public.jobs j
@@ -6485,6 +6579,26 @@ BEGIN
     END IF;
   END IF;
 
+  -- Company, machine and kind in ONE predicate, answered with ONE message. This
+  -- function is SECURITY DEFINER, so it reads past RLS: a message that
+  -- distinguished "no such note" from "different company" from "not a noticed
+  -- item" would be a cross-tenant existence oracle for anyone willing to guess
+  -- uuids. The uniform failure is the point, not laziness.
+  IF NEW.resolves_note_id IS NOT NULL THEN
+    SELECT EXISTS (
+      SELECT 1 FROM public.notes t
+      WHERE t.id = NEW.resolves_note_id
+        AND t.company_id = NEW.company_id
+        AND t.subject_kind = 'work_center'
+        AND t.work_center_id = NEW.work_center_id
+        AND t.maintenance_kind = 'noticed'
+    ) INTO v_ok;
+
+    IF NOT v_ok THEN
+      RAISE EXCEPTION 'that item is not an open observation on this machine';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $function$
@@ -6492,7 +6606,7 @@ $function$
 ;
 
 CREATE OR REPLACE FUNCTION public.part_playbook_notes(p_part_id uuid, p_routing_operation_id uuid DEFAULT NULL::uuid, p_operation_name text DEFAULT NULL::text, p_exclude_job_id uuid DEFAULT NULL::uuid, p_max_runs integer DEFAULT 10)
- RETURNS TABLE(id uuid, body text, created_at timestamp with time zone, note_type text, subject_kind text, routing_operation_id uuid, corrects_note_id uuid, viewer_count integer, usage_count integer, author_name text, job_number text, operation_label text, media jsonb, reactions jsonb)
+ RETURNS TABLE(id uuid, body text, created_at timestamp with time zone, note_type text, subject_kind text, routing_operation_id uuid, corrects_note_id uuid, viewer_count integer, usage_count integer, author_id uuid, author_name text, job_number text, operation_label text, media jsonb, reactions jsonb)
  LANGUAGE sql
  STABLE
  SET search_path TO 'public', 'pg_temp'
@@ -6564,6 +6678,7 @@ AS $function$
   SELECT
     c.id, c.body, c.created_at, c.note_type, c.subject_kind, c.routing_operation_id,
     c.corrects_note_id, c.viewer_count, c.usage_count,
+    c.author_id,
     a.name AS author_name,
     c.src_job_number,
     c.src_operation_label,
@@ -6591,14 +6706,46 @@ AS $function$
     -- never disagree; that is why there is no denormalized reaction counter.
     SELECT jsonb_agg(jsonb_build_object(
              'kind', x.kind,
+             -- WITHOUT THIS the reader can never be found in the array, so the
+             -- thumbs-up renders un-pressed on a note they have already marked
+             -- helpful, and tapping it again just re-inserts a duplicate. The
+             -- reaction was persisting the whole time; it simply could not be
+             -- recognised as theirs. Costs nothing extra: the join is already here.
+             'reactor_id', x.reactor_id,
              'name', u.name,
              'created_at', x.created_at
-           )) AS reactions
+           )) AS reactions,
+           count(*) FILTER (WHERE x.kind = 'helpful') AS helpful_count
     FROM public.note_reactions x
     JOIN public.user_company_access u ON u.id = x.reactor_id
     WHERE x.note_id = c.id
   ) rx ON true
-  ORDER BY c.created_at DESC;
+  -- RANKING: the load-bearing note first, EXCEPT that nothing recent gets buried.
+  --
+  -- Newest-first was safe but wrong on a part with several notes: the one that has
+  -- actually been consulted on eleven jobs could sit fourth, below three that were
+  -- read once out of curiosity. Ranking by usefulness fixes that.
+  --
+  -- The recency guard is not a nicety. Pure usefulness ranking sinks a note written
+  -- this morning about a changed fixture below an old note with a long history —
+  -- and on a shop floor the fresh correction is the one that must be seen. The
+  -- original plan solved this with a 'confirmed' reaction and visual decay of stale
+  -- entries; both were dropped, so the guard carries that weight alone.
+  --
+  -- 14 days is a judgement, not a finding: long enough to cover a part that runs
+  -- monthly, short enough that the pinned group stays small. Worth revisiting with
+  -- real data.
+  ORDER BY
+    (c.created_at >= now() - interval '14 days') DESC,
+    -- Within the recent group, newest first. NULL for older notes, which the first
+    -- key has already partitioned below, so they tie here and fall through.
+    CASE WHEN c.created_at >= now() - interval '14 days' THEN c.created_at END DESC,
+    -- Distinct JOBS it was consulted on: behavioural, and the strongest signal we
+    -- have. It beats helpful because it records someone reaching for the note while
+    -- doing the work, not an opinion offered afterwards.
+    c.usage_count DESC,
+    COALESCE(rx.helpful_count, 0) DESC,
+    c.created_at DESC;
 $function$
 
 ;
@@ -7985,7 +8132,7 @@ DROP TRIGGER IF EXISTS "note_views_bump_counts_trg" ON "public"."note_views";
 CREATE TRIGGER note_views_bump_counts_trg AFTER INSERT ON public.note_views FOR EACH ROW EXECUTE FUNCTION note_views_bump_counts();
 
 DROP TRIGGER IF EXISTS "notes_validate_subject_trg" ON "public"."notes";
-CREATE TRIGGER notes_validate_subject_trg BEFORE INSERT OR UPDATE OF company_id, job_id, part_id, routing_operation_id, work_center_id ON public.notes FOR EACH ROW EXECUTE FUNCTION notes_validate_subject();
+CREATE TRIGGER notes_validate_subject_trg BEFORE INSERT OR UPDATE OF company_id, job_id, part_id, routing_operation_id, work_center_id, resolves_note_id, maintenance_kind ON public.notes FOR EACH ROW EXECUTE FUNCTION notes_validate_subject();
 
 DROP TRIGGER IF EXISTS "trg_recompute_part_quantity" ON "public"."part_location_stock";
 CREATE TRIGGER trg_recompute_part_quantity AFTER INSERT OR DELETE OR UPDATE ON public.part_location_stock FOR EACH ROW EXECUTE FUNCTION recompute_part_quantity_from_locations();
@@ -8222,6 +8369,9 @@ COMMENT ON TABLE "public"."vendors"
 COMMENT ON TABLE "public"."waitlist"
     IS 'Pre-launch waitlist signups from the landing page. Captures prospective customer info (email, name, company, shop size) and tracks signup status (pending, approved, invited) and acquisition source.';
 
+COMMENT ON TABLE "public"."work_center_attachments"
+    IS 'Machine manuals and reference images, read on the floor from the Maintenance tab. Optional: a machine with none shows nothing at all, never a prompt to add one.';
+
 COMMENT ON TABLE "public"."work_centers"
     IS 'Capacity bucket for routing operations. Replaces operation_types. Either an internal machine/cell (kind=internal, labor_rate set) or an external vendor (kind=external, vendor_id set).';
 
@@ -8437,6 +8587,12 @@ COMMENT ON COLUMN "public"."notes"."viewer_count"
 
 COMMENT ON COLUMN "public"."notes"."usage_count"
     IS 'Distinct JOBS this note was consulted on (job-less reads do not count). The primary quality signal — a note used on 11 jobs is load-bearing, one read by 11 people once is curiosity. Same maintenance and monotonicity as viewer_count.';
+
+COMMENT ON COLUMN "public"."notes"."maintenance_kind"
+    IS 'cleaned | repaired | replaced | adjusted | noticed, on work-center notes only. OPTIONAL by design: an unclassified entry is still knowledge. Only ''noticed'' can be open.';
+
+COMMENT ON COLUMN "public"."notes"."resolves_note_id"
+    IS 'This entry is the fix for that ''noticed'' entry on the same machine. Open state is DERIVED from the absence of such a row and is never stored — see docs/modules/machine-maintenance.md §4.4.';
 
 COMMENT ON COLUMN "public"."part_procurement_tiers"."min_quantity"
     IS 'Lower bound (inclusive) of this tier in the part''s primary unit. A row with min_quantity=100 means "this price applies when ordering >= 100 of this part". Combined with the next-larger tier from the same vendor, defines a half-open break range.';
@@ -8687,6 +8843,9 @@ COMMENT ON COLUMN "public"."work_centers"."labor_rate"
 COMMENT ON COLUMN "public"."work_centers"."deleted_at"
     IS 'Archive marker (see parts.deleted_at). Reads filter deleted_at IS NULL; reusing the name revives the row.';
 
+COMMENT ON COLUMN "public"."work_centers"."make"
+    IS 'Optional machine detail. Never required, never prompted for, and no surface may render a machine as less ready than another because these are filled in — see docs/modules/machine-maintenance.md §4.5.';
+
 -- ============================================================
 -- 11. STORAGE BUCKETS
 -- ============================================================
@@ -8934,6 +9093,10 @@ GRANT ALL ON TABLE "public"."waitlist" TO "anon";
 GRANT ALL ON TABLE "public"."waitlist" TO "authenticated";
 GRANT ALL ON TABLE "public"."waitlist" TO "postgres";
 GRANT ALL ON TABLE "public"."waitlist" TO "service_role";
+GRANT TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."work_center_attachments" TO "anon";
+GRANT SELECT, INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN ON TABLE "public"."work_center_attachments" TO "authenticated";
+GRANT ALL ON TABLE "public"."work_center_attachments" TO "postgres";
+GRANT ALL ON TABLE "public"."work_center_attachments" TO "service_role";
 GRANT ALL ON TABLE "public"."work_centers" TO "anon";
 GRANT ALL ON TABLE "public"."work_centers" TO "authenticated";
 GRANT SELECT ON TABLE "public"."work_centers" TO "jigged_ai_readonly";

@@ -11,6 +11,7 @@ import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 
 import type { JobNote } from '@/types/operator';
 import { getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
 
 const THUMB = 64;
 
@@ -67,6 +68,10 @@ export default function OperationNotes({ notes }: { notes: JobNote[] }) {
           <Box key={n.id}>
             <Typography variant="caption" color="text.secondary">
               {n.author_name || 'Operator'} · {formatTimestamp(n.created_at)}
+              {/* Marker only, no actions. This is the office's read-only view of
+                  what the floor wrote; editing somebody else's note is not on
+                  offer anywhere, and delete lives where the note is authored. */}
+              <NoteEditedMark editedAt={n.edited_at} />
             </Typography>
             {n.body && (
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>

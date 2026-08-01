@@ -209,6 +209,34 @@ export default function PartWorkspace({
     setRefreshKey((k) => k + 1);
   }, []);
 
+  // --- Exit guard (interaction-standards.md §2) -----------------------------
+  // Tabs are conditionally rendered, so switching one unmounts its panels and
+  // throws away anything staged in them. The explicit-Save cards report their
+  // dirty state here so we can confirm first instead of discarding silently.
+  const [dirtySections, setDirtySections] = useState<Record<string, boolean>>({});
+  const reportDirty = useCallback((key: string, isDirty: boolean) => {
+    setDirtySections((prev) => (prev[key] === isDirty ? prev : { ...prev, [key]: isDirty }));
+  }, []);
+  const hasUnsavedChanges = Object.values(dirtySections).some(Boolean);
+  // Tab the user asked for while unsaved work was pending; applied if they
+  // confirm, dropped if they go back.
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
+
+  // Browser-level exit (tab close, reload, back). Attached ONLY while genuinely
+  // dirty and removed as soon as it's saved — an unconditional guard produces
+  // the false positive that trains users to click through the warning.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Browsers show their own generic copy; returnValue is legacy but still
+      // required by some engines to trigger the prompt at all.
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const handleDelete = async () => {
     if (!partId) return;
     setActionLoading(true);
@@ -247,7 +275,7 @@ export default function PartWorkspace({
   const tabParam = searchParams.get('tab') ?? 'workspace';
   const activeTab = visibleTabs.some((t) => t.slug === tabParam) ? tabParam : 'workspace';
 
-  const handleTabChange = useCallback(
+  const applyTabChange = useCallback(
     (slug: string) => {
       const next = new URLSearchParams(searchParams.toString());
       // Keep the default tab out of the URL for clean links.
@@ -257,6 +285,19 @@ export default function PartWorkspace({
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname, searchParams],
+  );
+
+  const handleTabChange = useCallback(
+    (slug: string) => {
+      // Leaving the tab unmounts the panel holding the staged edits, so ask
+      // first rather than discarding them silently.
+      if (hasUnsavedChanges) {
+        setPendingTab(slug);
+        return;
+      }
+      applyTabChange(slug);
+    },
+    [hasUnsavedChanges, applyTabChange],
   );
 
   const setupStatus = useMemo<PartSetupStatus | null>(() => {
@@ -401,6 +442,7 @@ export default function PartWorkspace({
           refreshAfterMutation={refreshAfterMutation}
           setupStatus={setupStatus}
           pricingGaps={pricingGaps}
+          onDirtyChange={reportDirty}
         />
       )}
 
@@ -471,6 +513,39 @@ export default function PartWorkspace({
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
             {actionLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Unsaved-changes guard. Switching tabs unmounts the panel holding the
+          staged edits, so this is the last chance to keep them. "Keep editing"
+          is the safe default and sits away from the destructive option
+          (interaction-standards.md §1, proximity of consequential options). */}
+      <Dialog open={pendingTab !== null} onClose={() => setPendingTab(null)}>
+        <DialogTitle>You have unsaved changes</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Your pricing changes haven&apos;t been saved yet. Leaving this tab will
+            discard them.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingTab(null)} variant="contained">
+            Keep editing
+          </Button>
+          <Button
+            onClick={() => {
+              const slug = pendingTab;
+              setPendingTab(null);
+              if (slug) applyTabChange(slug);
+            }}
+            // `color="error"` alone does nothing here: the theme's MuiButton
+            // `text` override hardcodes primary.light, so the prop loses. Force
+            // it — this is the option that throws work away and it must not
+            // read as the benign one (§1, destructive affordance).
+            sx={{ color: 'error.main' }}
+          >
+            Discard changes
           </Button>
         </DialogActions>
       </Dialog>

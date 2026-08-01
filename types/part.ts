@@ -62,6 +62,13 @@ export interface PartNote {
   part_id: string;
   body: string;
   created_at: string;
+  /**
+   * When the author last changed the body; null means never edited (#628).
+   * Server-stamped by a BEFORE UPDATE trigger, never client-written — the column
+   * carries no UPDATE grant. Only `note_type: 'user'` comments are editable;
+   * 'pricing' entries are an audit trail.
+   */
+  edited_at: string | null;
   author_id: string | null;
   author_name: string | null;
   note_type: PartNoteType;

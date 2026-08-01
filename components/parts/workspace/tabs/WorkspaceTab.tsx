@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import NextLink from 'next/link';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -39,6 +39,12 @@ interface WorkspaceTabProps {
     missing_op_rates: PartOpRateGap[];
     missing_leaves: PartCostMissingLeaf[];
   } | null;
+  /**
+   * Reports a staged-save panel's dirty state up to the workspace, which owns
+   * the exit guard. Keyed so two panels (a bought part shows both tier tables)
+   * can be dirty independently.
+   */
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }
 
 /** How many gap bullets to show before collapsing the rest into "+N more". */
@@ -62,7 +68,18 @@ export default function WorkspaceTab({
   refreshAfterMutation,
   setupStatus,
   pricingGaps,
+  onDirtyChange,
 }: WorkspaceTabProps) {
+  // Stable per-panel reporters — PartPricing publishes dirty state from an
+  // effect, so an inline arrow would re-fire it on every render.
+  const reportPricingDirty = useCallback(
+    (dirty: boolean) => onDirtyChange?.('pricing', dirty),
+    [onDirtyChange],
+  );
+  const reportProcurementDirty = useCallback(
+    (dirty: boolean) => onDirtyChange?.('procurement', dirty),
+    [onDirtyChange],
+  );
   // Turn the structural gaps into a flat, prioritised list of "what to fix"
   // bullets. Order: missing markups (the common case — a sub-part with no
   // markup), then purchased leaves with no vendor cost, then unpriced ops.
@@ -154,6 +171,7 @@ export default function WorkspaceTab({
                 refreshKey={refreshKey}
                 currentChain={currentChain}
                 onPricingChanged={refreshAfterMutation}
+                onDirtyChange={reportPricingDirty}
               />
             </Grid>
 
@@ -224,6 +242,7 @@ export default function WorkspaceTab({
                       primaryUnit={part.primary_unit}
                       preferredVendorId={part.preferred_vendor_id}
                       onSaved={() => refreshAfterMutation()}
+                      onDirtyChange={reportProcurementDirty}
                     />
                   </CardContent>
                 </Card>
@@ -239,6 +258,7 @@ export default function WorkspaceTab({
                 refreshKey={refreshKey}
                 currentChain={currentChain}
                 onPricingChanged={refreshAfterMutation}
+                onDirtyChange={reportPricingDirty}
               />
             </Grid>
           </>

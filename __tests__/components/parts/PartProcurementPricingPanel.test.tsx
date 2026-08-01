@@ -39,7 +39,7 @@ describe('PartProcurementPricingPanel — part-level tiers, explicit save', () =
     mockAddTier.mockResolvedValue({ id: 't1', min_quantity: 10, cost_per_unit: 2.5 });
   });
 
-  it('shows the red no-cost prompt + an empty starter row, with Save disabled until edited', async () => {
+  it('shows the red no-cost prompt + an empty starter row, with no Save affordance until edited', async () => {
     render(
       <PartProcurementPricingPanel partId="p1" companyId="c1" primaryUnit="each" />,
     );
@@ -52,9 +52,13 @@ describe('PartProcurementPricingPanel — part-level tiers, explicit save', () =
     // The yellow "Add first tier" bubble copy is gone.
     expect(screen.queryByRole('button', { name: /Add first tier/i })).toBeNull();
 
-    // Save is disabled until something is edited (no auto-save).
-    const save = screen.getByRole('button', { name: /Save costs/i });
-    expect(save).toBeDisabled();
+    // Nothing staged → no unsaved-changes footer at all, so no Save button.
+    // Save is hidden rather than disabled-and-visible because with nothing to
+    // save the action is genuinely irrelevant, not blocked (interaction-
+    // standards.md §4 rule 3) — and because a permanently-present Save button
+    // carries no signal. Its APPEARANCE is what tells the user work is pending.
+    expect(screen.queryByRole('button', { name: /Save costs/i })).toBeNull();
+    expect(screen.queryByText(/unsaved change/i)).toBeNull();
   });
 
   it('saves a typed part-level tier via the Save button (no vendor dimension) and fires onSaved', async () => {

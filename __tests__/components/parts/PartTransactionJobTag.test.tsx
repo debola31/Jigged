@@ -26,6 +26,11 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
 }));
+/** New: the modal resolves the acting member so owner-side writes carry an author. */
+vi.mock('@/utils/operatorAccess', () => ({
+  getCurrentMember: vi.fn(async () => ({ id: 'member-1', name: 'Owner' })),
+}));
+
 vi.mock('@/utils/jobsAccess', () => ({ getAllJobs: vi.fn() }));
 
 import PartTransactionModal from '@/components/parts/PartTransactionModal';

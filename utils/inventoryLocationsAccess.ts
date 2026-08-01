@@ -12,6 +12,7 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
+import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
 import {
   deleteFileFromStorage,
@@ -373,7 +374,10 @@ export async function moveLocation(
     .single();
   if (error) {
     console.error('Error moving inventory location:', error);
-    throw error;
+    // A move can collide with a sibling name exactly as a create or a rename can — the
+    // (company_id, parent_id, name) unique index does not care how the row got there. Raw, the
+    // user sees `23505 duplicate key value violates unique constraint`.
+    throw mapLocationWriteError(error, undefined);
   }
   return data as InventoryLocation;
 }
@@ -575,20 +579,48 @@ export async function getBalancesForParts(
 
   const supabase = getSupabase();
   const CHUNK = 500; // keep the IN () list well inside PostgREST's URL limits
+  const PAGE = 1000; // PostgREST's `max_rows`
 
-  const [locations, ...pages] = await Promise.all([
-    getLocations(companyId),
-    ...chunk(partIds, CHUNK).map(async (ids) => {
+  /**
+   * Page each chunk. Issue #619.
+   *
+   * A chunk of 500 parts is not 500 rows: every part gets an `Unassigned` balance from
+   * `trg_auto_track_stocked_part` plus one row per place it has ever been in, so three places per
+   * part is 1,500 rows against a `max_rows` of 1,000. PostgREST does not error on that — it
+   * **returns the first 1,000 and stops**, so the missing balances read as "this part is nowhere"
+   * and a material check quietly reports stock the shop has. Exactly 1,000 is safe; 1,001 is not.
+   *
+   * `.order()` on both columns is what makes paging deterministic — without a total order,
+   * successive ranges can repeat or skip rows.
+   */
+  const readChunk = async (ids: string[]) => {
+    const out: Array<{ part_id: string; location_id: string; quantity: number }> = [];
+    for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await supabase
         .from('part_location_stock')
         .select('part_id, location_id, quantity')
-        .in('part_id', ids);
+        .in('part_id', ids)
+        // Zero rows are the residue of `transfer_stock` and `bulk_put_away`, which decrement or
+        // set 0 rather than delete. They are not places the part is, and they burn page budget.
+        // NOTE: this filters around bad data at rest rather than fixing it — the residue is
+        // tracked separately as a backfill, and this filter must not be read as that fix.
+        .gt('quantity', 0)
+        .order('part_id')
+        .order('location_id')
+        .range(offset, offset + PAGE - 1);
       if (error) {
         console.error('Error loading location balances:', error);
         throw error;
       }
-      return (data ?? []) as Array<{ part_id: string; location_id: string; quantity: number }>;
-    }),
+      const rows = (data ?? []) as Array<{ part_id: string; location_id: string; quantity: number }>;
+      out.push(...rows);
+      if (rows.length < PAGE) return out;
+    }
+  };
+
+  const [locations, ...pages] = await Promise.all([
+    getLocations(companyId),
+    ...chunk(partIds, CHUNK).map(readChunk),
   ]);
 
   const byId = new Map(locations.map((l) => [l.id, l] as const));
@@ -1066,44 +1098,17 @@ interface MovementRow {
 }
 
 /**
- * Resolve the two things a movement row cannot carry itself: the author's name and a viewable
- * photo URL.
+ * Turn raw movement rows into renderable history entries.
  *
- * ## Why the author needs a separate query
- *
- * `operator_id` has **no foreign key** — `inventory_transactions`' only FKs are `company_id`,
- * `job_id`, `job_operation_id` and `part_id` — so the PostgREST embed the notes feed uses
- * (`author:user_company_access(name)`) cannot work here: an embed needs a declared relationship.
- * Adding the FK would be tidier, but it needs the existing column values validated first.
- *
- * `created_by` is no help either: it holds an `auth.users` id the browser cannot read at all. A
- * movement written before `operator_id` was populated on add/adjust/transfer therefore has no
- * author, and is returned with none rather than a guess.
- *
- * Two batched requests regardless of row count: the distinct authors, and one signed-URL call.
+ * The author-name and photo-URL lookups live in
+ * [`resolveMovementAttribution`](movementAttribution.ts) — the owner's part-ledger table needs the
+ * identical pair against the identical columns, and keeping two copies is how one of them ends up
+ * knowing something the other does not. The reason those lookups cannot be a PostgREST embed
+ * (`operator_id` has no foreign key) is documented there.
  */
 async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEntry[]> {
   if (rows.length === 0) return [];
-  const supabase = getSupabase();
-
-  const actorIds = [...new Set(rows.map((r) => r.operator_id).filter((v): v is string => !!v))];
-  const photoPaths = rows.map((r) => r.photo_path).filter((v): v is string => !!v);
-
-  const [actors, photoUrls] = await Promise.all([
-    actorIds.length > 0
-      ? supabase.from('user_company_access').select('id, name').in('id', actorIds)
-      : Promise.resolve({ data: [], error: null }),
-    photoPaths.length > 0
-      ? getSignedUrls(photoPaths, PHOTO_URL_EXPIRY_SECONDS)
-      : Promise.resolve(EMPTY_URLS),
-  ]);
-
-  // A failed name lookup must not take the history down with it — the movements are the point,
-  // the names are the caption.
-  const nameById = new Map<string, string>();
-  for (const a of (actors.data ?? []) as Array<{ id: string; name: string | null }>) {
-    if (a.name) nameById.set(a.id, a.name);
-  }
+  const { nameById, urlByPath } = await resolveMovementAttribution(rows);
 
   return rows.map((r) => ({
     id: r.id,
@@ -1115,7 +1120,7 @@ async function hydrateMovements(rows: MovementRow[]): Promise<LocationHistoryEnt
     unit: r.unit,
     notes: r.notes,
     actorName: r.operator_id ? nameById.get(r.operator_id) ?? null : null,
-    photoUrl: r.photo_path ? photoUrls.get(r.photo_path) ?? null : null,
+    photoUrl: r.photo_path ? urlByPath.get(r.photo_path) ?? null : null,
     hasDiscrepancy: Boolean(r.has_discrepancy),
     transferGroupId: r.transfer_group_id,
     locationId: r.location_id,

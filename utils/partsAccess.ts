@@ -16,7 +16,12 @@ import type {
   PartUnitConversion,
   PartUnitConversionFormData,
 } from '@/types/part';
-import type { InventoryTransaction, InventoryTransactionType } from '@/types/partTransaction';
+import type {
+  InventoryTransaction,
+  InventoryTransactionType,
+  InventoryTransactionWithRelations,
+} from '@/types/partTransaction';
+import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
@@ -1683,7 +1688,8 @@ export async function getPartTransactions(
   partId: string,
   offset: number = 0,
   limit: number = 25,
-): Promise<{ transactions: InventoryTransaction[]; total: number }> {
+  { photos = true }: { photos?: boolean } = {},
+): Promise<{ transactions: InventoryTransactionWithRelations[]; total: number }> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
@@ -1716,10 +1722,26 @@ export async function getPartTransactions(
     jobs?: { id: string; job_number: string } | null;
     job_operations?: { id: string; operation_name: string; sequence: number } | null;
   };
-  const transactions = ((data || []) as TxRow[]).map((t) => ({
+  const rows = (data || []) as TxRow[];
+
+  /**
+   * Who did it, and what they photographed.
+   *
+   * These two columns were already arriving — the select is `*` — and were being dropped on the
+   * floor, so the operator's phone had a strictly better view of the ledger than the desk. Neither
+   * can be an embed: `operator_id` has no foreign key. See `utils/movementAttribution.ts`.
+   */
+  const { nameById, urlByPath } = await resolveMovementAttribution(rows, { photos });
+
+  const transactions: InventoryTransactionWithRelations[] = rows.map((t) => ({
     ...t,
     job: t.jobs || null,
     job_operation: t.job_operations || null,
+    // Omitted, never "Unknown" — an absent name is honest about a row written before attribution.
+    operator: t.operator_id && nameById.has(t.operator_id)
+      ? { id: t.operator_id, name: nameById.get(t.operator_id) as string }
+      : null,
+    photo_url: t.photo_path ? urlByPath.get(t.photo_path) ?? null : null,
   }));
 
   return { transactions, total: count || 0 };
@@ -1887,7 +1909,9 @@ export async function getPartActivity(
 ): Promise<PartActivityEvent[]> {
   const [notes, txnResult] = await Promise.all([
     getPartNotes(partId, companyId),
-    getPartTransactions(partId, 0, 100),
+    // No thumbnail in the activity feed, so signing 100 URLs would be a storage round trip per
+    // part-page open for pixels nobody renders.
+    getPartTransactions(partId, 0, 100, { photos: false }),
   ]);
 
   const events: PartActivityEvent[] = [];

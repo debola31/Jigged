@@ -71,6 +71,7 @@ import {
   materializeLocationSpec,
   duplicateLocation,
   getBalancesForPart,
+  getBalancesForParts,
   addStockAtLocation,
   depleteStockAtLocation,
   adjustStockAtLocation,
@@ -1001,5 +1002,80 @@ describe('reserved location kind', () => {
   it('still accepts an unrecognised kind, which degrades to a generic tile', async () => {
     queueFrom({ data: loc({ id: 'l1', kind: '34r3' }), error: null });
     await expect(createLocation('co1', { name: 'Shelf A', kind: '34r3' })).resolves.toBeTruthy();
+  });
+});
+
+/**
+ * Issue #619. A chunk of 500 parts is not 500 rows: every part carries an `Unassigned` balance
+ * from `trg_auto_track_stocked_part` plus one per place it has been in, so three places per part
+ * is 1,500 rows against PostgREST's `max_rows` of 1,000. PostgREST does not error — it returns
+ * the first 1,000 and stops, so the rest read as "this part is nowhere".
+ */
+describe('getBalancesForParts — paging past max_rows', () => {
+  const bal = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      part_id: 'p' + (i % 500),
+      location_id: 'l1',
+      quantity: 5,
+    }));
+
+  it('keeps reading while a page comes back full', async () => {
+    // getLocations consumes queue slot 0; the balance pages follow.
+    queueFrom(
+      { data: [loc({ id: 'l1', name: 'Shelf A' })], error: null },
+      { data: bal(1000), error: null },
+      { data: bal(200), error: null },
+    );
+
+    const out = await getBalancesForParts('co1', ['p0']);
+
+    // 1,200 rows arrived across two pages; a single unpaged read would have stopped at 1,000.
+    const total = [...out.values()].reduce((n, list) => n + list.length, 0);
+    expect(total).toBe(1200);
+  });
+
+  /** Exactly max_rows is ambiguous — it may or may not be the end — so it must be followed up. */
+  it('does not assume a full page is the last one', async () => {
+    queueFrom(
+      { data: [loc({ id: 'l1' })], error: null },
+      { data: bal(1000), error: null },
+      { data: [], error: null },
+    );
+    await getBalancesForParts('co1', ['p0']);
+    // Three reads: locations, the full page, and the follow-up that proved it was the end.
+    expect(state.calls).toHaveLength(3);
+  });
+
+  it('stops after a short page instead of looping', async () => {
+    queueFrom({ data: [loc({ id: 'l1' })], error: null }, { data: bal(3), error: null });
+    await getBalancesForParts('co1', ['p0']);
+    expect(state.calls).toHaveLength(2);
+  });
+
+  /**
+   * A place the part merely passed through keeps a zero row forever — `transfer_stock`
+   * decrements and `bulk_put_away` sets 0, neither deletes. Those are not places the part is,
+   * and they burn page budget.
+   */
+  it('asks the server to drop zero rows rather than filtering them here', async () => {
+    queueFrom({ data: [loc({ id: 'l1' })], error: null }, { data: [], error: null });
+    await getBalancesForParts('co1', ['p0']);
+    expect(state.calls[1].gt).toEqual(['quantity', 0]);
+    // Without a total order, successive ranges can repeat or skip rows.
+    expect(state.calls[1].order).toBeDefined();
+    expect(state.calls[1].range).toEqual([0, 999]);
+  });
+});
+
+describe('moveLocation — error mapping', () => {
+  /** The (company_id, parent_id, name) index does not care whether a row arrived by create or move. */
+  it('turns a sibling-name collision into something a person can read', async () => {
+    queueFrom(
+      { data: loc({ id: 'cab2' }), error: null },   // assertParentInCompany
+      { data: [loc({ id: 'cab2' }), loc({ id: 'shelf' })], error: null }, // cycle walk
+      { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } },
+    );
+
+    await expect(moveLocation('shelf', 'cab2', 'co1')).rejects.not.toThrow(/23505|unique constraint/);
   });
 });

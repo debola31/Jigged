@@ -307,7 +307,9 @@ function FeedPrimary({ ev }: { ev: PartActivityEvent }) {
         <Typography variant="body2">
           {TXN_VERB[ev.txn.type] ?? ev.txn.type} {ev.txn.quantity} {ev.txn.unit}
         </Typography>
-        {ev.txn.has_discrepancy && <StatusChip color="warning" label="Discrepancy" />}
+        {/* "Shortfall", matching the ledger table: the flag is set only by a graceful
+            over-removal, where the shelf held less than the system thought. */}
+        {ev.txn.has_discrepancy && <StatusChip color="warning" label="Shortfall" />}
       </Box>
     );
   }

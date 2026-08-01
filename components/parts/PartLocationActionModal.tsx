@@ -14,6 +14,7 @@ import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
+import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   addStockAtLocation,
   depleteStockAtLocation,
@@ -105,6 +106,17 @@ export default function PartLocationActionModal({
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
+  /**
+   * Who is doing this, so the ledger can name them.
+   *
+   * `operator_id` is a `user_company_access.id`. The RPCs also stamp `created_by = auth.uid()`,
+   * but that is an `auth.users` id the browser cannot resolve to a name under any policy — so
+   * without this every owner-side movement stays permanently anonymous in the very history the
+   * part page now renders. Best-effort: a failed lookup writes no author rather than blocking
+   * a stock correction on a name.
+   */
+  const [operatorId, setOperatorId] = useState<string | null>(null);
+
   const handleEnter = async () => {
     setLocation(null);
     // Only one place to move from → pick it; no source picker needed.
@@ -115,6 +127,12 @@ export default function PartLocationActionModal({
     setNotes('');
     setError(null);
     setJob(null);
+    setOperatorId(null);
+    // ABOVE the deplete-only return: all four actions write a ledger row, and an earlier draft
+    // that put this after it would have attributed removals and nothing else.
+    getCurrentMember(companyId)
+      .then((m) => setOperatorId(m?.id ?? null))
+      .catch(() => setOperatorId(null));
     if (action !== 'deplete') return;
     setLoadingJobs(true);
     setJobs(await loadTaggableJobs(companyId));
@@ -196,7 +214,10 @@ export default function PartLocationActionModal({
     setError(null);
     try {
       if (action === 'add') {
-        await addStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
+        await addStockAtLocation(partId, location!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
         // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
@@ -204,13 +225,20 @@ export default function PartLocationActionModal({
         // back, it just loses the fact. The warning above the button is what stops a typo.
         await depleteStockAtLocation(partId, location!.id, qty, unit, {
           graceful: true,
+          operatorId: operatorId ?? undefined,
           notes: notes || undefined,
           jobId: job?.id || undefined,
         });
       } else if (action === 'adjust') {
-        await adjustStockAtLocation(partId, location!.id, qty, unit, { notes: notes || undefined });
+        await adjustStockAtLocation(partId, location!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       } else {
-        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, { notes: notes || undefined });
+        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       }
       posthog.capture('inventory_stock_updated', {
         action,

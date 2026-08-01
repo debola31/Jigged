@@ -282,9 +282,22 @@ export default function CustomerDetailPage() {
             }}
           >
             <Box>
-              <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                {customer.name}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {customer.name}
+                </Typography>
+                {/* Credit hold sits beside the name because it changes how you
+                    treat everything else on the page. Informational only —
+                    nothing here or downstream blocks on it. */}
+                {customer.credit_status === 'hold' && (
+                  <Chip label="On credit hold" color="warning" size="small" />
+                )}
+              </Box>
+              {customer.credit_status === 'hold' && customer.credit_hold_note && (
+                <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
+                  {customer.credit_hold_note}
+                </Typography>
+              )}
               {customer.website && (
                 <MuiLink
                   href={

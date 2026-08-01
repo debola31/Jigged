@@ -34,7 +34,7 @@ import SearchIcon from '@mui/icons-material/Search';
 
 import { getSupabase } from '@/lib/supabase';
 import type { Company } from '@/utils/companyAccess';
-import type { CustomerAddress } from '@/types/customer';
+import type { CustomerAddress, CustomerCreditStatus } from '@/types/customer';
 import type {
   CreateShipmentPayload,
   OpenJobPartRow,
@@ -71,6 +71,13 @@ function todayLocalISODate(): string {
 interface CustomerContext {
   id: string;
   name: string;
+  /**
+   * Manual credit standing. Carried here only to render a banner — the shipment
+   * flow does not branch on it and must not: see the credit-hold note in the
+   * validation memo below.
+   */
+  credit_status: CustomerCreditStatus;
+  credit_hold_note: string | null;
   addresses: CustomerAddress[];
 }
 
@@ -177,7 +184,7 @@ export default function ShipmentForm({
             .select(
               `id, job_number, company_id,
                customer:customers!left (
-                 id, name,
+                 id, name, credit_status, credit_hold_note,
                  addresses:customer_addresses (
                    id, customer_id, address_line1, address_line2, city, state,
                    postal_code, country, default_billing, default_shipping, attention_to
@@ -249,7 +256,7 @@ export default function ShipmentForm({
           const { data: customerRow, error: customerErr } = await supabase
             .from('customers')
             .select(
-              `id, name,
+              `id, name, credit_status, credit_hold_note,
                addresses:customer_addresses (
                  id, customer_id, address_line1, address_line2, city, state,
                  postal_code, country, default_billing, default_shipping, attention_to
@@ -498,6 +505,28 @@ export default function ShipmentForm({
   return (
     <Stack spacing={3}>
       {error && <Alert severity="error">{error}</Alert>}
+
+      {/* CREDIT HOLD — warn, never gate.
+          Deliberately a standalone render off `customer`, not an entry in
+          `validation.warnings`: warnings draw down beside the line items, and
+          this is about who we're shipping to, not what's on the pallet. Keeping
+          it out of the validation memo entirely is also the stronger guarantee —
+          there is no array here that anyone could later wire into `canSubmit`,
+          so "this must never block shipping" is enforced by there being nothing
+          to enforce. The person packing the box is not the person who decides
+          whether the account gets shipped; they need to know, not to be stopped.
+          Same doctrine as PartLocationActionModal's over-draw warning and the
+          operator rule that an out-of-sequence start never blocks. */}
+      {customer.credit_status === 'hold' && (
+        <Alert severity="warning">
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {customer.name} is on credit hold.
+          </Typography>
+          {customer.credit_hold_note && (
+            <Typography variant="body2">{customer.credit_hold_note}</Typography>
+          )}
+        </Alert>
+      )}
 
       {jobNumberForTitle && !isCustomerMode && (
         <Typography variant="subtitle1" sx={{ color: 'text.secondary' }}>

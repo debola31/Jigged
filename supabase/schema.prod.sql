@@ -132,8 +132,11 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "default_payment_terms" text,
     "default_lead_time_text" text,
     "default_fob_point" text,
+    "credit_status" text DEFAULT 'open'::text NOT NULL,
+    "credit_hold_note" text,
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
+    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name),
+    CONSTRAINT "customers_credit_status_check" CHECK ((credit_status = ANY (ARRAY['open'::text, 'hold'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."customer_addresses"

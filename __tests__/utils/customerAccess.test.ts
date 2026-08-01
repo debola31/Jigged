@@ -1,11 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EMPTY_CUSTOMER_FORM, type CustomerFormData, type Customer } from '@/types/customer';
+import {
+  EMPTY_CUSTOMER_FORM,
+  toCreditStatus,
+  type CustomerFormData,
+  type Customer,
+} from '@/types/customer';
 
-/** A Customer row with the standing-terms columns unset — the common case. */
+/**
+ * A Customer row with the standing-terms columns unset and credit open — the
+ * common case, and the state every pre-existing row lands in after the
+ * credit-hold migration's NOT NULL DEFAULT.
+ */
 const NO_STANDING_TERMS = {
   default_payment_terms: null,
   default_lead_time_text: null,
   default_fob_point: null,
+  credit_status: 'open',
+  credit_hold_note: null,
 } as const;
 
 // Use vi.hoisted to define mock variables before vi.mock is called
@@ -477,5 +488,29 @@ describe('standing terms — drift is customer-scoped, not shop-scoped', () => {
     // The moment there IS a per-customer agreement, a mismatch is meaningful
     // again — this is the signal the chip exists for.
     expect(hasTermDrift('Net 30', 'Net 60')).toBe(true);
+  });
+});
+
+describe('credit status — narrowing at the DB boundary', () => {
+  // credit_status is enum-via-CHECK, not a Postgres enum type, so the generated
+  // database types widen it to `string`. toCreditStatus is where it becomes the
+  // union again. It exists instead of an `as` cast because a cast compiles just
+  // as happily on a column that has genuinely drifted.
+  it('passes through the two real states', () => {
+    expect(toCreditStatus('open')).toBe('open');
+    expect(toCreditStatus('hold')).toBe('hold');
+  });
+
+  it('resolves anything else to open, never to hold', () => {
+    // customers_credit_status_check makes these unreachable; the branch exists
+    // to be honest about the type. The direction matters: inventing a credit
+    // hold nobody set would stop real work and erode trust in the flag, whereas
+    // failing to show one the DB could not have contained costs nothing.
+    expect(toCreditStatus(null)).toBe('open');
+    expect(toCreditStatus(undefined)).toBe('open');
+    expect(toCreditStatus('')).toBe('open');
+    expect(toCreditStatus('HOLD')).toBe('open');
+    expect(toCreditStatus('on_hold')).toBe('open');
+    expect(toCreditStatus('inactive')).toBe('open');
   });
 });

@@ -467,6 +467,8 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
+          credit_hold_note: string | null
+          credit_status: string
           default_fob_point: string | null
           default_lead_time_text: string | null
           default_payment_terms: string | null
@@ -479,6 +481,8 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string | null
+          credit_hold_note?: string | null
+          credit_status?: string
           default_fob_point?: string | null
           default_lead_time_text?: string | null
           default_payment_terms?: string | null
@@ -491,6 +495,8 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string | null
+          credit_hold_note?: string | null
+          credit_status?: string
           default_fob_point?: string | null
           default_lead_time_text?: string | null
           default_payment_terms?: string | null

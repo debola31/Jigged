@@ -5,6 +5,7 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import {
   EMPTY_CUSTOMER_FORM,
+  toCreditStatus,
   type Customer,
   type CustomerAddress,
   type CustomerFormData,
@@ -100,6 +101,10 @@ export async function getCustomers(
 
   const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
     ...r,
+    // Narrowed explicitly rather than left to the row cast above: credit_status
+    // is enum-via-CHECK, so the generated types widen it to `string` and the
+    // cast would assert the union without anything checking it.
+    credit_status: toCreditStatus(r.credit_status),
     addresses: r.addresses ?? [],
     customer_contacts: r.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(r),
@@ -150,6 +155,7 @@ export async function getAllCustomers(
 
     const batch = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
       ...r,
+      credit_status: toCreditStatus(r.credit_status),
       addresses: r.addresses ?? [],
       customer_contacts: r.customer_contacts ?? [],
       primary_contact: extractPrimaryContact(r),
@@ -190,6 +196,7 @@ export async function getCustomer(
 
   return {
     ...data,
+    credit_status: toCreditStatus(data.credit_status),
     addresses: (data.addresses ?? []) as CustomerAddress[],
   };
 }
@@ -250,6 +257,7 @@ export async function getCustomerWithRelations(
 
   return {
     ...typedCustomer,
+    credit_status: toCreditStatus(typedCustomer.credit_status),
     addresses: typedCustomer.addresses ?? [],
     customer_contacts: typedCustomer.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(typedCustomer),
@@ -306,6 +314,8 @@ function formDataToColumns(formData: CustomerFormData) {
     default_payment_terms: formData.default_payment_terms.trim() || null,
     default_lead_time_text: formData.default_lead_time_text.trim() || null,
     default_fob_point: formData.default_fob_point.trim() || null,
+    credit_status: formData.credit_status,
+    credit_hold_note: formData.credit_hold_note.trim() || null,
   };
 }
 
@@ -358,7 +368,7 @@ export async function createCustomer(
     }
   }
 
-  return customer;
+  return { ...customer, credit_status: toCreditStatus(customer.credit_status) };
 }
 
 /**
@@ -400,7 +410,7 @@ async function reviveArchivedCustomerByName(
     throw error;
   }
 
-  return data;
+  return { ...data, credit_status: toCreditStatus(data.credit_status) };
 }
 
 export async function updateCustomer(
@@ -424,7 +434,7 @@ export async function updateCustomer(
     throw error;
   }
 
-  return data;
+  return { ...data, credit_status: toCreditStatus(data.credit_status) };
 }
 
 /**

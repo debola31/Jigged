@@ -5,6 +5,7 @@ import {
   countNote,
   countRowKey,
   commonUnit,
+  contestedParts,
   groupByPart,
   resolveFallbackPlace,
   rowDelta,
@@ -278,5 +279,82 @@ describe('countRowKey', () => {
     const [a, b] = buildVariances([shelfA, shelfB], entries, opened);
     expect(a.movedSinceOpened).toBe(false);
     expect(b.movedSinceOpened).toBe(true);
+  });
+});
+
+/**
+ * #656 — a part counted at several places, where stock moved between them mid-count.
+ *
+ * The scenario in full: Shelf A holds 40, you count 40 (true). A coworker moves 6 A→B. Shelf B
+ * now holds 18, you count 18 (also true). Save: Shelf B's delta is zero so it is dropped, and
+ * Shelf A writes 40 absolutely — resurrecting six units. Neither count was wrong; the pair is.
+ */
+describe('contestedParts', () => {
+  const line = (
+    partId: string,
+    locationId: string,
+    counted: number,
+    systemQuantity: number,
+    movedSinceOpened: boolean,
+  ) => ({
+    candidate: {
+      partId,
+      partName: partId.toUpperCase(),
+      description: null,
+      unit: 'ea',
+      systemQuantity,
+      target: { locationId, locationName: locationId, locationPath: locationId },
+    },
+    counted,
+    delta: counted - systemQuantity,
+    movedSinceOpened,
+  });
+
+  it('flags a part whose other shelf changed while it was being counted', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 34, true), // opened at 40, now 34 — the 6 that left
+      line('p1', 'shelf-b', 18, 18, false),
+    ]);
+
+    expect(contested).toHaveLength(1);
+    expect(contested[0]).toHaveLength(2);
+  });
+
+  /**
+   * The half that reveals the problem has a delta of ZERO, so it is exactly what
+   * `committableVariances` throws away. Feeding this the committable set would see one line, call
+   * it a single-row part, and wave the resurrection through.
+   */
+  it('sees the pair even though the moved-into shelf has no variance to commit', () => {
+    const lines = [line('p1', 'shelf-a', 40, 34, true), line('p1', 'shelf-b', 18, 18, false)];
+    expect(committableVariances(lines)).toHaveLength(1); // shelf-b dropped: delta 0
+    expect(contestedParts(lines)).toHaveLength(1); // ...but the pair is still seen
+  });
+
+  /**
+   * Deliberately NOT flagged. With one row the existing rule is right: the count is what is on
+   * the shelf, so a mid-count movement changes nothing about what to save. Widening the gate to
+   * cover it would block the ordinary case to catch nothing.
+   */
+  it('leaves a single-row part alone even when it moved', () => {
+    expect(contestedParts([line('p1', 'shelf-a', 40, 34, true)])).toEqual([]);
+  });
+
+  it('leaves a multi-row part alone when nothing moved', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 40, false),
+      line('p1', 'shelf-b', 12, 12, false),
+    ]);
+    expect(contested).toEqual([]);
+  });
+
+  it('flags only the parts affected, not the whole sheet', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 34, true),
+      line('p1', 'shelf-b', 18, 18, false),
+      line('p2', 'shelf-a', 5, 5, false),
+      line('p2', 'shelf-b', 7, 7, false),
+    ]);
+    expect(contested.map((rows) => rows[0].candidate.partId)).toEqual(['p1']);
   });
 });

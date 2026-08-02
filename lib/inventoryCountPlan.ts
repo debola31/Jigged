@@ -174,6 +174,46 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
   return variances.filter((v) => v.delta !== 0);
 }
 
+/**
+ * A part counted at several places where stock moved between them while you were counting.
+ *
+ * ## The failure this exists to stop (#656)
+ *
+ * A sheet holds one part at Shelf A (40) and Shelf B (12).
+ *
+ *  1. You walk to Shelf A, find 40, type 40. True.
+ *  2. A coworker transfers 6 from A to B. Also legitimate. The truth is now A=34, B=18.
+ *  3. You walk to Shelf B, find 18, type 18. Also true.
+ *  4. Save. Shelf B's delta is zero, so `committableVariances` drops it. Shelf A writes **40
+ *     absolutely** — putting back six units that have legitimately left. Total 58; truth 52.
+ *
+ * Neither count was wrong. The *pair* is, because an absolute write replays a once-true
+ * observation over a movement that happened after it.
+ *
+ * ## Why it is scoped this narrowly
+ *
+ * For a part on ONE row the existing rule is right and is left alone: the count is what is on the
+ * shelf, so a mid-count movement changes nothing about what to save, and it is reported after the
+ * fact rather than asked about. What makes the multi-row case different is that the rows are not
+ * independent observations — a transfer between two of them moves the same stock twice.
+ *
+ * ## Feed it EVERY counted line
+ *
+ * Not `committableVariances(...)`. The zero-delta line is exactly the half that reveals the
+ * problem, and that is the half `committableVariances` discards.
+ */
+export function contestedParts(variances: CountVariance[]): CountVariance[][] {
+  const byPart = new Map<string, CountVariance[]>();
+  for (const v of variances) {
+    const list = byPart.get(v.candidate.partId) ?? [];
+    list.push(v);
+    byPart.set(v.candidate.partId, list);
+  }
+  return [...byPart.values()].filter(
+    (rows) => rows.length > 1 && rows.some((v) => v.movedSinceOpened),
+  );
+}
+
 /*
  * There is deliberately no "is this variance suspiciously large?" helper here.
  *

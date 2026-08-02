@@ -1197,3 +1197,91 @@ describe('a part in several places', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * #656 — the save gate, on the page.
+ *
+ * `contestedParts` is unit-tested; what this covers is that the page actually STOPS. The whole
+ * point of the issue is that explaining afterwards is too late: by then the wrong number is
+ * committed and the counter has walked away. So the assertion that matters is
+ * `expect(commitCount).not.toHaveBeenCalled()`.
+ */
+describe('stock that moved between two counted places', () => {
+  beforeEach(() => {
+    asMock(loadCountCandidates).mockResolvedValue([
+      at('p1', 'BUY-ORING-214', 'shelf-a', 'Shelf A', 40),
+      at('p1', 'BUY-ORING-214', 'shelf-b', 'Shelf B', 12),
+    ]);
+    // A coworker moved 6 from A to B between opening the sheet and pressing Save.
+    freshBalances({ 'p1::shelf-a': 34, 'p1::shelf-b': 18 });
+  });
+
+  const countBothShelves = async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+    await chooseParts(user, 'BUY-ORING-214');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '40'); // true when written
+    await user.type(inputFor('BUY-ORING-214', 'Shelf B'), '18'); // also true when written
+    await user.click(screen.getByRole('button', { name: /save/i }));
+    return user;
+  };
+
+  it('stops before writing, rather than resurrecting the stock and explaining after', async () => {
+    await countBothShelves();
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(/moved between places you counted/i)).toBeInTheDocument();
+    // The whole issue in one assertion: writing 40 absolutely to Shelf A would put back the six
+    // units that legitimately left, taking the total to 58 against a truth of 52.
+    expect(commitCount).not.toHaveBeenCalled();
+  });
+
+  it('names the shelf that changed and what it now reads', async () => {
+    await countBothShelves();
+    await screen.findByRole('dialog');
+
+    expect(
+      screen.getByText(/Shelf A: you counted 40 — now reads 34, changed since you looked/i),
+    ).toBeInTheDocument();
+  });
+
+  it('lets the counter go back to the sheet with the refreshed figures', async () => {
+    const user = await countBothShelves();
+    await screen.findByRole('dialog');
+
+    await user.click(screen.getByRole('button', { name: /let me recount/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    expect(commitCount).not.toHaveBeenCalled();
+    // Refreshed, so the recount is measured against what is on the shelf now, not what was.
+    expect(screen.getByRole('row', { name: /Shelf A/ })).toHaveTextContent('34');
+  });
+
+  /** The counter may have just walked both shelves again and know better than we do. */
+  it('still allows an override', async () => {
+    const user = await countBothShelves();
+    await screen.findByRole('dialog');
+
+    await user.click(screen.getByRole('button', { name: /save anyway/i }));
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+  });
+
+  it('does not stop a part counted at only one place', async () => {
+    asMock(loadCountCandidates).mockResolvedValue([
+      at('p2', '6061 plate', 'shelf-a', 'Shelf A', 40),
+    ]);
+    freshBalances({ 'p2::shelf-a': 34 });
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('6061 plate');
+    await chooseParts(user, '6061 plate');
+    // 41, not 40: the sheet opened at 40, so counting 40 is a zero delta and Save stays disabled.
+    await user.type(inputFor('6061 plate', 'Shelf A'), '41');
+    await user.click(screen.getByRole('button', { name: /save 1 change/i }));
+
+    // Reported after the fact, as before — the count IS what is on the shelf.
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});

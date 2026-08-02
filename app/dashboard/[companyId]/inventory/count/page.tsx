@@ -60,6 +60,10 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -86,6 +90,7 @@ import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import {
   buildVariances,
   committableVariances,
+  contestedParts,
   countRowKey,
   groupByPart,
   type CountGroup,
@@ -310,6 +315,17 @@ export default function InventoryCountPage() {
 
   const [checking, setChecking] = useState(false);
   const [committing, setCommitting] = useState(false);
+  /**
+   * A save held at the gate: stock moved between two places on this sheet (#656).
+   *
+   * Held rather than committed-and-explained, because by the time it is explained the wrong
+   * number is already in the database and the operator has walked away.
+   */
+  const [pending, setPending] = useState<{
+    toCommit: CountVariance[];
+    unseenPlaces: string[];
+    contested: CountVariance[][];
+  } | null>(null);
   const [progress, setProgress] = useState<CountCommitProgress | null>(null);
   const [snack, setSnack] = useState<{ msg: string; severity: 'success' | 'error' } | null>(null);
 
@@ -616,6 +632,8 @@ export default function InventoryCountPage() {
   const save = async () => {
     setChecking(true);
     let toCommit: CountVariance[];
+    /** Every counted line, including the zero-delta ones `toCommit` drops. */
+    let allVariances: CountVariance[] = [];
     /** Filled by the pre-save read; reported after the commit, never blocking it. */
     let unseenPlaces: string[] = [];
     try {
@@ -673,7 +691,10 @@ export default function InventoryCountPage() {
           .map((b) => `${partName} also has stock at ${[...b.path, b.locationName].join(' › ')}`);
       });
       setSelected(new Map(updated.map((c) => [countRowKey(c), c])));
-      toCommit = committableVariances(buildVariances(updated, entries, openedWithRef.current));
+      // Kept whole: `committableVariances` drops zero-delta lines, and a zero delta is precisely
+      // what the second half of a between-shelves move looks like. The gate below needs both.
+      allVariances = buildVariances(updated, entries, openedWithRef.current);
+      toCommit = committableVariances(allVariances);
     } catch (e) {
       setSnack({
         msg: e instanceof Error ? e.message : 'Could not re-check current quantities.',
@@ -691,6 +712,33 @@ export default function InventoryCountPage() {
       return;
     }
 
+    /*
+     * The gate. Stock moved BETWEEN two places you counted (#656).
+     *
+     * Each count was true when it was taken; the pair is not. Count Shelf A at 40, a coworker
+     * moves 6 A→B, count Shelf B at 18, save: Shelf B's delta is now zero so it is dropped, and
+     * Shelf A writes 40 absolutely — putting back six units that legitimately left. Total 58
+     * where the truth is 52.
+     *
+     * This is why the check runs against EVERY counted row and not `toCommit`: the half that
+     * reveals the problem is exactly the half `committableVariances` discards.
+     *
+     * Deliberately scoped to a part with two or more counted rows. For a single row the existing
+     * rule is right and stays — the count IS what is on the shelf, and a mid-count movement
+     * changes nothing about what to save, so it is reported afterwards rather than asked about.
+     */
+    const contested = contestedParts(allVariances);
+    if (contested.length > 0) {
+      setPending({ toCommit, unseenPlaces, contested });
+      return;
+    }
+
+    await runCommit(toCommit, unseenPlaces);
+  };
+
+  /** The write itself, once `save()`'s gate has let it through (or the user has overridden it). */
+  const runCommit = async (toCommit: CountVariance[], unseenPlaces: string[]) => {
+    setPending(null);
     setCommitting(true);
     setProgress({ done: 0, total: toCommit.length, currentPartName: '', currentLocationName: '' });
     try {
@@ -1503,6 +1551,63 @@ export default function InventoryCountPage() {
           </Button>
         </Box>
       )}
+
+      {/*
+        Stock moved BETWEEN two places on this sheet (#656).
+
+        A prompt, not a notice, and this is the one place on this page that blocks. Everywhere
+        else a mid-count movement is reported afterwards, because the count IS what is on the
+        shelf. That reasoning holds only while the rows are independent observations — and a
+        transfer between two rows of the same part moves the same stock twice, so writing both
+        absolutely puts back what legitimately left. By the time it could be explained the wrong
+        number is already committed and the counter has walked away.
+      */}
+      <Dialog open={pending !== null} onClose={() => setPending(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Stock moved between places you counted</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Both numbers were right when you wrote them, but something moved between the shelves
+            in between — so saving them together would put back stock that has already left.
+          </Typography>
+          {(pending?.contested ?? []).map((rows) => (
+            <Box key={rows[0].candidate.partId} sx={{ mb: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                {rows[0].candidate.partName}
+              </Typography>
+              {rows.map((v) => (
+                <Typography
+                  key={countRowKey(v.candidate)}
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block' }}
+                >
+                  {v.candidate.target.locationPath}: you counted {num(v.counted)}
+                  {v.movedSinceOpened
+                    ? ` — now reads ${num(v.candidate.systemQuantity)}, changed since you looked`
+                    : ''}
+                </Typography>
+              ))}
+            </Box>
+          ))}
+          <Typography variant="body2" color="text.secondary">
+            The figures above have been refreshed. Recount the places that changed, or save anyway
+            if you know these numbers are right.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          {/* Safe action first and on the right, as the default. Saving anyway stays reachable —
+              the counter may have just walked both shelves again and know better than we do. */}
+          <Button
+            onClick={() => pending && void runCommit(pending.toCommit, pending.unseenPlaces)}
+            color="inherit"
+          >
+            Save anyway
+          </Button>
+          <Button variant="contained" onClick={() => setPending(null)} autoFocus>
+            Let me recount
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={!!snack}

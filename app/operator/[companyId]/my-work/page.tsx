@@ -10,11 +10,9 @@ import Tooltip from '@mui/material/Tooltip';
 import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import {
   getMyContributionTotals,
@@ -84,7 +82,7 @@ function ReachRow({
   // unread row down to ONE tap target instead of two.
   if (!onToggle) {
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: 48, height: 48, justifyContent: 'center', flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minHeight: 40, pr: 0.5, flexShrink: 0 }}>
         {face}
       </Box>
     );
@@ -93,9 +91,16 @@ function ReachRow({
   /* THE DISCLOSURE FOR "WHO READ THIS", and deliberately not the whole row.
      NN/g measured (136 participants, 11 mobile prototypes) that when a row body
      and a trailing control do different things, people tap them about equally —
-     a coin flip. So the row body stays inert and the two controls sit at opposite
-     ends: readers here on the left, actions in the overflow on the right.
-     The count is the label, which is what keeps a bare icon honest. */
+     a coin flip. So the note text stays inert; this opens the readers and the
+     overflow opens the actions, and the two sit DIAGONALLY opposite — this at the
+     bottom-left of the row, the menu at the top-right — so neither is a plausible
+     mis-tap for the other. The count is the label, which is what keeps a bare icon
+     honest.
+
+     Sized to the metadata line rather than to a 48px gutter. The gutter was what
+     stranded it level with the reference instead of the sentence it belongs to, and
+     it cost the note 48px of width on a 375px screen for no reason. 40px tall plus
+     the icon-and-count width clears WCAG 2.5.8's 24px floor with room to spare. */
   return (
     <Tooltip title={expanded ? 'Hide readers' : 'Who read this'}>
       <ButtonBase
@@ -106,8 +111,9 @@ function ReachRow({
           display: 'flex',
           alignItems: 'center',
           gap: 0.5,
-          width: 48,
-          height: 48,
+          minHeight: 40,
+          px: 0.75,
+          ml: -0.75, // absorb the padding so the glyph keeps the note's left edge
           flexShrink: 0,
           borderRadius: 1,
           '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
@@ -174,45 +180,12 @@ function NoteRow({
      */
     <Box component="li" sx={{ borderBottom: '1px solid', borderColor: 'divider', py: 0.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
-        <ReachRow note={note} expanded={open} onToggle={note.viewer_count > 0 ? toggle : undefined} />
-
-        <Box sx={{ flex: 1, minWidth: 0, py: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-            {note.photo_count > 0 && (
-              <Chip
-                size="small"
-                variant="outlined"
-                icon={<PhotoCameraIcon />}
-                label={note.photo_count}
-              />
-            )}
-            <Box sx={{ flex: 1 }} />
-            {/* WHERE IT CAME FROM — one quiet reference, always in the same place.
-                The job number for a job or part note, the machine for a maintenance
-                entry; they are mutually exclusive, because a `notes` row has exactly
-                one subject under the CHECK constraint.
-
-                It sits here rather than leading the row because the NOTE is the point
-                of this screen. An earlier pass put the subject first in bold with the
-                step as a chip beside it, and the effect was that a list of what the
-                operator had written read as a list of stations — the reference
-                out-shouted the sentence it was supposed to annotate. Same reason the
-                maintenance kind is plain text here rather than an icon chip: "Noticed"
-                is worth knowing and not worth a wrench.
-
-                `part_name` is the last fallback, not a normal case: a durable part note
-                outlives the job it was captured on (provenance is ON DELETE SET NULL),
-                so once that job is deleted the part is the only reference left. */}
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {[note.machine_name ?? note.job_number ?? note.part_name, note.maintenance_kind]
-                .filter(Boolean)
-                .map((s) => `${s} · `)
-                .join('')}
-              {formatDate(note.created_at)}
-              <NoteEditedMark editedAt={note.edited_at} />
-            </Typography>
-          </Box>
-
+        <Box sx={{ flex: 1, minWidth: 0, pt: 1, pb: 0.25, pl: 0.5 }}>
+          {/* THE NOTE ITSELF, first and full width. It used to sit on the second line,
+              under a meta row that held the reference — which left the sentence
+              starting below and to the right of the eye that belonged to it, and gave
+              the row three different left edges. Everything in this column now shares
+              one. */}
           {note.body && (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
               {note.body}
@@ -236,6 +209,42 @@ function NoteRow({
             memberId={null}
             readOnly
           />
+
+          {/* ONE METADATA LINE, under the note it describes.
+              How far it travelled, where it came from, and when — all the same weight,
+              because none of them is the point of the row. The reference is the job
+              number for a job or part note and the machine for a maintenance entry;
+              they are mutually exclusive, since a `notes` row has exactly one subject
+              under the CHECK constraint. `part_name` is the last fallback rather than a
+              normal case: a durable part note outlives the job it was captured on
+              (provenance is ON DELETE SET NULL), so once that job is gone the part is
+              the only reference left.
+
+              The reader count leads it because it IS metadata — it was previously
+              stranded in a 48px gutter of its own, level with the reference rather than
+              with the sentence, which is what made the row look broken. Sitting here it
+              needs no gutter, so the note gets the full width back. */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', minHeight: 40 }}>
+            <ReachRow
+              note={note}
+              expanded={open}
+              onToggle={note.viewer_count > 0 ? toggle : undefined}
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0 }}>
+              {[
+                note.machine_name ?? note.job_number ?? note.part_name,
+                note.maintenance_kind,
+                note.photo_count > 0
+                  ? `${note.photo_count} photo${note.photo_count === 1 ? '' : 's'}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .map((s) => `${s} · `)
+                .join('')}
+              {formatDate(note.created_at)}
+              <NoteEditedMark editedAt={note.edited_at} />
+            </Typography>
+          </Box>
         </Box>
 
         {/* THE ONLY OTHER CONTROL, hard right. Every note here is unconditionally the

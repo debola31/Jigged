@@ -125,6 +125,28 @@ function ReachRow({
   );
 }
 
+/** One figure in the "what you've added" row: the number, then what it counts. */
+function Stat({
+  value,
+  label,
+  align,
+}: {
+  value: number;
+  label: string;
+  align: 'left' | 'center' | 'right';
+}) {
+  return (
+    <Box sx={{ textAlign: align }}>
+      <Typography variant="h4" fontWeight={700}>
+        {value}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+    </Box>
+  );
+}
+
 function NoteRow({
   note,
   companyId,
@@ -516,14 +538,16 @@ function MyContribution({ companyId }: { companyId: string }) {
           <Typography variant="overline" color="text.secondary">
             What you&apos;ve added
           </Typography>
-          {/* Three equal columns rather than three items pushed against the left edge.
-              A stat row reads as a set, and an even rhythm is what makes it one — clustered
-              left, the numbers looked like the start of a sentence that ran out.
+          {/* Three equal columns, and each one aligned to the edge it sits nearest:
+              first hard left, middle centred, last hard right. Equal columns alone were
+              not enough — with every column's content left-aligned, the last number
+              landed a third of the way in from the right and the middle one sat left of
+              the card's true centre, so the row still read as clustered.
 
-              CAPPED, not stretched to the card. Nothing constrains the operator column's
-              width on this branch, so `space-between` on a laptop would strand "views"
-              several hundred pixels from "notes". At 420px the row fills a phone (~340px of
-              usable width) and stays a group everywhere wider. */}
+              CAPPED at 420px rather than stretched to the card. Nothing constrains the
+              operator column's width on this branch, so edge-to-edge on a laptop would
+              put "notes" and "views" a thousand pixels apart. A phone has ~340px of
+              usable width here, so the cap never binds on the device this is for. */}
           <Box
             sx={{
               display: 'grid',
@@ -533,42 +557,28 @@ function MyContribution({ companyId }: { companyId: string }) {
               mt: 0.5,
             }}
           >
-            <Box>
-              <Typography variant="h4" fontWeight={700}>
-                {c.noteCount}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.noteCount === 1 ? 'note' : 'notes'}
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="h4" fontWeight={700}>
-                {c.photoCount}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.photoCount === 1 ? 'photo' : 'photos'}
-              </Typography>
-            </Box>
-            {/* "views", not "people". This sums each note's viewer_count, so one
-                colleague who read three of your notes contributes three — which
-                is a view total, not a headcount. A distinct-people figure would
-                need the note_views rows, which no browser role can read by
-                design. The per-note numbers below are exact. */}
-            {/* NOT GREEN, unlike the per-note count below.
-                Green is semantic in this theme — success.main is a state, not a decoration —
-                and a lifetime view total has no state to report. It is also the only one of
-                three sibling metrics that was coloured, which made the least actionable
-                number the loudest thing in the card. On a note row the same green earns its
-                place, because there it is binary and comparative: it marks which notes have
-                landed as you scan a column of them. Here there is nothing to compare it to. */}
-            <Box>
-              <Typography variant="h4" fontWeight={700}>
-                {c.peopleReached}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.peopleReached === 1 ? 'view' : 'views'}
-              </Typography>
-            </Box>
+            <Stat value={c.noteCount} label={c.noteCount === 1 ? 'note' : 'notes'} align="left" />
+            <Stat
+              value={c.photoCount}
+              label={c.photoCount === 1 ? 'photo' : 'photos'}
+              align="center"
+            />
+            {/* "views", not "people". This sums each note's viewer_count, so one colleague
+                who read three of your notes contributes three — a view total, not a
+                headcount. A distinct-people figure would need the note_views rows, which no
+                browser role can read by design. The per-note numbers below are exact.
+
+                NOT GREEN, unlike the per-note count. Green is semantic in this theme — a
+                state, not a decoration — and a lifetime total has no state to report. It was
+                also the only one of three sibling metrics that was coloured, which made the
+                least actionable number the loudest thing in the card. On a note row the same
+                green earns its place: there it is binary and comparative, marking which
+                notes have landed as you scan a column. Here there is nothing to compare. */}
+            <Stat
+              value={c.peopleReached}
+              label={c.peopleReached === 1 ? 'view' : 'views'}
+              align="right"
+            />
           </Box>
 
         </CardContent>

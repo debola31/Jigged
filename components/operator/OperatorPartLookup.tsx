@@ -29,16 +29,15 @@
  * **`onCreateNew` is deliberately omitted**, which removes the "Create New Part" row. Creating
  * parts is not an operator's job — same reasoning as the board withholding "Add storage".
  *
- * ## The distinction this screen must not blur
+ * ## A distinction this screen used to have to make, and no longer does
  *
- * A part with **no rows** in `part_location_stock` is one of two very different things:
+ * A part with no rows in `part_location_stock` used to be one of two very different things:
+ * genuinely nowhere, or simply not tracked by place — its stock living in `parts.quantity` alone,
+ * where "where?" had no answer at all. Reporting the second as "not in any place" would have read
+ * as *missing*.
  *
- * - **not location-tracked** — its stock is the single `parts.quantity`, and "where?" has no
- *   answer because nobody ever assigned it one. Saying "not in any place" would read as *missing*.
- * - **tracked, but empty everywhere** — genuinely nowhere, which is a real answer.
- *
- * `is_location_tracked` is what tells them apart, which is why `searchPartsForSelect` was widened
- * to return it.
+ * `is_location_tracked` was what told them apart, and it was removed in 20260802015837: every part
+ * has a place. An empty list now means exactly one thing, so the branch is gone.
  */
 
 import { useMemo, useState } from 'react';
@@ -95,9 +94,6 @@ export default function OperatorPartLookup({
     setError(null);
     onSelectionChange?.(part);
     if (!part) return;
-    // An untracked part has no per-place rows by definition — asking would always return [] and
-    // the empty state below would have to guess which kind of empty it was.
-    if (!part.is_location_tracked) return;
     setLoadingBalances(true);
     getBalancesForPart(part.id)
       .then(setBalances)
@@ -179,17 +175,10 @@ export default function OperatorPartLookup({
 
       {selected && (
         <Box sx={{ mt: 2 }}>
-          {!selected.is_location_tracked ? (
-            /* NOT "nowhere". This part's stock simply isn't held per place, so the honest answer
-               is the total and why there's no shelf — an empty list would imply it's missing. */
-            <Alert severity="info">
-              <strong>
-                {num(selected.quantity)} {selected.primary_unit ?? ''}
-              </strong>{' '}
-              on hand. This part isn&apos;t tracked by place, so there&apos;s no shelf to send you
-              to — ask the office if you need it binned.
-            </Alert>
-          ) : loadingBalances ? (
+          {/* The "isn't tracked by place" branch is gone (20260802015837). It existed to keep
+              "nowhere" apart from "not tracked", and the second state no longer exists — every
+              part has a place, so an empty list now means exactly one thing. */}
+          {loadingBalances ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
               <CircularProgress size={24} />
             </Box>
@@ -244,10 +233,10 @@ export default function OperatorPartLookup({
             </>
           )}
 
-          {/* Available on every tracked part, not just homeless ones: it is also the way through
-              when a label has come off or the phone has no camera. Low-emphasis on purpose —
-              scanning the shelf is the better input and stays the default. */}
-          {selected.is_location_tracked && !loadingBalances && (
+          {/* Available on every part, not just homeless ones: it is also the way through when a
+              label has come off or the phone has no camera. Low-emphasis on purpose — scanning
+              the shelf is the better input and stays the default. */}
+          {!loadingBalances && (
             <Button
               startIcon={
                 loadingPlaces ? <CircularProgress size={18} color="inherit" /> : <PlaceOutlinedIcon />

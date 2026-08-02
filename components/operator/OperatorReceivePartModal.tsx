@@ -68,7 +68,8 @@ export default function OperatorReceivePartModal({
     try {
       const all = await getStockedParts(companyId);
       const exclude = new Set(excludePartIds);
-      setParts(all.filter((p) => p.is_location_tracked && !exclude.has(p.id)));
+      // Every part has a place now, so there is nothing to filter on but what is already here.
+      setParts(all.filter((p) => !exclude.has(p.id)));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load parts.');
     } finally {

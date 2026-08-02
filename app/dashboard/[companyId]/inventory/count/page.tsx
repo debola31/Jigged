@@ -99,7 +99,6 @@ import {
   loadPartAtLocationCandidate,
   loadPartEverywhereCandidates,
   refreshLocationQuantities,
-  refreshSystemQuantities,
 } from '@/utils/inventoryCountAccess';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getCurrentMember } from '@/utils/operatorAccess';
@@ -568,15 +567,15 @@ export default function InventoryCountPage() {
     let toCommit: CountVariance[];
     try {
       /**
-       * Re-read what the system believes, PER ROW, against the thing that row is about.
+       * Re-read what the system believes, PER ROW, at the bin that row is about.
        *
-       * A location row must be re-read at ITS bin: `refreshSystemQuantities` reads
-       * `parts.quantity`, the roll-up across every place, so using it for a shelf row compares a
-       * shelf count against the whole shop's total and reports a variance on every line.
+       * Never against `parts.quantity`: that is the roll-up across every place, so using it for a
+       * shelf row compares a shelf count to the whole shop's total and reports a variance on
+       * every line. (The read that did so, `refreshSystemQuantities`, was deleted with the
+       * aggregate row in 20260802015837 — there is no longer a row it would be right for.)
        *
        * Driven off each row's own target rather than a page-level `locationId`, because the
-       * all-places sheet has no single location — its rows span several. Keying off the page
-       * would have sent every one of them down the roll-up branch.
+       * all-places sheet has no single location — its rows span several.
        *
        * The rows come from the SHEET, not from `candidates`: a part typed on a page or search you
        * have since navigated away from is no longer in that array, and its correction used to be
@@ -585,38 +584,29 @@ export default function InventoryCountPage() {
       const countedRows = sheet.filter((c) => entries[countRowKey(c)] !== undefined);
 
       const partIdsByLocation = new Map<string, string[]>();
-      const aggregateIds: string[] = [];
       for (const c of countedRows) {
         if (c.target.kind === 'location') {
           const ids = partIdsByLocation.get(c.target.locationId) ?? [];
           ids.push(c.partId);
           partIdsByLocation.set(c.target.locationId, ids);
-        } else if (c.target.kind === 'aggregate') {
-          aggregateIds.push(c.partId);
         }
       }
 
-      const [locationReads, aggregateFresh] = await Promise.all([
-        Promise.all(
+      const freshByLocation = new Map(
+        await Promise.all(
           [...partIdsByLocation].map(async ([locId, ids]) => {
             const m = await refreshLocationQuantities(locId, ids);
             return [locId, m] as const;
           }),
         ),
-        aggregateIds.length > 0
-          ? refreshSystemQuantities(aggregateIds)
-          : Promise.resolve(new Map<string, number>()),
-      ]);
-      const freshByLocation = new Map(locationReads);
+      );
 
       const updated = sheet.map((c) => {
         if (entries[countRowKey(c)] === undefined) return c;
         const q =
           c.target.kind === 'location'
             ? freshByLocation.get(c.target.locationId)?.get(c.partId)
-            : c.target.kind === 'aggregate'
-              ? aggregateFresh.get(c.partId)
-              : undefined;
+            : undefined;
         return q === undefined ? c : { ...c, systemQuantity: q };
       });
       setSelected(new Map(updated.map((c) => [countRowKey(c), c])));

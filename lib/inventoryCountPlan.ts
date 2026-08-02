@@ -36,12 +36,11 @@ export interface LocationBalance {
  * look placed.
  */
 export function resolveCountTarget(
-  isLocationTracked: boolean,
   balances: LocationBalance[],
   unassigned: { id: string; name: string } | null,
 ): CountTarget {
-  if (!isLocationTracked) return { kind: 'aggregate' };
-
+  // The `aggregate` arm is gone with `is_location_tracked` (20260802015837). It existed for a
+  // part whose stock lived in `parts.quantity` alone; no such part remains.
   const holding = balances.filter((b) => b.quantity > 0);
 
   if (holding.length === 0) {

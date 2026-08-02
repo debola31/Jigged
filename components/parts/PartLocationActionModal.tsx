@@ -120,7 +120,10 @@ export default function PartLocationActionModal({
   const [operatorId, setOperatorId] = useState<string | null>(null);
 
   const handleEnter = async () => {
-    setLocation(null);
+    // Only one place in the whole shop → pick it; no destination picker needed. That is the
+    // ordinary case for a shop without the locations flag, where the single auto-managed
+    // `Unassigned` bucket is the only place there is and a dropdown of one is pure friction.
+    setLocation(locations.length === 1 ? locations[0] : null);
     // Only one place to move from → pick it; no source picker needed.
     setSourceLoc(action === 'move' && sourceBalances.length === 1 ? sourceBalances[0] : null);
     setToLocation(null);
@@ -304,6 +307,12 @@ export default function PartLocationActionModal({
                 onCreate={onCreateLocation}
               />
             </>
+          ) : locations.length === 1 ? (
+            // Said, not chosen. Mirrors the single-source treatment above: the fact still needs
+            // stating (this is where it lands) but there is no decision to make.
+            <Typography variant="body2" color="text.secondary">
+              At <strong>{locations[0].label}</strong>
+            </Typography>
           ) : (
             <LocationPicker
               label="Location"

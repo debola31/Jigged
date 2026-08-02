@@ -20,9 +20,13 @@
  * at. See `resolveCountTarget` in lib/inventoryCountPlan.ts.
  */
 export type CountTarget =
-  /** Untracked part: write parts.quantity directly via adjustPartStock. */
-  | { kind: 'aggregate' }
-  /** Location-tracked with an unambiguous destination: adjustStockAtLocation. */
+  /**
+   * An unambiguous destination: adjustStockAtLocation.
+   *
+   * The `aggregate` kind that sat here — write `parts.quantity` directly, for a part whose stock
+   * was not held per place — went with `is_location_tracked` in 20260802015837. Every part now has
+   * a place, so every countable row has a location, even if that location is Unassigned.
+   */
   | { kind: 'location'; locationId: string; locationName: string }
   /**
    * Location-tracked and split across bins — not countable item-by-item *here*.

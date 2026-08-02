@@ -376,7 +376,7 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        // has_routing/quantity/is_location_tracked are display-only fillers — synthesize the
+        // has_routing/quantity are display-only fillers — synthesize the
         // option from the BOM row, which carries none of them. The material editor shows a name
         // and a unit; it never reads stock, so a filler here cannot mislead anyone.
         childPart: {
@@ -385,7 +385,6 @@ export default function PartBomPanel({
           description: editingRow.child_part.description,
           has_routing: false,
           is_stocked: editingRow.child_part.is_stocked,
-          is_location_tracked: false,
           source: editingRow.child_part.source,
           primary_unit: editingRow.child_part.primary_unit,
           quantity: 0,

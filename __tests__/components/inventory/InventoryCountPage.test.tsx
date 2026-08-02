@@ -22,7 +22,6 @@ vi.mock('@/utils/inventoryCountAccess', () => ({
   loadLocationCountCandidates: vi.fn(),
   loadPartAtLocationCandidate: vi.fn(),
   loadPartEverywhereCandidates: vi.fn(),
-  refreshSystemQuantities: vi.fn(),
   refreshLocationQuantities: vi.fn(),
   commitCount: vi.fn(),
 }));
@@ -69,7 +68,6 @@ import InventoryCountPage from '@/app/dashboard/[companyId]/inventory/count/page
 import {
   loadCountCandidates,
   loadLocationCountCandidates,
-  refreshSystemQuantities,
   refreshLocationQuantities,
   commitCount,
   loadPartAtLocationCandidate,
@@ -109,7 +107,9 @@ const cand = (over: Partial<CountCandidate> & { partId: string }): CountCandidat
   description: null,
   unit: 'ft',
   systemQuantity: 40,
-  target: { kind: 'aggregate' },
+  // Every part has a place since 20260802015837, so the company-wide sheet's default row is
+  // an Unassigned row — there is no longer a target that writes `parts.quantity`.
+  target: { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' },
   ...over,
 });
 
@@ -144,7 +144,7 @@ beforeEach(() => {
     cand({ partId: 'p1', partName: '4140 bar', systemQuantity: 40 }),
     cand({ partId: 'p2', partName: '6061 plate', systemQuantity: 12 }),
   ]);
-  asMock(refreshSystemQuantities).mockResolvedValue(new Map());
+  asMock(refreshLocationQuantities).mockResolvedValue(new Map());
   asMock(commitCount).mockResolvedValue({ committed: 1, failures: [] });
 });
 
@@ -382,7 +382,9 @@ describe('saving', () => {
 
   it('re-reads current quantities before writing', async () => {
     await enterAndSave('4140 bar', '38');
-    await waitFor(() => expect(refreshSystemQuantities).toHaveBeenCalledWith(['p1']));
+    await waitFor(() =>
+      expect(refreshLocationQuantities).toHaveBeenCalledWith('loc-unassigned', ['p1']),
+    );
   });
 
   /**
@@ -433,7 +435,7 @@ describe('saving', () => {
   });
 
   it('commits the quantity that was counted, not the one the sheet opened with', async () => {
-    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 44]]));
     await enterAndSave('4140 bar', '38');
 
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
@@ -445,14 +447,14 @@ describe('saving', () => {
   });
 
   it('says afterwards which parts moved while the count was open', async () => {
-    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 44]]));
     await enterAndSave('4140 bar', '38');
 
     expect(await screen.findByText(/moved while you were counting/i)).toBeInTheDocument();
   });
 
   it('saves nothing when the refresh shows the count already matches', async () => {
-    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 38]]));
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 38]]));
     await enterAndSave('4140 bar', '38');
 
     expect(await screen.findByText(/everything already matches/i)).toBeInTheDocument();
@@ -619,8 +621,9 @@ describe('counting one place', () => {
   });
 
   /**
-   * `refreshSystemQuantities` reads `parts.quantity` — the roll-up across every bin. Using it for a
-   * shelf count would compare against the whole shop's total and flag a variance on every line.
+   * A shelf count must be re-read at ITS shelf. Comparing it to `parts.quantity` — the roll-up
+   * across every bin — would flag a variance on every line. The read that could do so was deleted
+   * in 20260802015837, so what is left to pin is that the bin-scoped read is the one called.
    */
   it('re-reads THIS bin before saving, not the company-wide total', async () => {
     const user = userEvent.setup();
@@ -633,8 +636,9 @@ describe('counting one place', () => {
     await user.type(inputFor('BUY-ORING-214'), '830');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
-    await waitFor(() => expect(refreshLocationQuantities).toHaveBeenCalledWith(LOC, ['BUY-ORING-214']));
-    expect(refreshSystemQuantities).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(refreshLocationQuantities).toHaveBeenCalledWith(LOC, ['BUY-ORING-214']),
+    );
   });
 
   /**
@@ -851,7 +855,7 @@ describe('count runs are attributed', () => {
   it('passes the acting member to every line it commits', async () => {
     const user = userEvent.setup();
     // The file's default fixture already provides "4140 bar"; only the refresh needs pinning.
-    asMock(refreshSystemQuantities).mockResolvedValue(new Map([['p1', 40]]));
+    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 40]]));
     renderPage();
     await screen.findByText('4140 bar');
 
@@ -1008,7 +1012,6 @@ describe('counting one part everywhere', () => {
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
     expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-a', ['p-split']);
     expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-b', ['p-split']);
-    expect(refreshSystemQuantities).not.toHaveBeenCalled();
 
     const [variances] = asMock(commitCount).mock.calls[0];
     expect(

@@ -46,7 +46,6 @@ vi.mock('@/components/parts/PartAutocomplete', () => ({
           description: null,
           has_routing: false,
           is_stocked: true,
-          is_location_tracked: true,
           source: 'bought',
           primary_unit: 'ea',
           quantity: 240,

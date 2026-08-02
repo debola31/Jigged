@@ -11,7 +11,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/utils/partsAccess', () => ({
   getStockedParts: vi.fn(),
-  adjustPartStock: vi.fn(),
 }));
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
@@ -52,7 +51,6 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import { commitCount, loadPartAtLocationCandidate } from '@/utils/inventoryCountAccess';
-import { adjustPartStock } from '@/utils/partsAccess';
 import { adjustStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import type { CountVariance } from '@/types/inventoryCount';
 
@@ -74,25 +72,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   sbState.queue = [];
   sbState.calls = [];
-  asMock(adjustPartStock).mockResolvedValue({});
   asMock(adjustStockAtLocation).mockResolvedValue({});
 });
 
+/**
+ * There is one write path, not two. The `aggregate` target — write `parts.quantity` via
+ * `adjustPartStock` for a part not tracked by place — was deleted in 20260802015837 along with
+ * `is_location_tracked` and the four aggregate writers themselves. `parts.quantity` is now a
+ * trigger-maintained rollup that rejects direct writes, so there is nothing left to route to.
+ */
 describe('commitCount routing', () => {
-  it('writes an untracked part through the aggregate path', async () => {
-    await commitCount([variance('p1', 38, { kind: 'aggregate' }, 40)]);
-
-    expect(adjustPartStock).toHaveBeenCalledTimes(1);
-    expect(adjustPartStock).toHaveBeenCalledWith(
-      'p1',
-      38,
-      'ft',
-      'Inventory count — counted 38 ft (recorded as 40 ft)',
-    );
-    expect(adjustStockAtLocation).not.toHaveBeenCalled();
-  });
-
-  it('writes a tracked part at its location, never to parts.quantity', async () => {
+  it('writes a counted part at its location', async () => {
     await commitCount([
       variance('p2', 12, { kind: 'location', locationId: 'loc-a', locationName: 'Shelf A' }, 10),
     ]);
@@ -104,29 +94,30 @@ describe('commitCount routing', () => {
       'ft',
       { notes: 'Inventory count — counted 12 ft (recorded as 10 ft)' },
     );
-    // The direct write would be rejected by enforce_tracked_part_quantity — we must not try.
-    expect(adjustPartStock).not.toHaveBeenCalled();
   });
 
-  it('routes a mixed batch to both paths', async () => {
+  it('sends every line of a batch to its own place', async () => {
     await commitCount([
-      variance('p1', 5, { kind: 'aggregate' }),
+      variance('p1', 5, { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' }),
       variance('p2', 6, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
     ]);
-    expect(adjustPartStock).toHaveBeenCalledTimes(1);
-    expect(adjustStockAtLocation).toHaveBeenCalledTimes(1);
+    expect(adjustStockAtLocation).toHaveBeenCalledTimes(2);
+    expect(asMock(adjustStockAtLocation).mock.calls.map((c) => c[1])).toEqual([
+      'loc-unassigned',
+      'loc-a',
+    ]);
   });
 });
 
 describe('commitCount resilience', () => {
   it('keeps going after a failed line — a committed count is a real observation', async () => {
-    asMock(adjustPartStock)
+    asMock(adjustStockAtLocation)
       .mockRejectedValueOnce(new Error('network died'))
       .mockResolvedValueOnce({});
 
     const result = await commitCount([
-      variance('p1', 1, { kind: 'aggregate' }),
-      variance('p2', 2, { kind: 'aggregate' }),
+      variance('p1', 1, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
+      variance('p2', 2, { kind: 'location', locationId: 'loc-b', locationName: 'B' }),
     ]);
 
     expect(result.committed).toBe(1);
@@ -139,14 +130,16 @@ describe('commitCount resilience', () => {
     ]);
     expect(result.committed).toBe(0);
     expect(result.failures).toHaveLength(1);
-    expect(adjustPartStock).not.toHaveBeenCalled();
     expect(adjustStockAtLocation).not.toHaveBeenCalled();
   });
 
   it('reports progress per line and finishes at total', async () => {
     const seen: string[] = [];
     await commitCount(
-      [variance('p1', 1, { kind: 'aggregate' }), variance('p2', 2, { kind: 'aggregate' })],
+      [
+        variance('p1', 1, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
+        variance('p2', 2, { kind: 'location', locationId: 'loc-b', locationName: 'B' }),
+      ],
       { onProgress: (p) => seen.push(`${p.done}/${p.total}:${p.currentPartName}`) },
     );
     expect(seen).toEqual(['0/2:P1', '1/2:P2', '2/2:']);
@@ -163,7 +156,6 @@ describe('loadPartAtLocationCandidate', () => {
     part_name: 'RAW-AL6061-BLANK',
     description: 'Aluminium blank',
     primary_unit: 'ea',
-    is_location_tracked: true,
     ...over,
   });
 
@@ -207,13 +199,11 @@ describe('loadPartAtLocationCandidate', () => {
     );
   });
 
-  /** Mirrors the RPC guard here, so it fails before the sheet is filled in rather than after. */
-  it('refuses a part that is not tracked by place, naming it', async () => {
-    sbState.queue = [{ data: part({ is_location_tracked: false }), error: null }];
-    await expect(loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A')).rejects.toThrow(
-      /RAW-AL6061-BLANK.*tracked by place/i,
-    );
-  });
+  /*
+   * The guard that used to live here — refuse a part with `is_location_tracked = false`, naming
+   * it — went with the column in 20260802015837. Every part is countable at every place now, so
+   * there is no state for it to refuse.
+   */
 });
 
 describe('commitCount attribution', () => {
@@ -226,15 +216,5 @@ describe('commitCount attribution', () => {
 
     const opts = asMock(adjustStockAtLocation).mock.calls[0].at(-1);
     expect(opts.operatorId).toBe('member-1');
-  });
-
-  /**
-   * The aggregate branch stays unattributed on purpose: `adjustPartStock` writes the roll-up
-   * ledger that §5.4 intends to retire once every shop is location-tracked, so widening its
-   * signature would be work invested in the path being removed.
-   */
-  it('leaves the aggregate path alone', async () => {
-    await commitCount([variance('p1', 5, { kind: 'aggregate' })], { operatorId: 'member-1' });
-    expect(asMock(adjustPartStock).mock.calls[0]).toHaveLength(4);
   });
 });

@@ -12,7 +12,7 @@ import type { Part } from '@/types/part';
 vi.mock('@/utils/inventoryLocationsAccess', () => ({ addStockAtLocation: vi.fn() }));
 vi.mock('@/utils/partsAccess', () => ({ getStockedParts: vi.fn() }));
 
-const part = (over: { id: string; part_name: string; is_location_tracked: boolean }) =>
+const part = (over: { id: string; part_name: string }) =>
   ({ ...over, primary_unit: 'ea' }) as unknown as Part;
 
 const renderModal = (props: Partial<React.ComponentProps<typeof OperatorReceivePartModal>> = {}) =>
@@ -34,9 +34,9 @@ const renderModal = (props: Partial<React.ComponentProps<typeof OperatorReceiveP
 beforeEach(() => {
   vi.clearAllMocks();
   (getStockedParts as ReturnType<typeof vi.fn>).mockResolvedValue([
-    part({ id: 'pA', part_name: 'Part A', is_location_tracked: true }),
-    part({ id: 'pB', part_name: 'Part B', is_location_tracked: false }), // not tracked → excluded
-    part({ id: 'pC', part_name: 'Part C', is_location_tracked: true }), // already here → excluded
+    part({ id: 'pA', part_name: 'Part A' }),
+    part({ id: 'pB', part_name: 'Part B' }),
+    part({ id: 'pC', part_name: 'Part C' }), // already here → excluded
   ]);
 });
 
@@ -48,11 +48,15 @@ describe('OperatorReceivePartModal', () => {
     return input;
   };
 
-  it('offers only tracked parts not already in the bin', async () => {
+  /**
+   * "Already in the bin" is the only exclusion left. The other one — a part not tracked by place —
+   * went with `is_location_tracked` in 20260802015837: every part can be received anywhere now.
+   */
+  it('offers every part not already in the bin', async () => {
     renderModal();
     await openPartPicker();
     expect(await screen.findByRole('option', { name: 'Part A' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Part B' })).not.toBeInTheDocument(); // untracked
+    expect(await screen.findByRole('option', { name: 'Part B' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Part C' })).not.toBeInTheDocument(); // already here
   });
 

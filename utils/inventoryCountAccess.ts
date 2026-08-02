@@ -3,16 +3,16 @@
  *
  * There is no count table. Loading a sheet is two batched reads (stocked parts, then all
  * their location balances in one query — never N+1 per part), and committing walks the lines
- * through the *existing* stock functions: `adjustPartStock` for untracked parts,
- * `adjustStockAtLocation` for tracked ones. Both already write their `inventory_transactions`
- * row, so the count's audit trail comes free.
+ * through `adjustStockAtLocation`, which already writes its `inventory_transactions` row — so
+ * the count's audit trail comes free. There is one commit path, not two: since 20260802015837
+ * every part has a place, so there is no part whose count lands on `parts.quantity`.
  *
  * Commit is intentionally per-line and tolerant of partial failure: each counted line is an
  * independent fact, so line 50 failing doesn't invalidate lines 1-49.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
-import { getStockedParts, adjustPartStock } from '@/utils/partsAccess';
+import { getStockedParts } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
   getBalancesForPart,
@@ -20,7 +20,7 @@ import {
   getLocationContentsPage,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
-import { resolveCountTarget, countNote, type LocationBalance } from '@/lib/inventoryCountPlan';
+import { resolveCountTarget, countNote } from '@/lib/inventoryCountPlan';
 import type {
   CountCandidate,
   CountCommitProgress,
@@ -46,15 +46,11 @@ export async function loadCountCandidates(
   const parts = await getStockedParts(companyId, search);
   if (parts.length === 0) return [];
 
-  const tracked = parts.filter((p) => p.is_location_tracked);
-
-  // Locations are only needed to name balances and find Unassigned. A flag-off company has
-  // none, and nothing here is tracked, so skip the read entirely.
+  // No `tracked` split any more: every part has a place, so every stocked part has balances to
+  // read. The old branch existed because a flag-off company had none at all.
   const [balances, locations] = await Promise.all([
-    tracked.length > 0
-      ? getBalancesForParts(companyId, tracked.map((p) => p.id))
-      : new Map<string, LocationBalance[]>(),
-    tracked.length > 0 ? getLocations(companyId) : Promise.resolve([]),
+    getBalancesForParts(companyId, parts.map((p) => p.id)),
+    getLocations(companyId),
   ]);
 
   const unassignedRow = locations.find((l) => l.name === UNASSIGNED_NAME);
@@ -71,7 +67,7 @@ export async function loadCountCandidates(
       // nullable in the type, so fall back rather than render "null".
       unit: part.primary_unit ?? 'ea',
       systemQuantity: Number(part.quantity) || 0,
-      target: resolveCountTarget(part.is_location_tracked, partBalances, unassigned),
+      target: resolveCountTarget(partBalances, unassigned),
     };
   });
 }
@@ -144,7 +140,7 @@ export async function loadPartAtLocationCandidate(
   // count here, and it closes both gaps.
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_name, description, primary_unit, is_location_tracked')
+    .select('id, part_name, description, primary_unit')
     .eq('id', partId)
     .eq('company_id', companyId)
     .is('deleted_at', null)
@@ -155,11 +151,6 @@ export async function loadPartAtLocationCandidate(
     throw error;
   }
   if (!data) throw new Error('That part no longer exists.');
-  // Mirrors the RPC's own guard, before the round trip rather than after it — the commit would
-  // fail with `part % is not location-tracked` once the whole sheet had been filled in.
-  if (!data.is_location_tracked) {
-    throw new Error(`${data.part_name} isn't tracked by place, so it can't be counted at one.`);
-  }
 
   const balances = await refreshLocationQuantities(locationId, [partId]);
 
@@ -204,7 +195,7 @@ export async function loadPartEverywhereCandidates(
 
   const { data, error } = await supabase
     .from('parts')
-    .select('id, part_name, description, primary_unit, is_location_tracked')
+    .select('id, part_name, description, primary_unit')
     .eq('id', partId)
     .eq('company_id', companyId)
     .is('deleted_at', null)
@@ -215,9 +206,6 @@ export async function loadPartEverywhereCandidates(
     throw error;
   }
   if (!data) throw new Error('That part no longer exists.');
-  if (!data.is_location_tracked) {
-    throw new Error(`${data.part_name} isn't tracked by place, so it can't be counted at one.`);
-  }
 
   const balances = await getBalancesForPart(partId);
   const unit = data.primary_unit ?? 'ea';
@@ -280,36 +268,6 @@ export async function refreshLocationQuantities(
 }
 
 /**
- * Re-read current system quantities for the sheet's parts.
- *
- * Called on entering Review. Without it, a count resumed the next morning would show
- * variances against a snapshot taken when the sheet was opened, with no indication of its
- * age. The commit is unaffected either way (adjust sets an absolute value) — it's the
- * variance column and the big-variance prompt that would otherwise mislead.
- */
-export async function refreshSystemQuantities(partIds: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (partIds.length === 0) return out;
-
-  const supabase = getSupabase();
-  const CHUNK = ID_CHUNK;
-
-  for (let i = 0; i < partIds.length; i += CHUNK) {
-    const { data, error } = await supabase
-      .from('parts')
-      .select('id, quantity')
-      .in('id', partIds.slice(i, i + CHUNK));
-
-    if (error) {
-      console.error('Error refreshing system quantities for count:', error);
-      throw error;
-    }
-    for (const row of data ?? []) out.set(row.id, Number(row.quantity) || 0);
-  }
-  return out;
-}
-
-/**
  * Commit counted lines, one at a time, reporting progress.
  *
  * Each line routes to the write path its target demands — there is no third path, and
@@ -338,12 +296,7 @@ export async function commitCount(
     onProgress?.({ done: i, total: variances.length, currentPartName: v.candidate.partName });
 
     try {
-      if (v.candidate.target.kind === 'aggregate') {
-        // Deliberately unattributed: `adjustPartStock` writes the aggregate ledger, which §5.4
-        // intends to retire once every shop is location-tracked. Widening its signature to carry
-        // an operator would be work invested in the path being removed.
-        await adjustPartStock(v.candidate.partId, v.counted, v.candidate.unit, countNote(v));
-      } else if (v.candidate.target.kind === 'location') {
+      if (v.candidate.target.kind === 'location') {
         await adjustStockAtLocation(
           v.candidate.partId,
           v.candidate.target.locationId,

@@ -26,19 +26,31 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
   description: null,
   unit: 'ea',
   systemQuantity: 0,
-  target: { kind: 'aggregate' },
+  target: { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' },
   ...over,
 });
 
-describe('resolveCountTarget', () => {
-  it('sends an untracked part to the aggregate quantity', () => {
-    expect(resolveCountTarget(false, [], UNASSIGNED)).toEqual({ kind: 'aggregate' });
-  });
+/**
+ * Entries keyed the way the sheet keys them.
+ *
+ * These used to be written as `{ a: 7 }`, which worked only because the default candidate was an
+ * `aggregate` row whose key IS its part id. Every countable row has a place now, so the key is
+ * `part::place` and hand-writing it would just be restating `countRowKey`.
+ */
+const entriesFor = (...pairs: [CountCandidate, number][]): CountEntries =>
+  Object.fromEntries(pairs.map(([c, n]) => [countRowKey(c), n]));
 
-  it('sends a tracked part with no stock anywhere to Unassigned', () => {
-    // The opening-count case: trg_auto_track_stocked_part seeds every stocked part at
-    // Unassigned with 0, so a shop starting from zero has every part here.
-    expect(resolveCountTarget(true, [bal('loc-unassigned', 0)], UNASSIGNED)).toEqual({
+describe('resolveCountTarget', () => {
+  /**
+   * There is no longer an "untracked" arm to test. `is_location_tracked` was dropped in
+   * 20260802015837 and every part has a place, so `resolveCountTarget` takes balances alone —
+   * the aggregate target it used to return for a part whose stock lived in `parts.quantity`
+   * has no part left to describe.
+   */
+  it('sends a part with no stock anywhere to Unassigned', () => {
+    // The opening-count case: every part is seeded at Unassigned with 0, so a shop starting
+    // from zero has every part here.
+    expect(resolveCountTarget([bal('loc-unassigned', 0)], UNASSIGNED)).toEqual({
       kind: 'location',
       locationId: 'loc-unassigned',
       locationName: 'Unassigned',
@@ -48,24 +60,22 @@ describe('resolveCountTarget', () => {
   it('treats a seeded zero-row as "not placed", not as one location holding stock', () => {
     // Two rows, only one with stock — the zero must not make this look ambiguous.
     const target = resolveCountTarget(
-      true,
       [bal('loc-unassigned', 0), bal('loc-rack', 40, 'Bar rack')],
       UNASSIGNED,
     );
     expect(target).toEqual({ kind: 'location', locationId: 'loc-rack', locationName: 'Bar rack' });
   });
 
-  it('sends a tracked part with stock in exactly one location to that location', () => {
-    expect(resolveCountTarget(true, [bal('loc-a', 12, 'Shelf A')], UNASSIGNED)).toEqual({
+  it('sends a part with stock in exactly one location to that location', () => {
+    expect(resolveCountTarget([bal('loc-a', 12, 'Shelf A')], UNASSIGNED)).toEqual({
       kind: 'location',
       locationId: 'loc-a',
       locationName: 'Shelf A',
     });
   });
 
-  it('excludes a tracked part split across two or more locations', () => {
+  it('excludes a part split across two or more locations', () => {
     const target = resolveCountTarget(
-      true,
       [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 10)],
       UNASSIGNED,
     );
@@ -81,7 +91,6 @@ describe('resolveCountTarget', () => {
    */
   it('carries the holding places on the excluded branch, so the sheet can route to them', () => {
     const target = resolveCountTarget(
-      true,
       [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 0)],
       UNASSIGNED,
     );
@@ -94,14 +103,14 @@ describe('resolveCountTarget', () => {
   });
 
   it('carries no places when the exclusion is not about being split', () => {
-    const target = resolveCountTarget(true, [], null);
+    const target = resolveCountTarget([], null);
     expect(target.kind).toBe('excluded');
     // Nothing anywhere and no Unassigned bucket: there is no worksheet that would help.
     if (target.kind === 'excluded') expect(target.locations).toEqual([]);
   });
 
   it('excludes rather than guesses when there is no Unassigned bucket to fall back to', () => {
-    expect(resolveCountTarget(true, [], null).kind).toBe('excluded');
+    expect(resolveCountTarget([], null).kind).toBe('excluded');
   });
 });
 
@@ -142,8 +151,8 @@ describe('rowDelta', () => {
   });
 
   it('returns a signed delta once counted, and 0 when it matches', () => {
-    expect(rowDelta(c, { a: 7 })).toBe(-3);
-    expect(rowDelta(c, { a: 10 })).toBe(0);
+    expect(rowDelta(c, entriesFor([c, 7]))).toBe(-3);
+    expect(rowDelta(c, entriesFor([c, 10]))).toBe(0);
   });
 });
 
@@ -159,30 +168,30 @@ describe('buildVariances', () => {
   });
 
   it('computes a signed delta against the current system quantity', () => {
-    const v = buildVariances(candidates, { a: 7 }, new Map());
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(-3);
   });
 
   it('flags a line whose system quantity moved while the sheet was open', () => {
-    const openedWith = new Map([['a', 12]]); // sheet opened at 12, now 10
-    const v = buildVariances(candidates, { a: 7 }, openedWith);
+    const openedWith = new Map([[countRowKey(candidates[0]), 12]]); // sheet opened at 12, now 10
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), openedWith);
     expect(v[0].movedSinceOpened).toBe(true);
   });
 
   it('does not flag a line that held still', () => {
-    const v = buildVariances(candidates, { a: 7 }, new Map([['a', 10]]));
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), new Map([[countRowKey(candidates[0]), 10]]));
     expect(v[0].movedSinceOpened).toBe(false);
   });
 
   it('skips excluded parts even if a count somehow got entered', () => {
-    expect(buildVariances(candidates, { x: 3 }, new Map())).toEqual([]);
+    expect(buildVariances(candidates, entriesFor([candidates[2], 3]), new Map())).toEqual([]);
   });
 
   // The opening-count case: every part starts at zero, and finding stock there is ordinary.
   it('treats a count against a zero baseline as an ordinary increase', () => {
     const zeroed = [candidate({ partId: 'z', systemQuantity: 0 })];
-    const v = buildVariances(zeroed, { z: 5 }, new Map());
+    const v = buildVariances(zeroed, entriesFor([zeroed[0], 5]), new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(5);
   });
@@ -194,7 +203,11 @@ describe('committableVariances', () => {
     candidate({ partId: 'small', systemQuantity: 10 }),
     candidate({ partId: 'big', systemQuantity: 10 }),
   ];
-  const entries: CountEntries = { same: 10, small: 9, big: 2 };
+  const entries: CountEntries = entriesFor(
+    [candidates[0], 10],
+    [candidates[1], 9],
+    [candidates[2], 2],
+  );
   const variances = buildVariances(candidates, entries, new Map());
 
   it('drops lines counted equal to the system — no write needed', () => {
@@ -210,11 +223,8 @@ describe('committableVariances', () => {
 
 describe('countNote', () => {
   it('records both numbers so the ledger explains where the count came from', () => {
-    const v = buildVariances(
-      [candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 })],
-      { a: 38 },
-      new Map(),
-    )[0];
+    const bar = candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 });
+    const v = buildVariances([bar], entriesFor([bar, 38]), new Map())[0];
     expect(countNote(v)).toBe('Inventory count — counted 38 ft (recorded as 40 ft)');
   });
 });
@@ -240,7 +250,7 @@ describe('countRowKey', () => {
 
   it('is just the part id when there is no place', () => {
     expect(
-      countRowKey({ ...at('x'), target: { kind: 'aggregate' } }),
+      countRowKey({ ...at('x'), target: { kind: 'excluded', reason: 'split', locations: [] } }),
     ).toBe('p1');
   });
 

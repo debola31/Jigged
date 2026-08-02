@@ -1950,7 +1950,6 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
-          is_location_tracked: boolean
           is_stocked: boolean
           part_name: string
           preferred_vendor_id: string | null
@@ -1967,7 +1966,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name: string
           preferred_vendor_id?: string | null
@@ -1984,7 +1982,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name?: string
           preferred_vendor_id?: string | null
@@ -3532,10 +3529,6 @@ export type Database = {
           p_quantity: number
           p_unit: string
         }
-        Returns: Json
-      }
-      enable_location_tracking_for_company: {
-        Args: { p_company_id: string }
         Returns: Json
       }
       function_execute_leaks: {

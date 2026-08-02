@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
+import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
@@ -19,6 +20,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
 import type { Part } from '@/types/part';
+import type { PartUnitConversion } from '@/types/part';
 import type {
   InventoryLocation,
   PartLocationBalanceWithLocation,
@@ -50,6 +52,8 @@ function pathLabel(id: string, byId: Map<string, InventoryLocation>): string {
 
 interface PartLocationInventoryProps {
   part: Part;
+  /** The part's defined conversions, so a unit it can be bought in is offered here too. */
+  unitConversions: PartUnitConversion[];
   partId: string;
   companyId: string;
   /** Refresh the parent part (rollup quantity + history) after a change. */
@@ -58,6 +62,7 @@ interface PartLocationInventoryProps {
 
 export default function PartLocationInventory({
   part,
+  unitConversions,
   partId,
   companyId,
   onStockChanged,
@@ -84,7 +89,28 @@ export default function PartLocationInventory({
   const balances = inventoryData?.[0] ?? EMPTY_BALANCES;
   const locations = inventoryData?.[1] ?? EMPTY_LOCATIONS;
 
+  const { features } = useCompanyFeatures();
+
   const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
+
+  /**
+   * Whether this shop has been given places at all.
+   *
+   * Creating one is the flagged capability itself, so the picker's create-as-you-type is offered
+   * only to a shop that has the flag — not merely to one that happens to have more than one place.
+   */
+  const placesEnabled = Boolean(features.inventory_locations);
+
+  /**
+   * One-place mode: the shop has never built a place, so the auto-managed `Unassigned` bucket is
+   * the only one there is.
+   *
+   * This is the *normal* state for a shop without the `inventory_locations` flag — and since
+   * 20260802015837 every part has a place whether or not the shop has the flag, so this tab now
+   * renders for them too. What it must not do is show them a places UI they haven't been given:
+   * a "Move" button with nowhere to move to, and a dropdown containing exactly one option.
+   */
+  const onePlace = locations.length === 1 && locations[0].kind === 'system';
 
   // `kind` rides along so the picker can drop the auto-managed `Unassigned` bucket from
   // destination lists without needing to know how it's identified.
@@ -133,9 +159,24 @@ export default function PartLocationInventory({
     [balances],
   );
 
+  /**
+   * The units you may type a movement in.
+   *
+   * The part's own conversions are unioned in, which they were not before: `PartUnitConversionsEditor`
+   * sits a few hundred pixels below this on the same tab and lets a shop define "1 bar = 12 ft",
+   * and the dropdown then refused to offer `bar`. You could define a conversion you could not use.
+   * `convertToBaseUnit` inside the RPC wrapper has always accepted them — only the picker did not.
+   */
   const unitOptions = useMemo(
-    () => Array.from(new Set([primaryUnit, ...getStandardUnitsForUnit(primaryUnit)])).filter(Boolean),
-    [primaryUnit],
+    () =>
+      Array.from(
+        new Set([
+          primaryUnit,
+          ...getStandardUnitsForUnit(primaryUnit),
+          ...unitConversions.map((c) => c.from_unit),
+        ]),
+      ).filter(Boolean),
+    [primaryUnit, unitConversions],
   );
 
   const onActionDone = async () => {
@@ -156,9 +197,13 @@ export default function PartLocationInventory({
         <Button variant="outlined" startIcon={<RemoveIcon />} onClick={() => setAction('deplete')}>
           Remove
         </Button>
-        <Button variant="outlined" startIcon={<SwapHorizIcon />} onClick={() => setAction('move')}>
-          Move
-        </Button>
+        {/* Nowhere to move to when the shop has one bucket — the button would open a modal
+            whose source and destination are the same place. */}
+        {!onePlace && (
+          <Button variant="outlined" startIcon={<SwapHorizIcon />} onClick={() => setAction('move')}>
+            Move
+          </Button>
+        )}
         <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setAction('adjust')}>
           Adjust
         </Button>
@@ -244,7 +289,7 @@ export default function PartLocationInventory({
           unitOptions={unitOptions}
           locations={locationOptions}
           sourceBalances={sourceBalances}
-          onCreateLocation={createLocationFromPicker}
+          onCreateLocation={placesEnabled ? createLocationFromPicker : undefined}
           onClose={() => setAction(null)}
           onDone={onActionDone}
         />

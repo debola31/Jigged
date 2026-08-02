@@ -503,29 +503,14 @@ async def update_company_features(
             f"Updated company {company_id} features: {new_settings['features']}"
         )
 
-        # When inventory locations is newly turned ON, location-track all of the
-        # company's existing stocked parts (the per-part "enable tracking" opt-in
-        # was removed — every stocked part is tracked at "Unassigned" by default).
-        # New parts are auto-tracked by a DB trigger; this catches existing ones.
-        old_features = _normalize_features(current_settings.get("features", {}))
-        if not old_features.get("inventory_locations", False) and new_settings[
-            "features"
-        ].get("inventory_locations", False):
-            try:
-                backfill = service_client.rpc(
-                    "enable_location_tracking_for_company",
-                    {"p_company_id": company_id},
-                ).execute()
-                logger.info(
-                    f"Backfilled location tracking for {company_id}: {backfill.data}"
-                )
-            except Exception as backfill_err:
-                # Non-fatal: the flag write succeeded and the RPC is idempotent,
-                # so it can be retried. Surface for visibility.
-                logger.error(
-                    f"Location-tracking backfill failed for {company_id}: {backfill_err}"
-                )
-                sentry_sdk.capture_exception(backfill_err)
+        # No backfill on flag-flip any more.
+        #
+        # This used to call `enable_location_tracking_for_company` when `inventory_locations` went
+        # from off to on, because tracking was a per-part opt-in that existing parts hadn't taken.
+        # 20260802015837 removed the opt-in: every part in every company has a balance row at that
+        # company's `Unassigned` bucket, flag or no flag, and the trigger keeps new ones that way.
+        # There is nothing left for a flip to catch up — which is the point of doing it at rest
+        # rather than at the moment somebody happens to toggle a switch.
 
         return CompanyFeaturesUpdateResponse(
             success=True,

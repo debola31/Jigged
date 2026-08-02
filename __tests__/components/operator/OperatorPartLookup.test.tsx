@@ -54,7 +54,6 @@ const part = (over: Partial<PartSelectOption> = {}): PartSelectOption => ({
   description: 'Aluminum 6061 machining blank',
   has_routing: false,
   is_stocked: true,
-  is_location_tracked: true,
   source: 'bought',
   primary_unit: 'ea',
   quantity: 240,
@@ -107,34 +106,20 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     expect(onOpenLocation).toHaveBeenCalledWith('l1');
   });
 
-  /**
-   * The distinction this screen exists to keep straight. An untracked part has no
-   * `part_location_stock` rows at all, so the balances read is empty for the same reason a
-   * genuinely-empty tracked part is — and telling someone their 240 on hand are "nowhere" would
-   * send them looking for stock that is sitting right there, just unbinned.
+  /*
+   * The distinction this screen used to keep straight — "isn't tracked by place" versus "nowhere"
+   * — no longer exists. `is_location_tracked` was dropped in 20260802015837, so an empty balances
+   * read has exactly one meaning now: there is genuinely none anywhere. Removing the branch is
+   * the point; the remaining test below is the one true answer.
    */
-  it('says an untracked part is not binned, never that it is nowhere', async () => {
-    const user = userEvent.setup();
-    nextPick = part({ is_location_tracked: false, quantity: 240 });
-    renderLookup();
-    await pick(user);
 
-    expect(await screen.findByText(/isn't tracked by place/i)).toBeInTheDocument();
-    // The on-hand total must still be answered — that is the useful half of "no shelf for this".
-    expect(screen.getByText('240 ea')).toBeInTheDocument();
-    expect(screen.queryByText(/none in any place/i)).not.toBeInTheDocument();
-    // No point asking for balances that cannot exist.
-    expect(mockBalances).not.toHaveBeenCalled();
-  });
-
-  it('says a tracked part with no stock is genuinely nowhere', async () => {
+  it('says a part with no stock is genuinely nowhere', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([]);
     renderLookup();
     await pick(user);
 
     expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
-    expect(screen.queryByText(/isn't tracked by place/i)).not.toBeInTheDocument();
   });
 
   it('surfaces a failed read instead of showing an empty answer', async () => {
@@ -280,16 +265,6 @@ describe('OperatorPartLookup — the put-away picker', () => {
     expect(await screen.findByRole('button', { name: /put it away/i })).toBeInTheDocument();
   });
 
-  /** There is no per-place row to put anything into, so the picker would be a dead end. */
-  it('is withheld for a part that is not tracked by place', async () => {
-    const user = userEvent.setup();
-    nextPick = part({ is_location_tracked: false });
-    renderLookup();
-    await pick(user);
-    await screen.findByText(/isn't tracked by place/i);
-
-    expect(screen.queryByRole('button', { name: /put it away/i })).not.toBeInTheDocument();
-  });
 
   it('reports a failed places load instead of opening an empty picker', async () => {
     const user = userEvent.setup();

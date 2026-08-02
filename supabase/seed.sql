@@ -612,7 +612,17 @@ begin
       insert into public.inventory_transactions (company_id, part_id, item_name, type, quantity, unit, converted_quantity, job_id, notes, created_by, created_at)
       values ('22222222-2222-2222-2222-222222222222', e.child_part_id, e.part_name, 'depletion', used, e.unit, used, p_job,
               'Issued to '||v_num, '11111111-1111-1111-1111-111111111111', now() - (p_when||' days')::interval);
-      update public.parts set quantity = greatest(0, quantity - used) where id = e.child_part_id;
+      -- Decrement the BALANCE, not `parts.quantity`. As of 20260802015837 that column is
+      -- maintained solely by `recompute_part_quantity_from_locations`, and a direct write
+      -- raises — which is the point: the seed now has to move stock the way the app does.
+      -- Everything is still in Unassigned at this stage; the put-away block runs later.
+      update public.part_location_stock s
+         set quantity = greatest(0, s.quantity - used)
+        from public.inventory_locations l
+       where s.part_id = e.child_part_id
+         and s.location_id = l.id
+         and l.company_id = '22222222-2222-2222-2222-222222222222'
+         and l.kind = 'system';
     end loop;
   end loop;
 end $$;
@@ -1088,10 +1098,12 @@ begin
                               '{features,inventory_locations}', 'true')
    where id = v_company;
 
-  -- Sanctioned bulk backfill: creates the system "Unassigned" bucket and moves
-  -- every stocked part's whole quantity into it. The rollup trigger then keeps
-  -- parts.quantity = SUM(balances), so no figure above changes.
-  v_unassigned := (public.enable_location_tracking_for_company(v_company) ->> 'location_id')::uuid;
+  -- No backfill needed any more. `enable_location_tracking_for_company` was dropped in
+  -- 20260802015837: every part is seeded into Unassigned by `auto_track_stocked_part` the
+  -- moment it is inserted, for every company, flag or no flag. All this block needs is the
+  -- bucket's id — and note the flag write above now governs only whether this shop MANAGES
+  -- places, not whether its stock has one.
+  v_unassigned := public.inv_get_or_create_unassigned(v_company);
 
   -- No is_stockable / is_qr_anchor: both were dropped in
   -- 20260623031347_drop_location_display_flags.sql. Every node is stockable and

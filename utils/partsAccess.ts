@@ -18,15 +18,13 @@ import type {
 } from '@/types/part';
 import type {
   InventoryTransaction,
-  InventoryTransactionType,
   InventoryTransactionWithRelations,
 } from '@/types/partTransaction';
 import { resolveMovementAttribution } from '@/utils/movementAttribution';
-import { convertToBaseUnit } from '@/lib/unitPresets';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, is_location_tracked, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -40,7 +38,6 @@ interface PartRow {
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   costing_batch_quantity: number | string | null;
-  is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
   routings?: Array<{ id: string }> | { id: string } | null;
@@ -64,7 +61,6 @@ function rowToPart(row: PartRow): Part {
       row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
         ? null
         : Number(row.costing_batch_quantity),
-    is_location_tracked: row.is_location_tracked ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,
     routing: routingRecord
@@ -589,7 +585,6 @@ export interface PartSelectOption {
    * "tracked, but none anywhere" for another. Without this flag those are indistinguishable, and
    * the operator lookup would tell someone their stock is nowhere when it simply isn't binned.
    */
-  is_location_tracked: boolean;
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
@@ -606,7 +601,6 @@ const PART_SELECT_COLUMNS = `
   part_name,
   description,
   is_stocked,
-  is_location_tracked,
   source,
   primary_unit,
   quantity,
@@ -622,7 +616,6 @@ function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
     description: p.description as string | null,
     has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
     is_stocked: p.is_stocked as boolean,
-    is_location_tracked: Boolean(p.is_location_tracked),
     source: p.source as 'made' | 'bought',
     primary_unit: p.primary_unit as string | null,
     quantity: Number(p.quantity ?? 0),
@@ -1312,354 +1305,18 @@ export async function getPartCostExplain(
   };
 }
 
-// ============================================================
-// PART STOCK TRANSACTIONS
-// (replaces inventoryAccess.addStock / removeStock / adjustStock /
-//  removeStockGraceful / consumeMaterials)
-// ============================================================
-
-interface PartWithConversions {
-  id: string;
-  company_id: string;
-  part_name: string;
-  primary_unit: string | null;
-  quantity: number;
-  unit_conversions: Array<{ from_unit: string; to_primary_factor: number }>;
-}
-
-async function loadPartWithConversions(partId: string): Promise<PartWithConversions> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('parts')
-    .select(`
-      id, company_id, part_name, primary_unit, quantity,
-      parts_unit_conversions(from_unit, to_primary_factor)
-    `)
-    .eq('id', partId)
-    .single();
-
-  if (error || !data) {
-    throw error || new Error('Part not found');
-  }
-
-  return {
-    id: data.id as string,
-    company_id: data.company_id as string,
-    part_name: data.part_name as string,
-    primary_unit: data.primary_unit as string | null,
-    quantity: Number(data.quantity ?? 0),
-    unit_conversions:
-      (data.parts_unit_conversions as Array<{
-        from_unit: string;
-        to_primary_factor: number;
-      }>) || [],
-  };
-}
-
-async function createInventoryTransaction(
-  companyId: string,
-  partId: string,
-  itemName: string,
-  type: InventoryTransactionType,
-  quantity: number,
-  unit: string,
-  convertedQuantity: number,
-  notes: string | null,
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-  hasDiscrepancy: boolean = false,
-): Promise<InventoryTransaction> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('inventory_transactions')
-    .insert({
-      company_id: companyId,
-      part_id: partId,
-      item_name: itemName,
-      type,
-      quantity,
-      unit,
-      converted_quantity: convertedQuantity,
-      job_id: jobId || null,
-      job_operation_id: jobOperationId || null,
-      operator_id: operatorId || null,
-      notes,
-      created_by: createdBy || null,
-      has_discrepancy: hasDiscrepancy,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating part transaction:', error);
-    throw error;
-  }
-
-  return data as InventoryTransaction;
-}
-
 /**
- * Add stock to a stockable part (addition transaction).
+ * The four aggregate stock writers — `addPartStock`, `removePartStock`, `adjustPartStock` and
+ * `removePartStockGraceful` — were deleted in 20260802015837.
+ *
+ * They wrote `parts.quantity` directly. That column is now a rollup of `part_location_stock`,
+ * maintained by trigger, and a direct write to it raises: *"parts.quantity is maintained from
+ * part_location_stock; direct quantity writes are not allowed"*. So they were not merely dead
+ * (their last caller, PartTransactionModal, went with them) — they could no longer succeed.
+ *
+ * Stock movements go through the location RPCs: `addStockAtLocation`, `depleteStockAtLocation`,
+ * `adjustStockAtLocation`, `transferStock` in utils/inventoryLocationsAccess.ts.
  */
-export async function addPartStock(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  const newQuantity = part.quantity + convertedQuantity;
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'addition',
-    quantity,
-    unit,
-    convertedQuantity,
-    notes || null,
-    undefined,
-    undefined,
-    undefined,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Remove stock from a stockable part (depletion transaction). Validates that
- * quantity won't go negative — see `removePartStockGraceful` for the
- * operator-flow version that clamps + flags discrepancy.
- */
-export async function removePartStock(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  const newQuantity = part.quantity - convertedQuantity;
-  if (newQuantity < 0) {
-    throw new Error(
-      `Insufficient stock. Current: ${part.quantity} ${part.primary_unit}, Requested: ${convertedQuantity} ${part.primary_unit}`,
-    );
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'depletion',
-    quantity,
-    unit,
-    convertedQuantity,
-    notes || null,
-    jobId,
-    jobOperationId,
-    operatorId,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Set a part's stock to a specific value (adjustment transaction).
- */
-export async function adjustPartStock(
-  partId: string,
-  newQuantity: number,
-  unit: string,
-  notes: string = '',
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (newQuantity < 0) throw new Error('Quantity cannot be negative');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedNewQuantity = convertToBaseUnit(
-    newQuantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-  const difference = convertedNewQuantity - part.quantity;
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: convertedNewQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'adjustment',
-    Math.abs(difference),
-    part.primary_unit,
-    Math.abs(difference),
-    notes || `Adjusted from ${part.quantity} to ${convertedNewQuantity} ${part.primary_unit}`,
-    undefined,
-    undefined,
-    undefined,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Remove stock without blocking on insufficient inventory. When the operator
- * confirms more usage than is on hand, we deplete to zero, record the FULL
- * confirmed amount, and flag the row with `has_discrepancy=true`.
- */
-export async function removePartStockGraceful(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-): Promise<{
-  part: Part;
-  transaction: InventoryTransaction;
-  hasDiscrepancy: boolean;
-  shortfall: number;
-}> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  let newQuantity = part.quantity - convertedQuantity;
-  let hasDiscrepancy = false;
-  let shortfall = 0;
-  let finalNotes = notes || null;
-
-  if (newQuantity < 0) {
-    hasDiscrepancy = true;
-    shortfall = Math.abs(newQuantity);
-    newQuantity = 0;
-
-    const discrepancyNote = `[DISCREPANCY: Confirmed ${convertedQuantity} ${part.primary_unit}, but only ${part.quantity} ${part.primary_unit} was available. Shortfall: ${shortfall} ${part.primary_unit}]`;
-    finalNotes = finalNotes ? `${finalNotes} ${discrepancyNote}` : discrepancyNote;
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'depletion',
-    quantity,
-    unit,
-    convertedQuantity,
-    finalNotes,
-    jobId,
-    jobOperationId,
-    operatorId,
-    createdBy,
-    hasDiscrepancy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction, hasDiscrepancy, shortfall };
-}
 
 /**
  * Update the notes field on an existing transaction. All other fields are

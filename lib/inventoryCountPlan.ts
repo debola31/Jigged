@@ -8,80 +8,93 @@
 import type {
   CountCandidate,
   CountEntries,
-  CountTarget,
   CountVariance,
 } from '@/types/inventoryCount';
 
-/** A part's stock, per location, as read from part_location_stock. */
-export interface LocationBalance {
-  locationId: string;
-  locationName: string;
-  quantity: number;
+/**
+ * The place a part is counted at when it holds stock **nowhere**.
+ *
+ * This is all that survives of `resolveCountTarget`, which used to pick one target per part from
+ * four arms. Three of them are gone: `aggregate` with `is_location_tracked` (20260802015837), and
+ * both `excluded` arms with the sheet's move to one row per place. What remains is a single
+ * decision — where does a part with no stock anywhere get counted? — and the answer is the
+ * company's system bucket.
+ *
+ * **This is the opening count, not an edge case.** `trg_auto_track_stocked_part` seeds every
+ * stocked part at `Unassigned` with 0, so a shop counting for the first time has its entire
+ * catalogue here. It is also the most valuable count there is: *the system says zero and I am
+ * holding twelve*. A rule that emitted rows only for places with stock would delete exactly that.
+ *
+ * Resolved by `kind`, not by the literal name "Unassigned": `isReservedKind` stops anyone typing
+ * `system` into a location's kind, while nothing stops them renaming one.
+ */
+export function resolveFallbackPlace(
+  locations: { id: string; name: string; kind: string | null }[],
+): { id: string; name: string } {
+  const system = locations.find((l) => l.kind === 'system');
+  if (!system) {
+    // Not a fallback and not a silent drop. Every company has had a system bucket since
+    // 20260802015837 created one for all of them and asserted it, so its absence is a real data
+    // fault — and dropping the part from the sheet would hide it behind a shorter list nobody
+    // counts. Fail loudly enough to diagnose.
+    throw new Error(
+      'This company has no "Unassigned" location, so there is nowhere to record a count for a part that is not on a shelf. This is a data fault — please report it.',
+    );
+  }
+  return { id: system.id, name: system.name };
 }
 
 /**
- * Decide where a counted quantity goes for one part.
+ * A part and every row of it on this sheet.
  *
- *  - **Untracked** → `parts.quantity`. The only legal write for a part whose quantity isn't
- *    a rollup.
- *  - **Tracked, nothing anywhere** → Unassigned. The opening-count case, not an edge case:
- *    `trg_auto_track_stocked_part` seeds every stocked part there at 0, so a shop starting
- *    from zero has every part here. It's also the honest target — you counted the stock, you
- *    haven't said where it lives.
- *  - **Tracked, exactly one location holding stock** → that location.
- *  - **Tracked, two or more** → excluded. "38 total" against 10+20+10 has no defensible bin
- *    to absorb the difference, and pushing it to Unassigned would corrupt bin-level accuracy.
- *
- * "Holding stock" means quantity > 0: the seeded zero-row at Unassigned must not make a part
- * look placed.
+ * The unit the PICKER works in and the unit the sheet groups by. Ticking a part means "count this
+ * part wherever it is", which keeps the picker one-row-per-part — the list is unbounded,
+ * unvirtualised and client-filtered, and multiplying it by places-per-part would have cost a lot
+ * and bought nothing: nobody chooses a *shelf* when deciding which parts to walk.
  */
-export function resolveCountTarget(
-  balances: LocationBalance[],
-  unassigned: { id: string; name: string } | null,
-): CountTarget {
-  // The `aggregate` arm is gone with `is_location_tracked` (20260802015837). It existed for a
-  // part whose stock lived in `parts.quantity` alone; no such part remains.
-  const holding = balances.filter((b) => b.quantity > 0);
+export interface CountGroup {
+  partId: string;
+  partName: string;
+  description: string | null;
+  unit: string;
+  /** Sorted by `target.locationPath`, so the sheet's row order is a stable route round the shop. */
+  rows: CountCandidate[];
+  /** Σ of the rows' system quantities — the shop-wide figure, shown read-only on the header. */
+  total: number;
+}
 
-  if (holding.length === 0) {
-    if (!unassigned) {
-      return {
-        kind: 'excluded',
-        reason: 'No "Unassigned" location exists to hold the count.',
-        // Nowhere to send anyone: the part holds stock nowhere, so there is no
-        // place-scoped worksheet that would help.
-        locations: [],
-      };
+/**
+ * Group rows by part, preserving a deterministic order.
+ *
+ * Sorted by part name, and **within a part by place path** — the page used to sort on part name
+ * alone, which for several rows of one part is a tie, so their order fell out of `Array.sort`'s
+ * stability and changed between visits. On a walk-the-shop task the row order is the route.
+ */
+export function groupByPart(candidates: CountCandidate[]): CountGroup[] {
+  const byPart = new Map<string, CountGroup>();
+
+  for (const c of candidates) {
+    const g = byPart.get(c.partId);
+    if (g) {
+      g.rows.push(c);
+      g.total += c.systemQuantity;
+    } else {
+      byPart.set(c.partId, {
+        partId: c.partId,
+        partName: c.partName,
+        description: c.description,
+        unit: c.unit,
+        rows: [c],
+        total: c.systemQuantity,
+      });
     }
-    return { kind: 'location', locationId: unassigned.id, locationName: unassigned.name };
   }
 
-  if (holding.length === 1) {
-    return {
-      kind: 'location',
-      locationId: holding[0].locationId,
-      locationName: holding[0].locationName,
-    };
+  const groups = [...byPart.values()];
+  for (const g of groups) {
+    g.rows.sort((x, y) => x.target.locationPath.localeCompare(y.target.locationPath));
   }
-
-  // Carrying the places, not just their count, is what turns this from a dead end into a
-  // route: the sheet links each one to its place-scoped worksheet, where the same part IS
-  // countable because "Shelf A holds 830" says nothing about Shelf B.
-  return {
-    kind: 'excluded',
-    reason: `Stock is split across ${holding.length} locations — count this at its locations.`,
-    locations: holding.map((b) => ({ id: b.locationId, name: b.locationName })),
-  };
-}
-
-/** Candidates that can be counted item-by-item. */
-export function countableCandidates(candidates: CountCandidate[]): CountCandidate[] {
-  return candidates.filter((c) => c.target.kind !== 'excluded');
-}
-
-/** Candidates held back, so they can be named rather than silently missing. */
-export function excludedCandidates(candidates: CountCandidate[]): CountCandidate[] {
-  return candidates.filter((c) => c.target.kind === 'excluded');
+  return groups.sort((a, b) => a.partName.localeCompare(b.partName));
 }
 
 /**
@@ -111,13 +124,12 @@ export function commonUnit(candidates: CountCandidate[]): string | null {
  * for Shelf B. Keying by part alone made those two rows share one number, so typing 828 for Shelf A
  * silently wrote 828 to Shelf B as well and committed both.
  *
- * An `aggregate` row has no place, so the part id IS its identity. An `excluded` row is never
- * counted, and falls through to the same shape harmlessly.
+ * Unconditional since every row has a place. The `partId`-only branch that used to serve the
+ * placeless `aggregate` and `excluded` rows is deliberately not kept "just in case": a second key
+ * format nobody produces is an invitation to reintroduce the exact bug the key was created to fix.
  */
 export function countRowKey(candidate: CountCandidate): string {
-  return candidate.target.kind === 'location'
-    ? `${candidate.partId}::${candidate.target.locationId}`
-    : candidate.partId;
+  return `${candidate.partId}::${candidate.target.locationId}`;
 }
 
 export function rowDelta(candidate: CountCandidate, entries: CountEntries): number | null {
@@ -144,7 +156,6 @@ export function buildVariances(
     const key = countRowKey(candidate);
     const counted = entries[key];
     if (counted === undefined) continue;
-    if (candidate.target.kind === 'excluded') continue;
 
     const delta = counted - candidate.systemQuantity;
     const opened = openedWith.get(key);
@@ -188,7 +199,10 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
  */
 export function countNote(v: CountVariance): string {
   const unit = v.candidate.unit;
-  return `Inventory count — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
+  // The place is named because one part can now be counted at several of them in one session, and
+  // the ledger would otherwise carry three notes about one part each quoting a different "recorded
+  // as" figure — which reads as three contradictory statements rather than three shelves.
+  return `Inventory count at ${v.candidate.target.locationPath} — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
 }
 
 // ── Draft persistence: REMOVED 2026-08-01 ────────────────────────────────────

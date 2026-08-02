@@ -14,6 +14,7 @@ vi.mock('@/utils/partsAccess', () => ({
 }));
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
+  getBalancesForParts: vi.fn(),
   getLocations: vi.fn(),
 }));
 /**
@@ -50,8 +51,17 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => sbMock,
 }));
 
-import { commitCount, loadPartAtLocationCandidate } from '@/utils/inventoryCountAccess';
-import { adjustStockAtLocation } from '@/utils/inventoryLocationsAccess';
+import {
+  commitCount,
+  loadCountCandidates,
+  loadPartAtLocationCandidate,
+} from '@/utils/inventoryCountAccess';
+import { getStockedParts } from '@/utils/partsAccess';
+import {
+  adjustStockAtLocation,
+  getBalancesForParts,
+  getLocations,
+} from '@/utils/inventoryLocationsAccess';
 import type { CountVariance } from '@/types/inventoryCount';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -84,7 +94,7 @@ beforeEach(() => {
 describe('commitCount routing', () => {
   it('writes a counted part at its location', async () => {
     await commitCount([
-      variance('p2', 12, { kind: 'location', locationId: 'loc-a', locationName: 'Shelf A' }, 10),
+      variance('p2', 12, { locationId: 'loc-a', locationName: 'Shelf A', locationPath: 'Shelf A' }, 10),
     ]);
 
     expect(adjustStockAtLocation).toHaveBeenCalledWith(
@@ -92,14 +102,14 @@ describe('commitCount routing', () => {
       'loc-a',
       12,
       'ft',
-      { notes: 'Inventory count — counted 12 ft (recorded as 10 ft)' },
+      { notes: 'Inventory count at Shelf A — counted 12 ft (recorded as 10 ft)' },
     );
   });
 
   it('sends every line of a batch to its own place', async () => {
     await commitCount([
-      variance('p1', 5, { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' }),
-      variance('p2', 6, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
+      variance('p1', 5, { locationId: 'loc-unassigned', locationName: 'Unassigned', locationPath: 'Unassigned' }),
+      variance('p2', 6, { locationId: 'loc-a', locationName: 'A', locationPath: 'A' }),
     ]);
     expect(adjustStockAtLocation).toHaveBeenCalledTimes(2);
     expect(asMock(adjustStockAtLocation).mock.calls.map((c) => c[1])).toEqual([
@@ -116,29 +126,24 @@ describe('commitCount resilience', () => {
       .mockResolvedValueOnce({});
 
     const result = await commitCount([
-      variance('p1', 1, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
-      variance('p2', 2, { kind: 'location', locationId: 'loc-b', locationName: 'B' }),
+      variance('p1', 1, { locationId: 'loc-a', locationName: 'A', locationPath: 'A' }),
+      variance('p2', 2, { locationId: 'loc-b', locationName: 'B', locationPath: 'B' }),
     ]);
 
     expect(result.committed).toBe(1);
-    expect(result.failures).toEqual([{ partName: 'P1', message: 'network died' }]);
-  });
-
-  it('reports an excluded line as a failure rather than guessing a destination', async () => {
-    const result = await commitCount([
-      variance('p3', 9, { kind: 'excluded', reason: 'split across bins' }),
+    // The place is named because one part can occupy several lines: "P1 could not be saved"
+    // doesn't tell someone which of three numbers to re-enter.
+    expect(result.failures).toEqual([
+      { partName: 'P1', locationName: 'A', message: 'network died' },
     ]);
-    expect(result.committed).toBe(0);
-    expect(result.failures).toHaveLength(1);
-    expect(adjustStockAtLocation).not.toHaveBeenCalled();
   });
 
   it('reports progress per line and finishes at total', async () => {
     const seen: string[] = [];
     await commitCount(
       [
-        variance('p1', 1, { kind: 'location', locationId: 'loc-a', locationName: 'A' }),
-        variance('p2', 2, { kind: 'location', locationId: 'loc-b', locationName: 'B' }),
+        variance('p1', 1, { locationId: 'loc-a', locationName: 'A', locationPath: 'A' }),
+        variance('p2', 2, { locationId: 'loc-b', locationName: 'B', locationPath: 'B' }),
       ],
       { onProgress: (p) => seen.push(`${p.done}/${p.total}:${p.currentPartName}`) },
     );
@@ -168,7 +173,7 @@ describe('loadPartAtLocationCandidate', () => {
     const c = await loadPartAtLocationCandidate('co1', 'p1', 'l1', 'Shelf A');
 
     expect(c.systemQuantity).toBe(12);
-    expect(c.target).toEqual({ kind: 'location', locationId: 'l1', locationName: 'Shelf A' });
+    expect(c.target).toEqual({ locationId: 'l1', locationName: 'Shelf A', locationPath: 'Shelf A' });
   });
 
   /**
@@ -210,11 +215,115 @@ describe('commitCount attribution', () => {
   /** A count is a human assertion about a shelf, so the ledger has to say whose. */
   it('threads the operator onto every place-scoped line', async () => {
     await commitCount(
-      [variance('p1', 5, { kind: 'location', locationId: 'loc-a', locationName: 'Shelf A' })],
+      [variance('p1', 5, { locationId: 'loc-a', locationName: 'Shelf A', locationPath: 'Shelf A' })],
       { operatorId: 'member-1' },
     );
 
     const opts = asMock(adjustStockAtLocation).mock.calls[0].at(-1);
     expect(opts.operatorId).toBe('member-1');
+  });
+});
+
+/**
+ * The company-wide sheet's row rule — one row per (part, place).
+ *
+ * This function had **no test at all** before PR B, and it is the one the row rule lives in. Both
+ * of its plausible-but-wrong forms fail silently rather than throwing: sourcing straight from
+ * `getBalancesForParts` (which filters `quantity > 0`) makes a part holding stock nowhere vanish
+ * from the sheet, and emitting a row per balance ROW fills the sheet with the zero residue that
+ * `transfer_stock` and `bulk_put_away` leave behind forever. Neither shows up as an error — one
+ * is a shorter list, the other a longer one.
+ */
+describe('loadCountCandidates — one row per (part, place)', () => {
+  const SYSTEM = { id: 'loc-unassigned', name: 'Unassigned', kind: 'system' };
+  const SHELF_A = { id: 'loc-a', name: 'Shelf A', kind: 'shelf' };
+  const SHELF_B = { id: 'loc-b', name: 'Shelf B', kind: 'shelf' };
+
+  const part = (id: string, name: string) => ({
+    id,
+    part_name: name,
+    description: null,
+    primary_unit: 'ea',
+    quantity: 0,
+  });
+
+  const bal = (locationId: string, locationName: string, quantity: number, path: string[] = []) => ({
+    locationId,
+    locationName,
+    path,
+    quantity,
+  });
+
+  beforeEach(() => {
+    asMock(getLocations).mockResolvedValue([SYSTEM, SHELF_A, SHELF_B]);
+  });
+
+  it("emits one row per place holding stock, each carrying THAT place's balance", async () => {
+    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    asMock(getBalancesForParts).mockResolvedValue(
+      new Map([['p1', [bal('loc-a', 'Shelf A', 800), bal('loc-b', 'Shelf B', 28)]]]),
+    );
+
+    const rows = await loadCountCandidates('co1');
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => [r.target.locationId, r.systemQuantity])).toEqual([
+      ['loc-a', 800],
+      ['loc-b', 28],
+    ]);
+    // Never the company-wide roll-up — that is what made the old sheet write a shop total to
+    // one bin.
+    expect(rows.every((r) => r.systemQuantity !== 828)).toBe(true);
+  });
+
+  /**
+   * The opening count. `trg_auto_track_stocked_part` seeds every stocked part at Unassigned with
+   * 0, and `getBalancesForParts` filters those out — so without the fallback the entire catalogue
+   * of a shop counting for the first time would be missing from its own count sheet.
+   */
+  it('still emits a row for a part holding stock nowhere, at the system bucket', async () => {
+    asMock(getStockedParts).mockResolvedValue([part('p2', 'BRAND-NEW')]);
+    asMock(getBalancesForParts).mockResolvedValue(new Map());
+
+    const rows = await loadCountCandidates('co1');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].target.locationId).toBe('loc-unassigned');
+    expect(rows[0].systemQuantity).toBe(0);
+  });
+
+  /**
+   * The residue: `transfer_stock` decrements and `bulk_put_away` sets 0 rather than deleting, so
+   * a bin a part has left keeps a row forever. Rendering it would put a live absolute write
+   * target on the wrong shelf.
+   */
+  it('never emits a row for a place the part has left', async () => {
+    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    // getBalancesForParts already filters `> 0`; assert we do not add the ghost back.
+    asMock(getBalancesForParts).mockResolvedValue(new Map([['p1', [bal('loc-a', 'Shelf A', 800)]]]));
+
+    const rows = await loadCountCandidates('co1');
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].target.locationId).toBe('loc-a');
+  });
+
+  /** Two bins can share a leaf name, so the path is what tells the rows apart. */
+  it("carries the full ancestor path as the row's label", async () => {
+    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    asMock(getBalancesForParts).mockResolvedValue(
+      new Map([['p1', [bal('loc-a', 'Shelf A', 5, ['Cabinet 3'])]]]),
+    );
+
+    const rows = await loadCountCandidates('co1');
+    expect(rows[0].target.locationPath).toBe('Cabinet 3 › Shelf A');
+  });
+
+  it('throws rather than quietly shortening the sheet when there is no system bucket', async () => {
+    asMock(getLocations).mockResolvedValue([SHELF_A]);
+    asMock(getStockedParts).mockResolvedValue([part('p2', 'BRAND-NEW')]);
+    asMock(getBalancesForParts).mockResolvedValue(new Map());
+
+    await expect(loadCountCandidates('co1')).rejects.toThrow(/Unassigned/i);
   });
 });

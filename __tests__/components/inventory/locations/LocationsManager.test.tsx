@@ -179,13 +179,18 @@ describe('LocationsManager', () => {
     expect(screen.queryByRole('button', { name: /build visually/i })).not.toBeInTheDocument();
   });
 
-  /** The board is the hub, so the company-wide sheet is reached from here. */
-  it('offers Count everything, since /inventory no longer exists to host it', async () => {
+  /**
+   * The board is the hub, so the company-wide sheet is reached from here.
+   *
+   * "Count all parts", not "Count everything": every other control on this board is
+   * place-scoped, so "everything" read as "all the places" rather than "the whole catalogue".
+   */
+  it('offers Count all parts, since /inventory no longer exists to host it', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
-    await user.click(screen.getByRole('button', { name: /count everything/i }));
+    await user.click(screen.getByRole('button', { name: /count all parts/i }));
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count');
   });
 

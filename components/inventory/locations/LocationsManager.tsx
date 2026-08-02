@@ -441,7 +441,7 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
           startIcon={<FactCheckOutlinedIcon />}
           onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
         >
-          Count everything
+          Count all parts
         </Button>
       </Box>
       )}

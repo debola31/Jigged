@@ -4,29 +4,23 @@ import {
   committableVariances,
   countNote,
   countRowKey,
-  countableCandidates,
   commonUnit,
-  excludedCandidates,
-  resolveCountTarget,
+  groupByPart,
+  resolveFallbackPlace,
   rowDelta,
-  type LocationBalance,
 } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
-
-const bal = (locationId: string, quantity: number, locationName = locationId): LocationBalance => ({
-  locationId,
-  locationName,
-  quantity,
-});
-
-const UNASSIGNED = { id: 'loc-unassigned', name: 'Unassigned' };
 
 const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCandidate => ({
   partName: over.partId,
   description: null,
   unit: 'ea',
   systemQuantity: 0,
-  target: { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' },
+  target: {
+    locationId: 'loc-unassigned',
+    locationName: 'Unassigned',
+    locationPath: 'Unassigned',
+  },
   ...over,
 });
 
@@ -40,90 +34,82 @@ const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCan
 const entriesFor = (...pairs: [CountCandidate, number][]): CountEntries =>
   Object.fromEntries(pairs.map(([c, n]) => [countRowKey(c), n]));
 
-describe('resolveCountTarget', () => {
+describe('resolveFallbackPlace', () => {
+  const SYSTEM = { id: 'loc-unassigned', name: 'Unassigned', kind: 'system' };
+  const SHELF = { id: 'loc-a', name: 'Shelf A', kind: 'shelf' };
+
   /**
-   * There is no longer an "untracked" arm to test. `is_location_tracked` was dropped in
-   * 20260802015837 and every part has a place, so `resolveCountTarget` takes balances alone —
-   * the aggregate target it used to return for a part whose stock lived in `parts.quantity`
-   * has no part left to describe.
+   * The opening-count invariant, re-homed rather than deleted.
+   *
+   * It used to live on `resolveCountTarget`'s zero-arm. Four of that function's cases went with
+   * the exclusion (a split part is now several rows, not a notice), but this one survives and is
+   * the single thing PR B was most likely to break: `trg_auto_track_stocked_part` seeds every
+   * stocked part at Unassigned with 0, so a shop counting for the first time has its whole
+   * catalogue holding stock nowhere. A rule that emitted rows only for places with stock would
+   * make every one of them uncountable.
    */
-  it('sends a part with no stock anywhere to Unassigned', () => {
-    // The opening-count case: every part is seeded at Unassigned with 0, so a shop starting
-    // from zero has every part here.
-    expect(resolveCountTarget([bal('loc-unassigned', 0)], UNASSIGNED)).toEqual({
-      kind: 'location',
-      locationId: 'loc-unassigned',
-      locationName: 'Unassigned',
+  it('sends a part holding stock nowhere to the system bucket', () => {
+    expect(resolveFallbackPlace([SHELF, SYSTEM])).toEqual({
+      id: 'loc-unassigned',
+      name: 'Unassigned',
     });
   });
 
-  it('treats a seeded zero-row as "not placed", not as one location holding stock', () => {
-    // Two rows, only one with stock — the zero must not make this look ambiguous.
-    const target = resolveCountTarget(
-      [bal('loc-unassigned', 0), bal('loc-rack', 40, 'Bar rack')],
-      UNASSIGNED,
-    );
-    expect(target).toEqual({ kind: 'location', locationId: 'loc-rack', locationName: 'Bar rack' });
-  });
-
-  it('sends a part with stock in exactly one location to that location', () => {
-    expect(resolveCountTarget([bal('loc-a', 12, 'Shelf A')], UNASSIGNED)).toEqual({
-      kind: 'location',
-      locationId: 'loc-a',
-      locationName: 'Shelf A',
-    });
-  });
-
-  it('excludes a part split across two or more locations', () => {
-    const target = resolveCountTarget(
-      [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 10)],
-      UNASSIGNED,
-    );
-    expect(target.kind).toBe('excluded');
-    // An item-level "counted 38" has no defensible bin to absorb the -2.
-    if (target.kind === 'excluded') expect(target.reason).toContain('3 locations');
+  /** `isReservedKind` stops anyone typing `system` into a kind; nothing stops them renaming one. */
+  it('resolves by kind, not by the name "Unassigned"', () => {
+    const renamed = { id: 'loc-x', name: 'Not Yet Put Away', kind: 'system' };
+    expect(resolveFallbackPlace([SHELF, renamed]).id).toBe('loc-x');
   });
 
   /**
-   * Excluding a part is only defensible if we also say where to go. The sheet links each
-   * place to its own worksheet, where the part IS countable — so the branch has to carry
-   * the places, not just how many there were.
+   * Not a fallback and not a silent drop. Every company has had a system bucket since
+   * 20260802015837 created and asserted one, so its absence is a data fault — and dropping the
+   * part would hide it behind a shorter list nobody counts.
    */
-  it('carries the holding places on the excluded branch, so the sheet can route to them', () => {
-    const target = resolveCountTarget(
-      [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 0)],
-      UNASSIGNED,
-    );
-
-    expect(target.kind).toBe('excluded');
-    if (target.kind !== 'excluded') return;
-    // Only places actually holding stock — the zero row is not somewhere to send anyone.
-    expect(target.locations.map((l) => l.id)).toEqual(['loc-a', 'loc-b']);
-    expect(target.locations.every((l) => l.name.length > 0)).toBe(true);
-  });
-
-  it('carries no places when the exclusion is not about being split', () => {
-    const target = resolveCountTarget([], null);
-    expect(target.kind).toBe('excluded');
-    // Nothing anywhere and no Unassigned bucket: there is no worksheet that would help.
-    if (target.kind === 'excluded') expect(target.locations).toEqual([]);
-  });
-
-  it('excludes rather than guesses when there is no Unassigned bucket to fall back to', () => {
-    expect(resolveCountTarget([], null).kind).toBe('excluded');
+  it('throws rather than silently dropping the part when there is no system bucket', () => {
+    expect(() => resolveFallbackPlace([SHELF])).toThrow(/Unassigned/i);
   });
 });
 
-describe('scope partitioning', () => {
-  const list = [
-    candidate({ partId: 'a' }),
-    candidate({ partId: 'b', target: { kind: 'excluded', reason: 'split' } }),
-    candidate({ partId: 'c', target: { kind: 'location', locationId: 'l', locationName: 'L' } }),
-  ];
+describe('groupByPart', () => {
+  const at = (partId: string, locationId: string, path: string, quantity: number): CountCandidate => ({
+    partId,
+    partName: partId.toUpperCase(),
+    description: null,
+    unit: 'ea',
+    systemQuantity: quantity,
+    target: { locationId, locationName: path.split(' › ').pop()!, locationPath: path },
+  });
 
-  it('separates countable from excluded so excluded can be named, not dropped', () => {
-    expect(countableCandidates(list).map((c) => c.partId)).toEqual(['a', 'c']);
-    expect(excludedCandidates(list).map((c) => c.partId)).toEqual(['b']);
+  it("collects a part's places into one group and totals them", () => {
+    const [g] = groupByPart([at('p1', 'a', 'Shelf A', 10), at('p1', 'b', 'Shelf B', 20)]);
+    expect(g.partId).toBe('p1');
+    expect(g.rows).toHaveLength(2);
+    // The shop-wide figure, shown read-only on the group header — never an input.
+    expect(g.total).toBe(30);
+  });
+
+  /**
+   * Row order is the route you walk. Sorting on part name alone leaves several rows of one part
+   * tied, so their order fell out of `Array.sort`'s stability and changed between visits.
+   */
+  it("orders parts by name and a part's rows by place path", () => {
+    const groups = groupByPart([
+      at('zeta', 'z', 'Yard', 1),
+      at('alpha', 'b', 'Cabinet 3 › Shelf B', 2),
+      at('alpha', 'a', 'Cabinet 3 › Shelf A', 3),
+    ]);
+    expect(groups.map((g) => g.partId)).toEqual(['alpha', 'zeta']);
+    expect(groups[0].rows.map((r) => r.target.locationPath)).toEqual([
+      'Cabinet 3 › Shelf A',
+      'Cabinet 3 › Shelf B',
+    ]);
+  });
+
+  it('leaves a single-place part as a group of one', () => {
+    const groups = groupByPart([at('p1', 'a', 'Shelf A', 10)]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows).toHaveLength(1);
   });
 });
 
@@ -160,7 +146,6 @@ describe('buildVariances', () => {
   const candidates = [
     candidate({ partId: 'a', partName: 'A', systemQuantity: 10 }),
     candidate({ partId: 'b', partName: 'B', systemQuantity: 4 }),
-    candidate({ partId: 'x', partName: 'X', target: { kind: 'excluded', reason: 'split' } }),
   ];
 
   it('ignores uncounted parts entirely — no entry means no opinion', () => {
@@ -182,10 +167,6 @@ describe('buildVariances', () => {
   it('does not flag a line that held still', () => {
     const v = buildVariances(candidates, entriesFor([candidates[0], 7]), new Map([[countRowKey(candidates[0]), 10]]));
     expect(v[0].movedSinceOpened).toBe(false);
-  });
-
-  it('skips excluded parts even if a count somehow got entered', () => {
-    expect(buildVariances(candidates, entriesFor([candidates[2], 3]), new Map())).toEqual([]);
   });
 
   // The opening-count case: every part starts at zero, and finding stock there is ordinary.
@@ -222,10 +203,18 @@ describe('committableVariances', () => {
 });
 
 describe('countNote', () => {
-  it('records both numbers so the ledger explains where the count came from', () => {
+  /**
+   * The place is in the note because one part can now be counted at several of them in one
+   * session. Unnamed, the ledger carried three notes about one part each quoting a different
+   * "recorded as" figure — which reads as three contradictory statements rather than three
+   * shelves.
+   */
+  it('records the place and both numbers, so the ledger explains where the count came from', () => {
     const bar = candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 });
     const v = buildVariances([bar], entriesFor([bar, 38]), new Map())[0];
-    expect(countNote(v)).toBe('Inventory count — counted 38 ft (recorded as 40 ft)');
+    expect(countNote(v)).toBe(
+      'Inventory count at Unassigned — counted 38 ft (recorded as 40 ft)',
+    );
   });
 });
 
@@ -248,10 +237,12 @@ describe('countRowKey', () => {
     expect(countRowKey(at('shelf-a'))).not.toBe(countRowKey(at('shelf-b')));
   });
 
-  it('is just the part id when there is no place', () => {
-    expect(
-      countRowKey({ ...at('x'), target: { kind: 'excluded', reason: 'split', locations: [] } }),
-    ).toBe('p1');
+  /**
+   * The `partId`-only branch is gone, not merely unused: a second key format nobody produces is
+   * an invitation to reintroduce the exact bug the key was created to fix.
+   */
+  it('always carries the place, so no two rows of one part can collide', () => {
+    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a');
   });
 
   /**

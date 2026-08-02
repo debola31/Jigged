@@ -50,7 +50,7 @@
  * RPC, because a half-moved pile is worse than no move — you can't tell what you already did.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Alert from '@mui/material/Alert';
@@ -87,9 +87,9 @@ import {
   buildVariances,
   committableVariances,
   countRowKey,
-  countableCandidates,
+  groupByPart,
+  type CountGroup,
   commonUnit,
-  excludedCandidates,
   rowDelta,
 } from '@/lib/inventoryCountPlan';
 import {
@@ -98,7 +98,6 @@ import {
   loadLocationCountCandidates,
   loadPartAtLocationCandidate,
   loadPartEverywhereCandidates,
-  refreshLocationQuantities,
 } from '@/utils/inventoryCountAccess';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getCurrentMember } from '@/utils/operatorAccess';
@@ -107,6 +106,7 @@ import {
   PUT_AWAY_MAX,
   bulkPutAway,
   createLocation,
+  getBalancesForParts,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import LocationPicker, {
@@ -388,11 +388,14 @@ export default function InventoryCountPage() {
         }
 
         if (partIdParam) {
-          const { partName: name, candidates: rows } = await loadPartEverywhereCandidates(
-            companyId,
-            partIdParam,
-          );
+          const [{ partName: name, candidates: rows }, locations] = await Promise.all([
+            loadPartEverywhereCandidates(companyId, partIdParam),
+            // For "+ Count it somewhere else": this sheet has no picker step, so nothing else
+            // would have loaded them.
+            getLocations(companyId),
+          ]);
           if (cancelled) return;
+          setAllLocations(locations);
           setPartName(name);
           setCandidates(rows);
           setSelected(new Map(rows.map((c) => [countRowKey(c), c])));
@@ -431,16 +434,23 @@ export default function InventoryCountPage() {
     return () => clearTimeout(id);
   }, [search]);
 
-  const countable = useMemo(() => countableCandidates(candidates), [candidates]);
-  const excluded = useMemo(() => excludedCandidates(candidates), [candidates]);
-
   const visible = useMemo(() => {
     // Already filtered by the server in place-scoped mode; re-filtering here would hide rows
     // while a debounced request was still in flight.
-    if (locationMode) return countable;
+    if (locationMode) return candidates;
     const q = search.trim().toLowerCase();
-    return q ? countable.filter((c) => c.partName.toLowerCase().includes(q)) : countable;
-  }, [countable, search, locationMode]);
+    return q ? candidates.filter((c) => c.partName.toLowerCase().includes(q)) : candidates;
+  }, [candidates, search, locationMode]);
+
+  /**
+   * The picker's rows: ONE PER PART, not one per place.
+   *
+   * Ticking a part means "count this part wherever it is" — the sheet is what expands it into a
+   * row per place. Keeping the picker part-grained is deliberate: this list is unbounded,
+   * unvirtualised and filtered in the browser, so multiplying it by places-per-part would cost a
+   * lot and buy nothing. Nobody picks a *shelf* when deciding which parts to walk.
+   */
+  const groups = useMemo(() => groupByPart(visible), [visible]);
 
   /**
    * The chosen parts, alphabetical.
@@ -449,13 +459,17 @@ export default function InventoryCountPage() {
    * span pages — and a sheet whose rows move when you turn a page is worse than one that never
    * matched the grid.
    */
-  const sheet = useMemo(
-    () =>
-      countableCandidates([...selected.values()]).sort((a, b) =>
-        a.partName.localeCompare(b.partName),
-      ),
+  /** Distinct parts on the sheet — what the CTA counts. `selected.size` counts ROWS. */
+  const selectedParts = useMemo(
+    () => new Set([...selected.values()].map((c) => c.partId)).size,
     [selected],
   );
+
+  /** The sheet, grouped: a part and every place of it, ordered part-name then place-path. */
+  const sheetGroups = useMemo(() => groupByPart([...selected.values()]), [selected]);
+
+  /** The same rows, flat — for the footer tallies, the unit check and `save()`. */
+  const sheet = useMemo(() => sheetGroups.flatMap((g) => g.rows), [sheetGroups]);
 
   /** One unit for the whole sheet, or null when mixed — decides footer vs per-row. */
   const sheetUnit = useMemo(() => commonUnit(sheet), [sheet]);
@@ -500,6 +514,25 @@ export default function InventoryCountPage() {
       const key = countRowKey(c);
       if (next.has(key)) next.delete(key);
       else next.set(key, c);
+      return next;
+    });
+
+  /**
+   * Tick a part: put EVERY place of it on the sheet, or take them all off.
+   *
+   * The picker's unit is the part — "count this one wherever it is" — while the sheet's unit is
+   * the row. All-or-nothing rather than a tri-state: a part is either on your walk or it is not,
+   * and per-place deselection is a decision for the sheet, where the places are actually visible.
+   */
+  const toggleGroup = (g: CountGroup) =>
+    setSelected((prev) => {
+      const next = new Map(prev);
+      const allOn = g.rows.every((r) => next.has(countRowKey(r)));
+      for (const r of g.rows) {
+        const key = countRowKey(r);
+        if (allOn) next.delete(key);
+        else next.set(key, r);
+      }
       return next;
     });
 
@@ -573,6 +606,8 @@ export default function InventoryCountPage() {
   const save = async () => {
     setChecking(true);
     let toCommit: CountVariance[];
+    /** Filled by the pre-save read; reported after the commit, never blocking it. */
+    let unseenPlaces: string[] = [];
     try {
       /**
        * Re-read what the system believes, PER ROW, at the bin that row is about.
@@ -591,31 +626,41 @@ export default function InventoryCountPage() {
        */
       const countedRows = sheet.filter((c) => entries[countRowKey(c)] !== undefined);
 
-      const partIdsByLocation = new Map<string, string[]>();
-      for (const c of countedRows) {
-        if (c.target.kind === 'location') {
-          const ids = partIdsByLocation.get(c.target.locationId) ?? [];
-          ids.push(c.partId);
-          partIdsByLocation.set(c.target.locationId, ids);
-        }
-      }
+      /*
+       * One batched read for every counted PART, rather than one per bin.
+       *
+       * Two reasons it reads by part and not by (part, place). It is fewer requests — a sheet
+       * spanning eight shelves was eight round trips. And it can see a place the sheet does NOT
+       * hold: if a part gained stock somewhere while the count was open, that place is invisible
+       * to a read scoped to the rows already on the sheet, and the counter would never learn of
+       * it. Reported afterwards rather than blocking, because leaving a place blank deliberately
+       * leaves it untouched — "I only walked Shelf A" is the normal case, not an error.
+       */
+      const countedPartIds = [...new Set(countedRows.map((c) => c.partId))];
+      const freshByPart = await getBalancesForParts(companyId, countedPartIds);
 
-      const freshByLocation = new Map(
-        await Promise.all(
-          [...partIdsByLocation].map(async ([locId, ids]) => {
-            const m = await refreshLocationQuantities(locId, ids);
-            return [locId, m] as const;
-          }),
-        ),
-      );
+      const freshAt = (partId: string, locationId: string): number | undefined =>
+        freshByPart.get(partId)?.find((b) => b.locationId === locationId)?.quantity;
 
       const updated = sheet.map((c) => {
         if (entries[countRowKey(c)] === undefined) return c;
-        const q =
-          c.target.kind === 'location'
-            ? freshByLocation.get(c.target.locationId)?.get(c.partId)
-            : undefined;
-        return q === undefined ? c : { ...c, systemQuantity: q };
+        // `getBalancesForParts` filters `quantity > 0`, so a row whose bin has been emptied since
+        // load comes back absent — which means zero, not "unknown". Reading it as unknown would
+        // keep the stale figure and silently mis-report the variance.
+        return { ...c, systemQuantity: freshAt(c.partId, c.target.locationId) ?? 0 };
+      });
+
+      // Places a counted part has acquired since the sheet loaded. Not on anyone's sheet, so not
+      // committed — but named after the save, because "I counted that part" and "that part has
+      // stock I never saw" is exactly the gap a stocktake exists to close.
+      unseenPlaces = countedPartIds.flatMap((partId) => {
+        const onSheet = new Set(
+          countedRows.filter((c) => c.partId === partId).map((c) => c.target.locationId),
+        );
+        const partName = countedRows.find((c) => c.partId === partId)?.partName ?? '';
+        return (freshByPart.get(partId) ?? [])
+          .filter((b) => !onSheet.has(b.locationId))
+          .map((b) => `${partName} also has stock at ${[...b.path, b.locationName].join(' › ')}`);
       });
       setSelected(new Map(updated.map((c) => [countRowKey(c), c])));
       toCommit = committableVariances(buildVariances(updated, entries, openedWithRef.current));
@@ -637,25 +682,30 @@ export default function InventoryCountPage() {
     }
 
     setCommitting(true);
-    setProgress({ done: 0, total: toCommit.length, currentPartName: '' });
+    setProgress({ done: 0, total: toCommit.length, currentPartName: '', currentLocationName: '' });
     try {
       const result = await commitCount(toCommit, { onProgress: setProgress, operatorId });
       if (result.failures.length === 0) {
-        const moved = toCommit.filter((v) => v.movedSinceOpened).length;
+        // Named, not tallied. "1 item moved" on a sheet holding one part at three shelves does
+        // not say which shelf to go back and look at.
+        const moved = toCommit
+          .filter((v) => v.movedSinceOpened)
+          .map((v) => `${v.candidate.partName} at ${v.candidate.target.locationPath}`);
         setSnack({
           msg:
             `Counted ${result.committed} ${result.committed === 1 ? 'item' : 'items'}.` +
             // Said after the fact rather than as a prompt — the count is what's on the shelf,
             // so a mid-count movement changes nothing about what to save.
-            (moved > 0
-              ? ` ${moved} ${moved === 1 ? 'item' : 'items'} moved while you were counting; your count is what's saved.`
-              : ''),
+            (moved.length > 0
+              ? ` ${moved.join(', ')} moved while you were counting; your count is what's saved.`
+              : '') +
+            (unseenPlaces.length > 0 ? ` ${unseenPlaces.join('. ')}, which wasn't on your sheet.` : ''),
           severity: 'success',
         });
         router.push(returnTo.href);
       } else {
         setSnack({
-          msg: `Saved ${result.committed}. ${result.failures.length} could not be saved — ${result.failures[0].message}`,
+          msg: `Saved ${result.committed}. ${result.failures.length} could not be saved — ${result.failures[0].partName} at ${result.failures[0].locationName}: ${result.failures[0].message}`,
           severity: 'error',
         });
       }
@@ -722,7 +772,47 @@ export default function InventoryCountPage() {
     }
   };
 
-  /** Every location, for the destination picker. Only loaded in place-scoped mode. */
+  /**
+   * "+ Count it somewhere else" — B4, and the founder's sentence read literally:
+   * *"a user count even just select where a part is and how much is there."*
+   *
+   * An affordance on the sheet, deliberately not a picker STEP. On `?part=` the user already
+   * chose the part by pressing "Count all N places"; inserting a step would re-ask a question
+   * they answered. And a place the part has never been in is exactly the one you need when the
+   * system is wrong about where something lives.
+   *
+   * Three things it must not do, each of which would lose typed counts:
+   *  - touch the URL, or `serverSearch`: the loader effect depends on both and calls
+   *    `setEntries({})` unconditionally, so either would wipe the sheet.
+   *  - add a second row for a place already listed — two entries for one (part, place) commit
+   *    twice to the same shelf, last write silently winning. Idempotent instead.
+   *  - assume a zero balance. `loadPartAtLocationCandidate` READS it, so confirming an empty
+   *    shelf against a system that says twelve can still commit (a delta of 0 is dropped).
+   */
+  const addPartAtPlace = async (part: { id: string; name: string }, place: LocationPickerOption) => {
+    const existing = [...selected.values()].find(
+      (c) => c.partId === part.id && c.target.locationId === place.id,
+    );
+    if (existing) {
+      setSnack({
+        msg: `${part.name} is already on the sheet for ${place.label}.`,
+        severity: 'success',
+      });
+      return;
+    }
+    try {
+      const c = await loadPartAtLocationCandidate(companyId, part.id, place.id, place.label);
+      setSelected((prev) => new Map(prev).set(countRowKey(c), c));
+      rememberOpenedWith([c]);
+    } catch (e) {
+      setSnack({
+        msg: e instanceof Error ? e.message : 'Could not add that place.',
+        severity: 'error',
+      });
+    }
+  };
+
+  /** Every location, for the destination picker and for "+ Count it somewhere else". */
   const destinationOptions = useMemo<LocationPickerOption[]>(() => {
     const byId = new Map(allLocations.map((l) => [l.id, l] as const));
     const pathOf = (id: string): string => {
@@ -838,7 +928,7 @@ export default function InventoryCountPage() {
               against the SERVER here, so a term that matches nothing emptied `countable`, which
               unmounted the search field along with everything else — leaving no way to clear the
               term you had just typed. Only the list area is allowed to go empty. */}
-          {countable.length === 0 && !locationMode ? (
+          {candidates.length === 0 && !locationMode ? (
             <Card elevation={2}>
               <CardContent sx={{ p: 6, textAlign: 'center' }}>
                 <Inventory2OutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
@@ -889,13 +979,15 @@ export default function InventoryCountPage() {
                     })
                   }
                   // The RPC refuses more than PUT_AWAY_MAX to bound how long it holds row locks.
-                  // Say so here rather than letting someone select 2,000 and be told no.
-                  disabled={visible.length > PUT_AWAY_MAX}
+                  // Say so here rather than letting someone select 2,000 and be told no — but
+                  // only where put-away exists. It renders in place-scoped mode only, so this cap
+                  // was taking select-all away from company-wide shops for a button they can't see.
+                  disabled={locationMode && visible.length > PUT_AWAY_MAX}
                 >
                   {/* In place-scoped mode `visible === countable` by construction, so the old
                       comparison never fired and the label always read "Select all" even on
                       page 1 of 95. Key it off whether a pager exists. */}
-                  Select all{hereTotal > LOCATION_PAGE_SIZE || visible.length !== countable.length ? ' shown' : ''}
+                  Select all{hereTotal > LOCATION_PAGE_SIZE || visible.length !== candidates.length ? ' shown' : ''}
                 </Button>
                 <Button
                   variant="contained"
@@ -903,9 +995,13 @@ export default function InventoryCountPage() {
                   disabled={selected.size === 0}
                   onClick={() => setStep(1)}
                 >
-                  {selected.size === 0
+                  {/* `selected.size` is a ROW count, and rows are (part, place). Calling it
+                      "parts" made a 20-part shop with two bins read "Count 40 parts" — the same
+                      species of nonsense as the held-back notice this change deletes. */}
+                  {selectedParts === 0
                     ? 'Count'
-                    : `Count ${selected.size} ${selected.size === 1 ? 'part' : 'parts'}`}
+                    : `Count ${selectedParts} ${selectedParts === 1 ? 'part' : 'parts'}` +
+                      (selected.size > selectedParts ? ` in ${selected.size} places` : '')}
                 </Button>
               </Box>
 
@@ -1018,127 +1114,70 @@ export default function InventoryCountPage() {
                 </Stack>
               )}
 
-              {/*
-                Parts held back — ABOVE the list, not below it.
-
-                This sat under all 14 rows, so the founder scrolled straight past it, reached the
-                sheet, and reasonably concluded that counting a part across several places did not
-                exist. An exception that changes what you can do is not a footnote to the normal
-                case; burying it is how a built capability reads as missing. — and now reachable, which is the difference between naming
-                a limitation and leaving a dead end.
-
-                The copy already said "count these at their locations"; the chips were inert,
-                so it was an instruction with nowhere to follow. Each place is now a link to
-                its own worksheet, where the part IS countable: "Shelf A holds 830" adjusts
-                Shelf A and says nothing about Shelf B. The capability always existed — only
-                the route was missing.
-              */}
-              {excluded.length > 0 && (
-                <Alert severity="info" sx={{ mb: 3 }}>
-                  <Typography variant="body2" sx={{ mb: 1.5 }}>
-                    {excluded.length} {excluded.length === 1 ? 'part is' : 'parts are'} not on this
-                    sheet — their stock sits in more than one place, so a single total has no
-                    unambiguous home. Count them where they actually are:
-                  </Typography>
-                  <Stack spacing={1}>
-                    {excluded.slice(0, 8).map((c) => (
-                      <Box
-                        key={c.partId}
-                        sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}
-                      >
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {c.partName}
-                        </Typography>
-                        {/* Leads, because counting all of a split part's places in one pass is
-                            the point — the per-place chips beside it are for when you only
-                            happen to be standing at one of them. */}
-                        <Chip
-                          size="small"
-                          color="primary"
-                          clickable
-                          label="Count all places"
-                          onClick={() =>
-                            router.push(
-                              `/dashboard/${companyId}/inventory/count?part=${c.partId}&from=count`,
-                            )
-                          }
-                        />
-                        {c.target.kind === 'excluded' &&
-                          c.target.locations.map((l) => (
-                            <Chip
-                              key={l.id}
-                              size="small"
-                              variant="outlined"
-                              clickable
-                              label={l.name}
-                              onClick={() =>
-                                router.push(
-                                  // `&part=` makes this the one-row sheet the copy above
-                                  // promises ("count them where they actually are"), and
-                                  // `&from=count` brings you back here rather than to Storage.
-                                  `/dashboard/${companyId}/inventory/count?location=${l.id}&part=${c.partId}&from=count`,
-                                )
-                              }
-                            />
-                          ))}
-                      </Box>
-                    ))}
-                  </Stack>
-                  {excluded.length > 8 && (
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      …and {excluded.length - 8} more.
-                    </Typography>
-                  )}
-                </Alert>
-              )}
-
-              {countable.length === 0 ? (
+              {/* Branch on what's VISIBLE, and say why it's empty. A company-wide search that
+                  matched nothing used to render a blank card with no message at all. */}
+              {visible.length === 0 ? (
                 <Alert severity="info" sx={{ mb: 2 }}>
                   {search.trim()
-                    ? `Nothing here matches “${search.trim()}”.`
-                    : `${locationName} is empty.`}
+                    ? `Nothing matches “${search.trim()}”.`
+                    : locationMode
+                      ? `${locationName} is empty.`
+                      : 'Nothing to count yet — mark some parts as stocked first.'}
                 </Alert>
               ) : (
               <Card elevation={2}>
                 <Stack divider={<Divider />}>
-                  {visible.map((c) => (
-                    <Box
-                      key={countRowKey(c)}
-                      onClick={() => toggle(c)}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1,
-                        px: 2,
-                        py: 1,
-                        minHeight: 56,
-                        cursor: 'pointer',
-                        '&:hover': { bgcolor: 'action.hover' },
-                      }}
-                    >
-                      <Checkbox
-                        checked={selected.has(countRowKey(c))}
-                        tabIndex={-1}
-                        inputProps={{ 'aria-label': `Count ${c.partName}` }}
-                      />
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="body1" noWrap>
-                          {c.partName}
-                        </Typography>
-                        {/* Company-wide, the location tells you where this row will be written.
-                            Place-scoped it's the same word on every row — the page title already
-                            said it — so it's noise. */}
-                        {!locationMode && c.target.kind === 'location' && (
-                          <Typography variant="caption" color="text.secondary">
-                            {c.target.locationName}
+                  {/* ONE ROW PER PART, even when it sits in several places. See `groups`. */}
+                  {groups.map((g) => {
+                    const allOn = g.rows.every((r) => selected.has(countRowKey(r)));
+                    const places =
+                      g.rows.length === 1 ? g.rows[0].target.locationPath : `${g.rows.length} places`;
+                    return (
+                      <Box
+                        key={g.partId}
+                        onClick={() => toggleGroup(g)}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          px: 2,
+                          py: 1,
+                          minHeight: 56,
+                          cursor: 'pointer',
+                          '&:hover': { bgcolor: 'action.hover' },
+                        }}
+                      >
+                        <Checkbox
+                          checked={allOn}
+                          tabIndex={-1}
+                          /* The place is in the name because a part can appear once per shelf on
+                             the sheet this leads to; "Count BUY-ORING-214" three times over is an
+                             ambiguous accessible name. */
+                          inputProps={{
+                            'aria-label':
+                              g.rows.length === 1
+                                ? `Count ${g.partName}`
+                                : `Count ${g.partName} in ${g.rows.length} places`,
+                          }}
+                        />
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Typography variant="body1" noWrap>
+                            {g.partName}
                           </Typography>
-                        )}
+                          {/* Company-wide, this says where the count will be written. Place-scoped
+                              it's the same word on every row — the page title already said it. */}
+                          {!locationMode && (
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              {places}
+                            </Typography>
+                          )}
+                        </Box>
+                        <Typography variant="body2" color="text.secondary">
+                          {num(g.total)} {g.unit}
+                        </Typography>
                       </Box>
-                      <Typography variant="body2" color="text.secondary">
-                        {num(c.systemQuantity)} {c.unit}
-                      </Typography>
-                    </Box>
-                  ))}
+                    );
+                  })}
                 </Stack>
               </Card>
               )}
@@ -1191,90 +1230,201 @@ export default function InventoryCountPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sheet.map((c) => {
-                    const delta = rowDelta(c, entries);
-                    const isCounted = delta !== null;
-                    const matches = delta === 0;
+                  {sheetGroups.map((g) => {
+                    /*
+                     * A part in one place is one flat row, exactly as before. A part in several
+                     * gets a header plus an indented row per place.
+                     *
+                     * The header's `Counted` cell is deliberately EMPTY — not a dash, not a
+                     * disabled field. A total field there would rebuild the very ambiguity this
+                     * whole change removes: 38 against 10+20+10 has no defensible bin, and the
+                     * fix is not to resolve that question but to never ask it. Typing per place
+                     * is the answer, so the only inputs are on place rows.
+                     */
+                    const multi = g.rows.length > 1;
+                    const countedHere = g.rows.filter(
+                      (r) => entries[countRowKey(r)] !== undefined,
+                    ).length;
+                    const groupDelta = g.rows.reduce(
+                      (sum, r) => sum + (rowDelta(r, entries) ?? 0),
+                      0,
+                    );
 
-                    // No row-level "done" tint: the variance cell already says whether a row
-                    // has been actioned, and tinting the ground behind the figures only costs
-                    // them contrast.
-                    return (
-                      // `countRowKey`, not `partId`: the all-places sheet holds the SAME part
-                      // once per shelf, and React's duplicate-key warning is explicit that it
-                      // "may cause children to be duplicated and/or omitted".
-                      <TableRow key={countRowKey(c)}>
-                        <TableCell sx={{ width: '99%' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                            {c.partName}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {c.description ??
-                              (c.target.kind === 'location' ? c.target.locationName : '')}
-                          </Typography>
-                        </TableCell>
+                    const placeRow = (c: CountCandidate) => {
+                      const delta = rowDelta(c, entries);
+                      const isCounted = delta !== null;
+                      const matches = delta === 0;
 
-                        <TableCell align="right" sx={{ ...NUM_SX, color: 'text.secondary' }}>
-                          {num(c.systemQuantity)}
-                        </TableCell>
-
-                        <TableCell align="right" sx={{ py: 1 }}>
-                          <TextField
-                            type="number"
-                            size="small"
-                            value={entries[countRowKey(c)] ?? ''}
-                            onChange={(e) => setCount(countRowKey(c), e.target.value)}
-                            placeholder="—"
-                            inputProps={{
-                              min: 0,
-                              step: 'any',
-                              inputMode: 'decimal',
-                              'aria-label': `Counted quantity for ${c.partName}`,
-                              style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
-                            }}
-                            sx={{ width: 108 }}
-                          />
-                        </TableCell>
-
-                        {/* Only when the sheet is mixed — otherwise the unit is said once, in
-                            the footer, instead of repeating down every row. */}
-                        {!sheetUnit && (
-                          <TableCell align="right" sx={{ color: 'text.secondary' }}>
-                            <Typography variant="caption">{c.unit}</Typography>
+                      // No row-level "done" tint: the variance cell already says whether a row
+                      // has been actioned, and tinting the ground behind the figures only costs
+                      // them contrast.
+                      return (
+                        // `countRowKey`, not `partId`: the sheet holds the SAME part once per
+                        // shelf, and React's duplicate-key warning is explicit that it "may cause
+                        // children to be duplicated and/or omitted".
+                        <TableRow key={countRowKey(c)}>
+                          <TableCell sx={{ width: '99%', pl: multi ? 5 : 2 }}>
+                            {!multi && (
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {c.partName}
+                              </Typography>
+                            )}
+                            {/*
+                              Both, joined — never `description ?? place`.
+                              The `??` let a description outrank the place, so three rows of a
+                              described part rendered identically: same name, same sub-line,
+                              different Recorded figures and an input each. That is a
+                              wrong-shelf write, not a cosmetic slip.
+                              On a grouped part the header already carries name + description,
+                              so a place row shows only its path.
+                            */}
+                            <Typography variant="caption" color="text.secondary">
+                              {multi
+                                ? c.target.locationPath
+                                : [c.description, c.target.locationPath]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                            </Typography>
                           </TableCell>
-                        )}
 
-                        {/* Direction, and nothing else: green up, red down, neutral for no
-                            change. No per-row warning glyph — on the small quantities a shop
-                            actually counts, a proportional threshold fires on almost every
-                            line, and a column of cautions is indistinguishable from none. The
-                            large-change check still runs once, at the save confirm, where it
-                            can be read against the whole batch. */}
-                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                          {isCounted &&
-                            (matches ? (
-                              <Typography
-                                component="span"
-                                variant="body2"
-                                sx={{ color: 'text.disabled' }}
-                              >
-                                No change
+                          <TableCell align="right" sx={{ ...NUM_SX, color: 'text.secondary' }}>
+                            {num(c.systemQuantity)}
+                          </TableCell>
+
+                          <TableCell align="right" sx={{ py: 1 }}>
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={entries[countRowKey(c)] ?? ''}
+                              onChange={(e) => setCount(countRowKey(c), e.target.value)}
+                              placeholder="—"
+                              inputProps={{
+                                min: 0,
+                                step: 'any',
+                                inputMode: 'decimal',
+                                // The place is part of the name: without it a part on three
+                                // shelves has three controls sharing one accessible name, which
+                                // is unusable by screen reader and untestable by role.
+                                'aria-label': `Counted quantity for ${c.partName} in ${c.target.locationPath}`,
+                                style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
+                              }}
+                              sx={{ width: 108 }}
+                            />
+                          </TableCell>
+
+                          {/* Only when the sheet is mixed — otherwise the unit is said once, in
+                              the footer, instead of repeating down every row. */}
+                          {!sheetUnit && (
+                            <TableCell align="right" sx={{ color: 'text.secondary' }}>
+                              <Typography variant="caption">{c.unit}</Typography>
+                            </TableCell>
+                          )}
+
+                          {/* Direction, and nothing else: green up, red down, neutral for no
+                              change. No per-row warning glyph — on the small quantities a shop
+                              actually counts, a proportional threshold fires on almost every
+                              line, and a column of cautions is indistinguishable from none. The
+                              large-change check still runs once, at the save confirm, where it
+                              can be read against the whole batch. */}
+                          <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                            {isCounted &&
+                              (matches ? (
+                                <Typography
+                                  component="span"
+                                  variant="body2"
+                                  sx={{ color: 'text.disabled' }}
+                                >
+                                  No change
+                                </Typography>
+                              ) : (
+                                <Typography
+                                  component="span"
+                                  variant="body2"
+                                  sx={{
+                                    ...NUM_SX,
+                                    fontWeight: 700,
+                                    color: (delta as number) > 0 ? 'success.main' : 'error.main',
+                                  }}
+                                >
+                                  {signed(delta as number)}
+                                </Typography>
+                              ))}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    };
+
+                    if (!multi) return placeRow(g.rows[0]);
+
+                    return (
+                      <Fragment key={g.partId}>
+                        <TableRow sx={{ bgcolor: 'action.hover' }}>
+                          <TableCell sx={{ width: '99%' }}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                {g.partName}
                               </Typography>
-                            ) : (
-                              <Typography
-                                component="span"
-                                variant="body2"
-                                sx={{
-                                  ...NUM_SX,
-                                  fontWeight: 700,
-                                  color: (delta as number) > 0 ? 'success.main' : 'error.main',
+                              <Chip size="small" label={`${g.rows.length} places`} />
+                            </Stack>
+                            {g.description && (
+                              <Typography variant="caption" color="text.secondary">
+                                {g.description}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="right" sx={{ ...NUM_SX, color: 'text.secondary' }}>
+                            {num(g.total)}
+                          </TableCell>
+                          {/* Empty on purpose — see the note above. */}
+                          <TableCell />
+                          {!sheetUnit && <TableCell />}
+                          <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                            {countedHere > 0 && (
+                              <>
+                                <Typography
+                                  component="div"
+                                  variant="body2"
+                                  sx={{
+                                    ...NUM_SX,
+                                    fontWeight: 700,
+                                    color:
+                                      groupDelta === 0
+                                        ? 'text.disabled'
+                                        : groupDelta > 0
+                                          ? 'success.main'
+                                          : 'error.main',
+                                  }}
+                                >
+                                  {groupDelta === 0 ? 'No change' : signed(groupDelta)}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {countedHere} of {g.rows.length} places counted
+                                </Typography>
+                              </>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {g.rows.map(placeRow)}
+                        {/* Not offered in place-scoped mode: that sheet is about ONE bin, and
+                            "Found something not listed?" above already adds a part to it. */}
+                        {!locationMode && (
+                          <TableRow>
+                            <TableCell colSpan={sheetUnit ? 4 : 5} sx={{ pl: 5, py: 1 }}>
+                              <LocationPicker
+                                label={`Count ${g.partName} somewhere else`}
+                                options={destinationOptions}
+                                value={null}
+                                onChange={(place) => {
+                                  if (place) {
+                                    void addPartAtPlace({ id: g.partId, name: g.partName }, place);
+                                  }
                                 }}
-                              >
-                                {signed(delta as number)}
-                              </Typography>
-                            ))}
-                        </TableCell>
-                      </TableRow>
+                                unit={g.unit}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </TableBody>

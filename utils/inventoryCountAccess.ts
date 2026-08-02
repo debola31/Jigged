@@ -20,7 +20,7 @@ import {
   getLocationContentsPage,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
-import { resolveCountTarget, countNote } from '@/lib/inventoryCountPlan';
+import { resolveFallbackPlace, countNote } from '@/lib/inventoryCountPlan';
 import type {
   CountCandidate,
   CountCommitProgress,
@@ -28,16 +28,33 @@ import type {
   CountVariance,
 } from '@/types/inventoryCount';
 
-/** The auto-created system bucket every tracked part starts in. Resolved by name, as the
- *  RPCs do — there's a partial unique index on (company_id) WHERE name = 'Unassigned'. */
-const UNASSIGNED_NAME = 'Unassigned';
-
 /**
- * Build the count sheet for a company.
+ * The company-wide count sheet: **one row per (part, place)**.
  *
- * Returns every stocked part with its system quantity and resolved write target — including
- * the ones that can't be counted item-by-item, so the UI can name them rather than dropping
- * them silently.
+ * ## The row rule, stated once
+ *
+ *  - one row per place holding `quantity > 0`, carrying THAT place's balance; plus
+ *  - exactly one row at the company's system (`Unassigned`) bucket when a part holds stock
+ *    nowhere — the opening count, since `trg_auto_track_stocked_part` seeds every stocked part
+ *    there at 0.
+ *
+ * Zero-quantity balance rows are **never** emitted. `transfer_stock` decrements and
+ * `bulk_put_away` sets 0 rather than deleting, so every bin a part has ever passed through keeps
+ * a row forever. Rendering those would put a live absolute write target on a shelf the part has
+ * left: someone holding 12 types 12 into the ghost, booking 12 to the wrong place while the real
+ * shelf keeps its stale figure — a count that makes the data worse than not counting.
+ *
+ * Both simpler rules were considered and both write wrong numbers. Emitting a row per balance row
+ * gives you the ghosts above (≥9,428 of them at Contour). Emitting rows only where
+ * `quantity > 0` makes a part that holds stock nowhere vanish from the sheet entirely, which
+ * deletes the opening count and, ironically, the case the founder asked for most directly —
+ * saying where a part is matters most when the system thinks it is nowhere.
+ *
+ * ## Cost
+ *
+ * No new query and no extra request: `getBalancesForParts` was already fetching every balance for
+ * every stocked part to resolve one target per part. Only the row count changes, and only on the
+ * sheet — the picker stays part-grained (see `groupByPart`).
  */
 export async function loadCountCandidates(
   companyId: string,
@@ -46,29 +63,49 @@ export async function loadCountCandidates(
   const parts = await getStockedParts(companyId, search);
   if (parts.length === 0) return [];
 
-  // No `tracked` split any more: every part has a place, so every stocked part has balances to
-  // read. The old branch existed because a flag-off company had none at all.
+  // `getBalancesForParts` already filters `quantity > 0`, pages past PostgREST's max_rows, and
+  // computes each location's ancestor path — so the row rule above needs no query of its own.
   const [balances, locations] = await Promise.all([
     getBalancesForParts(companyId, parts.map((p) => p.id)),
     getLocations(companyId),
   ]);
 
-  const unassignedRow = locations.find((l) => l.name === UNASSIGNED_NAME);
-  const unassigned = unassignedRow ? { id: unassignedRow.id, name: unassignedRow.name } : null;
+  const fallback = resolveFallbackPlace(locations);
 
-  return parts.map((part) => {
-    const partBalances = balances.get(part.id) ?? [];
-
-    return {
+  return parts.flatMap((part) => {
+    const base = {
       partId: part.id,
       partName: part.part_name,
       description: part.description ?? null,
       // Every stocked part has one — parts_requires_unit CHECKs it — but the column is
       // nullable in the type, so fall back rather than render "null".
       unit: part.primary_unit ?? 'ea',
-      systemQuantity: Number(part.quantity) || 0,
-      target: resolveCountTarget(partBalances, unassigned),
     };
+
+    const held = balances.get(part.id) ?? [];
+    if (held.length === 0) {
+      return [
+        {
+          ...base,
+          systemQuantity: 0,
+          target: {
+            locationId: fallback.id,
+            locationName: fallback.name,
+            locationPath: fallback.name,
+          },
+        },
+      ];
+    }
+
+    return held.map((b) => ({
+      ...base,
+      systemQuantity: b.quantity,
+      target: {
+        locationId: b.locationId,
+        locationName: b.locationName,
+        locationPath: [...b.path, b.locationName].join(' › '),
+      },
+    }));
   });
 }
 
@@ -102,7 +139,9 @@ export async function loadLocationCountCandidates(
       description: null,
       unit: c.primary_unit ?? 'ea',
       systemQuantity: c.quantity,
-      target: { kind: 'location', locationId, locationName },
+      // `locationPath` is the plain name here: every row on this sheet shares one place and the
+      // page title already says which, so an ancestor path would repeat down every row.
+      target: { locationId, locationName, locationPath: locationName },
     })),
     total,
   };
@@ -160,7 +199,7 @@ export async function loadPartAtLocationCandidate(
     description: data.description,
     unit: data.primary_unit ?? 'ea',
     systemQuantity: balances.get(partId) ?? 0,
-    target: { kind: 'location', locationId, locationName },
+    target: { locationId, locationName, locationPath: locationName },
   };
 }
 
@@ -180,12 +219,16 @@ export async function loadPartAtLocationCandidate(
  * path already does the right thing: `commitCount` routes every line through
  * `adjustStockAtLocation` for ITS location, and no line touches another shelf.
  *
- * ## Only places that hold some
+ * ## The same row rule as the company-wide sheet
  *
- * A part that has passed through a bin keeps a zero balance row forever (`transfer_stock`
- * decrements, `bulk_put_away` sets 0), and putting every historical shelf on the sheet would send
- * someone to look at empties. A place that genuinely should be counted but reads zero is reachable
- * the other way — open that bin's sheet and use "Found something not listed?".
+ * One row per place holding some, plus one row at the system bucket when the part holds stock
+ * nowhere. A part that has passed through a bin keeps a zero balance row forever
+ * (`transfer_stock` decrements, `bulk_put_away` sets 0), and putting every historical shelf here
+ * would send someone to look at empties.
+ *
+ * The fallback row is what stops this sheet being reachable-but-empty. Before it, a part holding
+ * stock nowhere landed on an empty table with a disabled Save and no explanation — which is
+ * precisely the part you most need to say "it's over here, and there are twelve" about.
  */
 export async function loadPartEverywhereCandidates(
   companyId: string,
@@ -207,26 +250,44 @@ export async function loadPartEverywhereCandidates(
   }
   if (!data) throw new Error('That part no longer exists.');
 
-  const balances = await getBalancesForPart(partId);
+  const [balances, locations] = await Promise.all([
+    getBalancesForPart(partId),
+    getLocations(companyId),
+  ]);
   const unit = data.primary_unit ?? 'ea';
+  const fallback = resolveFallbackPlace(locations);
 
-  const candidates = balances
-    .filter((b) => Number(b.quantity ?? 0) > 0)
-    .map((b) => ({
-      partId,
-      partName: data.part_name,
-      // The PLACE is the sub-line here, not the description: every row shares the part, so the
-      // description would repeat on all of them while the one thing that differs went unlabelled.
-      description: b.path.join(' › ') || b.location_name,
-      unit,
-      systemQuantity: Number(b.quantity ?? 0),
-      target: {
-        kind: 'location' as const,
-        locationId: b.location_id,
-        locationName: b.location_name,
-      },
-    }))
-    .sort((a, b) => a.description!.localeCompare(b.description as string));
+  const held = balances.filter((b) => Number(b.quantity ?? 0) > 0);
+
+  // The place used to be crammed into `description` because there was nowhere else to put it.
+  // `target.locationPath` is that place now, so the description can go back to being the
+  // description — and a row can show both.
+  const base = { partId, partName: data.part_name, description: data.description, unit };
+
+  const candidates: CountCandidate[] =
+    held.length === 0
+      ? [
+          {
+            ...base,
+            systemQuantity: 0,
+            target: {
+              locationId: fallback.id,
+              locationName: fallback.name,
+              locationPath: fallback.name,
+            },
+          },
+        ]
+      : held
+          .map((b) => ({
+            ...base,
+            systemQuantity: Number(b.quantity ?? 0),
+            target: {
+              locationId: b.location_id,
+              locationName: b.location_name,
+              locationPath: [...b.path, b.location_name].join(' › ') || b.location_name,
+            },
+          }))
+          .sort((a, b) => a.target.locationPath.localeCompare(b.target.locationPath));
 
   return { partName: data.part_name, candidates };
 }
@@ -293,30 +354,38 @@ export async function commitCount(
 
   for (let i = 0; i < variances.length; i += 1) {
     const v = variances[i];
-    onProgress?.({ done: i, total: variances.length, currentPartName: v.candidate.partName });
+    onProgress?.({
+      done: i,
+      total: variances.length,
+      currentPartName: v.candidate.partName,
+      currentLocationName: v.candidate.target.locationPath,
+    });
 
     try {
-      if (v.candidate.target.kind === 'location') {
-        await adjustStockAtLocation(
-          v.candidate.partId,
-          v.candidate.target.locationId,
-          v.counted,
-          v.candidate.unit,
-          { notes: countNote(v), operatorId },
-        );
-      } else {
-        // Excluded lines are filtered out before commit; treat reaching here as a bug.
-        throw new Error('This part is counted at its locations, not on the sheet.');
-      }
+      await adjustStockAtLocation(
+        v.candidate.partId,
+        v.candidate.target.locationId,
+        v.counted,
+        v.candidate.unit,
+        { notes: countNote(v), operatorId },
+      );
       committed += 1;
     } catch (e) {
       failures.push({
         partName: v.candidate.partName,
+        // Without the place, "BUY-ORING-214 could not be saved" leaves someone who counted it at
+        // three shelves with no idea which number to re-enter.
+        locationName: v.candidate.target.locationPath,
         message: e instanceof Error ? e.message : 'Could not save this count.',
       });
     }
   }
 
-  onProgress?.({ done: variances.length, total: variances.length, currentPartName: '' });
+  onProgress?.({
+    done: variances.length,
+    total: variances.length,
+    currentPartName: '',
+    currentLocationName: '',
+  });
   return { committed, failures };
 }

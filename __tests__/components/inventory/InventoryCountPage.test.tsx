@@ -61,6 +61,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   LOCATION_PAGE_SIZE: 2,
   bulkPutAway: vi.fn(),
   createLocation: vi.fn(),
+  getBalancesForParts: vi.fn(),
   getLocations: vi.fn(async () => []),
 }));
 
@@ -73,10 +74,34 @@ import {
   loadPartAtLocationCandidate,
   loadPartEverywhereCandidates,
 } from '@/utils/inventoryCountAccess';
-import { bulkPutAway, getLocations } from '@/utils/inventoryLocationsAccess';
+import {
+  bulkPutAway,
+  getBalancesForParts,
+  getLocations,
+} from '@/utils/inventoryLocationsAccess';
 import type { CountCandidate } from '@/types/inventoryCount';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
+/**
+ * Stub the pre-save re-read.
+ *
+ * Keyed by `partId::locationId` on purpose: the page reads by PART now (one request instead of
+ * one per bin) and then picks each row's own place out of the result, so a stub that ignored the
+ * location would let a bug that applies Shelf A's balance to Shelf B pass unnoticed.
+ */
+const freshBalances = (rows: Record<string, number>) =>
+  asMock(getBalancesForParts).mockImplementation(async (_co: string, ids: string[]) => {
+    const out = new Map<string, { locationId: string; locationName: string; path: string[]; quantity: number }[]>();
+    for (const [key, quantity] of Object.entries(rows)) {
+      const [partId, locationId] = key.split('::');
+      if (!ids.includes(partId)) continue;
+      const list = out.get(partId) ?? [];
+      list.push({ locationId, locationName: locationId, path: [], quantity });
+      out.set(partId, list);
+    }
+    return out;
+  });
 
 // This jsdom setup doesn't provide localStorage (no --localstorage-file), which is also a real
 // browser case — private mode and some webviews. The page tolerates its absence; these tests
@@ -109,25 +134,47 @@ const cand = (over: Partial<CountCandidate> & { partId: string }): CountCandidat
   systemQuantity: 40,
   // Every part has a place since 20260802015837, so the company-wide sheet's default row is
   // an Unassigned row — there is no longer a target that writes `parts.quantity`.
-  target: { kind: 'location', locationId: 'loc-unassigned', locationName: 'Unassigned' },
+  target: { locationId: 'loc-unassigned', locationName: 'Unassigned', locationPath: 'Unassigned' },
   ...over,
 });
+
+/** A (part, place) row — the shape the loaders actually return now. */
+const at = (
+  partId: string,
+  partName: string,
+  locationId: string,
+  locationPath: string,
+  systemQuantity: number,
+): CountCandidate =>
+  cand({
+    partId,
+    partName,
+    systemQuantity,
+    target: { locationId, locationName: locationPath.split(' › ').pop()!, locationPath },
+  });
 
 const renderPage = () =>
   render(<InventoryCountPage />, {
     wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>,
   });
 
-/** The count input for a named part — every sheet row has one, so scope by label. */
-const inputFor = (partName: string) =>
-  screen.getByRole('spinbutton', { name: new RegExp(`counted quantity for ${partName}`, 'i') });
+/**
+ * The count input for one ROW — a part AT A PLACE.
+ *
+ * The place is required, not optional: a part on three shelves has three inputs, and the earlier
+ * positional `getAllByRole('spinbutton')[0]` binds to whatever the sort happened to put first.
+ */
+const inputFor = (partName: string, place: string) =>
+  screen.getByRole('spinbutton', {
+    name: new RegExp(`counted quantity for ${partName} in ${place}`, 'i'),
+  });
 
-/** Pick parts on step 1 and advance to the sheet. */
+/** Pick parts in the picker (one row per PART, whatever its places) and advance to the sheet. */
 const chooseParts = async (user: ReturnType<typeof userEvent.setup>, ...partNames: string[]) => {
   for (const name of partNames) {
-    await user.click(screen.getByRole('checkbox', { name: new RegExp(`count ${name}`, 'i') }));
+    await user.click(screen.getByRole('checkbox', { name: new RegExp(`^count ${name}`, 'i') }));
   }
-  await user.click(screen.getByRole('button', { name: /^count \d+ parts?$/i }));
+  await user.click(screen.getByRole('button', { name: /^count \d+ parts?/i }));
 };
 
 beforeEach(() => {
@@ -140,11 +187,32 @@ beforeEach(() => {
     loading: false,
   });
   window.localStorage.clear();
+  /*
+   * Two parts, one place each — still the majority shape a real shop returns (9 of the 14 stocked
+   * parts in `supabase/seed.sql` sit in exactly one place), so it is an honest default rather
+   * than a stale one. The multi-place shape this change introduces is not smeared across the
+   * tests that happen to need *a* row; it gets its own block, "a part in several places", where
+   * the grouping is the subject rather than an incidental.
+   */
   asMock(loadCountCandidates).mockResolvedValue([
-    cand({ partId: 'p1', partName: '4140 bar', systemQuantity: 40 }),
-    cand({ partId: 'p2', partName: '6061 plate', systemQuantity: 12 }),
+    at('p1', '4140 bar', 'loc-unassigned', 'Unassigned', 40),
+    at('p2', '6061 plate', 'loc-unassigned', 'Unassigned', 12),
   ]);
-  asMock(refreshLocationQuantities).mockResolvedValue(new Map());
+  // Location-AWARE by default: a blind stub returns the same Map for every bin, so a bug that
+  // reads Shelf A's balance and applies it to Shelf B cannot fail a test.
+  asMock(getBalancesForParts).mockImplementation(async (_co: string, ids: string[]) =>
+    new Map(
+      ids.map((id) => [
+        id,
+        id === 'p1'
+          ? [
+              { locationId: 'loc-unassigned', locationName: 'Unassigned', path: [], quantity: 40 },
+              { locationId: 'loc-a', locationName: 'Shelf A', path: ['Cabinet 3'], quantity: 8 },
+            ]
+          : [{ locationId: 'loc-unassigned', locationName: 'Unassigned', path: [], quantity: 12 }],
+      ]),
+    ),
+  );
   asMock(commitCount).mockResolvedValue({ committed: 1, failures: [] });
 });
 
@@ -172,7 +240,7 @@ describe('choosing what to count', () => {
     await screen.findByText('4140 bar');
     await chooseParts(user, '4140 bar');
 
-    expect(inputFor('4140 bar')).toBeInTheDocument();
+    expect(inputFor('4140 bar', 'Unassigned')).toBeInTheDocument();
     expect(
       screen.queryByRole('spinbutton', { name: /counted quantity for 6061 plate/i }),
     ).not.toBeInTheDocument();
@@ -183,66 +251,22 @@ describe('choosing what to count', () => {
     renderPage();
     await screen.findByText('4140 bar');
     await chooseParts(user, '4140 bar', '6061 plate');
-    expect(inputFor('4140 bar')).toHaveValue(null);
-    expect(inputFor('6061 plate')).toHaveValue(null);
+    expect(inputFor('4140 bar', 'Unassigned')).toHaveValue(null);
+    expect(inputFor('6061 plate', 'Unassigned')).toHaveValue(null);
   });
 
-  it('names parts held back instead of dropping them silently', async () => {
-    asMock(loadCountCandidates).mockResolvedValue([
-      cand({ partId: 'p1', partName: '4140 bar' }),
-      cand({
-        partId: 'p9',
-        partName: 'Split part',
-        target: {
-          kind: 'excluded',
-          reason: 'Stock is split across 2 locations',
-          locations: [
-            { id: 'shelf-a', name: 'Shelf A' },
-            { id: 'shelf-b', name: 'Shelf B' },
-          ],
-        },
-      }),
-    ]);
-    renderPage();
-    await screen.findByText('4140 bar');
-    expect(screen.getByText(/not on this sheet/i)).toBeInTheDocument();
-    expect(screen.getByText('Split part')).toBeInTheDocument();
-  });
-
-  /**
-   * Naming a held-back part is only half the job — the copy says "count them where they
-   * actually are", and until now the chips were inert, so that was an instruction with
-   * nowhere to follow. At one bin the same part is perfectly countable: "Shelf A holds
-   * 830" adjusts Shelf A and says nothing about Shelf B.
+  /*
+   * The two tests that stood here — "names parts held back instead of dropping them silently" and
+   * "routes a held-back part to each place it actually sits in" — are deleted, not rewritten.
+   *
+   * They asserted the notice the founder rejected ("this is silly... many parts will be in many
+   * places") and the chips that routed around it. A part in several places is now simply several
+   * rows on the sheet, so there is nothing held back to name and nowhere to route to. The
+   * behaviour that replaced them is covered in "a part in several places" below.
+   *
+   * Note this also removed the only test asserting a `?from=count` URL, so that `returnTo` branch
+   * went with the chips that were its only setters.
    */
-  it('routes a held-back part to each place it actually sits in', async () => {
-    const user = userEvent.setup();
-    asMock(loadCountCandidates).mockResolvedValue([
-      cand({ partId: 'p1', partName: '4140 bar' }),
-      cand({
-        partId: 'p9',
-        partName: 'Split part',
-        target: {
-          kind: 'excluded',
-          reason: 'Stock is split across 2 locations',
-          locations: [
-            { id: 'shelf-a', name: 'Shelf A' },
-            { id: 'shelf-b', name: 'Shelf B' },
-          ],
-        },
-      }),
-    ]);
-    renderPage();
-    await screen.findByText('Split part');
-
-    await user.click(screen.getByRole('button', { name: 'Shelf B' }));
-
-    // `&part=` makes this the one-row sheet the copy promises ("count them where they
-    // actually are") rather than the whole bin; `&from=count` returns here, not to Storage.
-    expect(mockPush).toHaveBeenCalledWith(
-      '/dashboard/co1/inventory/count?location=shelf-b&part=p9&from=count',
-    );
-  });
 
   /**
    * The back link used to push `/dashboard/co1/inventory` unconditionally. That route now redirects
@@ -294,13 +318,13 @@ describe('inline feedback', () => {
 
   it('shows the delta on the row as soon as a number is typed', async () => {
     const user = await onSheet();
-    await user.type(inputFor('4140 bar'), '38');
+    await user.type(inputFor('4140 bar', 'Unassigned'), '38');
     expect(await screen.findByText('-2')).toBeInTheDocument();
   });
 
   it('says a count matches rather than showing a zero delta', async () => {
     const user = await onSheet();
-    await user.type(inputFor('4140 bar'), '40');
+    await user.type(inputFor('4140 bar', 'Unassigned'), '40');
     // Anchored: the footer also says "Everything matches so far".
     expect(await screen.findByText(/^No change$/)).toBeInTheDocument();
   });
@@ -309,10 +333,10 @@ describe('inline feedback', () => {
     const user = await onSheet();
     expect(screen.getByText(/nothing entered yet/i)).toBeInTheDocument();
 
-    await user.type(inputFor('4140 bar'), '40'); // matches
+    await user.type(inputFor('4140 bar', 'Unassigned'), '40'); // matches
     expect(await screen.findByText(/everything matches so far/i)).toBeInTheDocument();
 
-    await user.type(inputFor('6061 plate'), '9'); // changes
+    await user.type(inputFor('6061 plate', 'Unassigned'), '9'); // changes
     expect(await screen.findByText('2 of 2 counted')).toBeInTheDocument();
     // Both parts are in 'ft', so the unit is stated once here rather than on every row.
     expect(screen.getByText(/1 will change · all in ft/)).toBeInTheDocument();
@@ -345,37 +369,37 @@ describe('inline feedback', () => {
     const user = await onSheet();
     expect(screen.getByRole('button', { name: /save 0 changes/i })).toBeDisabled();
 
-    await user.type(inputFor('4140 bar'), '40'); // matches — still nothing to write
+    await user.type(inputFor('4140 bar', 'Unassigned'), '40'); // matches — still nothing to write
     expect(screen.getByRole('button', { name: /save 0 changes/i })).toBeDisabled();
   });
 
   it('clearing an input un-counts the row rather than counting it as zero', async () => {
     const user = await onSheet();
-    await user.type(inputFor('4140 bar'), '38');
+    await user.type(inputFor('4140 bar', 'Unassigned'), '38');
     expect(await screen.findByText('1 of 2 counted')).toBeInTheDocument();
 
-    await user.clear(inputFor('4140 bar'));
+    await user.clear(inputFor('4140 bar', 'Unassigned'));
     expect(await screen.findByText('0 of 2 counted')).toBeInTheDocument();
   });
 
   it('going back to the scope step keeps what has been typed', async () => {
     const user = await onSheet();
-    await user.type(inputFor('4140 bar'), '38');
+    await user.type(inputFor('4140 bar', 'Unassigned'), '38');
     await user.click(screen.getByRole('button', { name: /^back$/i }));
 
     await screen.findByText(/one part or the whole shop/i);
     await user.click(screen.getByRole('button', { name: /^count 2 parts$/i }));
-    expect(inputFor('4140 bar')).toHaveValue(38);
+    expect(inputFor('4140 bar', 'Unassigned')).toHaveValue(38);
   });
 });
 
 describe('saving', () => {
-  const enterAndSave = async (partName: string, value: string) => {
+  const enterAndSave = async (partName: string, value: string, place = 'Unassigned') => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
     await chooseParts(user, '4140 bar');
-    await user.type(inputFor(partName), value);
+    await user.type(inputFor(partName, place), value);
     await user.click(screen.getByRole('button', { name: /save 1 change/i }));
     return user;
   };
@@ -383,7 +407,9 @@ describe('saving', () => {
   it('re-reads current quantities before writing', async () => {
     await enterAndSave('4140 bar', '38');
     await waitFor(() =>
-      expect(refreshLocationQuantities).toHaveBeenCalledWith('loc-unassigned', ['p1']),
+      // By part, not by bin: one request for the whole sheet, and it can see a place the sheet
+      // does not hold (reported after the save, never blocking it).
+      expect(getBalancesForParts).toHaveBeenCalledWith('co1', ['p1']),
     );
   });
 
@@ -435,7 +461,7 @@ describe('saving', () => {
   });
 
   it('commits the quantity that was counted, not the one the sheet opened with', async () => {
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    freshBalances({ 'p1::loc-unassigned': 44 });
     await enterAndSave('4140 bar', '38');
 
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
@@ -447,14 +473,17 @@ describe('saving', () => {
   });
 
   it('says afterwards which parts moved while the count was open', async () => {
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 44]]));
+    freshBalances({ 'p1::loc-unassigned': 44 });
     await enterAndSave('4140 bar', '38');
 
-    expect(await screen.findByText(/moved while you were counting/i)).toBeInTheDocument();
+    // Named, not tallied: "1 item moved" doesn't say which shelf to go back and look at.
+    expect(
+      await screen.findByText(/4140 bar at Unassigned moved while you were counting/i),
+    ).toBeInTheDocument();
   });
 
   it('saves nothing when the refresh shows the count already matches', async () => {
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 38]]));
+    freshBalances({ 'p1::loc-unassigned': 38 });
     await enterAndSave('4140 bar', '38');
 
     expect(await screen.findByText(/everything already matches/i)).toBeInTheDocument();
@@ -492,7 +521,7 @@ describe('counting one place', () => {
       quantity: undefined,
       systemQuantity: quantity,
       unit: 'ea',
-      target: { kind: 'location', locationId: LOC, locationName: 'Shelf A' },
+      target: { locationId: LOC, locationName: 'Shelf A', locationPath: 'Shelf A' },
     } as Partial<CountCandidate> & { partId: string });
 
   beforeEach(() => {
@@ -524,7 +553,7 @@ describe('counting one place', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
-    await user.type(inputFor('BUY-ORING-214'), '28');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '28');
 
     expect(window.localStorage.getItem('jigged.inventoryCount.co1')).toBeNull();
   });
@@ -621,24 +650,27 @@ describe('counting one place', () => {
   });
 
   /**
-   * A shelf count must be re-read at ITS shelf. Comparing it to `parts.quantity` — the roll-up
-   * across every bin — would flag a variance on every line. The read that could do so was deleted
-   * in 20260802015837, so what is left to pin is that the bin-scoped read is the one called.
+   * A shelf count must be measured against ITS shelf. The re-read now fetches every place a
+   * counted part sits in, so what this pins is that the page picks the row matching the sheet's
+   * own location — 828 at Shelf A — and not some other bin's figure or a roll-up of them all.
    */
   it('re-reads THIS bin before saving, not the company-wide total', async () => {
     const user = userEvent.setup();
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['BUY-ORING-214', 828]]));
+    freshBalances({ 'BUY-ORING-214::loc-shelf-a': 828, 'BUY-ORING-214::loc-elsewhere': 9999 });
     asMock(commitCount).mockResolvedValue({ committed: 1, failures: [] });
     renderPage();
     await screen.findByText("What's in Shelf A?");
 
     await chooseParts(user, 'BUY-ORING-214');
-    await user.type(inputFor('BUY-ORING-214'), '830');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '830');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
-    await waitFor(() =>
-      expect(refreshLocationQuantities).toHaveBeenCalledWith(LOC, ['BUY-ORING-214']),
-    );
+    // The variance is against Shelf A's 828, not the 9,999 sitting in another bin — so counting
+    // 830 is +2, and the commit carries that shelf's id.
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [variances] = asMock(commitCount).mock.calls[0];
+    expect(variances[0].delta).toBe(2);
+    expect(variances[0].candidate.target.locationId).toBe(LOC);
   });
 
   /**
@@ -718,7 +750,7 @@ describe('counting one place — the sheet outlives the search', () => {
       quantity: undefined,
       systemQuantity: quantity,
       unit: 'ea',
-      target: { kind: 'location', locationId: LOC2, locationName: 'Shelf A' },
+      target: { locationId: LOC2, locationName: 'Shelf A', locationPath: 'Shelf A' },
     } as Partial<CountCandidate> & { partId: string });
 
   beforeEach(() => {
@@ -730,7 +762,7 @@ describe('counting one place — the sheet outlives the search', () => {
       candidates: [hereRow('BUY-ORING-214', 828), hereRow('BUY-BEARING-608ZZ', 580)],
       total: 2,
     });
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map());
+    freshBalances({ 'BUY-ORING-214::loc-shelf-a': 828, 'BUY-BEARING-608ZZ::loc-shelf-a': 580 });
   });
 
   afterEach(() => searchParams.delete('location'));
@@ -742,7 +774,7 @@ describe('counting one place — the sheet outlives the search', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
-    await user.type(inputFor('BUY-ORING-214'), '800');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '800');
 
     // The server list is replaced by something that does not contain the counted part.
     asMock(loadLocationCountCandidates).mockResolvedValue({
@@ -768,7 +800,7 @@ describe('counting one place — the sheet outlives the search', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
-    await user.type(inputFor('BUY-ORING-214'), '800');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '800');
     expect(screen.getByText(/1 of 1 counted/i)).toBeInTheDocument();
 
     // Back to the picker, untick, re-tick, forward again. Two "Back" buttons exist (the page
@@ -778,7 +810,7 @@ describe('counting one place — the sheet outlives the search', () => {
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('button', { name: /count 1 part$/i }));
 
-    expect(inputFor('BUY-ORING-214')).toHaveValue(800);
+    expect(inputFor('BUY-ORING-214', 'Shelf A')).toHaveValue(800);
   });
 });
 
@@ -803,7 +835,7 @@ describe('counting one place — adding a part that is not listed', () => {
         quantity: undefined,
         systemQuantity: 0,
         unit: 'ea',
-        target: { kind: 'location', locationId: LOC3, locationName: 'Shelf A' },
+        target: { locationId: LOC3, locationName: 'Shelf A', locationPath: 'Shelf A' },
       } as Partial<CountCandidate> & { partId: string }),
     );
   });
@@ -855,12 +887,12 @@ describe('count runs are attributed', () => {
   it('passes the acting member to every line it commits', async () => {
     const user = userEvent.setup();
     // The file's default fixture already provides "4140 bar"; only the refresh needs pinning.
-    asMock(refreshLocationQuantities).mockResolvedValue(new Map([['p1', 40]]));
+    freshBalances({ 'p1::loc-unassigned': 40 });
     renderPage();
     await screen.findByText('4140 bar');
 
     await chooseParts(user, '4140 bar');
-    await user.type(inputFor('4140 bar'), '38');
+    await user.type(inputFor('4140 bar', 'Unassigned'), '38');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
@@ -888,7 +920,7 @@ describe('counting one part at one place', () => {
         quantity: undefined,
         systemQuantity: 580,
         unit: 'ea',
-        target: { kind: 'location', locationId: LOC4, locationName: 'Shelf A' },
+        target: { locationId: LOC4, locationName: 'Shelf A', locationPath: 'Shelf A' },
       } as Partial<CountCandidate> & { partId: string }),
     );
   });
@@ -901,7 +933,7 @@ describe('counting one part at one place', () => {
   it('goes straight to a one-row sheet with nothing to pick', async () => {
     renderPage();
     expect(await screen.findByText('4140 bar')).toBeInTheDocument();
-    expect(inputFor('4140 bar')).toBeInTheDocument();
+    expect(inputFor('4140 bar', 'Shelf A')).toBeInTheDocument();
     expect(screen.queryByText(/pick the parts/i)).not.toBeInTheDocument();
   });
 
@@ -948,10 +980,10 @@ describe('counting one part everywhere', () => {
       partId: 'p-split',
       partName: 'BUY-ORING-214',
       quantity: undefined,
-      description: name,
+      description: '1/2" O-ring, Buna-N',
       systemQuantity: qty,
       unit: 'ea',
-      target: { kind: 'location', locationId, locationName: name },
+      target: { locationId, locationName: name, locationPath: name },
     } as Partial<CountCandidate> & { partId: string });
 
   beforeEach(() => {
@@ -960,9 +992,7 @@ describe('counting one part everywhere', () => {
       partName: 'BUY-ORING-214',
       candidates: [row('shelf-a', 'Shelf A', 828), row('shelf-b', 'Shelf B', 552)],
     });
-    asMock(refreshLocationQuantities).mockImplementation(async (locId: string) =>
-      new Map([['p-split', locId === 'shelf-a' ? 828 : 552]]),
-    );
+    freshBalances({ 'p-split::shelf-a': 828, 'p-split::shelf-b': 552 });
     asMock(commitCount).mockResolvedValue({ committed: 2, failures: [] });
   });
 
@@ -972,6 +1002,8 @@ describe('counting one part everywhere', () => {
     renderPage();
     await screen.findByText('Shelf A');
     expect(screen.getByText('Shelf B')).toBeInTheDocument();
+    // Grouped under one part header rather than repeating the part name down the rows.
+    expect(screen.getByText('2 places')).toBeInTheDocument();
     expect(screen.queryByText(/pick the parts/i)).not.toBeInTheDocument();
     expect(await screen.findByText(/0 of 2 counted/i)).toBeInTheDocument();
   });
@@ -986,7 +1018,11 @@ describe('counting one part everywhere', () => {
     renderPage();
     await screen.findByText('Shelf A');
 
-    const [inputA, inputB] = screen.getAllByRole('spinbutton');
+    // By NAME, not by position. `getAllByRole('spinbutton')[0]` binds to whatever the sort
+    // happened to put first, so it silently kept passing while telling you nothing about which
+    // shelf got which number — which is the entire subject of this test.
+    const inputA = inputFor('BUY-ORING-214', 'Shelf A');
+    const inputB = inputFor('BUY-ORING-214', 'Shelf B');
     await user.type(inputA, '800');
     await user.type(inputB, '500');
 
@@ -1004,19 +1040,18 @@ describe('counting one part everywhere', () => {
     renderPage();
     await screen.findByText('Shelf A');
 
-    const [inputA, inputB] = screen.getAllByRole('spinbutton');
-    await user.type(inputA, '800');
-    await user.type(inputB, '500');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '800');
+    await user.type(inputFor('BUY-ORING-214', 'Shelf B'), '500');
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
-    expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-a', ['p-split']);
-    expect(refreshLocationQuantities).toHaveBeenCalledWith('shelf-b', ['p-split']);
+    // One read for the part, covering both its shelves — not one request per bin.
+    expect(getBalancesForParts).toHaveBeenCalledWith('co1', ['p-split']);
 
     const [variances] = asMock(commitCount).mock.calls[0];
     expect(
       variances.map((v: { candidate: CountCandidate; counted: number; delta: number }) => [
-        v.candidate.target.kind === 'location' ? v.candidate.target.locationId : '',
+        v.candidate.target.locationId,
         v.counted,
         v.delta,
       ]),
@@ -1033,5 +1068,132 @@ describe('counting one part everywhere', () => {
 
     await user.click(screen.getByRole('button', { name: /back to part/i }));
     expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts/p-split?tab=inventory');
+  });
+});
+
+/**
+ * The company-wide sheet, when a part sits in more than one place.
+ *
+ * This is what replaced the held-back notice the founder rejected ("this is silly... many parts
+ * will be in many places"). The design splits the two steps deliberately: the PICKER stays
+ * part-grained — nobody chooses a shelf when deciding which parts to walk — and the SHEET is
+ * place-grained, grouped under the part.
+ */
+describe('a part in several places', () => {
+  beforeEach(() => {
+    asMock(loadCountCandidates).mockResolvedValue([
+      at('p1', 'BUY-ORING-214', 'loc-a', 'Cabinet 3 › Shelf A', 800),
+      at('p1', 'BUY-ORING-214', 'loc-b', 'Cabinet 3 › Shelf B', 20),
+      at('p1', 'BUY-ORING-214', 'loc-unassigned', 'Unassigned', 8),
+      at('p2', '6061 plate', 'loc-unassigned', 'Unassigned', 12),
+    ]);
+    freshBalances({
+      'p1::loc-a': 800,
+      'p1::loc-b': 20,
+      'p1::loc-unassigned': 8,
+      'p2::loc-unassigned': 12,
+    });
+  });
+
+  /**
+   * The picker must NOT multiply. It is unbounded, unvirtualised and filtered in the browser, so
+   * one row per (part, place) would have made a 20-part shop read "Count 40 parts" — the same
+   * species of nonsense as the notice this change deletes.
+   */
+  it('lists one row per part, saying how many places it is in', async () => {
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+
+    expect(screen.getAllByText('BUY-ORING-214')).toHaveLength(1);
+    expect(screen.getByText('3 places')).toBeInTheDocument();
+    // The right-hand figure is the shop-wide total across those places.
+    expect(screen.getByText('828 ft')).toBeInTheDocument();
+  });
+
+  it('ticks every place of a part at once, and says so in the accessible name', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Count BUY-ORING-214 in 3 places' }),
+    );
+    // Rows, not parts — and the CTA has to say both or it lies about one of them.
+    expect(
+      screen.getByRole('button', { name: /^count 1 part in 3 places$/i }),
+    ).toBeEnabled();
+  });
+
+  it('expands the part into one input per place on the sheet', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+    await chooseParts(user, 'BUY-ORING-214');
+
+    expect(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf A')).toHaveValue(null);
+    expect(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf B')).toHaveValue(null);
+    expect(inputFor('BUY-ORING-214', 'Unassigned')).toHaveValue(null);
+  });
+
+  /**
+   * The ambiguity this whole change removes: 38 counted against 10+20+10 has no defensible bin.
+   * It is not *resolved* by grouping — it is never posed, because the group header has no input.
+   * A total field there would rebuild the bug behind a UI that now promises it works.
+   */
+  it('gives the part header no input, only a read-only subtotal', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+    await chooseParts(user, 'BUY-ORING-214');
+
+    // Three places, three inputs — not four.
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(3);
+    expect(
+      screen.queryByRole('spinbutton', { name: /^counted quantity for BUY-ORING-214$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sums the counted places on the header and says how many are done', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+    await chooseParts(user, 'BUY-ORING-214');
+
+    await user.type(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf A'), '803');
+    expect(await screen.findByText('1 of 3 places counted')).toBeInTheDocument();
+
+    await user.type(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf B'), '18');
+    expect(await screen.findByText('2 of 3 places counted')).toBeInTheDocument();
+    // +3 at Shelf A, −2 at Shelf B.
+    expect(screen.getByText('+1')).toBeInTheDocument();
+  });
+
+  /**
+   * A place left blank is a place you did not walk, and it must stay untouched. Partial counts
+   * are the normal case — "I only got to Shelf A" — not an error state.
+   */
+  it('writes only the places that were counted, each to its own shelf', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+    await chooseParts(user, 'BUY-ORING-214');
+
+    await user.type(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf A'), '803');
+    await user.click(screen.getByRole('button', { name: /save 1 change/i }));
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [variances] = asMock(commitCount).mock.calls[0];
+    expect(variances).toHaveLength(1);
+    expect(variances[0].candidate.target.locationId).toBe('loc-a');
+    expect(variances[0].delta).toBe(3);
+  });
+
+  /** The notice the founder called silly. There should be no Alert above the list at all. */
+  it('never holds a split part back from the sheet', async () => {
+    renderPage();
+    await screen.findByText('BUY-ORING-214');
+
+    expect(screen.queryByText(/not on this sheet/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

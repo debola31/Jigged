@@ -88,6 +88,7 @@ off by default elsewhere, and only the founder flips it.
 | **Reorganise a place** | Storage → click a place | `Rename`, `Duplicate`, `Add one inside`, **`Move into…`** (re-parent), `Delete` (empty subtrees only). |
 | Print labels | Storage toolbar / place drawer | `Print all labels` for setup, or `Print QR` for one place **and everything under it**. There is no row selection: bulk-print-a-subset is the only job those checkboxes served, nobody has asked for it twice, and a checkbox column charges every row on every visit for it. |
 | **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for `Unassigned` too. |
+| **See stock moving across the whole shop** | `/activity` → `Inventory` | Every movement, newest first, transfers folded to one row. Each row links to that part's ledger. Added 2026-08-01 — `getRecentActivity` already existed and its only caller was the operator's phone. |
 | Count one place | Storage → the ✓ on a row, or click the row → `Count or put away` | Worksheet scoped to that place, paginated. **Clicking anywhere on a row opens that place**; the chevron only expands, so one gesture never means two things. |
 | **Count one part at one place** | `/parts/{id}` → Inventory tab → the icon on a balance row | Offered on **every** row including zeros. |
 | **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |

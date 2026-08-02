@@ -508,7 +508,10 @@ describe('My Work — the "Me" tab', () => {
     render(<MyWorkPage />);
 
     const feedback = await screen.findByRole('button', { name: /give feedback/i });
-    const firstNote = screen.getAllByRole('listitem')[0];
+    // findAllByRole, not getAllByRole: the identity block renders immediately but the notes
+    // arrive on their own load, so a synchronous query here races the list and fails on a
+    // slower machine. CI caught exactly this.
+    const firstNote = (await screen.findAllByRole('listitem'))[0];
     expect(
       feedback.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -526,8 +529,8 @@ describe('My Work — the "Me" tab', () => {
     expect(email).toBeInTheDocument();
     expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument();
 
-    // Above the work, not below it.
-    const firstNote = screen.getAllByRole('listitem')[0];
+    // Above the work, not below it. Awaited — the notes load after the identity block.
+    const firstNote = (await screen.findAllByRole('listitem'))[0];
     expect(email.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -581,7 +584,8 @@ describe('My Work — the "Me" tab', () => {
     expect(within(row).queryAllByRole('link')).toHaveLength(0);
 
     // And reachable before the work rather than after it — the point of the move.
-    const firstNote = screen.getAllByRole('listitem')[0];
+    // Awaited: the notes load after the identity block this test opened on.
+    const firstNote = (await screen.findAllByRole('listitem'))[0];
     expect(
       logout.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

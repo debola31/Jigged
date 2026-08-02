@@ -816,9 +816,19 @@ describe('QuoteForm — standing-terms resolution chain', () => {
   });
 
   /** Pick a customer from the "Customer" autocomplete by visible name. */
+  /**
+   * Pick a customer by visible name.
+   *
+   * findByRole, not getByRole, and that is not defensive padding. When another
+   * MUI popup has just closed — the payment-terms picker, in the hand-typed
+   * test below — the customer combobox is briefly out of the accessibility tree,
+   * because MUI aria-hidden's the rest of the app while a popup is mounted. A
+   * synchronous getByRole races that transition: it passed locally and failed on
+   * CI's slower box, which is the signature of exactly this.
+   */
   async function selectCustomer(name: string) {
     const user = userEvent.setup();
-    await user.click(screen.getByRole('combobox', { name: /customer/i }));
+    await user.click(await screen.findByRole('combobox', { name: /customer/i }));
     await user.click(await screen.findByRole('option', { name }));
   }
 

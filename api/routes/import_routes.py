@@ -412,8 +412,20 @@ async def execute_import(
         # contact/address only to NEW customers — re-attaching a primary contact to an existing
         # customer would duplicate it and trip the one-primary index — and (b) the
         # created-vs-updated split in the summary.
+        # Keyed by the CASEFOLDED name, valued by the name EXACTLY as stored. The
+        # value is load-bearing: the upsert's on_conflict is the case-sensitive
+        # (company_id, name) constraint, so a CSV row spelled "acme corp" against
+        # a stored "Acme Corp" would not conflict — it would insert a SECOND
+        # customer while is_new (decided case-insensitively, just below) reported
+        # it as existing. Rewriting the payload to the stored spelling makes the
+        # upsert land on the row it was always meant to update.
+        #
+        # Consequence worth knowing: a re-import cannot RE-CASE a customer. That
+        # is the right trade — a silent duplicate of the entity every quote, job
+        # and invoice hangs off is far worse than a capitalisation fix the user
+        # can make on the customer page.
         existing_customer_names = {
-            c["name"].lower()
+            c["name"].strip().lower(): c["name"]
             for c in fetch_all_by_company(supabase, "customers", "name", request.company_id)
             if c.get("name")
         }
@@ -466,8 +478,13 @@ async def execute_import(
             if address_data and "country" not in address_data:
                 address_data["country"] = "USA"
 
-            name_lower = customer_data.get("name", "").lower()
-            is_new = name_lower not in existing_customer_names
+            name_lower = customer_data.get("name", "").strip().lower()
+            stored_name = existing_customer_names.get(name_lower)
+            is_new = stored_name is None
+            if stored_name is not None:
+                # Match the stored spelling so the upsert conflicts (and updates)
+                # instead of inserting a case-variant duplicate.
+                customer_data["name"] = stored_name
 
             # Attach a contact/address ONLY to a NEW customer — a re-imported (existing)
             # customer updates in place; re-inserting its primary contact/address would
@@ -516,7 +533,10 @@ async def execute_import(
                     )
                     for r in response.data or []:
                         if r.get("name") and r.get("id"):
-                            name_to_customer_id[r["name"].lower()] = r["id"]
+                            # Same normalisation as name_lower above, or the
+                            # lookup below misses and the row's contact/address
+                            # is silently dropped.
+                            name_to_customer_id[r["name"].strip().lower()] = r["id"]
 
                 contact_rows_to_insert = []
                 address_rows_to_insert = []

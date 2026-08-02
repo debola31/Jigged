@@ -330,6 +330,11 @@ export default function ShipmentForm({
                addresses:customer_addresses (
                  id, customer_id, address_line1, address_line2, city, state,
                  postal_code, country, default_billing, default_shipping, attention_to
+               ),
+               carrier_accounts:customer_carrier_accounts (
+                 id, company_id, customer_id, carrier, bill_to_party, account_number,
+                 account_postal_code, account_country_code, notes,
+                 created_at, updated_at, deleted_at
                )`,
             )
             .eq('id', source.customerId)
@@ -338,6 +343,33 @@ export default function ShipmentForm({
             throw new Error(customerErr?.message ?? 'Customer not found.');
           }
           ctx = customerRow as unknown as CustomerContext;
+
+          // Customer mode has no job to name a freight instruction, so the
+          // customer's standing arrangement IS the answer — resolveFreightLine
+          // with no job inputs falls straight to pickCarrierAccount. Without
+          // this the panel never rendered here and every shipment created from
+          // the customer surface saved NULL freight, even for a customer whose
+          // whole point is that shipping bills to their own account.
+          const customerFreight = resolveFreightLine({
+            jobFreightTerms: null,
+            jobCarrierAccountId: null,
+            customerAccounts: (customerRow.carrier_accounts ??
+              []) as unknown as CustomerCarrierAccount[],
+          });
+          setResolvedFreight(customerFreight);
+          setFreightTerms(customerFreight.terms ?? '');
+          setFreightAccountId(customerFreight.account?.id ?? '');
+          if (customerFreight.account?.carrier) {
+            const match = CARRIER_OPTIONS.find(
+              (c) =>
+                c.toLowerCase() === customerFreight.account!.carrier.trim().toLowerCase(),
+            );
+            if (match) setCarrierChoice(match);
+            else {
+              setCarrierChoice('other');
+              setCarrierOther(customerFreight.account.carrier);
+            }
+          }
 
           const openParts = await getOpenJobPartsForCustomer(
             companyId,

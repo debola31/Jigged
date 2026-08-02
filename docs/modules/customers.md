@@ -24,7 +24,7 @@ That last clause is the whole safety argument, and the reason this is not the `m
 |---|---|---|
 | `id` | uuid PK | `gen_random_uuid()` |
 | `company_id` | uuid NOT NULL | tenant key |
-| `name` | text NOT NULL | unique per company — **`customers_company_name_unique (company_id, name)`, FULL, no `WHERE`** |
+| `name` | text NOT NULL | **the identity, case- and space-insensitive** — `customers_company_name_ci_unique (company_id, lower(btrim(name)))`. FULL, no `WHERE`, so archived rows collide too: that collision is the signal to revive. The plain `customers_company_name_unique` survives beside it only as the CSV importer's `on_conflict` target |
 | `website` | text | |
 | `created_at` / `updated_at` | timestamptz | `updated_at` maintained by the `customers_updated_at` trigger (no column list — fires on every update) |
 | `deleted_at` | timestamptz | archive marker |
@@ -38,9 +38,14 @@ Everything unmarked is nullable. `customers_credit_status_check` is the **only**
 
 Contacts and addresses live in their own tables so a customer can have many of each.
 
-**`customer_contacts`** — `name` (req), `role` (`buyer` / `accounts_payable` / `engineering` / `quality` / `shipping_receiving` / `other`), `role_label` (required by CHECK when role is `other`), `email`, `phone`, `is_primary` (at most one per customer, `customer_contacts_one_primary` partial unique index).
+**`customer_contacts`** — `name` (req), `role` (`buyer` / `accounts_payable` / `engineering` / `quality` / `shipping_receiving` / `other`), `role_label` (required by CHECK when role is `other`), `email`, `phone`, `deleted_at`, and two independent flags:
 
-**`customer_addresses`** — `address_line1`/`2`, `city`, `state`, `postal_code`, `country` (default `USA`), `attention_to` (the "ATTN:" line printed above the address on packing slips), `default_billing`, `default_shipping`.
+- `is_primary` — who we call about the work.
+- `is_billing_default` — who invoices go to. **Separate on purpose**: at most shops the buyer and the AP clerk are two different people, and one flag forces the shop to lose one. Nothing falls back to the primary when it is unset.
+
+Both are "at most one per customer" via partial unique indexes **scoped to live rows**, which is why archiving a contact clears both flags in the same write — otherwise an archived person would hold the slot forever.
+
+**`customer_addresses`** — `address_line1`/`2`, `city`, `state`, `postal_code`, `country` (default `USA`), `attention_to` (the "ATTN:" line printed above the address on packing slips), `default_billing`, `default_shipping` — each **at most one per customer**, enforced by `idx_customer_addresses_one_default_billing` / `_shipping`. Those two indexes were documented from the baseline but did not exist until August 2026; until then a second default was possible and `pickBillingAddress` returned whichever row came back first.
 
 ### `customer_carrier_accounts` — the customer's own UPS/FedEx account
 
@@ -408,28 +413,31 @@ Each bullet cites a real test. Gaps are named as gaps rather than implied to be 
 | **`getCompanyDefaultPaymentTerms` / `setCompanyDefaultPaymentTerms` untested** — only the pure reader is covered, so the read-modify-write that actually persists the shop default has no test. |
 | **No test for `packingSlipPdf.ts`** — the printed freight row is unverified in CI. |
 
+Filled since: the contact-archive rules and the billing-default clear-then-set are covered by `__tests__/utils/customerContactsAccess.test.ts`, and the case-insensitive identity by `__tests__/utils/customerAccess.test.ts > 'finds the archived row whatever case the name was typed in'` plus `api/tests/integration/test_import_api.py::test_execute_matches_an_existing_customer_regardless_of_case`.
+
 ---
 
 ## Known defects
 
-Found by auditing the shipped code. Recorded here rather than fixed silently.
+**None outstanding.** The ten found by auditing this module ([#653](https://github.com/debola31/Jigged/issues/653)) are fixed. Two are worth remembering as a class, because the shape recurs:
 
-| # | Defect | Effect |
-|---|---|---|
-| 1 | The revive lookup is case-**sensitive** (`.eq('name', …)`) while the create pre-check is case-**insensitive** (`.ilike`) and the unique constraint is case-sensitive | Archive "Acme Corp", create "acme corp" → the pre-check passes, no `23505` fires, and a **second** customer row is inserted instead of reviving |
-| 2 | The importer decides `is_new` on a **lowercased** name but upserts on the case-sensitive constraint | "acme corp" against an existing "Acme Corp" is counted as an update, gets no contact/address — and still inserts a second row |
-| 3 | `defaultColDef` sets `sortable: true` and Contact/Email/Phone are not opted out | Clicking those headers sends non-existent columns (`primary_contact_name`, …) to PostgREST's `.order()` |
-| 4 | A failed quotes/jobs count is `console.error`'d and reported as `0` | The Related card renders "Quotes 0 / Jobs 0" — a definitive negative for a question never answered, against the [CLAUDE.md](../../CLAUDE.md) rule that "couldn't check" is never "denied" |
-| 5 | `hasTermDrift` returns true when the quote's field is empty and the customer has a value; `quotes.fob_point` is new, so every pre-existing quote has it NULL | The day a shop sets `default_fob_point`, every one of that customer's older quotes grows a "FOB differs" chip |
-| 6 | An archived customer's detail page renders normally — no banner, Edit and Delete still offered — and quote/job pages link straight to it | An archived customer is reachable by an ordinary click, not just a hand-typed URL |
-| 7 | `ShipmentForm` resolves freight **only in job mode**; the customer-mode query doesn't select `carrier_accounts` | A shipment created from the customer surface always saves NULL freight |
-| 8 | `bulkImportCustomers` has no callers, discards standing terms, and **blocks** on an existing name instead of reviving | Dead code with semantics opposite to the live importer |
-| 9 | Three stale comments | `customerAccess.ts`'s docblock still says rows hold "just identity"; `jobs.payment_terms` claims it is "editable on the job" (no UI writes it — only quote conversion does); the freight migration's "THE TRAP" comment says four/two columns where the triggers say five/three |
-| 10 | `getCustomers` (paginated, `{data,total}`) has no callers, and the `filter` argument on both list functions is dead (`_filter`) | `CustomerFilter`'s `active`/`inactive` values have no effect |
+**Name is the identity, and three layers disagreed about what that means.** The constraint was case-sensitive, the create pre-check was `.ilike`, and the revive lookup was `.eq` — so archiving "Acme Corp" and creating "acme corp" found nothing to revive and inserted a **second row for the same company**. The CSV importer reached the same end from the other side. Both lookups are now case-insensitive, and `customers_company_name_ci_unique` on `(company_id, lower(btrim(name)))` makes the DB the authority. The plain constraint survives beside it only because the importer upserts with `on_conflict="company_id,name"` and PostgREST cannot name an expression index.
+
+**A chip that fires on everything at once is a chip people learn to ignore.** `hasTermDrift` used to report drift when the quote stated nothing and the customer had a value. Because `quotes.fob_point` is newer than the quotes themselves, the first time a shop filled in one customer's FOB point every open quote for that customer chipped. A quote that states nothing never promised terms, so there is nothing to disagree with — drift now needs a value on both sides.
 
 ---
 
 ## Explicitly not built
+
+**Phases 4 and 5 of the CRM plan were dropped on 2026-08-02**, before being built, on the founder's call. Recorded here so they are a decision rather than a backlog item that quietly returns:
+
+| Dropped | Was | Why not |
+|---|---|---|
+| **Customer notes + activity feed** (`quote_note` / `shipping_note`, a `customer_comments` table, attachments, a merged timeline) | Phase 4 | The half that depends on someone choosing to type has **negative** evidence: E2's customer comments went entirely unused at the pilot shop. The attachments and merged-timeline halves have none at all. The one piece with a real question behind it — an auto-log answering *"who put them on credit hold, and when"* — is worth **asking** about before building |
+| **CustomerWorkspace** (tabbed shell replacing the card stack) | Phase 5 | Chrome. The page did pass the plan's own trigger (*"if four cards still feel comfortable, don't build the shell"* — it is at six), but a long page is a code-quality observation, not a reported problem. Nobody has said the page is hard to use |
+
+Both were dropped in favour of fixing [#653](https://github.com/debola31/Jigged/issues/653), whose P1 was silently duplicating the entity every quote, job and invoice hangs off. If either comes back, it should come back with a shop asking for it.
+
 
 **Numeric credit limits** — QuickBooks Online has no `CreditLimit` field (Intuit marks it Desktop-only, and its official workaround is typing the number into a Notes field). A limit implies a balance to compare against, which implies the AR subledger this product refuses. The moment `credit_status` grows a threshold, it has become this.
 

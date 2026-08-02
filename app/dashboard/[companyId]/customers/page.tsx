@@ -92,7 +92,7 @@ export default function CustomersPage() {
     loading,
     reload: fetchCustomers,
   } = useLoad(
-    () => getAllCustomers(companyId, 'all', searchDebounced, sortModel.field, sortModel.sort),
+    () => getAllCustomers(companyId, searchDebounced, sortModel.field, sortModel.sort),
     [companyId, searchDebounced, sortModel],
     {
       onError: (error) => {
@@ -210,10 +210,17 @@ export default function CustomersPage() {
       minWidth: 200,
       pinned: 'left' as const,
     },
+    // Contact / Email / Phone are read off the embedded primary contact — they
+    // are NOT columns on `customers`. Sorting is server-side (the colId goes
+    // straight into .order()), so leaving these sortable sent PostgREST a
+    // column name that does not exist and the request failed. Derived columns
+    // stay unsortable until there is something real to sort on, same as
+    // Location below.
     {
       colId: 'primary_contact_name',
       headerName: 'Contact',
       width: 250,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.name ?? '—',
     },
     {
@@ -221,12 +228,14 @@ export default function CustomersPage() {
       headerName: 'Email',
       flex: 2,
       minWidth: 200,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.email ?? '—',
     },
     {
       colId: 'primary_contact_phone',
       headerName: 'Phone',
       width: 180,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.phone ?? '—',
     },
     {

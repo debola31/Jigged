@@ -1917,8 +1917,6 @@ export async function getMyNotesPage(
     .from('notes')
     .select(
       'id, body, created_at, edited_at, viewer_count, usage_count, maintenance_kind, ' +
-        'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
-        'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
         'part:parts(part_name), ' +
         // The machine, for maintenance entries. Those are `notes` rows too
         // (subject_kind='work_center'), so they land in this list like anything else the
@@ -1969,8 +1967,6 @@ export async function getMyNotesPage(
     viewer_count: number;
     usage_count: number;
     maintenance_kind: string | null;
-    operation: StepRel;
-    captured_operation: StepRel;
     part: { part_name: string | null } | { part_name: string | null }[] | null;
     work_center: { name: string | null } | { name: string | null }[] | null;
     reactions: ReactionRel[] | null;
@@ -1993,9 +1989,6 @@ export async function getMyNotesPage(
       edited_at: r.edited_at,
       job_id: job?.id ?? null,
       job_number: job?.job_number ?? null,
-      // A durable part-subject note has no step of its own; the step it was
-      // captured at is the readable label.
-      operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),
       part_name: part?.part_name ?? null,
       machine_name: workCenter?.name ?? null,
       maintenance_kind: r.maintenance_kind,

@@ -56,7 +56,6 @@ function note(over: Partial<MyNote> = {}): MyNote {
     body: 'Clamp on the boss, not the flange — it walks.',
     created_at: '2026-07-20T14:00:00Z',
     edited_at: null,
-    operation_label: 'Op 20 · Mill',
     part_name: 'BRKT-1042',
     machine_name: null,
     maintenance_kind: null,
@@ -84,7 +83,6 @@ function machineNote(over: Partial<MyNote> = {}): MyNote {
     id: 'm1',
     body: 'Blade guard rattling at speed.',
     part_name: null,
-    operation_label: null,
     job_id: null,
     job_number: null,
     machine_name: 'Bandsaw',
@@ -130,10 +128,12 @@ describe('My Work', () => {
     render(<MyWorkPage />);
 
     expect(await screen.findByText(/Clamp on the boss/)).toBeInTheDocument();
-    expect(screen.getByText('BRKT-1042')).toBeInTheDocument();
-    expect(screen.getByText('Op 20 · Mill')).toBeInTheDocument();
-    // Where it came from, beside the date — visible without expanding anything.
+    // ONE quiet reference beside the date, and nothing leading the row. The subject
+    // used to lead in bold with the step as a chip, which made a list of what the
+    // operator wrote read as a list of stations.
     expect(screen.getByText(/J-0042 · Jul 20, 2026/)).toBeInTheDocument();
+    expect(screen.queryByText('BRKT-1042')).not.toBeInTheDocument();
+    expect(screen.queryByText('Op 20 · Mill')).not.toBeInTheDocument();
   });
 
   it('leads back to the job the note was written on', async () => {
@@ -460,35 +460,41 @@ describe('My Work — the "Me" tab', () => {
    * announced a part or a job. It was indistinguishable from a note whose context had been
    * lost.
    */
-  it('names the machine on a maintenance entry, which has no other subject', async () => {
+  it('names the machine where a job note names its job', async () => {
+    // A machine entry has no job, so the work center takes the same quiet slot beside
+    // the date rather than a bold heading of its own.
     stage({ notes: [machineNote()] });
     render(<MyWorkPage />);
 
     const row = (await screen.findAllByRole('listitem'))[0];
-    expect(within(row).getByText('Bandsaw')).toBeInTheDocument();
-    expect(within(row).getByText('noticed')).toBeInTheDocument();
+    expect(within(row).getByText(/Bandsaw · noticed · /)).toBeInTheDocument();
     // Nothing invented: a machine entry has no job to point at.
     expect(within(row).queryByText(/J-\d+/)).not.toBeInTheDocument();
   });
 
-  it('leaves an unclassified maintenance entry without a kind chip', async () => {
+  it('leaves an unclassified maintenance entry with just the machine', async () => {
     // Classifying is optional and null is a common, legal state — so absence must render
     // as absence, not as a placeholder.
     stage({ notes: [machineNote({ maintenance_kind: null })] });
     render(<MyWorkPage />);
 
     const row = (await screen.findAllByRole('listitem'))[0];
-    expect(within(row).getByText('Bandsaw')).toBeInTheDocument();
+    expect(within(row).getByText(/^Bandsaw · /)).toBeInTheDocument();
     expect(within(row).queryByText(/noticed|cleaned|repaired|adjusted|replaced/)).not.toBeInTheDocument();
   });
 
-  it('keeps the part name for a part note, unchanged', async () => {
-    stage({ notes: [note()] });
+  /**
+   * A durable part note outlives the job it was captured on — provenance is
+   * ON DELETE SET NULL, so the knowledge survives losing its origin. Once that job is
+   * gone the part is the only reference left, so it becomes the fallback rather than
+   * leaving the row with no context at all.
+   */
+  it('falls back to the part once the capturing job is gone', async () => {
+    stage({ notes: [note({ job_id: null, job_number: null })] });
     render(<MyWorkPage />);
 
     const row = (await screen.findAllByRole('listitem'))[0];
-    expect(within(row).getByText('BRKT-1042')).toBeInTheDocument();
-    expect(within(row).getByText('Op 20 · Mill')).toBeInTheDocument();
+    expect(within(row).getByText(/^BRKT-1042 · /)).toBeInTheDocument();
   });
 
   /**

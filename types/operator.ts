@@ -370,8 +370,6 @@ export interface MyNote {
    * Server-stamped, never client-written. See JobNote.edited_at.
    */
   edited_at: string | null;
-  /** "Op 20 · Mill" when the note carries a step, else null. */
-  operation_label: string | null;
   /** Part the note is durably attached to, when it has one. */
   part_name: string | null;
   /**

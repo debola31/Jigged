@@ -15,7 +15,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
-import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import {
   getMyContributionTotals,
@@ -179,36 +178,6 @@ function NoteRow({
 
         <Box sx={{ flex: 1, minWidth: 0, py: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-            {/* THE SUBJECT, in one stable slot. A `notes` row has exactly one subject —
-                a part, a job, or a machine — and this list mixes all three, because all
-                three are things the operator wrote.
-
-                Machine entries used to render nothing here. They carry no part and no
-                operation, and unlike a job note they carry no job number either (the
-                CHECK constraint forbids it), so a maintenance entry appeared as a bare
-                sentence with nothing anywhere on the row saying it was about a machine.
-                Job notes are deliberately left bare: their subject is the job, and the
-                job reference already sits quietly beside the date — see the note there
-                for why it stays quiet rather than becoming a heading. */}
-            {(note.part_name || note.machine_name) && (
-              <Typography variant="subtitle2" fontWeight={700} noWrap>
-                {note.part_name ?? note.machine_name}
-              </Typography>
-            )}
-            {note.operation_label && (
-              <Chip size="small" label={note.operation_label} variant="outlined" />
-            )}
-            {/* What they did to the machine, when they said. Optional by design, so a
-                classified entry gets a chip and an unclassified one simply doesn't. */}
-            {note.maintenance_kind && (
-              <Chip
-                size="small"
-                variant="outlined"
-                icon={<BuildOutlinedIcon />}
-                label={note.maintenance_kind}
-                sx={{ textTransform: 'capitalize' }}
-              />
-            )}
             {note.photo_count > 0 && (
               <Chip
                 size="small"
@@ -218,10 +187,27 @@ function NoteRow({
               />
             )}
             <Box sx={{ flex: 1 }} />
-            {/* Where it came from, sat quietly beside the date — an indication,
-                not an action. Opening the job is in the overflow menu. */}
-            <Typography variant="caption" color="text.secondary">
-              {note.job_number ? `${note.job_number} · ` : ''}
+            {/* WHERE IT CAME FROM — one quiet reference, always in the same place.
+                The job number for a job or part note, the machine for a maintenance
+                entry; they are mutually exclusive, because a `notes` row has exactly
+                one subject under the CHECK constraint.
+
+                It sits here rather than leading the row because the NOTE is the point
+                of this screen. An earlier pass put the subject first in bold with the
+                step as a chip beside it, and the effect was that a list of what the
+                operator had written read as a list of stations — the reference
+                out-shouted the sentence it was supposed to annotate. Same reason the
+                maintenance kind is plain text here rather than an icon chip: "Noticed"
+                is worth knowing and not worth a wrench.
+
+                `part_name` is the last fallback, not a normal case: a durable part note
+                outlives the job it was captured on (provenance is ON DELETE SET NULL),
+                so once that job is deleted the part is the only reference left. */}
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {[note.machine_name ?? note.job_number ?? note.part_name, note.maintenance_kind]
+                .filter(Boolean)
+                .map((s) => `${s} · `)
+                .join('')}
               {formatDate(note.created_at)}
               <NoteEditedMark editedAt={note.edited_at} />
             </Typography>

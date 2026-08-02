@@ -786,7 +786,84 @@ export default async function globalSetup(): Promise<void> {
   // The Maintenance tab is flag-gated. No maintenance ENTRIES are seeded: the
   // spec writes its own through the UI, which is the only way to exercise the
   // capture path the module is actually a bet on.
-  await ensureFeatureFlags(supabase, companyId, { machine_maintenance: true });
+  await ensureFeatureFlags(supabase, companyId, {
+    machine_maintenance: true,
+    // The count sheet and the Storage board are both behind this. Without it
+    // `inventory-count.spec.ts` lands on a redirect.
+    inventory_locations: true,
+  });
+
+  // A part in TWO places — the shape the count sheet exists to handle, and the one
+  // no other fixture produces.
+  await ensureSplitStock(supabase, companyId);
 
   console.log(`[e2e/global-setup] Done. user=${TEST_EMAIL} company=${companyId}`);
+}
+
+/** The two shelves `inventory-count.spec.ts` splits a part across. */
+export const E2E_SHELF_A = 'E2E Shelf A';
+export const E2E_SHELF_B = 'E2E Shelf B';
+/** The part it splits. Distinct from every other seeded part so the spec owns it. */
+export const E2E_SPLIT_PART = 'E2E-COUNT-SPLIT';
+
+async function ensureLocation(
+  supabase: SupabaseClient,
+  companyId: string,
+  name: string,
+): Promise<string> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('inventory_locations')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('name', name)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`location lookup failed: ${lookupErr.message}`);
+  if (existing) return existing.id;
+
+  const { data, error } = await supabase
+    .from('inventory_locations')
+    .insert({ company_id: companyId, name, kind: 'shelf' })
+    .select('id')
+    .single();
+  if (error) throw new Error(`location insert failed: ${error.message}`);
+  return data.id;
+}
+
+/**
+ * One part, stock at two shelves — the fixture for `inventory-count.spec.ts`.
+ *
+ * **Every write here is an absolute UPSERT, not a find-or-skip.** This seeder is find-or-insert
+ * throughout, and CI always starts clean while a dev machine does not: a helper that early-returns
+ * on "the part exists" leaves whatever the first run created, so extending it later silently does
+ * nothing until someone runs `supabase db reset`. Setting the balance to an exact quantity every
+ * time means a partial or drifted fixture repairs itself on the next run.
+ *
+ * `parts.quantity` is never written. It is a trigger-maintained roll-up of `part_location_stock`
+ * since 20260802015837, and a direct write raises.
+ */
+async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Promise<void> {
+  const partId = await ensurePart(supabase, companyId, {
+    part_name: E2E_SPLIT_PART,
+    description: 'Split across two shelves, for the count sheet',
+    source: 'bought',
+    is_stocked: true,
+    primary_unit: 'each',
+    // The auto-track trigger seeds an Unassigned row from this on INSERT; the upserts below then
+    // put the real stock on the shelves. Zero keeps the Unassigned row off the sheet (the row
+    // rule emits places holding > 0), so the spec sees exactly two rows.
+    quantity: 0,
+    cost_per_unit: null,
+  });
+
+  const shelfA = await ensureLocation(supabase, companyId, E2E_SHELF_A);
+  const shelfB = await ensureLocation(supabase, companyId, E2E_SHELF_B);
+
+  const { error } = await supabase.from('part_location_stock').upsert(
+    [
+      { company_id: companyId, part_id: partId, location_id: shelfA, quantity: 40 },
+      { company_id: companyId, part_id: partId, location_id: shelfB, quantity: 12 },
+    ],
+    { onConflict: 'part_id,location_id' },
+  );
+  if (error) throw new Error(`split stock upsert failed: ${error.message}`);
 }

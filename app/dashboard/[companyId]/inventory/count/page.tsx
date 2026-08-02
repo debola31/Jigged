@@ -232,6 +232,8 @@ export default function InventoryCountPage() {
    * the honest reset.
    */
   const [addNonce, setAddNonce] = useState(0);
+  /** Same reset, for the sheet's "+ Count it somewhere else" pickers. */
+  const [placeNonce, setPlaceNonce] = useState(0);
   const [addingPart, setAddingPart] = useState(false);
 
   const [locationName, setLocationName] = useState('');
@@ -405,9 +407,17 @@ export default function InventoryCountPage() {
           return;
         }
 
-        const found = await loadCountCandidates(companyId);
+        const [found, locations] = await Promise.all([
+          loadCountCandidates(companyId),
+          // For "+ Count it somewhere else" on the sheet. Found in the browser, not by a test:
+          // `allLocations` was loaded only in the place-scoped and everywhere branches, so on the
+          // company-wide sheet the picker rendered with an EMPTY option list — a control that
+          // opens onto nothing, which reads as broken rather than as unavailable.
+          getLocations(companyId),
+        ]);
         if (cancelled) return;
         setCandidates(found);
+        setAllLocations(locations);
         rememberOpenedWith(found);
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your stocked parts.');
@@ -790,6 +800,11 @@ export default function InventoryCountPage() {
    *    shelf against a system that says twelve can still commit (a delta of 0 is dropped).
    */
   const addPartAtPlace = async (part: { id: string; name: string }, place: LocationPickerOption) => {
+    // Before the early return, not after: the picker must clear whether the place was added or
+    // refused. Leaving the refused name in the box left the control filtered to that one option,
+    // so the NEXT place could not be picked at all.
+    setPlaceNonce((n) => n + 1);
+
     const existing = [...selected.values()].find(
       (c) => c.partId === part.id && c.target.locationId === place.id,
     );
@@ -1411,6 +1426,7 @@ export default function InventoryCountPage() {
                           <TableRow>
                             <TableCell colSpan={sheetUnit ? 4 : 5} sx={{ pl: 5, py: 1 }}>
                               <LocationPicker
+                                key={placeNonce}
                                 label={`Count ${g.partName} somewhere else`}
                                 options={destinationOptions}
                                 value={null}

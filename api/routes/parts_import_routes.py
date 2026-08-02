@@ -1065,8 +1065,10 @@ async def execute_import(
                 part_ids = [id_by_part_name[name] for name, _, _, _ in staged]
 
                 # Any stock at a place that isn't the Unassigned bucket makes the CSV number
-                # ambiguous. `.gt("quantity", 0)` matters: balance rows are never deleted, so a
-                # part that once passed through a shelf still has a zero row there.
+                # ambiguous. The `.gt("quantity", 0)` is KEPT after 20260802144310 deleted the
+                # zero-row residue: here it is a business predicate ("is this actually placed
+                # somewhere?"), not residue-hiding, so it stays correct under either data state
+                # and states its own intent at the point of use.
                 placed: set[str] = set()
                 for batch_start in range(0, len(part_ids), BATCH_SIZE):
                     res = (
@@ -1081,6 +1083,7 @@ async def execute_import(
                             placed.add(r["part_id"])
 
                 balance_rows: list[dict] = []
+                zeroed_part_ids: list[str] = []
                 ledger_rows: list[dict] = []
                 for name, prior_qty, new_qty, unit in staged:
                     part_id = id_by_part_name[name]
@@ -1091,14 +1094,19 @@ async def execute_import(
                     # file twice should be a no-op, not a wall of zero-delta "adjustments".
                     if prior_qty == new_qty:
                         continue
-                    balance_rows.append(
-                        {
-                            "company_id": request.company_id,
-                            "part_id": part_id,
-                            "location_id": unassigned_id,
-                            "quantity": new_qty,
-                        }
-                    )
+                    # A zero opening balance is a DELETE, not an upsert: `part_location_stock`
+                    # CHECKs `quantity > 0` since 20260802144310, so writing a 0 raises.
+                    if new_qty == 0:
+                        zeroed_part_ids.append(part_id)
+                    else:
+                        balance_rows.append(
+                            {
+                                "company_id": request.company_id,
+                                "part_id": part_id,
+                                "location_id": unassigned_id,
+                                "quantity": new_qty,
+                            }
+                        )
                     # Shape matches the location RPCs so there is ONE adjustment convention per
                     # table: quantity is abs(delta) in the primary unit (the
                     # inventory_transactions_quantity_positive CHECK makes a signed delta
@@ -1128,6 +1136,16 @@ async def execute_import(
                             balance_rows[batch_start : batch_start + BATCH_SIZE],
                             on_conflict="part_id,location_id",
                         )
+                        .execute()
+                    )
+
+                # "The CSV says this part is at zero" removes its row rather than storing a 0.
+                for batch_start in range(0, len(zeroed_part_ids), BATCH_SIZE):
+                    (
+                        supabase.table("part_location_stock")
+                        .delete()
+                        .eq("location_id", unassigned_id)
+                        .in_("part_id", zeroed_part_ids[batch_start : batch_start + BATCH_SIZE])
                         .execute()
                     )
             except Exception as e:

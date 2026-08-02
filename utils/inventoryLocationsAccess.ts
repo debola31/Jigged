@@ -584,11 +584,16 @@ export async function getBalancesForParts(
   /**
    * Page each chunk. Issue #619.
    *
-   * A chunk of 500 parts is not 500 rows: every part gets an `Unassigned` balance from
-   * `trg_auto_track_stocked_part` plus one row per place it has ever been in, so three places per
-   * part is 1,500 rows against a `max_rows` of 1,000. PostgREST does not error on that — it
-   * **returns the first 1,000 and stops**, so the missing balances read as "this part is nowhere"
-   * and a material check quietly reports stock the shop has. Exactly 1,000 is safe; 1,001 is not.
+   * A chunk of 500 parts is not 500 rows: a part has one row per place it actually holds stock in,
+   * so three places per part is 1,500 rows against a `max_rows` of 1,000. PostgREST does not error
+   * on that — it **returns the first 1,000 and stops**, so the missing balances read as "this part
+   * is nowhere" and a material check quietly reports stock the shop has. Exactly 1,000 is safe;
+   * 1,001 is not.
+   *
+   * The arithmetic got BETTER in 20260802144310, not worse: `trg_auto_track_stocked_part` no
+   * longer seeds an `Unassigned` row for every stocked part, and emptied bins lose their rows —
+   * so the row count is now places-actually-held rather than places-ever-visited. The paging
+   * stays because the bound is still real, just further away.
    *
    * `.order()` on both columns is what makes paging deterministic — without a total order,
    * successive ranges can repeat or skip rows.
@@ -600,11 +605,10 @@ export async function getBalancesForParts(
         .from('part_location_stock')
         .select('part_id, location_id, quantity')
         .in('part_id', ids)
-        // Zero rows are the residue of `transfer_stock` and `bulk_put_away`, which decrement or
-        // set 0 rather than delete. They are not places the part is, and they burn page budget.
-        // NOTE: this filters around bad data at rest rather than fixing it — the residue is
-        // tracked separately as a backfill, and this filter must not be read as that fix.
-        .gt('quantity', 0)
+        // No `quantity > 0` filter any more, and that is not an omission. It used to hide the
+        // residue `transfer_stock` and `bulk_put_away` left behind; 20260802144310 deleted that
+        // residue and added `CHECK (quantity > 0)`, so a row existing and the part being there
+        // are now the same fact. Filtering would be restating the constraint.
         .order('part_id')
         .order('location_id')
         .range(offset, offset + PAGE - 1);
@@ -683,7 +687,7 @@ export async function getLocationContents(
     )
     .eq('location_id', locationId)
     .is('part.deleted_at', null)
-    .gt('quantity', 0)
+    // No `quantity > 0`: since 20260802144310 a row at this bin IS stock at this bin.
     .order('quantity', { ascending: false })
     .limit(limit);
   if (error) {
@@ -755,8 +759,7 @@ export async function getLocationContentsPage(
       { count: 'exact' },
     )
     .eq('location_id', locationId)
-    .is('part.deleted_at', null)
-    .gt('quantity', 0);
+    .is('part.deleted_at', null);
 
   const term = search.trim();
   // Filtering and ordering both reach through the embed, so the whole thing stays one request —

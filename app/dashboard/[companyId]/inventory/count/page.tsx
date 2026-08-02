@@ -672,8 +672,8 @@ export default function InventoryCountPage() {
 
       const updated = sheet.map((c) => {
         if (entries[countRowKey(c)] === undefined) return c;
-        // `getBalancesForParts` filters `quantity > 0`, so a row whose bin has been emptied since
-        // load comes back absent — which means zero, not "unknown". Reading it as unknown would
+        // A bin emptied since the sheet loaded has no row at all (20260802144310 deletes rather
+        // than zeroes), so an absent row means zero — not "unknown". Reading it as unknown would
         // keep the stale figure and silently mis-report the variance.
         return { ...c, systemQuantity: freshAt(c.partId, c.target.locationId) ?? 0 };
       });

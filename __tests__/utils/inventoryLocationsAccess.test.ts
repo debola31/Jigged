@@ -672,12 +672,14 @@ describe('getLocationContentsPage', () => {
     expect(state.calls[0].order).toEqual(['part_name', { referencedTable: 'part', ascending: true }]);
   });
 
-  it('excludes archived parts and empty rows, like the board does', async () => {
+  it('excludes archived parts, like the board does', async () => {
     queueFrom({ data: [], error: null, count: 0 });
     await getLocationContentsPage('un');
     expect(String(state.calls[0].select?.[0])).toContain('!inner');
     expect(state.calls[0].is).toEqual(['part.deleted_at', null]);
-    expect(state.calls[0].gt).toEqual(['quantity', 0]);
+    // No `quantity > 0`: since 20260802144310 a row at this bin IS stock at this bin, so the
+    // filter and the CHECK would be saying the same thing in two places.
+    expect(state.calls[0].gt).toBeUndefined();
   });
 
   it('defaults to one page of LOCATION_PAGE_SIZE from the start', async () => {
@@ -1041,10 +1043,19 @@ describe('getBalancesForParts — paging past max_rows', () => {
    * decrements and `bulk_put_away` sets 0, neither deletes. Those are not places the part is,
    * and they burn page budget.
    */
-  it('asks the server to drop zero rows rather than filtering them here', async () => {
+  /**
+   * The inverse of what this used to assert.
+   *
+   * It pinned `gt('quantity', 0)` — a filter that hid the residue `transfer_stock` and
+   * `bulk_put_away` left behind. 20260802144310 deleted that residue and added
+   * `CHECK (quantity > 0)`, so a row existing and the part being there are the same fact and the
+   * filter would only restate the constraint. Asserting its ABSENCE is what stops someone
+   * reintroducing it and quietly re-establishing the two-sources-of-truth split.
+   */
+  it('does not filter zero rows, because the table can no longer hold one', async () => {
     queueFrom({ data: [loc({ id: 'l1' })], error: null }, { data: [], error: null });
     await getBalancesForParts('co1', ['p0']);
-    expect(state.calls[1].gt).toEqual(['quantity', 0]);
+    expect(state.calls[1].gt).toBeUndefined();
     // Without a total order, successive ranges can repeat or skip rows.
     expect(state.calls[1].order).toBeDefined();
     expect(state.calls[1].range).toEqual([0, 999]);

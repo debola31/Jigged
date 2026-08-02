@@ -848,9 +848,10 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     source: 'bought',
     is_stocked: true,
     primary_unit: 'each',
-    // The auto-track trigger seeds an Unassigned row from this on INSERT; the upserts below then
-    // put the real stock on the shelves. Zero keeps the Unassigned row off the sheet (the row
-    // rule emits places holding > 0), so the spec sees exactly two rows.
+    // Zero, so no Unassigned row is created at all: since 20260802144310 `auto_track_stocked_part`
+    // only seeds a row for a non-zero quantity, and the table CHECKs `quantity > 0`. The spec then
+    // sees exactly the two shelf rows the upserts below create — naturally, rather than because a
+    // filter was hiding a third.
     quantity: 0,
     cost_per_unit: null,
   });

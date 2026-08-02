@@ -38,17 +38,16 @@ import type {
  *    nowhere — the opening count, since `trg_auto_track_stocked_part` seeds every stocked part
  *    there at 0.
  *
- * Zero-quantity balance rows are **never** emitted. `transfer_stock` decrements and
- * `bulk_put_away` sets 0 rather than deleting, so every bin a part has ever passed through keeps
- * a row forever. Rendering those would put a live absolute write target on a shelf the part has
- * left: someone holding 12 types 12 into the ghost, booking 12 to the wrong place while the real
- * shelf keeps its stale figure — a count that makes the data worse than not counting.
+ * The fallback row is the whole subtlety. Emitting rows only for places that hold stock would
+ * make a part holding stock NOWHERE vanish from the sheet entirely — which deletes the opening
+ * count and, ironically, the case the founder asked for most directly: saying where a part is
+ * matters most when the system thinks it is nowhere.
  *
- * Both simpler rules were considered and both write wrong numbers. Emitting a row per balance row
- * gives you the ghosts above (≥9,428 of them at Contour). Emitting rows only where
- * `quantity > 0` makes a part that holds stock nowhere vanish from the sheet entirely, which
- * deletes the opening count and, ironically, the case the founder asked for most directly —
- * saying where a part is matters most when the system thinks it is nowhere.
+ * There is no longer a second trap on the other side. Until 20260802144310 every bin a part had
+ * passed through kept a zero row forever, and rendering one put a live absolute write target on a
+ * shelf the part had left — someone holding 12 typed 12 into the ghost, booking it to the wrong
+ * place while the real shelf kept its stale figure. That residue is deleted and the table now
+ * CHECKs `quantity > 0`, so the rows this reads are exactly the places the part is.
  *
  * ## Cost
  *
@@ -152,11 +151,15 @@ export async function loadLocationCountCandidates(
  *
  * ## Why this cannot reuse the paged read
  *
- * `loadLocationCountCandidates` is built on `getLocationContentsPage`, which filters
- * `.gt('quantity', 0)`. That is right for browsing a bin and wrong here: the whole reason to
- * count one part at one place is usually that you think the number is wrong, and the most
- * valuable case — *the system says zero and I am holding twelve* — is precisely the row that
- * filter removes. This reads the part directly and asks for its balance separately.
+ * `loadLocationCountCandidates` is built on `getLocationContentsPage`, which lists what a bin
+ * HOLDS. The whole reason to count one part at one place is usually that you think the number is
+ * wrong, and the most valuable case — *the system says zero and I am holding twelve* — is a part
+ * with no row at that bin at all, so no listing of the bin's contents can reach it. This reads the
+ * part directly and asks for its balance separately.
+ *
+ * (Until 20260802144310 that row existed and was hidden by a `quantity > 0` filter. Now it does
+ * not exist. The consequence for this function is the same either way, which is why it is
+ * unchanged: it must not assume, it must read.)
  *
  * ## The balance is READ, never assumed
  *
@@ -257,6 +260,8 @@ export async function loadPartEverywhereCandidates(
   const unit = data.primary_unit ?? 'ea';
   const fallback = resolveFallbackPlace(locations);
 
+  // `getBalancesForPart` is the unfiltered read, but since 20260802144310 there is nothing to
+  // filter: a row exists only where the part actually is.
   const held = balances.filter((b) => Number(b.quantity ?? 0) > 0);
 
   // The place used to be crammed into `description` because there was nowhere else to put it.

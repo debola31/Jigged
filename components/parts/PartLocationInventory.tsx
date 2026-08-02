@@ -136,13 +136,13 @@ export default function PartLocationInventory({
   };
 
   /**
-   * Move sources: only the locations where this part actually has stock.
+   * Move sources: the locations where this part has stock — which, since 20260802144310, is simply
+   * the rows it has.
    *
-   * The `> 0` is the part that was missing — this comment claimed the filter for months while the
-   * code mapped every balance row. Balances are never deleted (`transfer_stock` decrements,
-   * `bulk_put_away` sets 0), so every place the part has ever passed through survives at zero and
-   * was offered as a source. Picking one gets you as far as the RPC before it fails with
-   * "Insufficient stock at source location (have 0, need N)".
+   * The `> 0` is kept as a belt-and-braces restatement of the table's CHECK, not as a filter that
+   * does work. It earned its place historically: balances used to survive at zero for every place
+   * a part had passed through, and offering one as a move source got you as far as the RPC before
+   * it failed with "Insufficient stock at source location (have 0, need N)".
    */
   const sourceBalances = useMemo<LocationBalanceOption[]>(
     () =>

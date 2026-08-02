@@ -268,11 +268,14 @@ on conflict (id) do nothing;
 -- `low` part, so the "Low" chip and the `/parts?status=low` filter — which is the shop-wide
 -- shortage view — were invisible in every dev and preview environment.
 --
--- It wasn't simply missing data. Job material consumption below runs
+-- It wasn't simply missing data. Job material consumption below ran
 -- `set quantity = greatest(0, quantity - used)`, which drove ASM-GEARBOX, ASM-PUMPCORE,
 -- SUB-HOUSING and SUB-COVER from healthy quantities **straight to 0** — skipping the low band
 -- entirely — while everything else stayed at twice its reorder point or more. Measured on a
 -- reset stack: 10 in-stock, 8 out, **0 low**, with the nearest part at 20 against a reorder of 10.
+-- (Since 20260802144310 those four lose their balance ROW rather than holding a zero; the derived
+-- status is unchanged — no row and a zero row both read as `out` — but the count sheet reaches
+-- them through `resolveFallbackPlace` now instead of through a row.)
 --
 -- So the fix raises `reorder_point` on two parts rather than lowering `quantity`. reorder_point is
 -- read only by the status derivation and the low-stock alert lists — never by cost or inventory
@@ -616,13 +619,24 @@ begin
       -- maintained solely by `recompute_part_quantity_from_locations`, and a direct write
       -- raises — which is the point: the seed now has to move stock the way the app does.
       -- Everything is still in Unassigned at this stage; the put-away block runs later.
+      -- Split, because `part_location_stock` now CHECKs `quantity > 0` (20260802144310): a bin
+      -- emptied by consumption loses its row rather than parking a zero there. `greatest(0, ...)`
+      -- used to leave exactly that residue, and is where four of the seed's zero rows came from.
+      delete from public.part_location_stock s
+       using public.inventory_locations l
+       where s.part_id = e.child_part_id
+         and s.location_id = l.id
+         and l.company_id = '22222222-2222-2222-2222-222222222222'
+         and l.kind = 'system'
+         and s.quantity <= used;
       update public.part_location_stock s
-         set quantity = greatest(0, s.quantity - used)
+         set quantity = s.quantity - used
         from public.inventory_locations l
        where s.part_id = e.child_part_id
          and s.location_id = l.id
          and l.company_id = '22222222-2222-2222-2222-222222222222'
-         and l.kind = 'system';
+         and l.kind = 'system'
+         and s.quantity > used;
     end loop;
   end loop;
 end $$;

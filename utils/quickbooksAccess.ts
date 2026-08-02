@@ -349,3 +349,62 @@ export async function getQuickBooksInvoiceLinksForJob(
     };
   });
 }
+
+/**
+ * State of the QuickBooks custom field this shop uses for the customer PO
+ * number. `configured: false` is the ordinary starting state, not a failure.
+ */
+export interface QuickBooksPoField {
+  configured: boolean;
+  field_id: string | null;
+  field_name: string | null;
+  /** Every enabled sales custom field, so the UI can show which slots are taken. */
+  candidates: Array<{ id: string; name: string }>;
+  slots_used: number;
+}
+
+/**
+ * Re-read QuickBooks settings to find the shop's PO custom field.
+ *
+ * Deliberately a user action, never a mount or push side effect: it is a round
+ * trip to Intuit for a value that only changes when a human edits their
+ * QuickBooks settings.
+ *
+ * Jigged cannot create the field — verified live that the REST Preferences
+ * write silently no-ops and that the GraphQL Custom Fields API returns 403
+ * without a paid partner tier. This is the "I've set it up, look again" button.
+ */
+export function refreshQuickBooksPoField(companyId: string): Promise<QuickBooksPoField> {
+  return qbRequest<QuickBooksPoField>(`/${companyId}/po-field/refresh`, { method: 'POST' });
+}
+
+/** A payment term as QuickBooks holds it. `due_days` is null for non-net terms. */
+export interface QuickBooksTerm {
+  id: string;
+  name: string;
+  due_days: number | null;
+}
+
+/**
+ * The connected company's QuickBooks payment terms, for the quote picker.
+ *
+ * Offering QuickBooks' own terms means the term chosen on a quote already
+ * exists on the other side, so `SalesTermRef` resolves against a real entity
+ * instead of a string we hope matches.
+ *
+ * Resolves — never rejects — when QuickBooks is absent or unreachable:
+ * `{ connected: false, terms: [] }`. The caller falls back to Jigged's presets.
+ * A shop with no QuickBooks must still be able to write a quote, and a term
+ * typed here is created in QuickBooks at push time regardless.
+ */
+export async function listQuickBooksTerms(
+  companyId: string,
+): Promise<{ connected: boolean; terms: QuickBooksTerm[] }> {
+  try {
+    return await qbRequest<{ connected: boolean; terms: QuickBooksTerm[] }>(
+      `/${companyId}/terms`,
+    );
+  } catch {
+    return { connected: false, terms: [] };
+  }
+}

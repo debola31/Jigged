@@ -41,10 +41,20 @@ import {
   getAddressesForCustomer,
   deleteCustomerAddress,
 } from '@/utils/customerAddressesAccess';
+import {
+  getCarrierAccountsForCustomer,
+  archiveCarrierAccount,
+} from '@/utils/customerCarrierAccountsAccess';
 import { roleDisplayLabel } from '@/types/customerContact';
 import type { CustomerContact } from '@/types/customerContact';
 import type { CustomerAddress } from '@/types/customer';
-import { CustomerContactModal, CustomerAddressForm } from '@/components/customers';
+import { BILL_TO_PARTY_LABELS } from '@/types/customerCarrierAccount';
+import type { CustomerCarrierAccount } from '@/types/customerCarrierAccount';
+import {
+  CustomerContactModal,
+  CustomerAddressForm,
+  CarrierAccountModal,
+} from '@/components/customers';
 
 function formatAddressLines(a: CustomerAddress): string {
   const parts = [
@@ -65,6 +75,7 @@ function formatDate(iso: string | null): string {
 // the first load is in flight.
 const EMPTY_CONTACTS: CustomerContact[] = [];
 const EMPTY_ADDRESSES: CustomerAddress[] = [];
+const EMPTY_CARRIER_ACCOUNTS: CustomerCarrierAccount[] = [];
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -90,6 +101,12 @@ export default function CustomerDetailPage() {
   );
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null);
 
+  const [carrierModalOpen, setCarrierModalOpen] = useState(false);
+  const [editingCarrierAccount, setEditingCarrierAccount] = useState<
+    CustomerCarrierAccount | undefined
+  >(undefined);
+  const [deleteCarrierAccountId, setDeleteCarrierAccountId] = useState<string | null>(null);
+
   // Load the customer, then (only if it exists) its contacts and addresses in
   // parallel. useLoad keeps every setState inside the async callback, so the
   // load effect can't trip set-state-in-effect.
@@ -101,13 +118,19 @@ export default function CustomerDetailPage() {
     async () => {
       const c = await getCustomerWithRelations(customerId);
       if (!c) {
-        return { customer: null, contacts: EMPTY_CONTACTS, addresses: EMPTY_ADDRESSES };
+        return {
+          customer: null,
+          contacts: EMPTY_CONTACTS,
+          addresses: EMPTY_ADDRESSES,
+          carrierAccounts: EMPTY_CARRIER_ACCOUNTS,
+        };
       }
-      const [contacts, addresses] = await Promise.all([
+      const [contacts, addresses, carrierAccounts] = await Promise.all([
         getContactsForCustomer(customerId),
         getAddressesForCustomer(customerId),
+        getCarrierAccountsForCustomer(customerId),
       ]);
-      return { customer: c, contacts, addresses };
+      return { customer: c, contacts, addresses, carrierAccounts };
     },
     [customerId],
     {
@@ -118,6 +141,7 @@ export default function CustomerDetailPage() {
   const customer = data?.customer ?? null;
   const contacts = data?.contacts ?? EMPTY_CONTACTS;
   const addresses = data?.addresses ?? EMPTY_ADDRESSES;
+  const carrierAccounts = data?.carrierAccounts ?? EMPTY_CARRIER_ACCOUNTS;
 
   // Contact/address mutations re-run the full loader (reload). Cheap at customer
   // scale and keeps a single read path rather than separate per-list fetches.
@@ -144,6 +168,25 @@ export default function CustomerDetailPage() {
     setEditingContact(c);
     setContactModalOpen(true);
   };
+  /**
+   * "Delete" a carrier account archives it, matching the archive standard: a
+   * shipment already billed to this account keeps resolving it for history,
+   * while the account stops being offered on new ones.
+   */
+  const handleDeleteCarrierAccount = async () => {
+    if (!deleteCarrierAccountId) return;
+    setActionLoading(true);
+    try {
+      await archiveCarrierAccount(deleteCarrierAccountId);
+      setDeleteCarrierAccountId(null);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete carrier account');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleDeleteContact = async () => {
     if (!deleteContactId) return;
     setActionLoading(true);
@@ -282,9 +325,22 @@ export default function CustomerDetailPage() {
             }}
           >
             <Box>
-              <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                {customer.name}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {customer.name}
+                </Typography>
+                {/* Credit hold sits beside the name because it changes how you
+                    treat everything else on the page. Informational only —
+                    nothing here or downstream blocks on it. */}
+                {customer.credit_status === 'hold' && (
+                  <Chip label="On credit hold" color="warning" size="small" />
+                )}
+              </Box>
+              {customer.credit_status === 'hold' && customer.credit_hold_note && (
+                <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
+                  {customer.credit_hold_note}
+                </Typography>
+              )}
               {customer.website && (
                 <MuiLink
                   href={
@@ -594,6 +650,160 @@ export default function CustomerDetailPage() {
           </Card>
         </Grid>
 
+        {/* Standing terms — read-only here, edited on the customer form.
+            These were previously enterable but invisible: you could save terms
+            and never see them again, which is the opposite of the "somewhere to
+            save it so I don't keep it in my head" the field exists for.
+            Values are prose, so body1 rather than the h6 the Related counts use. */}
+        <Grid size={{ xs: 12 }}>
+          <Card elevation={2}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                Terms
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Payment terms
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_payment_terms || '—'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Lead time
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_lead_time_text || '—'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    FOB point
+                  </Typography>
+                  <Typography variant="body1" fontWeight={500}>
+                    {customer.default_fob_point || '—'}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                Applied to new quotes for this customer. Quotes you&rsquo;ve already
+                sent keep the terms they were created with.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Shipping — the customer's own carrier accounts, so their freight
+            bills to them instead of to us. Called "Shipping", not "Freight":
+            to a machinist "freight" means all shipping cost, so a tab by that
+            name reads as the wrong thing. */}
+        <Grid size={{ xs: 12 }}>
+          <Card elevation={2}>
+            <CardContent>
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 2,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Shipping ({carrierAccounts.length})
+                </Typography>
+                <Button
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    setEditingCarrierAccount(undefined);
+                    setCarrierModalOpen(true);
+                  }}
+                  disabled={actionLoading}
+                >
+                  Add account
+                </Button>
+              </Box>
+              <Divider sx={{ my: 2 }} />
+              {carrierAccounts.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No carrier accounts. Add one if this customer wants their
+                  shipments billed to their own UPS or FedEx account.
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  {carrierAccounts.map((acct) => (
+                    <Box
+                      key={acct.id}
+                      sx={{
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        p: 2,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: 2,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <Box sx={{ minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                            {acct.carrier}
+                          </Typography>
+                          <Chip
+                            label={BILL_TO_PARTY_LABELS[acct.bill_to_party]}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </Box>
+                        {/* Shown in full: this page is behind auth, and the whole
+                            point is that whoever ships can read the number. The
+                            printed slip redacts it — see maskAccountNumber. */}
+                        <Typography variant="body2" color="text.secondary">
+                          {acct.account_number
+                            ? `Account ${acct.account_number}`
+                            : 'No account number (billed on the BOL)'}
+                          {acct.account_postal_code && ` · ZIP ${acct.account_postal_code}`}
+                        </Typography>
+                        {acct.notes && (
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                            {acct.notes}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setEditingCarrierAccount(acct);
+                            setCarrierModalOpen(true);
+                          }}
+                          disabled={actionLoading}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="small"
+                          color="error"
+                          onClick={() => setDeleteCarrierAccountId(acct.id)}
+                          disabled={actionLoading}
+                        >
+                          Delete
+                        </Button>
+                      </Box>
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Related entities */}
         <Grid size={{ xs: 12 }}>
           <Card elevation={2}>
@@ -620,6 +830,38 @@ export default function CustomerDetailPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Carrier account modal */}
+      <CarrierAccountModal
+        open={carrierModalOpen}
+        onClose={() => setCarrierModalOpen(false)}
+        companyId={companyId}
+        customerId={customerId}
+        existing={editingCarrierAccount}
+        onSaved={fetchAll}
+      />
+
+      {/* Delete carrier account confirmation (archives — see the handler) */}
+      <Dialog
+        open={!!deleteCarrierAccountId}
+        onClose={() => !actionLoading && setDeleteCarrierAccountId(null)}
+      >
+        <DialogTitle>Delete carrier account?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Shipments already billed to this account keep their record. It just
+            stops being offered on new ones.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteCarrierAccountId(null)} disabled={actionLoading}>
+            Cancel
+          </Button>
+          <Button color="error" onClick={handleDeleteCarrierAccount} disabled={actionLoading}>
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Contact modal */}
       <CustomerContactModal

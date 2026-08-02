@@ -230,6 +230,16 @@ export default function CustomersPage() {
       valueGetter: (params) => params.data?.primary_contact?.phone ?? '—',
     },
     {
+      // Standing payment terms. Johnny's stated need is memory offload — he can
+      // enter terms on the customer but had nowhere to read them back. `field`
+      // (rather than a bare colId) keeps the colId equal to the DB column, so
+      // handleSortChanged's server-side .order() still works on this column.
+      field: 'default_payment_terms',
+      headerName: 'Payment terms',
+      width: 170,
+      valueGetter: (params) => params.data?.default_payment_terms ?? '—',
+    },
+    {
       colId: 'location',
       headerName: 'Location',
       flex: 1.5,

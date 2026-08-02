@@ -24,6 +24,7 @@ import EditIcon from '@mui/icons-material/Edit';
 
 import AddressDisplay, { addressToLines } from '@/components/common/AddressDisplay';
 import { updateJobAddressContact } from '@/utils/jobsAccess';
+import { FREIGHT_TERMS_LABELS } from '@/types/shipment';
 import type { JobWithRelations } from '@/types/job';
 
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
@@ -196,6 +197,30 @@ export default function JobBillingShippingCard({
                   Billing address
                 </Typography>
                 <AddressDisplay address={billingAddress} />
+              </Grid>
+            )}
+            {/* Freight, read-only. Shown only when the PO actually said
+                something — a job with no freight instruction ships the way it
+                always did, and an empty "Freight: —" row would just be noise. */}
+            {(job.freight_terms || job.ship_via || job.shipping_instructions) && (
+              <Grid size={{ xs: 12 }}>
+                <Divider sx={{ my: 1.5 }} />
+                <Typography variant="body2" color="text.secondary">
+                  Freight
+                </Typography>
+                <Typography variant="body2">
+                  {[
+                    job.freight_terms ? FREIGHT_TERMS_LABELS[job.freight_terms] : null,
+                    job.ship_via,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '—'}
+                </Typography>
+                {job.shipping_instructions && (
+                  <Typography variant="body2" color="text.secondary">
+                    {job.shipping_instructions}
+                  </Typography>
+                )}
               </Grid>
             )}
           </Grid>

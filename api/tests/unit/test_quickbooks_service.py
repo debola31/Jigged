@@ -320,9 +320,32 @@ def test_payload_memo_and_billaddr_optional():
     assert "BillAddr" not in payload
 
 
-def test_invoice_deep_link():
-    assert qb.invoice_deep_link("sandbox", "130") == "https://app.sandbox.qbo.intuit.com/app/invoice?txnId=130"
-    assert qb.invoice_deep_link("production", "130") == "https://app.qbo.intuit.com/app/invoice?txnId=130"
+def test_invoice_deep_link_uses_the_form_that_survives_sign_in():
+    """The /login?pagereq= shape, not /app/invoice?txnId=.
+
+    Traced live against both hosts: opening /app/invoice?txnId=130 with no QBO
+    session bounces to accounts.intuit.com and leaves
+    qbo.deeplink={"pagereq":"invoice"} — the transaction id is dropped, which is
+    why the user landed on a blank NEW invoice. The /login form leaves
+    qbo.deeplink={"pagereq":"invoice?txnId=130"} and adds account_id_hint, so
+    both the transaction AND the company survive the bounce.
+    """
+    assert qb.invoice_deep_link("sandbox", "130", "9341457314157411") == (
+        "https://sandbox.qbo.intuit.com/login"
+        "?deeplinkcompanyid=9341457314157411&pagereq=invoice%3FtxnId%3D130"
+    )
+    assert qb.invoice_deep_link("production", "130", "1234567890") == (
+        "https://qbo.intuit.com/login"
+        "?deeplinkcompanyid=1234567890&pagereq=invoice%3FtxnId%3D130"
+    )
+
+
+def test_invoice_deep_link_falls_back_without_a_realm():
+    """No realm -> the plain link. Degraded (loses the transaction on a cold
+    session) but never broken, and it keeps older stored links meaningful."""
+    assert qb.invoice_deep_link("sandbox", "130") == (
+        "https://sandbox.qbo.intuit.com/app/invoice?txnId=130"
+    )
 
 
 # ───────────────────────── token lifecycle ─────────────────────────
@@ -484,3 +507,262 @@ def test_create_customer_duplicate_links_existing(monkeypatch):
     monkeypatch.setattr(qb, "qb_query", lambda db, co, q: {"Customer": [{"Id": "77", "DisplayName": "Acme"}]})
     cid = qb.create_customer(_FakeDB({}), "co1", "Acme")
     assert cid == "77"
+
+
+# ─────────────────────── terms + PO placement ───────────────────────
+# Every assertion below was verified against a live QuickBooks sandbox before
+# being written; the comments record what was observed, not what was assumed.
+
+
+def test_payload_sends_sales_term_and_never_a_due_date():
+    """SalesTermRef alone — DueDate is deliberately omitted.
+
+    Verified live: supplying BOTH lets them disagree. An invoice pushed with
+    SalesTermRef=Net 60 and DueDate=TxnDate+7 stored the +7 date while still
+    reporting Net 60, so the printed invoice read "Terms: Net 60" beside a due
+    date a week out. With the term alone, QBO derived 2026-09-30 from a
+    2026-08-01 invoice — correct.
+    """
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="42",
+        item_ref="7",
+        job_number="J-0001",
+        bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+        sales_term_id="4",
+    )
+    assert payload["SalesTermRef"] == {"value": "4"}
+    assert "DueDate" not in payload
+
+
+def test_payload_without_a_term_sends_no_sales_term_ref():
+    """No term resolved -> the field is absent, not null.
+
+    This is the pre-existing behaviour and it is NOT harmless: five real sandbox
+    invoices pushed this way all came back with a due date of exactly TxnDate+30
+    from a QuickBooks company default that nothing in Jigged chose. Keeping the
+    key absent (rather than sending null) is what lets QBO apply that fallback
+    without erroring, so a term Jigged cannot resolve degrades to today's
+    behaviour instead of failing the push.
+    """
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="42", item_ref="7", job_number="J-0001", bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+    )
+    assert "SalesTermRef" not in payload
+    assert "DueDate" not in payload
+
+
+def test_po_goes_to_customer_memo_which_actually_prints():
+    """CustomerMemo is the placement that reaches the customer with zero setup.
+
+    Verified by pulling the invoice PDF: it renders under "Note to customer".
+    PrivateNote does NOT print — Intuit documents it as "does not appear on the
+    invoice to the customer" — so the memo is what makes the PO visible to an AP
+    department on a company that has configured nothing.
+    """
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1", item_ref="1", job_number="J-0007",
+        customer_po_number="PO-789", bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+    )
+    assert payload["CustomerMemo"] == {"value": "PO Number: PO-789"}
+    # ...and the two pre-existing placements are untouched. The line suffix is
+    # what the pilot shop's AP is already paying from; it must never regress.
+    assert payload["Line"][0]["Description"] == "P (PO Number: PO-789)"
+    assert payload["PrivateNote"] == "Jigged job J-0007 · PO Number: PO-789"
+
+
+def test_no_custom_field_when_the_shop_has_not_configured_one():
+    """The default state — and the one that must never guess.
+
+    Verified live that an unconfigured company reports only three booleans, all
+    false, with no field names at all. Writing to a guessed DefinitionId would
+    silently overwrite whatever the shop keeps in that slot (commonly "Sales
+    Rep" or "Job #") and the slot mapping cannot be reassigned afterwards.
+    """
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1", item_ref="1", job_number=None,
+        customer_po_number="PO-12", bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+        po_custom_field_id=None,
+    )
+    assert "CustomField" not in payload
+
+
+def test_custom_field_used_only_when_discovery_supplied_an_id():
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1", item_ref="1", job_number=None,
+        customer_po_number="PO-12", bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+        po_custom_field_id="2",
+        po_custom_field_name="Customer PO #",
+    )
+    assert payload["CustomField"] == [
+        {"DefinitionId": "2", "Type": "StringType",
+         "StringValue": "PO-12", "Name": "Customer PO #"}
+    ]
+
+
+def test_no_po_means_no_memo_and_no_custom_field():
+    payload = qb.quote_to_invoice_payload(
+        customer_ref="1", item_ref="1", job_number="J-0007", bill_addr=None,
+        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
+        po_custom_field_id="1",
+    )
+    assert "CustomerMemo" not in payload
+    assert "CustomField" not in payload
+
+
+def test_parse_net_days_reads_common_term_shapes():
+    """Falls back to 0 (due on receipt) on anything unreadable — the
+    conservative direction: a term we cannot parse should ask for payment
+    sooner, never silently extend credit."""
+    assert qb._parse_net_days("Net 30") == 30
+    assert qb._parse_net_days("net30") == 30
+    assert qb._parse_net_days("2/10 Net 60") == 60
+    assert qb._parse_net_days("50% Deposit / Balance Net 30") == 30
+    assert qb._parse_net_days("Due on Receipt") == 0
+    assert qb._parse_net_days("Cash on Delivery") == 0
+    assert qb._parse_net_days("") == 0
+
+
+def test_po_field_pattern_matches_real_shop_labels():
+    """Discovery matches on the shop's LABEL, never on slot position — Intuit
+    states definitions "may not appear in numeric order" in Preferences."""
+    for label in ("PO Number", "PO #", "Customer PO", "customer purchase order", "P.O."):
+        assert qb._PO_FIELD_PATTERN.search(label), label
+    for label in ("Sales Rep", "Job #", "Crew", "Priority"):
+        assert not qb._PO_FIELD_PATTERN.search(label), label
+
+
+def test_resolve_term_id_matches_the_truncated_name_it_created(monkeypatch):
+    """QBO caps Term.Name at 31 chars, so a longer Jigged term is stored short.
+
+    The lookup has to accept BOTH spellings. Matching only the full string would
+    miss the truncated row we created ourselves, re-POST the identical name, and
+    take QBO's duplicate-name 400 — so the first invoice on a job would carry a
+    SalesTermRef and every later one would silently carry none."""
+    long_term = "Net 30 from date of shipment, 1.5%/mo"
+    assert len(long_term) > qb._QB_TERM_NAME_MAX
+    stored = long_term[: qb._QB_TERM_NAME_MAX]
+
+    monkeypatch.setattr(
+        qb, "list_qb_terms", lambda db, cid: [{"id": "9", "name": stored, "due_days": 30}]
+    )
+
+    def _must_not_create(*args, **kwargs):
+        raise AssertionError("re-created a term that already exists in QuickBooks")
+
+    monkeypatch.setattr(qb, "qb_request", _must_not_create)
+    assert qb.resolve_term_id(None, "c1", long_term) == "9"
+
+
+def test_resolve_term_id_creates_within_the_name_cap(monkeypatch):
+    """A term QBO does not have is created under the truncated name — the same
+    string the lookup above will match on the next push."""
+    long_term = "Net 30 from date of shipment, 1.5%/mo"
+    monkeypatch.setattr(qb, "list_qb_terms", lambda db, cid: [])
+    sent: dict = {}
+
+    def _capture(db, cid, method, path, json_body=None):
+        sent.update(json_body or {})
+        return {"Term": {"Id": "12"}}
+
+    monkeypatch.setattr(qb, "qb_request", _capture)
+    assert qb.resolve_term_id(None, "c1", long_term) == "12"
+    assert sent["Name"] == long_term[: qb._QB_TERM_NAME_MAX]
+    assert len(sent["Name"]) <= qb._QB_TERM_NAME_MAX
+    assert sent["DueDays"] == 30
+
+
+def test_resolve_term_id_is_case_insensitive(monkeypatch):
+    """QBO ships "Due on receipt"; Jigged's preset is "Due on Receipt". A
+    case-sensitive compare would try to create it, and creating a Term whose
+    name already exists is rejected with HTTP 400 (verified live) — failing the
+    push on the most common term in the list."""
+    monkeypatch.setattr(
+        qb, "list_qb_terms", lambda db, cid: [{"id": "1", "name": "Due on receipt", "due_days": 0}]
+    )
+    assert qb.resolve_term_id(None, "c1", "Due on Receipt") == "1"
+
+
+def test_discover_po_custom_field_raises_when_it_cannot_ask(monkeypatch):
+    """"Couldn't check" must never be reported as "there is no field".
+
+    The caller persists this result, so swallowing the error would let one
+    Intuit blip wipe a correctly discovered field id and silently stop the PO
+    reaching invoices."""
+    def _boom(*args, **kwargs):
+        raise RuntimeError("intuit is down")
+
+    monkeypatch.setattr(qb, "qb_query", _boom)
+    with pytest.raises(RuntimeError):
+        qb.discover_po_custom_field(None, "c1")
+
+
+def test_discover_po_custom_field_reports_none_for_an_unconfigured_company(monkeypatch):
+    """An answered question with a negative answer IS returned as None — that is
+    the ordinary starting state, and it must stay distinguishable from the
+    unanswered case above."""
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: {"Preferences": [{}]})
+    assert qb.discover_po_custom_field(None, "c1") == {
+        "id": None, "name": None, "candidates": []
+    }
+
+
+def test_discover_po_custom_field_matches_label_not_slot(monkeypatch):
+    """Slot 1 is "Sales Rep" here and the PO lives in slot 3. Writing to a
+    guessed DefinitionId would overwrite whatever the shop keeps in that slot,
+    and the mapping cannot be reassigned afterwards."""
+    prefs = {
+        "Preferences": [
+            {
+                "SalesFormsPrefs": {
+                    "CustomField": [
+                        {
+                            "CustomField": [
+                                {"Name": "SalesFormsPrefs.UseSalesCustom1", "BooleanValue": True},
+                                {"Name": "SalesFormsPrefs.SalesCustomName1",
+                                 "StringValue": "Sales Rep"},
+                                {"Name": "SalesFormsPrefs.UseSalesCustom3", "BooleanValue": True},
+                                {"Name": "SalesFormsPrefs.SalesCustomName3",
+                                 "StringValue": "Customer PO #"},
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
+    found = qb.discover_po_custom_field(None, "c1")
+    assert found["id"] == "3"
+    assert found["name"] == "Customer PO #"
+    assert {c["name"] for c in found["candidates"]} == {"Sales Rep", "Customer PO #"}
+
+
+def test_discover_po_custom_field_ignores_a_disabled_slot(monkeypatch):
+    """A named-but-switched-off field does not print, so offering it would put
+    the PO somewhere nobody sees."""
+    prefs = {
+        "Preferences": [
+            {
+                "SalesFormsPrefs": {
+                    "CustomField": [
+                        {
+                            "CustomField": [
+                                {"Name": "SalesFormsPrefs.UseSalesCustom2", "BooleanValue": False},
+                                {"Name": "SalesFormsPrefs.SalesCustomName2",
+                                 "StringValue": "PO Number"},
+                            ]
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
+    found = qb.discover_po_custom_field(None, "c1")
+    assert found["id"] is None
+    assert found["candidates"] == []

@@ -27,6 +27,53 @@ export type ShippingMethod =
  *  stored directly in shipments.carrier, so the column itself is free text. */
 export const CARRIER_OPTIONS = ['UPS', 'FedEx', 'USPS'] as const;
 
+/**
+ * Who pays the freight. A different axis from `shipping_method` (how the goods
+ * left) and from the quote's `fob_point` (where title and risk transfer) —
+ * conflating any two of the three is the classic error in this domain, so they
+ * never share a control.
+ *
+ * `prepaid_and_add` is deliberately absent: it promises adding freight to the
+ * invoice, and there is no freight amount anywhere to add (weight_lbs was
+ * dropped in June 2026). An option naming something the system cannot do is how
+ * the previous version of this enum died of non-use.
+ */
+export type FreightTerms = 'prepaid' | 'collect' | 'third_party' | 'customer_arranged';
+
+/** Shop vocabulary, not API vocabulary — this is what a shipper says out loud. */
+export const FREIGHT_TERMS_LABELS: Record<FreightTerms, string> = {
+  prepaid: 'We pay (prepaid)',
+  collect: 'Freight collect (their account)',
+  third_party: 'Bill third party',
+  customer_arranged: 'They collect it',
+};
+
+/** Freight terms only mean something when goods actually ship on a carrier. */
+export const FREIGHT_TERMS_METHODS: ReadonlyArray<ShippingMethod> = ['shipment', 'dropship'];
+
+/**
+ * The redacted freight block frozen onto a shipment at ship time.
+ *
+ * Never carries the full account number: the packing slip renders from this and
+ * rides in the box past carriers, docks and whoever opens the carton.
+ * `account_last4` is null when the account is 4 characters or fewer — showing 3
+ * of 4 is not redaction — so `has_account` is what tells a document whether to
+ * say "billed to their account" or "billed on the bill of lading".
+ */
+export interface FreightAccountSnapshot {
+  carrier: string;
+  bill_to_party: string;
+  has_account: boolean;
+  account_last4: string | null;
+}
+
+export function toFreightTerms(value: string | null | undefined): FreightTerms | null {
+  return value === 'prepaid' || value === 'collect' || value === 'third_party' ||
+    value === 'customer_arranged'
+    ? value
+    : null;
+}
+
 export interface Shipment {
   id: string;
   company_id: string;
@@ -51,6 +98,10 @@ export interface Shipment {
   customer_name: string | null;
   bill_to_address: AddressSnapshot | null;
   ship_to_address: AddressSnapshot | null;
+  freight_terms: FreightTerms | null;
+  /** Navigation only — the document renders freight_account_snapshot. */
+  customer_carrier_account_id: string | null;
+  freight_account_snapshot: FreightAccountSnapshot | null;
 }
 
 export interface ShipmentLineItem {
@@ -142,6 +193,8 @@ export interface CreateShipmentPayload {
   ship_date: string;
   carrier?: string | null;
   shipping_method?: ShippingMethod | null;
+  freight_terms?: FreightTerms | null;
+  customer_carrier_account_id?: string | null;
   line_items: Array<{
     job_part_id: string;
     quantity: number;
@@ -225,3 +278,37 @@ export const SHIPPING_METHOD_OPTIONS: Array<{
   value,
   label: SHIPPING_METHOD_LABELS[value],
 }));
+
+/**
+ * One printable line describing how a shipment's freight is billed, built from
+ * the FROZEN snapshot rather than the live carrier account.
+ *
+ * Everything here is safe to print: the snapshot never carries the full account
+ * number. When `has_account` is true but `account_last4` is null the account was
+ * too short to reveal anything, so we say an account is on file without naming
+ * it — which is still the information a receiving dock needs.
+ *
+ * Returns null when there is no freight instruction at all, so the caller omits
+ * the row rather than printing "Freight: —".
+ */
+export function describeShipmentFreight(shipment: {
+  freight_terms: FreightTerms | null;
+  freight_account_snapshot: FreightAccountSnapshot | null;
+}): string | null {
+  const terms = shipment.freight_terms ? FREIGHT_TERMS_LABELS[shipment.freight_terms] : null;
+  const snap = shipment.freight_account_snapshot;
+  if (!terms && !snap) return null;
+
+  const parts: string[] = [];
+  if (terms) parts.push(terms);
+  if (snap) {
+    if (snap.account_last4) {
+      parts.push(`${snap.carrier} ••••${snap.account_last4}`);
+    } else if (snap.has_account) {
+      parts.push(`${snap.carrier} (account on file)`);
+    } else {
+      parts.push(snap.carrier);
+    }
+  }
+  return parts.join(' — ');
+}

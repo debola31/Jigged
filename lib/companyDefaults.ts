@@ -114,6 +114,42 @@ export function readCompanyDefaults(
   return out;
 }
 
+/**
+ * The shop-wide default payment terms — the terms that apply to a customer we
+ * have no specific agreement with.
+ *
+ * Stored at `settings.default_payment_terms` as a plain string: a sibling of
+ * `custom_payment_terms` and of the numeric `defaults` block, NOT a member of
+ * KNOWN_DEFAULTS. That registry is numeric to the floor (coerceInt, a numeric
+ * `fallback`, `readCompanyDefault(): number`, an `updateCompanyDefaults` typed
+ * `Record<string, number>`, and a settings card rendering `type="number"`);
+ * threading a string through it would mean a discriminated union across five
+ * call sites to add one field. `custom_payment_terms` already set the
+ * precedent for a string setting living beside that block.
+ *
+ * WHY A SHOP-WIDE DEFAULT IS SAFE HERE. It is resolved ONCE, when a quote is
+ * created, into that quote's own `payment_terms` column — never read again by
+ * an existing quote — and the form names which level the value came from
+ * ("From your shop default" vs "From <customer>'s standing terms"). That
+ * visible provenance is the whole difference from the `markup_rates` module
+ * deleted in July 2026, where a shared default resolved at READ time with
+ * nothing on screen to say where the number came from.
+ *
+ * Resolution order, implemented in QuoteForm:
+ *   customer.default_payment_terms -> this -> leave the field empty
+ *
+ * Returns null when unset, blank or non-string, so the caller can fall through
+ * to "empty" rather than prefilling something meaningless.
+ */
+export function readCompanyDefaultPaymentTerms(
+  company: SettingsLike | null | undefined,
+): string | null {
+  const settings = company?.settings as Record<string, unknown> | undefined | null;
+  const raw = settings?.default_payment_terms;
+  if (typeof raw !== 'string') return null;
+  return raw.trim() || null;
+}
+
 /** Upper bound on how many saved custom payment terms a company keeps. */
 export const MAX_CUSTOM_PAYMENT_TERMS = 15;
 

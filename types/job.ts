@@ -4,6 +4,7 @@
  * sync_job_production_status_from_parts trigger.
  */
 import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot';
+import type { FreightTerms } from '@/types/shipment';
 
 export type ProductionStatus = 'not_started' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -81,6 +82,22 @@ export interface Job {
   // visibility: no scheduling behavior. Sorts hot jobs first in the admin list
   // and the operator station queue. Set at creation and toggleable by office staff.
   is_hot: boolean;
+  // Freight instruction as the customer's PO stated it, for THIS order. The
+  // middle of three grains — customer default resolves onto the job at
+  // conversion, the job resolves onto the shipment at pack time. Without this
+  // layer the packer re-derives a customer default that may contradict the PO.
+  /**
+   * Payment terms this order was sold on, copied from the quote at conversion.
+   * Pushed to QuickBooks as SalesTermRef. Distinct from
+   * customers.default_payment_terms, which only ever seeds a NEW quote — a job
+   * keeps what it was converted with.
+   */
+  payment_terms: string | null;
+  freight_terms: FreightTerms | null;
+  customer_carrier_account_id: string | null;
+  /** Carrier/service in the PO's own words ("UPS Ground", "their truck"). */
+  ship_via: string | null;
+  shipping_instructions: string | null;
   status_changed_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -296,6 +313,21 @@ export interface JobWithRelations extends Job {
       default_billing: boolean;
       default_shipping: boolean;
       attention_to: string | null;
+    }>;
+    /**
+     * The customer's carrier accounts, offered when setting this job's freight.
+     * Includes archived rows (deleted_at) so a job already pointing at one still
+     * renders it; callers filter for the picker.
+     */
+    carrier_accounts?: Array<{
+      id: string;
+      carrier: string;
+      bill_to_party: string;
+      account_number: string | null;
+      account_postal_code: string | null;
+      account_country_code: string;
+      notes: string | null;
+      deleted_at: string | null;
     }>;
   } | null;
   quotes?: {

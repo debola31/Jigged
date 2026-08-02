@@ -157,4 +157,34 @@ CUSTOMER_SCHEMA = {
         "required": False,
         "description": "Country (defaults to USA)",
     },
+    # Standing terms. The descriptions carry the legacy vocabulary on purpose —
+    # the AI column mapper matches source headers against them, and a JobBOSS /
+    # E2 export calls this column "Terms Code", not "Payment Terms".
+    "default_payment_terms": {
+        "type": "string",
+        "required": False,
+        "description": (
+            "Standing payment terms for this customer, applied to new quotes "
+            "(e.g. Net 30, 2% 10 Net 30, Due on Receipt). Often exported as "
+            "'Terms', 'Terms Code' or 'Payment Terms'."
+        ),
+    },
+    "default_lead_time_text": {
+        "type": "string",
+        "required": False,
+        "description": (
+            "Standing lead time quoted to this customer, as free text "
+            "(e.g. '4-6 weeks ARO'). Often exported as 'Lead Time' or 'Lead Days'."
+        ),
+    },
+    "default_fob_point": {
+        "type": "string",
+        "required": False,
+        "description": (
+            "FOB point — WHERE title and risk transfer, as a named place "
+            "(e.g. 'FOB Cleveland, OH', 'FOB Origin'). Often exported as 'FOB'. "
+            "Not the freight payment terms (prepaid / collect / third party), "
+            "which describe who PAYS and are not imported here."
+        ),
+    },
 }

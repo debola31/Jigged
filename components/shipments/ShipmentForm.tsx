@@ -34,13 +34,24 @@ import SearchIcon from '@mui/icons-material/Search';
 
 import { getSupabase } from '@/lib/supabase';
 import type { Company } from '@/utils/companyAccess';
-import type { CustomerAddress } from '@/types/customer';
+import type { CustomerAddress, CustomerCreditStatus } from '@/types/customer';
+import {
+  describeFreightAccount,
+  type CustomerCarrierAccount,
+} from '@/types/customerCarrierAccount';
+import { resolveFreightLine, type ResolvedFreight } from '@/utils/shipmentsAccess';
 import type {
   CreateShipmentPayload,
   OpenJobPartRow,
   ShippingMethod,
 } from '@/types/shipment';
-import { CARRIER_OPTIONS, SHIPPING_METHOD_OPTIONS } from '@/types/shipment';
+import {
+  CARRIER_OPTIONS,
+  SHIPPING_METHOD_OPTIONS,
+  FREIGHT_TERMS_LABELS,
+  FREIGHT_TERMS_METHODS,
+  type FreightTerms,
+} from '@/types/shipment';
 import {
   createShipment,
   getJobPartShipmentSummaries,
@@ -48,6 +59,7 @@ import {
 } from '@/utils/shipmentsAccess';
 import {
   lineShipConsequence,
+  carrierAccountMismatch,
   type ShipConsequence,
 } from '@/components/shipments/shipmentMath';
 
@@ -71,7 +83,16 @@ function todayLocalISODate(): string {
 interface CustomerContext {
   id: string;
   name: string;
+  /**
+   * Manual credit standing. Carried here only to render a banner — the shipment
+   * flow does not branch on it and must not: see the credit-hold note in the
+   * validation memo below.
+   */
+  credit_status: CustomerCreditStatus;
+  credit_hold_note: string | null;
   addresses: CustomerAddress[];
+  /** Their own carrier accounts, for billing freight to them. */
+  carrier_accounts?: CustomerCarrierAccount[];
 }
 
 /**
@@ -130,6 +151,15 @@ export default function ShipmentForm({
   const [shippingMethod, setShippingMethod] = useState<ShippingMethod | ''>('');
   const [carrierChoice, setCarrierChoice] = useState<CarrierChoice>('');
   const [carrierOther, setCarrierOther] = useState('');
+  // Freight resolved from the job (or the customer) at load, plus the shipper's
+  // override. Kept OUT of `validation` on purpose: freight never gates a
+  // shipment, and the strongest way to guarantee that is for canSubmit to have
+  // no expression that could reach it.
+  const [resolvedFreight, setResolvedFreight] = useState<ResolvedFreight | null>(null);
+  const [freightTerms, setFreightTerms] = useState<FreightTerms | ''>('');
+  const [freightAccountId, setFreightAccountId] = useState('');
+  const [jobShipVia, setJobShipVia] = useState<string | null>(null);
+  const [jobShippingInstructions, setJobShippingInstructions] = useState<string | null>(null);
 
   const [lines, setLines] = useState<LineRow[]>([]);
 
@@ -177,13 +207,19 @@ export default function ShipmentForm({
             .select(
               `id, job_number, company_id,
                customer:customers!left (
-                 id, name,
+                 id, name, credit_status, credit_hold_note,
                  addresses:customer_addresses (
                    id, customer_id, address_line1, address_line2, city, state,
                    postal_code, country, default_billing, default_shipping, attention_to
+                 ),
+                 carrier_accounts:customer_carrier_accounts (
+                   id, company_id, customer_id, carrier, bill_to_party, account_number,
+                   account_postal_code, account_country_code, notes,
+                   created_at, updated_at, deleted_at
                  )
                ),
-               customer_po_number,
+               customer_po_number, freight_terms, customer_carrier_account_id, ship_via,
+               shipping_instructions,
                job_parts (
                  id, sequence, quantity, production_status, fulfillment_status,
                  parts (id, part_name, description)
@@ -199,6 +235,10 @@ export default function ShipmentForm({
             id: string;
             job_number: string;
             customer_po_number: string | null;
+            freight_terms: FreightTerms | null;
+            customer_carrier_account_id: string | null;
+            ship_via: string | null;
+            shipping_instructions: string | null;
             customer: CustomerContext | null;
             job_parts: Array<{
               id: string;
@@ -215,6 +255,43 @@ export default function ShipmentForm({
           }
           ctx = job.customer;
           setJobNumberForTitle(job.job_number);
+          // Resolve freight once, here: the JOB's instruction (what the PO said)
+          // beats the customer's standing arrangement. Doing it at load rather
+          // than at submit means the shipper SEES what will happen and can
+          // override it, instead of discovering it on the packing slip.
+          const freight = resolveFreightLine({
+            jobFreightTerms: job.freight_terms,
+            jobCarrierAccountId: job.customer_carrier_account_id,
+            customerAccounts: (job.customer.carrier_accounts ?? []).filter(
+              (a) => a.deleted_at === null || a.id === job.customer_carrier_account_id,
+            ),
+          });
+          setResolvedFreight(freight);
+          // Seed the controls here, inside the async loader, rather than from an
+          // effect watching resolvedFreight — a setState in an effect body
+          // triggers the cascading-render lint rule and this is the same data
+          // arriving at the same moment anyway.
+          setFreightTerms(freight.terms ?? '');
+          setFreightAccountId(freight.account?.id ?? '');
+          // Seed the carrier from the account we just resolved. Without this the
+          // packer picks a carrier from an empty field with the account sitting
+          // right beside it, and the slip prints "Carrier: FedEx" directly above
+          // "Freight: … — UPS ••••72W9". Seeding rather than forcing is the
+          // point: it is a visible default they can change, not a value written
+          // over them — a shipment genuinely can move on a different carrier
+          // than the account it bills to.
+          if (freight.account?.carrier) {
+            const match = CARRIER_OPTIONS.find(
+              (c) => c.toLowerCase() === freight.account!.carrier.trim().toLowerCase(),
+            );
+            if (match) setCarrierChoice(match);
+            else {
+              setCarrierChoice('other');
+              setCarrierOther(freight.account.carrier);
+            }
+          }
+          setJobShipVia(job.ship_via);
+          setJobShippingInstructions(job.shipping_instructions);
 
           const summaries = await getJobPartShipmentSummaries(source.jobId);
           const summaryByPart = new Map(summaries.map((s) => [s.job_part_id, s]));
@@ -249,7 +326,7 @@ export default function ShipmentForm({
           const { data: customerRow, error: customerErr } = await supabase
             .from('customers')
             .select(
-              `id, name,
+              `id, name, credit_status, credit_hold_note,
                addresses:customer_addresses (
                  id, customer_id, address_line1, address_line2, city, state,
                  postal_code, country, default_billing, default_shipping, attention_to
@@ -364,6 +441,21 @@ export default function ShipmentForm({
     blockingMessages: string[];
   };
 
+  // Freight only applies where goods ride a carrier — the same rule as the DB's
+  // shipments_freight_terms_method_check. Deriving it here (rather than reading
+  // the constraint's mind at submit) is what keeps a method change from
+  // producing a raw constraint error.
+  const freightApplies = FREIGHT_TERMS_METHODS.includes(shippingMethod as ShippingMethod);
+
+  const freightAccountOptions = (customer?.carrier_accounts ?? []).filter(
+    (a) => a.deleted_at === null || a.id === freightAccountId,
+  );
+  const selectedFreightAccount =
+    freightAccountOptions.find((a) => a.id === freightAccountId) ?? null;
+  // Kept as a primitive so the validation memo depends on a string rather than
+  // an object the compiler cannot prove stable.
+  const freightAccountCarrier = selectedFreightAccount?.carrier.trim() ?? '';
+
   const validation: Validation = useMemo(() => {
     const contributing = lines
       .map((row) => {
@@ -426,7 +518,31 @@ export default function ShipmentForm({
       warnings,
       blockingMessages,
     };
-  }, [lines, isCustomerMode, shippingAddressId, shippingMethod, carrierChoice, carrierOther]);
+  }, [
+    lines,
+    isCustomerMode,
+    shippingAddressId,
+    shippingMethod,
+    carrierChoice,
+    carrierOther,
+  ]);
+
+  /**
+   * The slip prints the carrier and the freight line one above the other, so a
+   * mismatch reads as a contradiction to whoever opens the box:
+   * "Carrier: FedEx" over "Freight: … — UPS ••••72W9".
+   *
+   * It is not always wrong — a shop can move a box on one carrier and bill
+   * another's account — so this warns rather than blocks. Computed OUTSIDE the
+   * validation memo on purpose: it keeps that memo's deps primitive, and it
+   * makes it structurally impossible for this to ever reach `canSubmit`.
+   */
+  const carrierMismatchWarning = freightApplies
+    ? carrierAccountMismatch(
+        carrierChoice === 'other' ? carrierOther : carrierChoice,
+        freightAccountCarrier,
+      )
+    : null;
 
   // ---------- Helpers to mutate a single line by id ----------
   const patchLine = useCallback((jobPartId: string, patch: Partial<LineRow>) => {
@@ -455,6 +571,12 @@ export default function ShipmentForm({
       ship_date: shipDate || todayLocalISODate(),
       carrier: resolvedCarrier,
       shipping_method: shippingMethod === '' ? null : shippingMethod,
+      // Freight terms only exist for methods where goods ride a carrier. Nulled
+      // here for pickup/restock rather than left to the DB, because
+      // shipments_freight_terms_method_check would otherwise reject the insert
+      // and the shipper would meet a raw constraint error.
+      freight_terms: freightApplies && freightTerms !== '' ? freightTerms : null,
+      customer_carrier_account_id: freightApplies ? freightAccountId || null : null,
       line_items: validation.contributing.map((c) => ({
         job_part_id: c.job_part_id,
         quantity: c.quantity,
@@ -480,6 +602,10 @@ export default function ShipmentForm({
   }, [
     customer, validation, shippingAddressId, shipDate, carrierChoice, carrierOther,
     shippingMethod, companyId, onCreated,
+    // Load-bearing, not lint appeasement: without these the callback closes over
+    // the freight values as they were at first render, so a shipper who changes
+    // "who pays" or the account would submit the stale ones.
+    freightApplies, freightTerms, freightAccountId,
   ]);
 
   // ---------- Render ----------
@@ -498,6 +624,115 @@ export default function ShipmentForm({
   return (
     <Stack spacing={3}>
       {error && <Alert severity="error">{error}</Alert>}
+
+      {/* CREDIT HOLD — warn, never gate.
+          Deliberately a standalone render off `customer`, not an entry in
+          `validation.warnings`: warnings draw down beside the line items, and
+          this is about who we're shipping to, not what's on the pallet. Keeping
+          it out of the validation memo entirely is also the stronger guarantee —
+          there is no array here that anyone could later wire into `canSubmit`,
+          so "this must never block shipping" is enforced by there being nothing
+          to enforce. The person packing the box is not the person who decides
+          whether the account gets shipped; they need to know, not to be stopped.
+          Same doctrine as PartLocationActionModal's over-draw warning and the
+          operator rule that an out-of-sequence start never blocks. */}
+      {customer.credit_status === 'hold' && (
+        <Alert severity="warning">
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {customer.name} is on credit hold.
+          </Typography>
+          {customer.credit_hold_note && (
+            <Typography variant="body2">{customer.credit_hold_note}</Typography>
+          )}
+        </Alert>
+      )}
+
+      {/* FREIGHT — who pays, and on whose account.
+          Shown only when goods actually ride a carrier: nobody bills freight on
+          a customer pickup or an internal restock, and the DB CHECK agrees.
+
+          THE ACCOUNT NUMBER IS SHOWN IN FULL, on purpose. The person reading
+          this is standing at the bench about to key it into WorldShip. The
+          redaction lives on the printed slip, which leaves the building — not
+          here, where hiding it would send them back to the sticky note.
+
+          Nothing here touches canSubmit. Freight is information, not a gate. */}
+      {freightApplies && (resolvedFreight || freightTerms) && (
+        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            Freight
+          </Typography>
+
+          {resolvedFreight?.requiresChoice && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {customer.name} has more than one carrier account. Pick the one
+              this shipment bills to.
+            </Alert>
+          )}
+
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <FormControl fullWidth>
+              <InputLabel id="freight-terms-label">Who pays</InputLabel>
+              <Select
+                labelId="freight-terms-label"
+                label="Who pays"
+                value={freightTerms}
+                onChange={(e) => setFreightTerms(e.target.value as FreightTerms | '')}
+              >
+                <MenuItem value="">
+                  <em>We pay</em>
+                </MenuItem>
+                {(Object.keys(FREIGHT_TERMS_LABELS) as FreightTerms[]).map((k) => (
+                  <MenuItem key={k} value={k}>
+                    {FREIGHT_TERMS_LABELS[k]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {freightAccountOptions.length > 0 && (
+              <FormControl fullWidth>
+                <InputLabel id="freight-account-label">Their account</InputLabel>
+                <Select
+                  labelId="freight-account-label"
+                  label="Their account"
+                  value={freightAccountId}
+                  onChange={(e) => setFreightAccountId(e.target.value)}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {freightAccountOptions.map((a) => (
+                    <MenuItem key={a.id} value={a.id}>
+                      {describeFreightAccount(a, { mask: false })}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Stack>
+
+          {selectedFreightAccount?.account_postal_code && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Account ZIP {selectedFreightAccount.account_postal_code}
+              {selectedFreightAccount.account_country_code
+                ? ` · ${selectedFreightAccount.account_country_code}`
+                : ''}
+              {selectedFreightAccount.notes ? ` · ${selectedFreightAccount.notes}` : ''}
+            </Typography>
+          )}
+          {(jobShipVia || jobShippingInstructions) && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              From the PO: {[jobShipVia, jobShippingInstructions].filter(Boolean).join(' · ')}
+            </Typography>
+          )}
+          {carrierMismatchWarning && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {carrierMismatchWarning}
+            </Alert>
+          )}
+        </Box>
+      )}
 
       {jobNumberForTitle && !isCustomerMode && (
         <Typography variant="subtitle1" sx={{ color: 'text.secondary' }}>

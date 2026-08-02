@@ -83,7 +83,14 @@ insert into public.companies (
    -- no preview deployment can display is a feature nobody can review — the
    -- reviewer sees an unchanged app and has to take the diff's word for it.
    -- Seed is local/preview-only, never prod, so this widens nothing real.
-   '{"features": {"data_import": true, "machine_maintenance": true}}'::jsonb)
+   --
+   -- default_payment_terms is the shop-wide fallback used when a customer has
+   -- no terms of their own. Seeded so both branches of the resolution chain are
+   -- reachable by hand: quote Northwind (has its own terms) and the field
+   -- credits the customer; quote Sierra Pump & Valve (has none) and it credits
+   -- the shop default instead.
+   '{"features": {"data_import": true, "machine_maintenance": true},
+     "default_payment_terms": "2/10 Net 30"}'::jsonb)
 on conflict (id) do nothing;
 
 -- Billing cache: the grandfather backfill in the stripe_billing_cache migration
@@ -196,13 +203,20 @@ insert into public.work_centers (id, company_id, name, kind, vendor_id, labor_ra
 on conflict (id) do nothing;
 
 -- ── Customers (+ billing/shipping addresses + primary contact) ───────────────
-insert into public.customers (id, company_id, name) values
-  ('50000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Northwind Hydraulics'),
-  ('50000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','Cascade Robotics'),
-  ('50000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','Meridian Aerospace'),
-  ('50000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Granite Equipment Co'),
-  ('50000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BlueRidge Medical Devices'),
-  ('50000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Sierra Pump & Valve')
+-- Standing terms are set on SOME customers only, on purpose: a shop fills these
+-- in as agreements are struck, so the realistic state is partial. It also makes
+-- both branches reachable by hand — pick Northwind on a new quote and terms
+-- prefill with a provenance line; pick Sierra and the fields stay empty.
+-- Granite Equipment Co is seeded ON CREDIT HOLD so the warn-never-gate path is
+-- reachable by hand: open a shipment for one of their jobs and the banner shows
+-- while the Create button stays live. Everyone else is 'open' by column default.
+insert into public.customers (id, company_id, name, default_payment_terms, default_lead_time_text, default_fob_point, credit_status, credit_hold_note) values
+  ('50000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Northwind Hydraulics','Net 30','4-6 weeks ARO','FOB our dock, Milwaukee WI','open',null),
+  ('50000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','Cascade Robotics','Net 45','6-8 weeks ARO',null,'open',null),
+  ('50000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','Meridian Aerospace','2/10 Net 30',null,'FOB destination','open',null),
+  ('50000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Granite Equipment Co','Net 30',null,null,'hold','Two invoices past 60 days. Spoke to their AP 7/28 — check before shipping.'),
+  ('50000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BlueRidge Medical Devices','50% Deposit / Balance Net 30','8-10 weeks ARO',null,'open',null),
+  ('50000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','Sierra Pump & Valve',null,null,null,'open',null)
 on conflict (id) do nothing;
 
 -- billing addresses (default_shipping true when the customer has no separate ship-to)
@@ -228,6 +242,23 @@ insert into public.customer_contacts (id, customer_id, name, role, email, phone,
   ('53000000-0000-0000-0000-000000000004','50000000-0000-0000-0000-000000000004','Tom Beck','buyer','tom@granite.example','555-0123',true),
   ('53000000-0000-0000-0000-000000000005','50000000-0000-0000-0000-000000000005','Lena Park','accounts_payable','ap@blueridge.example','555-0123',true),
   ('53000000-0000-0000-0000-000000000006','50000000-0000-0000-0000-000000000006','Marco Diaz','shipping_receiving','recv@sierrapump.example','555-0123',true)
+on conflict (id) do nothing;
+
+-- Carrier accounts: the customer's own account, so their freight bills to them.
+-- Two customers only, and deliberately covering both shapes —
+--   Northwind: third_party, so the account number is REQUIRED and present.
+--   Meridian:  recipient with NO account number, the LTL / Ground Collect case
+--              the nullable column exists for.
+-- Everyone else has none, which is the majority state and must render as a
+-- plain "no carrier accounts" rather than anything that looks unfinished.
+-- Exactly one account each, so pickCarrierAccount resolves; add a second to a
+-- customer by hand to see the "which account?" prompt.
+insert into public.customer_carrier_accounts
+  (id, company_id, customer_id, carrier, bill_to_party, account_number, account_postal_code, account_country_code, notes) values
+  ('54000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','50000000-0000-0000-0000-000000000001',
+   'UPS','third_party','4A72W9','53202','US','Ground only. They query anything air-freighted.'),
+  ('54000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','50000000-0000-0000-0000-000000000003',
+   'R+L Carriers','recipient',null,null,'US','LTL — billed to them on the BOL, no account number needed.')
 on conflict (id) do nothing;
 
 -- ── Parts ────────────────────────────────────────────────────────────────────

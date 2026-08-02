@@ -1,5 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { CustomerFormData, Customer } from '@/types/customer';
+import {
+  EMPTY_CUSTOMER_FORM,
+  toCreditStatus,
+  type CustomerFormData,
+  type Customer,
+} from '@/types/customer';
+
+/**
+ * A Customer row with the standing-terms columns unset and credit open — the
+ * common case, and the state every pre-existing row lands in after the
+ * credit-hold migration's NOT NULL DEFAULT.
+ */
+const NO_STANDING_TERMS = {
+  default_payment_terms: null,
+  default_lead_time_text: null,
+  default_fob_point: null,
+  credit_status: 'open',
+  credit_hold_note: null,
+} as const;
 
 // Use vi.hoisted to define mock variables before vi.mock is called
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
@@ -61,6 +79,10 @@ import {
   softDeleteCustomer,
   pickBillingAddress,
   pickShippingAddress,
+  pickPaymentTerms,
+  pickLeadTimeText,
+  pickFobPoint,
+  hasTermDrift,
 } from '@/utils/customerAccess';
 import type { CustomerAddress } from '@/types/customer';
 
@@ -88,6 +110,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Customer One',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       },
@@ -96,6 +119,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Customer Two',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-02T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       },
@@ -150,6 +174,7 @@ describe('customerAccess utilities', () => {
       company_id: 'company-1',
       name: 'Customer One',
       website: null,
+      ...NO_STANDING_TERMS,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
@@ -175,6 +200,7 @@ describe('customerAccess utilities', () => {
       company_id: 'company-1',
       name: 'Customer One',
       website: null,
+      ...NO_STANDING_TERMS,
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
@@ -245,6 +271,7 @@ describe('customerAccess utilities', () => {
 
   describe('createCustomer', () => {
     const mockFormData: CustomerFormData = {
+      ...EMPTY_CUSTOMER_FORM,
       name: 'New Customer',
       website: 'https://new.com',
     };
@@ -255,6 +282,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: mockFormData.name,
         website: mockFormData.website,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -278,10 +306,92 @@ describe('customerAccess utilities', () => {
         code: '23505',
       });
     });
+
+    // A name collision with an ARCHIVED customer revives that row rather than
+    // blocking — name is the identity here. But a revive is the same
+    // relationship coming back, not a fresh customer wearing its name, so what
+    // the shop already knew has to survive the round trip.
+    describe('reviving an archived customer by name', () => {
+      const archived = { id: 'cust-old', deleted_at: '2026-01-15T00:00:00Z' };
+
+      /** insert → 23505, lookup → the archived row, update → the revived row. */
+      function stageRevive() {
+        const single = mockQueryBuilder.single as ReturnType<typeof vi.fn>;
+        const maybeSingle = mockQueryBuilder.maybeSingle as ReturnType<typeof vi.fn>;
+        single
+          .mockReturnValueOnce({ data: null, error: { code: '23505', message: 'dup' } })
+          .mockReturnValueOnce({
+            data: {
+              id: 'cust-old',
+              company_id: 'company-1',
+              name: 'Acme Industrial',
+              website: null,
+              ...NO_STANDING_TERMS,
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2026-02-01T00:00:00Z',
+            },
+            error: null,
+          });
+        maybeSingle.mockReturnValueOnce({ data: archived, error: null });
+      }
+
+      /** The column patch the revive actually sent. */
+      function revivePatch(): Record<string, unknown> {
+        const update = mockQueryBuilder.update as ReturnType<typeof vi.fn>;
+        return update.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      }
+
+      it('never touches the credit hold', async () => {
+        // The create form always starts from EMPTY_CUSTOMER_FORM, i.e.
+        // credit_status 'open'. Writing that would lift a hold as a side effect
+        // of someone re-typing the name into the quick-create modal, and destroy
+        // the note recording why they were held in the first place.
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+        });
+
+        const patch = revivePatch();
+        expect(patch).not.toHaveProperty('credit_status');
+        expect(patch).not.toHaveProperty('credit_hold_note');
+        expect(patch.deleted_at).toBeNull();
+      });
+
+      it('leaves standing terms alone when the form did not supply them', async () => {
+        // Blank on the create form means "didn't say", never "clear it" — there
+        // is nothing on that screen to clear, since the user is creating.
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+        });
+
+        const patch = revivePatch();
+        expect(patch).not.toHaveProperty('default_payment_terms');
+        expect(patch).not.toHaveProperty('default_lead_time_text');
+        expect(patch).not.toHaveProperty('default_fob_point');
+      });
+
+      it('does apply the values the form did supply', async () => {
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'Acme Industrial',
+          default_payment_terms: 'Net 45',
+        });
+
+        const patch = revivePatch();
+        expect(patch.default_payment_terms).toBe('Net 45');
+        expect(patch.name).toBe('Acme Industrial');
+        expect(patch).not.toHaveProperty('default_lead_time_text');
+      });
+    });
   });
 
   describe('updateCustomer', () => {
     const mockFormData: CustomerFormData = {
+      ...EMPTY_CUSTOMER_FORM,
       name: 'Updated Customer',
       website: '',
     };
@@ -292,6 +402,7 @@ describe('customerAccess utilities', () => {
         company_id: 'company-1',
         name: 'Updated Customer',
         website: null,
+        ...NO_STANDING_TERMS,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
@@ -372,5 +483,115 @@ describe('address pickers', () => {
     expect(pickShippingAddress({ addresses: [bill, ship] })?.id).toBe('ship');
     // No ship-to flag but a billing default exists → ship where we bill.
     expect(pickShippingAddress({ addresses: [bill, addr({ id: 'x' })] })?.id).toBe('bill');
+  });
+});
+
+describe('standing terms — resolution for a NEW quote', () => {
+  it('returns the customer value for each standing term', () => {
+    const customer = {
+      default_payment_terms: 'Net 45',
+      default_lead_time_text: '4-6 weeks ARO',
+      default_fob_point: 'FOB Cleveland, OH',
+    };
+    expect(pickPaymentTerms(customer)).toBe('Net 45');
+    expect(pickLeadTimeText(customer)).toBe('4-6 weeks ARO');
+    expect(pickFobPoint(customer)).toBe('FOB Cleveland, OH');
+  });
+
+  it('treats unset, blank and whitespace-only as "no standing agreement"', () => {
+    // The quote field is then left empty rather than prefilled with '' — the
+    // shop is told nothing rather than told something wrong.
+    expect(pickPaymentTerms({ default_payment_terms: null })).toBeNull();
+    expect(pickPaymentTerms({ default_payment_terms: '' })).toBeNull();
+    expect(pickPaymentTerms({ default_payment_terms: '   ' })).toBeNull();
+    expect(pickLeadTimeText(null)).toBeNull();
+    expect(pickFobPoint(undefined)).toBeNull();
+  });
+
+  it('trims a stored value so a stray space never reads as drift later', () => {
+    expect(pickPaymentTerms({ default_payment_terms: '  Net 30  ' })).toBe('Net 30');
+  });
+});
+
+describe('standing terms — drift is reported, never applied', () => {
+  // The load-bearing guarantee of this whole feature: a quote is an offer that
+  // has already been emailed as a PDF, so moving the customer's standing terms
+  // must never change what that quote says. hasTermDrift only ever REPORTS a
+  // difference; nothing in the read path rewrites the quote. This is what
+  // separates these defaults from the markup_rates module deleted in July 2026,
+  // which resolved a shared default at READ time and so silently rewrote history.
+  it('reports drift when the customer default has moved away from the quote value', () => {
+    expect(hasTermDrift('Net 30', 'Net 60')).toBe(true);
+  });
+
+  it('reports no drift when they agree, ignoring case and surrounding space', () => {
+    expect(hasTermDrift('Net 30', 'Net 30')).toBe(false);
+    expect(hasTermDrift('net 30', 'Net 30')).toBe(false);
+    expect(hasTermDrift(' Net 30 ', 'Net 30')).toBe(false);
+  });
+
+  it('reports no drift when the customer has no standing value', () => {
+    // A shop that never fills these in must never see a drift chip — there is
+    // nothing to have drifted FROM.
+    expect(hasTermDrift('Net 30', null)).toBe(false);
+    expect(hasTermDrift('Net 30', '')).toBe(false);
+    expect(hasTermDrift('Net 30', '   ')).toBe(false);
+    expect(hasTermDrift(null, null)).toBe(false);
+  });
+
+  it('reports drift when the quote states nothing but the customer now has terms', () => {
+    // Worth surfacing: an older quote written before the standing terms existed.
+    expect(hasTermDrift(null, 'Net 30')).toBe(true);
+    expect(hasTermDrift('', 'Net 30')).toBe(true);
+  });
+});
+
+describe('standing terms — drift is customer-scoped, not shop-scoped', () => {
+  // A quote that inherited the SHOP-WIDE default must not chip when the shop
+  // changes its house term. hasTermDrift takes the customer's standing terms as
+  // its second argument and nothing else, so the guarantee is structural: there
+  // is no parameter through which a company default could reach it.
+  //
+  // This matters because the failure is silent and wholesale — the day the shop
+  // moves from Net 30 to Net 45, every open quote that took the house term would
+  // light up at once. A chip that fires on everything is a chip people stop
+  // reading, which would also destroy the per-customer signal that IS worth
+  // showing. If someone later threads a company default into this comparison,
+  // this test is what should stop them.
+  it('reports nothing for a quote whose customer has no terms of their own', () => {
+    // The quote says "Net 30" because it inherited the shop default at create
+    // time. The customer has no standing terms, so there is nothing to drift
+    // from — regardless of what the shop default says today.
+    expect(hasTermDrift('Net 30', null)).toBe(false);
+  });
+
+  it('still reports drift once that customer is given terms of their own', () => {
+    // The moment there IS a per-customer agreement, a mismatch is meaningful
+    // again — this is the signal the chip exists for.
+    expect(hasTermDrift('Net 30', 'Net 60')).toBe(true);
+  });
+});
+
+describe('credit status — narrowing at the DB boundary', () => {
+  // credit_status is enum-via-CHECK, not a Postgres enum type, so the generated
+  // database types widen it to `string`. toCreditStatus is where it becomes the
+  // union again. It exists instead of an `as` cast because a cast compiles just
+  // as happily on a column that has genuinely drifted.
+  it('passes through the two real states', () => {
+    expect(toCreditStatus('open')).toBe('open');
+    expect(toCreditStatus('hold')).toBe('hold');
+  });
+
+  it('resolves anything else to open, never to hold', () => {
+    // customers_credit_status_check makes these unreachable; the branch exists
+    // to be honest about the type. The direction matters: inventing a credit
+    // hold nobody set would stop real work and erode trust in the flag, whereas
+    // failing to show one the DB could not have contained costs nothing.
+    expect(toCreditStatus(null)).toBe('open');
+    expect(toCreditStatus(undefined)).toBe('open');
+    expect(toCreditStatus('')).toBe('open');
+    expect(toCreditStatus('HOLD')).toBe('open');
+    expect(toCreditStatus('on_hold')).toBe('open');
+    expect(toCreditStatus('inactive')).toBe('open');
   });
 });

@@ -3,14 +3,16 @@
 // Aliased to getSupabase so the existing call sites stay untouched. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import type {
-  Customer,
-  CustomerAddress,
-  CustomerFormData,
-  CustomerFilter,
-  CustomerWithRelations,
-  CustomerWithAddresses,
-  ImportResult,
+import {
+  EMPTY_CUSTOMER_FORM,
+  toCreditStatus,
+  type Customer,
+  type CustomerAddress,
+  type CustomerFormData,
+  type CustomerFilter,
+  type CustomerWithRelations,
+  type CustomerWithAddresses,
+  type ImportResult,
 } from '@/types/customer';
 import type {
   CustomerContact,
@@ -99,6 +101,10 @@ export async function getCustomers(
 
   const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
     ...r,
+    // Narrowed explicitly rather than left to the row cast above: credit_status
+    // is enum-via-CHECK, so the generated types widen it to `string` and the
+    // cast would assert the union without anything checking it.
+    credit_status: toCreditStatus(r.credit_status),
     addresses: r.addresses ?? [],
     customer_contacts: r.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(r),
@@ -149,6 +155,7 @@ export async function getAllCustomers(
 
     const batch = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
       ...r,
+      credit_status: toCreditStatus(r.credit_status),
       addresses: r.addresses ?? [],
       customer_contacts: r.customer_contacts ?? [],
       primary_contact: extractPrimaryContact(r),
@@ -189,6 +196,7 @@ export async function getCustomer(
 
   return {
     ...data,
+    credit_status: toCreditStatus(data.credit_status),
     addresses: (data.addresses ?? []) as CustomerAddress[],
   };
 }
@@ -249,6 +257,7 @@ export async function getCustomerWithRelations(
 
   return {
     ...typedCustomer,
+    credit_status: toCreditStatus(typedCustomer.credit_status),
     addresses: typedCustomer.addresses ?? [],
     customer_contacts: typedCustomer.customer_contacts ?? [],
     primary_contact: extractPrimaryContact(typedCustomer),
@@ -292,6 +301,25 @@ export async function checkCustomerNameExists(
 }
 
 /**
+ * Map form data to the customer column set shared by insert, revive and update.
+ *
+ * Every optional field normalises '' → null: a cleared standing-terms field must
+ * genuinely clear the default, not store an empty string that would then prefill
+ * a blank onto every new quote and read as "set" to the drift check.
+ */
+function formDataToColumns(formData: CustomerFormData) {
+  return {
+    name: formData.name.trim(),
+    website: formData.website.trim() || null,
+    default_payment_terms: formData.default_payment_terms.trim() || null,
+    default_lead_time_text: formData.default_lead_time_text.trim() || null,
+    default_fob_point: formData.default_fob_point.trim() || null,
+    credit_status: formData.credit_status,
+    credit_hold_note: formData.credit_hold_note.trim() || null,
+  };
+}
+
+/**
  * Create a new customer. Optionally captures one initial contact (forced
  * to is_primary=true) — matches the VendorForm "Initial Contact" pattern.
  * Addresses are added separately from the detail page after creation.
@@ -307,8 +335,7 @@ export async function createCustomer(
     .from('customers')
     .insert({
       company_id: companyId,
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...formDataToColumns(formData),
     })
     .select()
     .single();
@@ -341,7 +368,7 @@ export async function createCustomer(
     }
   }
 
-  return customer;
+  return { ...customer, credit_status: toCreditStatus(customer.credit_status) };
 }
 
 /**
@@ -367,11 +394,33 @@ async function reviveArchivedCustomerByName(
   // No archived match (or the collision was with a live customer) → let the caller throw.
   if (!existing || existing.deleted_at === null) return null;
 
+  // A revive is NOT a fresh create wearing the same name — it is the same
+  // relationship coming back, so what the shop already knew about it has to
+  // survive. The caller is always the CREATE form, which starts from
+  // EMPTY_CUSTOMER_FORM, so a blank field here means "didn't say", never
+  // "deliberately cleared". Writing the whole column set would wipe the archived
+  // row's standing terms with those blanks.
+  //
+  // Credit status is stronger still: it is NEVER written by a revive. Lifting a
+  // hold has to be a deliberate act on the customer page, not a side effect of
+  // someone re-typing the name into the quick-create modal — and credit_hold_note
+  // records why they were held, which the migration keeps on purpose so the next
+  // person can see what happened last time.
+  const filled = formDataToColumns(formData);
+  const revivePatch: Record<string, string | null> = { name: filled.name };
+  for (const key of [
+    'website',
+    'default_payment_terms',
+    'default_lead_time_text',
+    'default_fob_point',
+  ] as const) {
+    if (filled[key] !== null) revivePatch[key] = filled[key];
+  }
+
   const { data, error } = await supabase
     .from('customers')
     .update({
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...revivePatch,
       deleted_at: null,
       updated_at: new Date().toISOString(),
     })
@@ -384,7 +433,7 @@ async function reviveArchivedCustomerByName(
     throw error;
   }
 
-  return data;
+  return { ...data, credit_status: toCreditStatus(data.credit_status) };
 }
 
 export async function updateCustomer(
@@ -396,8 +445,7 @@ export async function updateCustomer(
   const { data, error } = await supabase
     .from('customers')
     .update({
-      name: formData.name.trim(),
-      website: formData.website.trim() || null,
+      ...formDataToColumns(formData),
       updated_at: new Date().toISOString(),
     })
     .eq('id', customerId)
@@ -409,7 +457,7 @@ export async function updateCustomer(
     throw error;
   }
 
-  return data;
+  return { ...data, credit_status: toCreditStatus(data.credit_status) };
 }
 
 /**
@@ -525,7 +573,10 @@ export async function bulkImportCustomers(
     try {
       await createCustomer(
         companyId,
-        { name: row.name.trim(), website: row.website ?? '' },
+        // Standing terms aren't part of this legacy client-side CSV shape —
+        // the backend importer (api/routes/import_routes.py) owns the mapped
+        // fields. Defaults stay unset rather than being invented per row.
+        { ...EMPTY_CUSTOMER_FORM, name: row.name.trim(), website: row.website ?? '' },
         row.contact,
       );
       results.imported++;
@@ -589,6 +640,62 @@ export function pickPrimaryContact<T extends { id: string; is_primary: boolean }
 ): T | null {
   if (!contacts || contacts.length === 0) return null;
   return contacts.find((c) => c.is_primary) ?? null;
+}
+
+/**
+ * The customer's STANDING TERMS — payment terms, lead time and FOB point,
+ * resolved for a NEW quote.
+ *
+ * These are siblings of pickBillingAddress / pickShippingAddress /
+ * pickPrimaryContact above and are used at exactly the same moment:
+ * QuoteForm.handleCustomerChange, when the user picks a customer. The value is
+ * copied into the quote's own column, shown in an editable field with a helper
+ * line naming where it came from, and never read again from the customer.
+ *
+ * That create-time-resolve-then-freeze shape is what separates this from the
+ * `markup_rates` module deleted in July 2026: that resolved a shared named
+ * entity at READ time, so editing a rate silently rewrote finished documents.
+ * Here, editing a customer's standing terms changes only the NEXT quote —
+ * existing quotes keep what they were issued with, and any difference is
+ * surfaced as a drift chip rather than applied.
+ *
+ * Each returns null when the customer has no standing value, so the caller
+ * leaves the field empty rather than guessing.
+ */
+export function pickPaymentTerms(
+  customer: Pick<Customer, 'default_payment_terms'> | null | undefined,
+): string | null {
+  return customer?.default_payment_terms?.trim() || null;
+}
+
+export function pickLeadTimeText(
+  customer: Pick<Customer, 'default_lead_time_text'> | null | undefined,
+): string | null {
+  return customer?.default_lead_time_text?.trim() || null;
+}
+
+export function pickFobPoint(
+  customer: Pick<Customer, 'default_fob_point'> | null | undefined,
+): string | null {
+  return customer?.default_fob_point?.trim() || null;
+}
+
+/**
+ * Does this quote's value still match the customer's current standing default?
+ *
+ * Returns false when the customer has no standing value (nothing to drift from)
+ * or when the two agree. A true result means the customer's default has moved
+ * since this quote was written — the UI shows a chip offering the new value and
+ * never applies it silently. Compared trimmed and case-insensitively so
+ * "net 30" vs "Net 30" isn't reported as drift.
+ */
+export function hasTermDrift(
+  quoteValue: string | null | undefined,
+  customerDefault: string | null | undefined,
+): boolean {
+  const std = customerDefault?.trim();
+  if (!std) return false;
+  return (quoteValue ?? '').trim().toLowerCase() !== std.toLowerCase();
 }
 
 // Helper re-exports so older callers that imported types from this file

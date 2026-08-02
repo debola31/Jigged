@@ -179,17 +179,33 @@ test.describe('Job invoicing (QuickBooks)', () => {
     await expect(createBtn).toBeEnabled();
 
     // Creating the invoice opens a new tab pointed straight at the QuickBooks
-    // invoice deep link (not just a snackbar). Stub the external QBO page so the
-    // popup navigation commits to that URL — otherwise a real (unauthenticated)
-    // hit to Intuit redirects to its sign-in page and the URL check is flaky.
-    await page.context().route('**/app/invoice**', (route) =>
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<html>QBO invoice</html>' }),
+    // invoice deep link (not just a snackbar). Stub whatever QBO host the link
+    // names so the popup commits to OUR url — otherwise a real (unauthenticated)
+    // hit to Intuit redirects to its sign-in page and there is nothing left to
+    // assert on. Matched by hostname, not by path: the path is the thing under
+    // test, and a path-shaped stub silently stops matching the moment the link
+    // shape changes, which is exactly how this spec passed a broken link before.
+    await page.context().route(
+      (url) => url.hostname.endsWith('qbo.intuit.com'),
+      (route) =>
+        route.fulfill({ status: 200, contentType: 'text/html', body: '<html>QBO</html>' }),
     );
     const popupPromise = page.waitForEvent('popup');
     await createBtn.click();
     const invoiceTab = await popupPromise;
-    await invoiceTab.waitForURL(/app\/invoice/, { timeout: 10_000 });
-    expect(invoiceTab.url()).toContain('/app/invoice');
+    await invoiceTab.waitForURL(/qbo\.intuit\.com/, { timeout: 10_000 });
+
+    // The link has to carry TWO things, and the second is a correctness fix
+    // rather than a nicety. `pagereq` is what survives Intuit's sign-in bounce
+    // (they stash it in a qbo.deeplink cookie), so without the txnId in there a
+    // cold user lands on a blank new-invoice screen. And `deeplinkcompanyid`
+    // pins the company: the old link named none, so someone signed into a
+    // different QBO company followed it into THAT company's invoice with the
+    // same numeric id.
+    const deepLink = new URL(invoiceTab.url());
+    expect(deepLink.pathname).toBe('/login');
+    expect(deepLink.searchParams.get('deeplinkcompanyid')).toBe(REALM);
+    expect(deepLink.searchParams.get('pagereq')).toMatch(/^invoice\?txnId=.+/);
     await invoiceTab.close();
 
     // Success snackbar + the toolbar Invoices dropdown now shows the new invoice.

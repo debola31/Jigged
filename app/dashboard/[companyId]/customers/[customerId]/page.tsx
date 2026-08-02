@@ -27,6 +27,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import StarIcon from '@mui/icons-material/Star';
 import StarOutlineIcon from '@mui/icons-material/StarOutline';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 
 import {
   getCustomerWithRelations,
@@ -34,8 +35,9 @@ import {
 } from '@/utils/customerAccess';
 import {
   getContactsForCustomer,
-  deleteCustomerContact,
+  archiveCustomerContact,
   setPrimaryContact,
+  setBillingDefaultContact,
 } from '@/utils/customerContactsAccess';
 import {
   getAddressesForCustomer,
@@ -191,11 +193,27 @@ export default function CustomerDetailPage() {
     if (!deleteContactId) return;
     setActionLoading(true);
     try {
-      await deleteCustomerContact(deleteContactId);
+      await archiveCustomerContact(deleteContactId);
       setDeleteContactId(null);
       await refreshContacts();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete contact');
+      setError(err instanceof Error ? err.message : 'Failed to remove contact');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+  /**
+   * Toggle who invoices go to. Clicking the current billing contact clears it —
+   * a customer is allowed to have none, and forcing one would make the office
+   * name a person they haven't agreed on.
+   */
+  const handleToggleBillingDefault = async (contactId: string, isCurrent: boolean) => {
+    setActionLoading(true);
+    try {
+      await setBillingDefaultContact(customerId, isCurrent ? null : contactId);
+      await refreshContacts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set billing contact');
     } finally {
       setActionLoading(false);
     }
@@ -452,6 +470,20 @@ export default function CustomerDetailPage() {
                               {contact.name}
                             </Typography>
                             <Chip size="small" label={roleDisplayLabel(contact)} variant="outlined" />
+                            {/* Named separately from the role chip: a contact's
+                                role is who they ARE at the customer, this is a
+                                job we've given them. The AP clerk is usually the
+                                billing contact, but not always — a buyer at a
+                                small shop often is too. */}
+                            {contact.is_billing_default && (
+                              <Chip
+                                size="small"
+                                color="primary"
+                                variant="outlined"
+                                icon={<ReceiptLongIcon />}
+                                label="Invoices"
+                              />
+                            )}
                           </Box>
                           <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
                             {contact.email && (
@@ -485,6 +517,29 @@ export default function CustomerDetailPage() {
                               </span>
                             </Tooltip>
                           )}
+                          <Tooltip
+                            title={
+                              contact.is_billing_default
+                                ? 'Stop sending invoices here'
+                                : 'Send invoices to this contact'
+                            }
+                          >
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() =>
+                                  handleToggleBillingDefault(
+                                    contact.id,
+                                    contact.is_billing_default,
+                                  )
+                                }
+                                disabled={actionLoading}
+                                color={contact.is_billing_default ? 'primary' : 'default'}
+                              >
+                                <ReceiptLongIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                           <Tooltip title="Edit contact">
                             <span>
                               <IconButton
@@ -877,11 +932,12 @@ export default function CustomerDetailPage() {
         open={!!deleteContactId}
         onClose={() => !actionLoading && setDeleteContactId(null)}
       >
-        <DialogTitle>Delete contact?</DialogTitle>
+        <DialogTitle>Remove contact?</DialogTitle>
         <DialogContent>
           <Typography>
-            Delete <strong>{contactBeingDeleted?.name ?? 'this contact'}</strong>?
-            This can&apos;t be undone.
+            <strong>{contactBeingDeleted?.name ?? 'This contact'}</strong> will stop
+            being offered on new quotes and jobs. Quotes and jobs that already name
+            them keep working, and you can add them again with the same details.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -894,7 +950,7 @@ export default function CustomerDetailPage() {
             variant="contained"
             disabled={actionLoading}
           >
-            Delete
+            Remove
           </Button>
         </DialogActions>
       </Dialog>

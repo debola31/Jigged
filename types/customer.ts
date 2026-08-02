@@ -152,6 +152,13 @@ export interface CustomerListContact {
   email: string | null;
   phone: string | null;
   is_primary: boolean;
+  is_billing_default: boolean;
+  /**
+   * Carried so a picker can drop archived people while keeping the one a
+   * document already names — blanking a job's contact because that person left
+   * would lose who the work was actually agreed with.
+   */
+  deleted_at: string | null;
 }
 
 export interface CustomerWithRelations extends Customer {

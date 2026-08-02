@@ -52,7 +52,10 @@ export default function JobBillingShippingCard({
 }) {
   const router = useRouter();
   const addresses: JobAddress[] = job.customers?.addresses ?? [];
-  const contacts: JobContact[] = job.customers?.customer_contacts ?? [];
+  // Archived contacts leave the picker, keeping one this job already names.
+  const contacts: JobContact[] = (job.customers?.customer_contacts ?? []).filter(
+    (c) => c.deleted_at === null || c.id === job.contact_id,
+  );
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);

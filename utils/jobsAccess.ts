@@ -249,7 +249,7 @@ export async function getJobWithRelations(
       *,
       customers!left(
         id, name,
-        customer_contacts(id, name, role, email, phone, is_primary),
+        customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at),
         addresses:customer_addresses(
           id,
           address_line1, address_line2, city, state, postal_code, country,

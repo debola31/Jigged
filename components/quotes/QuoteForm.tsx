@@ -750,6 +750,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         email: saved.email,
         phone: saved.phone,
         is_primary: saved.is_primary,
+        is_billing_default: saved.is_billing_default,
+        deleted_at: saved.deleted_at,
       };
       setCustomersById((prev) => {
         const existing = prev.get(formData.customer_id);
@@ -771,7 +773,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     ? customersById.get(formData.customer_id) ?? null
     : null;
   const customerAddresses: CustomerAddress[] = selectedCustomer?.addresses ?? [];
-  const customerContacts: CustomerListContact[] = selectedCustomer?.customer_contacts ?? [];
+  // Archived contacts leave the picker, keeping one this quote already names
+  // so editing an older quote never blanks the person it was agreed with.
+  const customerContacts: CustomerListContact[] = (
+    selectedCustomer?.customer_contacts ?? []
+  ).filter((c) => c.deleted_at === null || c.id === formData.contact_id);
 
   /**
    * Multi-line address display used in both the Select's renderValue

@@ -98,6 +98,7 @@ import {
   uploadFileToStorage,
 } from '@/utils/storageHelpers';
 import type { InventoryLocation } from '@/types/inventoryLocations';
+import { ID_CHUNK } from '@/lib/queryLimits';
 
 const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocation => ({
   company_id: 'co1',
@@ -1077,5 +1078,38 @@ describe('moveLocation — error mapping', () => {
     );
 
     await expect(moveLocation('shelf', 'cab2', 'co1')).rejects.not.toThrow(/23505|unique constraint/);
+  });
+});
+
+/**
+ * The chunk size is a transport limit, and it was wrong by more than double.
+ *
+ * Measured against the local PostgREST gateway with real UUIDs on 2026-08-01: 200 ids returns
+ * 200 OK, 220 returns **414 URI Too Long**. The old value was 500, with a comment claiming it
+ * kept the list "well inside PostgREST's URL limits" — so any shop with more than ~200 stocked
+ * parts got a hard 414 on every chunk. Contour has 9,428.
+ */
+describe('ID_CHUNK', () => {
+  it('stays under the measured 414 threshold, with headroom', () => {
+    expect(ID_CHUNK).toBeLessThanOrEqual(200);
+    // Not so small that a real catalogue becomes hundreds of round trips.
+    expect(ID_CHUNK).toBeGreaterThanOrEqual(100);
+  });
+
+  it('is what getBalancesForParts actually chunks by', async () => {
+    const ids = Array.from({ length: ID_CHUNK + 1 }, (_, i) => 'p' + i);
+    // locations + two chunks (the second holds the one leftover id).
+    queueFrom(
+      { data: [loc({ id: 'l1' })], error: null },
+      { data: [], error: null },
+      { data: [], error: null },
+    );
+
+    await getBalancesForParts('co1', ids);
+
+    const inCalls = state.calls.filter((c) => c.in).map((c) => (c.in as [string, string[]])[1]);
+    expect(inCalls).toHaveLength(2);
+    expect(inCalls[0]).toHaveLength(ID_CHUNK);
+    expect(inCalls[1]).toHaveLength(1);
   });
 });

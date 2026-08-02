@@ -16,12 +16,13 @@
  * says so on screen.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { ID_CHUNK } from '@/lib/queryLimits';
 
 import { buildRequirement } from '@/lib/materialRequirements';
 import type { MaterialRequirement, MaterialStockFacts } from '@/types/materialCheck';
 
 const CHUNK_PARENTS = 200;
-const CHUNK_IDS = 500;
+const CHUNK_IDS = ID_CHUNK;
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];

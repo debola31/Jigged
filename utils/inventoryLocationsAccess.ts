@@ -10,6 +10,7 @@
  * both the display values and the converted quantity.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
 import { resolveMovementAttribution } from '@/utils/movementAttribution';
@@ -578,7 +579,7 @@ export async function getBalancesForParts(
   if (partIds.length === 0) return byPart;
 
   const supabase = getSupabase();
-  const CHUNK = 500; // keep the IN () list well inside PostgREST's URL limits
+  const CHUNK = ID_CHUNK;
   const PAGE = 1000; // PostgREST's `max_rows`
 
   /**

@@ -11,6 +11,7 @@
  * independent fact, so line 50 failing doesn't invalidate lines 1-49.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { ID_CHUNK } from '@/lib/queryLimits';
 import { getStockedParts, adjustPartStock } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
@@ -257,7 +258,7 @@ export async function refreshLocationQuantities(
   if (partIds.length === 0) return out;
 
   const supabase = getSupabase();
-  const CHUNK = 500;
+  const CHUNK = ID_CHUNK;
 
   for (let i = 0; i < partIds.length; i += CHUNK) {
     const { data, error } = await supabase
@@ -291,7 +292,7 @@ export async function refreshSystemQuantities(partIds: string[]): Promise<Map<st
   if (partIds.length === 0) return out;
 
   const supabase = getSupabase();
-  const CHUNK = 500;
+  const CHUNK = ID_CHUNK;
 
   for (let i = 0; i < partIds.length; i += CHUNK) {
     const { data, error } = await supabase

@@ -59,6 +59,7 @@ import {
 } from '@/utils/shipmentsAccess';
 import {
   lineShipConsequence,
+  carrierAccountMismatch,
   type ShipConsequence,
 } from '@/components/shipments/shipmentMath';
 
@@ -272,6 +273,23 @@ export default function ShipmentForm({
           // arriving at the same moment anyway.
           setFreightTerms(freight.terms ?? '');
           setFreightAccountId(freight.account?.id ?? '');
+          // Seed the carrier from the account we just resolved. Without this the
+          // packer picks a carrier from an empty field with the account sitting
+          // right beside it, and the slip prints "Carrier: FedEx" directly above
+          // "Freight: … — UPS ••••72W9". Seeding rather than forcing is the
+          // point: it is a visible default they can change, not a value written
+          // over them — a shipment genuinely can move on a different carrier
+          // than the account it bills to.
+          if (freight.account?.carrier) {
+            const match = CARRIER_OPTIONS.find(
+              (c) => c.toLowerCase() === freight.account!.carrier.trim().toLowerCase(),
+            );
+            if (match) setCarrierChoice(match);
+            else {
+              setCarrierChoice('other');
+              setCarrierOther(freight.account.carrier);
+            }
+          }
           setJobShipVia(job.ship_via);
           setJobShippingInstructions(job.shipping_instructions);
 
@@ -434,6 +452,9 @@ export default function ShipmentForm({
   );
   const selectedFreightAccount =
     freightAccountOptions.find((a) => a.id === freightAccountId) ?? null;
+  // Kept as a primitive so the validation memo depends on a string rather than
+  // an object the compiler cannot prove stable.
+  const freightAccountCarrier = selectedFreightAccount?.carrier.trim() ?? '';
 
   const validation: Validation = useMemo(() => {
     const contributing = lines
@@ -497,7 +518,31 @@ export default function ShipmentForm({
       warnings,
       blockingMessages,
     };
-  }, [lines, isCustomerMode, shippingAddressId, shippingMethod, carrierChoice, carrierOther]);
+  }, [
+    lines,
+    isCustomerMode,
+    shippingAddressId,
+    shippingMethod,
+    carrierChoice,
+    carrierOther,
+  ]);
+
+  /**
+   * The slip prints the carrier and the freight line one above the other, so a
+   * mismatch reads as a contradiction to whoever opens the box:
+   * "Carrier: FedEx" over "Freight: … — UPS ••••72W9".
+   *
+   * It is not always wrong — a shop can move a box on one carrier and bill
+   * another's account — so this warns rather than blocks. Computed OUTSIDE the
+   * validation memo on purpose: it keeps that memo's deps primitive, and it
+   * makes it structurally impossible for this to ever reach `canSubmit`.
+   */
+  const carrierMismatchWarning = freightApplies
+    ? carrierAccountMismatch(
+        carrierChoice === 'other' ? carrierOther : carrierChoice,
+        freightAccountCarrier,
+      )
+    : null;
 
   // ---------- Helpers to mutate a single line by id ----------
   const patchLine = useCallback((jobPartId: string, patch: Partial<LineRow>) => {
@@ -680,6 +725,11 @@ export default function ShipmentForm({
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               From the PO: {[jobShipVia, jobShippingInstructions].filter(Boolean).join(' · ')}
             </Typography>
+          )}
+          {carrierMismatchWarning && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {carrierMismatchWarning}
+            </Alert>
           )}
         </Box>
       )}

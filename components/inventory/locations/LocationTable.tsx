@@ -30,6 +30,18 @@
  * a four-level tree was already partly invisible. Depth reads three redundant ways — indentation,
  * the `Inside` count, and the full breadcrumb in the detail drawer.
  *
+ * ## No selection checkboxes
+ *
+ * There were some, briefly, for bulk label printing — #648 listed bulk edit as a table advantage
+ * and I took that as a requirement. It was arguing from a feature list rather than from a job.
+ * The jobs that exist are covered: **Print all labels** for setup, and **Print QR** in the drawer
+ * for one place and everything under it. Bulk-print-a-*subset* is the leftover, nobody has asked
+ * for it twice, and a checkbox column charges every row on every visit for it. This page's own
+ * principle is "design for the sustain, not the setup", and printing labels is setup.
+ *
+ * If it turns out to be real, a dialog with a checklist probably beats a selection mode in the
+ * table: selection is then obviously scoped to printing, and the table never changes behaviour.
+ *
  * ## Everything is a row, including Unassigned
  *
  * `Unassigned` is the auto-managed put-away pile, not a shelf. It sorts last and says so inline,
@@ -39,7 +51,6 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
-import Checkbox from '@mui/material/Checkbox';
 import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import Table from '@mui/material/Table';
@@ -122,19 +133,9 @@ export interface LocationTableProps {
   onOpen: (node: InventoryLocationNode) => void;
   /** Straight to that place's count worksheet, without the drawer. */
   onCountHere: (node: InventoryLocationNode) => void;
-  /** Selected ids, for bulk label printing. Owned by the caller so the toolbar can read it. */
-  selectedIds: ReadonlySet<string>;
-  onSelectedChange: (ids: Set<string>) => void;
 }
 
-export default function LocationTable({
-  tree,
-  occupancy,
-  onOpen,
-  onCountHere,
-  selectedIds,
-  onSelectedChange,
-}: LocationTableProps) {
+export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: LocationTableProps) {
   /**
    * Collapsed, not expanded: the default is everything visible.
    *
@@ -153,35 +154,11 @@ export default function LocationTable({
       return next;
     });
 
-  const toggleSelected = (id: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onSelectedChange(next);
-  };
-
-  // Selecting "all" means all VISIBLE rows — a collapsed subtree is not silently included, or
-  // "print labels for selected" would print things you cannot see.
-  const allVisibleSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.node.id));
-  const someVisibleSelected = rows.some((r) => selectedIds.has(r.node.id));
-
   return (
     <TableContainer component={Paper} elevation={2}>
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell padding="checkbox">
-              <Checkbox
-                checked={allVisibleSelected}
-                indeterminate={someVisibleSelected && !allVisibleSelected}
-                onChange={() =>
-                  onSelectedChange(
-                    allVisibleSelected ? new Set() : new Set(rows.map((r) => r.node.id)),
-                  )
-                }
-                inputProps={{ 'aria-label': 'Select all places' }}
-              />
-            </TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Place</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Code</TableCell>
             <TableCell sx={{ fontWeight: 600 }} align="right">
@@ -195,17 +172,27 @@ export default function LocationTable({
           {rows.map(({ node, depth }) => {
             const occ = occupancyFor(occupancy, node.id);
             const isSystem = node.kind === SYSTEM_KIND;
+            const countLabel = isSystem ? `Put away from ${node.name}` : `Count ${node.name}`;
             return (
               <Fragment key={node.id}>
-                <TableRow hover selected={selectedIds.has(node.id)}>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      checked={selectedIds.has(node.id)}
-                      onChange={() => toggleSelected(node.id)}
-                      inputProps={{ 'aria-label': `Select ${node.name}` }}
-                    />
-                  </TableCell>
+                {/*
+                  The WHOLE row opens the place. Only the name was clickable before, which left
+                  most of a wide row as dead space.
 
+                  Deliberately NOT "a parent row expands": that gives one gesture two meanings
+                  depending on whether a row happens to have children, and it would cost parent
+                  rows their drawer — where rename, print QR, photo and history live. Expanding is
+                  the chevron's job, and it costs nothing to separate them because the drawer
+                  already lists what is inside with each child clickable.
+
+                  Mouse affordance only. The name stays a real <button> so the row is reachable and
+                  announced by keyboard and screen reader without pretending a <tr> is a control.
+                */}
+                <TableRow
+                  hover
+                  onClick={() => onOpen(node)}
+                  sx={{ cursor: 'pointer' }}
+                >
                   <TableCell>
                     {/* Indentation is the depth signal. `pl` scales with depth rather than nesting
                         real elements, so a row stays one row at any depth. */}
@@ -213,7 +200,11 @@ export default function LocationTable({
                       {node.children.length > 0 ? (
                         <IconButton
                           size="small"
-                          onClick={() => toggleCollapse(node.id)}
+                          // The row opens the place; this must not also do that.
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCollapse(node.id);
+                          }}
                           aria-label={
                             collapsed.has(node.id) ? `Expand ${node.name}` : `Collapse ${node.name}`
                           }
@@ -232,7 +223,12 @@ export default function LocationTable({
                       <Box sx={{ minWidth: 0 }}>
                         <Typography
                           component="button"
-                          onClick={() => onOpen(node)}
+                          onClick={(e: React.MouseEvent) => {
+                            // Redundant with the row, but keeps a focusable control with a real
+                            // accessible name. Stopped so the handler does not fire twice.
+                            e.stopPropagation();
+                            onOpen(node);
+                          }}
                           sx={{
                             background: 'none',
                             border: 0,
@@ -285,10 +281,16 @@ export default function LocationTable({
                   </TableCell>
 
                   <TableCell align="right">
-                    <Tooltip title={isSystem ? `Put away from ${node.name}` : `Count ${node.name}`}>
+                    {/* Tooltip and accessible name must agree. They didn't: sighted users read
+                        "Put away from Unassigned" while a screen reader said "Count Unassigned".
+                        The worksheet does both, and at the pile putting away is the real job. */}
+                    <Tooltip title={countLabel}>
                       <IconButton
-                        onClick={() => onCountHere(node)}
-                        aria-label={`Count ${node.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCountHere(node);
+                        }}
+                        aria-label={countLabel}
                         sx={{ width: 48, height: 48 }}
                       >
                         <FactCheckOutlinedIcon />

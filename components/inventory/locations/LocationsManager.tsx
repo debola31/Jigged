@@ -369,9 +369,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
     }
   };
 
-  /** Rows ticked in the table, for bulk label printing. Owned here so the toolbar can read it. */
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-
   const printLabels = async (labels: LocationLabel[], filename: string) => {
     if (labels.length === 0) {
       setToast('No locations to print yet.');
@@ -384,18 +381,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       heading: companyName,
     });
     doc.save(filename);
-  };
-
-  /**
-   * Just the ticked rows — NOT their descendants.
-   *
-   * Deliberately unlike the drawer's "Print QR", which collects the node plus everything under it
-   * because you asked about one place and meant the shelf and its bins. Here you ticked exactly
-   * what you can see, and a collapsed subtree is excluded from selection for the same reason.
-   */
-  const printSelectedLabels = async () => {
-    const wanted = allLabels.filter((l) => selectedIds.has(l.id));
-    await printLabels(wanted, 'inventory-labels-selected.pdf');
   };
 
   const printAllLabels = async () => {
@@ -434,13 +419,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       {tree.length > 0 && (
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <Box sx={{ flex: 1 }} />
-        {/* Selection-driven, and the single biggest thing a table gives that the board could not:
-            re-labelling twenty places was twenty trips through a drawer. #648 named it. */}
-        {selectedIds.size > 0 && (
-          <Button variant="outlined" startIcon={<QrCode2Icon />} onClick={printSelectedLabels}>
-            Print {selectedIds.size} label{selectedIds.size === 1 ? '' : 's'}
-          </Button>
-        )}
         <Button
           variant="outlined"
           startIcon={<QrCode2Icon />}
@@ -526,8 +504,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
             onCountHere={(node) =>
               router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
             }
-            selectedIds={selectedIds}
-            onSelectedChange={setSelectedIds}
           />
         </>
       )}

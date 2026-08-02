@@ -3534,11 +3534,6 @@ export type Database = {
         }
         Returns: Json
       }
-      disable_location_tracking: { Args: { p_part_id: string }; Returns: Json }
-      enable_location_tracking: {
-        Args: { p_initial_location_id?: string; p_part_id: string }
-        Returns: Json
-      }
       enable_location_tracking_for_company: {
         Args: { p_company_id: string }
         Returns: Json

@@ -76,8 +76,6 @@ import {
   depleteStockAtLocation,
   adjustStockAtLocation,
   transferStock,
-  enableLocationTracking,
-  disableLocationTracking,
   getLocationOccupancy,
   getLocationBoard,
   getLocationContents,
@@ -325,22 +323,7 @@ describe('RPC wrappers', () => {
     expect(res.transfer_group_id).toBe('grp1');
   });
 
-  it('enableLocationTracking calls the opt-in RPC with the optional initial location', async () => {
-    state.rpc = { data: { location_id: 'unassigned', part_quantity: 100, tracked: true }, error: null };
-    const res = await enableLocationTracking('part1', 'loc1');
-    expect(mockSupabase.rpc).toHaveBeenCalledWith('enable_location_tracking', {
-      p_part_id: 'part1',
-      p_initial_location_id: 'loc1',
-    });
-    expect(res.tracked).toBe(true);
-  });
 
-  it('disableLocationTracking calls the opt-out RPC', async () => {
-    state.rpc = { data: { part_quantity: 100, tracked: false }, error: null };
-    const res = await disableLocationTracking('part1');
-    expect(mockSupabase.rpc).toHaveBeenCalledWith('disable_location_tracking', { p_part_id: 'part1' });
-    expect(res.tracked).toBe(false);
-  });
 
   it('propagates an RPC error (e.g. the DB tenancy guard rejecting cross-company ids)', async () => {
     queueFrom(partCtx());

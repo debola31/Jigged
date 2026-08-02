@@ -33,7 +33,6 @@ import type {
   PartLocationBalanceWithLocation,
   ResolvedScan,
   StockMutationResult,
-  TrackingResult,
   TransferResult,
   UpdateLocationInput,
 } from '@/types/inventoryLocations';
@@ -853,31 +852,12 @@ async function loadConversionContext(
   };
 }
 
-export async function enableLocationTracking(
-  partId: string,
-  initialLocationId?: string,
-): Promise<TrackingResult> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase.rpc('enable_location_tracking', {
-    p_part_id: partId,
-    p_initial_location_id: initialLocationId,
-  });
-  if (error) {
-    console.error('Error enabling location tracking:', error);
-    throw error;
-  }
-  return data as unknown as TrackingResult;
-}
-
-export async function disableLocationTracking(partId: string): Promise<TrackingResult> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase.rpc('disable_location_tracking', { p_part_id: partId });
-  if (error) {
-    console.error('Error disabling location tracking:', error);
-    throw error;
-  }
-  return data as unknown as TrackingResult;
-}
+/*
+ * `enableLocationTracking` / `disableLocationTracking` were removed 2026-08-02 with the RPCs they
+ * called (migration 20260802015101). Every part has a place now, so there is nothing to opt into,
+ * and both had been callerless for weeks — `disable` in particular deleted every balance row for
+ * a part while being executable by any signed-in browser role.
+ */
 
 export async function addStockAtLocation(
   partId: string,

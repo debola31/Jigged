@@ -124,13 +124,6 @@ export interface TransferResult {
   to_balance: number;
 }
 
-export interface TrackingResult {
-  part_quantity: number;
-  tracked: boolean;
-  location_id?: string;
-  noop?: boolean;
-}
-
 export interface DepleteOptions {
   graceful?: boolean;
   notes?: string;

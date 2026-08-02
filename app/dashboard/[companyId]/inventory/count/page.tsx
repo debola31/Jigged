@@ -365,7 +365,10 @@ export default function InventoryCountPage() {
             setPartName(only.partName);
             setCandidates([only]);
             setHereTotal(1);
-            setSelected(new Map([[only.partId, only]]));
+            // `countRowKey`, not the bare part id: every other writer and every reader of
+            // `selected` keys by row. A part-id key is invisible while this sheet has one row,
+            // and becomes a duplicate (part, place) the moment a place can be added to it.
+            setSelected(new Map([[countRowKey(only), only]]));
             setEntries({});
             rememberOpenedWith([only]);
             setStep(1);
@@ -515,7 +518,10 @@ export default function InventoryCountPage() {
     if (!option || !locationId) return;
     setAddNonce((n) => n + 1);
 
-    if (selected.has(option.id)) {
+    // `selected` is keyed by `countRowKey` (`partId::locationId`), so probing it with a bare part
+    // id never matched and this guard has never once fired — re-adding a part silently re-fetched
+    // and overwrote its row, discarding whatever had been typed into it.
+    if ([...selected.values()].some((c) => c.partId === option.id)) {
       setSnack({ msg: `${option.part_name} is already on the sheet.`, severity: 'success' });
       return;
     }
@@ -525,7 +531,9 @@ export default function InventoryCountPage() {
       setSelected((prev) => new Map(prev).set(countRowKey(c), c));
       // Prepend so it is visible without hunting: it is not on this page of the server list, and
       // may not be on any page.
-      setCandidates((prev) => [c, ...prev.filter((x) => x.partId !== c.partId)]);
+      // Dedupe by ROW, not by part: a part legitimately appears once per place, so dropping
+      // every row that shares a part id would delete its other shelves from the list.
+      setCandidates((prev) => [c, ...prev.filter((x) => countRowKey(x) !== countRowKey(c))]);
       rememberOpenedWith([c]);
     } catch (e) {
       setSnack({

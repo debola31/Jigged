@@ -516,7 +516,23 @@ function MyContribution({ companyId }: { companyId: string }) {
           <Typography variant="overline" color="text.secondary">
             What you&apos;ve added
           </Typography>
-          <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', mt: 0.5 }}>
+          {/* Three equal columns rather than three items pushed against the left edge.
+              A stat row reads as a set, and an even rhythm is what makes it one — clustered
+              left, the numbers looked like the start of a sentence that ran out.
+
+              CAPPED, not stretched to the card. Nothing constrains the operator column's
+              width on this branch, so `space-between` on a laptop would strand "views"
+              several hundred pixels from "notes". At 420px the row fills a phone (~340px of
+              usable width) and stays a group everywhere wider. */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: 2,
+              maxWidth: 420,
+              mt: 0.5,
+            }}
+          >
             <Box>
               <Typography variant="h4" fontWeight={700}>
                 {c.noteCount}
@@ -538,12 +554,15 @@ function MyContribution({ companyId }: { companyId: string }) {
                 is a view total, not a headcount. A distinct-people figure would
                 need the note_views rows, which no browser role can read by
                 design. The per-note numbers below are exact. */}
+            {/* NOT GREEN, unlike the per-note count below.
+                Green is semantic in this theme — success.main is a state, not a decoration —
+                and a lifetime view total has no state to report. It is also the only one of
+                three sibling metrics that was coloured, which made the least actionable
+                number the loudest thing in the card. On a note row the same green earns its
+                place, because there it is binary and comparative: it marks which notes have
+                landed as you scan a column of them. Here there is nothing to compare it to. */}
             <Box>
-              <Typography
-                variant="h4"
-                fontWeight={700}
-                sx={{ color: c.peopleReached > 0 ? 'success.light' : 'text.primary' }}
-              >
+              <Typography variant="h4" fontWeight={700}>
                 {c.peopleReached}
               </Typography>
               <Typography variant="caption" color="text.secondary">

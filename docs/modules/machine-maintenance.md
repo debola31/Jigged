@@ -32,6 +32,14 @@
 the only entrance to this module, and the one live defect in it named in
 [§6](#6-phases-and-gates).
 
+> **An entry is a `notes` row**, `subject_kind='work_center'` with `note_type='user'` — not a
+> separate store. So maintenance entries are part of the author's contribution and appear on
+> **My work** beside their job and part notes, where the row names the machine in the slot a job
+> note uses for its job number. The CHECK constraint on `notes` permits exactly one subject, so a
+> maintenance entry carries no part, no operation and no job; before the machine name was
+> selected there, those rows rendered as a bare sentence with nothing saying what they concerned.
+> Anything that changes what an entry carries has to be checked on that surface too.
+
 ---
 
 ## 1. Problem

@@ -239,9 +239,15 @@ irreversibility.
   recover *when* a note was read, which combined with `note_viewers()` naming the
   reader reconstructs "Kurtis had to look this up on Tuesday". A count is a number
   the server already told us, so subtracting on the client leaks nothing.
-- **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then each
-  note with its view count, the job it was written on beside the date, and on tap
-  the named viewers plus an **Open J-NNNN** link back to the source.
+- **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then the
+  operator's notes ten at a time behind **Show more**. Each row is the note itself,
+  with one quiet metadata line beneath it: the view count, one reference, and the
+  date. The reference is the job number for a job or part note and the **work
+  center** for a maintenance entry — a `notes` row has exactly one subject under the
+  CHECK constraint, so they are mutually exclusive; `part_name` appears only as a
+  fallback once a durable part note's capturing job has been deleted. Tapping the
+  view count reveals the named viewers; the overflow menu carries **Open J-NNNN**,
+  Edit and Delete.
 
 **The word is "views", never "uses".** All that is recorded is that someone opened
 a note and stayed on it. Whether they acted on it is not measured, and claiming it
@@ -518,7 +524,7 @@ to protect.
 | Job parts hub | `/operator/{companyId}/jobs/{jobId}` | For multi-part jobs, lists the job's parts with progress; single-part jobs redirect straight to the traveler. |
 | Part traveler | `…/jobs/{jobId}/parts/{jobPartId}` | All steps for one part (read-only), with a back-link to the parts hub on multi-part jobs. |
 | Operation action | `…/parts/{jobPartId}/operations/{jobOperationId}` | Internal step: **Mark Complete** / **Undo**. Outside step: an "Outside process" banner (+ vendor) and **Mark Sent Out** / **Mark Received** (station-mismatch guard suppressed — outside steps have no operator station). Both: notes + photos, "last time we ran this part" guidance. |
-| My work | `/operator/{companyId}/my-work` | The author's own contribution and its reception: notes / photos / views, each note's view count, the job it was written on, and on tap the named viewers + a link back to that job. Bottom-nav tab; also the login banner's tap-through. **No completion count, streak or average — see the guardrail above.** |
+| My work | `/operator/{companyId}/my-work` | The author's own contribution and its reception: identity + Log out + Give feedback, the notes / photos / views totals, then the notes ten at a time behind Show more. Each row is the note, with view count / reference / date beneath it; the reference is the job number, or the work center for a maintenance entry. Tapping the view count names the viewers; the overflow menu carries Open J-NNNN, Edit and Delete. Bottom-nav tab; also the login banner's tap-through. **No completion count, streak or average — see the guardrail above.** |
 | Inventory (optional) | `/operator/{companyId}/inventory[/locations/{id}]` | Feature-gated bin browse + add/remove/adjust stock. |
 | Profile | `/operator/{companyId}/profile` | Operator name, email, company name, **Logout**, and **Give Feedback**. (The current station lives in the header selector, not on this page.) |
 
@@ -623,7 +629,10 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a new reader, **when** the digest is called again, **then** the running total has climbed — it is a total, not a window, which is what makes a client-side subtraction correct — *verified by `api/tests/integration/test_note_views_rls.py > test_digest_is_a_running_total_not_a_window`*.
 - [ ] **Given** a non-zero banner, **when** the operator taps it, **then** it navigates to My work AND banks the whole total; **when** they tap its close button, **then** it dismisses **without** navigating — *verified by `__tests__/components/operator/NoteUsageBanner.test.tsx`*.
 - [ ] **Given** My work, **when** it renders with any data, **then** no completion count, streak, average, pace or rank appears anywhere on the page — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'shows no completion count, streak, average or pace'`*.
-- [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives and only the job link is absent — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
+- [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives, the Open-job item leaves the overflow menu, and the reference falls back to the part it is anchored to — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'falls back to the part once the capturing job is gone'`*.
+- [ ] **Given** a maintenance entry the operator wrote, **when** My work renders it, **then** the row names the **work center** where a job note names its job — maintenance entries are `notes` rows with `subject_kind='work_center'` and land in this list like anything else the operator wrote — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'names the machine where a job note names its job'`*.
+- [ ] **Given** My work, **when** the operator taps a note's text, **then** nothing happens: the row body is inert, the view count opens the readers and the overflow opens the actions, so no tap is ambiguous between reading and deleting — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'does nothing when the note body is tapped'`; rationale in [interaction-standards.md §1](../interaction-standards.md)*.
+- [ ] **Given** an operator with more than ten notes, **when** My work renders, **then** ten load and the totals still count every note they have written, not the ten on screen — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'reports every note in the summary, not just the page on screen'`*.
 
 **Playbook ordering**
 

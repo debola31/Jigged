@@ -28,6 +28,7 @@ import AddIcon from '@mui/icons-material/Add';
 import StarIcon from '@mui/icons-material/Star';
 import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import ArchiveOutlinedIcon from '@mui/icons-material/ArchiveOutlined';
 
 import {
   getCustomerWithRelations,
@@ -353,7 +354,27 @@ export default function CustomerDetailPage() {
                 {customer.credit_status === 'hold' && (
                   <Chip label="On credit hold" color="warning" size="small" />
                 )}
+                {/* This page is reachable for an ARCHIVED customer by an
+                    ordinary click, not just a hand-typed URL — every quote and
+                    job links straight here, and the by-id read deliberately
+                    doesn't filter deleted_at so those links keep resolving.
+                    Without this the page looks completely live, Edit and Delete
+                    included. */}
+                {customer.deleted_at && (
+                  <Chip
+                    label="Archived"
+                    size="small"
+                    variant="outlined"
+                    icon={<ArchiveOutlinedIcon />}
+                  />
+                )}
               </Box>
+              {customer.deleted_at && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Removed from your lists. Quotes and jobs that reference it still
+                  work. Re-creating or re-importing the same name brings it back.
+                </Typography>
+              )}
               {customer.credit_status === 'hold' && customer.credit_hold_note && (
                 <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
                   {customer.credit_hold_note}

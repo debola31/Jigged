@@ -17,6 +17,9 @@ const NO_STANDING_TERMS = {
   default_fob_point: null,
   credit_status: 'open',
   credit_hold_note: null,
+  // Live, not archived. Note tsconfig excludes __tests__, so a fixture that
+  // drifts from the Customer type will NOT fail `tsc` — keep it honest by hand.
+  deleted_at: null,
 } as const;
 
 // Use vi.hoisted to define mock variables before vi.mock is called
@@ -149,7 +152,7 @@ describe('customerAccess utilities', () => {
       mockQueryBuilder.data = [mockCustomers[0]];
       mockQueryBuilder.error = null;
 
-      const result = await getAllCustomers('company-1', 'all', 'Customer One');
+      const result = await getAllCustomers('company-1', 'Customer One');
 
       expect(mockQueryBuilder.or).toHaveBeenCalledWith(
         'name.ilike."%Customer One%"'
@@ -373,6 +376,25 @@ describe('customerAccess utilities', () => {
         expect(patch).not.toHaveProperty('default_fob_point');
       });
 
+      // #653 P1. This is the defect that produced two rows for one company:
+      // the lookup was .eq (case-sensitive) while the create pre-check was
+      // .ilike (case-insensitive) and the constraint was case-sensitive — so
+      // archiving "Acme Corp" and creating "acme corp" found nothing to revive
+      // and inserted a duplicate instead.
+      it('finds the archived row whatever case the name was typed in', async () => {
+        stageRevive();
+        await createCustomer('company-1', {
+          ...EMPTY_CUSTOMER_FORM,
+          name: 'acme corp',
+        });
+
+        const ilike = mockQueryBuilder.ilike as ReturnType<typeof vi.fn>;
+        expect(ilike).toHaveBeenCalledWith('name', 'acme corp');
+        // ...and NOT via a case-sensitive equality on the name.
+        const eq = mockQueryBuilder.eq as ReturnType<typeof vi.fn>;
+        expect(eq).not.toHaveBeenCalledWith('name', 'acme corp');
+      });
+
       it('does apply the values the form did supply', async () => {
         stageRevive();
         await createCustomer('company-1', {
@@ -539,10 +561,17 @@ describe('standing terms — drift is reported, never applied', () => {
     expect(hasTermDrift(null, null)).toBe(false);
   });
 
-  it('reports drift when the quote states nothing but the customer now has terms', () => {
-    // Worth surfacing: an older quote written before the standing terms existed.
-    expect(hasTermDrift(null, 'Net 30')).toBe(true);
-    expect(hasTermDrift('', 'Net 30')).toBe(true);
+  // REVERSED from the original decision, deliberately. This used to assert
+  // true — "worth surfacing: an older quote written before the standing terms
+  // existed". In practice it is a chip storm: quotes.fob_point is newer than
+  // the quotes themselves, so every pre-existing quote holds NULL, and the
+  // first time a shop fills in one customer's FOB point every open quote for
+  // that customer chips at once. A quote that states nothing never promised
+  // terms, so there is no disagreement to report.
+  it('reports no drift when the quote states nothing — silence is not a promise', () => {
+    expect(hasTermDrift(null, 'Net 30')).toBe(false);
+    expect(hasTermDrift('', 'Net 30')).toBe(false);
+    expect(hasTermDrift('   ', 'Net 30')).toBe(false);
   });
 });
 

@@ -3957,6 +3957,7 @@ CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (s
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_addresses USING btree (customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_billing ON public.customer_addresses USING btree (customer_id) WHERE default_billing;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_shipping ON public.customer_addresses USING btree (customer_id) WHERE default_shipping;
+CREATE UNIQUE INDEX IF NOT EXISTS customers_company_name_ci_unique ON public.customers USING btree (company_id, lower(btrim(name)));
 CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE (is_primary AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_billing_default ON public.customer_contacts USING btree (customer_id) WHERE (is_billing_default AND (deleted_at IS NULL));
 CREATE INDEX IF NOT EXISTS idx_customer_carrier_accounts_customer ON public.customer_carrier_accounts USING btree (customer_id) WHERE (deleted_at IS NULL);

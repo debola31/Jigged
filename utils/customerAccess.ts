@@ -4,15 +4,12 @@
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import {
-  EMPTY_CUSTOMER_FORM,
   toCreditStatus,
   type Customer,
   type CustomerAddress,
   type CustomerFormData,
-  type CustomerFilter,
   type CustomerWithRelations,
   type CustomerWithAddresses,
-  type ImportResult,
 } from '@/types/customer';
 import type {
   CustomerContact,
@@ -20,15 +17,21 @@ import type {
   CustomerContactRole,
 } from '@/types/customerContact';
 import { createCustomerContact } from '@/utils/customerContactsAccess';
-import { orIlikeValue } from '@/utils/searchFilter';
+import { orIlikeValue, escapeIlikePattern } from '@/utils/searchFilter';
+import { toError } from '@/lib/supabaseErrors';
 
 /**
  * Customer access layer.
  *
- * Customer rows hold just identity (name, website). Contacts live in
- * customer_contacts and are managed via utils/customerContactsAccess.ts.
- * Addresses live in customer_addresses and are managed via
- * utils/customerAddressesAccess.ts.
+ * A customer row holds identity (name, website) plus the shop's standing
+ * commercial position on that customer: three default_* terms copied onto a NEW
+ * quote at create time, and a manual credit_status. Contacts, addresses and
+ * carrier accounts each live in their own table with their own access module.
+ *
+ * NAME IS THE IDENTITY, and identity ignores case and surrounding space — the
+ * DB agrees via customers_company_name_ci_unique. Every name lookup here is
+ * case-insensitive for that reason; a mix of .eq and .ilike across the layers is
+ * what produced two rows for one company (#653).
  *
  * createCustomer() optionally takes one initial contact, which is inserted
  * as the primary after the parent row is created — mirrors VendorForm's
@@ -69,66 +72,10 @@ function extractPrimaryContact(
 }
 
 /**
- * Get paginated list of customers for a company.
- * Joins customer_contacts (primary only) + customer_addresses so the AG Grid
- * list can render Contact and Location columns without per-row fetches.
- */
-export async function getCustomers(
-  companyId: string,
-  _filter: CustomerFilter = 'all',
-  search: string = '',
-  page: number = 1,
-  limit: number = 25,
-  sortField: string = 'name',
-  sortDirection: 'asc' | 'desc' = 'asc'
-): Promise<{ data: CustomerWithRelations[]; total: number }> {
-  const supabase = getSupabase();
-  const offset = (page - 1) * limit;
-
-  let query = supabase
-    .from('customers')
-    .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at)',
-      { count: 'exact' },
-    )
-    .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .order(sortField, { ascending: sortDirection === 'asc' })
-    .range(offset, offset + limit - 1);
-
-  if (search.trim()) {
-    query = query.or(`name.ilike.${orIlikeValue(search)}`);
-  }
-
-  const { data, error, count } = await query;
-
-  if (error) {
-    console.error('Error fetching customers:', error);
-    throw error;
-  }
-
-  const rows = ((data || []) as (CustomerWithPrimaryContactRow & { addresses: CustomerAddress[] })[]).map((r) => ({
-    ...r,
-    // Narrowed explicitly rather than left to the row cast above: credit_status
-    // is enum-via-CHECK, so the generated types widen it to `string` and the
-    // cast would assert the union without anything checking it.
-    credit_status: toCreditStatus(r.credit_status),
-    addresses: r.addresses ?? [],
-    customer_contacts: r.customer_contacts ?? [],
-    primary_contact: extractPrimaryContact(r),
-    quotes_count: 0,
-    jobs_count: 0,
-  }));
-
-  return { data: rows, total: count || 0 };
-}
-
-/**
  * Get all customers for a company (no pagination).
  */
 export async function getAllCustomers(
   companyId: string,
-  _filter: CustomerFilter = 'all',
   search: string = '',
   sortField: string = 'name',
   sortDirection: 'asc' | 'desc' = 'asc'
@@ -249,11 +196,18 @@ export async function getCustomerWithRelations(
       .eq('customer_id', customerId),
   ]);
 
+  // A failed count THROWS. It used to be logged and reported as 0, which turned
+  // "we couldn't ask" into "this customer has no quotes and no jobs" — a
+  // definitive negative for a question that was never answered, against
+  // CLAUDE.md's rule that "couldn't check" is never "denied". It also reached
+  // the delete dialog, whose "Used on N quotes, M jobs — kept for history" line
+  // would then tell someone an in-use customer was unreferenced right as they
+  // decided whether to archive it.
   if (quotesRes.error) {
-    console.error('Error fetching quotes count:', quotesRes.error);
+    throw toError(quotesRes.error, "Couldn't load this customer's quote count.");
   }
   if (jobsRes.error) {
-    console.error('Error fetching jobs count:', jobsRes.error);
+    throw toError(jobsRes.error, "Couldn't load this customer's job count.");
   }
 
   const quotesCount = quotesRes.count;
@@ -292,7 +246,10 @@ export async function checkCustomerNameExists(
     .select('id')
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .ilike('name', name);
+    // Escaped: an unescaped pattern makes % and _ wildcards, so a customer
+    // called "Acme_Co" would report "Bacme1Co" as already existing and block a
+    // legitimate name.
+    .ilike('name', escapeIlikePattern(name));
 
   if (excludeId) {
     query = query.neq('id', excludeId);
@@ -392,11 +349,17 @@ async function reviveArchivedCustomerByName(
   const supabase = getSupabase();
   const name = formData.name.trim();
 
+  // CASE-INSENSITIVE, matching checkCustomerNameExists and the DB's
+  // customers_company_name_ci_unique index. It used to be .eq, and that
+  // disagreement is what let a duplicate through: archive "Acme Corp", create
+  // "acme corp", and this lookup found nothing, so the caller re-threw the
+  // 23505 as a genuine duplicate — or, before the CI index existed, never got
+  // a 23505 at all and simply inserted a second row for the same company.
   const { data: existing } = await supabase
     .from('customers')
     .select('id, deleted_at')
     .eq('company_id', companyId)
-    .eq('name', name)
+    .ilike('name', escapeIlikePattern(name))
     .maybeSingle();
 
   // No archived match (or the collision was with a live customer) → let the caller throw.
@@ -520,89 +483,6 @@ export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<vo
 }
 
 /**
- * Bulk import customers from CSV. Mapped CSV columns can populate the
- * customers row (name, website) and optionally a single contact row +
- * single address row per imported customer.
- *
- * NOTE: the FastAPI importer in api/routes/import_routes.py is the
- * primary path for production CSV import. This helper exists for
- * client-side imports / tests.
- */
-export async function bulkImportCustomers(
-  companyId: string,
-  rows: Array<CustomerFormData & {
-    contact?: CustomerContactFormData;
-    address?: CustomerAddress;
-  }>,
-): Promise<ImportResult> {
-  const results: ImportResult = { imported: 0, skipped: 0, errors: [] };
-  const supabase = getSupabase();
-
-  const { data: existing } = await supabase
-    .from('customers')
-    .select('name')
-    .eq('company_id', companyId);
-
-  const existingNames = new Set(
-    (existing || []).map((c: { name: string }) => c.name.toLowerCase()),
-  );
-  const importedNames = new Set<string>();
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const rowNum = i + 2;
-
-    if (!row.name?.trim()) {
-      results.errors.push({ row: rowNum, reason: 'Missing name' });
-      results.skipped++;
-      continue;
-    }
-
-    const nameKey = row.name.trim().toLowerCase();
-
-    if (existingNames.has(nameKey)) {
-      results.errors.push({
-        row: rowNum,
-        reason: `Customer name "${row.name}" already exists`,
-      });
-      results.skipped++;
-      continue;
-    }
-
-    if (importedNames.has(nameKey)) {
-      results.errors.push({
-        row: rowNum,
-        reason: `Duplicate customer name "${row.name}" in file`,
-      });
-      results.skipped++;
-      continue;
-    }
-
-    try {
-      await createCustomer(
-        companyId,
-        // Standing terms aren't part of this legacy client-side CSV shape —
-        // the backend importer (api/routes/import_routes.py) owns the mapped
-        // fields. Defaults stay unset rather than being invented per row.
-        { ...EMPTY_CUSTOMER_FORM, name: row.name.trim(), website: row.website ?? '' },
-        row.contact,
-      );
-      results.imported++;
-      importedNames.add(nameKey);
-      existingNames.add(nameKey);
-    } catch (err) {
-      results.errors.push({
-        row: rowNum,
-        reason: err instanceof Error ? err.message : 'insert failed',
-      });
-      results.skipped++;
-    }
-  }
-
-  return results;
-}
-
-/**
  * Return the address tagged default_billing for the customer. When no address
  * is flagged but the customer has exactly one address, that lone address is
  * unambiguously the default and is returned — so single-address customers
@@ -703,7 +583,21 @@ export function hasTermDrift(
 ): boolean {
   const std = customerDefault?.trim();
   if (!std) return false;
-  return (quoteValue ?? '').trim().toLowerCase() !== std.toLowerCase();
+  const onQuote = (quoteValue ?? '').trim();
+  // A quote that states NOTHING is not drifting — it is silent. It promised no
+  // terms, so there is no disagreement between what we offered and what we now
+  // say, and the chip has nothing to report.
+  //
+  // This used to return true here, and the cost was a chip storm: quotes.fob_point
+  // is newer than the quotes themselves, so every pre-existing quote carries
+  // NULL, and the first time a shop filled in a customer's FOB point every one
+  // of that customer's open quotes grew a "FOB differs" chip at once. Same for
+  // payment terms and lead time the first time a shop fills those in. The
+  // comment on the drift block one level up already names this failure for the
+  // shop-default case — "a chip that fires on everything at once is a chip
+  // people learn to ignore" — and it applies identically here.
+  if (!onQuote) return false;
+  return onQuote.toLowerCase() !== std.toLowerCase();
 }
 
 // Helper re-exports so older callers that imported types from this file

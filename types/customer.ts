@@ -60,6 +60,15 @@ export interface Customer {
   credit_status: CustomerCreditStatus;
   /** Why they're on hold. Kept after a hold is lifted, as history for next time. */
   credit_hold_note: string | null;
+  /**
+   * Archive marker. Set by "Delete"; the row survives so every quote, job and
+   * shipment that references it keeps resolving.
+   *
+   * Carried on the type because a BY-ID read deliberately does not filter it —
+   * a quote or job links straight to the customer page, so that page can be
+   * showing an archived customer and needs to say so.
+   */
+  deleted_at: string | null;
   // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
   // mirror the DB shape. Consumers (e.g. the customer detail page) already
   // handle null via formatDate(string | null).

@@ -76,7 +76,12 @@ export default function JobEditForm({
 }: JobEditFormProps) {
   const router = useRouter();
   const addresses = job.customers?.addresses ?? [];
-  const contacts = job.customers?.customer_contacts ?? [];
+  // Archived contacts leave the picker, but one this job already names is
+  // kept — a person leaving the customer must not silently blank who the
+  // work was agreed with. Same rule as the carrier accounts below.
+  const contacts = (job.customers?.customer_contacts ?? []).filter(
+    (c) => c.deleted_at === null || c.id === job.contact_id,
+  );
   // Archived accounts stay out of the picker, but one this job already points
   // at is kept so editing an old job doesn't silently blank its freight.
   const carrierAccounts = (job.customers?.carrier_accounts ?? []).filter(

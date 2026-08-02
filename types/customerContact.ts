@@ -45,7 +45,17 @@ export interface CustomerContact {
   role_label: string | null;
   email: string | null;
   phone: string | null;
+  /** Who we call about the work. */
   is_primary: boolean;
+  /**
+   * Who invoices go to. Separate from `is_primary` on purpose — at most shops
+   * the buyer and the AP clerk are two different people, and one flag forces
+   * the shop to lose one of them. Nothing falls back to the primary when this
+   * is unset; a customer is allowed to have no billing contact.
+   */
+  is_billing_default: boolean;
+  /** Archive marker. A contact who left the company stops being offered. */
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }

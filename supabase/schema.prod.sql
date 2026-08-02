@@ -187,6 +187,8 @@ CREATE TABLE IF NOT EXISTS "public"."customer_contacts"
     "email" text,
     "phone" text,
     "is_primary" boolean NOT NULL DEFAULT false,
+    "is_billing_default" boolean NOT NULL DEFAULT false,
+    "deleted_at" timestamp with time zone,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "customer_contacts_pkey" PRIMARY KEY (id),
@@ -3847,7 +3849,7 @@ ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id);
+    ADD CONSTRAINT "quotes_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
@@ -3953,7 +3955,10 @@ CREATE INDEX IF NOT EXISTS idx_companies_is_demo ON public.companies USING btree
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_addresses USING btree (customer_id);
-CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE is_primary;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_billing ON public.customer_addresses USING btree (customer_id) WHERE default_billing;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_shipping ON public.customer_addresses USING btree (customer_id) WHERE default_shipping;
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE (is_primary AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_billing_default ON public.customer_contacts USING btree (customer_id) WHERE (is_billing_default AND (deleted_at IS NULL));
 CREATE INDEX IF NOT EXISTS idx_customer_carrier_accounts_customer ON public.customer_carrier_accounts USING btree (customer_id) WHERE (deleted_at IS NULL);
 
 CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);

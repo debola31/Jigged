@@ -301,6 +301,10 @@ export interface JobWithRelations extends Job {
       email: string | null;
       phone: string | null;
       is_primary: boolean;
+      is_billing_default: boolean;
+      /** Carried so a picker can drop archived people while keeping the one
+       *  this job already names. */
+      deleted_at: string | null;
     }>;
     addresses?: Array<{
       id: string;

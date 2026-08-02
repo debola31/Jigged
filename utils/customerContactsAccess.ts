@@ -30,7 +30,7 @@ import type {
 type CustomerContactInsert = Database['public']['Tables']['customer_contacts']['Insert'];
 
 const CUSTOMER_CONTACT_COLUMNS =
-  'id, customer_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
+  'id, customer_id, name, role, role_label, email, phone, is_primary, is_billing_default, deleted_at, created_at, updated_at';
 
 function formDataToInsert(
   formData: CustomerContactFormData,
@@ -49,8 +49,15 @@ function formDataToInsert(
 }
 
 /**
- * Get all contacts for a customer.
+ * Get a customer's LIVE contacts.
  * Ordered: primary first (is_primary DESC), then by creation order.
+ *
+ * Filters archived rows: this feeds the Contacts card and every picker that
+ * offers a person to choose, and someone who left the company must stop being
+ * offered. A document that already names an archived contact resolves it by id
+ * instead — see the `deleted_at` selected in the embeds on quotesAccess /
+ * jobsAccess, which the pickers use to keep a currently-selected archived row
+ * visible rather than silently blanking it.
  */
 export async function getContactsForCustomer(
   customerId: string,
@@ -61,6 +68,7 @@ export async function getContactsForCustomer(
     .from('customer_contacts')
     .select(CUSTOMER_CONTACT_COLUMNS)
     .eq('customer_id', customerId)
+    .is('deleted_at', null)
     .order('is_primary', { ascending: false })
     .order('created_at', { ascending: true });
 
@@ -177,18 +185,37 @@ export async function updateCustomerContact(
   return data as CustomerContact;
 }
 
-export async function deleteCustomerContact(contactId: string): Promise<void> {
+/**
+ * Archive a contact. Stamps `deleted_at` — never a SQL DELETE.
+ *
+ * The row survives because a quote or job that named this person keeps a
+ * `contact_id` pointing at it, and because "who did we deal with on this job"
+ * is a question shops ask about work that finished years ago. Both documents
+ * also freeze a `contact_snapshot`, so the printed block was never at risk —
+ * what archiving preserves is the live link and the ability to un-archive.
+ *
+ * Also clears both default flags in the same write. An archived contact that
+ * kept `is_primary` would hold the slot against the live partial unique index
+ * and the customer could never name a new primary; the same for the billing
+ * default. Archiving a person has to hand back whatever roles they held.
+ */
+export async function archiveCustomerContact(contactId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase
     .from('customer_contacts')
-    .delete()
+    .update({
+      deleted_at: new Date().toISOString(),
+      is_primary: false,
+      is_billing_default: false,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', contactId);
   if (error) {
-    console.error('Error deleting customer contact:', error);
+    console.error('Error archiving customer contact:', error);
     throw new Error(
       friendlyErrorMessage(error, {
         entity: 'contact',
-        fallback: 'Failed to delete contact.',
+        fallback: 'Failed to remove contact.',
       }),
     );
   }
@@ -218,6 +245,48 @@ export async function setPrimaryContact(
       );
     }
     console.error('Error setting primary contact:', error);
+    throw error;
+  }
+}
+
+/**
+ * Clear is_billing_default across a customer's contacts, then flip the named one.
+ *
+ * Mirrors setPrimaryContact, including its race window (see the file header):
+ * the DB index is the real guarantee, the clear-first is what keeps the UI from
+ * tripping it. Passing `null` clears the billing default without naming a new
+ * one — a customer is allowed to have none, and nothing falls back to the
+ * primary in its absence.
+ */
+export async function setBillingDefaultContact(
+  customerId: string,
+  contactId: string | null,
+): Promise<void> {
+  const supabase = getSupabase();
+
+  const { error: clearError } = await supabase
+    .from('customer_contacts')
+    .update({ is_billing_default: false })
+    .eq('customer_id', customerId)
+    .eq('is_billing_default', true);
+  if (clearError) {
+    console.error('Error clearing billing-default contact:', clearError);
+    throw clearError;
+  }
+
+  if (!contactId) return;
+
+  const { error } = await supabase
+    .from('customer_contacts')
+    .update({ is_billing_default: true, updated_at: new Date().toISOString() })
+    .eq('id', contactId);
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error(
+        'Another contact for this customer was just marked for billing. Refresh and try again.',
+      );
+    }
+    console.error('Error setting billing-default contact:', error);
     throw error;
   }
 }

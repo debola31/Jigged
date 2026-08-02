@@ -44,13 +44,21 @@ type CustomerWithPrimaryContactRow = Customer & {
     email: string | null;
     phone: string | null;
     is_primary: boolean;
+    is_billing_default: boolean;
+    deleted_at: string | null;
   }> | null;
 };
 
 function extractPrimaryContact(
   row: CustomerWithPrimaryContactRow,
 ): CustomerWithRelations['primary_contact'] {
-  const primary = (row.customer_contacts ?? []).find((c) => c.is_primary);
+  // Archiving a contact clears is_primary in the same write, so an archived
+  // person cannot be picked here. The deleted_at check is belt-and-braces
+  // against a row that got archived some other way (a service-role script,
+  // a future bulk operation) and kept its flag.
+  const primary = (row.customer_contacts ?? []).find(
+    (c) => c.is_primary && c.deleted_at === null,
+  );
   if (!primary) return null;
   return {
     id: primary.id,
@@ -80,7 +88,7 @@ export async function getCustomers(
   let query = supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at)',
       { count: 'exact' },
     )
     .eq('company_id', companyId)
@@ -135,7 +143,7 @@ export async function getAllCustomers(
     let query = supabase
       .from('customers')
       .select(
-        '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
+        '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at)',
       )
       .eq('company_id', companyId)
       .is('deleted_at', null)
@@ -214,7 +222,7 @@ export async function getCustomerWithRelations(
   const { data: customer, error: customerError } = await supabase
     .from('customers')
     .select(
-      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary)',
+      '*, addresses:customer_addresses(*), customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at)',
     )
     .eq('id', customerId)
     .single();

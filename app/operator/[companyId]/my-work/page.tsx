@@ -5,20 +5,17 @@ import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
+import ButtonBase from '@mui/material/ButtonBase';
+import Tooltip from '@mui/material/Tooltip';
 import CardContent from '@mui/material/CardContent';
-import CardActionArea from '@mui/material/CardActionArea';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined';
-import LaunchIcon from '@mui/icons-material/Launch';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import {
   getMyContributionTotals,
@@ -30,6 +27,7 @@ import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
 import NoteEditDialog from '@/components/notes/NoteEditDialog';
 import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
+import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
 import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
@@ -61,17 +59,64 @@ function formatDate(value: string): string {
  * quality signal the Playbook ranks by; it is just not the operator's business
  * on this screen.
  */
-function ReachRow({ note }: { note: MyNote }) {
+function ReachRow({
+  note,
+  expanded,
+  onToggle,
+}: {
+  note: MyNote;
+  expanded: boolean;
+  /** Omitted when nobody has read it — there are no names to ask for. */
+  onToggle?: () => void;
+}) {
   const read = note.viewer_count > 0;
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-      <VisibilityOutlinedIcon
-        sx={{ fontSize: 16, color: read ? 'success.light' : 'text.secondary' }}
-      />
-      <Typography variant="caption" sx={{ color: read ? 'success.light' : 'text.secondary' }}>
+  const color = read ? 'success.light' : 'text.secondary';
+
+  const face = (
+    <>
+      <VisibilityOutlinedIcon sx={{ fontSize: 18, color }} />
+      <Typography variant="caption" sx={{ color, fontWeight: 600 }}>
         {note.viewer_count}
       </Typography>
-    </Box>
+    </>
+  );
+
+  // Nobody has read it yet: a number, not a control. This is also what keeps an
+  // unread row down to ONE tap target instead of two.
+  if (!onToggle) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: 48, height: 48, justifyContent: 'center', flexShrink: 0 }}>
+        {face}
+      </Box>
+    );
+  }
+
+  /* THE DISCLOSURE FOR "WHO READ THIS", and deliberately not the whole row.
+     NN/g measured (136 participants, 11 mobile prototypes) that when a row body
+     and a trailing control do different things, people tap them about equally —
+     a coin flip. So the row body stays inert and the two controls sit at opposite
+     ends: readers here on the left, actions in the overflow on the right.
+     The count is the label, which is what keeps a bare icon honest. */
+  return (
+    <Tooltip title={expanded ? 'Hide readers' : 'Who read this'}>
+      <ButtonBase
+        onClick={onToggle}
+        aria-label={`Who read this note — ${note.viewer_count} so far`}
+        aria-expanded={expanded}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+          width: 48,
+          height: 48,
+          flexShrink: 0,
+          borderRadius: 1,
+          '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+        }}
+      >
+        {face}
+      </ButtonBase>
+    </Tooltip>
   );
 }
 
@@ -110,18 +155,30 @@ function NoteRow({
   };
 
   return (
-    <Card component="li" elevation={2} sx={{ ...cardSx, mb: 1.5 }}>
-      {/* The whole row expands. Navigation lives inside the expanded state
-          instead of on the card, so the list stays compact and there is only one
-          tap target per row — a chip up here both bloated the card and stole the
-          row's tap, because a button cannot nest inside a button. */}
-      <CardActionArea onClick={toggle} sx={{ p: 0 }}>
-        <CardContent sx={{ py: 1.5 }}>
+    /*
+     * A FLAT ROW WITH TWO CONTROLS AT OPPOSITE ENDS, and an inert body between them.
+     *
+     * This used to be a card that was one big CardActionArea: tap anywhere to expand,
+     * with Edit / Delete / Open-job as full-width buttons inside. Two things were wrong
+     * with that. The card chrome cost three notes per phone screen for no information —
+     * NN/g puts ~74% of viewing time in the first two screenfuls, and this screen's job
+     * is reading. And the per-card `backdrop-filter` was one blurred compositing layer
+     * per row, on the one screen that renders an unbounded list of them.
+     *
+     * The controls are split left and right ON PURPOSE. NN/g measured (136 participants,
+     * 11 mobile prototypes) that when a row body and a trailing control do different
+     * things, people tap them roughly equally — a coin flip. So the body does nothing at
+     * all: readers open from the eye on the left, actions from the overflow on the right,
+     * as far apart as the row allows. That also brings this surface into line with the
+     * job feed, the Playbook sheet and the machine logbook, which all use the same
+     * `NoteActionsMenu` — this screen was the only operator note surface rolling its own.
+     */
+    <Box component="li" sx={{ borderBottom: '1px solid', borderColor: 'divider', py: 0.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+        <ReachRow note={note} expanded={open} onToggle={note.viewer_count > 0 ? toggle : undefined} />
+
+        <Box sx={{ flex: 1, minWidth: 0, py: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-            {/* Leads the row so every card has a number in the same place — a
-                stable column to scan down, present whether or not the note
-                carries a part. */}
-            <ReachRow note={note} />
             {/* THE SUBJECT, in one stable slot. A `notes` row has exactly one subject —
                 a part, a job, or a machine — and this list mixes all three, because all
                 three are things the operator wrote.
@@ -162,7 +219,7 @@ function NoteRow({
             )}
             <Box sx={{ flex: 1 }} />
             {/* Where it came from, sat quietly beside the date — an indication,
-                not an action. The action is one tap away, inside the card. */}
+                not an action. Opening the job is in the overflow menu. */}
             <Typography variant="caption" color="text.secondary">
               {note.job_number ? `${note.job_number} · ` : ''}
               {formatDate(note.created_at)}
@@ -178,7 +235,13 @@ function NoteRow({
 
           {/* Read-only by necessity, not omission: RLS forbids reacting to your
               own note, so here endorsements are RECEPTION — the same category as
-              the view count above, and the other half of what came back. */}
+              the view count above, and the other half of what came back.
+
+              STAYS INLINE, and is not folded in behind the eye with the readers.
+              A view is involuntary and private, which is why the names sit behind a
+              deliberate tap; a reaction is a voluntary public claim and attribution
+              is the whole point of it. The list already caps at three names then
+              "+N", so it holds at shop scale. */}
           <NoteReactions
             companyId={companyId}
             noteId={note.id}
@@ -187,13 +250,29 @@ function NoteRow({
             memberId={null}
             readOnly
           />
-        </CardContent>
-      </CardActionArea>
+        </Box>
 
+        {/* THE ONLY OTHER CONTROL, hard right. Every note here is unconditionally the
+            caller's own — getMyNotesPage filters to author_id = me AND note_type =
+            'user' — so there is no permission test to run. */}
+        <NoteActionsMenu
+          canEdit
+          canDelete
+          onEdit={() => setEditing(true)}
+          onDelete={() => setConfirmingDelete(true)}
+          onOpen={
+            note.job_id && note.job_number
+              ? () => router.push(`/operator/${companyId}/jobs/${note.job_id}`)
+              : undefined
+          }
+          openLabel={note.job_number ? `Open ${note.job_number}` : undefined}
+        />
+      </Box>
+
+      {/* Readers only. The actions left this disclosure when they moved to the menu,
+          so what remains is content rather than a second action surface. */}
       <Collapse in={open} unmountOnExit>
-        <Box sx={{ px: 2, pb: 2 }}>
-          <Divider sx={{ mb: 1 }} />
-
+        <Box sx={{ pl: 6.5, pr: 2, pb: 1.5 }}>
           {note.viewer_count > 0 && (
             <>
               {/* Explicitly labelled: the job beside a viewer's name is the job
@@ -213,55 +292,6 @@ function NoteRow({
                 ))
               )}
             </>
-          )}
-
-          {/* THE PRIMARY HOME FOR EDIT AND DELETE (#628), and the one surface that
-              needs no permission test at all: getMyContribution already filters to
-              author_id = me AND note_type = 'user', so every note on this screen is
-              unconditionally the caller's own editable note.
-
-              Full-width buttons rather than the kebab used in the feeds, because
-              the card is one big CardActionArea and a button cannot nest inside a
-              button — the same constraint that put navigation down here in the
-              first place. */}
-          <Box
-            sx={{
-              display: 'flex',
-              gap: 1,
-              mt: note.viewer_count > 0 ? 1.5 : 0,
-            }}
-          >
-            <Button
-              variant="outlined"
-              fullWidth
-              startIcon={<EditOutlinedIcon />}
-              onClick={() => setEditing(true)}
-              sx={{ minHeight: 48 }}
-            >
-              Edit
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              fullWidth
-              startIcon={<DeleteOutlineIcon />}
-              onClick={() => setConfirmingDelete(true)}
-              sx={{ minHeight: 48 }}
-            >
-              Delete
-            </Button>
-          </Box>
-
-          {note.job_id && note.job_number && (
-            <Button
-              variant="outlined"
-              fullWidth
-              startIcon={<LaunchIcon />}
-              onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
-              sx={{ minHeight: 48, mt: 1.5 }}
-            >
-              Open {note.job_number}
-            </Button>
           )}
         </Box>
       </Collapse>
@@ -331,7 +361,7 @@ function NoteRow({
         }}
       />
       )}
-    </Card>
+    </Box>
   );
 }
 

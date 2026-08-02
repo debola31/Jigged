@@ -107,6 +107,25 @@ the generic "low-stakes ⇒ no dialog" advice.
     rightmost. Burying delete in a kebab there would regress the red-at-rest and
     delete-sits-last rules above; desktop has the width and the hover, so the phone
     constraint does not apply.
+  - *The operator's own work list* (`/operator/[companyId]/my-work`) uses the same
+    kebab, **plus one extra rule the other operator surfaces don't need: the row body
+    must stay inert.** This is the only note surface whose row also has to disclose
+    something — the "Viewed by" reader list, which is content and therefore cannot
+    live in a menu ([NN/g — contextual menus reveal *actions*](https://www.nngroup.com/articles/contextual-menus-guidelines/)).
+    The naive shape (tap the row to expand, kebab for actions) is a **split-button
+    row**, and NN/g measured across 136 participants and 11 mobile prototypes that
+    users "tap fairly equally on both the accordion icon and the accordion label"
+    ([NN/g — accordion icons](https://www.nngroup.com/articles/accordion-icons/)) —
+    i.e. roughly a coin flip on every tap, with a delete menu as one of the outcomes.
+    So the two disclosures sit at **opposite ends** of the row (readers on the eye at
+    far left, actions in the overflow at far right) and nothing between them is
+    tappable. `NoteActionsMenu` also carries an optional third item, "Open J-0042",
+    listed first so delete still sits last; this list is the only place a note is the
+    only route back to its job.
+
+> **If you are adding a note surface:** the kebab is the rule. Only add a second
+> disclosure if that surface has *content* to reveal as well as actions — and if it
+> does, make the row body inert rather than letting it compete with the menu.
 - 🔄 **Superseded:** the earlier target of "drop the BOM dialog + add Undo
   snackbars to BOM/tier/operation" is reversed after UX research (the audience
   floor above). We keep dialogs on destructive row deletes; ephemeral Undo is not

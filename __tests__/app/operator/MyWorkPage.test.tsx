@@ -138,34 +138,66 @@ describe('My Work', () => {
 
   it('leads back to the job the note was written on', async () => {
     // A note with no context is an orphan: the author cannot tell what they were
-    // looking at when they wrote it, let alone go and check. The link lives in
-    // the expanded state so the row itself stays one compact tap target.
+    // looking at when they wrote it, let alone go and check. The route back lives
+    // in the overflow menu, first and furthest from Delete.
     const user = userEvent.setup();
     stage();
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByText(/Clamp on the boss/));
-    await user.click(await screen.findByRole('button', { name: /Open J-0042/ }));
+    await user.click(await screen.findByRole('button', { name: /actions for this note/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /Open J-0042/ }));
 
     expect(routerMocks.push).toHaveBeenCalledWith(
       '/operator/test-company-id/jobs/job-1',
     );
   });
 
-  it('opens on a note nobody has read, so its job is still reachable', async () => {
-    // The card used to be inert at zero views. That stranded exactly the notes an
+  it('reaches the job of a note nobody has read', async () => {
+    // The row used to be inert at zero views, which stranded exactly the notes an
     // author is most likely to be checking up on — no viewers AND no way back to
-    // the job. There is always something behind the tap now.
+    // the job. The menu does not depend on the view count, so the route survives.
     const user = userEvent.setup();
     stage();
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByText(/Clamp on the boss/));
+    await user.click(await screen.findByRole('button', { name: /actions for this note/i }));
 
-    expect(await screen.findByRole('button', { name: /Open J-0042/ })).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: /Open J-0042/ })).toBeInTheDocument();
     // Still no pointless RPC: there are no names to fetch.
     expect(mockGetNoteViewers).not.toHaveBeenCalled();
     expect(screen.queryByText('Viewed by')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The row body does nothing, and that is the design.
+   *
+   * NN/g measured across 136 participants and 11 mobile prototypes that when a row body
+   * and a trailing control do different things, people tap them about equally. A row that
+   * both expands on body-tap AND carries a menu is therefore a coin flip on every tap —
+   * which is unacceptable when one of the outcomes is a delete menu. So the readers open
+   * from the eye on the far left and the actions from the overflow on the far right, with
+   * nothing tappable in between.
+   */
+  it('does nothing when the note body is tapped', async () => {
+    const user = userEvent.setup();
+    stage({ notes: [note({ viewer_count: 2 })] });
+    render(<MyWorkPage />);
+
+    await user.click(await screen.findByText(/Clamp on the boss/));
+
+    expect(mockGetNoteViewers).not.toHaveBeenCalled();
+    expect(screen.queryByText('Viewed by')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('offers no reader disclosure at all when nobody has read it', async () => {
+    // One tap target on an unread row, not two: there are no names to ask for, so the
+    // count is a number rather than a control.
+    stage({ notes: [note({ viewer_count: 0 })] });
+    render(<MyWorkPage />);
+
+    await screen.findByText(/Clamp on the boss/);
+    expect(screen.queryByRole('button', { name: /who read this/i })).not.toBeInTheDocument();
   });
 
   it('survives a note whose job has been deleted', async () => {
@@ -230,7 +262,7 @@ describe('My Work', () => {
     await screen.findByText(/Clamp on the boss/);
     expect(mockGetNoteViewers).not.toHaveBeenCalled();
 
-    await user.click(screen.getByText(/Clamp on the boss/));
+    await user.click(screen.getByRole('button', { name: /who read this/i }));
 
     expect(await screen.findByText('Diego · J-0004')).toBeInTheDocument();
     expect(screen.getByText('Priya · J-0006')).toBeInTheDocument();

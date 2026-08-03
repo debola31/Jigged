@@ -599,7 +599,7 @@ Three structural misses, costliest first:
 | [`jobs.md`](jobs.md) §material tracking | `job_materials` columns that don't exist (`inventory_item_id`, `actual_quantity`, `status`, `consumed_at`), a `JobMaterialsCard` with consume/skip, `create_job_operations_from_routing` — then links here, which says none of it exists | Rewrite |
 | [`architecture.md`](../architecture.md) | `routing_materials` (removed); `job_materials … actual consumption` | Correct both |
 | `docs/build-sequence.md` | 3,910 lines superseded, incl. a `GET/POST /api/inventory` that never existed | **Deleted** |
-| [`demo-company.md`](demo-company.md) | Seed SQL against dead `inventory_items` / `inventory_unit_conversions` | Correct |
+| `demo-company.md` | Seed SQL against dead `inventory_items` / `inventory_unit_conversions` | **Deleted** (Aug 2026) — it specified a v1 demo design that was never built |
 | [`usability-test-script-v1.md`](../usability-tests/usability-test-script-v1.md) Task 4 | Targets `/inventory/[itemId]`, deleted May 2026 | Superseded by the discovery script |
 | `docs/modules/inventory-locations.md` | Promised by PR #414, never written | Folded in here |
 

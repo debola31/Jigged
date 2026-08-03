@@ -50,6 +50,7 @@ import {
   getOutsideOpsForCompany,
   getCurrentMember,
   getNewHelpful,
+  NEW_HELPFUL_WINDOW_DAYS,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -755,5 +756,80 @@ describe('getNewHelpful', () => {
   it('returns nothing rather than throwing when there is no member', async () => {
     mockQueryBuilder.data = null;
     expect(await getNewHelpful('c1')).toEqual([]);
+  });
+
+  /**
+   * THE CURSOR GOES TO POSTGREST AT FULL PRECISION.
+   *
+   * Postgres keeps timestamptz to the microsecond; JS `Date` only to the millisecond. The
+   * cursor is set to the newest reaction actually shown, so that reaction's `created_at`
+   * equals the cursor exactly — and re-serialising through a Date sends a value 237µs
+   * early, making the row compare strictly greater and return as "new" on every load.
+   *
+   * Not hypothetical: the first version did exactly this and one note sat in the block
+   * through a dismissal, a reload and a fresh session on the preview. Every test here
+   * passed the whole time, because they assert the SHAPE of the result and this bug is in
+   * the argument sent to the filter.
+   */
+  /**
+   * `getNewHelpful` runs two queries off the one shared mock, so the member lookup and the
+   * reactions read are told apart by their select string — the member's is the only one
+   * asking for `reactions_seen_at`. Returns the cursor the filter actually received.
+   */
+  async function cursorSentFor(seenAt: string | null): Promise<string> {
+    const select = mockQueryBuilder.select as ReturnType<typeof vi.fn>;
+    const gt = mockQueryBuilder.gt as ReturnType<typeof vi.fn>;
+    const original = Object.getOwnPropertyDescriptor(mockQueryBuilder, 'data');
+    let lastSelect = '';
+    select.mockImplementation((s: string) => {
+      lastSelect = s ?? '';
+      return mockQueryBuilder;
+    });
+    Object.defineProperty(mockQueryBuilder, 'data', {
+      configurable: true,
+      get: () =>
+        lastSelect.includes('reactions_seen_at') ? { ...member, reactions_seen_at: seenAt } : [],
+    });
+    try {
+      gt.mockClear();
+      await getNewHelpful('c1');
+      return gt.mock.calls[0]![1] as string;
+    } finally {
+      delete (mockQueryBuilder as Record<string, unknown>).data;
+      if (original) Object.defineProperty(mockQueryBuilder, 'data', original);
+      select.mockImplementation(() => mockQueryBuilder);
+    }
+  }
+
+  /**
+   * THE CURSOR GOES TO POSTGREST AT FULL PRECISION.
+   *
+   * Postgres keeps timestamptz to the microsecond; JS `Date` only to the millisecond. The
+   * cursor is set to the newest reaction actually shown, so that reaction's `created_at`
+   * equals the cursor exactly — and re-serialising through a Date sends a value 237µs
+   * early, making the row compare strictly greater and return as "new" on every load.
+   *
+   * Not hypothetical: the first version did exactly this and one note sat in the block
+   * through a dismissal, a reload and a fresh session on the preview. Every other test here
+   * passed the whole time, because they assert the SHAPE of the result while this bug lives
+   * in the argument handed to the filter.
+   */
+  it('sends the seen-cursor to the filter without truncating its microseconds', async () => {
+    const microseconds = '2026-08-03T04:49:36.836237+00:00';
+    expect(await cursorSentFor(microseconds)).toBe(microseconds);
+  });
+
+  /** An expired cursor falls back to the window, which is a Date and so legitimately ISO. */
+  it('falls back to the window when the cursor predates it', async () => {
+    const sent = await cursorSentFor('2020-01-01T00:00:00.000001+00:00');
+    expect(sent).not.toBe('2020-01-01T00:00:00.000001+00:00');
+    const ageDays = (Date.now() - new Date(sent).getTime()) / 86_400_000;
+    expect(ageDays).toBeCloseTo(NEW_HELPFUL_WINDOW_DAYS, 1);
+  });
+
+  /** No cursor at all is the window too, never the epoch — see the migration's comment. */
+  it('uses the window, not the epoch, when nothing has been dismissed yet', async () => {
+    const ageDays = (Date.now() - new Date(await cursorSentFor(null)).getTime()) / 86_400_000;
+    expect(ageDays).toBeCloseTo(NEW_HELPFUL_WINDOW_DAYS, 1);
   });
 });

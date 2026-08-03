@@ -2122,7 +2122,7 @@ export async function removeReaction(
  * Eight weeks because that is roughly where the measured effect of a first endorsement
  * has decayed (Wachs et al.: 12.9% at first, 7.7% by eight weeks, 6.4% by twelve).
  */
-const NEW_HELPFUL_WINDOW_DAYS = 56;
+export const NEW_HELPFUL_WINDOW_DAYS = 56;
 
 /** Names shown before the rest collapse to "and N more". */
 export const MAX_HELPFUL_NAMES = 3;
@@ -2154,10 +2154,21 @@ export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
   const windowStart = new Date(Date.now() - NEW_HELPFUL_WINDOW_DAYS * 86_400_000);
   // NULL cursor means "never dismissed", which is NOT the epoch: it means show the recent
   // window rather than every reaction ever received.
+  //
+  // THE CURSOR IS FORWARDED AS THE RAW STRING, never re-serialised through a Date. Postgres
+  // keeps timestamptz to the microsecond and JS Date only to the millisecond, so
+  // `new Date('…:36.836237Z').toISOString()` sends `…:36.836Z` — 237µs early. The cursor is
+  // set to the newest reaction ACTUALLY SHOWN, so that reaction's own `created_at` equals
+  // the cursor exactly; truncating makes it compare strictly greater and it returns as
+  // "new" on every load, for ever. Observed on the preview: one note stuck in the block
+  // through a dismissal, a reload and a fresh session.
+  //
+  // The window comparison below still goes through Date, which is fine — it decides only
+  // whether an 8-week-old cursor beats the window, where a millisecond cannot matter.
   const since =
     member.reactions_seen_at && new Date(member.reactions_seen_at) > windowStart
-      ? new Date(member.reactions_seen_at)
-      : windowStart;
+      ? member.reactions_seen_at
+      : windowStart.toISOString();
 
   // The reactor hint is the FK's real name, not PostgREST's `<table>_<col>_fkey` default:
   // this schema names newer constraints `<table>_<col>_fk` and older ones `_fkey`, so the
@@ -2175,7 +2186,7 @@ export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
     .eq('company_id', companyId)
     .eq('kind', 'helpful')
     .eq('note.author_id', member.id)
-    .gt('created_at', since.toISOString())
+    .gt('created_at', since)
     .order('created_at', { ascending: false });
 
   if (error) {

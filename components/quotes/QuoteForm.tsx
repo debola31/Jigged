@@ -52,7 +52,6 @@ import {
   pickShippingAddress,
   pickPrimaryContact,
   pickPaymentTerms,
-  pickLeadTimeText,
   pickFobPoint,
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
@@ -153,7 +152,12 @@ const ADD_NEW_TERM = '__add_new_payment_term__';
  * release ownership on edit — so they're driven off one list rather than three
  * copies of the same branch.
  */
-const STANDING_TERM_FIELDS = ['payment_terms', 'lead_time_text', 'fob_point'] as const;
+// Lead time is NOT here. It is a quote field, but it has no customer-level
+// default to inherit from: lead time follows current shop load and the specific
+// part, not the customer, so a standing value was a stale promise waiting to be
+// quoted. The column was dropped; the field stays on the quote, typed when
+// someone can actually see the backlog.
+const STANDING_TERM_FIELDS = ['payment_terms', 'fob_point'] as const;
 type StandingTermField = (typeof STANDING_TERM_FIELDS)[number];
 
 function formatCurrency(value: number | null | undefined): string {
@@ -581,8 +585,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * → ON, disclosure hidden. Customers with separate billing/shipping
    * defaults → OFF, shipping disclosure visible.
    *
-   * It also pre-populates the customer's STANDING TERMS — payment_terms,
-   * lead_time_text and fob_point.
+   * It also pre-populates the customer's STANDING TERMS — payment_terms and
+   * fob_point.
    *
    * OVERWRITE RULE. Unlike the address/contact FKs, which MUST be replaced
    * because they belong to a different customer and the integrity trigger
@@ -640,10 +644,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       payment_terms: customerTerms
         ? { value: customerTerms, source: `${customer?.name ?? 'this customer'}’s standing terms` }
         : { value: shopDefaultTerms, source: 'your shop default' },
-      lead_time_text: {
-        value: pickLeadTimeText(customer),
-        source: `${customer?.name ?? 'this customer'}’s standing terms`,
-      },
       fob_point: {
         value: pickFobPoint(customer),
         source: `${customer?.name ?? 'this customer'}’s standing terms`,
@@ -1885,7 +1885,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               {/* Free-text lead time — the shop types whatever fits
                   ("2–3 weeks", "In stock", "Call to confirm"). Required
                   (validationError); stored verbatim and no longer drives the
-                  job due date (entered manually at conversion). */}
+                  job due date (entered manually at conversion).
+
+                  No standing-terms prefill: lead time follows current shop load
+                  and the specific part, so it is judged here, per quote, rather
+                  than inherited from the customer. */}
               <TextField
                 label="Lead time"
                 size="small"
@@ -1893,7 +1897,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                 required
                 value={formData.lead_time_text}
                 onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
-                helperText={standingTermsHelper('lead_time_text', 'e.g. “2–3 weeks” or “In stock”')}
+                helperText="e.g. “2–3 weeks” or “In stock”"
                 InputLabelProps={{ shrink: true }}
               />
             </Grid>

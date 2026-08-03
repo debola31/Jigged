@@ -103,47 +103,6 @@ const EMPTY_CARRIER_ACCOUNTS: CustomerCarrierAccount[] = [];
  */
 const ALL_JOB_STAGES = (Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]).join(',');
 
-/**
- * One Related-card count, as a link to its filtered list.
- *
- * The whole block is the target, not just the number — a bare numeral is a
- * small target for a 50-60 year old on a mouse, and Fitts's law is the reason
- * the label and count share one hit area.
- */
-function RelatedCountLink({
-  label,
-  count,
-  href,
-}: {
-  label: string;
-  count: number;
-  href: string;
-}) {
-  return (
-    <MuiLink
-      component={Link}
-      href={href}
-      underline="none"
-      sx={{
-        display: 'block',
-        px: 2,
-        py: 1,
-        minHeight: 48,
-        borderRadius: 1,
-        color: 'inherit',
-        '&:hover': { bgcolor: 'action.hover' },
-      }}
-    >
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="h6" color="primary.main">
-        {count}
-      </Typography>
-    </MuiLink>
-  );
-}
-
 export default function CustomerDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -504,14 +463,6 @@ export default function CustomerDetailPage() {
           >
             <Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                {/* Archived customers show the name as text — the fields go
-                    read-only rather than disabled, and the Archived explainer
-                    below carries the reason (interaction-standards §4). */}
-                {isArchived && (
-                  <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                    {customer.name}
-                  </Typography>
-                )}
                 {/* Credit hold sits beside the name because it changes how you
                     treat everything else on the page. Informational only —
                     nothing here or downstream blocks on it. */}
@@ -544,27 +495,11 @@ export default function CustomerDetailPage() {
                   {form.credit_hold_note}
                 </Typography>
               )}
-              {isArchived && customer.website && (
-                <MuiLink
-                  href={
-                    customer.website.startsWith('http')
-                      ? customer.website
-                      : `https://${customer.website}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{ fontWeight: 500 }}
-                >
-                  {customer.website}
-                </MuiLink>
-              )}
-              {/* The customer's own fields, edited right here. There is no
-                  longer an Edit route: contacts/addresses/carrier accounts were
-                  already editable on this page, and having the customer's OWN
-                  fields be the one thing behind a button was the inconsistency.
-                  Per interaction-standards §2 these are identity fields, so
-                  auto-save; the child records keep their row/modal editors
-                  because they are only valid as a set. */}
+              {/* The name reads as a heading with a pencil beside it — it is
+                  read constantly and renamed almost never, so an always-live
+                  input in the title position would make the page look like a
+                  form. Everything else on this page (terms, credit) auto-saves
+                  in place; there is no Edit route any more. */}
               <Box sx={{ mt: isArchived ? 0 : 1 }}>
                 <CustomerIdentityFields
                   form={form}
@@ -574,6 +509,8 @@ export default function CustomerDetailPage() {
                   onSelectChange={onSelectChange}
                   readOnly={isArchived}
                   saveState={saveState}
+                  displayName={savedForm.name || customer.name}
+                  onCancelEdit={() => setForm(savedForm)}
                 />
               </Box>
             </Box>
@@ -1070,16 +1007,28 @@ export default function CustomerDetailPage() {
                   when ?status= is absent (so the same link would give the
                   salesperson a different list from the owner). */}
               <Stack direction="row" spacing={3} flexWrap="wrap">
-                <RelatedCountLink
-                  label="Quotes"
-                  count={customer.quotes_count}
-                  href={`/dashboard/${companyId}/quotes?customer=${customerId}`}
-                />
-                <RelatedCountLink
-                  label="Jobs"
-                  count={customer.jobs_count}
-                  href={`/dashboard/${companyId}/jobs?customer=${customerId}&status=${ALL_JOB_STAGES}`}
-                />
+                <Box>
+                  <MuiLink
+                    component={Link}
+                    href={`/dashboard/${companyId}/quotes?customer=${customerId}`}
+                    underline="hover"
+                    variant="body2"
+                  >
+                    Quotes
+                  </MuiLink>
+                  <Typography variant="h6">{customer.quotes_count}</Typography>
+                </Box>
+                <Box>
+                  <MuiLink
+                    component={Link}
+                    href={`/dashboard/${companyId}/jobs?customer=${customerId}&status=${ALL_JOB_STAGES}`}
+                    underline="hover"
+                    variant="body2"
+                  >
+                    Jobs
+                  </MuiLink>
+                  <Typography variant="h6">{customer.jobs_count}</Typography>
+                </Box>
               </Stack>
             </CardContent>
           </Card>

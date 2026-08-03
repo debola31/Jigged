@@ -20,7 +20,6 @@ describe('hasChanged — the guard on every blur', () => {
   });
 
   it('notices a change in any field, including the credit ones', () => {
-    expect(hasChanged(form({ website: 'https://acme.test' }), form())).toBe(true);
     expect(hasChanged(form({ default_payment_terms: 'Net 30' }), form())).toBe(true);
     expect(hasChanged(form({ credit_status: 'hold' }), form())).toBe(true);
     expect(hasChanged(form({ credit_hold_note: '60 days' }), form())).toBe(true);
@@ -34,17 +33,13 @@ describe('normalizeSnapshot — compare what the DB would store', () => {
     const n = normalizeSnapshot(
       form({
         name: '  Acme Corp  ',
-        website: ' https://acme.test ',
         default_payment_terms: ' Net 30 ',
-        default_lead_time_text: ' 4 weeks ',
         default_fob_point: ' FOB our dock ',
         credit_hold_note: ' 60 days ',
       }),
     );
     expect(n.name).toBe('Acme Corp');
-    expect(n.website).toBe('https://acme.test');
     expect(n.default_payment_terms).toBe('Net 30');
-    expect(n.default_lead_time_text).toBe('4 weeks');
     expect(n.default_fob_point).toBe('FOB our dock');
     expect(n.credit_hold_note).toBe('60 days');
   });
@@ -78,16 +73,12 @@ describe('applyCreditStatusChange — lifting a hold clears its reason', () => {
   // must not disturb any other column, because updateCustomer writes them all.
   it('touches nothing but the credit fields', () => {
     const base = form({
-      website: 'https://acme.test',
       default_payment_terms: 'Net 45',
-      default_lead_time_text: '6 weeks',
       default_fob_point: 'FOB our dock',
     });
     const next = applyCreditStatusChange(base, 'hold');
     expect(next.name).toBe(base.name);
-    expect(next.website).toBe(base.website);
     expect(next.default_payment_terms).toBe(base.default_payment_terms);
-    expect(next.default_lead_time_text).toBe(base.default_lead_time_text);
     expect(next.default_fob_point).toBe(base.default_fob_point);
   });
 });

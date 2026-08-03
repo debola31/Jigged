@@ -116,7 +116,7 @@ const QUOTE_LIST_SELECT = `
   jobs!left(id, job_number)
 `;
 
-// The customer's standing terms (default_payment_terms / default_lead_time_text /
+// The customer's standing terms (default_payment_terms /
 // default_fob_point) ride along on the DETAIL select so the page can compare what
 // this quote was issued with against the customer's CURRENT default and surface
 // drift as a chip. Comparison only — the quote always RENDERS its own columns.
@@ -124,8 +124,8 @@ const QUOTE_LIST_SELECT = `
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(
-    id, name, website,
-    default_payment_terms, default_lead_time_text, default_fob_point,
+    id, name,
+    default_payment_terms, default_fob_point,
     customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at),
     addresses:customer_addresses(
       id,

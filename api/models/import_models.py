@@ -107,11 +107,6 @@ CUSTOMER_SCHEMA = {
         "required": True,
         "description": "Company/customer name",
     },
-    "website": {
-        "type": "string",
-        "required": False,
-        "description": "Company website URL",
-    },
     "contact_name": {
         "type": "string",
         "required": False,
@@ -167,14 +162,6 @@ CUSTOMER_SCHEMA = {
             "Standing payment terms for this customer, applied to new quotes "
             "(e.g. Net 30, 2% 10 Net 30, Due on Receipt). Often exported as "
             "'Terms', 'Terms Code' or 'Payment Terms'."
-        ),
-    },
-    "default_lead_time_text": {
-        "type": "string",
-        "required": False,
-        "description": (
-            "Standing lead time quoted to this customer, as free text "
-            "(e.g. '4-6 weeks ARO'). Often exported as 'Lead Time' or 'Lead Days'."
         ),
     },
     "default_fob_point": {

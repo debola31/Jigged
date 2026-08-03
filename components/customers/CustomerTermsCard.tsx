@@ -23,6 +23,11 @@ import type { CustomerFieldEditingProps } from '@/components/customers/customerF
  * Plain free text on purpose, matching what the old edit form offered: the
  * preset picker lives on the quote form, where the term is actually being
  * committed to a document. Offering presets in two places invites them to drift.
+ *
+ * Lead time used to sit here and was removed: it is a function of current shop
+ * load and the specific part, not of the customer, so a standing value here was
+ * a stale promise waiting to be quoted. It lives on the quote, stated at the
+ * moment someone judges the shop's actual backlog.
  */
 export default function CustomerTermsCard({
   form,
@@ -37,11 +42,6 @@ export default function CustomerTermsCard({
       key: 'default_payment_terms' as const,
       label: 'Payment terms',
       helper: 'Such as Net 30, or 50% deposit.',
-    },
-    {
-      key: 'default_lead_time_text' as const,
-      label: 'Lead time',
-      helper: 'However you normally phrase it on a quote.',
     },
     {
       key: 'default_fob_point' as const,

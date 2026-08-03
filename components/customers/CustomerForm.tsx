@@ -212,14 +212,6 @@ export default function CustomerForm({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Website"
-                value={formData.website}
-                onChange={handleChange('website')}
-                disabled={loading}
-                placeholder="https://example.com"
-              />
             </Grid>
           </Grid>
         </CardContent>
@@ -260,14 +252,6 @@ export default function CustomerForm({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Lead time"
-                value={formData.default_lead_time_text}
-                onChange={handleChange('default_lead_time_text')}
-                disabled={loading}
-                helperText="However you normally phrase it on a quote."
-              />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               {/* FOB is about where title and risk transfer — NOT about who pays

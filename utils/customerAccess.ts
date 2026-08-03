@@ -23,7 +23,7 @@ import { toError } from '@/lib/supabaseErrors';
 /**
  * Customer access layer.
  *
- * A customer row holds identity (name, website) plus the shop's standing
+ * A customer row holds its name plus the shop's standing
  * commercial position on that customer: three default_* terms copied onto a NEW
  * quote at create time, and a manual credit_status. Contacts, addresses and
  * carrier accounts each live in their own table with their own access module.
@@ -285,9 +285,7 @@ export async function checkCustomerNameExists(
 function formDataToColumns(formData: CustomerFormData) {
   return {
     name: formData.name.trim(),
-    website: formData.website.trim() || null,
     default_payment_terms: formData.default_payment_terms.trim() || null,
-    default_lead_time_text: formData.default_lead_time_text.trim() || null,
     default_fob_point: formData.default_fob_point.trim() || null,
     credit_status: formData.credit_status,
     credit_hold_note: formData.credit_hold_note.trim() || null,
@@ -389,12 +387,7 @@ async function reviveArchivedCustomerByName(
   // person can see what happened last time.
   const filled = formDataToColumns(formData);
   const revivePatch: Record<string, string | null> = { name: filled.name };
-  for (const key of [
-    'website',
-    'default_payment_terms',
-    'default_lead_time_text',
-    'default_fob_point',
-  ] as const) {
+  for (const key of ['default_payment_terms', 'default_fob_point'] as const) {
     if (filled[key] !== null) revivePatch[key] = filled[key];
   }
 
@@ -564,12 +557,6 @@ export function pickPaymentTerms(
   customer: Pick<Customer, 'default_payment_terms'> | null | undefined,
 ): string | null {
   return customer?.default_payment_terms?.trim() || null;
-}
-
-export function pickLeadTimeText(
-  customer: Pick<Customer, 'default_lead_time_text'> | null | undefined,
-): string | null {
-  return customer?.default_lead_time_text?.trim() || null;
 }
 
 export function pickFobPoint(

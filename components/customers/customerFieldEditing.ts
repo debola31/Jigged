@@ -33,12 +33,8 @@
 import type { CustomerFormData } from '@/types/customer';
 
 /** The customer-owned fields edited in place, by card. */
-export const IDENTITY_FIELDS = ['name', 'website'] as const;
-export const TERMS_FIELDS = [
-  'default_payment_terms',
-  'default_lead_time_text',
-  'default_fob_point',
-] as const;
+export const IDENTITY_FIELDS = ['name'] as const;
+export const TERMS_FIELDS = ['default_payment_terms', 'default_fob_point'] as const;
 
 /** Every field these helpers drive. */
 export type EditableCustomerField = keyof CustomerFormData;
@@ -88,9 +84,7 @@ export function normalizeSnapshot(form: CustomerFormData): CustomerFormData {
   return {
     ...form,
     name: form.name.trim(),
-    website: form.website.trim(),
     default_payment_terms: form.default_payment_terms.trim(),
-    default_lead_time_text: form.default_lead_time_text.trim(),
     default_fob_point: form.default_fob_point.trim(),
     credit_hold_note: form.credit_hold_note.trim(),
   };

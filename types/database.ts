@@ -536,13 +536,11 @@ export type Database = {
           credit_hold_note: string | null
           credit_status: string
           default_fob_point: string | null
-          default_lead_time_text: string | null
           default_payment_terms: string | null
           deleted_at: string | null
           id: string
           name: string
           updated_at: string | null
-          website: string | null
         }
         Insert: {
           company_id: string
@@ -550,13 +548,11 @@ export type Database = {
           credit_hold_note?: string | null
           credit_status?: string
           default_fob_point?: string | null
-          default_lead_time_text?: string | null
           default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name: string
           updated_at?: string | null
-          website?: string | null
         }
         Update: {
           company_id?: string
@@ -564,13 +560,11 @@ export type Database = {
           credit_hold_note?: string | null
           credit_status?: string
           default_fob_point?: string | null
-          default_lead_time_text?: string | null
           default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name?: string
           updated_at?: string | null
-          website?: string | null
         }
         Relationships: [
           {

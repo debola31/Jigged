@@ -1,29 +1,33 @@
 'use client';
 
+import { useState } from 'react';
 import Box from '@mui/material/Box';
-import Stack from '@mui/material/Stack';
+import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
+import EditIcon from '@mui/icons-material/Edit';
 
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 import type { CustomerFieldEditingProps } from '@/components/customers/customerFieldEditing';
 
 /**
- * Company name + website, edited in place in the detail page's header card.
+ * The customer's name in the detail-page header.
  *
- * Ported from components/parts/workspace/PartIdentitySection.tsx, which solved
- * this exact problem for parts — same audience, same all-columns update
- * function, same name-uniqueness-on-blur — and which is why /parts/{id}/edit no
- * longer exists. Matching a pattern that already shipped beats inventing one.
+ * Reads as a HEADING until you ask to change it. A name is the one field on
+ * this page that is read constantly and edited almost never — an always-live
+ * input in the title position makes the page look like a form and puts a
+ * caret-sized target where a heading belongs. The pencil is the exception to
+ * this page's otherwise auto-save-everywhere model, and it earns it: the terms
+ * and credit fields are things you come here to set, the name is the thing you
+ * came here to confirm.
  *
- * The name is a heading-sized input rather than a click-to-reveal pencil. A
- * pencil hides the affordance behind a hover on the one field most likely to be
- * corrected, and the audience here is 50-60 year olds on an office desktop who
- * should not have to discover that text is editable. It reads as the title
- * because it is styled as the title.
+ * Still auto-save once open — commits on blur or Enter, same as every other
+ * field, so the pencil reveals an editor rather than starting a staged form.
+ * Escape reverts and closes without writing.
  *
- * Uniqueness is checked on blur by the page, before the write — including the
- * case where the CHECK ITSELF FAILS, which is refused rather than reported as a
- * duplicate. See the persist handler on the detail page.
+ * Uniqueness is checked by the page before the write, including the case where
+ * the check itself fails (refused, not reported as a duplicate).
  */
 export default function CustomerIdentityFields({
   form,
@@ -32,43 +36,67 @@ export default function CustomerIdentityFields({
   onTextBlur,
   readOnly,
   saveState,
-}: CustomerFieldEditingProps & { saveState: SaveState }) {
-  if (readOnly) return null;
+  displayName,
+  onCancelEdit,
+}: CustomerFieldEditingProps & {
+  saveState: SaveState;
+  /** The last SAVED name, so cancelling can restore it. */
+  displayName: string;
+  onCancelEdit: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  // A failed save keeps the editor open — closing it would hide the error next
+  // to the value that caused it.
+  const close = () => {
+    if (saveState !== 'error') setEditing(false);
+  };
+
+  if (readOnly || !editing) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+          {displayName}
+        </Typography>
+        {!readOnly && (
+          <Tooltip title="Rename this customer">
+            <IconButton size="small" onClick={() => setEditing(true)} aria-label="Edit name">
+              <EditIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+    );
+  }
 
   return (
-    <Stack spacing={2} sx={{ maxWidth: 640 }}>
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, maxWidth: 560 }}>
       <TextField
+        autoFocus
         label="Company name"
         value={form.name}
         onChange={(e) => onTextChange('name', e.target.value)}
-        onBlur={onTextBlur}
+        onBlur={() => {
+          onTextBlur();
+          close();
+        }}
         onKeyDown={(e) => {
-          // Enter commits by blurring — the same write the blur handler does,
-          // just without making the user reach for the mouse or Tab.
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Enter') {
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'Escape') {
+            onCancelEdit();
+            setEditing(false);
+          }
         }}
         error={!!fieldErrors.name}
-        helperText={fieldErrors.name || ' '}
+        helperText={fieldErrors.name || 'Enter to save, Escape to cancel'}
         required
         fullWidth
-        slotProps={{
-          htmlInput: { 'aria-label': 'Company name' },
-        }}
         sx={{ '& .MuiInputBase-input': { fontSize: '1.5rem', fontWeight: 600 } }}
       />
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <TextField
-          label="Website"
-          value={form.website}
-          onChange={(e) => onTextChange('website', e.target.value)}
-          onBlur={onTextBlur}
-          placeholder="https://example.com"
-          error={!!fieldErrors.website}
-          helperText={fieldErrors.website || ' '}
-          fullWidth
-        />
+      <Box sx={{ pt: 2 }}>
         <SaveStatus state={saveState} />
       </Box>
-    </Stack>
+    </Box>
   );
 }

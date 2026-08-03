@@ -15,27 +15,38 @@
  * would have failed was runtime-skipping. This check would have flagged
  * the embed on the PR that dropped the column.
  *
- * STILL NEEDED AFTER THE TYPED-CLIENT MIGRATION, but only just — and the
- * remaining gap is worth stating precisely, because it is small enough that
- * someone will reasonably ask whether this check can go.
+ * STILL NEEDED AFTER THE TYPED-CLIENT MIGRATION, and the reason is worth
+ * recording precisely, because the obvious way to make it redundant does not
+ * work and someone will otherwise try it again.
  *
- * All 37 access files now use `getTypedSupabase()`, and supabase-js validates
- * select strings at the type level, so `tsc` already catches most of this class.
- * Measured, by injecting a bogus embed column into each shape:
+ * All 37 access files use `getTypedSupabase()`, and supabase-js validates select
+ * strings at the type level — so `tsc` does catch part of this class. Measured
+ * by injecting a bogus embed column and running the whole project:
  *
- *   .select(`…`) written inline        → tsc CATCHES it
- *       SelectQueryError<"column 'bogus' does not exist on 'parts'.">
- *   .select(SOME_CONST) built from a
- *   template literal with ${…}          → tsc SEES NOTHING
+ *   jobsAccess, `jobs → job_parts → parts`      → tsc CATCHES it
+ *       SelectQueryError<"column 'x' does not exist on 'parts'.">
+ *   quotesAccess QUOTE_DETAIL_SELECT             → tsc SEES NOTHING
  *
- * Interpolation widens the constant to `string`, and the type-level select
- * parser has nothing left to read. Four constants are in that blind spot today
- * — QUOTE_LINE_ITEM_FIELDS, QUOTE_LIST_SELECT, QUOTE_DETAIL_SELECT and
- * PART_SELECT_COLUMNS — and quotesAccess.ts is exactly where the jobs.status
- * incident lived. This check is what covers them.
+ * THE DIFFERENCE IS NOT HOW THE STRING IS DECLARED. That was the first guess,
+ * and it is wrong. All three of these were tested on the quotes detail select,
+ * with a jobsAccess injection in the SAME tsc run as a positive control to prove
+ * the experiment could detect anything at all:
  *
- * If those four are ever inlined so `tsc` can read them, this file can be
- * deleted outright rather than maintained.
+ *   as a `const` with ${…} interpolation   → not caught
+ *   the same const with `as const`         → not caught
+ *   fully inlined at the call site         → NOT CAUGHT
+ *
+ * So it is the select's own complexity. `quotes` embeds `customers`, which
+ * embeds both `customer_contacts` and `customer_addresses`, alongside
+ * `line_items` which embeds `parts`. Past some breadth/depth the type-level
+ * parser stops resolving and silently widens instead of erroring — and silence
+ * is indistinguishable from success.
+ *
+ * The practical consequence: inlining these selects buys NOTHING except three
+ * duplicated copies of PART_SELECT_COLUMNS, and deleting this file would leave
+ * the largest, most-nested selects in the codebase unchecked — including
+ * quotesAccess.ts, which is exactly where the jobs.status incident lived.
+ * Re-run the experiment before concluding otherwise.
  *
  * Scope:
  * - Validates EMBED columns (inside `relation(...)`). Bare top-level columns

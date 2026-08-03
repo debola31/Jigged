@@ -102,8 +102,8 @@ function hydrateCreators<T extends QuoteWithRelations>(
 // Select all quote_line_items columns (incl. lead_time_text) plus the joined
 // part. Uses `*` rather than an explicit column list — matching
 // getLineItemsForQuote — so a newly-added column loads without an explicit
-// reference that schemaEmbedCheck would flag against the prod snapshot before
-// the migration has deployed (the snapshot only refreshes post-deploy).
+// reference that schemaEmbedCheck would flag before the column exists in
+// types/database.ts.
 const QUOTE_LINE_ITEM_FIELDS = `
   *,
   parts(id, part_name, description, primary_unit)

@@ -42,6 +42,11 @@ jobs:
   verify:
     name: Production has applied every migration
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To file the issue below. A red ✗ on a commit is not an alert: it appears
+      # on no PR, and nobody browses main's commit list looking for one.
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +68,70 @@ jobs:
         # minutes; a real apply lands well inside that, and a failed one never
         # lands at all.
         run: python scripts/check_prod_migrations.py --wait 600
+
+      # An issue, not just a red check. This repo's attention lands on PRs and
+      # issues; a failed run on main shows up in neither, and the whole reason
+      # production sat 13 migrations behind for two days is that the signal
+      # existed somewhere nobody was looking. An issue emails the owner, sits in
+      # the Issues tab until closed, and cannot be scrolled past.
+      - name: File an issue so the failure is impossible to miss
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Idempotent: a label that already exists is not an error worth failing on.
+          gh label create prod-migrations \
+            --color B60205 \
+            --description "Production database is behind main" 2>/dev/null || true
+
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # One issue per outage, not one per merge. While prod stays behind,
+          # every subsequent push would otherwise file a duplicate and the noise
+          # would train everyone to ignore the label.
+          EXISTING=$(gh issue list --label prod-migrations --state open \
+            --json number --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body \
+              "Still failing as of \`${GITHUB_SHA:0:8}\` — [run](${RUN_URL})."
+            exit 0
+          fi
+
+          gh issue create \
+            --label prod-migrations \
+            --title "Production is behind main — migrations did not apply" \
+            --body "$(cat <<BODY
+          The \`Prod Migrations\` guard failed on [\`${GITHUB_SHA:0:8}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}).
+
+          **Production does not have every migration on \`main\`.** Supabase Branching
+          applies them on merge, so if they are still pending, that apply failed or
+          never ran. The deployed frontend may already be querying columns the
+          production database does not have.
+
+          [Full run log, including which versions are pending](${RUN_URL})
+
+          ### Read the first pending version, not the last
+          Migrations are atomic and ordered. Everything after the first one is
+          blocked behind it, not independently broken.
+
+          ### See the actual error
+          \`\`\`
+          npx supabase@2.109.0 db push --linked --dry-run
+          \`\`\`
+
+          ### Do not "fix" this with migration repair
+          \`migration repair --status applied\` marks the file done without running
+          it, so its contents never reach production and the next migration that
+          depends on them fails the same way.
+
+          This issue does not close itself. Close it once the guard is green again —
+          a stale open one suppresses the alert for the next real failure, because
+          subsequent runs comment here instead of filing a new issue.
+          BODY
+          )"
 
       - name: Explain a failure in the run summary
         if: failure()

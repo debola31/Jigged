@@ -125,7 +125,23 @@ function ReachRow({
   );
 }
 
-/** One figure in the "what you've added" row: the number, then what it counts. */
+/**
+ * One figure in the summary: the number, and what it counts.
+ *
+ * A `dt`/`dd` pair, which is the documented semantic for a big-number-plus-caption tile —
+ * it is what programmatically ties "9" to "Times viewed". These were previously
+ * `variant="h4"`, which renders a literal `<h4>`, so a screen reader's heading rotor listed
+ * "17", "0" and "9" as three headings with no antecedent and no link to their captions.
+ *
+ * `column-reverse` puts the number on top while leaving `dt` before `dd` in the DOM, which
+ * HTML requires. Reading "Notes, 17" rather than "17, Notes" is also the better of the two
+ * announcements — the caption frames the number instead of the listener holding a bare
+ * figure in memory until the label arrives.
+ *
+ * Deliberately NOT `tabular-nums`: equal-width digits make a large standalone value look
+ * loose. Column positions are already fixed by the grid, so the row cannot shift as a count
+ * rolls over.
+ */
 function Stat({
   value,
   label,
@@ -136,12 +152,15 @@ function Stat({
   align: 'left' | 'center' | 'right';
 }) {
   return (
-    <Box sx={{ textAlign: align }}>
-      <Typography variant="h4" fontWeight={700}>
-        {value}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
+    <Box sx={{ display: 'flex', flexDirection: 'column-reverse', textAlign: align }}>
+      <Typography component="dt" sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
         {label}
+      </Typography>
+      <Typography
+        component="dd"
+        sx={{ m: 0, fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}
+      >
+        {value}
       </Typography>
     </Box>
   );
@@ -295,7 +314,11 @@ function NoteRow({
               {/* Explicitly labelled: the job beside a viewer's name is the job
                   THEY consulted it on, not the job in the header where the note
                   was written. Same format, different meaning — so say which. */}
-              <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ display: 'block', fontWeight: 600, mb: 0.5 }}
+              >
                 Viewed by
               </Typography>
               {loading ? (
@@ -535,58 +558,63 @@ function MyContribution({ companyId }: { companyId: string }) {
           the point is that writing things down is the work, not a score. */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
         <CardContent>
-          {/* NO HEADER, deliberately. "What you've added" was true of the notes and the
-              photos and false of the views — those are not something the operator added,
-              they are what came back. No single heading is true of both categories, and
-              two headings over three figures is more structure than three numbers can
-              carry, so the captions say what each figure is instead. */}
-          {/* Three equal columns, and each one aligned to the edge it sits nearest:
-              first hard left, middle centred, last hard right. Equal columns alone were
-              not enough — with every column's content left-aligned, the last number
-              landed a third of the way in from the right and the middle one sat left of
-              the card's true centre, so the row still read as clustered.
+          {/* A HEADING, and it predicates THE NOTES rather than the operator.
+              "What you've added" was false of the third figure — a view is not something
+              the operator added. Moving the grammatical subject to the notes makes every
+              figure a true predicate of it: the notes number 17, and they have been opened
+              9 times. Google Maps solves the identical card the same way, attaching the
+              possessive to the posts rather than to the views ("total review views … of
+              your posts").
 
-              CAPPED at 420px rather than stretched to the card. Nothing constrains the
-              operator column's width on this branch, so edge-to-edge on a laptop would
-              put "notes" and "views" a thousand pixels apart. A phone has ~340px of
-              usable width here, so the cap never binds on the device this is for. */}
+              "so far" and never "this month": a bounded window turns a tally into a rate,
+              and a rate is pace — which the surveillance guardrail forbids outright.
+
+              Sentence case, not the `overline` variant used elsewhere on this screen.
+              Overline stacks 12px + uppercase + letter-spacing, and readers over 55 were
+              measured 29% more likely to misread text set in capitals (Arbel & Toler 2020),
+              with reading speed down 10–20% (Tinker 1955). This is the exact demographic
+              the app is for. A real `h2` because it is a section title, and because it is
+              what lets the captions below stay short enough to fit three across at 14px —
+              they inherit "your notes" from it instead of each repeating it. */}
+          <Typography
+            component="h2"
+            sx={{ fontSize: '1rem', fontWeight: 600, textTransform: 'none', mb: 1.5 }}
+          >
+            Your notes so far
+          </Typography>
+
+          {/* Three equal columns, each aligned to the edge it sits nearest: first hard
+              left, middle centred, last hard right. Capped at 420px — nothing constrains
+              the operator column's width on this branch, so aligning to the card's own
+              edges would put the first and last figures a thousand pixels apart on a
+              laptop. A phone has ~340px of usable width, so the cap never binds there. */}
           <Box
+            component="dl"
             sx={{
+              m: 0,
               display: 'grid',
               gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
               gap: 2,
               maxWidth: 420,
-              mt: 0.5,
             }}
           >
-            <Stat
-              value={c.noteCount}
-              label={c.noteCount === 1 ? 'note written' : 'notes written'}
-              align="left"
-            />
+            <Stat value={c.noteCount} label={c.noteCount === 1 ? 'Note' : 'Notes'} align="left" />
             <Stat
               value={c.photoCount}
-              label={c.photoCount === 1 ? 'photo added' : 'photos added'}
+              label={c.photoCount === 1 ? 'Photo' : 'Photos'}
               align="center"
             />
-            {/* "views", not "people". This sums each note's viewer_count, so one colleague
-                who read three of your notes contributes three — a view total, not a
-                headcount. A distinct-people figure would need the note_views rows, which no
-                browser role can read by design. The per-note numbers below are exact.
+            {/* "Times viewed", not "Views": a passive phrasing is what marks this figure as
+                reception rather than contribution now that it sits under a heading covering
+                all three. Still "viewed" and never "used" — all that was recorded is that
+                somebody opened the note and stayed on it.
 
-                NOT GREEN, unlike the per-note count. Green is semantic in this theme — a
-                state, not a decoration — and a lifetime total has no state to report. It was
-                also the only one of three sibling metrics that was coloured, which made the
-                least actionable number the loudest thing in the card. On a note row the same
-                green earns its place: there it is binary and comparative, marking which
-                notes have landed as you scan a column. Here there is nothing to compare. */}
-            {/* "times viewed", not "views": a passive phrasing is what marks this one out
-                as reception rather than contribution, now that no heading does it. Still
-                "viewed" and never "used" — all that was recorded is that somebody opened
-                the note and stayed on it. */}
+                A sum, not a headcount: one colleague reading three of these notes counts
+                three. A distinct-people figure would need the note_views rows, which no
+                browser role can read by design. */}
             <Stat
               value={c.peopleReached}
-              label={c.peopleReached === 1 ? 'time viewed' : 'times viewed'}
+              label={c.peopleReached === 1 ? 'Time viewed' : 'Times viewed'}
               align="right"
             />
           </Box>
@@ -594,7 +622,13 @@ function MyContribution({ companyId }: { companyId: string }) {
         </CardContent>
       </Card>
 
-      <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>
+      {/* Sentence case and a real heading, matching the summary above it. Uppercase is
+          measurably worse for readers over 55 — see the note on the card's heading — and
+          `overline` applies it along with a 12px size and extra letter-spacing. */}
+      <Typography
+        component="h2"
+        sx={{ fontSize: '1rem', fontWeight: 600, color: 'text.secondary', px: 0.5, mb: 0.5 }}
+      >
         Your notes
       </Typography>
       {/* A real list: it is one semantically, screen readers announce the count,

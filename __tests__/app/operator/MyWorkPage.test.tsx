@@ -218,31 +218,52 @@ describe('My Work', () => {
     stage({ totals: { peopleReached: 5 } });
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('times viewed')).toBeInTheDocument();
+    expect(await screen.findByText('Times viewed')).toBeInTheDocument();
     expect(screen.queryByText(/people have (used|viewed)/i)).not.toBeInTheDocument();
     // "viewed", never "used" — all that was recorded is that somebody opened the note.
     expect(screen.queryByText(/used/i)).not.toBeInTheDocument();
   });
 
   /**
-   * The summary has no heading, and that is deliberate rather than an oversight.
+   * The summary heading predicates THE NOTES, not the operator.
    *
    * It used to read "What you've added", which was true of the notes and the photos and
-   * false of the views — those are not something the operator added, they are what came
-   * back. No one heading is true of both categories, and two headings over three figures
-   * is more structure than three numbers can carry, so each caption states its own kind
-   * instead: the contributions are past-tense verbs the operator performed, the reception
-   * one is passive.
+   * false of the views — a view is not something the operator added, it is what came back.
+   * Moving the grammatical subject to the notes makes every figure a true predicate of it:
+   * the notes number 17, and they have been opened 9 times.
+   *
+   * "so far" is load-bearing and must stay unbounded. A windowed heading ("this month",
+   * "last 30 days") turns a tally into a rate, and a rate is pace — which the surveillance
+   * guardrail in docs/modules/operator-view.md forbids outright.
    */
-  it('states each figure kind in its own caption, with no heading claiming all three', async () => {
+  it('heads the summary with a claim that is true of every figure under it', async () => {
     stage({ totals: { noteCount: 17, photoCount: 2, peopleReached: 9 } });
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('notes written')).toBeInTheDocument();
-    expect(screen.getByText('photos added')).toBeInTheDocument();
-    expect(screen.getByText('times viewed')).toBeInTheDocument();
-    // The heading claimed authorship of a number the operator did not author.
+    expect(await screen.findByRole('heading', { name: /your notes so far/i })).toBeInTheDocument();
+    // Never a claim the operator authored the views.
     expect(screen.queryByText(/what you.?ve added/i)).not.toBeInTheDocument();
+    // Never a bounded window, which would make it a rate.
+    expect(screen.queryByText(/this (week|month)|last \d+ days/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The figures are data, not section titles. They rendered as `variant="h4"` — literal
+   * `<h4>` elements — so a screen reader's heading rotor listed "17", "0" and "9" as three
+   * headings with no antecedent, and nothing tied a figure to its caption. A `dt`/`dd` pair
+   * is the documented semantic for a big-number-plus-caption tile.
+   */
+  it('does not announce the figures as headings', async () => {
+    stage({ totals: { noteCount: 17, photoCount: 2, peopleReached: 9 } });
+    render(<MyWorkPage />);
+
+    await screen.findByRole('heading', { name: /your notes so far/i });
+    for (const figure of ['17', '2', '9']) {
+      expect(screen.queryByRole('heading', { name: figure })).not.toBeInTheDocument();
+    }
+    expect(screen.getByText('Notes')).toBeInTheDocument();
+    expect(screen.getByText('Photos')).toBeInTheDocument();
+    expect(screen.getByText('Times viewed')).toBeInTheDocument();
   });
 
   it('shows the view count alone, never a second job figure beside it', async () => {

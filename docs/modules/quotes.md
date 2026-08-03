@@ -586,7 +586,7 @@ This follows the same pattern as Customers, Parts, and Operations:
 
 ### Edit policy (line-item reconcile, frozen pricing, drift)
 
-This section is the authoritative spec for editing an existing quote. It supersedes any older "line items are read-only" language elsewhere in this doc. Implementation tracked in [#324](https://github.com/debola31/Jigged/issues/324). Every behavior carries an `edit → save → reload → assert` verification clause; the reload step is the binding mechanism — see [docs/testing/Testing-gaps.md](../testing/Testing-gaps.md) for why.
+This section is the authoritative spec for editing an existing quote. It supersedes any older "line items are read-only" language elsewhere in this doc. Implementation tracked in [#324](https://github.com/debola31/Jigged/issues/324). Every behavior carries an `edit → save → reload → assert` verification clause; the reload step is the binding mechanism — see [docs/testing/README.md](../testing/README.md) for why.
 
 **Pricing basis snapshot (the data shape this all depends on)**
 

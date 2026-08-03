@@ -139,7 +139,7 @@ test.describe('Parts and Routing workflow', () => {
     await expect(pricingCard.getByText(/unsaved change/i)).toBeVisible();
 
     // Commit it, then prove it actually reached the database rather than only
-    // the UI — the reload-after-save convention from docs/testing/Testing-gaps.md.
+    // the UI — the reload-after-save convention from docs/testing/README.md.
     await pricingCard.getByRole('button', { name: /Save pricing/i }).click();
     await page.reload();
 

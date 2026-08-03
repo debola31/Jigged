@@ -23,13 +23,12 @@ on:
     branches: [main]
   # Manual re-check, for confirming a fix without waiting for the next merge.
   workflow_dispatch:
-  # TEMPORARY — remove before merge. Proves the secret and the connection work
-  # from a runner while this PR is still open, so the guard's first run on main
-  # is not also its first real test. NOT a permanent trigger: on a PR that adds
-  # a migration, production legitimately does not have it yet, so this would go
-  # red on exactly the schema PRs it is meant to protect.
-  pull_request:
-    branches: [main]
+
+# Deliberately NOT triggered on pull_request. A PR that adds a migration has,
+# by definition, not merged yet, so production does not have it and the check
+# would fail — turning the guard red on exactly the schema PRs it exists to
+# protect. It was run once against PR #666 to prove the secret and connection
+# work from a runner (✅ 98 migrations), then removed.
 
 # Two merges land close together: the second run's answer is the only one that
 # matters, and cancelling the first avoids two jobs racing to report on the same

@@ -18,14 +18,14 @@ event + trigger-derived-status pattern the codebase already uses twice.
 ### What exists today (established by code exploration)
 
 - Hierarchy: `jobs` → `job_parts` → `job_operations`. Order quantity lives on
-  [`job_parts.quantity`](supabase/schema.prod.sql) (`numeric`, `CHECK > 0`). Operations
+  [`job_parts.quantity`](supabase/migrations/) (`numeric`, `CHECK > 0`). Operations
   belong to a **job_part**.
-- [`job_operations`](supabase/schema.prod.sql#L782) has `status ∈ {pending, in_progress,
+- [`job_operations`](supabase/migrations/) has `status ∈ {pending, in_progress,
   completed}` (CHECK-constrained), `completed_at`, `completed_by` — **no quantity, no
   started_at, no actual-time/cost columns** (those were deliberately removed).
 - **The house partial pattern**, used identically by shipments and invoices:
   - Append-only child event table carrying a per-event `quantity`
-    ([`shipment_line_items`](supabase/schema.prod.sql#L703),
+    ([`shipment_line_items`](supabase/migrations/),
     [`quickbooks_invoice_line_items`](supabase/migrations/20260702011324_multi_invoice_per_job.sql)).
     Events are never mutated or hard-deleted.
   - A denormalized tri-state status enum on the parent (`fulfillment_status`,

@@ -10,32 +10,118 @@ import {
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
-describe('schemaEmbedCheck — parser', () => {
-  it('parses CREATE TABLE blocks and ignores CONSTRAINT lines', () => {
-    const sql = `
-CREATE TABLE IF NOT EXISTS "public"."example"
-(
-    "id" uuid NOT NULL,
-    "name" text NOT NULL,
-    "value" numeric(12,4),
-    CONSTRAINT "example_pkey" PRIMARY KEY (id)
-);
+/**
+ * A miniature `types/database.ts`, matching what `supabase gen types` emits:
+ * the graphql_public schema first, then public, then the trailing `Constants`
+ * object that repeats every schema key. Indentation is significant — the
+ * parser relies on it, and CI asserts the real file byte-for-byte.
+ */
+const FIXTURE = `export type Json = string | number | boolean | null
+
+export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+  }
+  public: {
+    Tables: {
+      example: {
+        Row: {
+          id: string
+          name: string
+          value: number | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          insert_only_artifact?: string
+        }
+        Update: {
+          update_only_artifact?: string
+        }
+        Relationships: []
+      }
+      nested: {
+        Row: {
+          amount: number
+          id: string
+          tags: string[] | null
+        }
+        Insert: {
+          amount: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nested_example_fkey"
+            columns: ["example_id"]
+            referencedRelation: "example"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      a_view: {
+        Row: {
+          view_column: string | null
+        }
+        Relationships: []
+      }
+    }
+    Functions: {
+      some_function: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+  }
+}
+
+export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
+  public: {
+    Enums: {},
+  },
+} as const
 `;
-    const schema = parseSchema(sql);
+
+describe('schemaEmbedCheck — parser', () => {
+  it('reads the Row shape of each table under the public schema', () => {
+    const schema = parseSchema(FIXTURE);
     expect(schema.get('example')).toEqual(new Set(['id', 'name', 'value']));
+    expect(schema.get('nested')).toEqual(new Set(['amount', 'id', 'tags']));
   });
 
-  it('handles nested parens inside column type expressions', () => {
-    const sql = `
-CREATE TABLE IF NOT EXISTS "public"."nested"
-(
-    "id" uuid NOT NULL,
-    "amount" numeric(12,4) NOT NULL,
-    "tags" text[] DEFAULT '{}'::text[],
-    CONSTRAINT "nested_check" CHECK ((amount > (0)::numeric))
-);
-`;
-    expect(parseSchema(sql).get('nested')).toEqual(new Set(['id', 'amount', 'tags']));
+  it('does not leak Insert/Update-only keys into a table Row', () => {
+    // Insert and Update restate the same columns with different optionality,
+    // but they also carry generated-only keys. Row is the column set of record.
+    const cols = parseSchema(FIXTURE).get('example')!;
+    expect(cols.has('insert_only_artifact')).toBe(false);
+    expect(cols.has('update_only_artifact')).toBe(false);
+  });
+
+  it('stops at Views, preserving the old CREATE TABLE-only scope', () => {
+    // The previous parser read supabase/schema.prod.sql and matched only
+    // CREATE TABLE, so an embed targeting a view was already an unknown
+    // relation. Keep that boundary rather than silently widening the check.
+    const schema = parseSchema(FIXTURE);
+    expect(schema.has('a_view')).toBe(false);
+    expect(schema.has('some_function')).toBe(false);
+  });
+
+  it('ignores the trailing Constants block, which repeats the public key', () => {
+    // `public:` appears twice in the generated file. Anchoring on the type
+    // declaration is what keeps the constants object from being parsed as
+    // a second, empty schema that would clobber the real tables.
+    const schema = parseSchema(FIXTURE);
+    expect(schema.size).toBe(2);
+    expect([...schema.keys()].sort()).toEqual(['example', 'nested']);
   });
 });
 
@@ -93,16 +179,23 @@ describe('schemaEmbedCheck — full project scan', () => {
 
     // Self-check: make sure the scanner actually did work. If we scanned
     // zero files or zero tables, the test would be a false negative.
+    //
+    // The table floor is deliberately close to the real count (57 at the time
+    // this moved to types/database.ts). A parser that silently reads only part
+    // of the file — stopping at the first sibling key, or picking up the trailing
+    // Constants block instead of the schema — still returns a positive number,
+    // so a floor of 20 would wave it through and every embed against an
+    // unparsed table would degrade to "unknown relation" or, worse, be skipped.
     expect(result.filesScanned).toBeGreaterThan(0);
-    expect(result.schemaTables).toBeGreaterThan(20);
+    expect(result.schemaTables).toBeGreaterThan(50);
 
     if (hardErrors.length > 0) {
       const summary = formatErrors(hardErrors, REPO_ROOT);
       throw new Error(
         `Schema/embed drift detected in utils/. Update the access layer to ` +
-          `match supabase/schema.prod.sql, or regenerate the schema via ` +
-          `scripts/export_schema.py if a migration legitimately added/removed ` +
-          `columns:\n\n${summary}`,
+          `match types/database.ts, or regenerate it with ` +
+          `\`supabase start && pnpm gen:db-types\` if a migration legitimately ` +
+          `added/removed columns:\n\n${summary}`,
       );
     }
   });

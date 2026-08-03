@@ -280,9 +280,9 @@ Each bullet is a Given/When/Then scenario carrying a **verification clause** —
 
 **Status model — three derived axes**
 
-The `jobs` and `job_parts` tables each carry three independent status columns — `production_status`, `fulfillment_status`, and `invoicing_status` (confirmed in `supabase/schema.prod.sql`). Job-level values are **derived from the parts by DB triggers**; the access layer never writes them directly. (There is no single `jobs.status` column.)
+The `jobs` and `job_parts` tables each carry three independent status columns — `production_status`, `fulfillment_status`, and `invoicing_status` (confirmed in `supabase/migrations/`). Job-level values are **derived from the parts by DB triggers**; the access layer never writes them directly. (There is no single `jobs.status` column.)
 
-- [ ] **Given** a job with parts, **when** a part's `production_status` changes, **then** `jobs.production_status` is recomputed by `compute_job_production_status()` via trigger and is never set from the dashboard — *manual: `compute_job_production_status` in `supabase/schema.prod.sql`; trigger-cascade E2E automation-pending*.
+- [ ] **Given** a job with parts, **when** a part's `production_status` changes, **then** `jobs.production_status` is recomputed by `compute_job_production_status()` via trigger and is never set from the dashboard — *manual: `compute_job_production_status` in `supabase/migrations/`; trigger-cascade E2E automation-pending*.
 - [ ] **Given** a not-started job, **when** the first operation on any part is marked complete, **then** the job auto-progresses to `in_progress` — there is no manual "Start Job" — *automation-pending*.
 - [ ] **Given** an in-progress job, **when** the last operation across all parts is completed or skipped, **then** the job auto-progresses to `completed` — there is no manual "Mark Complete" — *automation-pending*.
 - [ ] **Given** a job with shipped quantities, **when** shipment records are created, **then** `fulfillment_status` advances (`unshipped → partially_shipped → fully_shipped`) as a side effect — there is no "Mark Shipped" production transition (see divergence report) — *automation-pending*.

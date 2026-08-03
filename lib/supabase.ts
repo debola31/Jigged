@@ -113,8 +113,8 @@ export function getSupabase(): UntypedSupabaseClient {
 /**
  * Returns the Supabase client with the `Database` generic applied, so
  * every `.from('quotes').select('...')` chain is validated against
- * supabase/schema.prod.sql at compile time. This is the path that
- * would have caught the May 2026 jobs.status incident.
+ * types/database.ts at compile time. This is the path that would have
+ * caught the May 2026 jobs.status incident.
  *
  * Use for any new access function or while converting an existing one.
  * When you switch a file from `getSupabase()` to `getTypedSupabase()`,

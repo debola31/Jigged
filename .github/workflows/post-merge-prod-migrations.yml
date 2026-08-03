@@ -1,0 +1,84 @@
+# Does production actually have what main says it has?
+#
+# Nothing else in this repo answers that. Every other gate — `supabase db reset`
+# locally, the Supabase Preview check on a PR, the E2E stack — runs against a
+# database built by REPLAYING the migrations, so all of them are green by
+# construction whenever the migration files are internally consistent. None of
+# them touches production.
+#
+# On 2026-08-01 a migration failed to apply to production and no check noticed.
+# Merges kept going green for two days while the deployed frontend queried
+# columns the production database did not have, until every job and quote page
+# rendered "Job not found". The bad statement was cheap to fix; the SILENCE cost
+# two days. This workflow is that missing alarm.
+#
+# It deliberately does NOT apply anything. Supabase Branching owns the apply on
+# merge (CLAUDE.md: never `db push` to prod by hand). This only asks whether the
+# apply happened, and makes it loud when it did not.
+
+name: Prod Migrations
+
+on:
+  push:
+    branches: [main]
+  # Manual re-check, for confirming a fix without waiting for the next merge.
+  workflow_dispatch:
+
+# Two merges land close together: the second run's answer is the only one that
+# matters, and cancelling the first avoids two jobs racing to report on the same
+# database. Never cancel-in-progress on a deploy gate that MUTATES; this one is
+# read-only, so cancelling costs nothing.
+concurrency:
+  group: prod-migrations
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Production has applied every migration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install psycopg2
+        run: pip install psycopg2-binary python-dotenv
+
+      - name: Wait for Supabase Branching to apply, then verify
+        env:
+          # Session-mode pooler URL (port 5432). The pooler is IPv4-reachable;
+          # the direct db.<ref>.supabase.co host is IPv6-only and will not
+          # resolve from a GitHub-hosted runner.
+          PROD_SUPABASE_DATABASE_URL: ${{ secrets.PROD_SUPABASE_DATABASE_URL }}
+        # Branching applies migrations asynchronously after the merge, so an
+        # instant check would false-alarm on every schema PR. Poll for 10
+        # minutes; a real apply lands well inside that, and a failed one never
+        # lands at all.
+        run: python scripts/check_prod_migrations.py --wait 600
+
+      - name: Explain a failure in the run summary
+        if: failure()
+        run: |
+          {
+            echo "## Production is behind \`main\`"
+            echo
+            echo "Migrations on \`main\` have not been applied to the production"
+            echo "database. Supabase Branching applies them on merge, so if they"
+            echo "are still pending, that apply **failed or never ran**."
+            echo
+            echo "Migrations are atomic and ordered: the FIRST pending version in"
+            echo "the log above is the one to read. Everything after it is blocked"
+            echo "behind it, not independently broken."
+            echo
+            echo "See the real error with:"
+            echo '```'
+            echo "npx supabase@2.109.0 db push --linked --dry-run"
+            echo '```'
+            echo
+            echo "Do **not** resolve this with \`migration repair --status applied\`."
+            echo "That marks the migration done without running it, so its contents"
+            echo "never reach production and the next migration to depend on them"
+            echo "fails the same way."
+          } >> "$GITHUB_STEP_SUMMARY"

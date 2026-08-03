@@ -342,7 +342,7 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** the Pricing card, **when** the user types a unit price, **then** the markup % is back-calculated from the live base cost and stored as the source of truth — *automation-pending (`handleUnitPriceChange` in `PartPricing.tsx` / `calculateMarkupFromUnitPrice`)*.
 - [ ] **Given** the routing changes, **when** the part page bumps `refreshKey`, **then** every tier's displayed base cost and unit price recompute against the new cost basis — *automation-pending (`PartPricing` `refreshKey` reload / `calculateTierPricing`)*.
 - [ ] **Given** a bought part with a procurement tier, **when** a tier is priced, **then** its sell price resolves as `procurement_cost(qty) × (1 + markup/100)` through the shared resolver — *verified by `__tests__/utils/partPricingTiersAccess.test.ts > 'getTiersWithComputedPrices — bought parts (no routing/BOM)' > 'prices a bought part as procurement cost × markup (the $55.74 case)'`*.
-- [ ] **Given** a part deletion, **when** the part row is removed, **then** its `part_pricing_tiers` rows are removed by cascade — *manual: `part_pricing_tiers.part_id` FK ON DELETE CASCADE in `supabase/schema.prod.sql`*.
+- [ ] **Given** a part deletion, **when** the part row is removed, **then** its `part_pricing_tiers` rows are removed by cascade — *manual: `part_pricing_tiers.part_id` FK ON DELETE CASCADE in `supabase/migrations/`*.
 
 **New-part pricing (unfilled row)**
 

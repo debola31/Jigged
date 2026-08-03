@@ -648,7 +648,7 @@ Because every AI call in this module must be user-initiated (repo rule: no on-mo
 - [ ] **Given** a query that fails validation at execution time, **when** run through the executor, **then** it returns a structured error rather than touching the DB — *verified by `api/tests/integration/test_sql_executor.py > 'TestQueryExecution' > 'test_validation_failure_returns_error'`*.
 - [ ] **Given** a full chat turn where the model requests a SQL query, **when** the pipeline runs, **then** the query executes and its result flows back into the answer with `execute_sql` recorded in `tool_calls` — *verified by `api/tests/integration/test_insights_chat.py > 'TestChatPipeline' > 'test_full_chat_with_sql_tool'`*.
 - [ ] **Given** a SQL error mid-turn, **when** the model sees it as a tool result, **then** it recovers gracefully within the iteration budget — *verified by `api/tests/integration/test_insights_chat.py > 'TestChatPipeline' > 'test_chat_recovers_from_sql_error'`*.
-- [ ] **Given** RLS on `saved_insights` and `ai_chat_queries`, **when** a user reads/writes, **then** they are scoped to their own rows / their company — *manual: `ENABLE ROW LEVEL SECURITY` + the "own saved insights" / "own company chat history" policies in `supabase/schema.prod.sql`*.
+- [ ] **Given** RLS on `saved_insights` and `ai_chat_queries`, **when** a user reads/writes, **then** they are scoped to their own rows / their company — *manual: `ENABLE ROW LEVEL SECURITY` + the "own saved insights" / "own company chat history" policies in `supabase/migrations/`*.
 
 **AI provider gating & config**
 
@@ -660,7 +660,7 @@ Because every AI call in this module must be user-initiated (repo rule: no on-mo
 **Saved-insight limit & scoping (owner-resolved: no cap, per-user)**
 
 - [ ] **Given** a user who already has several saved insights, **when** they pin another chart, **then** the save proceeds unconditionally — there is **no cap** (no `(N/5)` count header, no 5/5 disable, no DB unique/check constraint); `saveInsight` inserts every time — *automation-pending; shipped path is the unconditional insert in `utils/savedInsightsAccess.ts` (`saveInsight`), with no count/disable gate in `components/insights/InsightsChat.tsx` or `components/dashboard/InsightsSection.tsx`*.
-- [ ] **Given** two users in the same company, **when** each saves insights and reloads "Your Charts", **then** each sees only their own pinned cards (per-user within the company) — `getSavedInsights` filters by `company_id` and the `saved_insights` RLS `SELECT` policy narrows to `user_id = auth.uid()` — *automation-pending; scoping enforced by `getSavedInsights` in `utils/savedInsightsAccess.ts` + the "Users can read own saved insights" policy (`user_id = auth.uid()`) in `supabase/schema.prod.sql`*.
+- [ ] **Given** two users in the same company, **when** each saves insights and reloads "Your Charts", **then** each sees only their own pinned cards (per-user within the company) — `getSavedInsights` filters by `company_id` and the `saved_insights` RLS `SELECT` policy narrows to `user_id = auth.uid()` — *automation-pending; scoping enforced by `getSavedInsights` in `utils/savedInsightsAccess.ts` + the "Users can read own saved insights" policy (`user_id = auth.uid()`) in `supabase/migrations/`*.
 
 ---
 

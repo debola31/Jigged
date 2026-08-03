@@ -160,7 +160,7 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 4. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
 5. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
 6. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
-7. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
+7. **Watch the `Prod Migrations` check on the merge commit.** It polls production for ten minutes and goes red if the apply did not happen. **A green PR does not mean the migration reached prod** — every pre-merge gate runs against a database built by replaying the migrations, so all of them pass whether or not production ever gets them. This check is the only one that looks at prod. If it fails, read [`.github/workflows/post-merge-prod-migrations.yml`](.github/workflows/post-merge-prod-migrations.yml) and fix the migration; never `migration repair --status applied` to silence it, which marks the file done without running its contents.
 
 Never use the 8-digit date-only prefix for new files — always let the CLI generate the timestamp.
 
@@ -222,12 +222,32 @@ The CI test [`test_no_tenant_table_left_ungated`](api/tests/integration/test_bil
 
 ### Schema source-of-truth
 
-Two artifacts describe the database schema. They serve different purposes:
+Three things answer three different questions. Keep them straight — conflating
+them is what caused the 2026-08-03 outage.
 
-- `supabase/migrations/<timestamp>_baseline.sql` (and any migrations on top of it) is the source of truth for what *gets applied* to a fresh database — via `supabase start` / `db reset` locally, on every preview branch, and to prod on merge to `main`. This is the executable history. New schema changes land here as new migration files.
-- `supabase/schema.prod.sql` is a *cached snapshot* of the live prod database at the time `scripts/export_schema.py` last ran. Regenerate after a merge has deployed to prod so the snapshot tracks reality. Never edit by hand — it gets clobbered on the next export.
+| Question | Ask this |
+|---|---|
+| What *should* the schema be? | `supabase/migrations/` — the executable history, and the only source of truth |
+| What columns exist right now? | [`types/database.ts`](types/database.ts) — generated from the migrations, CI-enforced byte-exact |
+| What does *production* actually have? | The **Supabase MCP server** — live, and the only thing that can answer this honestly |
+| Are migrations and prod in sync? | [`scripts/check_prod_migrations.py`](scripts/check_prod_migrations.py), run on every merge |
 
-Use the schema files for "what does column X look like today" lookups without spinning up Postgres. Use the baseline + migrations for "what should the schema be" answers and for any code path that actually creates the DB. They should match; if they don't, regenerate the schema file (don't edit the migration).
+**There is deliberately no cached prod schema file.** `supabase/schema.prod.sql`
+existed for exactly the "what does column X look like today" lookup, and it was
+deleted because it could — and did — lie. It was hand-edited inside a feature PR
+to add `customer_contacts.is_billing_default` while production had no such
+column, its `Generated:` header left untouched. For two days it asserted
+something false about prod, and nothing detected it. During the outage it was
+worse than useless: it had to be ignored in favour of dumping prod live.
+
+A snapshot that can be confidently wrong is worse than no snapshot. The same
+failure shape as green CI checks that were reporting on preview branches while
+production burned — a signal everyone trusted that was measuring the wrong
+database.
+
+So: for schema questions, read the migrations or `types/database.ts`. For "what
+is really in prod", query it through MCP rather than trusting any file. And
+never re-introduce a hand-maintainable mirror of production.
 
 ---
 

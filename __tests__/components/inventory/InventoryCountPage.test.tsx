@@ -700,6 +700,48 @@ describe('counting one place', () => {
     );
   });
 
+  /**
+   * The page turn above must SURVIVE the search debounce's first tick.
+   *
+   * `search` and `serverSearch` both start as '', so the debounce has nothing to sync on mount —
+   * but it used to fire `setPage(0)` 300ms in regardless, silently returning anyone who pressed
+   * Next inside that window to page 1. It reached CI as an intermittent failure of the test above,
+   * since whether the timer landed before or after the click depended on how fast the runner was.
+   *
+   * Asserted on a real clock rather than fake timers: userEvent drives its own timers, and the
+   * bug is specifically about wall-clock ordering between the mount tick and a click. Waiting
+   * past 300ms is what makes this deterministic in both directions — before the fix it fails
+   * every run, not one in ten.
+   */
+  it('keeps the turned page when the search debounce first fires', async () => {
+    const user = userEvent.setup();
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
+      total: 9428,
+    });
+    renderPage();
+
+    await screen.findByText(/1–2 of 9,428 here/i);
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    await waitFor(() =>
+      expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(LOC, 'Shelf A', {
+        search: '',
+        offset: 2,
+        limit: 2,
+      }),
+    );
+
+    // Past the 300ms debounce, with margin. Nothing typed, so nothing should move.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(LOC, 'Shelf A', {
+      search: '',
+      offset: 2,
+      limit: 2,
+    });
+    expect(screen.getByText(/3–4 of 9,428 here/i)).toBeInTheDocument();
+  });
+
   /** A tick on page 1 must survive turning to page 2 — the sheet holds rows, not indexes. */
   it('keeps what is already ticked when the page turns', async () => {
     const user = userEvent.setup();

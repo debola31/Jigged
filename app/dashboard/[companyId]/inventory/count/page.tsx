@@ -451,7 +451,20 @@ export default function InventoryCountPage() {
 
   // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
   // is unconditional so the two modes don't need different effect shapes.
+  //
+  // THE MOUNT RUN IS SKIPPED, and that is a bug fix rather than an optimisation. `search` and
+  // `serverSearch` both start as '', so on mount this effect has nothing to sync — but it still
+  // used to fire `setPage(0)` 300ms after the page loaded. Anyone who pressed Next inside that
+  // window was silently thrown back to page 1: `page` went 1 → 0 and the loader refetched at
+  // offset 0. On the shop floor that is a real interaction (the pager is the first thing you
+  // reach for on a big bin like Unassigned), and in CI it was an intermittently failing test,
+  // because whether the timer landed before or after the click depended on machine speed.
+  const searchDebounceArmed = useRef(false);
   useEffect(() => {
+    if (!searchDebounceArmed.current) {
+      searchDebounceArmed.current = true;
+      return;
+    }
     const id = setTimeout(() => {
       setServerSearch(search.trim());
       // A new term is a new result set; staying on page 3 of the old one shows nothing.

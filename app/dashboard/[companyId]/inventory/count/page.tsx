@@ -284,6 +284,12 @@ export default function InventoryCountPage() {
    */
   const [serverSearch, setServerSearch] = useState('');
 
+  /**
+   * The term the page-reset has already been applied for. A ref, not state: it must not
+   * be a dependency of the debounce effect, or settling it would re-arm the timer.
+   */
+  const appliedSearchRef = useRef('');
+
   /** Parts held at this location in total — may exceed the page, so the UI can say so. */
   const [hereTotal, setHereTotal] = useState(0);
 
@@ -453,9 +459,22 @@ export default function InventoryCountPage() {
   // is unconditional so the two modes don't need different effect shapes.
   useEffect(() => {
     const id = setTimeout(() => {
-      setServerSearch(search.trim());
+      const next = search.trim();
+      setServerSearch(next);
       // A new term is a new result set; staying on page 3 of the old one shows nothing.
-      setPage(0);
+      //
+      // Only reset when the term actually CHANGED. This timer also fires ~300ms after
+      // mount, when the term has not changed, and an unconditional reset there races
+      // whatever the operator did in the meantime: page to 2 within 300ms of opening a
+      // bin and the reset lands afterwards, silently yanking them back to page 1. It is
+      // invisible locally because the timer usually expires before anyone can click, and
+      // deterministic on a loaded CI runner — which is how it was found, as
+      // `InventoryCountPage.test.tsx > 'pages through a bin instead of showing one
+      // capped page'` failing on main.
+      if (next !== appliedSearchRef.current) {
+        appliedSearchRef.current = next;
+        setPage(0);
+      }
     }, 300);
     return () => clearTimeout(id);
   }, [search]);

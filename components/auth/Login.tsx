@@ -34,7 +34,11 @@ interface LoginProps {
 function isValidReturnTo(path: string): boolean {
   try {
     const normalized = new URL(path, window.location.origin);
-    const allowedPrefixes = ['/dashboard', '/accept-invite'];
+    // `/operator` belongs here: without it a session expiry on the shop floor has its
+    // returnTo silently rejected and the operator is dropped in the office — which for
+    // a role='operator' user means an immediate AuthGuard bounce back out. It also broke
+    // the scanned-traveler-QR path, which deep-links into /operator/{id}/login.
+    const allowedPrefixes = ['/dashboard', '/operator', '/accept-invite'];
     return allowedPrefixes.some(p => normalized.pathname.startsWith(p)) && normalized.origin === window.location.origin;
   } catch {
     return false;

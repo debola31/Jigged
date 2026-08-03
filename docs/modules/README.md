@@ -1,6 +1,8 @@
 # Module Specifications
 
-> **Rewritten 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634). The table was
+> **Rewritten 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **273 → 814 words**
+> (`wc -w`) — the only file in this pass that **grew**, because an index that omits four of its eighteen
+> entries costs more than it saves. The table was
 > **missing four modules** — Billing, Invoicing, Vendors, and Work Centers (present only as the row saying
 > Operations folded into it). The **Build Order** still listed "Operations" at step 5 while the same table
 > called it folded. The **Priority** column mixed MoSCoW (`Must Have`) with build state (`Built`,

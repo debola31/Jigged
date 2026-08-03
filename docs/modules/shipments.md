@@ -1,6 +1,6 @@
 # Shipments Module
 
-> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **3,046 → 2,105 words**
+> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **3,046 → 2,111 words**
 > (`wc -w`) — a 31% cut *while adding* the freight model the doc had omitted entirely. Cut: the acceptance-criteria block (39% of
 > the doc — every bullet restated the test it cited); the "Feature flag (removed)" section, which repeated the
 > Overview; UI prose a component open reproduces. Kept: the one-slip-one-job invariant, the

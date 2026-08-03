@@ -1,11 +1,11 @@
 # Design System
 
-> **Condensed 2026-08-03 · 4,546 → 3,809 words (`wc -w`).** Cut: ~1,400 words restating CLAUDE.md
-> (principles 1–4, component-usage rules, list/create-edit/import layouts, mobile requirements,
+> **Condensed 2026-08-03 · 4,546 → 4,079 words (`wc -w`).** Cut: ~1,400 words restating CLAUDE.md
+> (principles 1–5, component-usage rules, list/create-edit/import layouts, mobile requirements,
 > WCAG); the ~450-word theme-provider example and the `WorkOrderCard` sample; pasted
 > `<Card>`/`<TextField>` snippets; the unused MUI 0–24 elevation ladder; a Do's/Don'ts list that
-> repeated CLAUDE.md. Roughly **700 words of new, code-verified correction** went back in, which is
-> why the net cut is modest — the pre-correction equivalent is ~3,060. Kept deliberately: every
+> repeated CLAUDE.md. Roughly **950 words of new, code-verified correction** went back in, which is
+> why the net cut is modest — the pre-correction equivalent is ~3,130. Kept deliberately: every
 > withdrawn argument, every measured value, every citation.
 >
 > **Nine corrections, marked inline.** Largest: the steel-blue-centre gradient this doc called
@@ -52,9 +52,9 @@ Constraints, each preventing a specific failure:
   keep ~**5.9:1**; the top-right bloom tops out around `#426289` (white ≈ **6.4:1**), and that corner
   carries white text/icons only.
 - **The bar is set by the room, not the desk.** Shop floors run **500–1000 lux** of fluorescent
-  light, and the operator surface is a phone held under it — contrast that merely passes in a dim
-  office fails in the place the app is actually read. This is why the thresholds above are treated
-  as hard limits rather than WCAG minimums to squeak past.
+  light and the operator surface is a phone held under it, so contrast that merely passes in a dim
+  office fails where the app is actually read. Treat the numbers above as hard limits, not WCAG
+  minimums to squeak past.
 - **Deliberately 2D** — no 3D scene, no looping video behind live data; both read as distracting.
   The marketing hero keeps its own video. Cost evidence against real 3D:
   [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)

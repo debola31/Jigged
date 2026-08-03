@@ -1,34 +1,33 @@
 # Work Centers Module
 
-> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,410 → 1,240 words**
-> (`wc -w`, measured). **Cut:** the acceptance-criteria block (51% of the original); the archive/never-blocks
-> policy, restated **four** times and owned by [architecture.md §16](../architecture.md); AG Grid column lists
-> that opening the page reproduces; AC bullets that only re-described the test they cited.
-> **Kept**, because other docs link here for them: work centre = station, the `operation_types` terminology
-> history, why external work has no setup cost, the kind-toggle lock, the station-QR removal.
+> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,410 → 1,618 words**
+> (`wc -w`, measured; above the ~1,100 aim because the corrections below *added* material).
+> **Cut:** the acceptance-criteria block (51% of the original); the archive/never-blocks policy, restated
+> **four** times and owned by [architecture.md §16](../architecture.md); AG Grid column lists that opening the
+> page reproduces; AC bullets that only re-described the test they cited; maintenance rationale owned by
+> [machine-maintenance.md](machine-maintenance.md). **Kept**, because other docs rely on this doc for them:
+> work centre = station, the `operation_types` history, why external work has no setup cost, the kind-toggle
+> lock, the station-QR removal.
 >
 > **Six corrections, marked ⚠ where they apply.** *Missing:* the five machine columns, their CHECK, and both
 > flag-gated maintenance cards — all shipped. *Wrong:* a migration filename that no longer exists;
 > `bulkImportWorkCenters` called "unit-covered" (no tests, no callers); `getWorkCentersFlat` called "no
 > non-test callers" (none at all); the E2E spec credited with external costing it never runs; a miscount of
 > `workCentersAccess.test.ts`. `#550`, cited as tracking dead-code pruning, is **CLOSED**.
-> *(Inbound `work-centers.md#…` anchors: `grep` finds none repo-wide, but the station heading below is kept
-> anchorable anyway.)*
 
 ## Overview
 
 A **work center** is a unit of production capacity: **internal** (a machine, station or in-house capability
-with an hourly labor rate) or **external** (an outsourced process performed by a vendor). Consumed by routing
-operations via `routing_operations.work_center_id`.
-
-**Priority:** built, in production. **Dependencies:** [Vendors](vendors.md) — external centres point at one.
+with an hourly labor rate) or **external** (an outsourced process performed by a vendor). Consumed by
+[Routings](routings.md) via `routing_operations.work_center_id`. Built, in production.
+**Depends on** [Vendors](vendors.md) — external centres point at one.
 
 ## Stations (work centers)
 
 **A "station" in the operator view is a `work_centers` row** — the two words name the same entity. Either kind
-qualifies; `kind='external'` simply points at a vendor. See
-[operator-view.md](operator-view.md#stations-work-centers) for how one is selected and remembered. A *machine*
-in [Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` row, with `kind='internal'`.
+qualifies; `kind='external'` simply points at a vendor. [operator-view.md](operator-view.md#stations-work-centers)
+covers how one is selected and remembered. A *machine* in
+[Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` row, with `kind='internal'`.
 
 > **Terminology.** This module supersedes what older docs called "Operations" (`operation_types`). The
 > two-axis design (internal vs external) unified machine and outsourced capabilities into one table; the
@@ -45,14 +44,14 @@ in [Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` ro
 | Column | Notes |
 |---|---|
 | `id`, `company_id` | uuid |
-| `name` | required; `work_centers_unique_per_company` UNIQUE `(company_id, name)` |
+| `name` | required; UNIQUE `(company_id, name)` — `work_centers_unique_per_company` |
 | `kind` | `internal \| external` (`work_centers_kind_check`), default `internal` |
 | `vendor_id` | FK → `vendors`; required when external, NULL when internal — both directions are DB CHECKs (`work_centers_external_requires_vendor`, `work_centers_internal_no_vendor`) |
 | `labor_rate` | numeric(10,2); internal only, cleared to NULL when kind flips to external |
 | `description` | optional multiline |
 | `metadata` | jsonb `{}` — reserved, unused |
 | `make`, `model`, `serial_number` | text — **machine details**: internal only, optional, unvalidated |
-| `year_built` | integer, `work_centers_year_built_sane` CHECK: NULL or 1900–2200 |
+| `year_built` | integer; `work_centers_year_built_sane` CHECK: NULL or 1900–2200 |
 | `purchased_on` | date |
 | `deleted_at` | archive marker |
 | `created_at`, `updated_at` | |
@@ -62,10 +61,9 @@ operation* (`routing_operations.external_unit_price`) — per-operation, not per
 once per part, so there is no setup cost**; setup is internal-only, and `external_setup_cost` was dropped in
 June 2026. [routings.md](routings.md) defers here for this rule.
 
-**Machine details are optional on purpose, with no completeness indicator.** Asset data entry is a leading
-cause of CMMS abandonment: the shop is asked to describe its equipment before the tool does anything, and the
-project dies in the describing. The machines already exist as work centres, so maintenance starts with a
-complete asset list and an empty asset detail — the right way round. Pilot kill criterion:
+**Machine details are optional by design, with no completeness indicator** — asset data entry is a leading
+cause of CMMS abandonment, and the machines already exist as work centres, so maintenance starts with a
+complete asset list and an empty asset detail. Full reasoning and the pilot kill criterion:
 [machine-maintenance.md](machine-maintenance.md).
 
 ---
@@ -78,8 +76,9 @@ Split by kind into **Internal** and **External** tabs; **there is no combined "A
 re-queries via `getWorkCentersByKind`, clears the search box and the selection, and moves the app-bar title.
 Internal shows a **Cost** column (`labor_rate` as `$X.XX/hr`); External shows **Vendor** plus the caption
 "External work centers are priced per routing operation, not by an hourly rate."
-**Withdrawn:** a single grid with a cross-kind Cost cell and a comparator pinning external rows — wrong
-because the two kinds never share a grid, so neither device has anything to reconcile.
+
+**Withdrawn:** a cross-kind Cost cell and a comparator pinning external rows — wrong because the two kinds
+never share a grid, so neither device has anything to reconcile.
 
 Search filters name (300ms debounce), default sort name asc, pagination 25/50/100. Toolbar: **Import**, **New
 Work Center**, `ExportCsvButton`, a `Delete (n)` bulk action once rows are selected, and — only with the
@@ -90,17 +89,16 @@ search box empty — the shared `ImportAllDataLink`.
 Header card (name, kind chip, "via {vendor}" for external); Details card (labor rate *or* vendor link +
 "Pricing per routing operation"; description; "Used in routing operations" count; timestamps); and — when
 `machine_maintenance` is enabled **and** `kind='internal'` — a **Maintenance log** card holding
-`MachineManualsManager` above a **read-only** `MachineLogPanel`. Read-only by design: the pilot's bar counts
-*non-founder* authors, so the most convenient place to write must not be the one seat that invalidates the
-result. Manuals and machine details are the office's job; the log is the floor's.
+`MachineManualsManager` above a **read-only** `MachineLogPanel`. Read-only because the pilot's bar counts
+*non-founder* authors: manuals and machine details are the office's job, the log is the floor's.
 
 **There is no station-QR card.** Per-work-centre placards and the bulk **Print Placards** action were removed
 in July 2026 — never deployed to a shop floor, and operators reach their station by signing into the operator
 view and picking it.
 
-Delete archives (`deleted_at`) and **never blocks**, even at `routing_operations_count > 0` — the universal
-policy is [architecture.md §16](../architecture.md). That count still drives the kind-toggle lock below; it no
-longer gates deletion.
+Delete archives (`deleted_at`) and **never blocks**, even at `routing_operations_count > 0` — universal policy
+in [architecture.md §16](../architecture.md). That count still drives the kind-toggle lock; it no longer gates
+deletion.
 
 ### Create / Edit — `.../new`, `.../{id}/edit`
 
@@ -116,8 +114,7 @@ supplies `routing_operations_count`.
   cannot be priced. Switching to External hides and clears it.
 - **External:** `vendor_id` via `VendorAutocomplete`, required.
 - **Machine details** card (flag `machine_maintenance`, internal only): make, model, serial number, year,
-  purchased. Deliberately in the office, not on the floor — somebody with a spec sheet in front of them is
-  doing paperwork on purpose.
+  purchased. Sited in the office, not on the floor — filling it is deliberate paperwork.
 - **Description** — optional multiline.
 
 ### Import — `/dashboard/{companyId}/work-centers/import`
@@ -127,8 +124,8 @@ CSV → AI-assisted column mapping → validation review → execute, through th
 multi-step pipeline with conflict detection, not Supabase CRUD. External rows resolve `vendor_name` →
 `vendor_id` server-side; unresolved names become `unknown_vendor` conflicts, internal rows carrying a vendor
 become `vendor_forbidden_for_internal` errors. Execute upserts `ON CONFLICT (company_id, name)`, so re-import
-**updates in place** (idempotent) and within-CSV duplicate names collapse into one; it sets `deleted_at = None`,
-so re-importing an archived name revives it.
+**updates in place** (idempotent) and within-CSV duplicate names collapse into one; it sets
+`deleted_at = None`, so re-importing an archived name revives it.
 
 That router is the **only live import path**. `bulkImportWorkCenters` mirrors the same rules client-side but
 has no callers and no tests. *(⚠ Previously called "the unit-covered reference logic".)*
@@ -163,10 +160,10 @@ audit are on [#345](https://github.com/debola31/Jigged/issues/345) (**CLOSED**).
 
 | Behaviour | Enforced by |
 |---|---|
-| Per-kind + per-company list scoping; by-id read; uniqueness lookup incl. `excludeId`; insert normalization (parsed `labor_rate`, nulled `vendor_id`); archive-not-delete single and bulk in 100-row batches; Supabase errors surface as a friendly throw | `__tests__/utils/workCentersAccess.test.ts` — `workCentersAccess` (13 `it`s) |
+| Per-kind + per-company scoping; by-id read; uniqueness lookup incl. `excludeId`; insert normalization (parsed `labor_rate`, nulled `vendor_id`); archive-not-delete single and bulk in 100-row batches; errors surface as a friendly throw | `__tests__/utils/workCentersAccess.test.ts` — `workCentersAccess` (13 `it`s) |
 | Blank machine details write as NULL; filled ones are trimmed and parsed | same file — `workCentersAccess machine details` (2 `it`s; 15 in the file) |
-| Import validation: internal-without-vendor passes, external-without-vendor fails, unknown vendor is a conflict, internal-with-vendor is an error | `api/tests/integration/test_work_centers_import_api.py` — `TestWorkCentersValidate` (4 tests) |
-| Import execute inserts internal rows and resolves `vendor_name` → `vendor_id` for external ones | same file — `TestWorkCentersExecute` (2 tests) |
+| Validation: internal-without-vendor passes, external-without-vendor fails, unknown vendor is a conflict, internal-with-vendor is an error | `api/tests/integration/test_work_centers_import_api.py` — `TestWorkCentersValidate` (4 tests) |
+| Execute inserts internal rows and resolves `vendor_name` → `vendor_id` for external ones | same file — `TestWorkCentersExecute` (2 tests) |
 | Both kinds cost as documented — internal by `labor_rate` × time, external by per-op `external_unit_price` with no setup | `__tests__/utils/routingCostCalculation.test.ts` — `calculateRoutingCost` (groups `internal operations`, `external operations`, `mixed internal + external routings`) |
 | Picking a work centre on a routing operation feeds the live part cost end-to-end — **internal only** (the spec selects a fixture named `E2E Internal WC`) | `e2e/parts-and-routing.spec.ts` — `Parts and Routing workflow` |
 
@@ -180,12 +177,3 @@ external work centre end-to-end. Search (`name.ilike`, whitespace no-op) is test
 
 **Scope.** The only entity edited here is the work centre itself. Routing operations *reference* one — an
 operation RUNS AT a work centre — but never edit it.
-
----
-
-## See also
-
-- [Routings](routings.md) — `routing_operations.work_center_id` is the consumer.
-- [Vendors](vendors.md) — external work centres reference a vendor.
-- [Operator View](operator-view.md#stations-work-centers) — the same row, seen as a station.
-- [Machine Maintenance](machine-maintenance.md) — the same row, seen as a machine.

@@ -1,6 +1,6 @@
 # Inventory Discovery — Remote Script v1
 
-> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 1,682 words**
+> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 1,718 words**
 > (`wc -w`) — a 30% cut, most of it spent back on the correction below. This is a **live instrument**, not a record. [`inventory.md`](../modules/inventory.md) §10
 > specifies the trim — *"vocabulary, bar rack, scanning, never a gate"* — so the probes its §9 already answers
 > are gone, listed once below so nobody re-adds them. The companion `usability-test-script-v1.md` was a spent
@@ -67,14 +67,14 @@ frame?"** at every stop and treat their photo set, not the call, as the record o
 > "Could you carry me around on your phone and show me everywhere material lives?"
 
 You are listening, not photographing. **Note what they *call* each place in their own words — that word
-outranks anything in our palette.**
+outranks any of our ten storage-type names.**
 
 | Record | Why |
 |---|---|
 | **Their name for each place** | "The bar rack", "the shelf by the saw", "out back". Names that are spatial and informal mean a code scheme like `CAB1-R03-L` will never be used |
 | **Is anything labelled today?** | Existing labels = they already believe in this. None = we are asking for a new habit |
 | **A bar rack — is there one?** | **Withdrawn:** *"a bar rack is the defining storage object in a machine shop"* — wrong because Contour's 22 genuine exported places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) contain none ([`inventory.md`](../modules/inventory.md) §5.5, §9). Ask anyway, once, because they buy in feet: it is the last unsettled bit of vocabulary, and the kind stays out until a pilot shop asks for it |
-| **Floor / corner / outside?** | The palette has no card for either. Ask directly — this is exactly what a camera misses |
+| **Floor / corner / outside / bench?** | The three flat kinds exist *because* 118 of their 121 legacy locations were flat — structures-only forces "on the floor by the saw" into a cabinet. Ask directly; this is exactly what a camera misses |
 | **Where do drops and offcuts go?** | J8. Dedicated remnant rack vs "back on the shelf" vs the scrap bin |
 
 If they cannot walk around, screen-share their photo set instead and go image by image — *"what is this, what

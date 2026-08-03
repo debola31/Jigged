@@ -167,8 +167,14 @@ jobs:
     needs: gate
     runs-on: ubuntu-latest
     env:
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      # Read from either tab. Neither ID is sensitive — they identify a project,
+      # they do not authorise anything — so a repo VARIABLE is the tidier home
+      # and stays readable in the UI. But they were configured as secrets, and a
+      # deploy silently receiving an empty string is a worse outcome than an
+      # untidy home: `vercel pull` then fails with a message about the TOKEN,
+      # which sends you looking at the wrong setting entirely.
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID || secrets.VERCEL_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -180,6 +186,37 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
+
+      # Say which setting is missing, before a tool with less context guesses.
+      # The first real run of this workflow had both IDs empty (configured as
+      # secrets while this read vars) and `vercel pull` reported only "The
+      # specified token is not valid" — pointing at the one credential that was
+      # actually present. Ten minutes were spent on the token.
+      - name: Check deploy credentials are present
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -n "${VERCEL_TOKEN:-}" ]      || MISSING="$MISSING VERCEL_TOKEN(secret)"
+          [ -n "${VERCEL_ORG_ID:-}" ]     || MISSING="$MISSING VERCEL_ORG_ID(variable-or-secret)"
+          [ -n "${VERCEL_PROJECT_ID:-}" ] || MISSING="$MISSING VERCEL_PROJECT_ID(variable-or-secret)"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing deploy credentials:$MISSING"
+            {
+              echo "## Deploy not attempted — credentials missing"
+              echo
+              echo "Empty:\`$MISSING\`"
+              echo
+              echo "Set under **Settings → Secrets and variables → Actions**."
+              echo "The two IDs are read from either tab; the token must be a secret."
+              echo "Find them in Vercel: token under Account Settings → Tokens,"
+              echo "org ID under Team Settings → General, project ID under the"
+              echo "project's Settings → General."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "All three deploy credentials are present."
 
       - name: Install Vercel CLI
         run: pnpm add -g vercel@48

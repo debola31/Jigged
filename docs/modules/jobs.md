@@ -2,7 +2,7 @@
 
 > **As-built, verified 2026-08-03 (issue #634).** Condensed 6,118 → 4,717 words (`wc -w`); the
 > cut would have been deeper but ~1,100 words of *corrections and restorations* were added,
-> because this doc was wrong in fourteen places. Checked against `supabase/schema.prod.sql`,
+> because this doc was wrong in fourteen places. Checked against `supabase/migrations/`,
 > `utils/jobsAccess.ts`, `app/dashboard/[companyId]/jobs/**`, `components/jobs/**`,
 > `types/job.ts` and `__tests__/utils/jobsAccess.test.ts`.
 >
@@ -469,7 +469,7 @@ unless stated.
 | Delete **archives**, scoped to id + company, **even with shipments and an invoice** | `describe('deleteJob')` — 4 it |
 | A `sent` op holds its part at `in_progress`; admin Complete/Undo refuse an external op | `describe('deriveStatusFromOps with the sent (at-vendor) state')` — 2 it; `describe('admin op guards refuse external (outside-vendor) ops')` — 2 it |
 | Invoice creation advances `invoicing_status` and lists the invoice | [`e2e/job-invoicing.spec.ts`](../../e2e/job-invoicing.spec.ts) `test.describe('Job invoicing (QuickBooks)')` — 1 test |
-| Job-level recompute cascade (part change → `compute_job_production_status` → job row) | `automation-pending` — SQL in `supabase/schema.prod.sql` |
+| Job-level recompute cascade (part change → `compute_job_production_status` → job row) | `automation-pending` — SQL in `supabase/migrations/` |
 | Auto-progression: first op complete → job `in_progress` (no manual Start Job); last op across all parts complete → job `completed` (no manual Mark Complete) | `automation-pending` |
 | Marking a ready op complete makes the next-sequence op on that part ready; Undo returns it to pending | `automation-pending` (`completeJobOperation` / `undoJobOperation`) |
 | Creating a shipment record advances `fulfillment_status` as a side effect — there is no "Mark Shipped" production transition | `automation-pending` |

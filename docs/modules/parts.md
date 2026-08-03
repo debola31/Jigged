@@ -99,8 +99,9 @@ category default markup — wrong because the entity was anemic (one number,
 
 > ⚠ *This doc previously listed `is_location_tracked` as a live column. It was dropped by
 > `20260802015837_every_part_has_a_place`
-> — every part can be received anywhere now. (`supabase/schema.prod.sql` still shows it; that file
-> is a cached prod snapshot, not the source of truth.)*
+> — every part can be received anywhere now. (The old `supabase/schema.prod.sql` snapshot still
+> showed the column; it has since been **deleted** for exactly this class of lie — see
+> [CLAUDE.md, "Schema source-of-truth"](../../CLAUDE.md#schema-source-of-truth).)*
 
 ### `part_pricing_tiers`
 

@@ -13,32 +13,118 @@ import {
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
-describe('schemaEmbedCheck — parser', () => {
-  it('parses CREATE TABLE blocks and ignores CONSTRAINT lines', () => {
-    const sql = `
-CREATE TABLE IF NOT EXISTS "public"."example"
-(
-    "id" uuid NOT NULL,
-    "name" text NOT NULL,
-    "value" numeric(12,4),
-    CONSTRAINT "example_pkey" PRIMARY KEY (id)
-);
+/**
+ * A miniature `types/database.ts`, matching what `supabase gen types` emits:
+ * graphql_public first, then public, then the trailing `Constants` object that
+ * repeats every schema key. Indentation is significant — the parser relies on
+ * it, which is safe because CI asserts the real file byte-for-byte.
+ */
+const FIXTURE = `export type Json = string | number | boolean | null
+
+export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+  }
+  public: {
+    Tables: {
+      example: {
+        Row: {
+          id: string
+          name: string
+          value: number | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          insert_only_artifact?: string
+        }
+        Update: {
+          update_only_artifact?: string
+        }
+        Relationships: []
+      }
+      nested: {
+        Row: {
+          amount: number
+          id: string
+          tags: string[] | null
+        }
+        Insert: {
+          amount: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nested_example_fkey"
+            columns: ["example_id"]
+            referencedRelation: "example"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      a_view: {
+        Row: {
+          view_column: string | null
+        }
+        Relationships: []
+      }
+    }
+    Functions: {
+      some_function: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+  }
+}
+
+export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
+  public: {
+    Enums: {},
+  },
+} as const
 `;
-    const schema = parseSchema(sql);
+
+describe('schemaEmbedCheck — parser', () => {
+  it('reads the Row shape of each table under the public schema', () => {
+    const schema = parseSchema(FIXTURE);
     expect(schema.get('example')).toEqual(new Set(['id', 'name', 'value']));
+    expect(schema.get('nested')).toEqual(new Set(['amount', 'id', 'tags']));
   });
 
-  it('handles nested parens inside column type expressions', () => {
-    const sql = `
-CREATE TABLE IF NOT EXISTS "public"."nested"
-(
-    "id" uuid NOT NULL,
-    "amount" numeric(12,4) NOT NULL,
-    "tags" text[] DEFAULT '{}'::text[],
-    CONSTRAINT "nested_check" CHECK ((amount > (0)::numeric))
-);
-`;
-    expect(parseSchema(sql).get('nested')).toEqual(new Set(['id', 'amount', 'tags']));
+  it('does not leak Insert/Update-only keys into a table Row', () => {
+    // Insert and Update restate the same columns with different optionality,
+    // and carry generator-only keys. Row is the column set of record.
+    const cols = parseSchema(FIXTURE).get('example')!;
+    expect(cols.has('insert_only_artifact')).toBe(false);
+    expect(cols.has('update_only_artifact')).toBe(false);
+  });
+
+  it('stops at Views, preserving the old CREATE TABLE-only scope', () => {
+    // The previous parser read supabase/schema.prod.sql and matched only
+    // CREATE TABLE, so an embed targeting a view was already an unknown
+    // relation. Keep that boundary rather than silently widening the check.
+    const schema = parseSchema(FIXTURE);
+    expect(schema.has('a_view')).toBe(false);
+    expect(schema.has('some_function')).toBe(false);
+  });
+
+  it('ignores the trailing Constants block, which repeats the public key', () => {
+    // `public:` appears twice in the generated file. Anchoring on the type
+    // declaration is what stops the constants object being parsed as a second,
+    // empty schema that would clobber the real tables.
+    const schema = parseSchema(FIXTURE);
+    expect(schema.size).toBe(2);
+    expect([...schema.keys()].sort()).toEqual(['example', 'nested']);
   });
 });
 
@@ -137,32 +223,104 @@ describe('schemaEmbedCheck — extraction', () => {
 });
 
 describe('schemaEmbedCheck — foreign-key hints', () => {
-  const SQL = `
-CREATE TABLE IF NOT EXISTS "public"."user_company_access"
-(
-    "id" uuid NOT NULL,
-    "name" text
-);
-CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
-(
-    "id" uuid NOT NULL,
-    "city" text
-);
-ALTER TABLE ONLY "public"."note_reactions"
-    ADD CONSTRAINT "note_reactions_reactor_fk" FOREIGN KEY (reactor_id) REFERENCES user_company_access(id) ON DELETE CASCADE;
-ALTER TABLE ONLY "public"."shipments"
-    ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
+  /**
+   * The same two tables and two foreign keys as before, in the shape
+   * `supabase gen types` emits. Note where a foreign key LIVES: on the
+   * referencing table's `Relationships`, not the one it points at — so
+   * `note_reactions` carries the constraint that targets `user_company_access`.
+   */
+  const TYPES = `export type Database = {
+  public: {
+    Tables: {
+      customer_addresses: {
+        Row: {
+          city: string | null
+          id: string
+        }
+        Relationships: []
+      }
+      note_reactions: {
+        Row: {
+          id: string
+          reactor_id: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_reactions_reactor_fk"
+            columns: ["reactor_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shipments: {
+        Row: {
+          id: string
+          shipping_address_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipments_shipping_address_id_fkey"
+            columns: ["shipping_address_id"]
+            isOneToOne: false
+            referencedRelation: "customer_addresses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_company_access: {
+        Row: {
+          id: string
+          name: string | null
+        }
+        Relationships: []
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+  }
+}
 `;
 
   const check = (select: string): Violation[] => {
     const file = path.join(REPO_ROOT, '__tmp_embed_hint_fixture.ts');
     writeFileSync(file, `await supabase.from('x').select('${select}');\n`);
     try {
-      return validateFile(file, parseSchema(SQL), parseForeignKeys(SQL));
+      return validateFile(file, parseSchema(TYPES), parseForeignKeys(TYPES));
     } finally {
       unlinkSync(file);
     }
   };
+
+  /**
+   * ON THE FK COUNT DROPPING WHEN THIS MOVED OFF THE SQL DUMP, since the
+   * numbers look alarming and the explanation is not obvious.
+   *
+   * The old dump yielded 155 constraints; the generated types yield 137. All 20
+   * of the difference reference `auth.users` — every `*_created_by_fkey`,
+   * `*_user_id_fkey` and friends. `supabase gen types` emits Relationships only
+   * for foreign keys whose target is in the exposed schema, and `auth` is not
+   * exposed to the Data API, so those names can never be a legal embed hint.
+   * Losing them costs nothing.
+   *
+   * The arithmetic closes the other way too: the types carry two FKs the dump
+   * never had (jobs/shipments → customer_carrier_accounts), because the dump
+   * predated the migrations that created that table. The new source is more
+   * accurate, not less.
+   */
+  it('reads both hint forms out of the Relationships arrays', () => {
+    const fks = parseForeignKeys(TYPES);
+    expect([...fks.names].sort()).toEqual([
+      'note_reactions_reactor_fk',
+      'shipments_shipping_address_id_fkey',
+    ]);
+    // Keyed by the table the FK POINTS AT, which is what an embed names.
+    expect([...(fks.columnsByTarget.get('customer_addresses') ?? [])]).toEqual([
+      'shipping_address_id',
+    ]);
+  });
 
   /**
    * The bug this check was extended for. The schema names newer constraints
@@ -209,14 +367,19 @@ describe('schemaEmbedCheck — full project scan', () => {
     // Self-check: make sure the scanner actually did work. If we scanned
     // zero files or zero tables, the test would be a false negative.
     expect(result.filesScanned).toBeGreaterThan(0);
-    expect(result.schemaTables).toBeGreaterThan(20);
+    // Floor kept close to the real count (57 when this moved to
+    // types/database.ts). A parser that reads only part of the file — stopping
+    // at the first sibling key, or picking up the trailing Constants block —
+    // still returns a positive number, so a floor of 20 would wave a truncated
+    // parse through and silently degrade every embed to "unknown relation".
+    expect(result.schemaTables).toBeGreaterThan(50);
 
     if (hardErrors.length > 0) {
       const summary = formatErrors(hardErrors, REPO_ROOT);
       throw new Error(
         `Schema/embed drift detected in utils/. Update the access layer to ` +
-          `match supabase/schema.prod.sql, or regenerate the schema via ` +
-          `scripts/export_schema.py if a migration legitimately added/removed ` +
+          `match types/database.ts, or regenerate it with ` +
+          `\`supabase start && pnpm gen:db-types\` if a migration legitimately added/removed ` +
           `columns:\n\n${summary}`,
       );
     }

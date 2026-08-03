@@ -1,7 +1,7 @@
 /**
  * Static schema/embed drift checker.
  *
- * Parses `supabase/schema.prod.sql` to learn the canonical {table → columns}
+ * Parses `types/database.ts` to learn the canonical {table → columns}
  * shape, then walks `utils/*.ts` (and any other paths passed in) looking for
  * PostgREST embed strings inside `.select(...)` calls and top-level
  * `const SELECT_FIELDS = \`...\`` constants. For every `relation(col1, col2)`
@@ -14,6 +14,39 @@
  * (the select string is opaque to TypeScript), and the one E2E spec that
  * would have failed was runtime-skipping. This check would have flagged
  * the embed on the PR that dropped the column.
+ *
+ * STILL NEEDED AFTER THE TYPED-CLIENT MIGRATION, and the reason is worth
+ * recording precisely, because the obvious way to make it redundant does not
+ * work and someone will otherwise try it again.
+ *
+ * All 37 access files use `getTypedSupabase()`, and supabase-js validates select
+ * strings at the type level — so `tsc` does catch part of this class. Measured
+ * by injecting a bogus embed column and running the whole project:
+ *
+ *   jobsAccess, `jobs → job_parts → parts`      → tsc CATCHES it
+ *       SelectQueryError<"column 'x' does not exist on 'parts'.">
+ *   quotesAccess QUOTE_DETAIL_SELECT             → tsc SEES NOTHING
+ *
+ * THE DIFFERENCE IS NOT HOW THE STRING IS DECLARED. That was the first guess,
+ * and it is wrong. All three of these were tested on the quotes detail select,
+ * with a jobsAccess injection in the SAME tsc run as a positive control to prove
+ * the experiment could detect anything at all:
+ *
+ *   as a `const` with ${…} interpolation   → not caught
+ *   the same const with `as const`         → not caught
+ *   fully inlined at the call site         → NOT CAUGHT
+ *
+ * So it is the select's own complexity. `quotes` embeds `customers`, which
+ * embeds both `customer_contacts` and `customer_addresses`, alongside
+ * `line_items` which embeds `parts`. Past some breadth/depth the type-level
+ * parser stops resolving and silently widens instead of erroring — and silence
+ * is indistinguishable from success.
+ *
+ * The practical consequence: inlining these selects buys NOTHING except three
+ * duplicated copies of PART_SELECT_COLUMNS, and deleting this file would leave
+ * the largest, most-nested selects in the codebase unchecked — including
+ * quotesAccess.ts, which is exactly where the jobs.status incident lived.
+ * Re-run the experiment before concluding otherwise.
  *
  * Scope:
  * - Validates EMBED columns (inside `relation(...)`). Bare top-level columns
@@ -37,58 +70,100 @@ import { join, relative, resolve } from 'path';
 export type Schema = Map<string, Set<string>>;
 
 /**
- * Parse a `CREATE TABLE IF NOT EXISTS "public"."<name>" (...);` dump into
- * a {table → Set<columns>} map. Iterates char-by-char tracking paren depth
- * so column-type expressions like `numeric(12,4)` and inline CHECK
- * constraints don't confuse the boundary detection.
+ * Parse `types/database.ts` into a {table → Set<columns>} map, reading the
+ * `Row` shape of every entry under the `public` schema's `Tables`.
+ *
+ * WHY THIS SOURCE. This used to parse `supabase/schema.prod.sql`, a snapshot
+ * exported from production. That file was deleted because it could — and did —
+ * lie: it was hand-edited in a feature PR to add
+ * `customer_contacts.is_billing_default` while production had no such column,
+ * its `Generated:` header untouched, and it asserted that for two days through
+ * an outage. A schema reference that can be confidently wrong is worse than none.
+ *
+ * `types/database.ts` cannot drift the same way. It is generated from the
+ * migration-replayed schema and CI fails on any diff (issue #406), so it can
+ * neither go stale nor be hand-edited without a red build. It is also the right
+ * reference for a PR-time check: it describes what the code will run against
+ * once merged, whereas production legitimately lags main, making drift against
+ * it ambiguous.
+ *
+ * Views are excluded, preserving this check's previous scope — the old parser
+ * matched only `CREATE TABLE`, so an embed targeting a view was already
+ * reported as an unknown relation.
  */
-export function parseSchema(sql: string): Schema {
+export function parseSchema(ts: string): Schema {
   const out: Schema = new Map();
-  const lines = sql.split('\n');
-  let currentTable: string | null = null;
-  let depth = 0;
-  let cols: Set<string> | null = null;
+  const lines = ts.split('\n');
 
-  for (const line of lines) {
-    if (currentTable === null) {
-      const m = /CREATE TABLE (?:IF NOT EXISTS )?"public"\."([^"]+)"/.exec(line);
-      if (m) {
-        currentTable = m[1];
-        cols = new Set();
-        depth = 0;
-      }
-    }
-    if (currentTable === null) continue;
-
-    let closed = false;
-    for (const ch of line) {
-      if (ch === '(') depth++;
-      else if (ch === ')') {
-        depth--;
-        if (depth === 0) {
-          out.set(currentTable, cols!);
-          currentTable = null;
-          cols = null;
-          closed = true;
-          break;
-        }
-      }
-    }
-    if (closed) continue;
-
-    if (currentTable !== null && depth > 0) {
-      const t = line.trim();
-      if (t.startsWith('CONSTRAINT')) continue;
-      const m = /^"([^"]+)"\s+\S/.exec(t);
-      if (m) cols!.add(m[1]);
-    }
+  // The generator emits the schema type first and a trailing `Constants` object
+  // last, and BOTH contain a `public:` key. Anchor on the type declaration so
+  // the constants block is never mistaken for the schema.
+  const start = lines.findIndex((l) => /^export type Database = \{/.test(l));
+  if (start === -1) {
+    throw new Error('types/database.ts: no `export type Database = {` declaration found');
   }
+
+  // Indentation is load-bearing here, and safe to rely on: the file is emitted
+  // by `supabase gen types` and CI asserts it byte-for-byte, so its formatting
+  // cannot drift without a failing build.
+  let inPublic = false;
+  let inTables = false;
+  let table: string | null = null;
+  let inRow = false;
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!inPublic) {
+      if (/^ {2}public: \{$/.test(line)) inPublic = true;
+      continue;
+    }
+
+    // Leaving the public schema block entirely.
+    if (/^ {2}\}/.test(line)) break;
+
+    if (!inTables) {
+      if (/^ {4}Tables: \{$/.test(line)) inTables = true;
+      continue;
+    }
+
+    // A sibling key at Tables' own depth (Views, Functions, Enums, …) ends it.
+    if (table === null && /^ {4}\w+: [{[]$/.test(line)) break;
+
+    if (table === null) {
+      const m = /^ {6}"?([A-Za-z0-9_]+)"?: \{$/.exec(line);
+      if (m) {
+        table = m[1];
+        out.set(table, new Set());
+      }
+      continue;
+    }
+
+    if (!inRow) {
+      if (/^ {8}Row: \{$/.test(line)) inRow = true;
+      else if (/^ {6}\}$/.test(line)) table = null;
+      continue;
+    }
+
+    if (/^ {8}\}$/.test(line)) {
+      // Row closed. Skip Insert/Update/Relationships — Row is the full column
+      // set, and the others merely re-state it with different optionality plus
+      // generator-only keys.
+      inRow = false;
+      table = null;
+      continue;
+    }
+
+    const col = /^ {10}"?([A-Za-z0-9_]+)"?\??: /.exec(line);
+    if (col) out.get(table)!.add(col[1]);
+  }
+
   return out;
 }
 
 /**
- * Every foreign key in the dump, in the two forms PostgREST accepts as an embed
- * disambiguation hint (`alias:relation!<hint>(...)`):
+ * Every foreign key in `types/database.ts`, in the two forms PostgREST accepts
+ * as an embed disambiguation hint (`alias:relation!<hint>(...)`):
  *
  * - `names` — the constraint name, e.g. `notes!notes_job_fk(...)`.
  * - `columnsByTarget` — the referencing COLUMN, keyed by the table it points at, e.g.
@@ -106,18 +181,38 @@ export interface ForeignKeys {
   columnsByTarget: Map<string, Set<string>>;
 }
 
-export function parseForeignKeys(sql: string): ForeignKeys {
+export function parseForeignKeys(ts: string): ForeignKeys {
   const names = new Set<string>();
   const columnsByTarget = new Map<string, Set<string>>();
+
+  // Reads the `Relationships` entries the generator emits under every table:
+  //
+  //     {
+  //       foreignKeyName: "quotes_contact_id_fkey"
+  //       columns: ["contact_id"]
+  //       isOneToOne: false
+  //       referencedRelation: "customer_contacts"
+  //       referencedColumns: ["id"]
+  //     },
+  //
+  // isOneToOne is optional because it is absent on some entries. The pattern is
+  // otherwise anchored field-to-field rather than using a lazy `[\s\S]*?`, so it
+  // cannot run past the end of one object and pair a name with the NEXT entry's
+  // target — which would invent a foreign key that does not exist and let a bad
+  // hint through.
   const re =
-    /ADD CONSTRAINT "?([A-Za-z0-9_]+)"?\s+FOREIGN KEY\s*\(([^)]*)\)\s*REFERENCES\s+(?:"?public"?\.)?"?([A-Za-z0-9_]+)"?/g;
+    /foreignKeyName:\s*"([^"]+)"\s*columns:\s*\[([^\]]*)\]\s*(?:isOneToOne:\s*\w+\s*)?referencedRelation:\s*"([^"]+)"/g;
+
   let m: RegExpExecArray | null;
-  while ((m = re.exec(sql)) !== null) {
+  while ((m = re.exec(ts)) !== null) {
     names.add(m[1]);
     const target = m[3];
     let cols = columnsByTarget.get(target);
     if (!cols) columnsByTarget.set(target, (cols = new Set()));
-    for (const c of m[2].split(',')) cols.add(c.trim().replace(/"/g, ''));
+    for (const c of m[2].split(',')) {
+      const col = c.trim().replace(/"/g, '');
+      if (col) cols.add(col);
+    }
   }
   return { names, columnsByTarget };
 }
@@ -455,10 +550,12 @@ export interface ProjectScanResult {
 }
 
 export function scanProject(repoRoot: string, scanDirs: string[] = ['utils']): ProjectScanResult {
-  const schemaPath = join(repoRoot, 'supabase/schema.prod.sql');
-  const schemaSql = readFileSync(schemaPath, 'utf8');
-  const schema = parseSchema(schemaSql);
-  const fks = parseForeignKeys(schemaSql);
+  // One read, two parsers: the generated types carry both the column shape and
+  // every foreign key (as each table's `Relationships` array).
+  const schemaPath = join(repoRoot, 'types/database.ts');
+  const schemaTs = readFileSync(schemaPath, 'utf8');
+  const schema = parseSchema(schemaTs);
+  const fks = parseForeignKeys(schemaTs);
 
   const files: string[] = [];
   for (const dir of scanDirs) {
@@ -520,8 +617,8 @@ function main(): void {
     console.error(formatViolation(v, repoRoot));
   }
   console.error(
-    '\nIf the schema was regenerated, refresh ' +
-      'supabase/schema.prod.sql via scripts/export_schema.py.\n',
+    '\nIf a migration changed the schema, regenerate the types it is checked ' +
+      'against:\n    supabase start && pnpm gen:db-types\n',
   );
   process.exit(1);
 }

@@ -25,7 +25,7 @@
 > `quotes.converted_to_job_id` (no such column); an `owner` role (never in the
 > CHECK); two wrong theme hexes; `stripe_routes.py` absent; insights endpoints 4×
 > overcounted; a `getCustomers()` paginated pattern that does not exist;
-> `supabase/schema.staging.sql` (deleted with staging); a `shipments/` route
+> `supabase/schema.staging.sql` and `schema.prod.sql` (both since deleted); a `shipments/` route
 > "feature-flagged per tenant" (neither exists).
 
 Multi-tenant data platform for small-scale precision manufacturing shops.
@@ -61,7 +61,7 @@ Only what `ls` doesn't tell you.
 | [`app/admin/`](../app/admin) | Platform-admin console; **not** company-scoped. |
 | [`components/parts/PartRoutingPanel.tsx`](../components/parts/PartRoutingPanel.tsx) | Routings are edited **inline on the part detail page** — no `/parts/[partId]/routing/` page, no wizard. [Routings](modules/routings.md). |
 | [`api/`](../api) | `routes/` (thin) → `models/` (Pydantic) → `services/` → `tools/` → `utils/`. §8.5. |
-| [`supabase/migrations/`](../supabase/migrations) | **Source of truth.** `schema.prod.sql` is a generated snapshot ([`scripts/export_schema.py`](../scripts/export_schema.py)), never hand-edited. *(Previously also listed `schema.staging.sql`; deleted when staging was retired for Supabase Branching.)* |
+| [`supabase/migrations/`](../supabase/migrations) | **The only source of truth**, and the executable history. There is deliberately **no cached schema snapshot** — `schema.prod.sql` and `scripts/export_schema.py` were deleted (2026-08-03) because a hand-editable mirror of prod could, and did, assert a column production did not have. See [CLAUDE.md, "Schema source-of-truth"](../CLAUDE.md#schema-source-of-truth). *(Previously also listed `schema.staging.sql`, deleted when staging was retired for Supabase Branching.)* |
 
 ---
 
@@ -161,8 +161,9 @@ use the typed getter; conversion is per-file. Regen + CI drift rules: CLAUDE.md.
 
 ### 7. Database Schema
 
-Tenancy tables are in §3. `grep 'CREATE TABLE' supabase/schema.prod.sql` lists all
-57 business tables; only the ones with a rule attached are worth writing down:
+Tenancy tables are in §3. `grep -rh 'CREATE TABLE' supabase/migrations/` lists them
+all (mind the later `DROP TABLE`s); only the ones with a rule attached are worth
+writing down:
 
 | Table(s) | Rule |
 |---|---|
@@ -224,7 +225,7 @@ trigger (`sync_job_{production,fulfillment,invoicing}_status_from_parts`):
 `quotes.status` is genuinely single: `active` \| `expired` (convertible at any
 time; `sweepExpiredQuotes` changes status, never deletes). *(This doc previously
 said conversion is marked by `quotes.converted_to_job_id`. **There is no such
-column** — absent from both `schema.prod.sql` and `types/database.ts`; it could not
+column** — absent from both `supabase/migrations/` and `types/database.ts`; it could not
 have survived one quote converting into many jobs. Conversion state is read from
 the job side, via `job_parts.source_quote_line_item_id` / `getQuoteConversionState`
 above.)*

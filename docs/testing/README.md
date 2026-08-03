@@ -35,8 +35,10 @@ This page holds only what nothing else owns. Everything else is a pointer, on pu
 
 Two directories under `__tests__/` are not mirrors and are worth knowing about:
 
-- **`__tests__/schema/`** — parses `supabase/schema.prod.sql` and migration *text*, so drift that
-  TypeScript cannot see still fails a build.
+- **`__tests__/schema/`** — parses `types/database.ts` and migration *text*, so drift that
+  TypeScript cannot see still fails a build. That last clause is load-bearing: supabase-js's
+  typed client stops resolving the largest nested selects and silently widens instead of
+  erroring, so `tsc` passes them regardless of what they reference.
 - **`__tests__/standards/`** — scans component source for house-rule violations (see
   [interaction-standards.md](../interaction-standards.md)).
 

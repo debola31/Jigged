@@ -23,7 +23,7 @@
 > second entry path (`/auth/callback`).
 
 **As-built, verified 2026-08-03** against `supabase/functions/team-invites/index.ts`,
-`supabase/schema.prod.sql`, and the `app/` routes below.
+`supabase/migrations/`, and the `app/` routes below.
 
 **Provenance of the "owner decision" rulings below** — referrals descoped, the `owner` role
 removed, the Edge Function (not FastAPI) as canonical backend, `/team` rather than

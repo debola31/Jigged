@@ -199,7 +199,7 @@ Three-step handshake:
 > is internal-only). The stale importer reference is tracked in #549.
 
 Still true as of 2026-08-03: the column is absent from `types/database.ts` and
-`supabase/schema.prod.sql`, yet the importer maps, validates
+`supabase/migrations/`, yet the importer maps, validates
 (`invalid_external_setup_cost`), and writes it. The covering test mocks Supabase, so it
 passes on a column that does not exist. The same stale reference also survives in
 `api/routes/parts_import_routes.py`, `api/services/insights_service.py`,

@@ -7,6 +7,7 @@ import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import Button from '@mui/material/Button';
 import BottomNavigation from '@mui/material/BottomNavigation';
 import BottomNavigationAction from '@mui/material/BottomNavigationAction';
 import Paper from '@mui/material/Paper';
@@ -440,18 +441,24 @@ function OperatorShell({
             )}
           </Box>
 
-          {/* Right: dashboard shortcut for non-operators (admins/leads viewing
-              the operator view). */}
+          {/* Right: the way back to the office, for non-operators (owners/leads who
+              are also admins) viewing the shop floor.
+
+              Labelled, not an icon. A bare dashboard glyph asks the viewer to already
+              know that this app has two surfaces and that this square is the door to
+              the other one — and our audience skews 50-60, where icon recognition is
+              measurably worse. "Office" is the word a shop already uses, and it pairs
+              with "Shop floor" on the way in. */}
           {userRole !== 'operator' && (
-            <IconButton
+            <Button
               color="inherit"
-              onClick={() => router.push(`/dashboard/${companyId}`)}
-              aria-label="Go to dashboard"
               size="small"
-              sx={{ ml: 0.5 }}
+              startIcon={<DashboardIcon fontSize="small" />}
+              onClick={() => router.push(`/dashboard/${companyId}`)}
+              sx={{ ml: 0.5, textTransform: 'none', flexShrink: 0 }}
             >
-              <DashboardIcon fontSize="small" />
-            </IconButton>
+              Office
+            </Button>
           )}
 
           {/*

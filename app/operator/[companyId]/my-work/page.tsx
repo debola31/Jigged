@@ -631,10 +631,17 @@ function MyContribution({ companyId }: { companyId: string }) {
           </Typography>
 
           {/* Three equal columns, each aligned to the edge it sits nearest: first hard
-              left, middle centred, last hard right. Capped at 420px — nothing constrains
-              the operator column's width on this branch, so aligning to the card's own
-              edges would put the first and last figures a thousand pixels apart on a
-              laptop. A phone has ~340px of usable width, so the cap never binds there. */}
+              left, middle centred, last hard right — so the row reads as distributed
+              across the card rather than clustered at one end.
+
+              This carried a `maxWidth: 420` when it was written, because at the time
+              nothing constrained the operator column and aligning to the card's own edges
+              would have thrown the first and last figures a thousand pixels apart on a
+              laptop. The shell now caps every operator page at 680px
+              (`app/operator/[companyId]/layout.tsx`), which does that job properly, and
+              the old cap became the bug instead: it pinned three figures into the left
+              62% of a 680px card and left the rest empty. Don't reintroduce it — if the
+              spread ever looks wrong again, the column width is the thing to change. */}
           <Box
             component="dl"
             sx={{
@@ -642,7 +649,6 @@ function MyContribution({ companyId }: { companyId: string }) {
               display: 'grid',
               gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
               gap: 2,
-              maxWidth: 420,
             }}
           >
             <Stat value={c.noteCount} label={c.noteCount === 1 ? 'Note' : 'Notes'} align="left" />

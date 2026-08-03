@@ -3,7 +3,7 @@
  *
  * An operation's progress is the SUM of non-void quantity_good events against
  * the part's ordered quantity (the target). Mirrors the shipment/invoice
- * line-item model. See docs/modules/partial-operation-completion-design.md.
+ * line-item model. See docs/modules/operator-view.md#recording-a-completion.
  */
 
 /** One append-only completion event on an operation. */

@@ -279,7 +279,7 @@ Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no s
 
 #### This journey *is* consumption tracking
 
-The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
+The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-view.md`](operator-view.md#status-model)). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
 
 ### J8 — Cut it, return the remnant
 
@@ -479,9 +479,9 @@ sum, so twice-consumed material (two operations, or a correction) works and hist
 Accepted: editing a BOM retroactively shifts "expected" on old jobs — already true via the live read;
 a frozen planned-vs-actual record means a snapshot **at consumption time**, not at job creation. And
 **"skipped" is unrepresentable** — `status: pending | consumed | skipped` is gone, so no row means
-skipped *or* not-yet-done. Don't model completeness (operator UX is complete-only, one tap —
-[operator-paperless-flow.md](../operator-paperless-flow.md) §5.2); add skip only on real need, never
-by reviving a per-job row.
+skipped *or* not-yet-done. Don't model completeness (the operator records a quantity, not a
+per-material state — [operator-view.md](operator-view.md#status-model)); add skip only on real need,
+never by reviving a per-job row.
 
 ### 5.10 Native app: deferred; the scanning spike is the gate
 
@@ -664,7 +664,7 @@ Founder observation, **Contour Tool & Machine**, 2026-07-27 — reliable on stru
 
 > **Withdrawn:** an earlier revision read *"rare data was populated"* as *"raw data … for a lot of parts"* and proposed importing quantities into a count sheet's **expected** column. Dead — 0.5%, and verification belongs in **Review & Fix**.
 
-**Still open, none blocking Phase 1:** do service jobs carry a BOM line for the customer's material (J4 needs an exclusion if so, else false shortages — `custCode`'s 51% likely means *"made for customer X"*; don't conflate) · a **bar rack**? their 22 places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) hold none, so *weakly refuted*, but they buy in feet — shipped without the card, reasoning in a `storageTypes.tsx` comment · what `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean (one card-sort) · do they reuse drops (J8) · scanning: ten in a row, dead zones, whose phones (§5.10) · label durability · frequency/pain ranking, which neither observation nor exports reach · **scrap** — does it consume material, and how does it relate to `has_discrepancy` ([operator-paperless-flow.md](../operator-paperless-flow.md) §5.4).
+**Still open, none blocking Phase 1:** do service jobs carry a BOM line for the customer's material (J4 needs an exclusion if so, else false shortages — `custCode`'s 51% likely means *"made for customer X"*; don't conflate) · a **bar rack**? their 22 places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) hold none, so *weakly refuted*, but they buy in feet — shipped without the card, reasoning in a `storageTypes.tsx` comment · what `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean (one card-sort) · do they reuse drops (J8) · scanning: ten in a row, dead zones, whose phones (§5.10) · label durability · frequency/pain ranking, which neither observation nor exports reach · **scrap** — does it consume material, and how does it relate to `has_discrepancy` ([operator-view.md](operator-view.md#scrap-and-defect-capture-discovery)).
 
 **Closed:** bulk exit from `Unassigned` — built 2026-07-30 as all-of-part-X plus a **search-driven** bulk assign (nobody assigns 9,428 parts; they assign what they hold). **#541** — #496 means *beyond* locations.
 

@@ -426,7 +426,7 @@ describe('operation action page — completion (characterisation)', () => {
 
   it('hands capture back to the feed on an outside step', async () => {
     // Outside steps use send/receive, so there is no completion block either —
-    // and the paperless doc calls "sent to coater 7/9, back 7/16" the
+    // and operator-view.md calls "sent to coater 7/9, back 7/16" the
     // highest-value note in the system.
     mockDetail.mockResolvedValue(
       detail({ operation_work_center_kind: 'external', operation_vendor_name: 'AcmeCoat' }) as never,

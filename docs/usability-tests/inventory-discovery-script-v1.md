@@ -1,10 +1,19 @@
 # Inventory Discovery — Remote Script v1
 
-> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 1,718 words**
-> (`wc -w`) — a 30% cut, most of it spent back on the correction below. This is a **live instrument**, not a record. [`inventory.md`](../modules/inventory.md) §10
+> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 2,349 words**
+> (`wc -w`) — near flat: a 30% trim, spent back almost entirely on the correction below and on the
+> verification pass. This is a **live instrument**, not a record. [`inventory.md`](../modules/inventory.md) §10
 > specifies the trim — *"vocabulary, bar rack, scanning, never a gate"* — so the probes its §9 already answers
 > are gone, listed once below so nobody re-adds them. The companion `usability-test-script-v1.md` was a spent
-> one-off and was deleted in the same pass.
+> one-off and was deleted in the same pass; its Task 6 note on **how** to ask the whose-phone question was
+> carried into probe 3 before it went.
+>
+> **Verification pass, same day.** The first trim cut three probes and one observation item *without*
+> recording them — the exact failure the "already answered" table exists to prevent. They were not answered,
+> only out of scope. Restored: the **timed find** (the instrument's only *observed* measurement), the **bar-end
+> marking** confirm (J8 mirrors a habit currently sourced to a forum, not to this shop), Part 3's reason for
+> existing (**the ten words came from generic warehouse research, not this shop**), and a table naming the
+> three cut probes as still-unanswered.
 >
 > **Correction — Part 3 could not have been run as written.** *(It told the facilitator to screen-share the
 > storage-type palette at `…/inventory/locations` → "Build visually" → step 1 and show "the seven cards".
@@ -40,6 +49,16 @@ one drove are in [`inventory.md`](../modules/inventory.md) §9.
 | Have they ever counted | **Yes, and it lapsed** — J9 rescues a practice rather than introducing one |
 | How many distinct places | **~10 ±4** (22 genuine places in the export, 12–18 net of tooling sizes) |
 | *"How would you record that you used material on a job?"* | Built as J7 |
+
+**Cut for scope, and still unanswered — do not mistake these for answered.** The §10 trim is
+*"vocabulary, bar rack, scanning"*, so three probes came out of v1 that nothing has since settled. They are
+recorded here rather than deleted, because the table above means *answered* and these are not:
+
+| Cut probe | Still owned by |
+|---|---|
+| *"Walk me through the last job, from 'we won it' to 'material on the machine'"* — the unsteered narrative that shows every point material is touched, and by whom | Nothing. §9's structure comes from the founder's model, not the shop's own telling |
+| *"How do you find out you're short? What's the latest you've ever found out?"* — J4's urgency; a war story here outranks any feature request | J4 exists, but its *urgency* is unmeasured; §9 concedes frequency/pain ranking is out of reach of both observation and the exports |
+| *"What happens when a delivery shows up — who touches it, what gets written down, is anything checked against the order?"* — whether the PRD's **Admin / Shipping Clerk** ([prd.md](../prd.md) §2, Users and Use Cases) is a real person at this shop or a fiction | [`inventory.md`](../modules/inventory.md) J6, which records the persona as having **no screen** but never asks whether the persona exists |
 
 ## Before the call
 
@@ -77,6 +96,12 @@ outranks any of our ten storage-type names.**
 | **Floor / corner / outside / bench?** | The three flat kinds exist *because* 118 of their 121 legacy locations were flat — structures-only forces "on the floor by the saw" into a cabinet. Ask directly; this is exactly what a camera misses |
 | **Where do drops and offcuts go?** | J8. Dedicated remnant rack vs "back on the shelf" vs the scrap bin |
 
+**One thing to actually watch them do.** *"Where's a piece of 4140? Can you go get it?"* — then **time it, and
+listen for hesitation.** This is the only **observed** item in the whole instrument; everything else below is
+self-demonstrated or self-reported, and the findings file makes you grade them apart for exactly that reason.
+It **survives remote intact — arguably better, because you cannot accidentally point.** Same move whenever they
+say *"we just know where it is"*: ask them to prove it by going and finding something. (J11.)
+
 If they cannot walk around, screen-share their photo set instead and go image by image — *"what is this, what
 is in it, what do you call it?"* Weaker; **record which mode you used**, it changes the weight of the finding.
 
@@ -91,11 +116,21 @@ is in it, what do you call it?"* Weaker; **record which mode you used**, it chan
    not observed — flag it as such.**
 2. **Dead zones.** *"Does your phone drop signal anywhere in the building — at the material rack, in the
    stockroom?"* Self-reported, so weaker than a measurement; flag it. Decides PWA offline scope.
-3. **Whose phones.** *"Whose phones would be used, and what are they?"* The §5.10 scanner spike must run on
-   the real handsets, not a simulator. Personal phones are already the decided auth model.
+3. **Whose phones — and do they mind?** *"Whose phones would be used, and what are they?"* then *"would
+   anyone mind using their own phone for work?"* The §5.10 scanner spike must run on the real handsets, not a
+   simulator. Personal phones are already the decided auth model, so **do not ask this open-ended as though a
+   shop tablet were still live** — the 2026-07-31 founder observation settled the device
+   ([device model](../../CLAUDE.md#who-uses-what-on-what--the-device-model)); ask it to *confirm the phone* and
+   spend the time on the half that is genuinely open, which [`inventory.md`](../modules/inventory.md) §9 names
+   as *"whose phone, and whether operators mind."* (Carried over from the deleted
+   `usability-test-script-v1.md`, whose Task 6 held the only note on how to ask this.)
 4. **Label durability.** *"If you stuck a paper label on the end of that bar rack, what does it look like in
    a month? Where on each piece of storage would one survive?"* Decides label material, not the data model.
-   A plastic sleeve is the cheap known answer; some spots may need a plate or engraved tag.
+   A plastic sleeve is the cheap known answer; some spots may need a plate or engraved tag. While you are
+   there, **confirm the marking habit**: *"is the material itself marked — do you write the alloy on the bar
+   ends, and re-mark the cut end?"* Have them point the camera at a bar end. J8 is built on *mirroring* that
+   habit rather than replacing it, and today that claim is sourced to a machinists' forum, **not to this
+   shop** — so it is a hypothesis wearing a citation.
 5. **Vocabulary check.** What do `ZAPP`, `SMD`, `SBS`, `DB BOX` and `0-5` mean? (One card sort.) And, carried
    over unasked from the 2026-03 script: *"What do you think 'Adjust' does versus 'Add' or 'Remove'?"*
 6. **Wrap.** *"What's the one thing about material that costs you the most time or money right now?"* and
@@ -106,6 +141,10 @@ is in it, what do you call it?"* Weaker; **record which mode you used**, it chan
 PR #419 promised to *"usability-test the storage-type icon set with Johnny/Shane and lock it"* and never ran.
 **A paper card sort, not a screen** — the palette that used to hold these was deleted (see the correction at
 the top), so the vocabulary is now all there is to test, which is the only part that mattered.
+
+**Why this part exists at all:** the ten storage words in the product **came from generic warehouse research,
+not from this shop**. They have never been said back to a machinist. That is the whole reason a vocabulary
+check outlived the screen it was written for.
 
 **Forward:** read out the ten kinds — Cabinet, Shelving unit, Pallet rack, Drawer unit, Single shelf, Bins,
 Aisle / zone, plus the three flat ones added because 118 of Contour's 121 legacy locations were flat: **floor

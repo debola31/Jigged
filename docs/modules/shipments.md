@@ -1,7 +1,7 @@
 # Shipments Module
 
-> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **3,046 → 2,111 words**
-> (`wc -w`) — a 31% cut *while adding* the freight model the doc had omitted entirely. Cut: the acceptance-criteria block (39% of
+> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **3,046 → 2,256 words**
+> (`wc -w`) — a 26% cut *while adding* the freight model the doc had omitted entirely. Cut: the acceptance-criteria block (39% of
 > the doc — every bullet restated the test it cited); the "Feature flag (removed)" section, which repeated the
 > Overview; UI prose a component open reproduces. Kept: the one-slip-one-job invariant, the
 > dead-but-undroppable `p_notes` parameter, the dormant customer-mode branch, invoicing-is-decoupled, every gap.
@@ -82,8 +82,14 @@ cancelled`) and **`fulfillment_status`** (`unshipped | partially_shipped | fully
 | `sync_job_fulfillment_status_from_parts` | AFTER INS/UPD `job_parts.fulfillment_status` / DEL | `jobs.fulfillment_status` |
 
 `compute_job_part_fulfillment_status(uuid)` compares `SUM(non-voided line quantities)` vs
-`job_parts.quantity`; `compute_job_fulfillment_status(uuid)` aggregates children and **does not** exclude
-cancelled parts (PRD §7.1). A job auto-closes when `SUM(shipped) ≥ SUM(ordered)` across non-cancelled parts.
+`job_parts.quantity`; `compute_job_fulfillment_status(uuid)` rolls the children up — `fully_shipped` only when
+**every** `job_parts` row is, `partially_shipped` if any is partial-or-full, else `unshipped`. It **does not
+exclude cancelled parts**, and there is no `SUM`: the rollup is over per-part *statuses*, counted across
+**all** parts including cancelled ones, so a cancelled-and-unshipped part holds the whole job off
+`fully_shipped`. *(⚠ This doc previously cited "PRD §7.1" for the cancelled-parts rule — **prd.md has never
+had a §7.1**; its sections run 1, 1.1, 2, 2.1, 4.1–4.3, 5, 5.1, 6, 7, 8, 8.1, 9. The function body is the
+enforcement, and `TestCancellationFulfillmentIndependence` is the test. The same passage then contradicted
+itself one clause later with "across non-cancelled parts".)*
 `qty_remaining` is derived live, so it always reflects the **current** ordered quantity including a
 post-conversion edit; conversely `updateJobPartQuantity` refuses to lower a part below
 `max(already-shipped, already-invoiced)`.
@@ -108,9 +114,14 @@ number back in a second query so callers get `{shipmentId, packingSlipNumber}`. 
 Two traps, recorded in migration `20260801030048`, both of which apply cleanly and break production:
 
 - **`p_notes text DEFAULT NULL` is dead** — no `shipments.notes` column, never used by the INSERT — and
-  **cannot be dropped.** `shipmentsAccess.ts` supplies eight named arguments and omits it; PostgREST resolves
+  **cannot be dropped.** `shipmentsAccess.ts` supplies ten named arguments (`p_company_id`, `p_customer_id`,
+  `p_shipping_address_id`, `p_one_time_address`, `p_ship_date`, `p_carrier`, `p_shipping_method`,
+  `p_line_items`, `p_freight_terms`, `p_customer_carrier_account_id`) and omits `p_notes`; PostgREST resolves
   an RPC by the set of names supplied, so removing the default makes every shipment creation return
-  `PGRST202`. All defaulted parameters stay trailing.
+  `PGRST202`. All defaulted parameters stay trailing — `p_notes` is the first of three, ahead of the two
+  freight ones. (Migration `20260801030048`'s own comment says "EIGHT named arguments"; that was the count
+  before the same migration's frontend half added the two freight arguments. Count the call site, not the
+  comment.)
 - **`DROP FUNCTION IF EXISTS` against a wrong signature succeeds and does nothing**, leaving the old
   `SECURITY DEFINER` overload alive with its grants and letting PostgREST pick. The migration ends with a
   `DO $$` block asserting exactly one overload exists, turning a silent miss into a failed migration.
@@ -159,7 +170,7 @@ from this doc.
 | `countShipmentsForJob(jobId)` | Counts **all** rows incl. voided via the direct `shipments.job_id` column. No longer gates `deleteJob` ([architecture.md §16](../architecture.md)) |
 | `getJobPartShipmentSummaries(jobId)` | `{job_part_id, qty_ordered, qty_shipped, qty_remaining (clamped ≥0), last_ship_date}` |
 | `getJobShipmentSummary(jobId)` | Job rollup: ordered/shipped/remaining, last ship date, latest slip #, count |
-| `getOpenJobPartsForCustomer(...)` | Feeds only the dormant customer-mode branch; same untracked-excision gap |
+| `getOpenJobPartsForCustomer(companyId, customerId, filter?)` | Feeds only the dormant customer-mode branch; same untracked-excision gap |
 | `getJobLastShipDate(jobId)` | Wrapper over the `job_last_ship_date(uuid)` SQL helper |
 | `resolveAttentionLine(shipment)` | ATTN line from the frozen `ship_to_address` snapshot — shared by form preview + PDF so they cannot drift |
 | `resolveFreightLine(args)` | → `{terms, account, requiresChoice, source}`. **The job wins over the customer default:** a customer who normally ships collect can send one PO saying "this one prepaid", and re-deriving at pack time would quietly contradict it. Returns `requiresChoice: true` rather than guessing when the customer holds >1 live account and the job named none |

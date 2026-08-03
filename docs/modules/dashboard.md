@@ -1,7 +1,7 @@
 # Dashboard Module
 
 > **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634); as-built, verified
-> against the code at `db58ae8`. **2,460 → 1,533 words** (`wc -w`).
+> against the code at `db58ae8`. **2,460 → 1,639 words** (`wc -w`).
 >
 > **Cut:** the acceptance-criteria block (45% of the doc — bullets restating their own citation); the
 > ~150-word "Quick Actions" section, which said only what the Overview already says; the User Stories table;
@@ -98,7 +98,8 @@ card rendered by `components/dashboard/RecentActivity.tsx`, a collapsible accord
 | `/dashboard/{companyId}/activity` | the above **plus** notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
 
 Shipments come from the real `shipments` table — there is no `jobs.shipped_at` in the dual-status model.
-**Floor chatter is deliberately excluded from the card** and lives only on the `/activity` page. Each row:
+**Floor chatter is deliberately excluded from the card** and lives only on the `/activity` page, reached by the
+card's **"View all activity"** link (`viewAllHref`, set by `page.tsx`; the link renders only when it is). Each row:
 type-coloured icon, entity number (Q-0089 / J-0042), action text, relative timestamp with an absolute-time
 tooltip. Empty: "No recent activity." on the card, "No activity yet." on the page.
 
@@ -110,6 +111,12 @@ Below Recent Activity: ask-bar (`InsightsChat`) + saved charts (`InsightsSection
 flag, which is **opt-out** (on unless a system admin turns it off for the tenant) and stays hidden while the
 flag loads so it never flashes in then out. Full spec — text-to-SQL flow, persistence, prompts, and the "AI
 only on explicit user action" contract — is in [AI Insights & Charts](ai-insights.md).
+
+**Nothing on this page may call a paid AI provider on mount.** `page.tsx`'s effects fire plain Supabase reads
+only (`getMetricValue`, `getDashboardActivity`); the ask-bar is driven by a submit. This is stated here, not
+just deferred, because **this is the page the rule was written from** — `AlertBadge` → `/api/insights/{id}/dashboard`
+once fired five Anthropic calls per dashboard load, nobody ever read the output, and it burned the credits in
+days (CLAUDE.md, "AI calls require an explicit user action"). A new tile is the obvious way to reintroduce it.
 
 ---
 

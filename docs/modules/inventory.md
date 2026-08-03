@@ -428,10 +428,6 @@ Both access files use `getTypedSupabase()`.
 of which first loads the part's conversion context and passes both display and converted
 quantities.
 
-**`utils/alertsAccess.ts`** — `getLowStockPartsAlerts`: stocked, non-deleted parts with a
-non-null `reorder_point`, filtered in JS to `quantity <= reorder_point`. Severity: `critical` at
-0, `high` at ≤50% of the reorder point, else `medium`. Feeds the header `AlertBadge`.
-
 ### Feature flag
 
 **`inventory_locations`** — [`lib/featureFlags.ts`](../../lib/featureFlags.ts), opt-in,
@@ -956,9 +952,10 @@ happens to be empty.
 Below the reorder point, the item lands on the buy list. On-order quantity is visible so
 nobody double-orders.
 
-**Today: partial.** `parts.reorder_point` exists, `deriveStockStatus` renders
-In stock / Low / Out of stock, and `getLowStockPartsAlerts` feeds the header `AlertBadge`.
-Missing: email notification, a real buy list, and any concept of on-order.
+**Today: partial.** `parts.reorder_point` exists and `deriveStockStatus` renders
+In stock / Low / Out of stock, surfaced by the shortage lens on the parts page
+(`?status=low` / `?status=out`). Missing: email notification, a real buy list, and
+any concept of on-order.
 
 **Doc conflict to settle:** PRD **FR-2 is a `Must`** and specifies dashboard alerts *plus*
 email. this document calls FR-2 a `Should`, reports it partially delivered,

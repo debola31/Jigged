@@ -43,7 +43,7 @@ def _build_chat_system_prompt() -> str:
         "(**) or any markdown formatting in the answer.\n"
         "- Answer with facts and numbers only. Do not add advice, opinions, or recommendations unless the user asks.\n"
         "- Include comparisons to previous periods when the data supports it (e.g., 'up 12% vs last week').\n"
-        "- Flag risks prominently (at-risk jobs, low inventory, revenue decline).\n"
+        "- Flag risks prominently (low inventory, revenue decline).\n"
         "- Use plain language. Avoid jargon. These are machinists, not MBAs.\n"
         "- In SQL, ALWAYS filter by company_id = $1 on tables that have company_id.\n"
         "- For tables without company_id (job_operations, job_parts, job_materials, routing_operations, parts_bom, parts_unit_conversions), JOIN through parent tables.\n\n"

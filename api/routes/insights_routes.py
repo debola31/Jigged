@@ -5,8 +5,8 @@ Endpoints:
 - POST /{company_id}/chat        - Submit natural language question
 
 Note: Saved insights CRUD (get/save/delete) is handled client-side
-via direct Supabase queries with RLS policies. Per-company alerts
-(at-risk jobs, low inventory) are also client-side via utils/alertsAccess.ts.
+via direct Supabase queries with RLS policies. Low-stock surfacing is
+client-side too — it's the shortage lens on the parts page, not an alert feed.
 """
 
 import json

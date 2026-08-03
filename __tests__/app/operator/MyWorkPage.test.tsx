@@ -218,8 +218,31 @@ describe('My Work', () => {
     stage({ totals: { peopleReached: 5 } });
     render(<MyWorkPage />);
 
-    expect(await screen.findByText('views')).toBeInTheDocument();
+    expect(await screen.findByText('times viewed')).toBeInTheDocument();
     expect(screen.queryByText(/people have (used|viewed)/i)).not.toBeInTheDocument();
+    // "viewed", never "used" — all that was recorded is that somebody opened the note.
+    expect(screen.queryByText(/used/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The summary has no heading, and that is deliberate rather than an oversight.
+   *
+   * It used to read "What you've added", which was true of the notes and the photos and
+   * false of the views — those are not something the operator added, they are what came
+   * back. No one heading is true of both categories, and two headings over three figures
+   * is more structure than three numbers can carry, so each caption states its own kind
+   * instead: the contributions are past-tense verbs the operator performed, the reception
+   * one is passive.
+   */
+  it('states each figure kind in its own caption, with no heading claiming all three', async () => {
+    stage({ totals: { noteCount: 17, photoCount: 2, peopleReached: 9 } });
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText('notes written')).toBeInTheDocument();
+    expect(screen.getByText('photos added')).toBeInTheDocument();
+    expect(screen.getByText('times viewed')).toBeInTheDocument();
+    // The heading claimed authorship of a number the operator did not author.
+    expect(screen.queryByText(/what you.?ve added/i)).not.toBeInTheDocument();
   });
 
   it('shows the view count alone, never a second job figure beside it', async () => {

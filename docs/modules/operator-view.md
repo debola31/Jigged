@@ -239,7 +239,9 @@ irreversibility.
   recover *when* a note was read, which combined with `note_viewers()` naming the
   reader reconstructs "Kurtis had to look this up on Tuesday". A count is a number
   the server already told us, so subtracting on the client leaks nothing.
-- **My work** (`/operator/{companyId}/my-work`) — notes / photos / views, then the
+- **My work** (`/operator/{companyId}/my-work`) — a heading-less summary of notes
+  written / photos added / times viewed (no one heading is true of both a
+  contribution and a reception figure, so each caption states its own kind), then the
   operator's notes ten at a time behind **Show more**. Each row is the note itself,
   with one quiet metadata line beneath it: the view count, one reference, and the
   date. The reference is the job number for a job or part note and the **work

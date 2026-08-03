@@ -535,9 +535,11 @@ function MyContribution({ companyId }: { companyId: string }) {
           the point is that writing things down is the work, not a score. */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
         <CardContent>
-          <Typography variant="overline" color="text.secondary">
-            What you&apos;ve added
-          </Typography>
+          {/* NO HEADER, deliberately. "What you've added" was true of the notes and the
+              photos and false of the views — those are not something the operator added,
+              they are what came back. No single heading is true of both categories, and
+              two headings over three figures is more structure than three numbers can
+              carry, so the captions say what each figure is instead. */}
           {/* Three equal columns, and each one aligned to the edge it sits nearest:
               first hard left, middle centred, last hard right. Equal columns alone were
               not enough — with every column's content left-aligned, the last number
@@ -557,10 +559,14 @@ function MyContribution({ companyId }: { companyId: string }) {
               mt: 0.5,
             }}
           >
-            <Stat value={c.noteCount} label={c.noteCount === 1 ? 'note' : 'notes'} align="left" />
+            <Stat
+              value={c.noteCount}
+              label={c.noteCount === 1 ? 'note written' : 'notes written'}
+              align="left"
+            />
             <Stat
               value={c.photoCount}
-              label={c.photoCount === 1 ? 'photo' : 'photos'}
+              label={c.photoCount === 1 ? 'photo added' : 'photos added'}
               align="center"
             />
             {/* "views", not "people". This sums each note's viewer_count, so one colleague
@@ -574,9 +580,13 @@ function MyContribution({ companyId }: { companyId: string }) {
                 least actionable number the loudest thing in the card. On a note row the same
                 green earns its place: there it is binary and comparative, marking which
                 notes have landed as you scan a column. Here there is nothing to compare. */}
+            {/* "times viewed", not "views": a passive phrasing is what marks this one out
+                as reception rather than contribution, now that no heading does it. Still
+                "viewed" and never "used" — all that was recorded is that somebody opened
+                the note and stayed on it. */}
             <Stat
               value={c.peopleReached}
-              label={c.peopleReached === 1 ? 'view' : 'views'}
+              label={c.peopleReached === 1 ? 'time viewed' : 'times viewed'}
               align="right"
             />
           </Box>

@@ -801,7 +801,6 @@ Product documentation is version-controlled in the `/docs` folder.
 | Product Requirements | [docs/prd.md](docs/prd.md) |
 | System Architecture | [docs/architecture.md](docs/architecture.md) |
 | Design System | [docs/design-system.md](docs/design-system.md) |
-| Operator Paperless Flow (journey spec) | [docs/operator-paperless-flow.md](docs/operator-paperless-flow.md) |
 | Observability (Sentry / PostHog / Vercel) | [docs/observability.md](docs/observability.md) |
 
 ### Module Specifications
@@ -816,7 +815,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Dashboard](docs/modules/dashboard.md)
 - [Routings](docs/modules/routings.md)
 - [Inventory](docs/modules/inventory.md)
-- [Operator View](docs/modules/operator-view.md)
+- [Operator View](docs/modules/operator-view.md) — carries the operator journeys too
 - [Machine Maintenance](docs/modules/machine-maintenance.md) (operator-logged machine logbook; flag-gated pilot with a written kill criterion)
 - [Invitation System](docs/modules/invitation-system.md)
 - [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))

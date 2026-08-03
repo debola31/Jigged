@@ -226,7 +226,7 @@ The routing drives the live `Cost Breakdown` card on the part detail page (`calc
 
 ### Integration with Quotes
 
-Quotes reference parts via `quote_line_items.part_id`. At `createQuote`, per-part cost snapshots (`quote_operations`, `quote_materials`) are written once per distinct part on the quote so the breakdown survives later routing edits. The quote line item itself snapshots `quantity`, `unit_price`, `markup_percent`, and `base_cost_per_unit` from the selected pricing tier (or the salesperson's per-quote override). See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items-quote_line_items).
+Quotes reference parts via `quote_line_items.part_id`. At `createQuote`, per-part cost snapshots (`quote_operations`, `quote_materials`) are written once per distinct part on the quote so the breakdown survives later routing edits. The quote line item itself snapshots `quantity`, `unit_price`, `markup_percent`, and `base_cost_per_unit` from the selected pricing tier (or the salesperson's per-quote override). See [Quotes Module — Snapshotted Line Items](quotes.md#quote_line_items).
 
 ### Edge Cases
 

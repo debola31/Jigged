@@ -126,7 +126,14 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 **Features:**
 
-- AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
+- AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **On hand**, **Status**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
+
+- **Parts is now the single item master, including stock** — the separate `/dashboard/{companyId}/inventory` list was folded in on 2026-07-30 and redirects here. It was `parts WHERE is_stocked` with three extra columns and no unique capability; its own module doc had described it as *"a filtered view over `parts`"* since it was written. See [inventory.md §5.12](inventory.md#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30).
+
+  - **On hand** folds the unit into the cell (`40 ea`) rather than spending a column on it, and shows `—` for a non-stocked part: a made-to-order part has no stock level, and printing `0` would read as *"we're out"* rather than *"not applicable"*.
+  - **Status** is derived at render from `quantity + reorder_point` via `deriveStockStatus` — never stored, so it cannot drift.
+  - A **Stock** filter (All / Stocked / Low stock / Out of stock) is seeded from `?status=`, which makes this page the **shop-wide shortage lens**: `JobPartMaterialsCard`'s *"N short"* chip links to `/parts?status=low`. Stock filters only ever narrow to stocked parts — a non-stocked part is neither low nor out, and including it would invent a shortage for a made-to-order part.
+  - With the `inventory_locations` flag **off**, this page also carries **Count Inventory**, since it is then the only stock surface.
 
 - **Default sort is most-recently-updated first** (the Updated column, descending) — users care about the parts they just worked on, not the alphabetical top. Alphabetical is one click away on the Part Name header. Sorting is server-side for the real columns (`part_name`, `source`, `updated_at`). This pairs with the `updated_at` accuracy fix below, so a part whose routing/pricing/BOM was just edited rises to the top.
 

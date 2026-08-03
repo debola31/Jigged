@@ -809,17 +809,17 @@ async def execute_import(
             for p in fetch_all_by_company(
                 supabase,
                 "parts",
-                "id, part_name, quantity, primary_unit, is_location_tracked",
+                "id, part_name, quantity, primary_unit",
                 request.company_id,
             )
         }
 
-        # Opening balances that actually moved a number, staged for the ledger write after the
-        # upsert. Each entry is (part_name, prior_qty, new_qty, unit).
-        pending_stock_ledger: list[tuple[str, float, float, str]] = []
-        # Rows whose quantity was deliberately NOT written because the part is location-tracked.
-        # Surfaced in the response — never silently dropped.
-        location_tracked_skips: list[str] = []
+        # Opening balances staged for after the upsert, when the part ids are known.
+        # Each entry is (part_name, prior_qty, new_qty, unit).
+        pending_balances: list[tuple[str, float, float, str]] = []
+        # Rows whose quantity was deliberately NOT written because the part already holds stock
+        # at a real place. Surfaced in the response — never silently dropped.
+        already_placed_skips: list[str] = []
 
         for i, row in enumerate(request.rows):
             row_number = i + 1
@@ -958,28 +958,28 @@ async def execute_import(
 
             part_data["primary_unit"] = resolved_unit
 
-            # Quantity is only written when the CSV actually supplied one.
+            # `quantity` is NEVER written here — not on insert, not on update.
             #
-            # Two rules, both load-bearing:
-            #  1. Never write it when unmapped. The column is NOT NULL DEFAULT 0, so inserts
-            #     are fine without it — but writing an explicit 0 on an UPDATE zeroed the
-            #     stock of every existing part on any re-import that didn't map quantity.
-            #  2. Never write it for a location-tracked part. parts.quantity is a
-            #     trigger-maintained rollup of part_location_stock there, and the
-            #     enforce_tracked_part_quantity BEFORE UPDATE trigger raises if we disagree
-            #     with it — which, because upserts are batched 500 at a time, failed all 500
-            #     rows with an opaque 500. Those balances are set by a count or at a location.
+            # It stopped being a column you set in 20260802015837: every part has a place now, so
+            # `parts.quantity` is a trigger-maintained rollup of `part_location_stock` for all of
+            # them, and `enforce_tracked_part_quantity` (BEFORE UPDATE) raises on any direct write
+            # that disagrees with the sum. Because upserts are batched 500 at a time, one such row
+            # failed all 500 with an opaque 500. An INSERT slips past that trigger, which is worse:
+            # it lands a part whose quantity has no balances behind it, breaking at rest the very
+            # invariant the migration asserts.
+            #
+            # So the number goes where the number lives — a balance at the company's `Unassigned`
+            # bucket, written after the upsert once part ids are known. The rollup trigger then
+            # sets `parts.quantity` itself.
+            #
+            # Still never written when unmapped: `quantity_val is None` means the CSV said nothing,
+            # and an explicit 0 on a re-import used to zero every existing part's stock.
             existing = existing_by_name.get(part_name.lower())
             if quantity_val is not None:
-                if existing and existing.get("is_location_tracked"):
-                    location_tracked_skips.append(part_name)
-                else:
-                    part_data["quantity"] = quantity_val
-                    prior_qty = float(existing.get("quantity") or 0) if existing else 0.0
-                    if prior_qty != quantity_val:
-                        pending_stock_ledger.append(
-                            (part_name, prior_qty, float(quantity_val), resolved_unit)
-                        )
+                prior_qty = float(existing.get("quantity") or 0) if existing else 0.0
+                pending_balances.append(
+                    (part_name, prior_qty, float(quantity_val), resolved_unit)
+                )
             # parts.cost_per_unit was dropped (migration 20260514). For bought
             # rows we stage a NULL-vendor procurement tier post-insert; made
             # rows' cost_val is ignored — compute_part_cost_at_qty recomputes
@@ -1036,21 +1036,81 @@ async def execute_import(
                 sentry_sdk.capture_exception(e)
                 raise HTTPException(status_code=500, detail="Internal server error")
 
-        # ── Provenance for opening balances ────────────────────────────────
-        # An imported quantity is a stock movement like any other, so it gets a ledger row —
-        # a balance with no transaction explaining it is exactly what inventory.md J1 forbids.
+        # ── Opening balances ───────────────────────────────────────────────
+        # The imported quantity is written as a BALANCE at the company's `Unassigned` bucket,
+        # not as `parts.quantity`. The rollup trigger on `part_location_stock` derives the part
+        # total from it, which is the only way that column is allowed to change now.
         #
-        # Shape mirrors adjustPartStock (utils/partsAccess.ts) so there is ONE adjustment
-        # convention per table: quantity is abs(delta) in the primary unit (the table's
-        # inventory_transactions_quantity_positive CHECK makes a signed delta unstorable), and
-        # direction lives in the notes text.
-        if pending_stock_ledger:
+        # Written directly rather than through `adjust_stock_at_location`, deliberately: that RPC
+        # is per-part, and an onboarding import is thousands of rows — Contour's parts file alone
+        # would be ~8k sequential round trips. The batched upsert keeps the same trigger as the
+        # single source of truth for the rollup; only the ledger row is hand-written, exactly as
+        # it already was.
+        #
+        # A quantity is skipped when the part ALREADY holds stock at a real place. "240 on hand"
+        # from a spreadsheet cannot say which shelf to correct, and dumping it into `Unassigned`
+        # would silently inflate the total. This is the same refusal the old
+        # `is_location_tracked` check made, on the condition that actually matters.
+        if pending_balances:
             try:
-                ledger_rows = []
-                for name, prior_qty, new_qty, unit in pending_stock_ledger:
-                    part_id = id_by_part_name.get(name)
-                    if not part_id:
+                unassigned_id = supabase.rpc(
+                    "inv_get_or_create_unassigned", {"p_company_id": request.company_id}
+                ).execute().data
+
+                staged = [
+                    (name, prior_qty, new_qty, unit)
+                    for name, prior_qty, new_qty, unit in pending_balances
+                    if name in id_by_part_name
+                ]
+                part_ids = [id_by_part_name[name] for name, _, _, _ in staged]
+
+                # Any stock at a place that isn't the Unassigned bucket makes the CSV number
+                # ambiguous. The `.gt("quantity", 0)` is KEPT after 20260802144310 deleted the
+                # zero-row residue: here it is a business predicate ("is this actually placed
+                # somewhere?"), not residue-hiding, so it stays correct under either data state
+                # and states its own intent at the point of use.
+                placed: set[str] = set()
+                for batch_start in range(0, len(part_ids), BATCH_SIZE):
+                    res = (
+                        supabase.table("part_location_stock")
+                        .select("part_id, location_id")
+                        .in_("part_id", part_ids[batch_start : batch_start + BATCH_SIZE])
+                        .gt("quantity", 0)
+                        .execute()
+                    )
+                    for r in res.data or []:
+                        if r["location_id"] != unassigned_id:
+                            placed.add(r["part_id"])
+
+                balance_rows: list[dict] = []
+                zeroed_part_ids: list[str] = []
+                ledger_rows: list[dict] = []
+                for name, prior_qty, new_qty, unit in staged:
+                    part_id = id_by_part_name[name]
+                    if part_id in placed:
+                        already_placed_skips.append(name)
                         continue
+                    # Unchanged numbers need no write and no ledger row — re-importing the same
+                    # file twice should be a no-op, not a wall of zero-delta "adjustments".
+                    if prior_qty == new_qty:
+                        continue
+                    # A zero opening balance is a DELETE, not an upsert: `part_location_stock`
+                    # CHECKs `quantity > 0` since 20260802144310, so writing a 0 raises.
+                    if new_qty == 0:
+                        zeroed_part_ids.append(part_id)
+                    else:
+                        balance_rows.append(
+                            {
+                                "company_id": request.company_id,
+                                "part_id": part_id,
+                                "location_id": unassigned_id,
+                                "quantity": new_qty,
+                            }
+                        )
+                    # Shape matches the location RPCs so there is ONE adjustment convention per
+                    # table: quantity is abs(delta) in the primary unit (the
+                    # inventory_transactions_quantity_positive CHECK makes a signed delta
+                    # unstorable), and direction lives in the notes text.
                     delta = abs(new_qty - prior_qty)
                     ledger_rows.append(
                         {
@@ -1061,20 +1121,49 @@ async def execute_import(
                             "quantity": delta,
                             "unit": unit,
                             "converted_quantity": delta,
+                            "location_id": unassigned_id,
                             "notes": (
                                 f"Opening balance from import — set from {prior_qty} "
                                 f"to {new_qty} {unit}"
                             ),
                         }
                     )
+
+                for batch_start in range(0, len(balance_rows), BATCH_SIZE):
+                    (
+                        supabase.table("part_location_stock")
+                        .upsert(
+                            balance_rows[batch_start : batch_start + BATCH_SIZE],
+                            on_conflict="part_id,location_id",
+                        )
+                        .execute()
+                    )
+
+                # "The CSV says this part is at zero" removes its row rather than storing a 0.
+                for batch_start in range(0, len(zeroed_part_ids), BATCH_SIZE):
+                    (
+                        supabase.table("part_location_stock")
+                        .delete()
+                        .eq("location_id", unassigned_id)
+                        .in_("part_id", zeroed_part_ids[batch_start : batch_start + BATCH_SIZE])
+                        .execute()
+                    )
+            except Exception as e:
+                # Unlike the ledger below, this one IS the data — fail loudly rather than report
+                # a successful import whose quantities never landed.
+                logger.error(f"Parts import balance write failed: {e}", exc_info=True)
+                sentry_sdk.capture_exception(e)
+                raise HTTPException(status_code=500, detail="Internal server error")
+
+            # A balance with no transaction explaining it is exactly what inventory.md J1
+            # forbids — but the balances are already committed and correct by here, so a missing
+            # ledger row is a provenance gap, not a data error. Log loudly, don't fail.
+            try:
                 for batch_start in range(0, len(ledger_rows), BATCH_SIZE):
                     supabase.table("inventory_transactions").insert(
                         ledger_rows[batch_start : batch_start + BATCH_SIZE]
                     ).execute()
             except Exception as e:
-                # The balances are already committed and correct. A missing ledger row is a
-                # provenance gap, not a data error, so log loudly rather than fail the import
-                # and leave the caller unsure what landed.
                 logger.error(f"Parts import ledger write failed: {e}", exc_info=True)
                 sentry_sdk.capture_exception(e)
 
@@ -1131,10 +1220,10 @@ async def execute_import(
             f"Parts import complete: {imported_count} created, {updated_count} updated, {skipped} skipped"
         )
 
-        if location_tracked_skips:
+        if already_placed_skips:
             logger.info(
-                f"Parts import: {len(location_tracked_skips)} quantities not written "
-                f"(location-tracked parts): {location_tracked_skips[:10]}"
+                f"Parts import: {len(already_placed_skips)} quantities not written "
+                f"(part already holds stock at a place): {already_placed_skips[:10]}"
             )
 
         return PartExecuteResponse(
@@ -1143,7 +1232,7 @@ async def execute_import(
             updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
-            location_tracked_skipped=location_tracked_skips,
+            quantity_skipped_already_placed=already_placed_skips,
         )
 
     except HTTPException:

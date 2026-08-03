@@ -1,53 +1,64 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+/**
+ * The operator Inventory tab — item-first, which is what makes its own label true.
+ *
+ * ## What it used to be, and why that was wrong
+ *
+ * It rendered the owner's `LocationBoard`: a drawn map of *places*, read-only. That is Storage
+ * content under an Inventory label, and industry usage is consistent — *inventory* means items and
+ * quantities, *storage* means places. Every action an operator actually takes here is an **item**
+ * action: find one, put one away, take one out. The tab now matches the noun.
+ *
+ * Dropping the board cost less than it looks. With 12–18 places you are standing among, walking
+ * beats scrolling a picture of furniture three feet away — and Scan already reaches a place faster
+ * *and* proves you are at it, so the board was competing with the better tool. The one thing the
+ * board did that nothing else does — reach a bin whose label has come off — survives as the tap
+ * target on every activity row.
+ *
+ * ## Two modes, never both
+ *
+ * Idle → the shop-wide feed. Part selected → that part's places, feed hidden. The feed is the
+ * genuinely phone-shaped thing here: what a phone knows that you do not is what changed while you
+ * were somewhere else. Mid-lookup it is noise, and showing both is how this screen becomes a wall.
+ */
+
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
-import CardContent from '@mui/material/CardContent';
 import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
-import CircularProgress from '@mui/material/CircularProgress';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import WarehouseOutlinedIcon from '@mui/icons-material/WarehouseOutlined';
 
-import { getLocations } from '@/utils/inventoryLocationsAccess';
-import type { InventoryLocation } from '@/types/inventoryLocations';
+import { getRecentActivity } from '@/utils/inventoryLocationsAccess';
+import OperatorPartLookup from '@/components/operator/OperatorPartLookup';
+import BinHistory from '@/components/operator/BinHistory';
+import type { PartSelectOption } from '@/components/parts/PartAutocomplete';
 
-// Stable empty fallback so the roots memo doesn't churn while the first load runs.
-const EMPTY_LOCATIONS: InventoryLocation[] = [];
-
-/**
- * Operator "warehouse home" — the root of the Inventory tab. Lists the
- * top-level storage locations to browse (drill down into the bin view), so the
- * warehouse is reachable and orientable without a physical QR scan. Scanning a
- * printed label still jumps straight to a bin (the fast path).
- */
 export default function OperatorWarehouseHomePage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
 
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Two modes, never both at once.
+   *
+   * With a part chosen you are mid-task — the shop-wide feed underneath becomes noise, and showing
+   * it is exactly how this screen would turn into a wall. Idle, the feed IS the page.
+   */
+  const [selectedPart, setSelectedPart] = useState<PartSelectOption | null>(null);
 
-  const { data: locationsData, loading } = useLoad(
-    () => getLocations(companyId),
-    [companyId],
-    {
-      onError: (e) => {
-        setError(e instanceof Error ? e.message : 'Could not load the warehouse.');
-      },
+  const { data: activity, loading } = useLoad(() => getRecentActivity(companyId), [companyId], {
+    onError: (e) => {
+      setError(e instanceof Error ? e.message : 'Could not load recent activity.');
     },
-  );
-  const locations = locationsData ?? EMPTY_LOCATIONS;
+  });
 
-  // Top-level locations are the warehouse roots to browse from.
-  const roots = useMemo(() => locations.filter((l) => l.parent_id === null), [locations]);
+  const openLocation = (locationId: string) =>
+    router.push(`/operator/${companyId}/inventory/locations/${locationId}`);
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -57,10 +68,15 @@ export default function OperatorWarehouseHomePage() {
           Inventory
         </Typography>
       </Stack>
-      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 3, color: 'text.secondary' }}>
-        <QrCodeScannerIcon fontSize="small" />
-        <Typography variant="body2">Scan a printed label to jump straight to a bin.</Typography>
-      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Look up a part to find where it is. Scan a shelf label to go straight there.
+      </Typography>
+
+      <OperatorPartLookup
+        companyId={companyId}
+        onOpenLocation={openLocation}
+        onSelectionChange={setSelectedPart}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -68,43 +84,30 @@ export default function OperatorWarehouseHomePage() {
         </Alert>
       )}
 
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress />
+      {/*
+        Recent activity replaces the drawn board that used to sit here.
+
+        A board is a map of places you are standing among — with 12–18 of them, walking beats
+        scrolling a picture of furniture that is three feet away, and it competed with Scan, which
+        reaches a place faster and proves you are actually at it. What a phone genuinely knows that
+        you do not is WHAT CHANGED WHILE YOU WERE ELSEWHERE. Every row taps through to its place,
+        so this is also how you reach a bin whose label has come off.
+      */}
+      {!selectedPart && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="overline" color="text.secondary">
+            Recent activity
+          </Typography>
+          <Box sx={{ mt: 0.5 }}>
+            <BinHistory
+              entries={activity}
+              loading={loading}
+              showPlace
+              onOpenLocation={openLocation}
+              emptyText="No stock has moved yet. Scan a shelf label to put something away."
+            />
+          </Box>
         </Box>
-      ) : roots.length === 0 ? (
-        <Card elevation={2}>
-          <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            <WarehouseOutlinedIcon sx={{ fontSize: 44, color: 'text.disabled', mb: 1 }} />
-            <Typography color="text.secondary">
-              No storage locations yet. Once they&apos;re set up, you can browse them here.
-            </Typography>
-          </CardContent>
-        </Card>
-      ) : (
-        <Stack spacing={1}>
-          {roots.map((loc) => (
-            <Card key={loc.id} elevation={2}>
-              <CardActionArea
-                onClick={() => router.push(`/operator/${companyId}/inventory/locations/${loc.id}`)}
-                sx={{ minHeight: 56 }}
-              >
-                <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 600 }}>{loc.name}</Typography>
-                    {loc.kind && (
-                      <Typography variant="caption" color="text.secondary">
-                        {loc.kind}
-                      </Typography>
-                    )}
-                  </Box>
-                  {loc.code && <Chip size="small" label={loc.code} variant="outlined" />}
-                  <KeyboardArrowRightIcon color="action" />
-                </CardContent>
-              </CardActionArea>
-            </Card>
-          ))}
-        </Stack>
       )}
     </Box>
   );

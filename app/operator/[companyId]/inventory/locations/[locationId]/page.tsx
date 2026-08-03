@@ -10,9 +10,9 @@ import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
+import Link from '@mui/material/Link';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -21,7 +21,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
-import { resolveScan, getLocations } from '@/utils/inventoryLocationsAccess';
+import { resolveScan, getLocations, getLocationHistory } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
@@ -31,6 +31,7 @@ import OperatorLocationActionModal, {
   type OperatorLocationAction,
 } from '@/components/operator/OperatorLocationActionModal';
 import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
+import BinHistory from '@/components/operator/BinHistory';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -98,6 +99,22 @@ export default function OperatorBinViewPage() {
    * that the operator's context is already known — making them wait after tapping Move would
    * undo that. It's one small read of a tree a shop has a couple of dozen nodes in.
    */
+  /**
+   * Recent movements here. Keyed on the same `locationId` as the scan, and reloaded by the same
+   * `reload` the action modals call — so a put-away you just recorded appears without a refresh,
+   * which is the whole point of showing it to the person who made it.
+   */
+  const {
+    data: history,
+    loading: historyLoading,
+    reload: reloadHistory,
+  } = useLoad(() => getLocationHistory(locationId), [locationId]);
+
+  /** Both, always: a movement changes the contents AND adds a history row. */
+  const reloadAll = async () => {
+    await Promise.all([reload(), reloadHistory()]);
+  };
+
   const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
   const moveDestinations = useMemo(() => {
     const list = allLocations ?? [];
@@ -114,11 +131,12 @@ export default function OperatorBinViewPage() {
       }
       return names.join(' › ');
     };
+    // The current location and the `Unassigned` bucket are both dropped by `LocationPicker` now
+    // (`excludeId` / `excludeSystem`), so this only has to build the labelled list.
     return list
-      .filter((l) => l.id !== locationId)
-      .map((l) => ({ id: l.id, label: pathOf(l.id) }))
+      .map((l) => ({ id: l.id, label: pathOf(l.id), kind: l.kind }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [allLocations, locationId]);
+  }, [allLocations]);
 
   const modalUnit = modal?.part.primary_unit || 'ea';
   const unitOptions = useMemo(
@@ -144,6 +162,7 @@ export default function OperatorBinViewPage() {
 
   const children = scan?.children ?? [];
   const contents = scan?.contents ?? [];
+  const contentsTotal = scan?.contentsTotal ?? 0;
 
   return (
     <Box sx={{ pb: 4 }}>
@@ -153,7 +172,6 @@ export default function OperatorBinViewPage() {
           <Typography variant="h5" sx={{ fontWeight: 700 }}>
             {node.name}
           </Typography>
-          {node.code && <Chip size="small" label={node.code} variant="outlined" />}
         </Stack>
         {path.length > 1 && (
           <Typography variant="body2" color="text.secondary">
@@ -178,11 +196,6 @@ export default function OperatorBinViewPage() {
                   <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography sx={{ fontWeight: 600 }}>{child.name}</Typography>
-                      {child.code && (
-                        <Typography variant="caption" color="text.secondary">
-                          {child.code}
-                        </Typography>
-                      )}
                     </Box>
                     <KeyboardArrowRightIcon color="action" />
                   </CardContent>
@@ -216,6 +229,29 @@ export default function OperatorBinViewPage() {
           </Card>
         ) : (
           <Stack spacing={1} sx={{ mt: 0.5 }}>
+            {/* The list is capped. Saying so beats the silent `max_rows` clip this read used to
+                take — an operator seeing 200 of 9,428 needs to know the rest exist. */}
+            {/* The instruction is back, and now it points somewhere real.
+                It once read "Scan or search a part to reach one that isn't listed", when neither
+                route existed — no part search anywhere on the operator app, and a scanner that
+                resolves location labels and job travellers but never a part. It was stripped to
+                "ask the office" rather than keep promising two impossible things. J11 shipped
+                2026-07-31, so the honest version is a link to it — the lookup answers "where is
+                this?" for any part, including one below this cap. */}
+            {contentsTotal > contents.length && (
+              <Alert severity="info">
+                Showing the {contents.length} largest of {num(contentsTotal)} parts here. The rest
+                are still counted —{' '}
+                <Link
+                  component="button"
+                  type="button"
+                  onClick={() => router.push(`/operator/${companyId}/inventory`)}
+                >
+                  look a part up
+                </Link>{' '}
+                to find one that isn&apos;t listed.
+              </Alert>
+            )}
             {contents.map((part) => (
               <Card key={part.part_id} elevation={2}>
                 <CardContent>
@@ -279,6 +315,18 @@ export default function OperatorBinViewPage() {
         )}
       </Box>
 
+      {/* Recent movements, last. The contents above answer "what is here now"; this answers
+          "what happened here", including the photo whoever moved it left behind. Before this there
+          was no operator-side ledger view at all, which is what made a movement photo write-only. */}
+      <Box sx={{ mt: 4 }}>
+        <Typography variant="overline" color="text.secondary">
+          Recent activity
+        </Typography>
+        <Box sx={{ mt: 0.5 }}>
+          <BinHistory entries={history} loading={historyLoading} />
+        </Box>
+      </Box>
+
       {modal && (
         <OperatorLocationActionModal
           open
@@ -294,7 +342,7 @@ export default function OperatorBinViewPage() {
           moveDestinations={moveDestinations}
           operatorId={operatorId}
           onClose={() => setModal(null)}
-          onDone={reload}
+          onDone={reloadAll}
         />
       )}
 
@@ -304,8 +352,9 @@ export default function OperatorBinViewPage() {
         locationId={node.id}
         locationName={node.name}
         excludePartIds={contents.map((c) => c.part_id)}
+        operatorId={operatorId}
         onClose={() => setReceiveOpen(false)}
-        onDone={reload}
+        onDone={reloadAll}
       />
     </Box>
   );

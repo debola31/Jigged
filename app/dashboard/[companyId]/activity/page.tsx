@@ -36,6 +36,9 @@ const FILTERS: { label: string; types?: ActivityType[] }[] = [
   { label: 'Notes', types: ['note'] },
   { label: 'Photos', types: ['photo'] },
   { label: 'Operations', types: ['operation'] },
+  // Stock movements. The owner had no shop-wide view of these at all — `getRecentActivity`
+  // existed but its only caller was the operator's phone.
+  { label: 'Inventory', types: ['inventory'] },
 ];
 
 function ActivityRow({ item }: { item: ActivityItem }) {

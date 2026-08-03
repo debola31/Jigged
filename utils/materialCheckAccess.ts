@@ -16,12 +16,13 @@
  * says so on screen.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { ID_CHUNK } from '@/lib/queryLimits';
 
 import { buildRequirement } from '@/lib/materialRequirements';
 import type { MaterialRequirement, MaterialStockFacts } from '@/types/materialCheck';
 
 const CHUNK_PARENTS = 200;
-const CHUNK_IDS = 500;
+const CHUNK_IDS = ID_CHUNK;
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -76,7 +77,7 @@ async function loadStockFacts(childIds: string[]): Promise<Map<string, MaterialS
     chunk(childIds, CHUNK_IDS).map(async (ids) => {
       const { data, error } = await supabase
         .from('parts')
-        .select('id, part_name, primary_unit, quantity, is_stocked, is_location_tracked, deleted_at')
+        .select('id, part_name, primary_unit, quantity, is_stocked, deleted_at')
         .in('id', ids);
       if (error) {
         console.error('Error loading material stock facts:', error);
@@ -93,7 +94,6 @@ async function loadStockFacts(childIds: string[]): Promise<Map<string, MaterialS
       primaryUnit: row.primary_unit,
       onHand: Number(row.quantity) || 0,
       isStocked: Boolean(row.is_stocked),
-      isLocationTracked: Boolean(row.is_location_tracked),
       // Archived materials stay on the list, flagged. A BOM line silently vanishing from a
       // job's material list is worse than one shown as odd.
       isArchived: row.deleted_at !== null,

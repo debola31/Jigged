@@ -1,101 +1,116 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildDraft,
   buildVariances,
-  clearDraft,
   committableVariances,
   countNote,
-  countableCandidates,
+  countRowKey,
   commonUnit,
-  countedTally,
-  draftKey,
-  excludedCandidates,
-  parseDraft,
-  readDraft,
-  resolveCountTarget,
+  contestedParts,
+  groupByPart,
+  resolveFallbackPlace,
   rowDelta,
-  safeStorage,
-  writeDraft,
-  type LocationBalance,
 } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountEntries } from '@/types/inventoryCount';
-
-const bal = (locationId: string, quantity: number, locationName = locationId): LocationBalance => ({
-  locationId,
-  locationName,
-  quantity,
-});
-
-const UNASSIGNED = { id: 'loc-unassigned', name: 'Unassigned' };
 
 const candidate = (over: Partial<CountCandidate> & { partId: string }): CountCandidate => ({
   partName: over.partId,
   description: null,
   unit: 'ea',
   systemQuantity: 0,
-  target: { kind: 'aggregate' },
+  target: {
+    locationId: 'loc-unassigned',
+    locationName: 'Unassigned',
+    locationPath: 'Unassigned',
+  },
   ...over,
 });
 
-describe('resolveCountTarget', () => {
-  it('sends an untracked part to the aggregate quantity', () => {
-    expect(resolveCountTarget(false, [], UNASSIGNED)).toEqual({ kind: 'aggregate' });
-  });
+/**
+ * Entries keyed the way the sheet keys them.
+ *
+ * These used to be written as `{ a: 7 }`, which worked only because the default candidate was an
+ * `aggregate` row whose key IS its part id. Every countable row has a place now, so the key is
+ * `part::place` and hand-writing it would just be restating `countRowKey`.
+ */
+const entriesFor = (...pairs: [CountCandidate, number][]): CountEntries =>
+  Object.fromEntries(pairs.map(([c, n]) => [countRowKey(c), n]));
 
-  it('sends a tracked part with no stock anywhere to Unassigned', () => {
-    // The opening-count case: trg_auto_track_stocked_part seeds every stocked part at
-    // Unassigned with 0, so a shop starting from zero has every part here.
-    expect(resolveCountTarget(true, [bal('loc-unassigned', 0)], UNASSIGNED)).toEqual({
-      kind: 'location',
-      locationId: 'loc-unassigned',
-      locationName: 'Unassigned',
+describe('resolveFallbackPlace', () => {
+  const SYSTEM = { id: 'loc-unassigned', name: 'Unassigned', kind: 'system' };
+  const SHELF = { id: 'loc-a', name: 'Shelf A', kind: 'shelf' };
+
+  /**
+   * The opening-count invariant, re-homed rather than deleted.
+   *
+   * It used to live on `resolveCountTarget`'s zero-arm. Four of that function's cases went with
+   * the exclusion (a split part is now several rows, not a notice), but this one survives and is
+   * the single thing PR B was most likely to break: `trg_auto_track_stocked_part` seeds every
+   * stocked part at Unassigned with 0, so a shop counting for the first time has its whole
+   * catalogue holding stock nowhere. A rule that emitted rows only for places with stock would
+   * make every one of them uncountable.
+   */
+  it('sends a part holding stock nowhere to the system bucket', () => {
+    expect(resolveFallbackPlace([SHELF, SYSTEM])).toEqual({
+      id: 'loc-unassigned',
+      name: 'Unassigned',
     });
   });
 
-  it('treats a seeded zero-row as "not placed", not as one location holding stock', () => {
-    // Two rows, only one with stock — the zero must not make this look ambiguous.
-    const target = resolveCountTarget(
-      true,
-      [bal('loc-unassigned', 0), bal('loc-rack', 40, 'Bar rack')],
-      UNASSIGNED,
-    );
-    expect(target).toEqual({ kind: 'location', locationId: 'loc-rack', locationName: 'Bar rack' });
+  /** `isReservedKind` stops anyone typing `system` into a kind; nothing stops them renaming one. */
+  it('resolves by kind, not by the name "Unassigned"', () => {
+    const renamed = { id: 'loc-x', name: 'Not Yet Put Away', kind: 'system' };
+    expect(resolveFallbackPlace([SHELF, renamed]).id).toBe('loc-x');
   });
 
-  it('sends a tracked part with stock in exactly one location to that location', () => {
-    expect(resolveCountTarget(true, [bal('loc-a', 12, 'Shelf A')], UNASSIGNED)).toEqual({
-      kind: 'location',
-      locationId: 'loc-a',
-      locationName: 'Shelf A',
-    });
-  });
-
-  it('excludes a tracked part split across two or more locations', () => {
-    const target = resolveCountTarget(
-      true,
-      [bal('loc-a', 10), bal('loc-b', 20), bal('loc-c', 10)],
-      UNASSIGNED,
-    );
-    expect(target.kind).toBe('excluded');
-    // An item-level "counted 38" has no defensible bin to absorb the -2.
-    if (target.kind === 'excluded') expect(target.reason).toContain('3 locations');
-  });
-
-  it('excludes rather than guesses when there is no Unassigned bucket to fall back to', () => {
-    expect(resolveCountTarget(true, [], null).kind).toBe('excluded');
+  /**
+   * Not a fallback and not a silent drop. Every company has had a system bucket since
+   * 20260802015837 created and asserted one, so its absence is a data fault — and dropping the
+   * part would hide it behind a shorter list nobody counts.
+   */
+  it('throws rather than silently dropping the part when there is no system bucket', () => {
+    expect(() => resolveFallbackPlace([SHELF])).toThrow(/Unassigned/i);
   });
 });
 
-describe('scope partitioning', () => {
-  const list = [
-    candidate({ partId: 'a' }),
-    candidate({ partId: 'b', target: { kind: 'excluded', reason: 'split' } }),
-    candidate({ partId: 'c', target: { kind: 'location', locationId: 'l', locationName: 'L' } }),
-  ];
+describe('groupByPart', () => {
+  const at = (partId: string, locationId: string, path: string, quantity: number): CountCandidate => ({
+    partId,
+    partName: partId.toUpperCase(),
+    description: null,
+    unit: 'ea',
+    systemQuantity: quantity,
+    target: { locationId, locationName: path.split(' › ').pop()!, locationPath: path },
+  });
 
-  it('separates countable from excluded so excluded can be named, not dropped', () => {
-    expect(countableCandidates(list).map((c) => c.partId)).toEqual(['a', 'c']);
-    expect(excludedCandidates(list).map((c) => c.partId)).toEqual(['b']);
+  it("collects a part's places into one group and totals them", () => {
+    const [g] = groupByPart([at('p1', 'a', 'Shelf A', 10), at('p1', 'b', 'Shelf B', 20)]);
+    expect(g.partId).toBe('p1');
+    expect(g.rows).toHaveLength(2);
+    // The shop-wide figure, shown read-only on the group header — never an input.
+    expect(g.total).toBe(30);
+  });
+
+  /**
+   * Row order is the route you walk. Sorting on part name alone leaves several rows of one part
+   * tied, so their order fell out of `Array.sort`'s stability and changed between visits.
+   */
+  it("orders parts by name and a part's rows by place path", () => {
+    const groups = groupByPart([
+      at('zeta', 'z', 'Yard', 1),
+      at('alpha', 'b', 'Cabinet 3 › Shelf B', 2),
+      at('alpha', 'a', 'Cabinet 3 › Shelf A', 3),
+    ]);
+    expect(groups.map((g) => g.partId)).toEqual(['alpha', 'zeta']);
+    expect(groups[0].rows.map((r) => r.target.locationPath)).toEqual([
+      'Cabinet 3 › Shelf A',
+      'Cabinet 3 › Shelf B',
+    ]);
+  });
+
+  it('leaves a single-place part as a group of one', () => {
+    const groups = groupByPart([at('p1', 'a', 'Shelf A', 10)]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows).toHaveLength(1);
   });
 });
 
@@ -115,13 +130,6 @@ describe('commonUnit', () => {
   });
 });
 
-describe('countedTally', () => {
-  it('counts entries, and zero is a real count rather than "unanswered"', () => {
-    expect(countedTally({ a: 5, c: 0 })).toBe(2);
-    expect(countedTally({})).toBe(0);
-  });
-});
-
 describe('rowDelta', () => {
   const c = candidate({ partId: 'a', systemQuantity: 10 });
 
@@ -130,8 +138,8 @@ describe('rowDelta', () => {
   });
 
   it('returns a signed delta once counted, and 0 when it matches', () => {
-    expect(rowDelta(c, { a: 7 })).toBe(-3);
-    expect(rowDelta(c, { a: 10 })).toBe(0);
+    expect(rowDelta(c, entriesFor([c, 7]))).toBe(-3);
+    expect(rowDelta(c, entriesFor([c, 10]))).toBe(0);
   });
 });
 
@@ -139,7 +147,6 @@ describe('buildVariances', () => {
   const candidates = [
     candidate({ partId: 'a', partName: 'A', systemQuantity: 10 }),
     candidate({ partId: 'b', partName: 'B', systemQuantity: 4 }),
-    candidate({ partId: 'x', partName: 'X', target: { kind: 'excluded', reason: 'split' } }),
   ];
 
   it('ignores uncounted parts entirely — no entry means no opinion', () => {
@@ -147,30 +154,26 @@ describe('buildVariances', () => {
   });
 
   it('computes a signed delta against the current system quantity', () => {
-    const v = buildVariances(candidates, { a: 7 }, new Map());
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(-3);
   });
 
   it('flags a line whose system quantity moved while the sheet was open', () => {
-    const openedWith = new Map([['a', 12]]); // sheet opened at 12, now 10
-    const v = buildVariances(candidates, { a: 7 }, openedWith);
+    const openedWith = new Map([[countRowKey(candidates[0]), 12]]); // sheet opened at 12, now 10
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), openedWith);
     expect(v[0].movedSinceOpened).toBe(true);
   });
 
   it('does not flag a line that held still', () => {
-    const v = buildVariances(candidates, { a: 7 }, new Map([['a', 10]]));
+    const v = buildVariances(candidates, entriesFor([candidates[0], 7]), new Map([[countRowKey(candidates[0]), 10]]));
     expect(v[0].movedSinceOpened).toBe(false);
-  });
-
-  it('skips excluded parts even if a count somehow got entered', () => {
-    expect(buildVariances(candidates, { x: 3 }, new Map())).toEqual([]);
   });
 
   // The opening-count case: every part starts at zero, and finding stock there is ordinary.
   it('treats a count against a zero baseline as an ordinary increase', () => {
     const zeroed = [candidate({ partId: 'z', systemQuantity: 0 })];
-    const v = buildVariances(zeroed, { z: 5 }, new Map());
+    const v = buildVariances(zeroed, entriesFor([zeroed[0], 5]), new Map());
     expect(v).toHaveLength(1);
     expect(v[0].delta).toBe(5);
   });
@@ -182,7 +185,11 @@ describe('committableVariances', () => {
     candidate({ partId: 'small', systemQuantity: 10 }),
     candidate({ partId: 'big', systemQuantity: 10 }),
   ];
-  const entries: CountEntries = { same: 10, small: 9, big: 2 };
+  const entries: CountEntries = entriesFor(
+    [candidates[0], 10],
+    [candidates[1], 9],
+    [candidates[2], 2],
+  );
   const variances = buildVariances(candidates, entries, new Map());
 
   it('drops lines counted equal to the system — no write needed', () => {
@@ -197,68 +204,157 @@ describe('committableVariances', () => {
 });
 
 describe('countNote', () => {
-  it('records both numbers so the ledger explains where the count came from', () => {
-    const v = buildVariances(
-      [candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 })],
-      { a: 38 },
-      new Map(),
-    )[0];
-    expect(countNote(v)).toBe('Inventory count — counted 38 ft (recorded as 40 ft)');
+  /**
+   * The place is in the note because one part can now be counted at several of them in one
+   * session. Unnamed, the ledger carried three notes about one part each quoting a different
+   * "recorded as" figure — which reads as three contradictory statements rather than three
+   * shelves.
+   */
+  it('records the place and both numbers, so the ledger explains where the count came from', () => {
+    const bar = candidate({ partId: 'a', partName: '4140 bar', unit: 'ft', systemQuantity: 40 });
+    const v = buildVariances([bar], entriesFor([bar, 38]), new Map())[0];
+    expect(countNote(v)).toBe(
+      'Inventory count at Unassigned — counted 38 ft (recorded as 40 ft)',
+    );
   });
 });
 
-describe('draft persistence', () => {
-  const entries: CountEntries = { a: 3 };
-
-  it('round-trips a draft', () => {
-    const draft = buildDraft('co1', ['a'], entries, 1000);
-    expect(parseDraft(JSON.stringify(draft), 'co1')).toEqual(draft);
+/**
+ * Draft persistence was removed 2026-08-01 along with the resume banner — see the note at the
+ * bottom of lib/inventoryCountPlan.ts. Its tests went with it rather than being left asserting
+ * a feature nobody can reach.
+ */
+describe('countRowKey', () => {
+  const at = (locationId: string) => ({
+    partId: 'p1',
+    partName: 'BUY-ORING-214',
+    description: null,
+    unit: 'ea',
+    systemQuantity: 828,
+    target: { kind: 'location' as const, locationId, locationName: locationId },
   });
 
-  it('namespaces the key by company', () => {
-    expect(draftKey('co1')).not.toBe(draftKey('co2'));
+  it('separates the same part at two places', () => {
+    expect(countRowKey(at('shelf-a'))).not.toBe(countRowKey(at('shelf-b')));
   });
 
-  it('discards a draft belonging to another company', () => {
-    const draft = buildDraft('co1', ['a'], entries, 1000);
-    expect(parseDraft(JSON.stringify(draft), 'co2')).toBeNull();
+  /**
+   * The `partId`-only branch is gone, not merely unused: a second key format nobody produces is
+   * an invitation to reintroduce the exact bug the key was created to fix.
+   */
+  it('always carries the place, so no two rows of one part can collide', () => {
+    expect(countRowKey(at('shelf-a'))).toBe('p1::shelf-a');
   });
 
-  it('discards an older shape rather than half-restoring it', () => {
-    // v2 dropped partIds when the sheet briefly had no scope step; v3 needs them back.
-    const v2 = JSON.stringify({ version: 2, companyId: 'co1', entries, savedAt: 1 });
-    expect(parseDraft(v2, 'co1')).toBeNull();
+  /**
+   * The bug this prevents: keyed by part alone, both rows read one entry, so typing 800 for
+   * Shelf A committed 800 to Shelf B as well — against a completely different recorded quantity.
+   */
+  it('keeps two places on one sheet from sharing a number', () => {
+    const shelfA = at('shelf-a');
+    const shelfB = { ...at('shelf-b'), systemQuantity: 552 };
+    const entries = { [countRowKey(shelfA)]: 800, [countRowKey(shelfB)]: 500 };
+
+    expect(rowDelta(shelfA, entries)).toBe(-28);
+    expect(rowDelta(shelfB, entries)).toBe(-52);
+
+    const variances = buildVariances([shelfA, shelfB], entries, new Map());
+    expect(variances.map((v) => [v.candidate.target.kind === 'location' ? v.candidate.target.locationId : '', v.counted, v.delta]))
+      .toEqual([
+        ['shelf-a', 800, -28],
+        ['shelf-b', 500, -52],
+      ]);
   });
 
-  it('survives corrupted or absent storage', () => {
-    expect(parseDraft('not json', 'co1')).toBeNull();
-    expect(parseDraft(null, 'co1')).toBeNull();
-    expect(parseDraft(JSON.stringify({ version: 3, companyId: 'co1' }), 'co1')).toBeNull();
-    // entries present but scope missing — can't tell how big the count was meant to be.
-    expect(
-      parseDraft(JSON.stringify({ version: 3, companyId: 'co1', entries, savedAt: 1 }), 'co1'),
-    ).toBeNull();
+  /** `movedSinceOpened` must compare per row, or one shelf's drift flags the other. */
+  it('tracks the opened-with baseline per place', () => {
+    const shelfA = at('shelf-a');
+    const shelfB = { ...at('shelf-b'), systemQuantity: 552 };
+    const opened = new Map([
+      [countRowKey(shelfA), 828],
+      [countRowKey(shelfB), 600], // somebody moved 48 out of Shelf B while we counted
+    ]);
+    const entries = { [countRowKey(shelfA)]: 828, [countRowKey(shelfB)]: 552 };
+
+    const [a, b] = buildVariances([shelfA, shelfB], entries, opened);
+    expect(a.movedSinceOpened).toBe(false);
+    expect(b.movedSinceOpened).toBe(true);
   });
 });
 
-describe('storage helpers when localStorage is unavailable', () => {
-  // Private-browsing modes and some embedded webviews either omit localStorage or throw on
-  // access. A count has to keep working there — resume is the only thing lost.
-  it('reads null, and writing or clearing is a no-op rather than a crash', () => {
-    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    Object.defineProperty(window, 'localStorage', {
-      get() {
-        throw new Error('access denied');
-      },
-      configurable: true,
-    });
+/**
+ * #656 — a part counted at several places, where stock moved between them mid-count.
+ *
+ * The scenario in full: Shelf A holds 40, you count 40 (true). A coworker moves 6 A→B. Shelf B
+ * now holds 18, you count 18 (also true). Save: Shelf B's delta is zero so it is dropped, and
+ * Shelf A writes 40 absolutely — resurrecting six units. Neither count was wrong; the pair is.
+ */
+describe('contestedParts', () => {
+  const line = (
+    partId: string,
+    locationId: string,
+    counted: number,
+    systemQuantity: number,
+    movedSinceOpened: boolean,
+  ) => ({
+    candidate: {
+      partId,
+      partName: partId.toUpperCase(),
+      description: null,
+      unit: 'ea',
+      systemQuantity,
+      target: { locationId, locationName: locationId, locationPath: locationId },
+    },
+    counted,
+    delta: counted - systemQuantity,
+    movedSinceOpened,
+  });
 
-    const draft = buildDraft('co1', ['a'], { a: 3 }, 1);
-    expect(safeStorage()).toBeNull();
-    expect(readDraft('co1')).toBeNull();
-    expect(() => writeDraft(draft)).not.toThrow();
-    expect(() => clearDraft('co1')).not.toThrow();
+  it('flags a part whose other shelf changed while it was being counted', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 34, true), // opened at 40, now 34 — the 6 that left
+      line('p1', 'shelf-b', 18, 18, false),
+    ]);
 
-    if (original) Object.defineProperty(window, 'localStorage', original);
+    expect(contested).toHaveLength(1);
+    expect(contested[0]).toHaveLength(2);
+  });
+
+  /**
+   * The half that reveals the problem has a delta of ZERO, so it is exactly what
+   * `committableVariances` throws away. Feeding this the committable set would see one line, call
+   * it a single-row part, and wave the resurrection through.
+   */
+  it('sees the pair even though the moved-into shelf has no variance to commit', () => {
+    const lines = [line('p1', 'shelf-a', 40, 34, true), line('p1', 'shelf-b', 18, 18, false)];
+    expect(committableVariances(lines)).toHaveLength(1); // shelf-b dropped: delta 0
+    expect(contestedParts(lines)).toHaveLength(1); // ...but the pair is still seen
+  });
+
+  /**
+   * Deliberately NOT flagged. With one row the existing rule is right: the count is what is on
+   * the shelf, so a mid-count movement changes nothing about what to save. Widening the gate to
+   * cover it would block the ordinary case to catch nothing.
+   */
+  it('leaves a single-row part alone even when it moved', () => {
+    expect(contestedParts([line('p1', 'shelf-a', 40, 34, true)])).toEqual([]);
+  });
+
+  it('leaves a multi-row part alone when nothing moved', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 40, false),
+      line('p1', 'shelf-b', 12, 12, false),
+    ]);
+    expect(contested).toEqual([]);
+  });
+
+  it('flags only the parts affected, not the whole sheet', () => {
+    const contested = contestedParts([
+      line('p1', 'shelf-a', 40, 34, true),
+      line('p1', 'shelf-b', 18, 18, false),
+      line('p2', 'shelf-a', 5, 5, false),
+      line('p2', 'shelf-b', 7, 7, false),
+    ]);
+    expect(contested.map((rows) => rows[0].candidate.partId)).toEqual(['p1']);
   });
 });

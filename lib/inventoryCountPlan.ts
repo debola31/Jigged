@@ -7,73 +7,94 @@
 
 import type {
   CountCandidate,
-  CountDraft,
   CountEntries,
-  CountTarget,
   CountVariance,
 } from '@/types/inventoryCount';
 
-/** A part's stock, per location, as read from part_location_stock. */
-export interface LocationBalance {
-  locationId: string;
-  locationName: string;
-  quantity: number;
+/**
+ * The place a part is counted at when it holds stock **nowhere**.
+ *
+ * This is all that survives of `resolveCountTarget`, which used to pick one target per part from
+ * four arms. Three of them are gone: `aggregate` with `is_location_tracked` (20260802015837), and
+ * both `excluded` arms with the sheet's move to one row per place. What remains is a single
+ * decision — where does a part with no stock anywhere get counted? — and the answer is the
+ * company's system bucket.
+ *
+ * **This is the opening count, not an edge case.** `trg_auto_track_stocked_part` seeds every
+ * stocked part at `Unassigned` with 0, so a shop counting for the first time has its entire
+ * catalogue here. It is also the most valuable count there is: *the system says zero and I am
+ * holding twelve*. A rule that emitted rows only for places with stock would delete exactly that.
+ *
+ * Resolved by `kind`, not by the literal name "Unassigned": `isReservedKind` stops anyone typing
+ * `system` into a location's kind, while nothing stops them renaming one.
+ */
+export function resolveFallbackPlace(
+  locations: { id: string; name: string; kind: string | null }[],
+): { id: string; name: string } {
+  const system = locations.find((l) => l.kind === 'system');
+  if (!system) {
+    // Not a fallback and not a silent drop. Every company has had a system bucket since
+    // 20260802015837 created one for all of them and asserted it, so its absence is a real data
+    // fault — and dropping the part from the sheet would hide it behind a shorter list nobody
+    // counts. Fail loudly enough to diagnose.
+    throw new Error(
+      'This company has no "Unassigned" location, so there is nowhere to record a count for a part that is not on a shelf. This is a data fault — please report it.',
+    );
+  }
+  return { id: system.id, name: system.name };
 }
 
 /**
- * Decide where a counted quantity goes for one part.
+ * A part and every row of it on this sheet.
  *
- *  - **Untracked** → `parts.quantity`. The only legal write for a part whose quantity isn't
- *    a rollup.
- *  - **Tracked, nothing anywhere** → Unassigned. The opening-count case, not an edge case:
- *    `trg_auto_track_stocked_part` seeds every stocked part there at 0, so a shop starting
- *    from zero has every part here. It's also the honest target — you counted the stock, you
- *    haven't said where it lives.
- *  - **Tracked, exactly one location holding stock** → that location.
- *  - **Tracked, two or more** → excluded. "38 total" against 10+20+10 has no defensible bin
- *    to absorb the difference, and pushing it to Unassigned would corrupt bin-level accuracy.
- *
- * "Holding stock" means quantity > 0: the seeded zero-row at Unassigned must not make a part
- * look placed.
+ * The unit the PICKER works in and the unit the sheet groups by. Ticking a part means "count this
+ * part wherever it is", which keeps the picker one-row-per-part — the list is unbounded,
+ * unvirtualised and client-filtered, and multiplying it by places-per-part would have cost a lot
+ * and bought nothing: nobody chooses a *shelf* when deciding which parts to walk.
  */
-export function resolveCountTarget(
-  isLocationTracked: boolean,
-  balances: LocationBalance[],
-  unassigned: { id: string; name: string } | null,
-): CountTarget {
-  if (!isLocationTracked) return { kind: 'aggregate' };
+export interface CountGroup {
+  partId: string;
+  partName: string;
+  description: string | null;
+  unit: string;
+  /** Sorted by `target.locationPath`, so the sheet's row order is a stable route round the shop. */
+  rows: CountCandidate[];
+  /** Σ of the rows' system quantities — the shop-wide figure, shown read-only on the header. */
+  total: number;
+}
 
-  const holding = balances.filter((b) => b.quantity > 0);
+/**
+ * Group rows by part, preserving a deterministic order.
+ *
+ * Sorted by part name, and **within a part by place path** — the page used to sort on part name
+ * alone, which for several rows of one part is a tie, so their order fell out of `Array.sort`'s
+ * stability and changed between visits. On a walk-the-shop task the row order is the route.
+ */
+export function groupByPart(candidates: CountCandidate[]): CountGroup[] {
+  const byPart = new Map<string, CountGroup>();
 
-  if (holding.length === 0) {
-    if (!unassigned) {
-      return { kind: 'excluded', reason: 'No "Unassigned" location exists to hold the count.' };
+  for (const c of candidates) {
+    const g = byPart.get(c.partId);
+    if (g) {
+      g.rows.push(c);
+      g.total += c.systemQuantity;
+    } else {
+      byPart.set(c.partId, {
+        partId: c.partId,
+        partName: c.partName,
+        description: c.description,
+        unit: c.unit,
+        rows: [c],
+        total: c.systemQuantity,
+      });
     }
-    return { kind: 'location', locationId: unassigned.id, locationName: unassigned.name };
   }
 
-  if (holding.length === 1) {
-    return {
-      kind: 'location',
-      locationId: holding[0].locationId,
-      locationName: holding[0].locationName,
-    };
+  const groups = [...byPart.values()];
+  for (const g of groups) {
+    g.rows.sort((x, y) => x.target.locationPath.localeCompare(y.target.locationPath));
   }
-
-  return {
-    kind: 'excluded',
-    reason: `Stock is split across ${holding.length} locations — count this at its locations.`,
-  };
-}
-
-/** Candidates that can be counted item-by-item. */
-export function countableCandidates(candidates: CountCandidate[]): CountCandidate[] {
-  return candidates.filter((c) => c.target.kind !== 'excluded');
-}
-
-/** Candidates held back, so they can be named rather than silently missing. */
-export function excludedCandidates(candidates: CountCandidate[]): CountCandidate[] {
-  return candidates.filter((c) => c.target.kind === 'excluded');
+  return groups.sort((a, b) => a.partName.localeCompare(b.partName));
 }
 
 /**
@@ -89,19 +110,30 @@ export function commonUnit(candidates: CountCandidate[]): string | null {
   return candidates.every((c) => c.unit === first) ? first : null;
 }
 
-/** How many parts carry a number. Drives the footer's running tally. */
-export function countedTally(entries: CountEntries): number {
-  return Object.keys(entries).length;
-}
-
 /**
  * The delta for one row, or null when it hasn't been counted.
  *
  * Used for the inline feedback that replaced the separate review page — the number appears on
  * the row the moment it's typed, which is when it's actually useful.
  */
+/**
+ * The key a counted number is stored under.
+ *
+ * **Not the part id.** A sheet can hold the same part more than once — that is the whole point of
+ * counting a part across every place it sits in, where BUY-ORING-214 appears for Shelf A and again
+ * for Shelf B. Keying by part alone made those two rows share one number, so typing 828 for Shelf A
+ * silently wrote 828 to Shelf B as well and committed both.
+ *
+ * Unconditional since every row has a place. The `partId`-only branch that used to serve the
+ * placeless `aggregate` and `excluded` rows is deliberately not kept "just in case": a second key
+ * format nobody produces is an invitation to reintroduce the exact bug the key was created to fix.
+ */
+export function countRowKey(candidate: CountCandidate): string {
+  return `${candidate.partId}::${candidate.target.locationId}`;
+}
+
 export function rowDelta(candidate: CountCandidate, entries: CountEntries): number | null {
-  const counted = entries[candidate.partId];
+  const counted = entries[countRowKey(candidate)];
   if (counted === undefined) return null;
   return counted - candidate.systemQuantity;
 }
@@ -121,12 +153,12 @@ export function buildVariances(
   const out: CountVariance[] = [];
 
   for (const candidate of candidates) {
-    const counted = entries[candidate.partId];
+    const key = countRowKey(candidate);
+    const counted = entries[key];
     if (counted === undefined) continue;
-    if (candidate.target.kind === 'excluded') continue;
 
     const delta = counted - candidate.systemQuantity;
-    const opened = openedWith.get(candidate.partId);
+    const opened = openedWith.get(key);
     out.push({
       candidate,
       counted,
@@ -140,6 +172,46 @@ export function buildVariances(
 /** Variances that change something. A part counted equal to the system needs no write. */
 export function committableVariances(variances: CountVariance[]): CountVariance[] {
   return variances.filter((v) => v.delta !== 0);
+}
+
+/**
+ * A part counted at several places where stock moved between them while you were counting.
+ *
+ * ## The failure this exists to stop (#656)
+ *
+ * A sheet holds one part at Shelf A (40) and Shelf B (12).
+ *
+ *  1. You walk to Shelf A, find 40, type 40. True.
+ *  2. A coworker transfers 6 from A to B. Also legitimate. The truth is now A=34, B=18.
+ *  3. You walk to Shelf B, find 18, type 18. Also true.
+ *  4. Save. Shelf B's delta is zero, so `committableVariances` drops it. Shelf A writes **40
+ *     absolutely** — putting back six units that have legitimately left. Total 58; truth 52.
+ *
+ * Neither count was wrong. The *pair* is, because an absolute write replays a once-true
+ * observation over a movement that happened after it.
+ *
+ * ## Why it is scoped this narrowly
+ *
+ * For a part on ONE row the existing rule is right and is left alone: the count is what is on the
+ * shelf, so a mid-count movement changes nothing about what to save, and it is reported after the
+ * fact rather than asked about. What makes the multi-row case different is that the rows are not
+ * independent observations — a transfer between two of them moves the same stock twice.
+ *
+ * ## Feed it EVERY counted line
+ *
+ * Not `committableVariances(...)`. The zero-delta line is exactly the half that reveals the
+ * problem, and that is the half `committableVariances` discards.
+ */
+export function contestedParts(variances: CountVariance[]): CountVariance[][] {
+  const byPart = new Map<string, CountVariance[]>();
+  for (const v of variances) {
+    const list = byPart.get(v.candidate.partId) ?? [];
+    list.push(v);
+    byPart.set(v.candidate.partId, list);
+  }
+  return [...byPart.values()].filter(
+    (rows) => rows.length > 1 && rows.some((v) => v.movedSinceOpened),
+  );
 }
 
 /*
@@ -167,93 +239,29 @@ export function committableVariances(variances: CountVariance[]): CountVariance[
  */
 export function countNote(v: CountVariance): string {
   const unit = v.candidate.unit;
-  return `Inventory count — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
+  // The place is named because one part can now be counted at several of them in one session, and
+  // the ledger would otherwise carry three notes about one part each quoting a different "recorded
+  // as" figure — which reads as three contradictory statements rather than three shelves.
+  return `Inventory count at ${v.candidate.target.locationPath} — counted ${v.counted} ${unit} (recorded as ${v.candidate.systemQuantity} ${unit})`;
 }
 
-// ── Draft persistence ────────────────────────────────────────────────────────
-
-export const DRAFT_VERSION = 3 as const;
-
-export function draftKey(companyId: string): string {
-  return `jigged.inventoryCount.${companyId}`;
-}
-
-export function buildDraft(
-  companyId: string,
-  partIds: string[],
-  entries: CountEntries,
-  now: number,
-): CountDraft {
-  return { version: DRAFT_VERSION, companyId, partIds, entries, savedAt: now };
-}
-
-/**
- * Parse a stored draft, returning null for anything unusable.
- *
- * Deliberately strict: a draft from an older shape, another company, or corrupted storage is
- * discarded rather than half-restored. Losing an in-progress count is annoying; resuming one
- * with numbers attached to the wrong parts would be worse.
- */
-export function parseDraft(raw: string | null, companyId: string): CountDraft | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<CountDraft>;
-    if (parsed.version !== DRAFT_VERSION) return null;
-    if (parsed.companyId !== companyId) return null;
-    if (typeof parsed.savedAt !== 'number') return null;
-    if (!Array.isArray(parsed.partIds)) return null;
-    if (!parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
-      return null;
-    }
-    return parsed as CountDraft;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * localStorage, or null where it isn't usable.
- *
- * Absent during SSR, and *also* absent or throwing in private-browsing modes and some
- * embedded webviews — a real runtime case, not just a test artefact. A count must work
- * without a draft; losing resume is a downgrade, not a failure.
- */
-export function safeStorage(): Storage | null {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-export function readDraft(companyId: string): CountDraft | null {
-  const store = safeStorage();
-  if (!store) return null;
-  try {
-    return parseDraft(store.getItem(draftKey(companyId)), companyId);
-  } catch {
-    return null;
-  }
-}
-
-/** Persist a draft. Silent on failure — a full or blocked store must not interrupt counting. */
-export function writeDraft(draft: CountDraft): void {
-  const store = safeStorage();
-  if (!store) return;
-  try {
-    store.setItem(draftKey(draft.companyId), JSON.stringify(draft));
-  } catch {
-    /* quota exceeded or blocked — the count continues in memory */
-  }
-}
-
-export function clearDraft(companyId: string): void {
-  const store = safeStorage();
-  if (!store) return;
-  try {
-    store.removeItem(draftKey(companyId));
-  } catch {
-    /* nothing to clean up */
-  }
-}
+// ── Draft persistence: REMOVED 2026-08-01 ────────────────────────────────────
+//
+// The whole feature is gone — `DRAFT_VERSION`, `draftKey`, `buildDraft`, `parseDraft`,
+// `safeStorage`, `readDraft`, `writeDraft`, `clearDraft` and the `CountDraft` type.
+//
+// Founder's call, verbatim: "we should remove this unfinished counting feature — it only proves
+// annoying, if a user moves away from the page that's them discarding the operation and doing
+// something else."
+//
+// That reading is right, and the code had been arguing with it for a while. Navigating away is a
+// deliberate act; treating it as an accident meant the next count opened with an interruption
+// asking about a decision the user had already made. The banner also could not be trusted at
+// face value — a place-scoped count had to be excluded from writing a draft at all, because the
+// key was company-wide and the resume prompt lived only on the company-wide branch, so an
+// abandoned Shelf A count would have come back as a company-wide one and committed a wildly
+// wrong adjustment. That guard is gone with the feature it was guarding.
+//
+// If resume is ever wanted again it should be a real count SESSION on the server — something you
+// can assign, hand over and pick up on another device — not a browser-local snapshot keyed by
+// company. localStorage was never the right home for work that two people might share.

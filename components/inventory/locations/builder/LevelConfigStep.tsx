@@ -19,6 +19,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
+import { planLevelNames } from '@/utils/locationSpec';
 
 const MAX_LEVELS = 4;
 
@@ -29,13 +30,18 @@ function labelOf(level: LevelSpec): string {
   return level.names ? capitalize(level.kind) : stripPattern(level.namePattern);
 }
 
-function exampleOf(level: LevelSpec): string {
-  if (level.names) return level.names.join(', ') || '—';
-  const count = level.count ?? 0;
-  if (count === 0) return 'none';
-  const pattern = level.namePattern || '{n}';
-  const shown = Array.from({ length: Math.min(3, count) }, (_, i) => pattern.replace('{n}', String(i + 1)));
-  return shown.join(', ') + (count > 3 ? ', …' : '');
+/**
+ * The *"→ Row 4, Row 5, Row 6, …"* hint under a level's controls.
+ *
+ * Goes through `planLevelNames` rather than substituting `{n}` itself, so the hint and the preview
+ * beside it can't disagree. They did: this used to hardcode `i + 1`, so on a repeat subdivide the
+ * hint said `Row 1, Row 2, Row 3` while the preview correctly showed `Row 4, Row 5, Row 6`.
+ */
+function exampleOf(level: LevelSpec, existingSiblingNames: string[] = []): string {
+  if (level.names) return planLevelNames(level, existingSiblingNames).names.join(', ') || '—';
+  if ((level.count ?? 0) === 0) return 'none';
+  const { names } = planLevelNames(level, existingSiblingNames);
+  return names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : '');
 }
 
 /** Branches whose children are all leaves — the rows you'd fine-tune per side. */
@@ -66,6 +72,8 @@ interface LevelConfigStepProps {
   onAdd: (parentKey: string) => void;
   onDuplicate: (key: string) => void;
   onStartOver: () => void;
+  /** Names the parent already holds, so the top level's hint continues rather than restarting. */
+  existingSiblingNames?: string[];
 }
 
 export default function LevelConfigStep({
@@ -79,6 +87,7 @@ export default function LevelConfigStep({
   onAdd,
   onDuplicate,
   onStartOver,
+  existingSiblingNames = [],
 }: LevelConfigStepProps) {
   // ----- Customized: reflect the real per-branch structure as editable chips ---
   if (customized) {
@@ -268,7 +277,9 @@ export default function LevelConfigStep({
                 )}
 
                 <Typography variant="caption" color="text.secondary">
-                  → {exampleOf(level)}
+                  {/* Only the TOP level continues past existing siblings — deeper levels sit
+                      under containers this spec is creating fresh. */}
+                  → {exampleOf(level, i === 0 ? existingSiblingNames : [])}
                 </Typography>
               </Stack>
             </Paper>

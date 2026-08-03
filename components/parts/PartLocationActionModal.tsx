@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -8,12 +9,12 @@ import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
-import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
+import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   addStockAtLocation,
   depleteStockAtLocation,
@@ -21,15 +22,22 @@ import {
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import LocationPicker, {
+  type LocationPickerOption,
+} from '@/components/inventory/locations/LocationPicker';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 
-export interface LocationOption {
-  id: string;
-  label: string;
-}
+/**
+ * A choosable location.
+ *
+ * Now just the picker's own option type — this used to be a separate `{ id, label }` and the two
+ * drifted, which is how the destination picker ended up unable to show quantities or to recognise
+ * the system bucket.
+ */
+export type LocationOption = LocationPickerOption;
 
 /** A location where the part currently HAS stock — a valid Move source. */
 export interface LocationBalanceOption extends LocationOption {
@@ -39,7 +47,9 @@ export interface LocationBalanceOption extends LocationOption {
 const TITLES: Record<LocationAction, string> = {
   add: 'Add stock at a location',
   deplete: 'Remove stock from a location',
-  adjust: 'Set stock at a location (cycle count)',
+  // No "(cycle count)": warehouse jargon, shipped to a shop owner. Same register as the
+  // "1 item needs adjusting" copy this product already watched fail.
+  adjust: 'Set the true quantity at a location',
   move: 'Move stock between locations',
 };
 
@@ -57,6 +67,14 @@ interface PartLocationActionModalProps {
   locations: LocationOption[];
   /** Locations where the part has stock — the Move sources (with quantities). */
   sourceBalances?: LocationBalanceOption[];
+  /**
+   * Create a location from a name typed into the picker.
+   *
+   * Optional: omit it and the picker is choose-only. §5.5 decision 2 held this back until the
+   * sibling-name unique index existed, because a bare create-as-you-type field is how `ST0CK`
+   * appeared beside `STOCK` in the legacy data.
+   */
+  onCreateLocation?: (name: string) => Promise<LocationOption>;
   onClose: () => void;
   onDone: () => void | Promise<void>;
 }
@@ -70,6 +88,7 @@ export default function PartLocationActionModal({
   unitOptions,
   locations,
   sourceBalances = [],
+  onCreateLocation,
   onClose,
   onDone,
 }: PartLocationActionModalProps) {
@@ -89,8 +108,22 @@ export default function PartLocationActionModal({
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
+  /**
+   * Who is doing this, so the ledger can name them.
+   *
+   * `operator_id` is a `user_company_access.id`. The RPCs also stamp `created_by = auth.uid()`,
+   * but that is an `auth.users` id the browser cannot resolve to a name under any policy — so
+   * without this every owner-side movement stays permanently anonymous in the very history the
+   * part page now renders. Best-effort: a failed lookup writes no author rather than blocking
+   * a stock correction on a name.
+   */
+  const [operatorId, setOperatorId] = useState<string | null>(null);
+
   const handleEnter = async () => {
-    setLocation(null);
+    // Only one place in the whole shop → pick it; no destination picker needed. That is the
+    // ordinary case for a shop without the locations flag, where the single auto-managed
+    // `Unassigned` bucket is the only place there is and a dropdown of one is pure friction.
+    setLocation(locations.length === 1 ? locations[0] : null);
     // Only one place to move from → pick it; no source picker needed.
     setSourceLoc(action === 'move' && sourceBalances.length === 1 ? sourceBalances[0] : null);
     setToLocation(null);
@@ -99,6 +132,12 @@ export default function PartLocationActionModal({
     setNotes('');
     setError(null);
     setJob(null);
+    setOperatorId(null);
+    // ABOVE the deplete-only return: all four actions write a ledger row, and an earlier draft
+    // that put this after it would have attributed removals and nothing else.
+    getCurrentMember(companyId)
+      .then((m) => setOperatorId(m?.id ?? null))
+      .catch(() => setOperatorId(null));
     if (action !== 'deplete') return;
     setLoadingJobs(true);
     setJobs(await loadTaggableJobs(companyId));
@@ -180,7 +219,10 @@ export default function PartLocationActionModal({
     setError(null);
     try {
       if (action === 'add') {
-        await addStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
+        await addStockAtLocation(partId, location!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       } else if (action === 'deplete') {
         // Graceful, like the operator path: taking more than the system shows clamps the
         // balance to zero and flags `has_discrepancy` rather than refusing. The stock left
@@ -188,14 +230,27 @@ export default function PartLocationActionModal({
         // back, it just loses the fact. The warning above the button is what stops a typo.
         await depleteStockAtLocation(partId, location!.id, qty, unit, {
           graceful: true,
+          operatorId: operatorId ?? undefined,
           notes: notes || undefined,
           jobId: job?.id || undefined,
         });
       } else if (action === 'adjust') {
-        await adjustStockAtLocation(partId, location!.id, qty, unit, notes || undefined);
+        await adjustStockAtLocation(partId, location!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       } else {
-        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, notes || undefined);
+        await transferStock(partId, sourceLoc!.id, toLocation!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId,
+        });
       }
+      posthog.capture('inventory_stock_updated', {
+        action,
+        part_id: partId,
+        quantity: qty,
+        unit,
+      });
       await onDone();
       onClose();
     } catch (e) {
@@ -237,43 +292,36 @@ export default function PartLocationActionModal({
                   renderInput={(params) => <TextField {...params} label="From location" required />}
                 />
               )}
-              <Autocomplete
-                options={locations}
+              {/* The destination now excludes the source and the `Unassigned` bucket, and shows
+                  what the part already holds at each candidate — none of which it did while this
+                  was a second, separately-written Autocomplete. */}
+              <LocationPicker
+                label="To location"
+                options={locationOptions}
                 value={toLocation}
-                onChange={(_, v) => setToLocation(v)}
-                getOptionLabel={(o) => o.label}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
-                renderInput={(params) => <TextField {...params} label="To location" required />}
+                onChange={setToLocation}
+                excludeId={sourceLoc?.id ?? null}
+                excludeSystem
+                unit={primaryUnit}
+                required
+                onCreate={onCreateLocation}
               />
             </>
+          ) : locations.length === 1 ? (
+            // Said, not chosen. Mirrors the single-source treatment above: the fact still needs
+            // stating (this is where it lands) but there is no decision to make.
+            <Typography variant="body2" color="text.secondary">
+              At <strong>{locations[0].label}</strong>
+            </Typography>
           ) : (
-            <Autocomplete
+            <LocationPicker
+              label="Location"
               options={locationOptions}
               value={location}
-              onChange={(_, v) => setLocation(v)}
-              // The input keeps the bare path; the quantity lives in the dropdown row, so a
-              // chosen value doesn't read as part of the location's name.
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(o, v) => o.id === v.id}
-              renderOption={(props, o) => {
-                const { key, ...rest } = props;
-                const qty = quantityByLocation.get(o.id) ?? 0;
-                return (
-                  // The label takes the slack rather than relying on justify-content, which
-                  // MUI's own option class overrides.
-                  <Box component="li" key={key} {...rest} sx={{ display: 'flex', gap: 2 }}>
-                    <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{o.label}</Box>
-                    <Typography
-                      variant="caption"
-                      color={qty > 0 ? 'text.secondary' : 'text.disabled'}
-                      sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
-                    >
-                      {qty > 0 ? `${num(qty)} ${primaryUnit}` : 'empty'}
-                    </Typography>
-                  </Box>
-                );
-              }}
-              renderInput={(params) => <TextField {...params} label="Location" required />}
+              onChange={setLocation}
+              unit={primaryUnit}
+              required
+              onCreate={onCreateLocation}
             />
           )}
           <Stack direction="row" spacing={1}>

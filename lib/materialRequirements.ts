@@ -122,6 +122,5 @@ export function buildRequirement(args: {
     shortBy,
     status,
     basis,
-    isLocationTracked: stock.isLocationTracked,
   };
 }

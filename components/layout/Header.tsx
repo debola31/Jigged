@@ -75,22 +75,16 @@ function getPageTitle(pathname: string): string {
     return 'Jobs';
   }
 
-  // Check for inventory routes
-  if (segments.includes('inventory')) {
-    if (segments.includes('new')) return 'New Inventory Item';
-    if (segments.includes('edit')) return 'Edit Inventory Item';
-    if (segments.includes('import')) return 'Import Inventory';
-    // Named sub-routes. Without these the "is there a segment after /inventory?" check below
-    // reads them as an item id and titles them "Inventory Details", which is simply wrong.
-    if (segments.includes('count')) return 'Count Inventory';
-    if (segments.includes('shortages')) return 'Material Shortages';
-    // Check if there's an itemId (detail page)
-    const inventoryIndex = segments.indexOf('inventory');
-    if (inventoryIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[inventoryIndex + 1])) {
-      return 'Inventory Details';
-    }
-    return 'Inventory';
-  }
+  // Inventory routes. Only two exist — `/inventory/count` and `/inventory/locations` —
+  // and the locations page sets its own title via setTitle(), so `count` is the single
+  // case this needs to handle.
+  //
+  // Six branches were removed here: 'New/Edit Inventory Item', 'Import Inventory' and an
+  // itemId → 'Inventory Details' fallback all pointed at routes that never existed (part
+  // create/edit lives under /parts), 'Material Shortages' pointed at the never-built
+  // /inventory/shortages, and the bare 'Inventory' served the list page now folded into
+  // /parts.
+  if (segments.includes('count')) return 'Count Inventory';
 
   // Check for settings routes
   if (segments.includes('settings')) {

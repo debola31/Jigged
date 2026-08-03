@@ -4,8 +4,11 @@
  * Mirrors the batch-QR approach in jobTravelerPdf (QRCode.toDataURL up front,
  * level 'H' per the QR design decision) and lays the labels out in a grid. Each
  * label shows the QR (payload = the location UUID deep-link, so relabeling never
- * breaks it) plus the full human path and code — the physical label must match
- * the software's naming.
+ * breaks it) plus the full human path — the physical label must match the software's naming.
+ *
+ * There was a `code` line under the path, smaller and grey. It went with the column in
+ * 20260803034616: the name was already the primary line, and nothing in the app could look a code
+ * up, so it was a second identifier printed under the first one.
  */
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
@@ -14,7 +17,6 @@ export interface LocationLabel {
   id: string;
   /** Full path, root → node, e.g. ['Cabinet 1', 'Row 3', 'Left']. */
   path: string[];
-  code: string | null;
 }
 
 export interface LocationLabelSheetOptions {
@@ -84,19 +86,12 @@ export async function generateLocationLabelSheet(
 
     const textX = x + QR_MM + 5;
     const textW = cellW - QR_MM - 8;
-    let ty = y + cellH / 2 - 4;
+    const ty = y + cellH / 2 - 4;
 
     doc.setFontSize(11);
     doc.setTextColor(0);
     const pathLines = doc.splitTextToSize(label.path.join('  ›  ') || '(unnamed)', textW);
     doc.text(pathLines, textX, ty);
-    ty += pathLines.length * 5 + 1;
-
-    if (label.code) {
-      doc.setFontSize(10);
-      doc.setTextColor(90);
-      doc.text(label.code, textX, ty);
-    }
   });
 
   return doc;

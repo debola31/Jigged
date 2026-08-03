@@ -157,6 +157,23 @@ const PG_INSUFFICIENT_PRIVILEGE = '42501';
  * replacing it with a generic apology.
  */
 const PG_RAISED_BY_US = 'P0001';
+/**
+ * `check_violation` — which our stock RPCs use for their *deliberate* user-facing raises
+ * ("Insufficient stock at source location (have 5, need 10)", "Too many parts at once").
+ *
+ * Passing it through needs care, because a real table CHECK constraint raises the same code with
+ * raw DB text ("new row for relation \"parts\" violates check constraint parts_requires_unit") that
+ * must never reach a user. The two are told apart by that phrase — see `isRawConstraintText`.
+ *
+ * Without this, every one of those hand-written messages was replaced by a generic fallback: the
+ * operator moving more than a shelf holds was told "Failed to update stock" instead of how much
+ * was actually there.
+ */
+const PG_CHECK_VIOLATION = '23514';
+
+/** True for Postgres' own constraint-failure wording, as opposed to a message we wrote. */
+const isRawConstraintText = (message: string) =>
+  /violates (check|not-null|exclusion) constraint/i.test(message);
 
 export interface FriendlyErrorOptions {
   /** What the user was acting on, e.g. "address", "part", "job". Default "item". */
@@ -238,6 +255,9 @@ export function friendlyErrorMessage(
   // Checked last: permission and auth classes above are more actionable than whatever text
   // the function happened to raise.
   if (code === PG_RAISED_BY_US && message) {
+    return message;
+  }
+  if (code === PG_CHECK_VIOLATION && message && !isRawConstraintText(message)) {
     return message;
   }
 

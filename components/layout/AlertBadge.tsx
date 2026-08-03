@@ -18,6 +18,7 @@ import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import { deriveStockStatus } from '@/components/inventory/StockStatusChip';
 // Use the canonical `getLowStockPartsAlerts` (the legacy `getInventoryAlerts`
 // alias still exists but the new name reflects the unified parts model).
 import {
@@ -196,7 +197,22 @@ export default function AlertBadge({ companyId }: AlertBadgeProps) {
                         key={alert.item_name}
                         onClick={() => {
                           setAnchorEl(null);
-                          router.push(`/dashboard/${companyId}/inventory`);
+                          /**
+                           * `/inventory` is gone — it redirects to Parts unfiltered — so clicking
+                           * one specific short part used to dump the user on the whole catalogue.
+                           *
+                           * The status is derived from the row's own numbers rather than hardcoded
+                           * to `low`, because this bell groups everything short under the heading
+                           * "Low Inventory" and most of those rows are actually at zero. Sending an
+                           * out-of-stock part to `?status=low` would open a list that does not
+                           * contain the part the user just clicked — a worse kind of wrong than the
+                           * unfiltered list, because it looks filtered and is missing the answer.
+                           *
+                           * Same `deriveStockStatus` the Parts page filters with, so the two cannot
+                           * disagree about which bucket a part is in.
+                           */
+                          const status = deriveStockStatus(alert.quantity, alert.reorder_point);
+                          router.push(`/dashboard/${companyId}/parts?status=${status}`);
                         }}
                         sx={{ pl: 3, py: 1 }}
                       >

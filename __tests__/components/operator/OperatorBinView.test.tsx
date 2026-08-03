@@ -22,6 +22,8 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   resolveScan: vi.fn(),
   // Move destinations: the page loads the whole tree so tapping Move doesn't wait on a fetch.
   getLocations: vi.fn(async () => []),
+  // Recent activity for this bin. Empty by default — these tests are about the contents.
+  getLocationHistory: vi.fn(async () => []),
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
@@ -38,6 +40,15 @@ vi.mock('@/utils/operatorAccess', () => ({
 vi.mock('@/utils/partsAccess', () => ({
   getStockedParts: vi.fn().mockResolvedValue([]),
 }));
+// The action modal can now attach a photo, which pulls in storageHelpers -> lib/supabase, and that
+// module builds its client eagerly at import time whenever `window` exists. Stubbed rather than
+// mocking the whole Supabase client: these tests never exercise an upload.
+vi.mock('@/utils/storageHelpers', () => ({
+  generateStoragePath: (co: string, kind: string, id: string, name: string) =>
+    `${co}/${kind}/${id}/${name}`,
+  uploadFileToStorage: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/utils/jobsAccess', () => ({
   getAllJobs: vi.fn().mockResolvedValue([]),
 }));

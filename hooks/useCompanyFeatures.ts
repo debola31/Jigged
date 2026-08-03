@@ -28,6 +28,8 @@ import { useLoad } from '@/hooks/useLoad';
  * `useCompany()` would re-fetch the identical row for anything that needs both —
  * which is exactly what the operator "Me" tab was doing, requesting one companies
  * row twice per mount on the page whose problem was concurrent request volume.
+ * Storage needs both too: the flag gates the page and the name heads its QR label
+ * sheet.
  */
 export function useCompanyFeatures() {
   const params = useParams();

@@ -4,14 +4,9 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
-import AddIcon from '@mui/icons-material/Add';
-import RemoveIcon from '@mui/icons-material/Remove';
-import TuneIcon from '@mui/icons-material/Tune';
 
 import type { Part, PartUnitConversion } from '@/types/part';
-import type { InventoryTransactionType } from '@/types/partTransaction';
 import PartTransactionHistoryTable from '@/components/parts/PartTransactionHistoryTable';
 import PartUnitConversionsEditor from '@/components/parts/PartUnitConversionsEditor';
 import PartLocationInventory from '@/components/parts/PartLocationInventory';
@@ -21,7 +16,8 @@ interface InventoryTabProps {
   partId: string;
   companyId: string;
   transactionsRefreshKey: number;
-  openTxnModal: (type: InventoryTransactionType) => void;
+  /** Feeds the location modal's unit dropdown — see `unitOptions` in PartLocationInventory. */
+  unitConversions: PartUnitConversion[];
   onConversionsChanged: (next: PartUnitConversion[]) => void;
   /** Refresh the part (rollup quantity + history) after a location change. */
   onStockChanged: () => void | Promise<void>;
@@ -38,7 +34,7 @@ export default function InventoryTab({
   partId,
   companyId,
   transactionsRefreshKey,
-  openTxnModal,
+  unitConversions,
   onConversionsChanged,
   onStockChanged,
 }: InventoryTabProps) {
@@ -70,52 +66,28 @@ export default function InventoryTab({
           />
         )}
 
-        {part.is_location_tracked ? (
-          <Box sx={{ mt: 4 }}>
-            <PartLocationInventory
-              part={part}
-              partId={partId}
-              companyId={companyId}
-              onStockChanged={onStockChanged}
-            />
-          </Box>
-        ) : (
-          <>
-            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 4, flexWrap: 'wrap' }}>
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                startIcon={<AddIcon />}
-                onClick={() => openTxnModal('addition')}
-                disabled={!part.primary_unit}
-              >
-                Add Stock
-              </Button>
-              {/* Not red — see the note in PartLocationInventory: reversible bookkeeping, not
-                  a destructive act. */}
-              <Button
-                variant="outlined"
-                size="large"
-                startIcon={<RemoveIcon />}
-                onClick={() => openTxnModal('depletion')}
-                disabled={!part.primary_unit || part.quantity <= 0}
-              >
-                Remove Stock
-              </Button>
-              <Button
-                variant="outlined"
-                color="info"
-                size="large"
-                startIcon={<TuneIcon />}
-                onClick={() => openTxnModal('adjustment')}
-                disabled={!part.primary_unit}
-              >
-                Adjust
-              </Button>
-            </Box>
-          </>
-        )}
+        {/*
+          One engine, for every part.
+
+          This used to branch on `is_location_tracked`: tracked parts got
+          `PartLocationInventory` (per-place balances, atomic RPCs, a ledger row per movement)
+          and untracked parts got three buttons writing `parts.quantity` directly from the
+          browser. Which one you saw was decided by a trigger gated on a company feature flag,
+          so the same screen behaved structurally differently for two shops.
+
+          The column is gone (20260802015837) and so is the second engine. A shop that does not
+          manage places still sees Add / Remove / Adjust here — they just land in Unassigned,
+          through the same RPC as everyone else, with the same history.
+        */}
+        <Box sx={{ mt: 4 }}>
+          <PartLocationInventory
+            part={part}
+            partId={partId}
+            companyId={companyId}
+            unitConversions={unitConversions}
+            onStockChanged={onStockChanged}
+          />
+        </Box>
 
         {/* Unit conversions — inline-editable list. */}
         {part.primary_unit && (

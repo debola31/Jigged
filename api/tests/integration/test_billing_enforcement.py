@@ -171,3 +171,24 @@ def test_no_tenant_table_left_ungated(supabase_admin):
     explicitly exempt. A new tenant table left un-gated fails this test."""
     res = supabase_admin.rpc("tenant_tables_missing_write_gate", {}).execute()
     assert res.data == [], f"tenant tables missing the billing write-gate: {res.data}"
+
+
+def test_no_definer_function_walks_past_the_gate(supabase_admin):
+    """The companion guard, and the one that would have caught #645.
+
+    `test_no_tenant_table_left_ungated` checks that a POLICY EXISTS. A SECURITY
+    DEFINER function runs as the function owner, and no table here sets FORCE ROW
+    LEVEL SECURITY, so an owner bypasses RLS entirely — a definer function writing
+    a gated table is invisible to a policy-existence check.
+
+    That is exactly how all five location-stock RPCs shipped with no entitlement
+    check while CI stayed green, and it made billing depend on a feature flag: a
+    lapsed shop with `inventory_locations` OFF was blocked (direct browser insert,
+    gate applies) and the same shop with it ON could write freely.
+    """
+    res = supabase_admin.rpc("definer_writers_missing_write_gate", {}).execute()
+    assert res.data == [], (
+        "SECURITY DEFINER functions write a billing-gated table without calling "
+        f"company_can_write: {res.data}. Add PERFORM public.inv_assert_can_write(<company>) "
+        "after the membership check, or argue the exemption in the function's list."
+    )

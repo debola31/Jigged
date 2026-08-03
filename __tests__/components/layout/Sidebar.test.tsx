@@ -35,6 +35,10 @@ describe('Sidebar', () => {
 
   it('renders all menu items for admin', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: false, inventory_locations: true },
+      loading: false,
+    });
 
     render(<Sidebar />);
 
@@ -42,9 +46,12 @@ describe('Sidebar', () => {
     expect(screen.getByText('Quotes')).toBeInTheDocument();
     expect(screen.getByText('Jobs')).toBeInTheDocument();
     expect(screen.getByText('Parts')).toBeInTheDocument();
-    // Inventory came back as its own list page (Parts/Inventory split). It
-    // sits between Parts and Work Centers in the sidebar.
-    expect(screen.getByText('Inventory')).toBeInTheDocument();
+    // 'Inventory' became 'Storage' when the /inventory list folded into Parts. Parts now
+    // holds the quantities — i.e. Parts *is* the inventory — so keeping the old word here
+    // would have the two labels swapped relative to their meanings: inventory = the items,
+    // storage = the places. Sits between Parts and Work Centers.
+    expect(screen.getByText('Storage')).toBeInTheDocument();
+    expect(screen.queryByText('Inventory')).not.toBeInTheDocument();
     expect(screen.getByText('Work Centers')).toBeInTheDocument();
     expect(screen.getByText('Vendors')).toBeInTheDocument();
     expect(screen.getByText('Customers')).toBeInTheDocument();
@@ -52,6 +59,20 @@ describe('Sidebar', () => {
     expect(screen.getByText('Settings')).toBeInTheDocument();
     // Operations was deleted earlier and stays gone.
     expect(screen.queryByText('Operations')).not.toBeInTheDocument();
+  });
+
+  it('hides Storage when the locations flag is off — such a shop has no places at all', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+    mockUseCompanyFeatures.mockReturnValue({
+      features: { shipments: false, inventory_locations: false },
+      loading: false,
+    });
+
+    render(<Sidebar />);
+
+    expect(screen.queryByText('Storage')).not.toBeInTheDocument();
+    // Parts is still the item master either way — the count moves to its toolbar.
+    expect(screen.getByText('Parts')).toBeInTheDocument();
   });
 
   it('hides Team and Settings for user role', () => {

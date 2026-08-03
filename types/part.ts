@@ -29,7 +29,6 @@ export interface Part {
   costing_batch_quantity: number | null;
   // When true, parts.quantity is a trigger-maintained rollup of
   // part_location_stock and stock is managed per-location (see InventoryTab).
-  is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
   // Optional relation counts (populated by getPartWithRelations)

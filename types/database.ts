@@ -652,35 +652,35 @@ export type Database = {
       }
       inventory_locations: {
         Row: {
-          code: string | null
           company_id: string
           created_at: string
           id: string
           kind: string | null
           name: string
           parent_id: string | null
+          photo_path: string | null
           sort_order: number
           updated_at: string
         }
         Insert: {
-          code?: string | null
           company_id: string
           created_at?: string
           id?: string
           kind?: string | null
           name: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
         Update: {
-          code?: string | null
           company_id?: string
           created_at?: string
           id?: string
           kind?: string | null
           name?: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -717,6 +717,7 @@ export type Database = {
           notes: string | null
           operator_id: string | null
           part_id: string | null
+          photo_path: string | null
           quantity: number
           transfer_group_id: string | null
           type: string
@@ -737,6 +738,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity: number
           transfer_group_id?: string | null
           type: string
@@ -757,6 +759,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity?: number
           transfer_group_id?: string | null
           type?: string
@@ -2047,7 +2050,6 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
-          is_location_tracked: boolean
           is_stocked: boolean
           part_name: string
           preferred_vendor_id: string | null
@@ -2064,7 +2066,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name: string
           preferred_vendor_id?: string | null
@@ -2081,7 +2082,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name?: string
           preferred_vendor_id?: string | null
@@ -3479,7 +3479,29 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      inventory_location_occupancy: {
+        Row: {
+          company_id: string | null
+          location_id: string | null
+          part_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       _migrate_legacy_shipment_for_job: {
@@ -3495,7 +3517,9 @@ export type Database = {
           p_converted_quantity: number
           p_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_unit: string
         }
@@ -3508,6 +3532,7 @@ export type Database = {
           p_location_id: string
           p_new_quantity: number
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
           p_unit: string
         }
@@ -3534,6 +3559,14 @@ export type Database = {
         Returns: undefined
       }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
+      bulk_put_away: {
+        Args: {
+          p_from_location_id: string
+          p_part_ids: string[]
+          p_to_location_id: string
+        }
+        Returns: Json
+      }
       company_can_write: {
         Args: { check_company_id: string }
         Returns: boolean
@@ -3609,6 +3642,12 @@ export type Database = {
         }
         Returns: string
       }
+      definer_writers_missing_write_gate: {
+        Args: never
+        Returns: {
+          function_name: string
+        }[]
+      }
       delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
         Args: {
@@ -3623,15 +3662,6 @@ export type Database = {
           p_quantity: number
           p_unit: string
         }
-        Returns: Json
-      }
-      disable_location_tracking: { Args: { p_part_id: string }; Returns: Json }
-      enable_location_tracking: {
-        Args: { p_initial_location_id?: string; p_part_id: string }
-        Returns: Json
-      }
-      enable_location_tracking_for_company: {
-        Args: { p_company_id: string }
         Returns: Json
       }
       function_execute_leaks: {
@@ -3688,6 +3718,10 @@ export type Database = {
         }[]
       }
       get_user_company_ids: { Args: never; Returns: string[] }
+      inv_assert_can_write: {
+        Args: { p_company_id: string }
+        Returns: undefined
+      }
       inv_assert_location_in_company: {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
@@ -3836,7 +3870,9 @@ export type Database = {
           p_converted_quantity: number
           p_from_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_to_location_id: string
           p_unit: string

@@ -159,8 +159,12 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 3. **If the migration creates a table in `public`, grant it explicitly** — in the same migration, alongside `ENABLE ROW LEVEL SECURITY` and the policies. See "Data API grants" below. Without a `GRANT` the table is invisible to PostgREST/supabase-js and the FastAPI backend.
 4. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
 5. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
-6. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
-7. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
+   **A green PR does not mean the migration will apply to production.** A preview branch is built by replaying migrations from the baseline; production never was. An object the baseline creates can exist on every preview and not exist on prod — which is exactly how one `REVOKE` blocked the pipeline for two days (2026-08-03).
+6. **Merge to `main` applies migrations to production.** Supabase runs them and posts its verdict as a check on the **merge commit** — not on the PR, which is closed and frozen green by then. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it.
+7. **The frontend deploys only after that verdict is green.** [`deploy-production.yml`](.github/workflows/deploy-production.yml) waits for Supabase's check on the merge commit and runs `vercel deploy --prod` only on success. Vercel's own git auto-deploy is off for `main` (`git.deploymentEnabled` in [`vercel.json`](vercel.json)) so this is the only path to production.
+   **Why:** these used to run in parallel with no ordering. The migration failed, the frontend shipped anyway, and code went live selecting a column production did not have. The gate fails closed — no verdict means no deploy — because shipping against an unverified schema is the failure it exists to prevent.
+   If it blocks, fix the migration and merge again. The manual escape hatch is `vercel deploy --prod`.
+8. Nothing to regenerate afterwards except `types/database.ts` (`pnpm gen:db-types`), which CI enforces. There is deliberately no prod schema snapshot to refresh — see "Schema source-of-truth" below.
 
 Never use the 8-digit date-only prefix for new files — always let the CLI generate the timestamp.
 
@@ -222,12 +226,20 @@ The CI test [`test_no_tenant_table_left_ungated`](api/tests/integration/test_bil
 
 ### Schema source-of-truth
 
-Two artifacts describe the database schema. They serve different purposes:
+Different questions have different answers. Conflating them is what made the 2026-08-03 outage hard to diagnose.
 
-- `supabase/migrations/<timestamp>_baseline.sql` (and any migrations on top of it) is the source of truth for what *gets applied* to a fresh database — via `supabase start` / `db reset` locally, on every preview branch, and to prod on merge to `main`. This is the executable history. New schema changes land here as new migration files.
-- `supabase/schema.prod.sql` is a *cached snapshot* of the live prod database at the time `scripts/export_schema.py` last ran. Regenerate after a merge has deployed to prod so the snapshot tracks reality. Never edit by hand — it gets clobbered on the next export.
+| Question | Ask |
+|---|---|
+| What *should* the schema be? | `supabase/migrations/` — the executable history, and the only source of truth. New changes land here as new files. |
+| What columns exist? | [`types/database.ts`](types/database.ts) — generated from the migration-replayed schema, CI-enforced byte-exact (#406). |
+| RLS policies, grants, CHECK constraints, function bodies | The migrations. **None of these appear in `types/database.ts`.** |
+| What does *production* actually have? | Query it — the Supabase MCP server. No file in this repo can answer this honestly. |
 
-Use the schema files for "what does column X look like today" lookups without spinning up Postgres. Use the baseline + migrations for "what should the schema be" answers and for any code path that actually creates the DB. They should match; if they don't, regenerate the schema file (don't edit the migration).
+**There is deliberately no cached prod schema file.** `supabase/schema.prod.sql` existed for the "what does column X look like today" lookup and was deleted because it could — and did — lie. It was hand-edited inside a feature PR to add `customer_contacts.is_billing_default` while production had no such column, its `Generated:` header left untouched, and it asserted that falsehood for two days. During the outage it was worse than useless: it had to be ignored in favour of dumping prod live.
+
+A snapshot that can be confidently wrong is worse than none — the same failure shape as a green check reporting on a preview branch while production burned. **Do not re-introduce a hand-maintainable mirror of production.**
+
+Note that migrations and production *can* legitimately diverge for a while: the merge applies them, and until it succeeds prod is behind. That gap is what [`deploy-production.yml`](.github/workflows/deploy-production.yml) exists to stop the frontend from stepping into.
 
 ---
 

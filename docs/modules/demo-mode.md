@@ -111,7 +111,7 @@ no `operation_types` or routing nodes/edges — superseded by `work_centers` and
 
 ## Functions
 
-Bodies live in [`supabase/schema.prod.sql`](../../supabase/schema.prod.sql); this is what they
+Bodies live in [`supabase/migrations/`](../../supabase/migrations/); this is what they
 are for.
 
 | Function | Does |

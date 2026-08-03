@@ -1,0 +1,198 @@
+# Production deploys wait for the database.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# WHY THIS EXISTS
+# ═══════════════════════════════════════════════════════════════════════════════
+# Merging to main used to start two things at once, with no ordering between them:
+# Supabase applied the migrations, and Vercel built and shipped the frontend.
+# Neither waited for the other, so when one failed the other shipped anyway.
+#
+# On 2026-08-01 a migration failed to apply to production. Vercel deployed the
+# frontend regardless. Two days later PR #654 shipped code selecting
+# customer_contacts.is_billing_default — a column the failed migration was
+# supposed to create — and every job and quote page in production started
+# rendering "Job not found" (PostgREST 42703 rejects the whole select).
+#
+# The migration failing was survivable. Shipping code that depended on it was not.
+# This workflow makes the frontend deploy WAIT for the database, and refuse to
+# ship if the database did not get what the code expects.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE SIGNAL WE GATE ON, AND WHY IT IS NOT A NEW ONE
+# ═══════════════════════════════════════════════════════════════════════════════
+# Supabase already reports the production apply: it posts a check run onto the
+# MERGE COMMIT once it has run the migrations against production. During the
+# outage that check said `failure` on five consecutive merges over two days, with
+# the exact SQL error in its summary. Nobody saw it, for two structural reasons:
+#
+#   1. It lands on the merge commit, which is created AFTER the PR page freezes.
+#      A closed PR never updates, so the PR stays green forever.
+#   2. It is a check run from a third-party GitHub App, and GitHub sends no
+#      notification for those — the failure emails you can subscribe to cover
+#      Actions workflows only, and only for the user who triggered them
+#      (github.com/orgs/community/discussions/55379, still open).
+#
+# So the fix is not another probe. It is to READ the verdict that already exists
+# and refuse to deploy on top of it. An earlier attempt polled production's
+# schema_migrations table over a direct database connection; that meant a prod DB
+# credential in CI and a second source of truth that could disagree with the
+# first. This asks Supabase what happened instead.
+#
+# It also fixes the notification gap as a side effect, which is the real reason
+# to prefer it: THIS is an Actions workflow, so when it fails GitHub emails the
+# person who merged. No mail provider, no API key, no extra moving parts.
+
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  # Manual re-run, for shipping after a migration has been fixed without waiting
+  # for another merge — and the escape hatch if Actions itself is the problem.
+  workflow_dispatch:
+
+# Deploys queue; they never cancel each other. cancel-in-progress would kill a
+# deploy midway through `vercel deploy`, which is the one moment where being
+# interrupted can leave production in an indeterminate state. Two rapid merges
+# simply deploy in order, and the later one wins because it runs last.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # The check Supabase posts for the production migration apply. Confusingly it
+  # is named "Supabase Preview" on the merge commit too — same name, but there it
+  # reports the PRODUCTION apply rather than a preview branch. If Supabase ever
+  # renames it, this is the one line to change; the gate fails closed until it is
+  # corrected, which is the safe direction.
+  SUPABASE_CHECK_NAME: Supabase Preview
+  # How long to wait for that verdict. Observed: ~38s from merge to conclusion.
+  # Ten minutes is generous enough that a slow apply is never mistaken for a
+  # failed one.
+  GATE_TIMEOUT_SECONDS: 600
+
+jobs:
+  gate:
+    name: Database is ready for this code
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - name: Wait for Supabase to finish applying migrations to production
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for '${SUPABASE_CHECK_NAME}' on ${GITHUB_SHA:0:8}…"
+          DEADLINE=$(( SECONDS + GATE_TIMEOUT_SECONDS ))
+
+          # Selects the newest run of that check. A re-run after a fix must
+          # supersede the original failure rather than be masked by it.
+          NEWEST='[.check_runs[] | select(.name == $n)] | sort_by(.started_at) | last'
+
+          while :; do
+            # Status and conclusion ONLY — deliberately not the summary. Supabase
+            # puts the raw multi-line SQL error in .output.summary, so folding it
+            # into this delimited row makes it many lines, and every field parsed
+            # out of it is then garbage. That mistake reads as a timeout rather
+            # than a failure, which is the most dangerous possible misreading
+            # here: it turns "the migration failed" into "no answer yet".
+            STATE=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
+              | jq -r --arg n "$SUPABASE_CHECK_NAME" \
+                  "$NEWEST | if . == null then \"absent|\" else \"\(.status)|\(.conclusion // \"\")\" end")
+
+            STATUS="${STATE%%|*}"
+            CONCLUSION="${STATE#*|}"
+
+            if [ "$STATUS" = "completed" ]; then
+              # Fetched separately, only when it is about to be printed.
+              SUMMARY=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
+                | jq -r --arg n "$SUPABASE_CHECK_NAME" \
+                    "$NEWEST | .output.summary // \"(no summary provided)\"")
+
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "✅ Migrations applied to production. Safe to deploy."
+                exit 0
+              fi
+
+              echo "::error::Supabase reported '${CONCLUSION}' applying migrations to production."
+              {
+                echo "## Production deploy blocked"
+                echo
+                echo "Supabase could not apply this commit's migrations to production,"
+                echo "so the frontend was **not** deployed. Production is still serving"
+                echo "the previous version, which matches the database it is talking to."
+                echo
+                echo "### What Supabase reported"
+                printf '%s\n' "$SUMMARY"
+                echo
+                echo "Migrations are atomic and ordered — everything queued behind the"
+                echo "first failure is blocked by it, not independently broken."
+                echo
+                echo "Fix the migration and merge again. Do **not** clear this with"
+                echo "\`migration repair --status applied\`: that records the file as done"
+                echo "without running it, so its contents never reach production and the"
+                echo "next migration that depends on them fails the same way."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              # FAIL CLOSED. No verdict is not the same as a good verdict, and
+              # shipping code whose schema assumptions are unverified is exactly
+              # what caused the outage this gate exists to prevent. The cost is
+              # that a Supabase outage blocks deploys; the escape hatch is a
+              # manual `vercel deploy --prod`, or re-running this workflow.
+              echo "::error::No verdict from '${SUPABASE_CHECK_NAME}' within ${GATE_TIMEOUT_SECONDS}s."
+              {
+                echo "## Production deploy blocked — no answer from Supabase"
+                echo
+                echo "The migration check never reported within ${GATE_TIMEOUT_SECONDS}s, so"
+                echo "whether production has this commit's schema is **unknown**."
+                echo
+                echo "This gate fails closed on purpose: deploying on an unverified"
+                echo "database is the failure it exists to prevent. If Supabase is"
+                echo "healthy and this is a false alarm, re-run the workflow."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+
+            sleep 15
+          done
+
+  deploy:
+    name: Deploy to Vercel production
+    needs: gate
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Vercel CLI
+        run: pnpm add -g vercel@48
+
+      # `vercel pull` fetches the project's PRODUCTION environment variables from
+      # Vercel itself, so NEXT_PUBLIC_SUPABASE_* and friends keep living in the
+      # Vercel dashboard. They are deliberately NOT duplicated into GitHub
+      # secrets: two copies of an env var is how one of them goes stale.
+      - name: Pull Vercel production environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

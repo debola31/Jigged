@@ -1,7 +1,7 @@
 /**
  * The decision-first view-model for the Review step.
  *
- * Shape (research-backed, see docs/modules/data-import-phase2-design.md §4):
+ * Shape (research-backed, see docs/modules/data-import.md "Review step"):
  *  - ONE consequence line — what you lose if you import right now — instead of a verdict
  *    banner. No import product surveyed ships a ready/not-ready verdict, and "Not ready to
  *    import" is a dead end a shop owner can't act on. Xero's framing instead: "you can

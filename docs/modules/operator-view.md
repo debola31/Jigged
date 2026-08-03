@@ -761,11 +761,9 @@ went up. **The bottleneck was adoption, not the absence of a print button.**
 
 ## Acceptance Criteria
 
-Each bullet is a Given/When/Then scenario carrying a verification clause — the test file and
-`describe` that proves it, a manual procedure, or an explicit `automation-pending` tag with the
-issue that tracks it. **Cite a file, not a nested test title:** a test title is a free-text string
-nothing checks, and 2026 audits found up to two-thirds of such citations dangling. Every path below
-was confirmed to exist on 2026-08-02.
+Convention (Given/When/Then + a checkable verification clause) is stated once in
+[modules/README.md](README.md#the-acceptance-criteria-convention). Every path below was confirmed to exist on
+2026-08-02.
 
 **Authentication & station selection**
 
@@ -841,10 +839,10 @@ was confirmed to exist on 2026-08-02.
 **New since you last looked** (#661)
 
 - [ ] **Given** helpful marks the author has not seen, **then** they appear grouped by NOTE with the reactors named — three people on one note is one item naming three — and never as a per-person total; **given** nothing new, **then** the block renders nothing — *verified by `__tests__/components/operator/NewHelpfulBlock.test.tsx` and `__tests__/utils/operatorAccess.test.ts > getNewHelpful`*.
-- [ ] **Given** the quoted text, **then** it is a `blockquote` and the line reads "found **your note** helpful" — bold with no framing read as the block's own headline, so the surface failed to say the one thing it exists for — *verified by `NewHelpfulBlock.test.tsx > 'marks the quoted text as the operator's own note'`*.
+- [ ] **Given** the quoted text, **then** it is a `blockquote` and the line reads "found **your note** helpful" — bold with no framing read as the block's own headline, so the surface failed to say the one thing it exists for — *verified by `__tests__/components/operator/NewHelpfulBlock.test.tsx`*.
 - [ ] **Given** **Got it**, **then** the cursor advances to the newest instant actually on screen (not `now()`), so a reaction landing mid-render is still shown next time; **given** a failed dismiss, **then** the block stays put rather than losing the news — *verified by `NewHelpfulBlock.test.tsx`*.
-- [ ] **Given** a cursor stored at microsecond precision, **when** the block reloads, **then** the newest reaction does **not** return — the cursor goes to PostgREST as the raw string, because a round-trip through JS `Date` truncates to milliseconds and makes that reaction compare strictly greater for ever — *verified by `__tests__/utils/operatorAccess.test.ts > 'sends the seen-cursor to the filter without truncating its microseconds'`*.
-- [ ] **Given** an operator whose notes nobody has opened, **when** the summary renders, **then** the zero stays in place and a forward-looking line appears instead of a standing "0 views" — *verified by `MyWorkPage.test.tsx > 'turns a zero view count forward'`*.
+- [ ] **Given** a cursor stored at microsecond precision, **when** the block reloads, **then** the newest reaction does **not** return — the cursor goes to PostgREST as the raw string, because a round-trip through JS `Date` truncates to milliseconds and makes that reaction compare strictly greater for ever — *verified by `__tests__/utils/operatorAccess.test.ts` > `getNewHelpful`*.
+- [ ] **Given** an operator whose notes nobody has opened, **when** the summary renders, **then** the zero stays in place and a forward-looking line appears instead of a standing "0 views" — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
 
 **Playbook ordering**
 

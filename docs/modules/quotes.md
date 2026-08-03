@@ -424,9 +424,8 @@ same PDF. The printed document is a faithful record of the price quoted.
 
 ## Acceptance Criteria
 
-Given/When/Then with a verification clause — the test file and `describe` that proves it, or an
-`automation-pending` tag against [#367](https://github.com/debola31/Jigged/issues/367). Cite a
-file and describe, never a nested test title.
+Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
+`automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).
 
 **Create, list, edit**
 

@@ -85,7 +85,7 @@ Quantity price break-points that live on the part. One row per tier; selected ti
 **Single-direction data flow:**
 
 - `markup_percent` is the source of truth.
-- `unit_price` is always recomputed against the current cost basis (routing + BOM for made parts; procurement tiers for bought parts). Cost change → unit prices drift to reflect it. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#per-quote-price-overrides)).
+- `unit_price` is always recomputed against the current cost basis (routing + BOM for made parts; procurement tiers for bought parts). Cost change → unit prices drift to reflect it. There is no lock concept on the part; if you need a stable price across routing changes, lock it on the quote (see [Quotes — Per-quote overrides](quotes.md#quote_line_items)).
 - Typing in the unit-price input is shorthand for "compute the markup % that would yield this price"; the editor back-calculates and stores the markup as the source of truth (there is no stored `unit_price` to keep in lockstep).
 
 ### File Attachments (`part_attachments`)
@@ -267,7 +267,7 @@ A part's cost flows in four layers:
    base_cost_per_unit = run_labor_per_unit + material_per_unit + (total_setup / quantity)
    unit_price        = base_cost_per_unit × (1 + markup / 100)
    ```
-3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#snapshotted-line-items).
+3. **Quote line item** — a frozen snapshot of `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` taken at quote creation. See [Quotes Module — Snapshotted Line Items](quotes.md#quote_line_items).
 4. **Job part** — created at quote→job conversion by copying the quote line's `(quantity, unit_price, total_price)`. Unlike the quote line, `job_parts.quantity` is **editable** post-conversion (with fulfillment guardrails) and `total_price` is re-derived as `quantity × unit_price` at edit time. Invoicing and revenue read the `job_part`, not the quote snapshot — so the job part is the post-conversion source of truth. See [Jobs Module — Editing order quantity](jobs.md).
 
 **Bought parts** have no routing, so their base cost comes from the part's **procurement tiers** (the Cost card) via `compute_part_cost_at_qty` instead of `calculateRoutingCost`. The shared resolver `getTiersWithComputedPrices` falls back to that procurement cost when a part has no routing/BOM, so a bought part's pricing tiers still resolve a sell price = `procurement_cost(qty) × (1 + markup/100)`. A made part with no routing/BOM yet shows an "Add operations or materials to calculate pricing" empty state in the Pricing card; the user can still add tiers and type unit prices manually (the back-calculated markup will look unusual until a cost basis exists).

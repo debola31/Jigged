@@ -43,7 +43,7 @@ def supabase_admin() -> Generator[Client, None, None]:
             "TEST_SUPABASE_URL not configured. Run `supabase start` and "
             "`eval \"$(supabase status -o env)\"`, then export "
             "TEST_SUPABASE_URL / TEST_SUPABASE_PUBLISHABLE_KEY / TEST_SUPABASE_SECRET_KEY. "
-            "See docs/testing/backend-setup.md."
+            "See docs/testing/README.md."
         )
     service_key = os.getenv("TEST_SUPABASE_SECRET_KEY")
     if not service_key:

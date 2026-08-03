@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { selectStationIfPickerShown } from './helpers/navigation';
 
 /**
  * The machine logbook, end to end.
@@ -51,9 +52,7 @@ const openList = (page: Page) => page.getByTestId('machine-open-items');
 async function selectStationAndOpenLog(page: Page, companyId: string): Promise<void> {
   await page.goto(`/operator/${companyId}/jobs`);
 
-  const picker = page.getByRole('button', { name: WC_INTERNAL });
-  await expect(picker.or(maintenanceTab(page))).toBeVisible({ timeout: 30_000 });
-  if (await picker.isVisible()) await picker.click();
+  await selectStationIfPickerShown(page, WC_INTERNAL, maintenanceTab(page));
 
   await expect(maintenanceTab(page)).toBeVisible({ timeout: 30_000 });
   await maintenanceTab(page).click();
@@ -69,14 +68,20 @@ test.describe('Machine Maintenance', () => {
 
     // Wait for one of the two states before asserting — a not-yet-rendered page
     // reports "no tab" for the wrong reason.
-    const picker = page.getByRole('button', { name: WC_INTERNAL });
-    await expect(picker.or(maintenanceTab(page))).toBeVisible({ timeout: 30_000 });
+    //
+    // Keyed on the picker's HEADING, not on the station's button: the seed names
+    // the job operation after the work centre, the dispatch row prints it, and
+    // Playwright matches accessible names by substring — so the button matches
+    // both surfaces once a station is already selected. See
+    // `selectStationIfPickerShown`.
+    const pickerHeading = page.getByText('Select Your Station');
+    await expect(pickerHeading.or(maintenanceTab(page))).toBeVisible({ timeout: 30_000 });
 
-    if (await picker.isVisible()) {
+    if (await pickerHeading.isVisible()) {
       // No station yet: the tab must not be offered. There is no machine to have
       // a logbook for.
       await expect(maintenanceTab(page)).toHaveCount(0);
-      await picker.click();
+      await page.getByRole('button', { name: WC_INTERNAL }).click();
     }
 
     await expect(maintenanceTab(page)).toBeVisible({ timeout: 30_000 });

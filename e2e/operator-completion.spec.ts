@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
-import { navigateTo, waitForGridLoaded } from './helpers/navigation';
+import {
+  navigateTo,
+  selectStationIfPickerShown,
+  waitForGridLoaded,
+} from './helpers/navigation';
 
 /**
  * Recording a completion, end to end.
@@ -50,17 +54,12 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<v
   // list shows instead. Requiring it unconditionally made the helper usable only
   // once per test.
   await page.goto(`/operator/${companyId}/jobs`);
-  const picker = page.getByRole('button', { name: WC_INTERNAL });
-  // Wait for one of the two possible states before deciding, for the same reason
-  // as openStep below: isVisible() resolves immediately, so checking it straight
-  // after a goto reports "no picker" on a page that simply has not rendered yet —
-  // and the station silently never gets selected.
-  await expect(picker.or(page.getByRole('button', { name: 'My Station' }))).toBeVisible({
-    timeout: 30_000,
-  });
-  if (await picker.isVisible()) {
-    await picker.click();
-  }
+  await selectStationIfPickerShown(
+    page,
+    WC_INTERNAL,
+    // Settled marker: the lens toggle only renders once a station is chosen.
+    page.getByRole('button', { name: 'My Station' }),
+  );
 
   await page.goto(`/operator/${companyId}/jobs/${jobId}`);
   await expect(page).toHaveURL(/\/parts\/[0-9a-f-]{36}/, { timeout: 30_000 });

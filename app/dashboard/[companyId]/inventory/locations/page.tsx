@@ -3,9 +3,7 @@
 import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
@@ -16,18 +14,23 @@ export default function InventoryLocationsPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const { setTitle } = usePageTitle();
-  const { features, loading } = useCompanyFeatures();
+  const { features, companyName, loading } = useCompanyFeatures();
   const enabled = features.inventory_locations;
 
   useEffect(() => {
-    setTitle('Inventory Locations');
+    // Matches the sidebar item. Said "Inventory Locations" while the nav said "Storage",
+    // and "locations" carries the industry's site/warehouse meaning we don't have.
+    setTitle('Storage');
     return () => setTitle(null);
   }, [setTitle]);
 
-  // Feature-flagged: bounce companies that haven't opted in back to Inventory.
+  // Feature-flagged: bounce companies that haven't opted in.
+  //
+  // Straight to /parts, not /inventory — the latter is itself now a redirect to /parts, so
+  // sending them there cost a second hop for nothing.
   useEffect(() => {
     if (!loading && !enabled) {
-      router.replace(`/dashboard/${companyId}/inventory`);
+      router.replace(`/dashboard/${companyId}/parts`);
     }
   }, [loading, enabled, router, companyId]);
 
@@ -41,14 +44,13 @@ export default function InventoryLocationsPage() {
 
   return (
     <Box>
-      <Button
-        startIcon={<ArrowBackIcon />}
-        onClick={() => router.push(`/dashboard/${companyId}/inventory`)}
-        sx={{ mb: 2 }}
-      >
-        Back to Inventory
-      </Button>
-      <LocationsManager companyId={companyId} />
+      {/* The "Back to Inventory" button is gone. Storage is a top-level sidebar item now, so
+          there is nothing to go back *to* — and the page it pointed at no longer exists, so it
+          would have bounced through a redirect to land on Parts. A back link out of a top-level
+          destination is chrome pretending to be navigation. */}
+      {/* `companyName` was never passed before, so the QR label sheet printed with no heading —
+          the prop existed and read `undefined` on every call. */}
+      <LocationsManager companyId={companyId} companyName={companyName ?? undefined} />
     </Box>
   );
 }

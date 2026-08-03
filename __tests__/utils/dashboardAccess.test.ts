@@ -10,6 +10,7 @@ const DATA: Record<string, unknown[]> & { error?: unknown } = {
   shipments: [],
   notes: [],
   operations: [],
+  inventory: [],
 };
 
 function resolveData(state: { table: string; completedFilter: boolean }) {
@@ -25,6 +26,8 @@ function resolveData(state: { table: string; completedFilter: boolean }) {
       return { data: DATA.notes, error: null };
     case 'job_operations':
       return { data: DATA.operations, error: null };
+    case 'inventory_transactions':
+      return { data: DATA.inventory, error: null };
     default:
       return { data: [], error: null };
   }
@@ -186,5 +189,79 @@ describe('getActivityStream', () => {
     }
     // Newest-first: received (05:00) before sent (04:00).
     expect(ops[0].action).toBe('received');
+  });
+});
+
+/**
+ * Stock movements in the shared feed.
+ *
+ * The owner had no shop-wide view of stock moving: `getRecentActivity` did exactly this and its
+ * only caller was the operator's Inventory tab.
+ */
+describe('inventory activity', () => {
+  const txn = (over: Record<string, unknown>) => ({
+    id: 'x',
+    created_at: '2026-08-01T10:00:00Z',
+    type: 'addition',
+    item_name: 'BUY-ORING-214',
+    quantity: 828,
+    unit: 'ea',
+    part_id: 'p1',
+    location_name: 'Shelf A',
+    transfer_group_id: null,
+    notes: null,
+    ...over,
+  });
+
+  beforeEach(() => {
+    DATA.inventory = [];
+  });
+
+  it('says what moved, how much, and where', async () => {
+    DATA.inventory = [txn({})];
+    const [item] = await getActivityStream('co1', { types: ['inventory'] });
+
+    expect(item.type).toBe('inventory');
+    expect(item.entityNumber).toBe('BUY-ORING-214');
+    expect(item.action).toBe('stock_in');
+    expect(item.quantityLabel).toBe('828 ea');
+    expect(item.locationName).toBe('Shelf A');
+    // Straight to that part's ledger, which is where you go to ask "why".
+    expect(item.href).toContain('/parts/p1?tab=inventory');
+  });
+
+  /** A transfer writes two rows sharing a group id; the feed must not show the event twice. */
+  it('folds a transfer to the leg that says where the stock ended up', async () => {
+    DATA.inventory = [
+      txn({ id: 'to', type: 'addition', transfer_group_id: 'g1', location_name: 'Shelf A' }),
+      txn({ id: 'from', type: 'depletion', transfer_group_id: 'g1', location_name: 'Unassigned' }),
+    ];
+
+    const items = await getActivityStream('co1', { types: ['inventory'] });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].action).toBe('moved');
+    expect(items[0].locationName).toBe('Shelf A');
+  });
+
+  /** A half-pair whose partner fell outside the window is still a movement that happened. */
+  it('keeps a lone depletion leg rather than dropping it', async () => {
+    DATA.inventory = [txn({ id: 'from', type: 'depletion', transfer_group_id: 'g1' })];
+
+    const items = await getActivityStream('co1', { types: ['inventory'] });
+    expect(items).toHaveLength(1);
+    expect(items[0].action).toBe('moved');
+  });
+
+  it('reads an adjustment as a count', async () => {
+    DATA.inventory = [txn({ type: 'adjustment', quantity: 30 })];
+    const [item] = await getActivityStream('co1', { types: ['inventory'] });
+    expect(item.action).toBe('counted');
+  });
+
+  it('is left out of the feed unless asked for', async () => {
+    DATA.inventory = [txn({})];
+    const items = await getActivityStream('co1', { types: ['job'] });
+    expect(items.every((i) => i.type !== 'inventory')).toBe(true);
   });
 });

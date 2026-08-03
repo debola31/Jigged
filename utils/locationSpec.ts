@@ -3,37 +3,94 @@
  *
  * The builder collects an ordered list of LevelSpecs (level 0 = the top
  * containers, level 1 = their divisions, …) and this module turns them into a
- * LocationSpecNode tree with names and zero-padded sortable codes. The code
- * scheme is shared with bulkGenerateChildren so the visual and manual builders
- * agree. Every location can hold stock and be printed — no per-node flags.
+ * LocationSpecNode tree of NAMES. Every location can hold stock and be printed — no per-node
+ * flags.
+ *
+ * There was a parallel code scheme here — `CAB1` → `CAB1-R03` → `CAB1-R03-L`, parent-prefixed and
+ * zero-padded, shared with the manual bulk generator so the two agreed. It went with
+ * `inventory_locations.code` in 20260803034616: a label prints the QR and the full path, nothing
+ * in the app resolves a location by code, and a second identifier that only ever appeared printed
+ * under the first one is not one.
  */
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
-/** Zero-pad a 1-based index to a uniform width (warehouse naming discipline). */
-export function pad(n: number, width: number): string {
-  return String(n).padStart(width, '0');
-}
-
-/** Code for a generated node, e.g. parent "CAB1" + row 3 → "CAB1-R03". */
-export function generatedCode(
-  parentCode: string | null,
-  kind: string,
-  idx: number,
-  width: number,
-): string {
-  const initial = (kind || 'N').charAt(0).toUpperCase();
-  return `${parentCode ? parentCode + '-' : ''}${initial}${pad(idx, width)}`;
-}
-
-/** Code for an explicitly-named node, e.g. parent "CAB1-R03" + "Left" → "CAB1-R03-L". */
-export function explicitCode(parentCode: string | null, name: string): string {
-  const initial = (name.trim().charAt(0) || 'X').toUpperCase();
-  return `${parentCode ? parentCode + '-' : ''}${initial}`;
-}
-
 export interface BuildSpecOptions {
-  /** Code of the parent the tree will be created under (null = top-level). */
-  parentCode?: string | null;
+  /**
+   * Names the parent ALREADY contains, so a repeat subdivide continues rather than collides.
+   *
+   * Subdivide Cabinet 3 into Rows, then do it again: without this the second run regenerates
+   * "Row 1" and — once the sibling-name unique index exists — dies partway through
+   * `materializeLocationSpec`'s sequential inserts, leaving a partial tree behind an opaque
+   * `23505`. Continuing the numbering is also what the operator meant: subdividing twice means
+   * *more rows*, not a duplicate set.
+   *
+   * Applies to the TOP level only. Deeper levels sit under containers this spec is creating
+   * fresh, so they have no pre-existing siblings by construction.
+   */
+  existingSiblingNames?: string[];
+}
+
+/** The numeric suffix of a name, or 0 — "Row 12" → 12, "Left" → 0. */
+function trailingNumber(name: string): number {
+  const m = name.match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/** A name with its numeric suffix stripped — "Row 12" → "Row", "Left" → "Left". */
+function nameBase(name: string): string {
+  return name.replace(/\s*\d+\s*$/, '').trim();
+}
+
+export interface LevelNaming {
+  /** Final names for this level, already shifted past any existing siblings. */
+  names: string[];
+  /** 1-based index the first name corresponds to. */
+  startIndex: number;
+}
+
+/**
+ * Names for one level, planned against what the parent already holds.
+ *
+ * Patterned levels continue the run: `Row {n}` × 3 under a parent that already has Row 1–3 gives
+ * **Row 4–6**, and the codes follow (`R04`–`R06`) because `startIndex` drives them too.
+ *
+ * Explicitly-named levels can't count, so a collision gets the `nextSiblingName` treatment
+ * instead: `Left` beside an existing `Left` becomes `Left 2`.
+ */
+export function planLevelNames(level: LevelSpec, existingSiblingNames: string[] = []): LevelNaming {
+  if (level.names && level.names.length > 0) {
+    const taken = new Set(existingSiblingNames.map((n) => n.trim().toLowerCase()));
+    const names = level.names
+      .map((n) => n.trim())
+      .filter(Boolean)
+      .map((nm) => {
+        let candidate = nm;
+        let n = 1;
+        while (taken.has(candidate.toLowerCase())) {
+          n += 1;
+          candidate = `${nameBase(nm) || nm} ${n}`;
+        }
+        taken.add(candidate.toLowerCase());
+        return candidate;
+      });
+    return { names, startIndex: 1 };
+  }
+
+  const count = Math.max(0, level.count ?? 0);
+  const pattern = level.namePattern || '{n}';
+  // The base of the pattern with `{n}` removed — "Row {n}" → "Row" — so only siblings of the
+  // same series shift the start. An existing "Shelf 7" must not push Rows to Row 8.
+  const base = nameBase(pattern.replace('{n}', '').trim());
+  const highest = existingSiblingNames.reduce(
+    (max, n) => (nameBase(n) === base ? Math.max(max, trailingNumber(n)) : max),
+    0,
+  );
+  const startIndex = highest + 1;
+
+  return {
+    names: Array.from({ length: count }, (_, i) => pattern.replace('{n}', String(startIndex + i))),
+    startIndex,
+  };
 }
 
 /**
@@ -47,44 +104,28 @@ export function buildSpecFromLevels(
 ): LocationSpecNode[] {
   const buildLevel = (
     depth: number,
-    parentCode: string | null,
     parentKey: string,
+    existingSiblingNames: string[],
   ): LocationSpecNode[] => {
     if (depth >= levels.length) return [];
     const level = levels[depth];
 
-    const makeNode = (i: number, name: string, code: string): LocationSpecNode => {
+    const makeNode = (i: number, name: string): LocationSpecNode => {
       const key = parentKey ? `${parentKey}/${i}` : `${i}`;
       return {
         key,
         name,
         kind: level.kind || null,
-        code,
-        children: buildLevel(depth + 1, code, key),
+        children: buildLevel(depth + 1, key, []),
       };
     };
 
-    if (level.names && level.names.length > 0) {
-      return level.names
-        .map((n) => n.trim())
-        .filter(Boolean)
-        .map((nm, i) => makeNode(i, nm, explicitCode(parentCode, nm)));
-    }
-
-    const count = Math.max(0, level.count ?? 0);
-    const width = Math.max(2, String(count).length);
-    const pattern = level.namePattern || '{n}';
-    const nodes: LocationSpecNode[] = [];
-    for (let i = 0; i < count; i++) {
-      const idx = i + 1;
-      nodes.push(
-        makeNode(i, pattern.replace('{n}', String(idx)), generatedCode(parentCode, level.kind, idx, width)),
-      );
-    }
-    return nodes;
+    // Explicit names and generated ones took different branches only to derive different code
+    // shapes; with codes gone they are one walk, since `planLevelNames` already picked the names.
+    return planLevelNames(level, existingSiblingNames).names.map((nm, i) => makeNode(i, nm));
   };
 
-  return buildLevel(0, opts.parentCode ?? null, '');
+  return buildLevel(0, '', opts.existingSiblingNames ?? []);
 }
 
 /** Total node count across the spec forest (for the live "will create N" count). */
@@ -107,38 +148,32 @@ export function removeSpecNode(nodes: LocationSpecNode[], key: string): Location
 let addSeq = 0;
 const freshKey = () => `e${addSeq++}`;
 
-/** Code for a hand-added/cloned node, reusing the generated/explicit scheme. */
-function deriveCodeFor(name: string, kind: string, parentCode: string | null): string {
-  const m = name.match(/(\d+)\s*$/);
-  if (m) return generatedCode(parentCode, kind, parseInt(m[1], 10), Math.max(2, m[1].length));
-  return explicitCode(parentCode, name);
-}
-
-/** Deep-clone a subtree with fresh keys and codes re-derived under `parentCode`. */
-function cloneSubtree(node: LocationSpecNode, parentCode: string | null, overrideName?: string): LocationSpecNode {
-  const name = overrideName ?? node.name;
-  const code = deriveCodeFor(name, node.kind ?? '', parentCode);
+/** Deep-clone a subtree with fresh keys. */
+function cloneSubtree(node: LocationSpecNode, overrideName?: string): LocationSpecNode {
   return {
     key: freshKey(),
-    name,
+    name: overrideName ?? node.name,
     kind: node.kind,
-    code,
-    children: node.children.map((c) => cloneSubtree(c, code)),
+    children: node.children.map((c) => cloneSubtree(c)),
   };
 }
 
-/** Next sibling name for a clone: bump past the highest number sharing the same
- *  base (Bin 4 → Bin 5, keeping a gap), or count the same-base siblings when
- *  they're unnumbered (Left among [Left, Right] → Left 2). */
+/**
+ * Next sibling name for a clone: bump past the highest number sharing the same base
+ * (Bin 4 → Bin 5, keeping a gap), or count the same-base siblings when they're unnumbered
+ * (Left among [Left, Right] → Left 2).
+ *
+ * Bumps ONE name. A whole regenerated run — the repeat-subdivide case — goes through
+ * `planLevelNames` instead, which shifts the entire series and its codes together.
+ */
 function nextSiblingName(siblings: LocationSpecNode[], last: LocationSpecNode): string {
-  const base = last.name.replace(/\s*\d+\s*$/, '').trim();
+  const base = nameBase(last.name);
   let maxNum = 0;
   let sameBase = 0;
   for (const s of siblings) {
-    if (s.name.replace(/\s*\d+\s*$/, '').trim() === base) {
+    if (nameBase(s.name) === base) {
       sameBase += 1;
-      const m = s.name.match(/(\d+)\s*$/);
-      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+      maxNum = Math.max(maxNum, trailingNumber(s.name));
     }
   }
   const next = (maxNum > 0 ? maxNum : sameBase) + 1;
@@ -165,32 +200,18 @@ export function addChildUnder(tree: LocationSpecNode[], parentKey: string): Loca
   return mapNode(tree, parentKey, (parent) => {
     let child: LocationSpecNode;
     if (parent.children.length === 0) {
-      child = {
-        key: freshKey(),
-        name: 'Item 1',
-        kind: 'item',
-        code: deriveCodeFor('Item 1', 'item', parent.code),
-        children: [],
-      };
+      child = { key: freshKey(), name: 'Item 1', kind: 'item', children: [] };
     } else {
       const last = parent.children[parent.children.length - 1];
-      child = cloneSubtree(last, parent.code, nextSiblingName(parent.children, last));
+      child = cloneSubtree(last, nextSiblingName(parent.children, last));
     }
     return { ...parent, children: [...parent.children, child] };
   });
 }
 
-/** Parent's code, inferred from a child's code ("C01-R03" → "C01", "C01" → null). */
-function parentCodeOf(code: string | null): string | null {
-  if (!code) return null;
-  const i = code.lastIndexOf('-');
-  return i >= 0 ? code.slice(0, i) : null;
-}
-
 /**
- * Duplicate a node (and its subtree) as the NEXT sibling — fresh keys, a bumped
- * name (Cabinet 1 → Cabinet 2), and re-derived codes under the same parent.
- * Works at any level, including top-level entries.
+ * Duplicate a node (and its subtree) as the NEXT sibling — fresh keys and a bumped
+ * name (Cabinet 1 → Cabinet 2). Works at any level, including top-level entries.
  */
 export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSpecNode[] {
   const walk = (nodes: LocationSpecNode[]): LocationSpecNode[] => {
@@ -198,7 +219,7 @@ export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSp
     for (const n of nodes) {
       out.push({ ...n, children: walk(n.children) });
       if (n.key === key) {
-        out.push(cloneSubtree(n, parentCodeOf(n.code), nextSiblingName(nodes, n)));
+        out.push(cloneSubtree(n, nextSiblingName(nodes, n)));
       }
     }
     return out;
@@ -208,18 +229,16 @@ export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSp
 
 /**
  * Duplicate a single (DB-sourced) subtree as a sibling: a bumped name past the
- * EXISTING sibling names (Cabinet 1 → Cabinet 2), fresh keys, and codes
- * re-derived under `parentCode`. Used by the Locations manager's Duplicate —
- * unlike duplicateNode it takes the real sibling names + parent code explicitly
- * (rather than inferring from an in-memory forest), so it can't collide with
- * siblings the in-memory tree doesn't know about.
+ * EXISTING sibling names (Cabinet 1 → Cabinet 2) and fresh keys. Used by the Locations manager's
+ * Duplicate — unlike duplicateNode it takes the real sibling names explicitly (rather than
+ * inferring from an in-memory forest), so it can't collide with siblings the in-memory tree
+ * doesn't know about.
  */
 export function duplicateSubtreeAsSibling(
   rootNode: LocationSpecNode,
-  parentCode: string | null,
   existingSiblingNames: string[],
 ): LocationSpecNode {
   const siblings = existingSiblingNames.map((name) => ({ ...rootNode, name, children: [] }));
-  const name = nextSiblingName(siblings, rootNode);
-  return cloneSubtree(rootNode, parentCode, name);
+  return cloneSubtree(rootNode, nextSiblingName(siblings, rootNode));
 }
+

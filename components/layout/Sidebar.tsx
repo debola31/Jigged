@@ -15,7 +15,7 @@ import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import WorkIcon from '@mui/icons-material/Work';
 import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
-import Inventory2Icon from '@mui/icons-material/Inventory2';
+import WarehouseIcon from '@mui/icons-material/WarehouseOutlined';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import FactoryIcon from '@mui/icons-material/Factory';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
@@ -50,7 +50,18 @@ const menuItems: MenuItem[] = [
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
   { name: 'Parts', path: '/parts', icon: CategoryIcon },
-  { name: 'Inventory', path: '/inventory', icon: Inventory2Icon },
+  // Two nouns carry the model: Parts is *what we have* (now with on-hand + status),
+  // Storage is *where it lives*. The old 'Inventory' item pointed at a list that was
+  // `parts WHERE is_stocked` with three extra columns — it's folded into Parts, which
+  // means Parts now IS the inventory. Keeping the word here would have the two labels
+  // swapped relative to their industry meanings: "inventory" is the items, "storage"
+  // is the places. Flag-gated, because a shop without the flag has no places at all.
+  {
+    name: 'Storage',
+    path: '/inventory/locations',
+    icon: WarehouseIcon,
+    featureFlag: 'inventory_locations',
+  },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },

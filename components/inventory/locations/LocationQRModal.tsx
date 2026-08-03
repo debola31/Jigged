@@ -46,7 +46,7 @@ export default function LocationQRModal({
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const url = buildLocationScanUrl(baseUrl, companyId, node.id);
-  const fileStem = (node.code || node.name).replace(/\s+/g, '-');
+  const fileStem = node.name.replace(/\s+/g, '-');
 
   const download = async (labels: LocationLabel[], stem: string) => {
     setBusy(true);
@@ -64,7 +64,7 @@ export default function LocationQRModal({
   };
 
   const subtreeCount = labels.length;
-  const thisLabel: LocationLabel = { id: node.id, path, code: node.code };
+  const thisLabel: LocationLabel = { id: node.id, path };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
@@ -74,11 +74,6 @@ export default function LocationQRModal({
           <Paper elevation={0} sx={{ p: 2, bgcolor: 'white', borderRadius: 2 }}>
             <QRCodeCanvas value={url} size={200} level="H" includeMargin bgColor="#ffffff" fgColor="#000000" />
           </Paper>
-          {node.code && (
-            <Typography variant="body2" color="text.secondary">
-              {node.code}
-            </Typography>
-          )}
           <Box sx={{ width: '100%' }}>
             <Button
               fullWidth

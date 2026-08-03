@@ -29,8 +29,6 @@ import {
 } from '@/utils/partsAccess';
 import { parseBackChain } from '@/lib/partNavStack';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
-import type { InventoryTransactionType } from '@/types/partTransaction';
-import PartTransactionModal from '@/components/parts/PartTransactionModal';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 
 import PartIdentitySection from './PartIdentitySection';
@@ -69,17 +67,17 @@ export default function PartWorkspace({
   const partId = params.partId as string | undefined;
   const { setTitle } = usePageTitle();
 
-  // Breadcrumb root reflects where the user entered from (Parts vs Inventory).
-  const partsListHref = useMemo(() => {
-    const from = searchParams.get('from');
-    if (from === 'inventory') return `/dashboard/${companyId}/inventory`;
-    return `/dashboard/${companyId}/parts`;
-  }, [companyId, searchParams]);
-
-  const partsListLabel = useMemo(
-    () => (searchParams.get('from') === 'inventory' ? 'Inventory' : 'Parts'),
-    [searchParams],
-  );
+  /**
+   * Breadcrumb root. There is only one parts list now.
+   *
+   * This used to branch on `?from=inventory` to a crumb reading "Inventory" and pointing at
+   * `/dashboard/{id}/inventory`. Both halves went stale when that page was deleted: the label named
+   * a page that no longer exists and the href redirected to Parts anyway. Nothing emits the param
+   * any more either — its producers were the deleted list's row-click and Add Item — so only a stale
+   * bookmark can carry it, and it now gets an honest "Parts" crumb instead of a mislabelled redirect.
+   */
+  const partsListHref = `/dashboard/${companyId}/parts`;
+  const partsListLabel = 'Parts';
 
   // BOM drill-down chain from `?back=id1,id2,id3` (oldest → most recent).
   const currentChain = useMemo(() => parseBackChain(searchParams), [searchParams]);
@@ -116,9 +114,6 @@ export default function PartWorkspace({
   // seed fetched on load (the editor owns the live list once it mounts). Reset
   // to null on a fresh part (partId-change remounts this component anyway).
   const [conversionsOverride, setConversionsOverride] = useState<PartUnitConversion[] | null>(null);
-
-  const [txnModalOpen, setTxnModalOpen] = useState(false);
-  const [txnModalType, setTxnModalType] = useState<InventoryTransactionType>('addition');
 
   // Priceability — the same compute_part_cost machinery the parts list uses,
   // so the completeness chip can't disagree with the list ✓/⚠ column. null
@@ -163,6 +158,9 @@ export default function PartWorkspace({
     },
   );
   const part = loadData?.part ?? null;
+  // Fed the deleted aggregate modal; now feeds the location modal's unit dropdown, so a shop can
+  // actually USE a conversion it has defined. `conversionsOverride` is what the editor writes
+  // back, so the dropdown updates without a re-fetch.
   const unitConversions = conversionsOverride ?? loadData?.conversions ?? EMPTY_CONVERSIONS;
   // Create mode never fetches (no partId); only existing mode shows the spinner.
   const loading = mode === 'existing' && partLoading;
@@ -249,11 +247,6 @@ export default function PartWorkspace({
       setDeleteDialogOpen(false);
     }
   };
-
-  const openTxnModal = useCallback((type: InventoryTransactionType) => {
-    setTxnModalType(type);
-    setTxnModalOpen(true);
-  }, []);
 
   const handleTxnSuccess = () => {
     // Bumping transactionsRefreshKey re-runs the part fetch (a useLoad dep) in
@@ -452,7 +445,7 @@ export default function PartWorkspace({
           partId={partId}
           companyId={companyId}
           transactionsRefreshKey={transactionsRefreshKey}
-          openTxnModal={openTxnModal}
+          unitConversions={unitConversions}
           onConversionsChanged={setConversionsOverride}
           onStockChanged={handleTxnSuccess}
         />
@@ -468,18 +461,12 @@ export default function PartWorkspace({
         <HistoryTab partId={partId} companyId={companyId} createdAt={part.created_at} />
       )}
 
-      {/* Stock transaction modal (owned here; triggered from the Inventory tab) */}
-      {part.is_stocked && (
-        <PartTransactionModal
-          open={txnModalOpen}
-          onClose={() => setTxnModalOpen(false)}
-          companyId={companyId}
-          part={part}
-          unitConversions={unitConversions}
-          defaultType={txnModalType}
-          onSuccess={handleTxnSuccess}
-        />
-      )}
+      {/*
+        `PartTransactionModal` was removed with `is_location_tracked` (20260802015837). It was the
+        aggregate write path — three buttons that wrote `parts.quantity` straight from the browser
+        for parts that had no places. Every part has a place now, so every write goes through an
+        `*_at_location` RPC and the modal has no case left to serve.
+      */}
 
       {/* Delete confirmation */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>

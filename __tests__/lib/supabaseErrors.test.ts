@@ -205,6 +205,65 @@ describe('friendlyErrorMessage', () => {
   });
 });
 
+/**
+ * `check_violation` from our own RPCs.
+ *
+ * The stock RPCs raise their user-facing messages with `ERRCODE = 'check_violation'`, not `P0001`
+ * — so before this every one of them was replaced by a generic fallback. An operator moving more
+ * than a shelf holds was told "Failed to update stock" instead of how much was actually there.
+ *
+ * It can't be a blanket pass-through, because a real table CHECK raises the same code with raw
+ * Postgres wording that must never reach a user.
+ */
+describe('friendlyErrorMessage — deliberate check violations', () => {
+  it('passes through a message our own RPC wrote', () => {
+    expect(
+      friendlyErrorMessage(
+        { code: '23514', message: 'Insufficient stock at source location (have 5, need 10)' },
+        { entity: 'stock', fallback: 'Failed to update stock.' },
+      ),
+    ).toBe('Insufficient stock at source location (have 5, need 10)');
+  });
+
+  it('passes through the put-away cap message', () => {
+    expect(
+      friendlyErrorMessage(
+        { code: '23514', message: 'Too many parts at once (1001 of a maximum 1000).' },
+        { fallback: 'nope' },
+      ),
+    ).toMatch(/Too many parts at once/);
+  });
+
+  it('does NOT leak a real table CHECK constraint failure', () => {
+    expect(
+      friendlyErrorMessage(
+        {
+          code: '23514',
+          message:
+            'new row for relation "parts" violates check constraint "parts_requires_unit"',
+        },
+        { fallback: 'Could not save the part.' },
+      ),
+    ).toBe('Could not save the part.');
+  });
+
+  it('does not leak a not-null constraint failure either', () => {
+    expect(
+      friendlyErrorMessage(
+        { code: '23514', message: 'null value violates not-null constraint' },
+        { fallback: 'Could not save.' },
+      ),
+    ).toBe('Could not save.');
+  });
+
+  // Permission and auth are more actionable, so they still win.
+  it('still prefers the permission message over a raised one', () => {
+    expect(
+      friendlyErrorMessage({ code: '23514', message: 'permission denied for table parts' }),
+    ).toMatch(/don't have permission/);
+  });
+});
+
 describe('isTransientAbortError', () => {
   // The exact shape @supabase/auth-js rejects with when another call steals the auth
   // lock. Recovered from the __serialized__ extra on Sentry JAVASCRIPT-NEXTJS-9.

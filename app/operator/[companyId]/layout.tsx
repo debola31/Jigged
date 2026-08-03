@@ -530,7 +530,18 @@ function OperatorShell({
           p: 2,
         }}
       >
-        {children}
+        {/*
+          The operator surface is a phone, and nothing was enforcing that.
+          On a desktop browser every card stretched to the full window — a four-line movement row
+          rendered ~1,900px wide with the text in the leftmost fifth, which is what made the
+          activity feed look sparse and unreadable rather than dense. A phone-width column is the
+          honest rendering of a phone-first app in a big window, and it costs one rule here
+          instead of a `maxWidth` on each of the pages inside.
+
+          Applies to every operator screen, deliberately — Jobs and Me had the same problem and
+          nobody had noticed because nobody opens them on a monitor.
+        */}
+        <Box sx={{ maxWidth: 680, mx: 'auto' }}>{children}</Box>
       </Box>
 
       {/* Bottom Navigation — hidden only on the bare station-selection screen */}

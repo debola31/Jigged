@@ -4,6 +4,7 @@ import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import PrecisionManufacturingOutlinedIcon from '@mui/icons-material/PrecisionManufacturingOutlined';
@@ -56,6 +57,13 @@ export function getActivityVisual(item: ActivityItem): { icon: SvgIconComponent;
       return { icon: PhotoCameraOutlinedIcon, color: 'info.main' };
     case 'shipment':
       return { icon: LocalShippingOutlinedIcon, color: 'secondary.main' };
+    case 'inventory':
+      // Colour means the amount on hand changed, or something needs attention — the same policy
+      // the operator's feed settled on. A MOVE changes no total, so it stays neutral rather than
+      // claiming a third meaning for a third hue.
+      if (item.action === 'stock_in') return { icon: Inventory2OutlinedIcon, color: 'success.main' };
+      if (item.action === 'stock_out') return { icon: Inventory2OutlinedIcon, color: 'warning.main' };
+      return { icon: Inventory2OutlinedIcon, color: 'text.secondary' };
     case 'operation':
       // Outside-op send/receive get the truck (amber out, green back); internal
       // completion keeps the machining icon.
@@ -86,6 +94,14 @@ export function formatActivityText(item: ActivityItem): string {
       return item.customerName ? `Quote created for ${item.customerName}` : 'Quote created';
     case 'shipment':
       return item.customerName ? `Shipped to ${item.customerName}` : 'Shipped';
+    case 'inventory': {
+      const where = item.locationName ? ` at ${item.locationName}` : '';
+      const qty = item.quantityLabel ?? '';
+      if (item.action === 'moved') return `${qty} moved to ${item.locationName ?? 'another place'}`;
+      if (item.action === 'stock_in') return `${qty} added${where}`;
+      if (item.action === 'stock_out') return `${qty} taken${where}`;
+      return `Counted — set to ${qty}${where}`;
+    }
     case 'note':
       return `${who} added a note`;
     case 'photo':

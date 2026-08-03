@@ -62,7 +62,7 @@ export default function PartTransactionHistoryTable({
           page * rowsPerPage,
           rowsPerPage,
         );
-        setTransactions(data as InventoryTransactionWithRelations[]);
+        setTransactions(data);
         setTotal(count);
       } catch (err) {
         console.error('Error fetching transactions:', err);
@@ -163,6 +163,15 @@ export default function PartTransactionHistoryTable({
                     <Typography variant="body2">
                       {formatTransactionDate(transaction.created_at)}
                     </Typography>
+                    {/* Who did it. The column was fetched and dropped on the floor until now, so
+                        an operator's phone had a better view of this ledger than the desk did.
+                        Rows written before `operator_id` was populated show no name rather than
+                        "Unknown" — the absence is honest, an invented author is not. */}
+                    {transaction.operator && (
+                      <Typography variant="caption" color="text.secondary">
+                        {transaction.operator.name}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -172,9 +181,12 @@ export default function PartTransactionHistoryTable({
                         color={typeDisplay.color}
                         variant="outlined"
                       />
+                      {/* "Shortfall" — the specific thing recorded. `has_discrepancy` is set only
+                          by a graceful over-removal, where the shelf held less than the system
+                          thought; "Discrepancy" invited it to be read as any mismatch. */}
                       {transaction.has_discrepancy && (
                         <Chip
-                          label="Discrepancy"
+                          label="Shortfall"
                           size="small"
                           color="warning"
                           variant="filled"
@@ -268,6 +280,35 @@ export default function PartTransactionHistoryTable({
                         >
                           <EditIcon sx={{ fontSize: 14 }} />
                         </IconButton>
+                        {/* 40px, not the 64px `BinHistory` uses: that is a card list on a phone,
+                            this is a table row on a monitor. The link opens the full-size object,
+                            which is where you actually read a shelf photo. */}
+                        {transaction.photo_url && (
+                          <Box
+                            component="a"
+                            href={transaction.photo_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ display: 'inline-flex', flexShrink: 0 }}
+                          >
+                            <Box
+                              component="img"
+                              src={transaction.photo_url}
+                              alt={`Photo taken when ${transaction.item_name} was moved`}
+                              sx={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 1,
+                                // `contain`: a cropped thumbnail of a shelf can hide the very
+                                // thing the photo was taken to show.
+                                objectFit: 'contain',
+                                bgcolor: 'action.hover',
+                                border: 1,
+                                borderColor: 'divider',
+                              }}
+                            />
+                          </Box>
+                        )}
                       </Box>
                     )}
                   </TableCell>

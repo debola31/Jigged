@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -11,7 +12,6 @@ import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
-import Autocomplete from '@mui/material/Autocomplete';
 
 import {
   addStockAtLocation,
@@ -21,6 +21,11 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import MovementPhotoField from '@/components/operator/MovementPhotoField';
+import { generateStoragePath, uploadFileToStorage } from '@/utils/storageHelpers';
+import LocationPicker, {
+  type LocationPickerOption,
+} from '@/components/inventory/locations/LocationPicker';
 import type { JobWithRelations } from '@/types/job';
 
 export type OperatorLocationAction = 'add' | 'deplete' | 'adjust' | 'move';
@@ -30,7 +35,9 @@ export type OperatorLocationAction = 'add' | 'deplete' | 'adjust' | 'move';
 const TITLES: Record<OperatorLocationAction, string> = {
   add: 'Add stock',
   deplete: 'Remove stock',
-  adjust: 'Adjust stock (cycle count)',
+  // See the note on the owner-side modal: "cycle count" is jargon, and this one is read
+  // on a phone by whoever is standing at the shelf.
+  adjust: 'Set the true quantity',
   move: 'Move stock to another location',
 };
 
@@ -54,7 +61,7 @@ interface OperatorLocationActionModalProps {
   locationId: string;
   locationName: string;
   /** Where a Move can go. Loaded by the parent; empty for the other actions. */
-  moveDestinations?: Array<{ id: string; label: string }>;
+  moveDestinations?: LocationPickerOption[];
   /** user_company_access.id of the signed-in operator (for the ledger). */
   operatorId: string | null;
   onClose: () => void;
@@ -96,6 +103,13 @@ export default function OperatorLocationActionModal({
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
   const [destination, setDestination] = useState<{ id: string; label: string } | null>(null);
+  /**
+   * Optional evidence, on the two actions where material physically lands somewhere. Not on
+   * `deplete` (nothing to show — the stock left) and not on `adjust` (a correction to a number,
+   * whose evidence is the count that produced it).
+   */
+  const [photo, setPhoto] = useState<File | null>(null);
+  const showPhoto = action === 'add' || action === 'move';
 
   const handleEnter = async () => {
     setQuantity('');
@@ -104,6 +118,7 @@ export default function OperatorLocationActionModal({
     setError(null);
     setJob(null);
     setDestination(null);
+    setPhoto(null);
     if (action !== 'deplete') return;
     setLoadingJobs(true);
     // loadTaggableJobs swallows failures — the tag is optional and must never block a removal.
@@ -126,8 +141,45 @@ export default function OperatorLocationActionModal({
     setSaving(true);
     setError(null);
     try {
+      /**
+       * Upload BEFORE the write, never after.
+       *
+       * `photo_path` is set at INSERT inside the RPC and is immutable afterwards, so there is no
+       * second step in which to attach it. The cost is that a failed RPC leaves an orphaned object
+       * in the bucket; the alternative — insert, upload, then UPDATE the path — needs the column to
+       * stay mutable, and evidence that can be swapped later is not evidence.
+       *
+       * A failed UPLOAD does abort the write, because saving silently without the photo the
+       * operator just attached would be a lie about what was recorded.
+       */
+      let photoPath: string | undefined;
+      if (photo && showPhoto) {
+        const path = generateStoragePath(companyId, 'inventory-transactions', locationId, photo.name);
+        try {
+          await uploadFileToStorage(path, photo);
+        } catch (e) {
+          // Named separately from the write's own failure. The shared mapper would render this as
+          // "Failed to update stock", which points at the quantity — so an operator would retype a
+          // number that was never the problem, on a shop-wifi upload that just needs retrying.
+          setError(
+            `Couldn't upload the photo (${
+              e instanceof Error ? e.message : 'unknown error'
+            }). Nothing was recorded — try again, or remove the photo and save.`,
+          );
+          setSaving(false);
+          return;
+        }
+        photoPath = path;
+      }
+
       if (action === 'add') {
-        await addStockAtLocation(partId, locationId, qty, unit, notes || undefined);
+        // operatorId on every write, not just depletion: bin history has to be able to name
+        // who put something away, and `created_by` (an auth user) is unreadable from the browser.
+        await addStockAtLocation(partId, locationId, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+          photoPath,
+        });
       } else if (action === 'deplete') {
         await depleteStockAtLocation(partId, locationId, qty, unit, {
           graceful: true,
@@ -136,10 +188,24 @@ export default function OperatorLocationActionModal({
           jobId: job?.id || undefined, // tie to the job, not an operation
         });
       } else if (action === 'adjust') {
-        await adjustStockAtLocation(partId, locationId, qty, unit, notes || undefined);
+        await adjustStockAtLocation(partId, locationId, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+        });
       } else {
-        await transferStock(partId, locationId, destination!.id, qty, unit, notes || undefined);
+        await transferStock(partId, locationId, destination!.id, qty, unit, {
+          notes: notes || undefined,
+          operatorId: operatorId || undefined,
+          photoPath,
+        });
       }
+      posthog.capture('operator_inventory_stock_updated', {
+        action,
+        part_id: partId,
+        quantity: qty,
+        unit,
+        location_id: locationId,
+      });
       await onDone();
       onClose();
     } catch (e) {
@@ -197,14 +263,17 @@ export default function OperatorLocationActionModal({
             </Typography>
           )}
           {action === 'move' && (
-            <Autocomplete
+            // Shared with the admin part page, so the two can't drift again. `excludeSystem`
+            // matters here: an operator moving something off a shelf is never trying to put it
+            // back on the "nowhere in particular" pile.
+            <LocationPicker
+              label="Move to"
               options={moveDestinations}
               value={destination}
-              onChange={(_, v) => setDestination(v)}
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(o, v) => o.id === v.id}
-              renderInput={(params) => <TextField {...params} label="Move to" required />}
-              noOptionsText="No other locations"
+              onChange={setDestination}
+              excludeId={locationId}
+              excludeSystem
+              required
             />
           )}
           {action === 'deplete' && (
@@ -218,6 +287,12 @@ export default function OperatorLocationActionModal({
             minRows={2}
             fullWidth
           />
+          {/* Below the notes, and never required. This flow runs dozens of times a shift; a photo
+              is the thing a ledger row cannot record — what the shelf looks like now — but an
+              unphotographed movement is the normal case. */}
+          {showPhoto && (
+            <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
+          )}
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>

@@ -27,6 +27,25 @@ export function deriveStockStatus(
   return 'in_stock';
 }
 
+/**
+ * How many units short of the reorder point, or null when the question doesn't apply.
+ *
+ * Derived, never stored — same discipline as `deriveStockStatus`, so the two cannot disagree.
+ * Returns **0 at equality** rather than null: a part sitting exactly on its reorder point IS at
+ * the line and belongs on the buy list; collapsing that to "no shortfall" would quietly drop the
+ * row the reorder point exists to catch.
+ */
+export function shortfall(
+  quantity: number | null | undefined,
+  reorderPoint: number | null | undefined,
+): number | null {
+  if (reorderPoint === null || reorderPoint === undefined) return null;
+  const q = Number(quantity ?? 0);
+  const r = Number(reorderPoint);
+  if (q > r) return null;
+  return r - q;
+}
+
 interface Visual {
   label: string;
   color: string;

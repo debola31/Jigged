@@ -6,8 +6,11 @@
  * was no test and no acceptance criterion pinning it** — see docs/modules/inventory.md §7,
  * "Validated feedback had no protection". This file is that protection.
  *
- * Both owner-side write paths are covered: the aggregate engine (PartTransactionModal →
- * removePartStock) and the location engine (PartLocationActionModal → depleteStockAtLocation).
+ * There is one owner-side write path now: PartLocationActionModal → depleteStockAtLocation. The
+ * aggregate engine this file also covered (PartTransactionModal → removePartStock) was deleted in
+ * 20260802015837 with `is_location_tracked`, so its half of the protection moved down here rather
+ * than being dropped — including the two cases it alone held: an adjustment offers no job tag, and
+ * a failing jobs query must not block recording stock that physically moved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -15,25 +18,24 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
-vi.mock('@/utils/partsAccess', () => ({
-  addPartStock: vi.fn(),
-  removePartStock: vi.fn(),
-  adjustPartStock: vi.fn(),
-}));
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
 }));
+/** New: the modal resolves the acting member so owner-side writes carry an author. */
+vi.mock('@/utils/operatorAccess', () => ({
+  getCurrentMember: vi.fn(async () => ({ id: 'member-1', name: 'Owner' })),
+}));
+
 vi.mock('@/utils/jobsAccess', () => ({ getAllJobs: vi.fn() }));
 
-import PartTransactionModal from '@/components/parts/PartTransactionModal';
-import PartLocationActionModal from '@/components/parts/PartLocationActionModal';
-import { removePartStock } from '@/utils/partsAccess';
+import PartLocationActionModal, {
+  type LocationAction,
+} from '@/components/parts/PartLocationActionModal';
 import { depleteStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import { getAllJobs } from '@/utils/jobsAccess';
-import type { Part } from '@/types/part';
 import type { JobWithRelations } from '@/types/job';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
@@ -43,14 +45,6 @@ const JOBS = [
   { id: 'job-2', job_number: 'J-1048', job_parts: [] },
 ] as unknown as JobWithRelations[];
 
-const PART = {
-  id: 'p1',
-  part_name: 'BUY-ORING-214',
-  primary_unit: 'each',
-  quantity: 500,
-  is_stocked: true,
-} as unknown as Part;
-
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider>
 );
@@ -58,81 +52,11 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 beforeEach(() => {
   vi.clearAllMocks();
   asMock(getAllJobs).mockResolvedValue(JOBS);
-  asMock(removePartStock).mockResolvedValue({});
   asMock(depleteStockAtLocation).mockResolvedValue({});
 });
 
-const renderTxn = (defaultType: 'addition' | 'depletion' | 'adjustment') =>
-  render(
-    <PartTransactionModal
-      open
-      onClose={vi.fn()}
-      companyId="co1"
-      part={PART}
-      unitConversions={[]}
-      defaultType={defaultType}
-    />,
-    { wrapper },
-  );
-
-describe('PartTransactionModal — job tag on removal (#59)', () => {
-  it('passes the chosen job through to removePartStock', async () => {
-    const user = userEvent.setup();
-    renderTxn('depletion');
-
-    const picker = await screen.findByRole('combobox', { name: /tag to a job/i });
-    await user.click(picker);
-    await user.click(await screen.findByRole('option', { name: /J-1047/ }));
-
-    await user.clear(screen.getByRole('spinbutton', { name: /quantity/i }));
-    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '4');
-    await user.click(screen.getByRole('button', { name: /remove stock/i }));
-
-    await waitFor(() =>
-      expect(removePartStock).toHaveBeenCalledWith('p1', 4, 'each', '', 'job-1'),
-    );
-  });
-
-  // The tag is optional — a removal with no job must still be recordable.
-  it('records the removal with no job when none is chosen', async () => {
-    const user = userEvent.setup();
-    renderTxn('depletion');
-    await screen.findByRole('combobox', { name: /tag to a job/i });
-
-    await user.clear(screen.getByRole('spinbutton', { name: /quantity/i }));
-    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '2');
-    await user.click(screen.getByRole('button', { name: /remove stock/i }));
-
-    await waitFor(() =>
-      expect(removePartStock).toHaveBeenCalledWith('p1', 2, 'each', '', undefined),
-    );
-  });
-
-  // An addition or an adjustment isn't consumption, so a job on it would mean nothing.
-  it.each([['addition'], ['adjustment']] as const)('offers no job tag for a %s', async (type) => {
-    renderTxn(type);
-    await waitFor(() => expect(getAllJobs).toHaveBeenCalled());
-    expect(screen.queryByRole('combobox', { name: /tag to a job/i })).not.toBeInTheDocument();
-  });
-
-  // A failing jobs query must not stop someone recording stock that physically moved.
-  it('still allows the removal when the job list fails to load', async () => {
-    asMock(getAllJobs).mockRejectedValue(new Error('offline'));
-    const user = userEvent.setup();
-    renderTxn('depletion');
-
-    await user.clear(await screen.findByRole('spinbutton', { name: /quantity/i }));
-    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '3');
-    await user.click(screen.getByRole('button', { name: /remove stock/i }));
-
-    await waitFor(() =>
-      expect(removePartStock).toHaveBeenCalledWith('p1', 3, 'each', '', undefined),
-    );
-  });
-});
-
 describe('PartLocationActionModal — job tag on removal (#59)', () => {
-  const renderLoc = (action: 'deplete' | 'add') =>
+  const renderLoc = (action: LocationAction) =>
     render(
       <PartLocationActionModal
         open
@@ -141,7 +65,10 @@ describe('PartLocationActionModal — job tag on removal (#59)', () => {
         partId="p1"
         primaryUnit="each"
         unitOptions={['each']}
-        locations={[{ id: 'l1', label: 'Shelf A' }]}
+        locations={[
+          { id: 'l1', label: 'Shelf A' },
+          { id: 'l2', label: 'Shelf B' },
+        ]}
         onClose={vi.fn()}
         onDone={vi.fn()}
       />,
@@ -168,10 +95,59 @@ describe('PartLocationActionModal — job tag on removal (#59)', () => {
     );
   });
 
-  it('offers no job tag when adding stock', async () => {
-    renderLoc('add');
+  /**
+   * One place in the whole shop → no destination to choose, so the picker is replaced by a line
+   * of text and the lone place is pre-selected. This is the ordinary shape for a shop without the
+   * `inventory_locations` flag, where the auto-managed `Unassigned` bucket is all there is.
+   */
+  it('states the place instead of asking, when there is only one', async () => {
+    const user = userEvent.setup();
+    render(
+      <PartLocationActionModal
+        open
+        action="deplete"
+        companyId="co1"
+        partId="p1"
+        primaryUnit="each"
+        unitOptions={['each']}
+        locations={[{ id: 'l1', label: 'Unassigned' }]}
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />,
+      { wrapper },
+    );
+
+    expect(await screen.findByText('Unassigned')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /location/i })).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '2');
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    // Pre-selected, not merely hidden — the write must still name the place.
+    await waitFor(() =>
+      expect(depleteStockAtLocation).toHaveBeenCalledWith('p1', 'l1', 2, 'each', expect.anything()),
+    );
+  });
+
+  // An addition or an adjustment isn't consumption, so a job on it would mean nothing.
+  it.each([['add'], ['adjust']] as const)('offers no job tag for a %s', async (action) => {
+    renderLoc(action);
     await screen.findByRole('combobox', { name: /location/i });
     expect(screen.queryByRole('combobox', { name: /tag to a job/i })).not.toBeInTheDocument();
+  });
+
+  // A failing jobs query must not stop someone recording stock that physically moved.
+  it('still allows the removal when the job list fails to load', async () => {
+    asMock(getAllJobs).mockRejectedValue(new Error('offline'));
+    const user = userEvent.setup();
+    renderLoc('deplete');
+
+    await user.click(await screen.findByRole('combobox', { name: /location/i }));
+    await user.click(await screen.findByRole('option', { name: /^Shelf A/ }));
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '3');
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(depleteStockAtLocation).toHaveBeenCalled());
   });
 });
 

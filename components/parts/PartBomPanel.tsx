@@ -376,8 +376,9 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        // has_routing/quantity are display-only fillers — synthesize the option
-        // from the BOM row.
+        // has_routing/quantity are display-only fillers — synthesize the
+        // option from the BOM row, which carries none of them. The material editor shows a name
+        // and a unit; it never reads stock, so a filler here cannot mislead anyone.
         childPart: {
           id: editingRow.child_part.id,
           part_name: editingRow.child_part.part_name,

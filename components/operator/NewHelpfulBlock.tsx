@@ -74,17 +74,35 @@ function HelpfulRow({ item }: { item: NewHelpful }) {
   const { text, hidden } = names(item.names, expanded);
 
   return (
-    <Box component="li" sx={{ display: 'block', mb: 1.5, '&:last-of-type': { mb: 0 } }}>
+    <Box component="li" sx={{ display: 'block', mb: 2, '&:last-of-type': { mb: 0 } }}>
       {/* The note leads, in the operator's own words — a summary that carries only a
-          count cannot tell them WHICH note, and the specificity is the whole point. */}
+          count cannot tell them WHICH note, and the specificity is the whole point.
+          It is marked as a QUOTATION rather than set in bold: bold made it read as the
+          block's own headline, so the one thing the surface has to convey — that this is
+          something YOU wrote — was the thing it did not say. The rule and indent carry
+          that visually; "your note" below carries it in words, for a screen reader and
+          for anyone who reads the sentence before the styling. */}
       {item.body && (
-        <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'pre-wrap' }}>
+        <Typography
+          component="blockquote"
+          variant="body2"
+          sx={{
+            m: 0,
+            pl: 1.25,
+            borderLeft: '3px solid',
+            // Neutral rather than another green: the panel is already tinted, and a
+            // second accent would read as status rather than as quotation.
+            borderColor: 'rgba(255, 255, 255, 0.28)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
           {item.body}
         </Typography>
       )}
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-        {/* "found it helpful" reads correctly for one name or several, so no plural branch. */}
-        {text} found it helpful
+      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+        {/* Reads correctly for one name or several, so no plural branch. "your note"
+            rather than "it" — with several notes in the block, "it" has no antecedent. */}
+        {text} found your note helpful
         {hidden > 0 && (
           <>
             {', and '}

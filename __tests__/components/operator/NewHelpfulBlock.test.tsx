@@ -28,7 +28,7 @@ describe('New since you last looked', () => {
     render(<NewHelpfulBlock items={[item()]} onDismiss={vi.fn()} />);
 
     expect(screen.getByText(/Clamp on the boss/)).toBeInTheDocument();
-    expect(screen.getByText(/Sam Carter found it helpful/)).toBeInTheDocument();
+    expect(screen.getByText(/Sam Carter found your note helpful/)).toBeInTheDocument();
     // Never a nameless count, which is the banner's job and not this one's.
     expect(screen.queryByText(/1 person/i)).not.toBeInTheDocument();
   });
@@ -49,7 +49,7 @@ describe('New since you last looked', () => {
 
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(
-      screen.getByText(/Sam Carter, Dee Novak and Ray Ellis found it helpful/),
+      screen.getByText(/Sam Carter, Dee Novak and Ray Ellis found your note helpful/),
     ).toBeInTheDocument();
   });
 
@@ -119,11 +119,29 @@ describe('New since you last looked', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  /**
+   * The quoted text has to read as SOMETHING YOU WROTE. Set in bold with no framing it
+   * read as the block's own headline instead — "hard to tell that it is a note written by
+   * the user", from looking at the shipped surface on a phone. Both channels carry it now:
+   * a blockquote visually, and "your note" in the sentence, which is the half a screen
+   * reader gets.
+   */
+  it('marks the quoted text as the operator\'s own note, in words and in markup', () => {
+    const { container } = render(<NewHelpfulBlock items={[item()]} onDismiss={vi.fn()} />);
+
+    const quote = container.querySelector('blockquote');
+    expect(quote).not.toBeNull();
+    expect(quote).toHaveTextContent('Clamp on the boss');
+    expect(screen.getByText(/found your note helpful/)).toBeInTheDocument();
+    // "it" has no antecedent once the block holds more than one note.
+    expect(screen.queryByText(/found it helpful/)).not.toBeInTheDocument();
+  });
+
   it('survives a photo-only note, which has no body to quote', () => {
     render(<NewHelpfulBlock items={[item({ body: null })]} onDismiss={vi.fn()} />);
 
     const row = within(screen.getAllByRole('listitem')[0]!);
-    expect(row.getByText(/Sam Carter found it helpful/)).toBeInTheDocument();
+    expect(row.getByText(/Sam Carter found your note helpful/)).toBeInTheDocument();
   });
 
   /**

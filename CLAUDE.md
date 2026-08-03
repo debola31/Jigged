@@ -66,7 +66,7 @@ This applies to every layer:
 - Backend: no endpoint that generates AI summaries "on read" as a side effect. If an endpoint is called by a mounting component, it must not be able to reach a paid AI provider.
 - Background jobs: fine, but must be infrequent (e.g. hourly or daily) and rate-limited per company. Never wire a background job to "on user login" or "on page view".
 
-**Why:** we previously had `AlertBadge` → `/api/insights/{id}/dashboard` firing 5 Anthropic calls on every dashboard page load. Users never saw the AI summaries — the bell icon only read the raw metric arrays. Credits ran out in days. Every new AI feature must pass the "what user action triggered this?" test before merging.
+**Why:** we once had a header alert badge calling `/api/insights/{id}/dashboard`, firing 5 Anthropic calls on every dashboard page load. Users never saw the AI summaries — the bell icon only read the raw metric arrays. Credits ran out in days. (Both the endpoint and the badge have since been removed, but the failure mode is what matters.) Every new AI feature must pass the "what user action triggered this?" test before merging.
 
 **How to apply:** when adding an AI feature, the entry point must be a button, form submit, or explicit refresh gesture — not a lifecycle hook. If you need fresh data for a passive UI (badge counts, dashboards), compute it from Supabase without AI, or cache it in a dedicated table populated by a scheduled job. If you're unsure whether a code path can fire on mount, grep for `useEffect`/`onMount` callers and trace up from the AI call site.
 
@@ -801,7 +801,6 @@ Product documentation is version-controlled in the `/docs` folder.
 | Product Requirements | [docs/prd.md](docs/prd.md) |
 | System Architecture | [docs/architecture.md](docs/architecture.md) |
 | Design System | [docs/design-system.md](docs/design-system.md) |
-| Operator Paperless Flow (journey spec) | [docs/operator-paperless-flow.md](docs/operator-paperless-flow.md) |
 | Observability (Sentry / PostHog / Vercel) | [docs/observability.md](docs/observability.md) |
 
 ### Module Specifications
@@ -816,7 +815,7 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Dashboard](docs/modules/dashboard.md)
 - [Routings](docs/modules/routings.md)
 - [Inventory](docs/modules/inventory.md)
-- [Operator View](docs/modules/operator-view.md)
+- [Operator View](docs/modules/operator-view.md) — carries the operator journeys too
 - [Machine Maintenance](docs/modules/machine-maintenance.md) (operator-logged machine logbook; flag-gated pilot with a written kill criterion)
 - [Invitation System](docs/modules/invitation-system.md)
 - [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))

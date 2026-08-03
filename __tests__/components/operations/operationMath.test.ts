@@ -6,8 +6,9 @@ import {
   completionConsequenceCaption,
 } from '@/components/operations/operationMath';
 
-// Acceptance criteria AC1–AC5 from the design doc
-// (docs/modules/partial-operation-completion-design.md).
+// Acceptance criteria AC1–AC5, now in
+// docs/modules/operator-view.md#recording-a-completion (the design doc was
+// folded in and deleted once the work shipped).
 
 describe('operationQtyRemaining', () => {
   it('AC1: remaining = target − good, clamped ≥ 0', () => {

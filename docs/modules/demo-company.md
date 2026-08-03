@@ -861,7 +861,7 @@ if (!hasDemoCompany) {
 
 ## 12. Acceptance Criteria
 
-> **SUPERSEDED — historical, not verifiable.** This checklist describes the v1 Demo Company design, which was never built and does not ship. None of the artifacts below exist in the codebase (`demo_templates`, `clone_demo_company()`, `companies.demo_template_id`/`demo_owner_id`, `DemoBanner`, the `/api/demo/*` routes, PIN-authenticated demo operators). The shipping feature is [Demo Mode](./demo-mode.md) — see its §12 for the live acceptance criteria and `docs/testing/divergence/demo-company.md` for the supersession evidence. The items are kept below verbatim for historical record only.
+> **SUPERSEDED — historical, not verifiable.** This checklist describes the v1 Demo Company design, which was never built and does not ship. None of the artifacts below exist in the codebase (`demo_templates`, `clone_demo_company()`, `companies.demo_template_id`/`demo_owner_id`, `DemoBanner`, the `/api/demo/*` routes, PIN-authenticated demo operators). The shipping feature is [Demo Mode](./demo-mode.md) — see its §12 for the live acceptance criteria, and `demo-mode.md` §16 "Supersedes" for the supersession record. The items are kept below verbatim for historical record only.
 
 - ~~`system_admins` table exists with RLS policies~~ *(revived under Demo Mode)*
 - ~~`is_system_admin()` function works correctly with `SECURITY DEFINER`~~ *(revived under Demo Mode)*

@@ -700,6 +700,49 @@ describe('counting one place', () => {
     );
   });
 
+  /**
+   * The search box debounces into `serverSearch` on a 300ms timer, and that timer also fires
+   * ~300ms after MOUNT, when the term has not changed. It used to reset the page
+   * unconditionally, so paging within 300ms of opening a bin silently yanked the operator
+   * back to page 1. Measured call sequence before the fix:
+   *
+   *     offset 0  (initial load) → offset 2 (the click) → offset 0 (the mount timer)
+   *
+   * Invisible locally, because the timer usually expires before a human can click, and
+   * deterministic on a loaded CI runner — which is how it was found, as the sibling test
+   * above failing on `main` with `offset: 0` where it expected `2`.
+   *
+   * This asserts on the whole call list rather than the last call, so it fails loudly if a
+   * stray reload reappears, and waits well past the debounce on purpose: the point is that
+   * nothing happens when it fires.
+   */
+  it('does not reset the page when the mount-time search debounce fires', async () => {
+    const user = userEvent.setup();
+    asMock(loadLocationCountCandidates).mockResolvedValue({
+      candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
+      total: 9428,
+    });
+    renderPage();
+
+    expect(await screen.findByText(/1–2 of 9,428 here/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /next/i }));
+
+    await waitFor(() =>
+      expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(
+        LOC,
+        'Shelf A',
+        expect.objectContaining({ offset: 2 }),
+      ),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const offsets = asMock(loadLocationCountCandidates).mock.calls.map(
+      (call: unknown[]) => (call[2] as { offset: number }).offset,
+    );
+    expect(offsets).toEqual([0, 2]);
+  });
+
   /** A tick on page 1 must survive turning to page 2 — the sheet holds rows, not indexes. */
   it('keeps what is already ticked when the page turns', async () => {
     const user = userEvent.setup();

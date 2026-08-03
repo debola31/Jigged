@@ -46,6 +46,10 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
+  // No **Shop floor** entry here on purpose. The labelled Shop floor button in the
+  // Header covers every office page at every width, including a phone — where this
+  // sidebar is behind a hamburger and so can't help. A second copy of one destination
+  // would add no reach, only a duplicate label on the same screen.
   { name: 'Activity', path: '/activity', icon: DynamicFeedIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
@@ -111,7 +115,7 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
               // know yet whether to show the live item.
               if (item.featureFlag && featuresLoading) {
                 return (
-                  <ListItem key={`skeleton-${item.path}`} disablePadding>
+                  <ListItem key={`skeleton-${item.name}`} disablePadding>
                     <Box sx={{ px: 2, py: 1.5, width: '100%' }}>
                       <Skeleton
                         variant="rectangular"
@@ -129,7 +133,9 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
               const IconComponent = item.icon;
 
               return (
-                <ListItem key={item.path} disablePadding>
+                // Keyed by name rather than path — names are unique by construction,
+                // paths only happen to be.
+                <ListItem key={item.name} disablePadding>
                   <ListItemButton
                     component={Link}
                     href={fullPath}

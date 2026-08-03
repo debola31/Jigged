@@ -61,6 +61,21 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Operations')).not.toBeInTheDocument();
   });
 
+  // The sidebar is office navigation only. The way to the shop floor is the labelled
+  // button in the Header, which reaches every page at every width — this one wouldn't,
+  // since the sidebar is behind a hamburger on a phone. See Header.test.tsx.
+  it('does not duplicate the Header shop-floor door', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+
+    render(<Sidebar />);
+
+    expect(screen.queryByText(/shop floor/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^dashboard$/i })).toHaveAttribute(
+      'href',
+      '/dashboard/test-company-id',
+    );
+  });
+
   it('hides Storage when the locations flag is off — such a shop has no places at all', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
     mockUseCompanyFeatures.mockReturnValue({

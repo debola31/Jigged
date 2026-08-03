@@ -18,7 +18,7 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import posthog from 'posthog-js';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
-import { setLastCompany } from '@/utils/companyAccess';
+import { setLastCompany, homePathForRole } from '@/utils/companyAccess';
 import { getEdgeFunctionUrl } from '@/lib/supabase';
 import { AuthLayout } from '@/components/auth';
 import type { Invitation } from '@/types/team';
@@ -145,8 +145,9 @@ export default function AcceptInvitePage() {
     // Check if invitation is still valid
     if (inv.status !== 'pending') {
       if (inv.status === 'accepted') {
-        // Already accepted — just redirect to dashboard
-        router.replace(`/dashboard/${inv.company_id}`);
+        // Already accepted — send them to their home surface, which for an operator
+        // is the shop floor rather than a dashboard they'd be bounced straight out of.
+        router.replace(homePathForRole(inv.role, inv.company_id));
         return;
       }
       setError(`This invitation has been ${inv.status}. Please contact your admin for a new invitation.`);
@@ -273,8 +274,9 @@ export default function AcceptInvitePage() {
       posthog.identify(userId, { email: invitation.email });
       posthog.capture('invitation_accepted', { role: invitation.role });
 
-      // Redirect to dashboard
-      router.replace(`/dashboard/${companyId}`);
+      // Straight to the surface the invited role actually works on. A new operator's
+      // very first screen used to be a dashboard flash before AuthGuard corrected it.
+      router.replace(homePathForRole(invitation.role, companyId));
     } catch (err) {
       console.error('Error accepting invitation:', err);
       setError(err instanceof Error ? err.message : 'Failed to accept invitation');

@@ -208,13 +208,12 @@ No item detail/create/edit/import page of its own; that is all Parts UI.
 
 ### Access layer
 
-Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventoryLocationsAccess.ts`, `inventoryCountAccess.ts`, `locationOccupancy.ts`, `alertsAccess.ts`. Non-obvious:
+Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventoryLocationsAccess.ts`, `inventoryCountAccess.ts`, `locationOccupancy.ts`. Non-obvious:
 
 - `getLocationContents` caps at 200 (`LOCATION_CONTENTS_LIMIT`) and shows the exact total: uncapped, PostgREST `max_rows` clipped it silently — invisible on a 14-row seed, wrong on a 9,428-part shop. Archived parts excluded, matching the `inventory_location_occupancy` view.
 - `bulkPutAway` — **one atomic RPC, never chunked** (a half-moved pile is worse than none); it moves whole balances, so N parts cost one request, not 2N — every *other* location-stock wrapper first loads the part's conversion context and sends **both** display and converted quantities, which is the second read that makes an ordinary stock write cost 2; the 1000-part cap sits in the RPC, not the UI.
 - `occupancyFor` **zero-defaults** so render code never branches on `undefined` — an optional `?.hasStock` reads an *unknown* location as "empty", which is exactly how the roll-up bug comes back.
 - `refreshSystemQuantities` reads the all-bin roll-up, so a shelf count using it flags variance on every row; `refreshLocationQuantities` is the per-place one.
-- `getLowStockPartsAlerts` — `quantity <= reorder_point` filtered in JS; `critical` at 0, `high` at ≤50%, else `medium`; feeds the header `AlertBadge`.
 - `setLocationPhoto` / `clearLocationPhoto` / `getLocationPhotoUrl` order their writes so a failure anywhere leaves a *readable* location rather than a row pointing at a file that isn't there.
 - **`code` is gone (20260803034616).** The founder asked why a label printed a code when it already printed the name, and there was no answer that survived contact. `locationLabelPdf` laid out the QR, then the full path at 11pt black, then the code at 10pt grey — a second human-readable identifier one line under the first. And **nothing in the app could look one up**: no search, no filter, no `eq('code')`, and the scanner parses the UUID. The three defences all failed — "short enough to say out loud" (you would say *Shelf A*, and nothing accepts a spoken code), "survives a rename" (the QR carries the UUID, so it already did), and "matches codes stencilled on the rack" (a shop with that scheme would simply *name* the place `A-12`). Safe to drop rather than deprecate because no one had printed a label yet. The parent-prefixed zero-padded scheme in `locationSpec` (`CAB1` → `CAB1-R03` → `CAB1-R03-L`) went with it; the builder keeps its **name** planning, which is the half anyone reads.
 - **`kind` left the UI in the same pass**, for the same reason one step earlier: its only consumer was the board's `unitKind`, which chose a drawing, and the board became a table. The column stays because `kind = 'system'` marks the `Unassigned` pile and `resolveFallbackPlace`, `excludeSystem`, the operator put-away split and the detail sheet's action gate all key off it — but it is now set only by `inv_get_or_create_unassigned`, never by a person.
@@ -280,7 +279,7 @@ Admin/shipping clerk — a PRD persona (*"Receive inbound materials"*) with no s
 
 #### This journey *is* consumption tracking
 
-The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-paperless-flow.md`](../operator-paperless-flow.md) §5.2). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
+The earlier separate J9 (issue **#550**) is folded in — the take-record *is* the consumption, and confirming again at operation completion would restate it against a complete-only UX ([`operator-view.md`](operator-view.md#status-model)). Shipped 2026-07-28, **no new table**: a depletion row tagged `job_id`, expected from the live BOM, actual their sum, variance on read; `job_materials` not revived ([§5.9](#59-job_materials--resolved-drop-it-consumption-backs-onto-the-ledger)). **#550 closed by folding in, not as written** — it specified an operation-completion step behind an `inventory_transactions` flag that never existed, and named the wrong actor. **Deliberately not delivered:** "issued" is job-level, not job-part-level (no `job_part_id`), so two parts drawing one material show the same figure — hence *"issued to this job"*; one nullable column + index fixes it, omitted to keep Phase 1 migration-free. Reopen a separate confirmation only for variance the take-event can't express (consumed by one operator, reconciled by another).
 
 ### J8 — Cut it, return the remnant
 
@@ -330,9 +329,13 @@ Two deviations from spec: **no count-session table** (localStorage, so Phase 1 a
 
 ### J10 — Don't run out
 
-Owner: below the reorder point an item lands on the buy list, on-order visible so nobody double-orders. **Partial** — `parts.reorder_point`, `deriveStockStatus` (In stock/Low/Out) and `getLowStockPartsAlerts` → header `AlertBadge` exist; email, a real buy list and any concept of on-order do not.
+Owner: below the reorder point an item lands on the buy list, on-order visible so nobody double-orders. **Partial** — `parts.reorder_point` and `deriveStockStatus` (In stock/Low/Out) exist, surfaced by the shortage lens on the parts page; email, a real buy list and any concept of on-order do not.
 
-**2026-08-01:** `/parts?status=low` grew **Reorder at** and **Short by** columns (`shortfall()`, derived like `deriveStockStatus` so the two cannot disagree; **0 at equality**, because a part sitting exactly on its line is on the buy list). `?status=out` gets **Reorder at** only — "short by" there would restate the reorder point on every row. That is the worksheet half of a buy list, not the buy list: no vendor grouping, no PO, no on-order. The badge read is also **bounded** now (`LOW_STOCK_SCAN_LIMIT`, ordered emptiest-first) — it was unbounded over every stocked part with a reorder point, so on a 9,428-part catalogue PostgREST truncated it at `max_rows` and a genuinely-out part could be missing from the badge with no error. **Doc conflict to settle:** PRD **FR-2 is a `Must`** (dashboard *plus* email); this doc calls it a `Should`, partly delivered, and plans to hide it behind the non-existent `inventory_transactions` flag; [`ai-insights.md`](ai-insights.md) records the badge as built and checked off.
+**2026-08-01:** `/parts?status=low` grew **Reorder at** and **Short by** columns (`shortfall()`, derived like `deriveStockStatus` so the two cannot disagree; **0 at equality**, because a part sitting exactly on its line is on the buy list). `?status=out` gets **Reorder at** only — "short by" there would restate the reorder point on every row. That is the worksheet half of a buy list, not the buy list: no vendor grouping, no PO, no on-order.
+
+**2026-08-02:** the header alert badge was **removed**, and with it `getLowStockPartsAlerts` and its scan bound. The badge's low-inventory list was a second, weaker rendering of the same predicate the shortage lens already draws — and the lens is the surface a buy list would grow out of. So the shortage lens is now the only low-stock door, which also settles two thirds of the doc conflict below.
+
+**Doc conflict to settle:** PRD **FR-2 is a `Must`** (dashboard *plus* email); this doc calls it a `Should`, partly delivered, and plans to hide it behind the non-existent `inventory_transactions` flag. ([`ai-insights.md`](ai-insights.md) no longer claims the badge as built — that line went with the badge.) FR-2 now rests entirely on the shortage lens, with no notification of any kind.
 
 ### J11 — Find it
 
@@ -476,9 +479,9 @@ sum, so twice-consumed material (two operations, or a correction) works and hist
 Accepted: editing a BOM retroactively shifts "expected" on old jobs — already true via the live read;
 a frozen planned-vs-actual record means a snapshot **at consumption time**, not at job creation. And
 **"skipped" is unrepresentable** — `status: pending | consumed | skipped` is gone, so no row means
-skipped *or* not-yet-done. Don't model completeness (operator UX is complete-only, one tap —
-[operator-paperless-flow.md](../operator-paperless-flow.md) §5.2); add skip only on real need, never
-by reviving a per-job row.
+skipped *or* not-yet-done. Don't model completeness (the operator records a quantity, not a
+per-material state — [operator-view.md](operator-view.md#status-model)); add skip only on real need,
+never by reviving a per-job row.
 
 ### 5.10 Native app: deferred; the scanning spike is the gate
 
@@ -661,7 +664,7 @@ Founder observation, **Contour Tool & Machine**, 2026-07-27 — reliable on stru
 
 > **Withdrawn:** an earlier revision read *"rare data was populated"* as *"raw data … for a lot of parts"* and proposed importing quantities into a count sheet's **expected** column. Dead — 0.5%, and verification belongs in **Review & Fix**.
 
-**Still open, none blocking Phase 1:** do service jobs carry a BOM line for the customer's material (J4 needs an exclusion if so, else false shortages — `custCode`'s 51% likely means *"made for customer X"*; don't conflate) · a **bar rack**? their 22 places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) hold none, so *weakly refuted*, but they buy in feet — shipped without the card, reasoning in a `storageTypes.tsx` comment · what `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean (one card-sort) · do they reuse drops (J8) · scanning: ten in a row, dead zones, whose phones (§5.10) · label durability · frequency/pain ranking, which neither observation nor exports reach · **scrap** — does it consume material, and how does it relate to `has_discrepancy` ([operator-paperless-flow.md](../operator-paperless-flow.md) §5.4).
+**Still open, none blocking Phase 1:** do service jobs carry a BOM line for the customer's material (J4 needs an exclusion if so, else false shortages — `custCode`'s 51% likely means *"made for customer X"*; don't conflate) · a **bar rack**? their 22 places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) hold none, so *weakly refuted*, but they buy in feet — shipped without the card, reasoning in a `storageTypes.tsx` comment · what `ZAPP`, `SMD`, `SBS`, `DB BOX`, `0-5` mean (one card-sort) · do they reuse drops (J8) · scanning: ten in a row, dead zones, whose phones (§5.10) · label durability · frequency/pain ranking, which neither observation nor exports reach · **scrap** — does it consume material, and how does it relate to `has_discrepancy` ([operator-view.md](operator-view.md#scrap-and-defect-capture-discovery)).
 
 **Closed:** bulk exit from `Unassigned` — built 2026-07-30 as all-of-part-X plus a **search-driven** bulk assign (nobody assigns 9,428 parts; they assign what they hold). **#541** — #496 means *beyond* locations.
 

@@ -31,7 +31,6 @@ const INSIGHT_LABELS: Record<string, string> = {
   revenue_trend: 'Revenue Trend',
   job_pipeline: 'Job Pipeline',
   quote_conversion: 'Quote Conversion',
-  at_risk_jobs: 'At-Risk Jobs',
   inventory_alerts: 'Inventory Alerts',
 };
 
@@ -51,52 +50,6 @@ function getTimeAgo(computedAt: string): string {
 
 function AlertList({ insight }: { insight: InsightCardType }) {
   const { type, metric_data } = insight;
-
-  if (type === 'at_risk_jobs') {
-    const jobs = (metric_data?.at_risk_jobs as Array<Record<string, unknown>>) || [];
-    if (jobs.length === 0) {
-      return (
-        <Alert severity="success" sx={{ mb: 1 }}>
-          No at-risk jobs detected.
-        </Alert>
-      );
-    }
-    return (
-      <List dense disablePadding>
-        {jobs.slice(0, 5).map((job, i) => (
-          <ListItem key={i} disableGutters sx={{ py: 0.5 }}>
-            <ListItemText
-              primary={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {String(job.job_number || '')}
-                  </Typography>
-                  <Chip
-                    label={String(job.severity || 'unknown')}
-                    size="small"
-                    color={
-                      job.severity === 'high'
-                        ? 'error'
-                        : job.severity === 'medium'
-                          ? 'warning'
-                          : 'default'
-                    }
-                    sx={{ height: 20, fontSize: '0.7rem' }}
-                  />
-                </Box>
-              }
-              secondary={`${String(job.customer_name || 'Unknown')} - ${Number(job.pct_complete || 0).toFixed(0)}% complete, ${Number(job.pct_time_elapsed || 0).toFixed(0)}% time elapsed`}
-            />
-          </ListItem>
-        ))}
-        {jobs.length > 5 && (
-          <Typography variant="caption" color="text.secondary" sx={{ pl: 1 }}>
-            +{jobs.length - 5} more
-          </Typography>
-        )}
-      </List>
-    );
-  }
 
   if (type === 'inventory_alerts') {
     const alerts = (metric_data?.alerts as Array<Record<string, unknown>>) || [];
@@ -186,7 +139,7 @@ export default function InsightCard({
     );
   }
 
-  const isAlertType = insight.type === 'at_risk_jobs' || insight.type === 'inventory_alerts';
+  const isAlertType = insight.type === 'inventory_alerts';
   const title = titleOverride || INSIGHT_LABELS[insight.type] || insight.type;
   const timeAgo = getTimeAgo(insight.computed_at);
 

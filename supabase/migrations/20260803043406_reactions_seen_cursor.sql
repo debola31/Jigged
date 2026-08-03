@@ -114,10 +114,12 @@ AS $$
       'company_can_write', 'get_operator_access_id', 'get_user_company_ids',
       'is_company_admin', 'is_system_admin',
       -- Called directly from application code (utils/*Access.ts, app/, hooks/).
+      -- NB: enable_location_tracking / disable_location_tracking are deliberately absent.
+      -- 20260802015101 dropped both RPCs; re-listing them here would leave the allowlist
+      -- naming functions that no longer exist, which is how this list rots.
       'accept_invitation', 'add_stock_at_location', 'adjust_stock_at_location',
       'create_demo_company', 'create_shipment_with_line_items', 'delete_location',
-      'deplete_stock_at_location', 'disable_location_tracking',
-      'enable_location_tracking', 'log_note_views', 'log_operator_event',
+      'deplete_stock_at_location', 'log_note_views', 'log_operator_event',
       'note_viewers', 'reset_demo_company', 'sync_demo_access', 'transfer_stock',
       -- Added 20260801181116: the count sheet's put-away calls it directly
       -- (`bulkPutAway` in utils/inventoryLocationsAccess.ts).

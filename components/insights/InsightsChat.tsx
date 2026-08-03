@@ -25,7 +25,6 @@ import { saveInsight } from '@/utils/savedInsightsAccess';
 const EXAMPLE_PROMPTS = [
   'What is my revenue trend over time?',
   'Who is my top customer by revenue?',
-  'Are any jobs behind schedule?',
   'What is my quote pipeline worth?',
 ];
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter, usePathname, useParams } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
@@ -11,7 +11,6 @@ import MenuIcon from '@mui/icons-material/Menu';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { usePageTitle } from './PageTitleProvider';
-import AlertBadge from './AlertBadge';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -149,8 +148,6 @@ interface HeaderProps {
 export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const params = useParams();
-  const companyId = params.companyId as string | undefined;
   const { signOut, user } = useAuth();
   const firstName = user?.user_metadata?.first_name;
   const { isDemoMode } = useDemoMode();
@@ -212,7 +209,6 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
             Welcome, {firstName}
           </Typography>
         )}
-        {companyId && <AlertBadge companyId={companyId} />}
         {isMobile ? (
           <IconButton
             onClick={handleSignOut}

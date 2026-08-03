@@ -19,7 +19,6 @@ The AI Insights module gives shop owners and administrators an intelligent data 
 | As a... | I want to... | So that... |
 |---|---|---|
 | Admin | See a revenue trend chart on my dashboard | I can spot growth or decline at a glance |
-| Admin | Know which jobs are at risk of delay | I can intervene before we miss a deadline |
 | Admin | Ask questions about my data in plain English | I don't have to export data and crunch it in Excel |
 | User | See quote conversion rates with trend context | I can improve the sales process over time |
 | Admin | See which customers generate the most revenue | I can prioritize relationships and spot concentration risk |
@@ -55,7 +54,7 @@ The AI chat uses a **text-to-SQL** approach: the AI generates SQL queries agains
 
 ### Single Code Path: Text-to-SQL via Chat
 
-The dashboard page is user-driven: the ask bar is the only way to generate insights, and users pin the results they want to keep (`saved_insights`). There is no pre-built "5 cached cards" panel — that pipeline was removed along with the `ai_insight_cache` table because nothing read the AI summaries it generated and it burned Anthropic credits on every dashboard load. The header `AlertBadge` (at-risk jobs + low inventory) is pure Supabase aggregation; see [utils/alertsAccess.ts](../../utils/alertsAccess.ts).
+The dashboard page is user-driven: the ask bar is the only way to generate insights, and users pin the results they want to keep (`saved_insights`). There is no pre-built "5 cached cards" panel — that pipeline was removed along with the `ai_insight_cache` table because nothing read the AI summaries it generated and it burned Anthropic credits on every dashboard load. The header alert badge that sat alongside it (at-risk jobs + low inventory) was removed in August 2026 — at-risk was retired as a concept, and low stock is surfaced by the shortage lens on the parts page instead.
 
 ### Chat Flow
 
@@ -126,7 +125,7 @@ deterministic code decides whether and how to render it.
 
 ### Hybrid Tool Architecture
 
-`CHAT_TOOLS` is a list that currently contains only `execute_sql`, but is designed for extensibility. As user behavior patterns emerge, predefined Python tools can be added alongside SQL for queries that are too complex or error-prone for AI-generated SQL (e.g., multi-step business logic like at-risk job severity scoring). See GitHub issue for tracking.
+`CHAT_TOOLS` is a list that currently contains only `execute_sql`, but is designed for extensibility. As user behavior patterns emerge, predefined Python tools can be added alongside SQL for queries that are too complex or error-prone for AI-generated SQL (e.g., multi-step business logic like margin attribution across a BOM). See GitHub issue for tracking.
 
 ### Extending the Existing AI Infrastructure
 
@@ -198,7 +197,7 @@ All functions implicitly receive `company_id` from the authenticated request con
 
 **Revenue source of truth:** the realized-revenue functions (`get_revenue_by_period`, `get_customer_revenue_breakdown`, `get_part_profitability`) sum **`job_parts.total_price`** (the agreed per-part line total on the job), *not* the source `quote_line_items.total_price`. The job part is the post-conversion source of truth, so revenue reflects any order quantity edited after conversion — and it avoids over-counting a price-options quote's unchosen lines. `get_revenue_forecast` is the exception: it sums `quote_line_items.total_price` because it values the **open** (un-converted) quote pipeline, where no job exists yet. The same rule is encoded in the NL→SQL guidance in `api/tools/schema_context.py`.
 
-At-risk jobs and low-inventory alerts are **not** in this list — they are computed client-side in [utils/alertsAccess.ts](../../utils/alertsAccess.ts) and consumed by the header `AlertBadge` popover. They use Supabase RLS directly (no service-role, no AI).
+Low-stock surfacing is **not** in this list — it is the shortage lens on the parts page (`?status=low` / `?status=out`), computed client-side over Supabase RLS directly (no service-role, no AI).
 
 ---
 
@@ -328,7 +327,6 @@ The dashboard combines a customizable KPI strip, an AI-powered ask bar, and a us
 **Example prompt chips:**
 - "Revenue trend"
 - "Top customer?"
-- "Jobs behind schedule?"
 - "Quote pipeline worth?"
 
 ### 3. Chart Types
@@ -340,7 +338,6 @@ Using MUI X Charts (`@mui/x-charts`):
 | Revenue Trend | Area/Line chart | `<LineChart>` or `<AreaChart>` |
 | Job Pipeline | Donut chart | `<PieChart>` with inner radius |
 | Quote Conversion | Sparkline + big number | `<SparkLineChart>` + `<Typography>` |
-| At-Risk Jobs | Alert list (no chart) | MUI `<Alert>` + `<List>` |
 | Inventory Alerts | Alert list (no chart) | MUI `<Alert>` + `<List>` |
 | Customer Revenue | Horizontal bar chart | `<BarChart>` with `layout="horizontal"` |
 | Part Profitability | Grouped bar chart | `<BarChart>` |
@@ -455,7 +452,6 @@ components/
 
 utils/
 +-- insightsAccess.ts              # Chat API helpers
-+-- alertsAccess.ts                # Client-side at-risk jobs + inventory alerts (AlertBadge)
 +-- savedInsightsAccess.ts         # Saved insights CRUD via Supabase (RLS scoped)
 +-- dashboardAccess.ts             # Metric values + pinned metric keys (user_preferences)
 ```
@@ -511,7 +507,7 @@ Guidelines:
 - Default to a one-line prose answer; include a chart_config only when there are >=3 data points and a chart helps (trend, comparison, part-of-whole). Single facts and 1-2 values stay text.
 - Highlight actionable insights: what should the owner DO about this data?
 - Compare to previous periods when relevant.
-- Flag risks prominently (at-risk jobs, low inventory, revenue decline).
+- Flag risks prominently (low inventory, revenue decline).
 - Use plain language. Avoid jargon. These are machinists, not MBAs.
 - Write plain prose. Never use markdown tables, bold (**), or any markdown; for multiple values use chart_config plus a one-line summary or a short inline list.
 - Only query tables in the schema above; never reference user/auth/access tables.
@@ -542,7 +538,6 @@ Guidelines:
 
 ### Phase 1 — Enhanced
 
-- [x] Header alert badge for at-risk jobs and low inventory (AlertBadge popover) — Supabase-first, no AI
 - [ ] Additional chart types (scatter, heatmap for schedule visualization)
 - [ ] Multi-turn conversation history in chat (would be scoped per user within a company, mirroring `saved_insights` — chat is stateless today)
 - [ ] Predefined tools for complex business logic queries (based on user behavior)
@@ -569,7 +564,6 @@ Guidelines:
 | Individual metric function execution | < 1 second |
 | Chat response end-to-end | < 8 seconds |
 | SQL query execution | < 5 seconds (enforced timeout) |
-| AlertBadge fetch (at-risk jobs + inventory) | < 500ms (Supabase, no AI) |
 
 These targets assume the small data volumes typical of target shops (1-50 users, hundreds of jobs, not millions).
 
@@ -592,7 +586,7 @@ These targets assume the small data volumes typical of target shops (1-50 users,
 |---|---|
 | AI provider unavailable | Chat returns 503 with retry-after. |
 | AI rate limited by provider | Chat returns 503 with retry-after. |
-| No data available | Chat answer explains the gap; AlertBadge shows "All clear". |
+| No data available | Chat answer explains the gap. |
 | Chat question unrelated to data | AI responds: "I can only answer questions about your shop's data. Try asking about revenue, jobs, quotes, customers, or inventory." |
 | SQL validation fails | AI sees the error and can retry with corrected SQL (up to 5 iterations) |
 | SQL execution timeout | Returns error to AI; AI can simplify the query or explain the limitation |

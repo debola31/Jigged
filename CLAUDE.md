@@ -66,7 +66,7 @@ This applies to every layer:
 - Backend: no endpoint that generates AI summaries "on read" as a side effect. If an endpoint is called by a mounting component, it must not be able to reach a paid AI provider.
 - Background jobs: fine, but must be infrequent (e.g. hourly or daily) and rate-limited per company. Never wire a background job to "on user login" or "on page view".
 
-**Why:** we previously had `AlertBadge` → `/api/insights/{id}/dashboard` firing 5 Anthropic calls on every dashboard page load. Users never saw the AI summaries — the bell icon only read the raw metric arrays. Credits ran out in days. Every new AI feature must pass the "what user action triggered this?" test before merging.
+**Why:** we once had a header alert badge calling `/api/insights/{id}/dashboard`, firing 5 Anthropic calls on every dashboard page load. Users never saw the AI summaries — the bell icon only read the raw metric arrays. Credits ran out in days. (Both the endpoint and the badge have since been removed, but the failure mode is what matters.) Every new AI feature must pass the "what user action triggered this?" test before merging.
 
 **How to apply:** when adding an AI feature, the entry point must be a button, form submit, or explicit refresh gesture — not a lifecycle hook. If you need fresh data for a passive UI (badge counts, dashboards), compute it from Supabase without AI, or cache it in a dedicated table populated by a scheduled job. If you're unsure whether a code path can fire on mount, grep for `useEffect`/`onMount` callers and trace up from the AI call site.
 

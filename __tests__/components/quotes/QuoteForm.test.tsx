@@ -32,24 +32,47 @@ vi.mock('@/utils/partsAccess', () => ({
   getComputedPartCost: vi.fn(async () => 40),
 }));
 
-// Customers: dropdown + defaults
+// Customers: dropdown + defaults. The pick* resolvers are the real ones in
+// spirit — they read the standing-terms columns off the selected customer — so
+// they delegate to the actual field rather than returning a fixed stub, which
+// is what lets the resolution-chain tests below mean anything.
 const getAllCustomers = vi.fn();
 vi.mock('@/utils/customerAccess', () => ({
   getAllCustomers: (...args: unknown[]) => getAllCustomers(...args),
   pickBillingAddress: vi.fn(() => null),
   pickShippingAddress: vi.fn(() => null),
   pickPrimaryContact: vi.fn(() => null),
+  pickPaymentTerms: (c: { default_payment_terms?: string | null } | null | undefined) =>
+    c?.default_payment_terms?.trim() || null,
+  pickLeadTimeText: (c: { default_lead_time_text?: string | null } | null | undefined) =>
+    c?.default_lead_time_text?.trim() || null,
+  pickFobPoint: (c: { default_fob_point?: string | null } | null | undefined) =>
+    c?.default_fob_point?.trim() || null,
 }));
 
 // Company access — the form loads/persists the company's saved custom payment
 // terms. Mocked so tests don't hit the real Supabase-backed access layer.
 const getCustomPaymentTerms = vi.fn();
+const getCompanyDefaultPaymentTerms = vi.fn();
 const addCustomPaymentTerm = vi.fn();
 const removeCustomPaymentTerm = vi.fn();
 vi.mock('@/utils/companyAccess', () => ({
   getCustomPaymentTerms: (...args: unknown[]) => getCustomPaymentTerms(...args),
+  // The shop-wide default payment terms, resolved onto a new quote when the
+  // customer has none of their own. Defaults to null below (no shop default),
+  // which is the pre-existing behaviour these tests were written against.
+  getCompanyDefaultPaymentTerms: (...args: unknown[]) =>
+    getCompanyDefaultPaymentTerms(...args),
   addCustomPaymentTerm: (...args: unknown[]) => addCustomPaymentTerm(...args),
   removeCustomPaymentTerm: (...args: unknown[]) => removeCustomPaymentTerm(...args),
+}));
+
+// QuickBooks' own payment terms, offered above the local presets when a shop is
+// connected. Defaults to "not connected" so these tests keep asserting the
+// local-only picker, which is what most shops see.
+const listQuickBooksTerms = vi.fn();
+vi.mock('@/utils/quickbooksAccess', () => ({
+  listQuickBooksTerms: (...args: unknown[]) => listQuickBooksTerms(...args),
 }));
 
 // Pricing tiers — return non-empty so the validation tier-check passes
@@ -104,6 +127,7 @@ const initialBlank: QuoteFormData = {
   parts: [],
   lead_time_text: '',
   payment_terms: '',
+  fob_point: '',
   expiration_date: '',
 };
 
@@ -115,8 +139,9 @@ const initialPopulated: QuoteFormData = {
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
   lead_time_text: '14 business days',
   // Payment terms are required to submit a quote, so the "populated/complete"
-  // fixture carries one.
+  // fixture carries one. FOB is optional and stays empty.
   payment_terms: 'Net 30',
+  fob_point: '',
   expiration_date: '',
 };
 
@@ -149,6 +174,10 @@ describe('QuoteForm', () => {
     detectQuoteLineDrift.mockResolvedValue([]);
     // Company saved-terms: none by default; add/remove echo back a list.
     getCustomPaymentTerms.mockResolvedValue([]);
+    // No shop-wide default by default — the terms field starts empty, which is
+    // what every assertion in this file was written against.
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
     addCustomPaymentTerm.mockResolvedValue([]);
     removeCustomPaymentTerm.mockResolvedValue([]);
   });
@@ -333,6 +362,65 @@ describe('QuoteForm', () => {
       'test-company-id',
       'Net 30, 1% late charge',
     );
+  });
+
+  it('offers the terms QuickBooks already has, above the local presets', async () => {
+    listQuickBooksTerms.mockResolvedValue({
+      connected: true,
+      terms: [
+        { id: '3', name: 'Net 30', due_days: 30 },
+        { id: '7', name: 'Net 45', due_days: 45 },
+      ],
+    });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+
+    // "Net 45" exists only in QuickBooks — it is offered because a term
+    // QuickBooks knows resolves to a real SalesTermRef on the invoice.
+    expect(await screen.findByRole('option', { name: 'Net 45' })).toBeInTheDocument();
+    // And it leads: options are ordered most-authoritative first.
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.indexOf('Net 45')).toBeLessThan(labels.indexOf('Net 60'));
+  });
+
+  // QuickBooks ships "Due on receipt"; our preset reads "Due on Receipt". Two
+  // rows for one term is the drift this whole feature exists to remove.
+  it('shows one row per term when QuickBooks spells it differently', async () => {
+    listQuickBooksTerms.mockResolvedValue({
+      connected: true,
+      terms: [{ id: '1', name: 'Due on receipt', due_days: 0 }],
+    });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    await screen.findByRole('option', { name: 'Due on receipt' });
+
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(labels.filter((l) => l?.toLowerCase() === 'due on receipt')).toHaveLength(1);
+    // QuickBooks' spelling wins — it is the one that has to match on their side.
+    expect(labels).toContain('Due on receipt');
+    expect(labels).not.toContain('Due on Receipt');
+  });
+
+  it('falls back to the local presets when there is no QuickBooks', async () => {
+    // Already the default mock, but stated explicitly: this is what most shops
+    // see, and the picker must be complete without QuickBooks.
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
+    render(
+      <QuoteForm mode="edit" quoteId="q-1" initialData={{ ...initialPopulated, payment_terms: '' }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /payment terms/i }));
+    expect(await screen.findByRole('option', { name: 'Net 30' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Due on Receipt' })).toBeInTheDocument();
   });
 
   it('shows a highlighted "Add New" row at the bottom of the dropdown', async () => {
@@ -710,5 +798,270 @@ describe('QuoteForm', () => {
       expect(screen.getAllByLabelText('Order quantity')).toHaveLength(3);
     });
     expect(screen.getAllByRole('button', { name: /use custom price/i })).toHaveLength(1);
+  });
+});
+
+describe('QuoteForm — standing-terms resolution chain', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRouterMocks();
+    getTiersWithComputedPrices.mockResolvedValue([
+      { id: 'tier-1', quantity: 1, unit_price: 50, markup_percent: 25 },
+    ]);
+    getCustomPaymentTerms.mockResolvedValue([]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+    listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
+    addCustomPaymentTerm.mockResolvedValue([]);
+    removeCustomPaymentTerm.mockResolvedValue([]);
+  });
+
+  /** Pick a customer from the "Customer" autocomplete by visible name. */
+  /**
+   * Pick a customer by visible name.
+   *
+   * findByRole, not getByRole, and that is not defensive padding. When another
+   * MUI popup has just closed — the payment-terms picker, in the hand-typed
+   * test below — the customer combobox is briefly out of the accessibility tree,
+   * because MUI aria-hidden's the rest of the app while a popup is mounted. A
+   * synchronous getByRole races that transition: it passed locally and failed on
+   * CI's slower box, which is the signature of exactly this.
+   */
+  async function selectCustomer(name: string) {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('combobox', { name: /customer/i }));
+    await user.click(await screen.findByRole('option', { name }));
+  }
+
+  it('falls back to the shop default and says so, when the customer has no terms', async () => {
+    // The common case for a shop with one house term: most customers carry no
+    // agreement of their own, and retyping the house term onto each of them is
+    // exactly the data entry this chain exists to remove.
+    getAllCustomers.mockResolvedValue([
+      { id: 'cust-1', name: 'Acme Corp', addresses: [], customer_contacts: [] },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue('2/10 Net 30');
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('2/10 Net 30');
+    });
+    // Naming the LEVEL is the whole safety argument — "why does this say
+    // 2/10 Net 30?" has two possible answers and the user must not have to hunt.
+    expect(screen.getByText(/from your shop default/i)).toBeInTheDocument();
+  });
+
+  it("prefers the customer's own terms over the shop default, and credits the customer", async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        default_payment_terms: 'Net 60',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue('2/10 Net 30');
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 60');
+    });
+    expect(screen.getByText(/from acme corp.s standing terms/i)).toBeInTheDocument();
+  });
+
+  it('leaves the field empty when neither level has a value', async () => {
+    // A shop that has filled nothing in must see byte-identical behaviour to
+    // before this feature existed — that is the whole rollout gate.
+    getAllCustomers.mockResolvedValue([
+      { id: 'cust-1', name: 'Acme Corp', addresses: [], customer_contacts: [] },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('');
+    });
+    expect(screen.queryByText(/edit to override/i)).not.toBeInTheDocument();
+  });
+
+  // A prefilled value belongs to the customer that supplied it. Switching to a
+  // customer who has none must CLEAR it, not strand it — otherwise Acme's terms
+  // are quoted to Beta, and because the provenance line goes with it, the field
+  // then looks hand-typed and no later switch will correct it.
+  it('clears a prefilled term when the next customer has none', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        default_payment_terms: 'Net 60',
+        addresses: [],
+        customer_contacts: [],
+      },
+      { id: 'cust-2', name: 'Beta LLC', addresses: [], customer_contacts: [] },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+
+    await selectCustomer('Acme Corp');
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 60');
+    });
+
+    await selectCustomer('Beta LLC');
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('');
+    });
+    expect(screen.queryByText(/acme corp/i)).not.toBeInTheDocument();
+  });
+
+  // The correction has to survive a second hop: after clearing, the field must
+  // still be ours, so a third customer's real terms still land.
+  it('still applies the next customer’s terms after a clear', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        default_payment_terms: 'Net 60',
+        addresses: [],
+        customer_contacts: [],
+      },
+      { id: 'cust-2', name: 'Beta LLC', addresses: [], customer_contacts: [] },
+      {
+        id: 'cust-3',
+        name: 'Gamma Inc',
+        default_payment_terms: 'Net 15',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+
+    await selectCustomer('Acme Corp');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 60'),
+    );
+    await selectCustomer('Beta LLC');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue(''),
+    );
+    await selectCustomer('Gamma Inc');
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 15');
+    });
+    expect(screen.getByText(/from gamma inc.s standing terms/i)).toBeInTheDocument();
+  });
+
+  // A term the user typed is theirs, and a customer switch must not touch it.
+  it('leaves a hand-typed term alone when the customer changes', async () => {
+    getAllCustomers.mockResolvedValue([
+      { id: 'cust-1', name: 'Acme Corp', addresses: [], customer_contacts: [] },
+      {
+        id: 'cust-2',
+        name: 'Beta LLC',
+        default_payment_terms: 'Net 15',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+    getCompanyDefaultPaymentTerms.mockResolvedValue(null);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('combobox', { name: /payment terms/i }));
+    await user.click(await screen.findByRole('option', { name: 'Net 30' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 30'),
+    );
+
+    await selectCustomer('Beta LLC');
+    // Beta has Net 15, but the user said Net 30 — their choice wins.
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /payment terms/i })).toHaveValue('Net 30'),
+    );
+  });
+
+  // Warns at the moment the customer is picked. Quoting is the earlier of the
+  // two places a hold can be caught — at pack time the quote is already written,
+  // sent and worked.
+  it('warns when the selected customer is on credit hold', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        credit_status: 'hold',
+        credit_hold_note: '90 days past due — check with Dana',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    expect(await screen.findByText(/Acme Corp is on credit hold/i)).toBeInTheDocument();
+    expect(screen.getByText(/90 days past due/i)).toBeInTheDocument();
+  });
+
+  it('shows no credit banner for a customer in good standing', async () => {
+    getAllCustomers.mockResolvedValue([
+      {
+        id: 'cust-1',
+        name: 'Acme Corp',
+        credit_status: 'open',
+        addresses: [],
+        customer_contacts: [],
+      },
+    ]);
+
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+    await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+    await selectCustomer('Acme Corp');
+
+    expect(screen.queryByText(/on credit hold/i)).not.toBeInTheDocument();
+  });
+
+  // "Warn, never gate" stated as the only thing that actually proves it: the
+  // submit button lands in the SAME state either way. Asserting it is simply
+  // enabled would be testing the blank form's own completeness rules, which
+  // disable it for unrelated reasons and would pass even if the hold did gate.
+  it('a credit hold leaves the submit button exactly as it was', async () => {
+    const customer = {
+      id: 'cust-1',
+      name: 'Acme Corp',
+      addresses: [],
+      customer_contacts: [],
+    };
+    const submitState = async (credit_status: string) => {
+      getAllCustomers.mockResolvedValue([{ ...customer, credit_status }]);
+      const { unmount } = render(<QuoteForm mode="create" initialData={initialBlank} />);
+      await waitFor(() => expect(getAllCustomers).toHaveBeenCalled());
+      await selectCustomer('Acme Corp');
+      const disabled = screen
+        .getByRole('button', { name: /create quote|save/i })
+        .hasAttribute('disabled');
+      unmount();
+      return disabled;
+    };
+
+    expect(await submitState('hold')).toBe(await submitState('open'));
   });
 });

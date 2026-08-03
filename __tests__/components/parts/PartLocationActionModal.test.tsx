@@ -8,13 +8,24 @@ import PartLocationActionModal, {
   type LocationBalanceOption,
   type LocationOption,
 } from '@/components/parts/PartLocationActionModal';
-import { transferStock } from '@/utils/inventoryLocationsAccess';
+import {
+  addStockAtLocation,
+  adjustStockAtLocation,
+  depleteStockAtLocation,
+  transferStock,
+} from '@/utils/inventoryLocationsAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
+}));
+
+/** The modal resolves the acting member so owner-side writes carry an author. */
+vi.mock('@/utils/operatorAccess', () => ({
+  getCurrentMember: vi.fn(async () => ({ id: 'member-1', name: 'Owner' })),
 }));
 
 // The Remove action embeds JobTagPicker, which imports jobsAccess -> lib/supabase. Stubbed so
@@ -58,19 +69,22 @@ describe('PartLocationActionModal — Move', () => {
     expect(screen.queryByRole('combobox', { name: /from location/i })).not.toBeInTheDocument();
 
     await userEvent.click(toCombo);
-    await userEvent.click(await screen.findByRole('option', { name: 'Right' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Right/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '1');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l2', 1, 'ea', undefined),
+      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l2', 1, 'ea', {
+        notes: undefined,
+        operatorId: 'member-1',
+      }),
     );
   });
 
   it('blocks moving more than the source holds, upfront (no DB call)', async () => {
     renderMove([{ id: 'l1', label: 'Left', quantity: 2 }]);
     await userEvent.click(await screen.findByRole('combobox', { name: /to location/i }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Right' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Right/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '5');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
@@ -90,12 +104,70 @@ describe('PartLocationActionModal — Move', () => {
     await userEvent.click(screen.getByRole('option', { name: /Left — 2 ea/ }));
 
     await userEvent.click(screen.getByRole('combobox', { name: /to location/i }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Bin' }));
+    await userEvent.click(await screen.findByRole('option', { name: /^Bin/ }));
     await userEvent.type(screen.getByRole('spinbutton', { name: /quantity/i }), '1');
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() =>
-      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l3', 1, 'ea', undefined),
+      expect(transferStock).toHaveBeenCalledWith('p1', 'l1', 'l3', 1, 'ea', {
+        notes: undefined,
+        operatorId: 'member-1',
+      }),
     );
+  });
+});
+
+/**
+ * Every owner-side write must name who made it. The RPCs also stamp `created_by`, but that holds
+ * an `auth.users` id the browser cannot resolve — so without `operatorId` the part page's own
+ * history renders these rows permanently anonymous while the operator's phone names its own.
+ */
+describe('PartLocationActionModal — attribution', () => {
+  const renderSingle = (action: 'add' | 'deplete' | 'adjust') =>
+    render(
+      <PartLocationActionModal
+        open
+        action={action}
+        companyId="co1"
+        partId="p1"
+        primaryUnit="ea"
+        unitOptions={['ea']}
+        locations={ALL}
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />,
+      { wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider> },
+    );
+
+  const write = async (action: 'add' | 'deplete' | 'adjust') => {
+    const user = userEvent.setup();
+    renderSingle(action);
+    // `findBy`, not `getBy`: the Dialog mounts its body through a transition, and `handleEnter`
+    // (which resolves the member) fires with it.
+    await user.click(await screen.findByRole('combobox', { name: /location/i }));
+    await user.click(await screen.findByRole('option', { name: /^Left/ }));
+    await user.type(screen.getByRole('spinbutton', { name: /quantity/i }), '1');
+    await user.click(screen.getByRole('button', { name: /confirm/i }));
+  };
+
+  it.each([
+    ['add', addStockAtLocation],
+    ['deplete', depleteStockAtLocation],
+    ['adjust', adjustStockAtLocation],
+  ] as const)('stamps the acting member on %s', async (action, fn) => {
+    await write(action);
+    await waitFor(() => expect(fn).toHaveBeenCalled());
+    const opts = vi.mocked(fn).mock.calls[0].at(-1) as { operatorId?: string | null };
+    expect(opts.operatorId).toBe('member-1');
+  });
+
+  /** A name lookup that fails must never block a stock correction. */
+  it('still writes when the member cannot be resolved', async () => {
+    vi.mocked(getCurrentMember).mockRejectedValueOnce(new Error('offline'));
+    await write('add');
+
+    await waitFor(() => expect(addStockAtLocation).toHaveBeenCalled());
+    const opts = vi.mocked(addStockAtLocation).mock.calls[0].at(-1) as { operatorId?: string | null };
+    expect(opts.operatorId).toBeNull();
   });
 });

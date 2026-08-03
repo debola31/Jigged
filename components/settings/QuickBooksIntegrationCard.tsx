@@ -14,11 +14,14 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
+import Divider from '@mui/material/Divider';
 import {
   getQuickBooksStatus,
   startQuickBooksConnect,
   disconnectQuickBooks,
+  refreshQuickBooksPoField,
   type QuickBooksStatus,
+  type QuickBooksPoField,
 } from '@/utils/quickbooksAccess';
 import SettingsSection from '@/components/settings/SettingsSection';
 
@@ -36,6 +39,28 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  // Null until the admin asks. Deliberately not fetched on mount: it is a round
+  // trip to Intuit for a value that only changes when a human edits their
+  // QuickBooks settings, and nothing on this page is blocked without it.
+  const [poField, setPoField] = useState<QuickBooksPoField | null>(null);
+
+  const handleCheckPoField = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      const found = await refreshQuickBooksPoField(companyId);
+      setPoField(found);
+      setSuccess(
+        found.configured
+          ? `Found your "${found.field_name}" field — PO numbers will use it from now on.`
+          : 'No PO field found in QuickBooks yet.',
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read QuickBooks settings.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const loadStatus = useCallback(async () => {
     try {
@@ -169,6 +194,59 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 ? <>Connected to <strong>{status.qb_company_name}</strong>.</>
                 : 'QuickBooks is connected.'}
             </Typography>
+
+            {/* PO number placement.
+                The customer's PO already prints on every invoice line and in
+                the "Note to customer" block — both verified on a real invoice
+                PDF — so this section is an OPTIONAL upgrade, not a warning.
+                It exists because QuickBooks Online has no built-in PO field and
+                the API cannot create one: the REST Preferences write silently
+                does nothing, and the newer GraphQL route needs a paid Intuit
+                partner tier. So the shop has to make it, and we look for it. */}
+            <Divider sx={{ my: 3 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Customer PO number
+            </Typography>
+
+            {poField?.configured ? (
+              <Alert severity="success" sx={{ mb: 2 }}>
+                PO numbers will appear in your <strong>{poField.field_name}</strong>{' '}
+                field on QuickBooks invoices.
+              </Alert>
+            ) : (
+              <>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  PO numbers already print on each invoice line and as a note to
+                  the customer. If you&rsquo;d also like one in the invoice
+                  header, where accounts-payable teams usually look, QuickBooks
+                  needs you to add the field — we can&rsquo;t create it for you.
+                </Typography>
+                <Typography variant="body2" component="div" sx={{ mb: 2 }}>
+                  In QuickBooks: <strong>Settings ⚙ → Account and settings →
+                  Sales → Sales form content → Custom fields → Add field</strong>.
+                  Name it <strong>PO Number</strong>, turn on{' '}
+                  <strong>Print on form</strong>, and tick every sales form.
+                  Then check again here.
+                </Typography>
+                {poField && poField.slots_used >= 3 && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    All three of your custom-field slots are in use (
+                    {poField.candidates.map((c) => c.name).join(', ')}). QuickBooks
+                    allows no more, so PO numbers will stay on the invoice lines
+                    and in the customer note.
+                  </Alert>
+                )}
+              </>
+            )}
+
+            <Button
+              size="small"
+              onClick={handleCheckPoField}
+              disabled={busy}
+              sx={{ mb: 3, display: 'block' }}
+            >
+              {poField ? 'Check again' : 'Check QuickBooks settings'}
+            </Button>
 
             <Button variant="outlined" color="error" onClick={() => setDisconnectOpen(true)} disabled={busy}>
               Disconnect

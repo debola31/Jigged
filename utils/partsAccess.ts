@@ -16,12 +16,15 @@ import type {
   PartUnitConversion,
   PartUnitConversionFormData,
 } from '@/types/part';
-import type { InventoryTransaction, InventoryTransactionType } from '@/types/partTransaction';
-import { convertToBaseUnit } from '@/lib/unitPresets';
+import type {
+  InventoryTransaction,
+  InventoryTransactionWithRelations,
+} from '@/types/partTransaction';
+import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, is_location_tracked, created_at, updated_at';
+  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -35,7 +38,6 @@ interface PartRow {
   reorder_point: number | null;
   preferred_vendor_id: string | null;
   costing_batch_quantity: number | string | null;
-  is_location_tracked: boolean;
   created_at: string;
   updated_at: string;
   routings?: Array<{ id: string }> | { id: string } | null;
@@ -59,7 +61,6 @@ function rowToPart(row: PartRow): Part {
       row.costing_batch_quantity === null || row.costing_batch_quantity === undefined
         ? null
         : Number(row.costing_batch_quantity),
-    is_location_tracked: row.is_location_tracked ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,
     routing: routingRecord
@@ -575,6 +576,15 @@ export interface PartSelectOption {
   description: string | null;
   has_routing: boolean;
   is_stocked: boolean;
+  /**
+   * Whether stock for this part is held per-location (`part_location_stock`) rather than as the
+   * single `quantity` above.
+   *
+   * Needed to answer "where is this?" honestly: an untracked part has no `part_location_stock`
+   * rows at all, so an empty balances result means "not tracked by place" for one part and
+   * "tracked, but none anywhere" for another. Without this flag those are indistinguishable, and
+   * the operator lookup would tell someone their stock is nowhere when it simply isn't binned.
+   */
   source: 'made' | 'bought';
   primary_unit: string | null;
   quantity: number;
@@ -1295,354 +1305,18 @@ export async function getPartCostExplain(
   };
 }
 
-// ============================================================
-// PART STOCK TRANSACTIONS
-// (replaces inventoryAccess.addStock / removeStock / adjustStock /
-//  removeStockGraceful / consumeMaterials)
-// ============================================================
-
-interface PartWithConversions {
-  id: string;
-  company_id: string;
-  part_name: string;
-  primary_unit: string | null;
-  quantity: number;
-  unit_conversions: Array<{ from_unit: string; to_primary_factor: number }>;
-}
-
-async function loadPartWithConversions(partId: string): Promise<PartWithConversions> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('parts')
-    .select(`
-      id, company_id, part_name, primary_unit, quantity,
-      parts_unit_conversions(from_unit, to_primary_factor)
-    `)
-    .eq('id', partId)
-    .single();
-
-  if (error || !data) {
-    throw error || new Error('Part not found');
-  }
-
-  return {
-    id: data.id as string,
-    company_id: data.company_id as string,
-    part_name: data.part_name as string,
-    primary_unit: data.primary_unit as string | null,
-    quantity: Number(data.quantity ?? 0),
-    unit_conversions:
-      (data.parts_unit_conversions as Array<{
-        from_unit: string;
-        to_primary_factor: number;
-      }>) || [],
-  };
-}
-
-async function createInventoryTransaction(
-  companyId: string,
-  partId: string,
-  itemName: string,
-  type: InventoryTransactionType,
-  quantity: number,
-  unit: string,
-  convertedQuantity: number,
-  notes: string | null,
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-  hasDiscrepancy: boolean = false,
-): Promise<InventoryTransaction> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('inventory_transactions')
-    .insert({
-      company_id: companyId,
-      part_id: partId,
-      item_name: itemName,
-      type,
-      quantity,
-      unit,
-      converted_quantity: convertedQuantity,
-      job_id: jobId || null,
-      job_operation_id: jobOperationId || null,
-      operator_id: operatorId || null,
-      notes,
-      created_by: createdBy || null,
-      has_discrepancy: hasDiscrepancy,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating part transaction:', error);
-    throw error;
-  }
-
-  return data as InventoryTransaction;
-}
-
 /**
- * Add stock to a stockable part (addition transaction).
+ * The four aggregate stock writers — `addPartStock`, `removePartStock`, `adjustPartStock` and
+ * `removePartStockGraceful` — were deleted in 20260802015837.
+ *
+ * They wrote `parts.quantity` directly. That column is now a rollup of `part_location_stock`,
+ * maintained by trigger, and a direct write to it raises: *"parts.quantity is maintained from
+ * part_location_stock; direct quantity writes are not allowed"*. So they were not merely dead
+ * (their last caller, PartTransactionModal, went with them) — they could no longer succeed.
+ *
+ * Stock movements go through the location RPCs: `addStockAtLocation`, `depleteStockAtLocation`,
+ * `adjustStockAtLocation`, `transferStock` in utils/inventoryLocationsAccess.ts.
  */
-export async function addPartStock(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  const newQuantity = part.quantity + convertedQuantity;
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'addition',
-    quantity,
-    unit,
-    convertedQuantity,
-    notes || null,
-    undefined,
-    undefined,
-    undefined,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Remove stock from a stockable part (depletion transaction). Validates that
- * quantity won't go negative — see `removePartStockGraceful` for the
- * operator-flow version that clamps + flags discrepancy.
- */
-export async function removePartStock(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  const newQuantity = part.quantity - convertedQuantity;
-  if (newQuantity < 0) {
-    throw new Error(
-      `Insufficient stock. Current: ${part.quantity} ${part.primary_unit}, Requested: ${convertedQuantity} ${part.primary_unit}`,
-    );
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'depletion',
-    quantity,
-    unit,
-    convertedQuantity,
-    notes || null,
-    jobId,
-    jobOperationId,
-    operatorId,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Set a part's stock to a specific value (adjustment transaction).
- */
-export async function adjustPartStock(
-  partId: string,
-  newQuantity: number,
-  unit: string,
-  notes: string = '',
-  createdBy?: string,
-): Promise<{ part: Part; transaction: InventoryTransaction }> {
-  if (newQuantity < 0) throw new Error('Quantity cannot be negative');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedNewQuantity = convertToBaseUnit(
-    newQuantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-  const difference = convertedNewQuantity - part.quantity;
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: convertedNewQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'adjustment',
-    Math.abs(difference),
-    part.primary_unit,
-    Math.abs(difference),
-    notes || `Adjusted from ${part.quantity} to ${convertedNewQuantity} ${part.primary_unit}`,
-    undefined,
-    undefined,
-    undefined,
-    createdBy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction };
-}
-
-/**
- * Remove stock without blocking on insufficient inventory. When the operator
- * confirms more usage than is on hand, we deplete to zero, record the FULL
- * confirmed amount, and flag the row with `has_discrepancy=true`.
- */
-export async function removePartStockGraceful(
-  partId: string,
-  quantity: number,
-  unit: string,
-  notes: string = '',
-  jobId?: string,
-  jobOperationId?: string,
-  operatorId?: string,
-  createdBy?: string,
-): Promise<{
-  part: Part;
-  transaction: InventoryTransaction;
-  hasDiscrepancy: boolean;
-  shortfall: number;
-}> {
-  if (quantity <= 0) throw new Error('Quantity must be positive');
-
-  const supabase = getSupabase();
-  const part = await loadPartWithConversions(partId);
-  if (!part.primary_unit) {
-    throw new Error('Part has no primary unit; cannot record a stock transaction.');
-  }
-
-  const convertedQuantity = convertToBaseUnit(
-    quantity,
-    unit,
-    part.primary_unit,
-    part.unit_conversions,
-  );
-
-  let newQuantity = part.quantity - convertedQuantity;
-  let hasDiscrepancy = false;
-  let shortfall = 0;
-  let finalNotes = notes || null;
-
-  if (newQuantity < 0) {
-    hasDiscrepancy = true;
-    shortfall = Math.abs(newQuantity);
-    newQuantity = 0;
-
-    const discrepancyNote = `[DISCREPANCY: Confirmed ${convertedQuantity} ${part.primary_unit}, but only ${part.quantity} ${part.primary_unit} was available. Shortfall: ${shortfall} ${part.primary_unit}]`;
-    finalNotes = finalNotes ? `${finalNotes} ${discrepancyNote}` : discrepancyNote;
-  }
-
-  const { data: updated, error: updateError } = await supabase
-    .from('parts')
-    .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-    .eq('id', partId)
-    .select(PART_COLUMNS)
-    .single();
-
-  if (updateError) {
-    console.error('Error updating part quantity:', updateError);
-    throw updateError;
-  }
-
-  const transaction = await createInventoryTransaction(
-    part.company_id,
-    partId,
-    part.part_name,
-    'depletion',
-    quantity,
-    unit,
-    convertedQuantity,
-    finalNotes,
-    jobId,
-    jobOperationId,
-    operatorId,
-    createdBy,
-    hasDiscrepancy,
-  );
-
-  return { part: rowToPart(updated as PartRow), transaction, hasDiscrepancy, shortfall };
-}
 
 /**
  * Update the notes field on an existing transaction. All other fields are
@@ -1671,7 +1345,8 @@ export async function getPartTransactions(
   partId: string,
   offset: number = 0,
   limit: number = 25,
-): Promise<{ transactions: InventoryTransaction[]; total: number }> {
+  { photos = true }: { photos?: boolean } = {},
+): Promise<{ transactions: InventoryTransactionWithRelations[]; total: number }> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
@@ -1704,10 +1379,26 @@ export async function getPartTransactions(
     jobs?: { id: string; job_number: string } | null;
     job_operations?: { id: string; operation_name: string; sequence: number } | null;
   };
-  const transactions = ((data || []) as TxRow[]).map((t) => ({
+  const rows = (data || []) as TxRow[];
+
+  /**
+   * Who did it, and what they photographed.
+   *
+   * These two columns were already arriving — the select is `*` — and were being dropped on the
+   * floor, so the operator's phone had a strictly better view of the ledger than the desk. Neither
+   * can be an embed: `operator_id` has no foreign key. See `utils/movementAttribution.ts`.
+   */
+  const { nameById, urlByPath } = await resolveMovementAttribution(rows, { photos });
+
+  const transactions: InventoryTransactionWithRelations[] = rows.map((t) => ({
     ...t,
     job: t.jobs || null,
     job_operation: t.job_operations || null,
+    // Omitted, never "Unknown" — an absent name is honest about a row written before attribution.
+    operator: t.operator_id && nameById.has(t.operator_id)
+      ? { id: t.operator_id, name: nameById.get(t.operator_id) as string }
+      : null,
+    photo_url: t.photo_path ? urlByPath.get(t.photo_path) ?? null : null,
   }));
 
   return { transactions, total: count || 0 };
@@ -1717,6 +1408,38 @@ export async function getPartTransactions(
 // PART NOTES + ACTIVITY FEED
 // ============================================================
 
+// One read shape for every part_comments path (read, insert, update). Hoisted when
+// editing arrived and made it a third copy — mirrors JOB_NOTE_SELECT in
+// operatorAccess and MACHINE_NOTE_SELECT in machineMaintenanceAccess.
+const PART_COMMENT_SELECT =
+  'id, part_id, body, created_at, edited_at, author_id, note_type, ' +
+  'author:user_company_access(name)';
+
+type PartCommentRow = {
+  id: string;
+  part_id: string;
+  body: string;
+  created_at: string;
+  edited_at: string | null;
+  author_id: string | null;
+  note_type: string;
+  author: { name: string | null } | { name: string | null }[] | null;
+};
+
+function mapPartCommentRow(n: PartCommentRow): PartNote {
+  const author = Array.isArray(n.author) ? n.author[0] : n.author;
+  return {
+    id: n.id,
+    part_id: n.part_id,
+    body: n.body,
+    created_at: n.created_at,
+    edited_at: n.edited_at,
+    author_id: n.author_id,
+    author_name: author?.name ?? null,
+    note_type: (n.note_type as PartNoteType) ?? 'user',
+  };
+}
+
 /**
  * Notes on a part, newest-first. Mirrors getJobNotes (operatorAccess).
  */
@@ -1725,7 +1448,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
 
   const { data, error } = await supabase
     .from('part_comments')
-    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
+    .select(PART_COMMENT_SELECT)
     .eq('part_id', partId)
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
@@ -1735,28 +1458,7 @@ export async function getPartNotes(partId: string, companyId: string): Promise<P
     throw error;
   }
 
-  type NoteRow = {
-    id: string;
-    part_id: string;
-    body: string;
-    created_at: string;
-    author_id: string | null;
-    note_type: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-
-  return ((data ?? []) as NoteRow[]).map((n) => {
-    const author = Array.isArray(n.author) ? n.author[0] : n.author;
-    return {
-      id: n.id,
-      part_id: n.part_id,
-      body: n.body,
-      created_at: n.created_at,
-      author_id: n.author_id,
-      author_name: author?.name ?? null,
-      note_type: (n.note_type as PartNoteType) ?? 'user',
-    };
-  });
+  return ((data ?? []) as unknown as PartCommentRow[]).map(mapPartCommentRow);
 }
 
 /**
@@ -1786,7 +1488,7 @@ export async function addPartNote(
       body: trimmed,
       note_type: noteType,
     })
-    .select('id, part_id, body, created_at, author_id, note_type, author:user_company_access(name)')
+    .select(PART_COMMENT_SELECT)
     .single();
 
   if (error) {
@@ -1794,26 +1496,40 @@ export async function addPartNote(
     throw error;
   }
 
-  type NoteRow = {
-    id: string;
-    part_id: string;
-    body: string;
-    created_at: string;
-    author_id: string | null;
-    note_type: string;
-    author: { name: string | null } | { name: string | null }[] | null;
-  };
-  const n = data as NoteRow;
-  const author = Array.isArray(n.author) ? n.author[0] : n.author;
-  return {
-    id: n.id,
-    part_id: n.part_id,
-    body: n.body,
-    created_at: n.created_at,
-    author_id: n.author_id,
-    author_name: author?.name ?? null,
-    note_type: (n.note_type as PartNoteType) ?? 'user',
-  };
+  return mapPartCommentRow(data as unknown as PartCommentRow);
+}
+
+/**
+ * Edit the body of a part comment you wrote (#628).
+ *
+ * RLS restricts this to the author and to `note_type = 'user'`; the column-scoped
+ * grant restricts it to `body`, and a BEFORE UPDATE trigger stamps `edited_at`.
+ * So an auto-logged 'pricing' entry is not editable, and nothing here can change
+ * authorship or type — the audit trail stays an audit trail.
+ *
+ * Blank is refused before the round trip. Unlike a job/machine note, a part comment
+ * has no media, so an empty one has nothing left to be: `part_comments_body_not_blank`
+ * requires a non-blank NOT NULL body unconditionally.
+ */
+export async function updatePartNote(noteId: string, body: string): Promise<PartNote> {
+  const supabase = getSupabase();
+
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Comment cannot be empty.');
+
+  const { data, error } = await supabase
+    .from('part_comments')
+    .update({ body: trimmed })
+    .eq('id', noteId)
+    .select(PART_COMMENT_SELECT)
+    .single();
+
+  if (error) {
+    console.error('Error updating part note:', error);
+    throw error;
+  }
+
+  return mapPartCommentRow(data as unknown as PartCommentRow);
 }
 
 /**
@@ -1875,7 +1591,9 @@ export async function getPartActivity(
 ): Promise<PartActivityEvent[]> {
   const [notes, txnResult] = await Promise.all([
     getPartNotes(partId, companyId),
-    getPartTransactions(partId, 0, 100),
+    // No thumbnail in the activity feed, so signing 100 URLs would be a storage round trip per
+    // part-page open for pixels nobody renders.
+    getPartTransactions(partId, 0, 100, { photos: false }),
   ]);
 
   const events: PartActivityEvent[] = [];

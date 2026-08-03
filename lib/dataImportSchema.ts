@@ -87,5 +87,11 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     { key: 'quantity', label: 'Quantity', required: true },
     { key: 'unit', label: 'Unit', required: true },
   ],
-  customers: [{ key: 'name', label: 'Customer name', required: true }],
+  customers: [
+    { key: 'name', label: 'Customer name', required: true },
+    // A legacy customer master nearly always carries a terms code — it's the one
+    // commercial field every job-shop ERP ships — so mapping it on import is the
+    // difference between arriving populated and being typed in per customer later.
+    { key: 'default_payment_terms', label: 'Payment terms', required: false },
+  ],
 };

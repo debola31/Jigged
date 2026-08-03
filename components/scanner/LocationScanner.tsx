@@ -218,7 +218,7 @@ export default function LocationScanner({
                 operationId: scan.operationId,
               });
               if (ok === false) {
-                setRejected('That traveler belongs to a different company.');
+                setRejected('That traveler can’t be used here.');
                 return;
               }
               setRejected(null);
@@ -227,7 +227,20 @@ export default function LocationScanner({
 
             const accepted = await onScanRef.current(scan.locationId);
             if (accepted === false) {
-              setRejected('That label belongs to a different company.');
+              /**
+               * "Can't be used here", NOT "belongs to a different company" — which is what this
+               * used to say and was wrong most of the time.
+               *
+               * A handler returning `false` means *the caller* can't accept this code, and the
+               * count page's put-away picker returns it for three different reasons: the label
+               * isn't a valid destination, it's the bin you're already standing at, or it's the
+               * `Unassigned` bucket. Two of those are your own labels scanned by the right person,
+               * so telling them it belongs to another company was a plain falsehood.
+               *
+               * The genuine wrong-company case is caught earlier by `foreignCompanyRejection`,
+               * which owns that wording — so this path no longer needs to guess at a cause.
+               */
+              setRejected('That label can’t be used here.');
               return;
             }
             setRejected(null);

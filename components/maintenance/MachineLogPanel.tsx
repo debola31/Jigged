@@ -14,7 +14,8 @@ import { useLoad } from '@/hooks/useLoad';
 import { useNoteDwell } from '@/hooks/useNoteDwell';
 import { useNoteCapture } from '@/hooks/useNoteCapture';
 import type { NoteWriter } from '@/hooks/useNoteCapture';
-import { getCurrentMember } from '@/utils/operatorAccess';
+import { getCurrentMember, updateNoteBody } from '@/utils/operatorAccess';
+import { deleteJobNote, deleteJobNoteMedia } from '@/utils/jobNoteMediaAccess';
 import {
   addMachineNote,
   addMachineNoteMedia,
@@ -29,6 +30,8 @@ import MachineDetailsCard from '@/components/maintenance/MachineDetailsCard';
 import MachineEntry from '@/components/maintenance/MachineEntry';
 import MachineManualsSheet from '@/components/maintenance/MachineManualsSheet';
 import MachineOpenItems from '@/components/maintenance/MachineOpenItems';
+import NoteEditDialog from '@/components/notes/NoteEditDialog';
+import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import type { MachineNote, MaintenanceKind } from '@/types/machineMaintenance';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
@@ -62,9 +65,14 @@ export default function MachineLogPanel({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [kind, setKind] = useState<MaintenanceKind | null>(null);
   const [replyingTo, setReplyingTo] = useState<MachineNote | null>(null);
   const [manualsOpen, setManualsOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<MachineNote | null>(null);
+  const [deletingEntry, setDeletingEntry] = useState<MachineNote | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const {
     data: log,
@@ -95,7 +103,10 @@ export default function MachineLogPanel({
   useEffect(() => {
     let active = true;
     getCurrentMember(companyId).then((m) => {
-      if (active && m) setMemberId(m.id);
+      if (active && m) {
+        setMemberId(m.id);
+        setIsAdmin(m.role === 'admin');
+      }
     });
     return () => {
       active = false;
@@ -145,6 +156,59 @@ export default function MachineLogPanel({
     [capture, reload],
   );
 
+
+  /**
+   * Save an edited entry (#628). Body first, then any photo removals.
+   *
+   * That order is deliberate: the body update is the statement most likely to be
+   * refused (RLS, or the billing gate on a lapsed shop), so it fails before
+   * anything irreversible has happened to the photos.
+   *
+   * Reload rather than patch in place, because `open` is DERIVED server-side by
+   * deriveOpenItems and the thread structure below is computed from `openIds`.
+   * Editing cannot change either — maintenance_kind and resolves_note_id are
+   * immutable under the guard — but delete can, and using one refresh path for
+   * both keeps the pinned block and the log from ever disagreeing (§4.4).
+   */
+  const handleEditSave = useCallback(
+    async (body: string | null, removedMediaIds: string[]) => {
+      if (!editingEntry) return;
+      setRowBusy(true);
+      setRowError(null);
+      try {
+        await updateNoteBody(editingEntry.id, body);
+        for (const id of removedMediaIds) {
+          const m = editingEntry.media.find((x) => x.id === id);
+          if (m) await deleteJobNoteMedia({ id: m.id, storage_path: m.storage_path });
+        }
+        setEditingEntry(null);
+        reload();
+      } catch (err) {
+        setRowError(err instanceof Error ? err.message : 'Could not save that change.');
+      } finally {
+        setRowBusy(false);
+      }
+    },
+    [editingEntry, reload],
+  );
+
+  const handleDelete = useCallback(async () => {
+    if (!deletingEntry) return;
+    setRowBusy(true);
+    setRowError(null);
+    try {
+      await deleteJobNote(deletingEntry.id);
+      setDeletingEntry(null);
+      // MANDATORY, not stylistic — see handleEditSave. Deleting a resolver puts
+      // its target back in Needs attention, and that only shows if the derived
+      // open list is refetched.
+      reload();
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not delete that entry.');
+    } finally {
+      setRowBusy(false);
+    }
+  }, [deletingEntry, reload]);
 
   // Opens a reply directly under the item. No scroll-to-top and no banner: the
   // composer's POSITION says what it answers, which is a thing you cannot lose
@@ -278,6 +342,15 @@ export default function MachineLogPanel({
         items={log?.open ?? []}
         companyId={companyId}
         memberId={memberId}
+        isAdmin={isAdmin}
+        onEditItem={(item) => {
+          setRowError(null);
+          setEditingEntry(item);
+        }}
+        onDeleteItem={(item) => {
+          setRowError(null);
+          setDeletingEntry(item);
+        }}
         onLogFix={readOnly ? undefined : startFix}
         replyingToId={replyingTo?.id ?? null}
         // KEYED BY THE ITEM IT ANSWERS. The draft lives inside this component,
@@ -328,6 +401,15 @@ export default function MachineLogPanel({
                     entry={root}
                     companyId={companyId}
                     memberId={memberId}
+                    isAdmin={isAdmin}
+                    onEdit={() => {
+                      setRowError(null);
+                      setEditingEntry(root);
+                    }}
+                    onDelete={() => {
+                      setRowError(null);
+                      setDeletingEntry(root);
+                    }}
                     readOnly={readOnly}
                   />
                 </Box>
@@ -353,6 +435,15 @@ export default function MachineLogPanel({
                       entry={reply}
                       companyId={companyId}
                       memberId={memberId}
+                      isAdmin={isAdmin}
+                      onEdit={() => {
+                        setRowError(null);
+                        setEditingEntry(reply);
+                      }}
+                      onDelete={() => {
+                        setRowError(null);
+                        setDeletingEntry(reply);
+                      }}
                       readOnly={readOnly}
                     />
                   </Box>
@@ -364,6 +455,44 @@ export default function MachineLogPanel({
       ) : null}
 
       <MachineDetailsCard details={details ?? null} />
+
+      {editingEntry && (
+      <NoteEditDialog
+        key={editingEntry.id}
+        open
+        initialBody={editingEntry.body}
+        media={editingEntry.media}
+        noun="entry"
+        saving={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setEditingEntry(null);
+          setRowError(null);
+        }}
+        onSave={({ body, removedMediaIds }) => handleEditSave(body, removedMediaIds)}
+      />
+      )}
+
+      <NoteDeleteDialog
+        open={deletingEntry !== null}
+        noun="entry"
+        // Said BEFORE the fact rather than discovered after. "Open" is derived
+        // from the absence of a resolver (§4.4), so deleting the record that
+        // something was fixed necessarily returns the item to outstanding. That
+        // is correct behaviour and completely unguessable from the word "delete".
+        consequence={
+          deletingEntry?.resolves_note_id
+            ? 'The item this fixed goes back to Needs attention.'
+            : null
+        }
+        deleting={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setDeletingEntry(null);
+          setRowError(null);
+        }}
+        onConfirm={handleDelete}
+      />
     </Box>
   );
 }

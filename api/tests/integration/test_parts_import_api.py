@@ -96,6 +96,13 @@ class MockSupabaseTable:
     def in_(self, field, values):
         return self
 
+    def gt(self, field, value):
+        # The importer filters balance rows with .gt("quantity", 0) — a part that once passed
+        # through a shelf keeps a zero row there. Applied for real so a seeded zero row behaves
+        # like the database's, not like stock.
+        self._data = [r for r in self._data if float(r.get(field) or 0) > value]
+        return self
+
     def range(self, start, end):
         # Paged reads (fetch_all_by_company): the mock returns its full data on the first
         # page; since test fixtures are < 1000 rows, the paging loop stops after one call.
@@ -147,8 +154,14 @@ class MockSupabase:
         existing_vendors=None,
         upsert_log=None,
         insert_log=None,
+        existing_balances=None,
+        unassigned_id="loc-unassigned",
     ):
         self._existing_parts = existing_parts or []
+        # part_location_stock rows the company already has, as {part_id, location_id, quantity}.
+        self._existing_balances = existing_balances or []
+        self._unassigned_id = unassigned_id
+        self.rpc_calls: list[tuple[str, dict]] = []
         self._existing_customers = existing_customers or []
         self._existing_vendors = existing_vendors or []
         self._upsert_log = upsert_log if upsert_log is not None else []
@@ -191,11 +204,20 @@ class MockSupabase:
             self._table_instance = MockSupabaseTable(data=self._existing_customers)
         elif name == "vendors":
             self._table_instance = MockSupabaseTable(data=self._existing_vendors)
+        elif name == "part_location_stock":
+            self._table_instance = MockSupabaseTable(
+                data=[dict(b) for b in self._existing_balances]
+            )
         else:
             self._table_instance = MockSupabaseTable()
         # Wrap insert for inspection
         self._record_insert_factory(name)(self._table_instance)
         return self._table_instance
+
+    def rpc(self, name, params=None):
+        """Only `inv_get_or_create_unassigned` is called from the import path."""
+        self.rpc_calls.append((name, params or {}))
+        return MockSupabaseTable(data=self._unassigned_id)
 
 
 def create_mock_supabase_override(
@@ -204,6 +226,7 @@ def create_mock_supabase_override(
     existing_vendors=None,
     upsert_log=None,
     insert_log=None,
+    existing_balances=None,
 ):
     """Create a dependency override function for get_supabase."""
     mock = MockSupabase(
@@ -212,6 +235,7 @@ def create_mock_supabase_override(
         existing_vendors=existing_vendors,
         upsert_log=upsert_log,
         insert_log=insert_log,
+        existing_balances=existing_balances,
     )
     def override():
         return mock
@@ -882,7 +906,12 @@ class TestPartsExecuteEndpoint:
         # Procurement-only row (no operation columns) ⇒ source='bought'.
         assert inserted["source"] == "bought"
         assert inserted["primary_unit"] == "pounds"
-        assert inserted["quantity"] == 250.0
+        # NOT on the part row — `parts.quantity` is a trigger-maintained rollup since
+        # 20260802015837. It lands as a balance at the Unassigned bucket instead.
+        assert "quantity" not in inserted
+        balance = [r for r in insert_log if r["table"] == "part_location_stock"][0]["data"][0]
+        assert balance["quantity"] == 250.0
+        assert balance["location_id"] == "loc-unassigned"
         # cost_per_unit was dropped from parts in migration 20260514; the CSV
         # cost is routed into a NULL-vendor procurement tier instead. Assert
         # the tier was emitted with the right shape.
@@ -924,7 +953,6 @@ class TestPartsExecuteEndpoint:
                     "part_name": "STEEL-4140",
                     "quantity": 500,
                     "primary_unit": "pounds",
-                    "is_location_tracked": False,
                 }
             ],
             insert_log=insert_log,
@@ -971,7 +999,6 @@ class TestPartsExecuteEndpoint:
                     "part_name": "STEEL-4140",
                     "quantity": 100,
                     "primary_unit": "pounds",
-                    "is_location_tracked": False,
                 }
             ],
             insert_log=insert_log,
@@ -1020,7 +1047,6 @@ class TestPartsExecuteEndpoint:
                     "part_name": "STEEL-4140",
                     "quantity": 250,
                     "primary_unit": "pounds",
-                    "is_location_tracked": False,
                 }
             ],
             insert_log=insert_log,
@@ -1033,14 +1059,14 @@ class TestPartsExecuteEndpoint:
         assert [r for r in insert_log if r["table"] == "inventory_transactions"] == []
 
     @pytest.mark.unit
-    async def test_execute_skips_and_reports_quantity_for_a_location_tracked_part(
+    async def test_execute_skips_and_reports_quantity_for_an_already_placed_part(
         self, test_client
     ):
-        """A tracked part's quantity is a rollup of part_location_stock, so we must not write it.
+        """A part already sitting on a real shelf keeps its balances; the CSV number is refused.
 
-        Previously this raised enforce_tracked_part_quantity and, because upserts are batched
-        500 at a time, failed all 500 rows with an opaque 500. Skipping is correct — silence
-        is not, so the skip is reported back rather than the balance quietly not landing.
+        "250 lbs on hand" cannot say which shelf to correct, and dumping it into `Unassigned`
+        would silently inflate the total. Skipping is correct — silence is not, so the skip is
+        reported back rather than the balance quietly not landing.
         """
         insert_log: list = []
 
@@ -1060,12 +1086,15 @@ class TestPartsExecuteEndpoint:
         app.dependency_overrides[get_supabase] = create_mock_supabase_override(
             existing_parts=[
                 {
-                    "id": "part-1",
+                    "id": "upserted-id-0",
                     "part_name": "STEEL-4140",
                     "quantity": 100,
                     "primary_unit": "pounds",
-                    "is_location_tracked": True,
                 }
+            ],
+            # 100 lbs on a real shelf, not in the Unassigned bucket.
+            existing_balances=[
+                {"part_id": "upserted-id-0", "location_id": "shelf-a", "quantity": 100}
             ],
             insert_log=insert_log,
         )
@@ -1077,26 +1106,26 @@ class TestPartsExecuteEndpoint:
         data = response.json()
 
         # Reported, not silent.
-        assert data["location_tracked_skipped"] == ["STEEL-4140"]
+        assert data["quantity_skipped_already_placed"] == ["STEEL-4140"]
 
-        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
-        upserted = parts_inserts[0]["data"][0]
+        parts_upserts = [r for r in insert_log if r["table"] == "parts"]
+        upserted = parts_upserts[0]["data"][0]
+        # Never written on the part row — the trigger owns that column now.
         assert "quantity" not in upserted
         # No balance moved, so a provenance row would be a lie.
+        assert [r for r in insert_log if r["table"] == "part_location_stock"] == []
         assert [r for r in insert_log if r["table"] == "inventory_transactions"] == []
         # Everything else about the row still imported.
         assert upserted["primary_unit"] == "pounds"
 
     @pytest.mark.unit
-    async def test_execute_writes_quantity_for_a_brand_new_part_even_with_locations_on(
-        self, test_client
-    ):
-        """The insert path is unguarded, and must stay that way.
+    async def test_execute_writes_an_opening_balance_at_unassigned(self, test_client):
+        """The normal onboarding case: a quantity lands as a balance, never on the part row.
 
-        enforce_tracked_part_quantity is BEFORE UPDATE only. A new part lands with its
-        quantity, and trg_auto_track_stocked_part then flips is_location_tracked and seeds
-        part_location_stock from it — so the balance ends up correct. Skipping new parts would
-        break the normal onboarding import for a locations-enabled company.
+        `parts.quantity` became a trigger-maintained rollup of `part_location_stock` in
+        20260802015837 — writing it directly raises on UPDATE, and on INSERT slips past the
+        trigger to leave a part whose total has no balances behind it. So the importer writes
+        the balance and lets the rollup follow.
         """
         insert_log: list = []
 
@@ -1113,17 +1142,8 @@ class TestPartsExecuteEndpoint:
             "uom_resolutions": {1: "pounds"},
         }
 
-        # No existing part by that name — the tracked part in the company is unrelated.
         app.dependency_overrides[get_supabase] = create_mock_supabase_override(
-            existing_parts=[
-                {
-                    "id": "part-9",
-                    "part_name": "SOMETHING-ELSE",
-                    "quantity": 5,
-                    "primary_unit": "pounds",
-                    "is_location_tracked": True,
-                }
-            ],
+            existing_parts=[],
             insert_log=insert_log,
         )
 
@@ -1131,17 +1151,18 @@ class TestPartsExecuteEndpoint:
         app.dependency_overrides.clear()
 
         assert response.status_code == 200
-        data = response.json()
-        assert data["location_tracked_skipped"] == []
+        assert response.json()["quantity_skipped_already_placed"] == []
 
-        parts_inserts = [r for r in insert_log if r["table"] == "parts"]
-        upserted = parts_inserts[0]["data"][0]
-        assert upserted["quantity"] == 40.0
+        upserted = [r for r in insert_log if r["table"] == "parts"][0]["data"][0]
+        assert "quantity" not in upserted
+
+        balances = [r for r in insert_log if r["table"] == "part_location_stock"]
+        assert len(balances) == 1
+        row = balances[0]["data"][0]
+        assert row["quantity"] == 40.0
+        assert row["location_id"] == "loc-unassigned"
+
         # Prior is 0 for a new part, so the ledger row explains 0 -> 40.
-        ledger = [r for r in insert_log if r["table"] == "inventory_transactions"]
-        assert len(ledger) == 1
-        assert ledger[0]["data"][0]["quantity"] == 40.0
-
     @pytest.mark.unit
     async def test_execute_resolves_preferred_vendor_to_id(self, test_client):
         """preferred_vendor_name resolves to vendor_id at execute time."""

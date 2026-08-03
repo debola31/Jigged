@@ -56,9 +56,9 @@ beforeEach(() => {
     { id: 'b3', parent_part_id: 'made1', child_part_id: 'bolt', quantity: 6, unit: 'each', consume_whole_units: false },
   ];
   tableData.parts = [
-    { id: 'steel', part_name: 'Steel', primary_unit: 'each', quantity: 15, is_stocked: true, is_location_tracked: false, deleted_at: null },
-    { id: 'oring', part_name: 'O-ring', primary_unit: 'each', quantity: 9000, is_stocked: true, is_location_tracked: false, deleted_at: null },
-    { id: 'bolt', part_name: 'Bolt', primary_unit: 'each', quantity: 9000, is_stocked: true, is_location_tracked: false, deleted_at: null },
+    { id: 'steel', part_name: 'Steel', primary_unit: 'each', quantity: 15, is_stocked: true, deleted_at: null },
+    { id: 'oring', part_name: 'O-ring', primary_unit: 'each', quantity: 9000, is_stocked: true, deleted_at: null },
+    { id: 'bolt', part_name: 'Bolt', primary_unit: 'each', quantity: 9000, is_stocked: true, deleted_at: null },
   ];
   tableData.parts_unit_conversions = [];
   tableData.inventory_transactions = [];

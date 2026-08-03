@@ -34,7 +34,8 @@ import type {
   JobNote,
   JobNoteMedia,
   PartPreviousNote,
-  MyContribution,
+  MyContributionTotals,
+  MyNotesPage,
   MyNote,
   NoteViewer,
   NoteReaction,
@@ -44,18 +45,71 @@ import type {
 // CURRENT USER (the signed-in company member — ANY role)
 // ============================================================================
 
+export interface CurrentMember {
+  id: string;
+  name: string | null;
+  user_id: string;
+  /**
+   * The caller's role in THIS company. Selected here rather than through a second
+   * query because every note surface already calls this to resolve `id`, and
+   * delete gating needs author-or-admin (#628). `useUserRole` would issue a second
+   * round trip for a value that is on the row we are already fetching.
+   */
+  role: string | null;
+}
+
+/**
+ * IN-FLIGHT lookups only, keyed by company. Entries are dropped the moment they settle.
+ *
+ * WHY THIS EXISTS. Every call opens with `auth.getSession()`, which `supabase-js`
+ * serialises behind a `navigator.locks` acquisition and may refresh the token inside.
+ * Mounting the "Me" tab fires three of these in one commit (the identity hook, the totals
+ * loader, the first-page loader), so duplicate callers didn't just cost a round trip —
+ * they queued against each other on the single lock that gates every other request on the
+ * page, which is what the tab's stall actually was. Sharing one flight collapses that to
+ * one lock acquisition.
+ *
+ * WHY IT DOES NOT OUTLIVE THE FLIGHT. A session-length cache of this row is a cross-user
+ * data leak waiting to happen, and the app's shape makes it near-certain rather than
+ * theoretical: sign-out on the admin surface is `await signOut(); router.replace('/')`
+ * (components/layout/Header.tsx) and sign-in is `router.push` — every step a client
+ * navigation, so module state survives the whole sign-out/sign-in cycle. A retained entry
+ * would hand the next person the previous person's `user_company_access` row on a shared
+ * office computer, and this function is what pins `uploaded_by` / `author_id` on writes
+ * whose RLS policies require them to match the caller (utils/partAttachmentsAccess.ts,
+ * utils/workCenterAttachmentsAccess.ts) and what drives the admin-only delete affordances
+ * in FilesTab and JobFeed. Rather than maintain a list of every sign-out path that must
+ * remember to invalidate — one forgotten call site is a silent leak — the entry simply
+ * never outlives the request it was deduplicating. There is nothing to invalidate.
+ *
+ * The cost is one lookup per navigation instead of one per session, which is what the
+ * code did before the cache existed. The stall was never sequential calls; it was three
+ * concurrent ones.
+ */
+const memberFlights = new Map<string, Promise<CurrentMember | null>>();
+
 /**
  * The signed-in user's user_company_access row for this company — used wherever
  * we need the acting member's account id (job-note author, operation completer,
  * activity attribution). Intentionally NOT role-filtered: operators, users, and
  * admins are all company members, and every one of them can act in the operator
  * view. (There is no separate "operators" table — that legacy table is gone.)
+ *
+ * Concurrent callers share one request — see `memberFlights`.
  */
-export async function getCurrentMember(companyId: string): Promise<{
-  id: string;
-  name: string | null;
-  user_id: string;
-} | null> {
+export function getCurrentMember(companyId: string): Promise<CurrentMember | null> {
+  const inFlight = memberFlights.get(companyId);
+  if (inFlight) return inFlight;
+
+  const flight = fetchCurrentMember(companyId).finally(() => {
+    memberFlights.delete(companyId);
+  });
+
+  memberFlights.set(companyId, flight);
+  return flight;
+}
+
+async function fetchCurrentMember(companyId: string): Promise<CurrentMember | null> {
   const supabase = getSupabase();
 
   const { data: { session } } = await supabase.auth.getSession();
@@ -63,7 +117,7 @@ export async function getCurrentMember(companyId: string): Promise<{
 
   const { data: member } = await supabase
     .from('user_company_access')
-    .select('id, name, user_id')
+    .select('id, name, user_id, role')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
@@ -1298,7 +1352,7 @@ export async function getJobPartsOverview(
 const JOB_NOTE_SELECT =
   'id, subject_kind, job_id, job_operation_id, captured_job_id, ' +
   'captured_job_operation_id, part_id, routing_operation_id, ' +
-  'viewer_count, usage_count, body, note_type, created_at, ' +
+  'viewer_count, usage_count, body, note_type, created_at, edited_at, ' +
   'author_id, author:user_company_access(name), ' +
   // Reactions embed because they are PUBLIC within the shop — the deliberate
   // opposite of note_views, which has no client read path at any level. Count and
@@ -1351,6 +1405,7 @@ type JobNoteRow = {
   body: string | null;
   note_type: string | null;
   created_at: string;
+  edited_at: string | null;
   author_id: string | null;
   author: { name: string | null } | { name: string | null }[] | null;
   reactions: ReactionRel[] | null;
@@ -1402,6 +1457,7 @@ function mapJobNoteRow(n: JobNoteRow): JobNote {
     body: n.body,
     note_type: n.note_type === 'event' ? 'event' : 'user',
     created_at: n.created_at,
+    edited_at: n.edited_at,
     author_name: author?.name ?? null,
     subject_kind: n.subject_kind === 'part' || n.subject_kind === 'work_center'
       ? n.subject_kind
@@ -1558,6 +1614,60 @@ export async function addJobNote(
   return mapJobNoteRow(data as unknown as JobNoteRow);
 }
 
+/**
+ * Edit the body of a note you wrote (#628).
+ *
+ * ONE function for every `notes` surface. The job feed, the Playbook sheet, My work
+ * and the machine logbook are four READ shapes over one table; a second update
+ * function would be a second place for the blank-body rule to drift out of step.
+ *
+ * WHAT THIS CANNOT DO, and it is structural rather than a convention here: the
+ * browser holds `GRANT UPDATE (body)` and nothing else, so `viewer_count`,
+ * `usage_count`, `author_id`, `note_type`, `maintenance_kind`, `resolves_note_id`
+ * and every subject column are unwritable — not merely "not written by this
+ * function". Editing therefore NEVER resets a note's reach. That is deliberate:
+ * a resettable counter would hand an author a timed read-oracle on their own notes
+ * (see the migration header and docs/modules/operator-view.md). The honesty cost of
+ * keeping the count is carried by `edited_at` and the "· edited" marker instead.
+ *
+ * `edited_at` is likewise absent from the payload — the database stamps it in a
+ * BEFORE UPDATE trigger, and only when the body actually changed, so a no-op
+ * re-save leaves the note unmarked.
+ *
+ * `body` may be null for a media-only note (the `notes_body_blank_or_null` CHECK
+ * permits NULL but not blank), so blank normalises to null here. Callers must
+ * refuse an empty body on a note with no media — an empty note is a delete, and
+ * the UI offers that instead.
+ *
+ * Returns only the two columns that can have changed. Every caller already holds
+ * the note it is editing, so patching `{ body, edited_at }` into it is cheaper and
+ * less error-prone than re-selecting one of four different embed shapes here.
+ */
+export async function updateNoteBody(
+  noteId: string,
+  body: string | null,
+): Promise<{ body: string | null; edited_at: string | null }> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('notes')
+    .update({ body: body?.trim() || null })
+    .eq('id', noteId)
+    .select('body, edited_at')
+    .single();
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not save that change.',
+      }),
+    );
+  }
+
+  return data as { body: string | null; edited_at: string | null };
+}
+
 /** Resolve a step's identity for the RPC's legacy step-name fallback. */
 async function getStepIdentity(
   jobOperationId: string,
@@ -1575,6 +1685,7 @@ type PlaybookRow = {
   id: string;
   body: string | null;
   created_at: string;
+  edited_at: string | null;
   note_type: string | null;
   subject_kind: string;
   routing_operation_id: string | null;
@@ -1679,6 +1790,7 @@ export async function getPartPreviousNotes(
     body: r.body,
     note_type: r.note_type === 'event' ? 'event' : 'user',
     created_at: r.created_at,
+    edited_at: r.edited_at,
     author_name: r.author_name,
     author_id: r.author_id,
     reactions: mapReactions(r.reactions),
@@ -1698,7 +1810,79 @@ export async function getPartPreviousNotes(
 // ============================================================================
 
 /**
- * What the caller has written, and how far it has travelled.
+ * How many of the caller's own notes load at a time on the "Me" tab.
+ *
+ * Ten, where the completed-jobs list above uses fifty, because the two caps are
+ * solving different problems. That one is bounding a query; this one is bounding
+ * a SCROLL — "Give feedback" sits under this list, and the whole point of paging
+ * it is that the end of the page stays about a screen away on a phone. Fifty
+ * blurred cards would page the query and still bury the button.
+ */
+export const MY_NOTES_PAGE_SIZE = 10;
+
+/**
+ * The totals on the "Me" tab's summary card.
+ *
+ * A SEPARATE QUERY FROM THE LIST, deliberately. These used to be reduced from the
+ * fetched note rows, which was only honest while the list was unbounded. Once the
+ * list pages, deriving them from the loaded rows would mean the operator's note
+ * count climbed every time they tapped Show more — a number about the UI wearing
+ * the label of a number about their work.
+ *
+ * Two columns and one embed, against the seven relations the list select needs:
+ * this exists to be cheap enough to run alongside the first page. `photoCount`
+ * needs the media rows counted per note, and `peopleReached` needs each row's
+ * viewer_count summed; neither is expressible as a PostgREST `count`.
+ */
+export async function getMyContributionTotals(
+  companyId: string,
+): Promise<MyContributionTotals> {
+  const supabase = getSupabase();
+
+  const empty: MyContributionTotals = { noteCount: 0, photoCount: 0, peopleReached: 0 };
+
+  const member = await getCurrentMember(companyId);
+  if (!member) return empty;
+
+  const { data, error } = await supabase
+    .from('notes')
+    .select('viewer_count, media:note_media(id)')
+    .eq('company_id', companyId)
+    .eq('author_id', member.id)
+    // Auto-logged entries are not somebody's contribution.
+    .eq('note_type', 'user');
+
+  // THROW, don't return zeroes. A failed count and a genuine zero are different
+  // facts, and rendering the first as the second tells an operator their notes are
+  // gone. The caller has an error state; give it something to show.
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not load your work.',
+      }),
+    );
+  }
+  if (!data) return empty;
+
+  const rows = data as unknown as Array<{
+    viewer_count: number;
+    media: Array<{ id: string }> | null;
+  }>;
+
+  return {
+    noteCount: rows.length,
+    photoCount: rows.reduce((n, r) => n + (r.media ?? []).length, 0),
+    // Summed rather than distinct, and labelled "views" in the UI for exactly
+    // that reason: the per-note numbers it adds up are visible right below it.
+    // Distinct people across all notes would need the view rows, which are
+    // deliberately unreadable by any browser role.
+    peopleReached: rows.reduce((n, r) => n + r.viewer_count, 0),
+  };
+}
+
+/**
+ * What the caller has written, and how far it has travelled — one page of it.
  *
  * This is the return half of the loop: an operator writes something down and,
  * without this, nothing ever comes back. The login banner says "3 people used
@@ -1710,28 +1894,35 @@ export async function getPartPreviousNotes(
  * that no operator-facing surface ever reflects their pace or standing back at
  * them. Their own output and its reception, nothing else.
  *
- * viewer_count and usage_count are columns on the row, so the whole screen is
- * one round trip — no per-note count queries.
+ * viewer_count and usage_count are columns on the row, so a page is one round
+ * trip — no per-note count queries.
+ *
+ * PAGED SINCE #6xx. This used to fetch every note the operator had ever written,
+ * with all seven embeds, and render the lot. It was the only operator screen
+ * putting a `backdrop-filter` card inside an uncapped `.map()`, so the cost grew
+ * without bound in both the query and the compositor. `hasMore` is derived from a
+ * full page coming back rather than from a count, matching the activity feed.
  */
-export async function getMyContribution(companyId: string): Promise<MyContribution> {
+export async function getMyNotesPage(
+  companyId: string,
+  { offset = 0, limit = MY_NOTES_PAGE_SIZE }: { offset?: number; limit?: number } = {},
+): Promise<MyNotesPage> {
   const supabase = getSupabase();
 
   const member = await getCurrentMember(companyId);
-  const empty: MyContribution = {
-    noteCount: 0,
-    photoCount: 0,
-    peopleReached: 0,
-    notes: [],
-  };
+  const empty: MyNotesPage = { notes: [], hasMore: false };
   if (!member) return empty;
 
   const { data, error } = await supabase
     .from('notes')
     .select(
-      'id, body, created_at, viewer_count, usage_count, ' +
-        'operation:job_operations!notes_job_operation_fk(operation_name, sequence), ' +
-        'captured_operation:job_operations!notes_captured_job_operation_fk(operation_name, sequence), ' +
+      'id, body, created_at, edited_at, viewer_count, usage_count, maintenance_kind, ' +
         'part:parts(part_name), ' +
+        // The machine, for maintenance entries. Those are `notes` rows too
+        // (subject_kind='work_center'), so they land in this list like anything else the
+        // operator wrote — but they carry no part, no operation and no job, so without
+        // this they rendered as a bare sentence with nothing saying what it was about.
+        'work_center:work_centers!notes_work_center_fk(name), ' +
         // Read-only here: RLS forbids reacting to your own note, so on My work
         // these are reception rather than an available action.
         'reactions:note_reactions(kind, reactor_id, reactor:user_company_access(name)), ' +
@@ -1746,19 +1937,38 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     .eq('author_id', member.id)
     // Auto-logged entries are not somebody's contribution.
     .eq('note_type', 'user')
-    .order('created_at', { ascending: false });
+    // `id` breaks ties: two notes saved in the same millisecond would otherwise
+    // sort unstably between pages, which is how a row goes missing or repeats.
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(offset, offset + limit - 1);
 
-  if (error || !data) return empty;
+  // THROW rather than resolving to an empty page. Swallowing this is worse here than
+  // anywhere else in the file: an empty page reads as `hasMore: false`, which retires
+  // the Show more button, so a single dropped request on a flaky shop connection made
+  // every remaining note look deleted — with no error and no way back short of leaving
+  // the tab. The caller's catch is what shows the retry, and it can only fire if this
+  // rejects.
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'note',
+        fallback: 'Could not load your notes.',
+      }),
+    );
+  }
+  if (!data) return empty;
 
   type Row = {
     id: string;
     body: string | null;
     created_at: string;
+    edited_at: string | null;
     viewer_count: number;
     usage_count: number;
-    operation: StepRel;
-    captured_operation: StepRel;
+    maintenance_kind: string | null;
     part: { part_name: string | null } | { part_name: string | null }[] | null;
+    work_center: { name: string | null } | { name: string | null }[] | null;
     reactions: ReactionRel[] | null;
     job: JobRel;
     captured_job: JobRel;
@@ -1770,17 +1980,18 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
 
   const notes: MyNote[] = (data as unknown as Row[]).map((r) => {
     const part = Array.isArray(r.part) ? r.part[0] : r.part;
+    const workCenter = Array.isArray(r.work_center) ? r.work_center[0] : r.work_center;
     const job = oneJob(r.job) ?? oneJob(r.captured_job);
     return {
       id: r.id,
       body: r.body,
       created_at: r.created_at,
+      edited_at: r.edited_at,
       job_id: job?.id ?? null,
       job_number: job?.job_number ?? null,
-      // A durable part-subject note has no step of its own; the step it was
-      // captured at is the readable label.
-      operation_label: stepLabel(r.operation) ?? stepLabel(r.captured_operation),
       part_name: part?.part_name ?? null,
+      machine_name: workCenter?.name ?? null,
+      maintenance_kind: r.maintenance_kind,
       photo_count: (r.media ?? []).length,
       reactions: mapReactions(r.reactions),
       viewer_count: r.viewer_count,
@@ -1788,16 +1999,11 @@ export async function getMyContribution(companyId: string): Promise<MyContributi
     };
   });
 
-  return {
-    noteCount: notes.length,
-    photoCount: notes.reduce((n, x) => n + x.photo_count, 0),
-    // Summed rather than distinct, and labelled "views" in the UI for exactly
-    // that reason: the per-note numbers it adds up are visible right below it.
-    // Distinct people across all notes would need the view rows, which are
-    // deliberately unreadable by any browser role.
-    peopleReached: notes.reduce((n, x) => n + x.viewer_count, 0),
-    notes,
-  };
+  // A full page means there is probably another one; a short page means there
+  // certainly isn't. Same rule the activity feed uses. It can show Show more once
+  // on an exact multiple of the page size, which costs one empty fetch and is
+  // preferable to paying for an exact count on every page.
+  return { notes, hasMore: notes.length === limit };
 }
 
 /**

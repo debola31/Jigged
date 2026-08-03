@@ -31,6 +31,11 @@ export interface InventoryTransaction {
   location_id: string | null;
   location_name: string | null;
   transfer_group_id: string | null;
+  /**
+   * Storage path of a photo taken as evidence of this movement. Written at INSERT inside the RPC
+   * and immutable afterwards — evidence that can be swapped later is not evidence.
+   */
+  photo_path: string | null;
   created_at: string;
   created_by: string | null;
 }
@@ -48,10 +53,18 @@ export interface InventoryTransactionWithRelations extends InventoryTransaction 
     operation_name: string;
     sequence: number;
   } | null;
+  /**
+   * Resolved from `operator_id` by a separate lookup, not an embed — the column has no foreign
+   * key, so PostgREST cannot join it. **Absent means unattributed**: rows written before
+   * `operator_id` was populated on add/adjust/transfer have no author, and must render without
+   * one rather than as "Unknown". See `utils/movementAttribution.ts`.
+   */
   operator?: {
     id: string;
     name: string;
   } | null;
+  /** Signed URL for `photo_path`. Absent when there is no photo, or the object has gone. */
+  photo_url?: string | null;
 }
 
 /**

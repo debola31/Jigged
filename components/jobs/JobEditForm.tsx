@@ -33,6 +33,7 @@ import {
   updateJobPartPrice,
 } from '@/utils/jobsAccess';
 import type { JobWithRelations, JobPartWithRelations } from '@/types/job';
+import { FREIGHT_TERMS_LABELS, type FreightTerms } from '@/types/shipment';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 
 const ADD_NEW_ADDRESS_ID = '__add_new_address__';
@@ -75,7 +76,17 @@ export default function JobEditForm({
 }: JobEditFormProps) {
   const router = useRouter();
   const addresses = job.customers?.addresses ?? [];
-  const contacts = job.customers?.customer_contacts ?? [];
+  // Archived contacts leave the picker, but one this job already names is
+  // kept — a person leaving the customer must not silently blank who the
+  // work was agreed with. Same rule as the carrier accounts below.
+  const contacts = (job.customers?.customer_contacts ?? []).filter(
+    (c) => c.deleted_at === null || c.id === job.contact_id,
+  );
+  // Archived accounts stay out of the picker, but one this job already points
+  // at is kept so editing an old job doesn't silently blank its freight.
+  const carrierAccounts = (job.customers?.carrier_accounts ?? []).filter(
+    (a) => a.deleted_at === null || a.id === job.customer_carrier_account_id,
+  );
   const parts: JobPartWithRelations[] = job.job_parts ?? [];
   const customerHref = `/dashboard/${companyId}/customers/${job.customer_id}`;
 
@@ -87,6 +98,10 @@ export default function JobEditForm({
   const [billingSame, setBillingSame] = useState(
     !job.billing_address_id || job.billing_address_id === job.shipping_address_id,
   );
+  const [freightTerms, setFreightTerms] = useState<FreightTerms | ''>(job.freight_terms ?? '');
+  const [carrierAccountId, setCarrierAccountId] = useState(job.customer_carrier_account_id ?? '');
+  const [shipVia, setShipVia] = useState(job.ship_via ?? '');
+  const [shippingInstructions, setShippingInstructions] = useState(job.shipping_instructions ?? '');
   const [lines, setLines] = useState<Record<string, LineDraft>>(() => {
     const m: Record<string, LineDraft> = {};
     for (const p of parts) {
@@ -145,6 +160,10 @@ export default function JobEditForm({
         shipping_address_id: shippingId,
         billing_address_id: billingSame ? shippingId : billingId,
         contact_id: contactId,
+        freight_terms: freightTerms === '' ? null : freightTerms,
+        customer_carrier_account_id: carrierAccountId,
+        ship_via: shipVia,
+        shipping_instructions: shippingInstructions,
       });
       // Per line: quantity first (keeps the agreed price and recomputes the
       // total), then a manual price if the user changed it — same order the
@@ -344,6 +363,91 @@ export default function JobEditForm({
                   </Select>
                 </FormControl>
               )}
+
+              {/* Freight — what the customer's PO said for THIS order.
+                  It belongs on the job, not only on the shipment: the
+                  instruction arrives when the PO is read, and re-deriving it
+                  from the customer's standing arrangement weeks later at pack
+                  time is how a one-off ("this one prepaid, we're in a hurry")
+                  gets silently billed the usual way.
+
+                  Kept visually apart from the addresses above because it
+                  answers a different question: not where it goes, but who
+                  pays. */}
+              <Divider sx={{ my: 3 }} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                Freight
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                As the customer&rsquo;s PO states it. Leave blank to use their
+                standing arrangement when this ships.
+              </Typography>
+
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <FormControl size="small" sx={{ minWidth: 200, flex: '1 1 200px' }}>
+                  <InputLabel id="job-edit-freight-terms-label">Who pays</InputLabel>
+                  <Select
+                    labelId="job-edit-freight-terms-label"
+                    label="Who pays"
+                    value={freightTerms}
+                    onChange={(e) => setFreightTerms(e.target.value as FreightTerms | '')}
+                  >
+                    <MenuItem value="">
+                      <em>Not stated</em>
+                    </MenuItem>
+                    {(Object.keys(FREIGHT_TERMS_LABELS) as FreightTerms[]).map((k) => (
+                      <MenuItem key={k} value={k}>
+                        {FREIGHT_TERMS_LABELS[k]}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {/* Only this customer's accounts are offered, and the DB
+                    enforces it too — the customer-match trigger rejects another
+                    customer's account outright, so a mis-set FK cannot bill the
+                    wrong firm. */}
+                {carrierAccounts.length > 0 && (
+                  <FormControl size="small" sx={{ minWidth: 200, flex: '1 1 200px' }}>
+                    <InputLabel id="job-edit-carrier-account-label">Their account</InputLabel>
+                    <Select
+                      labelId="job-edit-carrier-account-label"
+                      label="Their account"
+                      value={carrierAccountId}
+                      onChange={(e) => setCarrierAccountId(e.target.value)}
+                    >
+                      <MenuItem value="">
+                        <em>None</em>
+                      </MenuItem>
+                      {carrierAccounts.map((a) => (
+                        <MenuItem key={a.id} value={a.id}>
+                          {a.carrier}
+                          {a.account_number ? ` · ${a.account_number}` : ''}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mt: 2 }}>
+                <TextField
+                  size="small"
+                  label="Ship via"
+                  value={shipVia}
+                  onChange={(e) => setShipVia(e.target.value)}
+                  sx={{ minWidth: 200, flex: '1 1 200px' }}
+                  helperText="The PO's words, e.g. UPS Ground"
+                />
+                <TextField
+                  size="small"
+                  label="Shipping instructions"
+                  value={shippingInstructions}
+                  onChange={(e) => setShippingInstructions(e.target.value)}
+                  sx={{ minWidth: 200, flex: '1 1 280px' }}
+                  helperText="Anything the shipper needs to honour"
+                />
+              </Box>
             </CardContent>
           </Card>
         </Grid>

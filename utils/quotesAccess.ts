@@ -116,11 +116,17 @@ const QUOTE_LIST_SELECT = `
   jobs!left(id, job_number)
 `;
 
+// The customer's standing terms (default_payment_terms / default_lead_time_text /
+// default_fob_point) ride along on the DETAIL select so the page can compare what
+// this quote was issued with against the customer's CURRENT default and surface
+// drift as a chip. Comparison only — the quote always RENDERS its own columns.
+// Deliberately absent from QUOTE_LIST_SELECT: the list shows no terms.
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(
     id, name, website,
-    customer_contacts(id, name, role, email, phone, is_primary),
+    default_payment_terms, default_lead_time_text, default_fob_point,
+    customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at),
     addresses:customer_addresses(
       id,
       address_line1, address_line2, city, state, postal_code, country,
@@ -399,6 +405,7 @@ export async function createQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: paymentTerms,
+      fob_point: nullIfBlank(formData.fob_point),
       expiration_date: expirationDate,
       status: 'active',
       created_by: user?.id ?? null,
@@ -550,6 +557,7 @@ export async function updateQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: nullIfBlank(formData.payment_terms),
+      fob_point: nullIfBlank(formData.fob_point),
       expiration_date: newExpiration,
       status: nextStatus,
       ...(nextStatus !== existing.status
@@ -1341,12 +1349,26 @@ export async function convertQuoteToJob(
       is_hot: options.hot ?? false,
       due_date: dueDate,
       customer_po_number: customerPoNumber,
+      // The commercial term this order was sold on, frozen onto the job.
+      // Unlike freight below, this IS carried: the quote genuinely stated it,
+      // the customer accepted it by issuing the PO, and it has to survive to
+      // the QuickBooks invoice — which until now sent no terms at all and let
+      // QBO silently apply a company default nobody in Jigged could see.
+      payment_terms: quote.payment_terms,
       // Carry the quote's billing/shipping address + contact onto the job so
       // it has a shippable address of its own. Editable on the job afterwards
       // (utils/jobsAccess.ts updateJobAddressContact) without touching the quote.
       billing_address_id: quote.billing_address_id,
       shipping_address_id: quote.shipping_address_id,
       contact_id: quote.contact_id,
+      // FREIGHT IS DELIBERATELY LEFT NULL HERE, unlike the address/contact above.
+      // jobs.freight_terms means "what the customer's PO said for this order".
+      // Seeding it from their standing arrangement would make the job assert
+      // something the PO may never have stated, and resolveFreightLine would
+      // then report the value as coming from the job when it really came from
+      // the customer. Left null, the fallback happens at ship time with honest
+      // provenance, and the job's Freight section stays empty until someone
+      // types what the PO actually says.
       created_by: user.id,
     })
     .select('id, job_number')

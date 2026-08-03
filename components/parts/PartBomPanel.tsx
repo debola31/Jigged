@@ -15,7 +15,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Link from '@mui/material/Link';
-import Divider from '@mui/material/Divider';
+import Chip from '@mui/material/Chip';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -88,13 +88,21 @@ const formatQuantity = (n: number): string =>
  * row for an editor in place. No modal — keeps the editing flow consistent
  * with operations and avoids covering the rest of the page.
  *
- * Each saved row shows the child part name (linked), the BOM-line
- * quantity + unit, and a small table of the child's tier ladder (qty
- * break + cost/unit from compute_part_cost_at_qty). The ladder is the
- * full transparency a parent's tier pricing depends on: at parent qty N
- * the child cost flows through `compute_part_cost_at_qty(child_id, N ×
- * bom_qty_in_primary)`, which picks the child's tier matching that
- * cascaded qty.
+ * A saved row is a bordered card shaped like the operation rows it sits
+ * beside — identity on line 1 (linked child part + Made/Bought chip),
+ * numbers on a single caption line below ("2 ea · $64.10/ea"), actions on
+ * the right. The two lists are the same kind of thing and now read that
+ * way; the earlier two-line-plus-table layout made a four-material BOM
+ * several times taller than a four-operation routing.
+ *
+ * The child's tier ladder (qty break + cost/unit from
+ * compute_part_cost_at_qty) is the full transparency a parent's tier
+ * pricing depends on: at parent qty N the child cost flows through
+ * `compute_part_cost_at_qty(child_id, N × bom_qty_in_primary)`, which
+ * picks the child's tier matching that cascaded qty. It is still rendered
+ * in full whenever the child has MORE THAN ONE break. A single break —
+ * the common case — folds into the caption instead of spending a
+ * two-row table on one number. Nothing is dropped either way.
  *
  * Per-parent-unit totals are deliberately not rendered — the contribution
  * varies by which parent tier you're at, so a single "Material total"
@@ -368,8 +376,9 @@ export default function PartBomPanel({
       : null;
   const editingInitial: MaterialEditorValue | undefined = editingRow
     ? {
-        // has_routing/quantity are display-only fillers — synthesize the option
-        // from the BOM row.
+        // has_routing/quantity are display-only fillers — synthesize the
+        // option from the BOM row, which carries none of them. The material editor shows a name
+        // and a unit; it never reads stock, so a filler here cannot mislead anyone.
         childPart: {
           id: editingRow.child_part.id,
           part_name: editingRow.child_part.part_name,
@@ -440,7 +449,7 @@ export default function PartBomPanel({
           </Typography>
         </Box>
       ) : (
-        <Stack divider={<Divider flexItem />} spacing={0}>
+        <Stack spacing={0}>
           {rows.map((row) => {
             const child = row.child_part;
             const ladder = tierLadders.get(row.id) ?? [];
@@ -462,6 +471,50 @@ export default function PartBomPanel({
                 ? child.costing_batch_quantity
                 : null;
 
+            /**
+             * The secondary caption, built as segments joined by "·" — the same
+             * shape as an operation row's "Setup 30 min · Run 5 min/unit".
+             *
+             * Everything the old two-line + table layout showed still appears:
+             * a SINGLE qty break folds in here (it was costing a two-row table
+             * to show one number), while a child with more than one break keeps
+             * the full ladder below, because that is detail a caption can't
+             * carry. Consumption mode and the pinned batch move here verbatim.
+             */
+            const captionParts: { key: string; text: string; warning?: boolean }[] = [];
+            if (ladderLoaded && !missingCost) {
+              if (ladder.length === 1) {
+                const only = ladder[0];
+                captionParts.push({
+                  key: 'cost',
+                  text:
+                    only.costPerUnit === null
+                      ? 'No cost'
+                      : `${formatCurrency(only.costPerUnit)}/${only.unit}`,
+                  warning: only.costPerUnit === null,
+                });
+              } else if (ladder.length > 1) {
+                captionParts.push({
+                  key: 'cost',
+                  text: `${ladder.length} qty breaks`,
+                });
+              }
+            }
+            // Only meaningful for a fractional-capable line; "whole units" on a
+            // part that can't be split says nothing.
+            if (row.consume_whole_units || pinnedBatch !== null) {
+              captionParts.push({
+                key: 'mode',
+                text: row.consume_whole_units ? 'whole units' : 'fractional',
+              });
+            }
+            if (pinnedBatch !== null) {
+              captionParts.push({
+                key: 'batch',
+                text: `batch ${formatQuantity(pinnedBatch)}`,
+              });
+            }
+
             // Render an editor in place of the row when editing this one.
             if (editorState.mode === 'edit' && editorState.rowId === row.id) {
               return (
@@ -482,21 +535,26 @@ export default function PartBomPanel({
               <Box
                 key={row.id}
                 sx={{
-                  py: 1.5,
-                  pl: 1.5,
                   display: 'flex',
-                  flexDirection: 'column',
+                  alignItems: 'center',
                   gap: 1,
-                  borderLeft: '3px solid',
-                  borderColor: missingCost ? 'error.main' : 'transparent',
+                  p: 1,
+                  mb: 1,
+                  bgcolor: 'background.paper',
+                  border: '1px solid',
+                  // Same colour ladder as the operation rows next door
+                  // (error.main = broken, divider = fine), and the same bordered
+                  // card geometry — these two lists sit side by side and read as
+                  // one kind of thing.
+                  borderColor: missingCost ? 'error.main' : 'divider',
+                  borderRadius: 1,
                 }}
               >
-                {/* Header row: name + BOM qty + actions on one line, all
-                    centered at the part-name baseline. The tier table
-                    renders BELOW so the actions can't drift downward when
-                    a long ladder makes the left column taller. */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {/* Line 1 — identity: the child part, and whether its cost
+                      comes from a routing or a vendor. Mirrors the operation
+                      row's work-center name + Internal/External chip. */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Link
                       component={NextLink}
                       href={buildPartHref({
@@ -504,117 +562,169 @@ export default function PartBomPanel({
                         targetPartId: child.id,
                         chain: pushPartToChain(currentChain, partId, child.id),
                       })}
-                      underline="always"
-                      color="primary.main"
+                      // Reads as ordinary row text and reveals itself as a link
+                      // on hover — the same treatment as a part name in a
+                      // quote's line items. Permanently-blue underlined names
+                      // fought the row for attention and were harder to read
+                      // against the dark card than plain white text.
+                      //
+                      // Colour is therefore NOT the link affordance here; the
+                      // chevron is, and it is always visible. Focus gets the
+                      // same underline as hover so the cue isn't mouse-only.
+                      underline="hover"
+                      color="inherit"
                       sx={{
                         fontWeight: 500,
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 0.25,
+                        '&:focus-visible': { textDecoration: 'underline' },
                       }}
                     >
                       {child.part_name}
                       <ChevronRightIcon sx={{ fontSize: 16 }} />
                     </Link>
+                    <Chip
+                      label={child.source === 'bought' ? 'Bought' : 'Made'}
+                      size="small"
+                      variant="outlined"
+                      color={child.source === 'bought' ? 'secondary' : 'default'}
+                      sx={{ height: 18, fontSize: '0.7rem' }}
+                    />
                   </Box>
-                  <Box sx={{ minWidth: 130, textAlign: 'right' }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>
+
+                  {/* Line 2 — the numbers, as one caption like the operation
+                      row's "Setup 30 min · Run 5 min/unit". Quantity keeps
+                      primary-text weight: on a BOM it is the number that
+                      matters most. */}
+                  <Typography variant="caption" component="div" sx={{ mt: 0.25 }}>
+                    <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
                       {formatQuantity(row.quantity)} {row.unit}
-                    </Typography>
-                    {(row.consume_whole_units || pinnedBatch !== null) && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        {row.consume_whole_units ? 'whole units' : 'fractional'}
-                        {pinnedBatch !== null ? ` · batch ${formatQuantity(pinnedBatch)}` : ''}
-                      </Typography>
-                    )}
-                  </Box>
-                  {!readOnly && (
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      <Tooltip title="Edit">
-                        <span>
-                          <IconButton
-                            size="small"
-                            onClick={() => openEdit(row.id)}
-                            disabled={editorOpen || saving}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                      <Tooltip title="Remove">
-                        <span>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => setPendingDelete(row)}
-                            disabled={editorOpen || saving}
-                          >
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
                     </Box>
+                    {captionParts.map((seg) => (
+                      <Box component="span" key={seg.key}>
+                        <Box component="span" sx={{ color: 'text.secondary', mx: 0.5 }}>
+                          ·
+                        </Box>
+                        <Box
+                          component="span"
+                          sx={{ color: seg.warning ? 'warning.main' : 'text.secondary' }}
+                        >
+                          {seg.text}
+                        </Box>
+                      </Box>
+                    ))}
+                  </Typography>
+
+                  {/* A child with MORE THAN ONE qty break still gets the full
+                      ladder — that is real detail a caption can't carry. A
+                      single break is folded into the caption above instead of
+                      spending a two-row table on one number. */}
+                  {ladder.length > 1 && (
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: 'auto auto',
+                        columnGap: 2,
+                        rowGap: 0.25,
+                        alignItems: 'baseline',
+                        width: 'fit-content',
+                        mt: 0.5,
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ fontWeight: 600 }}
+                      >
+                        Qty
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ fontWeight: 600, textAlign: 'right' }}
+                      >
+                        Cost / unit
+                      </Typography>
+                      {ladder.map((t, i) => (
+                        <Box key={`tier-${i}`} sx={{ display: 'contents' }}>
+                          <Typography variant="caption">
+                            {formatQuantity(t.qty)} {t.unit}
+                          </Typography>
+                          <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                            {t.costPerUnit === null
+                              ? '—'
+                              : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+
+                  {missingCost && (
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
+                        color: 'error.main',
+                        mt: 0.25,
+                      }}
+                    >
+                      <ErrorOutlineIcon sx={{ fontSize: 16 }} />
+                      <Typography variant="caption">
+                        No cost on file — add{' '}
+                        {child.source === 'bought' ? 'a vendor price' : 'pricing tiers'} on this
+                        material so it can be costed.
+                      </Typography>
+                    </Box>
+                  )}
+
+                  {/* Non-trivial lot size: the ladder above is the child's OWN
+                      qty-break costs, which differ from the fixed batch cost
+                      this BOM values it at. Label so the two aren't read as a
+                      contradiction. */}
+                  {pinnedBatch !== null && ladder.length > 1 && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block', mt: 0.25 }}
+                    >
+                      Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
+                      here it&apos;s valued at its costing lot size of{' '}
+                      {formatQuantity(pinnedBatch)}.
+                    </Typography>
                   )}
                 </Box>
 
-                {ladder.length > 0 && (
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'auto auto',
-                      columnGap: 2,
-                      rowGap: 0.25,
-                      alignItems: 'baseline',
-                      width: 'fit-content',
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ fontWeight: 600 }}
-                    >
-                      Qty
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ fontWeight: 600, textAlign: 'right' }}
-                    >
-                      Cost / unit
-                    </Typography>
-                    {ladder.map((t, i) => (
-                      <Box key={`tier-${i}`} sx={{ display: 'contents' }}>
-                        <Typography variant="caption">
-                          {formatQuantity(t.qty)} {t.unit}
-                        </Typography>
-                        <Typography variant="caption" sx={{ textAlign: 'right' }}>
-                          {t.costPerUnit === null
-                            ? '—'
-                            : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                )}
-                {missingCost && (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.main' }}>
-                    <ErrorOutlineIcon sx={{ fontSize: 16 }} />
-                    <Typography variant="caption">
-                      No cost on file — add{' '}
-                      {child.source === 'bought' ? 'a vendor price' : 'pricing tiers'} on this
-                      material so it can be costed.
-                    </Typography>
-                  </Box>
-                )}
-                {/* Non-trivial lot size: the ladder above is the child's OWN
-                    qty-break costs, which differ from the fixed batch cost this
-                    BOM values it at. Label so the two aren't read as a
-                    contradiction. */}
-                {pinnedBatch !== null && ladder.length > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    Ladder shows {child.part_name}&apos;s own qty-break costs; consumed
-                    here it&apos;s valued at its costing lot size of {formatQuantity(pinnedBatch)}.
-                  </Typography>
+                {!readOnly && (
+                  <>
+                    <Tooltip title="Edit">
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={() => openEdit(row.id)}
+                          disabled={editorOpen || saving}
+                          aria-label="Edit material"
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Remove">
+                      <span>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => setPendingDelete(row)}
+                          disabled={editorOpen || saving}
+                          aria-label="Delete material"
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </>
                 )}
               </Box>
             );

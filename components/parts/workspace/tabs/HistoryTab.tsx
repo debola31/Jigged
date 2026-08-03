@@ -23,15 +23,23 @@ import AddCommentIcon from '@mui/icons-material/AddComment';
 import PercentIcon from '@mui/icons-material/Percent';
 import NoteOutlinedIcon from '@mui/icons-material/NoteOutlined';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
 
 import {
   getPartActivity,
   addPartNote,
   deletePartNote,
+  updatePartNote,
   type PartActivityEvent,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import DeleteIconButton from '@/components/common/DeleteIconButton';
+import NoteEditDialog from '@/components/notes/NoteEditDialog';
+import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
+import type { PartNote } from '@/types/part';
 
 interface HistoryTabProps {
   partId: string;
@@ -82,7 +90,17 @@ function matchesFilter(ev: PartActivityEvent, filter: ActivityFilter): boolean {
 export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabProps) {
   const [events, setEvents] = useState<PartActivityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [operator, setOperator] = useState<{ id: string; name: string | null } | null>(null);
+  const [operator, setOperator] = useState<{
+    id: string;
+    name: string | null;
+    role: string | null;
+  } | null>(null);
+  /** The comment being edited, or null. Held whole so the dialog can seed itself. */
+  const [editingNote, setEditingNote] = useState<PartNote | null>(null);
+  /** The comment pending delete confirmation. */
+  const [deletingNote, setDeletingNote] = useState<PartNote | null>(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -140,12 +158,35 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
     }
   };
 
-  const handleDelete = async (noteId: string) => {
+  const handleDelete = async () => {
+    if (!deletingNote) return;
+    setRowBusy(true);
+    setRowError(null);
     try {
-      await deletePartNote(noteId);
+      await deletePartNote(deletingNote.id);
+      setDeletingNote(null);
       setRefreshTick((t) => t + 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete comment');
+      setRowError(err instanceof Error ? err.message : 'Failed to delete comment');
+    } finally {
+      setRowBusy(false);
+    }
+  };
+
+  const handleEditSave = async (newBody: string | null) => {
+    if (!editingNote) return;
+    setRowBusy(true);
+    setRowError(null);
+    try {
+      // Non-null asserted by the dialog: a part comment has no media, so its
+      // allowEmpty is always false and Save cannot fire with an empty body.
+      await updatePartNote(editingNote.id, newBody ?? '');
+      setEditingNote(null);
+      setRefreshTick((t) => t + 1);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Failed to save comment');
+    } finally {
+      setRowBusy(false);
     }
   };
 
@@ -231,19 +272,40 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
             </Typography>
           ) : (
             <List disablePadding>
-              {visible.map((ev) => (
-                <FeedRow
-                  key={ev.id}
-                  ev={ev}
-                  canDelete={
-                    ev.kind === 'note' &&
-                    ev.note.note_type === 'user' &&
-                    !!operator &&
-                    ev.note.author_id === operator.id
-                  }
-                  onDelete={handleDelete}
-                />
-              ))}
+              {visible.map((ev) => {
+                // 'pricing' rows are the auto-logged audit trail — never editable,
+                // never deletable. RLS refuses them too after #628, so this gate is
+                // honesty rather than enforcement: a control that is a guaranteed
+                // 42501 reads as a broken button.
+                const own =
+                  ev.kind === 'note' &&
+                  ev.note.note_type === 'user' &&
+                  !!operator &&
+                  ev.note.author_id === operator.id;
+                return (
+                  <FeedRow
+                    key={ev.id}
+                    ev={ev}
+                    // Edit is AUTHOR-ONLY, deliberately asymmetric with delete: an
+                    // admin who could reword someone else's comment would change
+                    // what it says without changing whose name is on it.
+                    canEdit={own}
+                    canDelete={
+                      ev.kind === 'note' &&
+                      ev.note.note_type === 'user' &&
+                      (own || operator?.role === 'admin')
+                    }
+                    onEdit={() => {
+                      setRowError(null);
+                      if (ev.kind === 'note') setEditingNote(ev.note);
+                    }}
+                    onDelete={() => {
+                      setRowError(null);
+                      if (ev.kind === 'note') setDeletingNote(ev.note);
+                    }}
+                  />
+                );
+              })}
               {showCreated && createdAt && (
                 <ListItem alignItems="flex-start" disableGutters>
                   <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
@@ -259,33 +321,80 @@ export default function HistoryTab({ partId, companyId, createdAt }: HistoryTabP
           )}
         </CardContent>
       </Card>
+
+      {editingNote && (
+      <NoteEditDialog
+        key={editingNote.id}
+        open
+        initialBody={editingNote.body}
+        noun="comment"
+        saving={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setEditingNote(null);
+          setRowError(null);
+        }}
+        onSave={({ body: newBody }) => handleEditSave(newBody)}
+      />
+      )}
+
+      {/* A part comment is a hard delete with no restore, so it gets the
+          lightweight confirmation docs/interaction-standards.md requires for an
+          immediately-persisted row delete. This row previously deleted on a single
+          click with no confirmation — a pre-existing gap against that standard,
+          closed here because #628 is already reworking this row. */}
+      <NoteDeleteDialog
+        open={deletingNote !== null}
+        noun="comment"
+        deleting={rowBusy}
+        error={rowError}
+        onClose={() => {
+          setDeletingNote(null);
+          setRowError(null);
+        }}
+        onConfirm={handleDelete}
+      />
     </Box>
   );
 }
 
 function FeedRow({
   ev,
+  canEdit,
   canDelete,
+  onEdit,
   onDelete,
 }: {
   ev: PartActivityEvent;
+  canEdit: boolean;
   canDelete: boolean;
-  onDelete: (noteId: string) => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
+  // Both controls sit at rest, and the delete stays a bare error-coloured trash
+  // icon rather than moving into an overflow menu: docs/interaction-standards.md
+  // requires the destructive control shown at rest, and this is a desktop surface
+  // with the width and the hover to carry two icons. The operator surfaces use a
+  // kebab instead, because their note headers already wrap on a 375px phone.
+  const actions =
+    ev.kind === 'note' && (canEdit || canDelete) ? (
+      <>
+        {canEdit && (
+          <Tooltip title="Edit comment">
+            <IconButton size="small" aria-label="Edit comment" onClick={onEdit}>
+              <EditOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+        {/* Delete last — the destructive option is predictably rightmost. */}
+        {canDelete && (
+          <DeleteIconButton edge="end" ariaLabel="Delete comment" onClick={onDelete} />
+        )}
+      </>
+    ) : undefined;
+
   return (
-    <ListItem
-      alignItems="flex-start"
-      disableGutters
-      secondaryAction={
-        canDelete && ev.kind === 'note' ? (
-          <DeleteIconButton
-            edge="end"
-            ariaLabel="Delete comment"
-            onClick={() => onDelete(ev.note.id)}
-          />
-        ) : undefined
-      }
-    >
+    <ListItem alignItems="flex-start" disableGutters secondaryAction={actions}>
       <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
         <FeedIcon ev={ev} />
       </ListItemIcon>
@@ -307,7 +416,9 @@ function FeedPrimary({ ev }: { ev: PartActivityEvent }) {
         <Typography variant="body2">
           {TXN_VERB[ev.txn.type] ?? ev.txn.type} {ev.txn.quantity} {ev.txn.unit}
         </Typography>
-        {ev.txn.has_discrepancy && <StatusChip color="warning" label="Discrepancy" />}
+        {/* "Shortfall", matching the ledger table: the flag is set only by a graceful
+            over-removal, where the shelf held less than the system thought. */}
+        {ev.txn.has_discrepancy && <StatusChip color="warning" label="Shortfall" />}
       </Box>
     );
   }
@@ -327,5 +438,10 @@ function FeedSecondary({ ev }: { ev: PartActivityEvent }) {
   if (ev.kind === 'transaction') {
     return <>{ev.txn.notes ? `${when} · ${ev.txn.notes}` : when}</>;
   }
-  return <>{`${ev.note.author_name ?? 'Unknown'} · ${when}`}</>;
+  return (
+    <>
+      {`${ev.note.author_name ?? 'Unknown'} · ${when}`}
+      <NoteEditedMark editedAt={ev.note.edited_at} />
+    </>
+  );
 }

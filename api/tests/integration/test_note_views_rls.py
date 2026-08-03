@@ -1105,3 +1105,331 @@ def test_a_manual_uploads_fine_under_your_own_name(shop):
         .data[0]
     )
     assert row["uploaded_by"] == shop["author"]["access_id"]
+
+
+# ── editing a note (#628): what the column-scoped grant actually buys ────────
+# Notes became editable, and the whole design rests on ONE claim: an edit can
+# change the words and NOTHING else. That claim is enforced by a column-scoped
+# GRANT plus a BEFORE UPDATE trigger, and neither is observable from the
+# frontend — a Vitest test can only assert what the client SENDS, never what the
+# database would have allowed. So it is asserted here.
+
+
+def test_the_author_can_edit_their_own_note(shop):
+    note_id = _make_note(shop, "back the feed off")
+    shop["author"]["client"].table("notes").update({"body": "back the feed WAY off"}).eq(
+        "id", note_id
+    ).execute()
+
+    row = (
+        shop["admin"].table("notes").select("body, edited_at").eq("id", note_id).single().execute().data
+    )
+    assert row["body"] == "back the feed WAY off"
+    assert row["edited_at"] is not None
+
+
+def test_a_colleague_cannot_edit_someone_elses_note(shop):
+    note_id = _make_note(shop, "original")
+    shop["reader"]["client"].table("notes").update({"body": "vandalised"}).eq(
+        "id", note_id
+    ).execute()
+
+    body = shop["admin"].table("notes").select("body").eq("id", note_id).single().execute().data
+    assert body["body"] == "original"
+
+
+def test_an_ADMIN_cannot_edit_someone_elses_note(shop):
+    """Deliberately asymmetric with delete, which an admin CAN do.
+
+    An admin who could reword somebody else's note would change what it says
+    without changing whose name is on it — the note would still be attributed to
+    its author. Deleting is visibly destructive and the author notices; a silent
+    rewrite under their name is neither. Mirrors notes_insert, which already
+    refuses admin-on-behalf-of authoring.
+    """
+    note_id = _make_note(shop, "original")
+    shop["boss"]["client"].table("notes").update({"body": "the boss says otherwise"}).eq(
+        "id", note_id
+    ).execute()
+
+    body = shop["admin"].table("notes").select("body").eq("id", note_id).single().execute().data
+    assert body["body"] == "original"
+
+
+def test_editing_does_not_move_the_counters(shop):
+    """THE headline assertion of #628.
+
+    The tempting design was to reset viewer_count on an edit, so a note that
+    changed would not carry reach earned by its old wording. It is refused
+    because a resettable counter is a timed read-oracle: edit at 9:00, glance at
+    9:15, and any increment says somebody read it in those fifteen minutes —
+    then note_viewers() supplies the name, defeating the no-timestamps rule.
+
+    So reach survives an edit, and the "· edited" marker carries the honesty
+    instead.
+    """
+    note_id = _make_note(shop)
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+    shop["reader2"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_b"]}
+    ).execute()
+    before = _counts(shop, note_id)
+    assert before == (2, 2), f"precondition failed, counters were {before}"
+
+    shop["author"]["client"].table("notes").update({"body": "reworded entirely"}).eq(
+        "id", note_id
+    ).execute()
+
+    assert _counts(shop, note_id) == before
+
+
+def test_a_note_update_cannot_carry_a_counter(shop):
+    """The column-scoped grant, tested at the wire.
+
+    An UPDATE naming viewer_count is refused by the EXECUTOR before RLS or any
+    trigger runs, because the privilege to name that column does not exist. That
+    placement is the point: a future careless permissive policy cannot re-open
+    it.
+    """
+    note_id = _make_note(shop)
+
+    with pytest.raises(Exception) as exc:
+        shop["author"]["client"].table("notes").update(
+            {"body": "x", "viewer_count": 999}
+        ).eq("id", note_id).execute()
+    assert "viewer_count" in str(exc.value) or "permission denied" in str(exc.value).lower()
+
+    with pytest.raises(Exception):
+        shop["author"]["client"].table("notes").update({"viewer_count": 0}).eq(
+            "id", note_id
+        ).execute()
+
+    assert _counts(shop, note_id) == (0, 0)
+
+
+def test_a_note_update_cannot_change_its_subject_or_author(shop):
+    """Same grant, the other columns it protects.
+
+    Re-pointing a note at a different part would silently move knowledge onto the
+    wrong job; changing author_id would forge attribution.
+    """
+    note_id = _make_note(shop)
+
+    for payload in (
+        {"author_id": shop["reader"]["access_id"]},
+        {"part_id": shop["part_id"], "subject_kind": "job"},
+        {"note_type": "event"},
+    ):
+        with pytest.raises(Exception):
+            shop["author"]["client"].table("notes").update(payload).eq(
+                "id", note_id
+            ).execute()
+
+
+def test_edited_at_is_stamped_by_the_database_not_the_client(shop):
+    """The marker must be unforgeable by the one party with a motive to suppress it.
+
+    edited_at carries no UPDATE grant, so a client that names it is refused
+    outright; the trigger sets it. If the grant were ever widened, the trigger
+    still overwrites whatever arrived.
+    """
+    note_id = _make_note(shop)
+
+    with pytest.raises(Exception):
+        shop["author"]["client"].table("notes").update(
+            {"body": "x", "edited_at": None}
+        ).eq("id", note_id).execute()
+
+    shop["author"]["client"].table("notes").update({"body": "genuinely changed"}).eq(
+        "id", note_id
+    ).execute()
+    row = shop["admin"].table("notes").select("edited_at").eq("id", note_id).single().execute().data
+    assert row["edited_at"] is not None
+
+
+def test_a_no_op_save_does_not_mark_a_note_edited(shop):
+    """Re-saving identical text is not an edit.
+
+    A marker that appears when nothing changed teaches readers to ignore it.
+    """
+    note_id = _make_note(shop, "unchanged text")
+    shop["author"]["client"].table("notes").update({"body": "unchanged text"}).eq(
+        "id", note_id
+    ).execute()
+
+    row = shop["admin"].table("notes").select("edited_at").eq("id", note_id).single().execute().data
+    assert row["edited_at"] is None
+
+
+def test_view_logging_still_works_with_the_guard_trigger_installed(shop):
+    """REGRESSION TEST for the trap this migration was shaped around.
+
+    note_views_bump_counts() UPDATEs notes.viewer_count from an AFTER INSERT
+    trigger on note_views. It runs SECURITY DEFINER as the table owner, so the
+    guard's `current_user IN ('anon','authenticated')` check is what lets it
+    through. Without that check the guard raises on the counter write and EVERY
+    NOTE READ 500s — a total outage of the read path, from a trigger that looks
+    like it only concerns editing.
+
+    If someone later "simplifies" the role check away, this fails.
+    """
+    note_id = _make_note(shop)
+
+    shop["reader"]["client"].rpc(
+        "log_note_views", {"p_note_ids": [note_id], "p_job_id": shop["job_a"]}
+    ).execute()
+
+    assert _counts(shop, note_id) == (1, 1)
+
+
+def test_auto_logged_notes_are_neither_editable_nor_deletable(shop):
+    """'event' rows are the audit trail, and they carry the acting member as author.
+
+    Without the note_type clause in the policies, an author could delete their own
+    audit line.
+    """
+    note_id = (
+        shop["admin"]
+        .table("notes")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "subject_kind": "job",
+                "job_id": shop["job_a"],
+                "author_id": shop["author"]["access_id"],
+                "body": "Order quantity changed 10 -> 12",
+                "note_type": "event",
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+
+    shop["author"]["client"].table("notes").update({"body": "nope"}).eq("id", note_id).execute()
+    shop["author"]["client"].table("notes").delete().eq("id", note_id).execute()
+    shop["boss"]["client"].table("notes").delete().eq("id", note_id).execute()
+
+    row = shop["admin"].table("notes").select("body").eq("id", note_id).execute().data
+    assert len(row) == 1, "an auto-logged audit row was deleted"
+    assert row[0]["body"] == "Order quantity changed 10 -> 12"
+
+
+def test_the_author_and_an_admin_can_delete_a_user_note(shop):
+    """The positive half of the delete policy — otherwise the test above could pass
+    because deleting is broken outright."""
+    own = _make_note(shop, "mine to remove")
+    shop["author"]["client"].table("notes").delete().eq("id", own).execute()
+    assert shop["admin"].table("notes").select("id").eq("id", own).execute().data == []
+
+    theirs = _make_note(shop, "an admin may remove this")
+    shop["boss"]["client"].table("notes").delete().eq("id", theirs).execute()
+    assert shop["admin"].table("notes").select("id").eq("id", theirs).execute().data == []
+
+
+def test_no_browser_role_can_write_a_notes_column_other_than_body(shop):
+    """The whole design in one assertion, and the durable half of it.
+
+    The tests above assert today's behaviour; this asserts the PRIVILEGE, so a
+    future blanket `GRANT ALL ON public.notes TO authenticated` fails the build
+    instead of silently re-opening the read oracle.
+    """
+    leaks = shop["admin"].rpc("note_counter_write_leaks", {}).execute().data
+    assert leaks == [], f"browser roles can write notes columns: {leaks}"
+
+
+def test_the_playbook_rpc_is_not_executable_by_anon(shop):
+    """Guards the ACL that a DROP FUNCTION destroyed once already.
+
+    20260728041800 set REVOKE ... FROM PUBLIC / GRANT ... TO authenticated;
+    20260729133520 then dropped the function to widen RETURNS TABLE and never
+    re-issued either, so it shipped anon-executable. Harmless there (SECURITY
+    INVOKER, and anon is a member of nothing) but invisible without a test —
+    over-granting breaks nothing you would notice.
+
+    See issue #640 for the general case: the ON FUNCTIONS default privileges were
+    never revoked, so `REVOKE ... FROM PUBLIC` alone does not close a function.
+    """
+    leaks = shop["admin"].rpc("playbook_rpc_execute_leaks", {}).execute().data
+    assert leaks == [], f"part_playbook_notes is executable by: {leaks}"
+
+
+# ── part_comments: the office half, same guarantees ──────────────────────────
+
+
+def _make_part_comment(shop, body: str = "quoted from the 2024 print") -> str:
+    return (
+        shop["admin"]
+        .table("part_comments")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "part_id": shop["part_id"],
+                "author_id": shop["author"]["access_id"],
+                "body": body,
+                "note_type": "user",
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+
+
+def test_part_comment_edit_follows_the_same_rules(shop):
+    note_id = _make_part_comment(shop, "original")
+
+    # Author may edit.
+    shop["author"]["client"].table("part_comments").update({"body": "corrected"}).eq(
+        "id", note_id
+    ).execute()
+    row = (
+        shop["admin"]
+        .table("part_comments")
+        .select("body, edited_at")
+        .eq("id", note_id)
+        .single()
+        .execute()
+        .data
+    )
+    assert row["body"] == "corrected"
+    assert row["edited_at"] is not None
+
+    # A colleague may not.
+    shop["reader"]["client"].table("part_comments").update({"body": "vandalised"}).eq(
+        "id", note_id
+    ).execute()
+    body = (
+        shop["admin"].table("part_comments").select("body").eq("id", note_id).single().execute().data
+    )
+    assert body["body"] == "corrected"
+
+
+def test_auto_logged_pricing_comments_are_immutable(shop):
+    """The pricing feed is written automatically on a pricing save. It is an audit
+    trail, and it carries the acting member as author — so without the note_type
+    clause its own author could rewrite or remove it."""
+    note_id = (
+        shop["admin"]
+        .table("part_comments")
+        .insert(
+            {
+                "company_id": shop["company_id"],
+                "part_id": shop["part_id"],
+                "author_id": shop["author"]["access_id"],
+                "body": "Markup 30% -> 35%",
+                "note_type": "pricing",
+            }
+        )
+        .execute()
+        .data[0]["id"]
+    )
+
+    shop["author"]["client"].table("part_comments").update({"body": "nope"}).eq(
+        "id", note_id
+    ).execute()
+    shop["author"]["client"].table("part_comments").delete().eq("id", note_id).execute()
+
+    rows = shop["admin"].table("part_comments").select("body").eq("id", note_id).execute().data
+    assert len(rows) == 1
+    assert rows[0]["body"] == "Markup 30% -> 35%"

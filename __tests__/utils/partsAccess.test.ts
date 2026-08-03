@@ -71,6 +71,7 @@ import {
   getPartNotes,
   addPartNote,
   deletePartNote,
+  updatePartNote,
   getPartActivity,
 } from '@/utils/partsAccess';
 
@@ -103,7 +104,6 @@ describe('partsAccess utilities', () => {
     reorder_point: null,
     preferred_vendor_id: null,
     costing_batch_quantity: null,
-    is_location_tracked: false,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   };
@@ -284,6 +284,44 @@ describe('partsAccess utilities', () => {
     it('throws on error', async () => {
       mockQueryBuilder.error = { message: 'boom' };
       await expect(deletePartNote('n1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('updatePartNote', () => {
+    it('rejects an empty/whitespace body before hitting the DB', async () => {
+      await expect(updatePartNote('n1', '   ')).rejects.toThrow(/empty/i);
+      expect(mockQueryBuilder.update).not.toHaveBeenCalled();
+    });
+
+    it('updates ONLY the body column, trimmed', async () => {
+      mockQueryBuilder.data = {
+        id: 'n1',
+        part_id: 'p1',
+        body: 'fixed',
+        created_at: '2026-02-01T00:00:00Z',
+        edited_at: '2026-08-01T10:00:00Z',
+        author_id: 'a1',
+        note_type: 'user',
+        author: { name: 'Sam' },
+      };
+
+      const note = await updatePartNote('n1', '  fixed  ');
+
+      expect(mockSupabase.from).toHaveBeenCalledWith('part_comments');
+      // Exact key-set, not objectContaining: part_comments also carries a
+      // column-scoped UPDATE grant on `body` alone, so a second key here would be
+      // a 42501 in production. Fail in the unit test instead.
+      const payload = mockQueryBuilder.update.mock.calls[0][0];
+      expect(Object.keys(payload)).toEqual(['body']);
+      expect(payload.body).toBe('fixed');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
+      // edited_at comes back from the trigger; the client never sends it.
+      expect(note).toMatchObject({ id: 'n1', edited_at: '2026-08-01T10:00:00Z' });
+    });
+
+    it('throws on error', async () => {
+      mockQueryBuilder.error = { message: 'boom' };
+      await expect(updatePartNote('n1', 'x')).rejects.toBeTruthy();
     });
   });
 
@@ -596,8 +634,7 @@ describe('partsAccess utilities', () => {
         reorder_point: null,
         preferred_vendor_id: null,
         costing_batch_quantity: null,
-        is_location_tracked: false,
-        created_at: '2024-01-01T00:00:00Z',
+            created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
 

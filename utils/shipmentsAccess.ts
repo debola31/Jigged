@@ -18,6 +18,7 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import type {
   CreateShipmentPayload,
+  FreightTerms,
   JobPartShipmentSummary,
   JobShipmentSummary,
   OpenJobPartFilter,
@@ -27,6 +28,8 @@ import type {
   ShipmentFilters,
   ShipmentWithRelations,
 } from '@/types/shipment';
+import type { CustomerCarrierAccount } from '@/types/customerCarrierAccount';
+import { pickCarrierAccount } from '@/utils/customerCarrierAccountsAccess';
 
 /**
  * Create a shipment and its line items atomically. Returns the new
@@ -62,6 +65,8 @@ export async function createShipment(
     p_carrier: payload.carrier ?? null,
     p_shipping_method: payload.shipping_method ?? null,
     p_line_items: payload.line_items,
+    p_freight_terms: payload.freight_terms ?? null,
+    p_customer_carrier_account_id: payload.customer_carrier_account_id ?? null,
   };
   const { data: shipmentId, error } = await supabase.rpc(
     'create_shipment_with_line_items',
@@ -640,4 +645,87 @@ export async function voidShipment(shipmentId: string): Promise<void> {
     console.error('voidShipment failed:', error);
     throw new Error(`Failed to void shipment: ${error.message}`);
   }
+}
+
+/**
+ * What freight instruction applies to this shipment, before the shipper touches
+ * anything.
+ *
+ * Resolution order, and the middle level is the one that matters:
+ *
+ *     JOB (what the customer's PO actually said)
+ *       -> customer default (their standing arrangement)
+ *         -> nothing (we pay, as before)
+ *
+ * The job wins because that is where the order-specific instruction lives. A
+ * customer who normally ships collect can send one PO saying "this one prepaid,
+ * we're in a hurry", and re-deriving from the customer default at pack time
+ * would quietly contradict it.
+ *
+ * Returns `account: null` with `requiresChoice: true` when the customer has more
+ * than one live carrier account and the job did not name one — pickCarrierAccount
+ * refuses to guess, and the form asks instead of billing the wrong account.
+ */
+export interface ResolvedFreight {
+  terms: FreightTerms | null;
+  account: CustomerCarrierAccount | null;
+  /** True when we could not resolve an account and the shipper must choose. */
+  requiresChoice: boolean;
+  /** Where the resolved values came from, for the form's helper line. */
+  source: 'job' | 'customer' | 'none';
+}
+
+export function resolveFreightLine(args: {
+  jobFreightTerms: FreightTerms | null;
+  jobCarrierAccountId: string | null;
+  customerAccounts: CustomerCarrierAccount[];
+}): ResolvedFreight {
+  const { jobFreightTerms, jobCarrierAccountId, customerAccounts } = args;
+
+  // The job named an account explicitly — the PO's instruction, and the most
+  // specific thing we know.
+  if (jobCarrierAccountId) {
+    const named = customerAccounts.find((a) => a.id === jobCarrierAccountId) ?? null;
+    return {
+      terms: jobFreightTerms,
+      account: named,
+      requiresChoice: false,
+      source: 'job',
+    };
+  }
+
+  if (jobFreightTerms) {
+    // Terms without an account: fine for prepaid and customer_arranged, which
+    // need no account at all. For collect/third_party the shipper still has to
+    // say which account, so fall through to the customer's.
+    const needsAccount = jobFreightTerms === 'collect' || jobFreightTerms === 'third_party';
+    if (!needsAccount) {
+      return { terms: jobFreightTerms, account: null, requiresChoice: false, source: 'job' };
+    }
+    const only = pickCarrierAccount(customerAccounts);
+    return {
+      terms: jobFreightTerms,
+      account: only,
+      requiresChoice: only === null && customerAccounts.length > 0,
+      source: 'job',
+    };
+  }
+
+  // Nothing on the job. Fall back to the customer's standing arrangement.
+  const only = pickCarrierAccount(customerAccounts);
+  if (only) {
+    return {
+      terms: only.bill_to_party === 'third_party' ? 'third_party' : 'collect',
+      account: only,
+      requiresChoice: false,
+      source: 'customer',
+    };
+  }
+
+  return {
+    terms: null,
+    account: null,
+    requiresChoice: customerAccounts.length > 0,
+    source: 'none',
+  };
 }

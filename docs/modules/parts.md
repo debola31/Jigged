@@ -126,7 +126,14 @@ Engineering files attached to a part — drawings (PDF), CAD models (STEP), and 
 
 **Features:**
 
-- AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
+- AG Grid showing: **Part Name** (with an inline ⚠ marker on parts not yet priceable), **Description**, **On hand**, **Status**, **Source** (Made/Bought chip), **Updated**. There is no Category column (categories were removed) and no Cost column — engineering/cost signals live on the detail page.
+
+- **Parts is now the single item master, including stock** — the separate `/dashboard/{companyId}/inventory` list was folded in on 2026-07-30 and redirects here. It was `parts WHERE is_stocked` with three extra columns and no unique capability; its own module doc had described it as *"a filtered view over `parts`"* since it was written. See [inventory.md §5.12](inventory.md#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30).
+
+  - **On hand** folds the unit into the cell (`40 ea`) rather than spending a column on it, and shows `—` for a non-stocked part: a made-to-order part has no stock level, and printing `0` would read as *"we're out"* rather than *"not applicable"*.
+  - **Status** is derived at render from `quantity + reorder_point` via `deriveStockStatus` — never stored, so it cannot drift.
+  - A **Stock** filter (All / Stocked / Low stock / Out of stock) is seeded from `?status=`, which makes this page the **shop-wide shortage lens**: `JobPartMaterialsCard`'s *"N short"* chip links to `/parts?status=low`. Stock filters only ever narrow to stocked parts — a non-stocked part is neither low nor out, and including it would invent a shortage for a made-to-order part.
+  - With the `inventory_locations` flag **off**, this page also carries **Count Inventory**, since it is then the only stock surface.
 
 - **Default sort is most-recently-updated first** (the Updated column, descending) — users care about the parts they just worked on, not the alphabetical top. Alphabetical is one click away on the Part Name header. Sorting is server-side for the real columns (`part_name`, `source`, `updated_at`). This pairs with the `updated_at` accuracy fix below, so a part whose routing/pricing/BOM was just edited rises to the top.
 
@@ -174,6 +181,15 @@ An **editable, maturity-adaptive workspace** (`PartWorkspace`) — not a read-on
 - **Usage** — jobs and quotes that reference this part.
 - **Files** — engineering attachments (`?tab=files`, always visible).
 - **Activity** — the part Notes + transaction feed (its slug stays `history` for back-compat).
+  A `user` comment is **editable by its author and deletable by its author or a company admin**
+  ([#628](https://github.com/debola31/Jigged/issues/628)); an edited one renders "· edited". Edit is
+  author-only on purpose, asymmetric with delete: an admin who could reword somebody else's comment
+  would change what it says without changing whose name is on it. Auto-logged `pricing` entries are
+  neither editable nor deletable — they are the audit trail, and the RLS policies exclude them by
+  `note_type` rather than trusting the UI to hide the control. `part_comments` also carries a
+  column-scoped `UPDATE (body)` grant and a guard trigger, so an edit cannot reach `author_id` or
+  `note_type`; its legacy blanket `GRANT ALL` (which included `TRUNCATE`) was narrowed in the same
+  migration.
 
 A sticky header shows the part name and a completeness/priceability chip. Delete lives in the header; it **archives** the part (never disabled, never blocked — even when quotes/jobs/BOM parents reference it) and detaches it from other parts' BOMs so their costs recompute. See `docs/architecture.md` §16.
 
@@ -196,15 +212,26 @@ Editing model — markup % is the source of truth:
 - Editing **markup %** recomputes the displayed unit price directly.
 - Editing **unit price** back-calculates the markup % and stores it as the new source of truth. There is no lock concept; subsequent routing changes still propagate.
 
-**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button with an "Unsaved changes" hint — mirroring the bought-part Cost card. Each save also auto-logs a `pricing` note to the Activity feed.
+**Explicit save** (not auto-save): pricing feeds quotes (financial data), so tier edits are committed via a **Save pricing** button — mirroring the bought-part Cost card. Each save also auto-logs a `pricing` note to the Activity feed.
+
+Unsaved edits are surfaced two ways (see [interaction-standards §2](../interaction-standards.md#2-saving)): the edited row gets an amber `3px` left accent — the same accent the incomplete BOM/routing rows use, one rung below their red — and a **sticky footer** appears at the bottom of the card naming the count with **Discard** and **Save pricing**. The footer is absent entirely when there is nothing staged, so its appearance is itself the signal. This replaced a caption-sized grey "Unsaved changes" hint that users did not see.
+
+"Unsaved" is **derived**, not latched: the card snapshots the persisted values it was seeded from and compares live rows against it, so reverting an edit by hand (1 → 10 → 1) clears the state rather than demanding a save that would write nothing.
 
 **Live updates from routing**: the card watches the part-page-level `refreshKey` counter. When the routing/BOM panel auto-saves, the parent bumps `refreshKey`, which reloads the breakdown and recomputes every tier's displayed base cost and unit price against the new cost basis.
+
+**Staged edits survive that refresh.** `refreshKey` invalidates *derived* data only — the cost breakdown and the per-tier base costs. It deliberately does **not** re-seed the editable tier rows or clear the dirty flag while an edit is staged. Before this guard existed, saving an operation while a Min qty sat unsaved silently reverted it (interaction-standards §2, invariant 1). A genuine part change still reloads, since the dirty flag belongs to the part being edited.
+
+**Batch size commits via its own explicit Save** (`updatePartCostingBatchQuantity`), not on blur. It reads like a harmless scalar, but `compute_part_cost_at_qty` values this part as a made child at exactly this quantity in every parent's BOM — a fat-fingered 30 → 300 silently re-costs every parent and flows into their quotes. That makes it financial data under [interaction-standards §2](../interaction-standards.md#2-saving), and financial data does not auto-save.
+
+Being a staged surface, it gets the **same** unsaved affordance as the tier tables: an amber outline on the field plus the shared `UnsavedChangesBar` (Discard + **Save batch size**) at the bottom of the Cost card. It previously had a lone Save button and no unsaved marker — the "some cards prompt you, some don't" inconsistency this standard exists to remove.
 
 ▸ **Bought-part Cost card (`PartProcurementPricingPanel`)**
 
 For **bought** parts, the workspace shows a **Cost** card with a single **Preferred vendor** picker (the *only* preferred-vendor control — it is no longer duplicated on the part-details/identity card; that field now appears only in the create flow) and a per-vendor qty-break cost-tier sheet (Min qty / Unit cost).
 
-- **Explicit Save** — cost is financial data, so edits are committed via a **Save costs** button (with an "Unsaved changes" hint), not auto-saved on blur, matching the made-part Pricing card. Deletes and additions are reconciled against the persisted sheet on save.
+- **Explicit Save** — cost is financial data, so edits are committed via a **Save costs** button, not auto-saved on blur, matching the made-part Pricing card. Deletes and additions are reconciled against the persisted sheet on save. Unsaved edits get the same amber row accent + sticky Discard/Save footer as the Pricing card.
+- **The vendor picker is auto-save, and now looks like it.** Picking a preferred vendor writes immediately, while the tier sheet below is staged — two save models in one card, which [interaction-standards §2](../interaction-standards.md#2-saving) forbids when the user can't tell them apart. The picker keeps auto-save (it's a single non-financial label, the right mode for it) but sits in its own bordered block with its own `SaveStatus` and helper text ("Saved as soon as you pick it"), so the two models read as two sections.
 - **No-cost state** — when the selected vendor has no saved tier yet, the sheet shows **one empty starter row highlighted red** plus a short red prompt ("Add at least one cost tier so this part can be priced and quoted."), replacing the previous yellow banner/"Add first tier" bubble. The red styling uses the theme `error` palette (never a hardcoded hex).
 - **Indicator clears on save** — the panel calls an `onSaved` callback so the workspace re-derives priceability immediately; the "Needs cost" chip (and the red prompt) clear on Save **without a page reload**. (Previously the chip lingered until reload because the panel had no refresh callback.)
 

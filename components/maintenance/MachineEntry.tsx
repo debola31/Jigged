@@ -5,6 +5,8 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import NoteMediaGallery from '@/components/operator/NoteMediaGallery';
 import NoteReactions from '@/components/operator/NoteReactions';
+import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
+import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import type { MachineNote } from '@/types/machineMaintenance';
 
 /**
@@ -43,8 +45,11 @@ export default function MachineEntry({
   entry,
   companyId,
   memberId,
+  isAdmin = false,
   isOpen,
   onLogFix,
+  onEdit,
+  onDelete,
   hideAuthor = false,
   readOnly = false,
 }: {
@@ -52,10 +57,16 @@ export default function MachineEntry({
   companyId: string;
   /** Current member's user_company_access id; null until resolved. */
   memberId: string | null;
+  /** Widens delete (not edit) to any entry in the shop. */
+  isAdmin?: boolean;
   /** True for a flagged entry nothing has resolved yet. */
   isOpen?: boolean;
   /** Offered only on an open item. Absent in read-only (office) rendering. */
   onLogFix?: () => void;
+  /** Author-only. Absent in read-only rendering. */
+  onEdit?: () => void;
+  /** Author or company admin. Absent in read-only rendering. */
+  onDelete?: () => void;
   /**
    * Suppress the author line. Set while an entry is pinned as outstanding.
    *
@@ -80,6 +91,7 @@ export default function MachineEntry({
         )}
         <Typography variant="caption" color="text.secondary">
           {formatWhen(entry.created_at)}
+          <NoteEditedMark editedAt={entry.edited_at} />
         </Typography>
         <Box sx={{ flex: 1 }} />
         {/* Right-aligned outlined button, the same affordance in the pinned block
@@ -95,6 +107,32 @@ export default function MachineEntry({
           >
             Log the fix
           </Button>
+        )}
+
+        {/* Edit / Delete (#628). Only the BODY is editable — maintenance_kind and
+            resolves_note_id are immutable under the database guard — so an author
+            can fix the wording of what they noticed but can never un-notice it,
+            and a fix can never be re-pointed at a different item. That is what
+            keeps the derived-open list in §4.4 trustworthy while the text stays
+            correctable.
+
+            DOES NOT UNDERMINE hideAuthor. The menu appears only on your OWN entry
+            (or, for delete, if you are an admin), so a reader still cannot tell
+            who raised any item but their own — which they already knew. §5's
+            concern is a list of open items with names read down the column, and
+            that stays impossible. */}
+        {!readOnly && (
+          <NoteActionsMenu
+            canEdit={Boolean(onEdit) && memberId !== null && entry.author_id === memberId}
+            canDelete={
+              Boolean(onDelete) &&
+              memberId !== null &&
+              (entry.author_id === memberId || isAdmin)
+            }
+            onEdit={() => onEdit?.()}
+            onDelete={() => onDelete?.()}
+            noun="entry"
+          />
         )}
       </Box>
 

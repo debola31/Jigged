@@ -188,6 +188,29 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.your_table TO service_role;
 
 **Symptom of a missing grant:** PostgREST returns `42501 permission denied`, and its error hint names the grant to add. Because local now matches prod, this fails in dev rather than only in production.
 
+### Function EXECUTE grants (new functions in `public`)
+
+**A new function is browser-callable unless you revoke it.** Postgres grants `EXECUTE` to `PUBLIC` on every function it creates, and `authenticated` is a member of `PUBLIC`. So a `SECURITY DEFINER` helper you intend as backend-only is reachable from the browser the moment it exists — and because that function bypasses RLS by definition, the grant is the *only* thing between a caller and the data.
+
+To make one service-role-only, **name the roles**:
+
+```sql
+REVOKE EXECUTE ON FUNCTION public.your_function(uuid) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.your_function(uuid) TO service_role;
+```
+
+**Why the roles are named explicitly**, when `FROM PUBLIC` looks sufficient: until [`20260801024552`](supabase/migrations/20260801024552_revoke_function_execute_from_browser_roles.sql) the schema also carried `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon, authenticated`, so every new function landed with **explicit** browser grants on top of PUBLIC's. `REVOKE ... FROM PUBLIC` removed only PUBLIC's and left the rest, which meant eight migrations claimed "service-role only" in their comments and none of them were ([#640](https://github.com/debola31/Jigged/issues/640)). That default is now revoked, so `FROM PUBLIC` alone *is* enough today — the explicit form is kept because it is correct under either state and costs nothing.
+
+Three cases need **no** grant at all, and revoking from them is free:
+
+- **Trigger functions** — permission is checked when the trigger is created, not each time it fires.
+- **Event-trigger functions** — same.
+- **Helpers called only from `SECURITY DEFINER` parents** — the parent body runs as the function owner, so the caller's privileges are irrelevant.
+
+Both non-obvious claims above are asserted behaviourally in [`test_function_execute_grants.py`](api/tests/integration/test_function_execute_grants.py), because getting them wrong breaks writes in production rather than failing loudly.
+
+**Enforced in CI:** `function_execute_leaks()` lists any `SECURITY DEFINER` function in `public` a browser role can execute that is not on its reviewed allowlist, and a test asserts it is empty. Adding a function to that allowlist should come with a sentence in the PR saying why the browser needs to call it. **This guard exists because over-granting is silent** — it produces no error, no broken page, no symptom; `part_playbook_notes` was left `anon`-executable by a `DROP FUNCTION` for three days and nothing noticed. A `DROP FUNCTION` destroys a function's ACL *and* its `COMMENT`, so any migration that drops and recreates one must re-issue both.
+
 ### Billing write-gate (new tenant tables)
 
 Entitlement is enforced at the DB layer: every browser-writable tenant table carries `billing_gate_*` restrictive RLS policies that call `company_can_write(company_id)`, so a lapsed/unsubscribed shop can't write (reads stay open). RLS is per-table — **a new `company_id` table without the gate silently bypasses billing.** When you add a tenant table:

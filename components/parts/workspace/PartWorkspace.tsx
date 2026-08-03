@@ -29,8 +29,6 @@ import {
 } from '@/utils/partsAccess';
 import { parseBackChain } from '@/lib/partNavStack';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
-import type { InventoryTransactionType } from '@/types/partTransaction';
-import PartTransactionModal from '@/components/parts/PartTransactionModal';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 
 import PartIdentitySection from './PartIdentitySection';
@@ -69,17 +67,17 @@ export default function PartWorkspace({
   const partId = params.partId as string | undefined;
   const { setTitle } = usePageTitle();
 
-  // Breadcrumb root reflects where the user entered from (Parts vs Inventory).
-  const partsListHref = useMemo(() => {
-    const from = searchParams.get('from');
-    if (from === 'inventory') return `/dashboard/${companyId}/inventory`;
-    return `/dashboard/${companyId}/parts`;
-  }, [companyId, searchParams]);
-
-  const partsListLabel = useMemo(
-    () => (searchParams.get('from') === 'inventory' ? 'Inventory' : 'Parts'),
-    [searchParams],
-  );
+  /**
+   * Breadcrumb root. There is only one parts list now.
+   *
+   * This used to branch on `?from=inventory` to a crumb reading "Inventory" and pointing at
+   * `/dashboard/{id}/inventory`. Both halves went stale when that page was deleted: the label named
+   * a page that no longer exists and the href redirected to Parts anyway. Nothing emits the param
+   * any more either — its producers were the deleted list's row-click and Add Item — so only a stale
+   * bookmark can carry it, and it now gets an honest "Parts" crumb instead of a mislabelled redirect.
+   */
+  const partsListHref = `/dashboard/${companyId}/parts`;
+  const partsListLabel = 'Parts';
 
   // BOM drill-down chain from `?back=id1,id2,id3` (oldest → most recent).
   const currentChain = useMemo(() => parseBackChain(searchParams), [searchParams]);
@@ -116,9 +114,6 @@ export default function PartWorkspace({
   // seed fetched on load (the editor owns the live list once it mounts). Reset
   // to null on a fresh part (partId-change remounts this component anyway).
   const [conversionsOverride, setConversionsOverride] = useState<PartUnitConversion[] | null>(null);
-
-  const [txnModalOpen, setTxnModalOpen] = useState(false);
-  const [txnModalType, setTxnModalType] = useState<InventoryTransactionType>('addition');
 
   // Priceability — the same compute_part_cost machinery the parts list uses,
   // so the completeness chip can't disagree with the list ✓/⚠ column. null
@@ -163,6 +158,9 @@ export default function PartWorkspace({
     },
   );
   const part = loadData?.part ?? null;
+  // Fed the deleted aggregate modal; now feeds the location modal's unit dropdown, so a shop can
+  // actually USE a conversion it has defined. `conversionsOverride` is what the editor writes
+  // back, so the dropdown updates without a re-fetch.
   const unitConversions = conversionsOverride ?? loadData?.conversions ?? EMPTY_CONVERSIONS;
   // Create mode never fetches (no partId); only existing mode shows the spinner.
   const loading = mode === 'existing' && partLoading;
@@ -209,6 +207,34 @@ export default function PartWorkspace({
     setRefreshKey((k) => k + 1);
   }, []);
 
+  // --- Exit guard (interaction-standards.md §2) -----------------------------
+  // Tabs are conditionally rendered, so switching one unmounts its panels and
+  // throws away anything staged in them. The explicit-Save cards report their
+  // dirty state here so we can confirm first instead of discarding silently.
+  const [dirtySections, setDirtySections] = useState<Record<string, boolean>>({});
+  const reportDirty = useCallback((key: string, isDirty: boolean) => {
+    setDirtySections((prev) => (prev[key] === isDirty ? prev : { ...prev, [key]: isDirty }));
+  }, []);
+  const hasUnsavedChanges = Object.values(dirtySections).some(Boolean);
+  // Tab the user asked for while unsaved work was pending; applied if they
+  // confirm, dropped if they go back.
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
+
+  // Browser-level exit (tab close, reload, back). Attached ONLY while genuinely
+  // dirty and removed as soon as it's saved — an unconditional guard produces
+  // the false positive that trains users to click through the warning.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Browsers show their own generic copy; returnValue is legacy but still
+      // required by some engines to trigger the prompt at all.
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const handleDelete = async () => {
     if (!partId) return;
     setActionLoading(true);
@@ -221,11 +247,6 @@ export default function PartWorkspace({
       setDeleteDialogOpen(false);
     }
   };
-
-  const openTxnModal = useCallback((type: InventoryTransactionType) => {
-    setTxnModalType(type);
-    setTxnModalOpen(true);
-  }, []);
 
   const handleTxnSuccess = () => {
     // Bumping transactionsRefreshKey re-runs the part fetch (a useLoad dep) in
@@ -247,7 +268,7 @@ export default function PartWorkspace({
   const tabParam = searchParams.get('tab') ?? 'workspace';
   const activeTab = visibleTabs.some((t) => t.slug === tabParam) ? tabParam : 'workspace';
 
-  const handleTabChange = useCallback(
+  const applyTabChange = useCallback(
     (slug: string) => {
       const next = new URLSearchParams(searchParams.toString());
       // Keep the default tab out of the URL for clean links.
@@ -257,6 +278,19 @@ export default function PartWorkspace({
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
     [router, pathname, searchParams],
+  );
+
+  const handleTabChange = useCallback(
+    (slug: string) => {
+      // Leaving the tab unmounts the panel holding the staged edits, so ask
+      // first rather than discarding them silently.
+      if (hasUnsavedChanges) {
+        setPendingTab(slug);
+        return;
+      }
+      applyTabChange(slug);
+    },
+    [hasUnsavedChanges, applyTabChange],
   );
 
   const setupStatus = useMemo<PartSetupStatus | null>(() => {
@@ -401,6 +435,7 @@ export default function PartWorkspace({
           refreshAfterMutation={refreshAfterMutation}
           setupStatus={setupStatus}
           pricingGaps={pricingGaps}
+          onDirtyChange={reportDirty}
         />
       )}
 
@@ -410,7 +445,7 @@ export default function PartWorkspace({
           partId={partId}
           companyId={companyId}
           transactionsRefreshKey={transactionsRefreshKey}
-          openTxnModal={openTxnModal}
+          unitConversions={unitConversions}
           onConversionsChanged={setConversionsOverride}
           onStockChanged={handleTxnSuccess}
         />
@@ -426,18 +461,12 @@ export default function PartWorkspace({
         <HistoryTab partId={partId} companyId={companyId} createdAt={part.created_at} />
       )}
 
-      {/* Stock transaction modal (owned here; triggered from the Inventory tab) */}
-      {part.is_stocked && (
-        <PartTransactionModal
-          open={txnModalOpen}
-          onClose={() => setTxnModalOpen(false)}
-          companyId={companyId}
-          part={part}
-          unitConversions={unitConversions}
-          defaultType={txnModalType}
-          onSuccess={handleTxnSuccess}
-        />
-      )}
+      {/*
+        `PartTransactionModal` was removed with `is_location_tracked` (20260802015837). It was the
+        aggregate write path — three buttons that wrote `parts.quantity` straight from the browser
+        for parts that had no places. Every part has a place now, so every write goes through an
+        `*_at_location` RPC and the modal has no case left to serve.
+      */}
 
       {/* Delete confirmation */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
@@ -471,6 +500,39 @@ export default function PartWorkspace({
             startIcon={actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
             {actionLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Unsaved-changes guard. Switching tabs unmounts the panel holding the
+          staged edits, so this is the last chance to keep them. "Keep editing"
+          is the safe default and sits away from the destructive option
+          (interaction-standards.md §1, proximity of consequential options). */}
+      <Dialog open={pendingTab !== null} onClose={() => setPendingTab(null)}>
+        <DialogTitle>You have unsaved changes</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Your pricing changes haven&apos;t been saved yet. Leaving this tab will
+            discard them.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingTab(null)} variant="contained">
+            Keep editing
+          </Button>
+          <Button
+            onClick={() => {
+              const slug = pendingTab;
+              setPendingTab(null);
+              if (slug) applyTabChange(slug);
+            }}
+            // `color="error"` alone does nothing here: the theme's MuiButton
+            // `text` override hardcodes primary.light, so the prop loses. Force
+            // it — this is the option that throws work away and it must not
+            // read as the benign one (§1, destructive affordance).
+            sx={{ color: 'error.main' }}
+          >
+            Discard changes
           </Button>
         </DialogActions>
       </Dialog>

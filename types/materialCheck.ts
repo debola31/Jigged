@@ -45,7 +45,6 @@ export interface MaterialStockFacts {
   /** `parts.quantity` — authoritative for BOTH engines (a trigger rolls up bin balances). */
   onHand: number;
   isStocked: boolean;
-  isLocationTracked: boolean;
   isArchived: boolean;
 }
 
@@ -88,5 +87,4 @@ export interface MaterialRequirement {
   shortBy: number | null;
   status: RequirementStatus;
   basis: UnitBasis;
-  isLocationTracked: boolean;
 }

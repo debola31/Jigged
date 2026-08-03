@@ -6,7 +6,7 @@ import { applyOverdueJobsFilter } from '@/utils/jobsAccess';
 
 // ============== Types ==============
 
-export type ActivityType = 'quote' | 'job' | 'shipment' | 'note' | 'photo' | 'operation';
+export type ActivityType = 'quote' | 'job' | 'shipment' | 'note' | 'photo' | 'operation' | 'inventory';
 
 export type ActivityAction =
   | 'created'
@@ -18,7 +18,13 @@ export type ActivityAction =
   // Outside (external-vendor) operation lifecycle — same 'operation' type as an
   // internal completion, distinguished by action + vendorName.
   | 'sent'
-  | 'received';
+  | 'received'
+  // Stock movements. `moved` covers both halves of a transfer, which the feed folds into one row
+  // the same way the operator's does — see `foldTransfers` in inventoryLocationsAccess.
+  | 'stock_in'
+  | 'stock_out'
+  | 'moved'
+  | 'counted';
 
 export interface ActivityItem {
   id: string;
@@ -34,6 +40,9 @@ export interface ActivityItem {
   vendorName?: string;
   /** Deep link to the underlying record. */
   href?: string;
+  /** Inventory events: where it happened, and how much. */
+  locationName?: string;
+  quantityLabel?: string;
 }
 
 // ============== Pinned Metrics ==============
@@ -710,6 +719,88 @@ function opActivityHref(companyId: string, jobId: string): string {
 }
 
 /**
+ * Stock movements, for the `inventory` filter on the activity page.
+ *
+ * The owner had no shop-wide view of stock moving. `getRecentActivity` exists and does exactly
+ * this, but its only caller is the operator's Inventory tab — so the person paying for the
+ * software could see one part's ledger, or one place's, and never the shop. This puts it where
+ * every other cross-module event already lives rather than building a second feed.
+ *
+ * Deliberately NOT reusing `getRecentActivity`: that one folds transfer pairs, signs photos and
+ * resolves author names for a card list on a phone. Here the row is one line in a mixed feed, so
+ * it skips the photo round trip entirely and folds by taking only the destination leg of a
+ * transfer — the same rule, a tenth of the work.
+ */
+async function fetchInventoryActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+
+  let q = supabase
+    .from('inventory_transactions')
+    .select('id, created_at, type, item_name, quantity, unit, part_id, location_name, transfer_group_id, notes')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(perSource);
+  if (before) q = q.lt('created_at', before);
+
+  const { data, error } = await q;
+  if (error) {
+    console.error('Error fetching inventory activity:', error);
+    return [];
+  }
+
+  type Row = {
+    id: string;
+    created_at: string;
+    type: string;
+    item_name: string;
+    quantity: number;
+    unit: string;
+    part_id: string | null;
+    location_name: string | null;
+    transfer_group_id: string | null;
+    notes: string | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+
+  // A transfer writes two rows sharing a group id. Showing both puts the same event in the feed
+  // twice with opposite signs; keeping the ADDITION leg keeps the place the stock ended up in.
+  const groupsWithArrival = new Set(
+    rows.filter((r) => r.transfer_group_id && r.type === 'addition').map((r) => r.transfer_group_id),
+  );
+
+  const items: ActivityItem[] = [];
+  for (const r of rows) {
+    if (r.transfer_group_id && r.type === 'depletion' && groupsWithArrival.has(r.transfer_group_id)) {
+      continue;
+    }
+    const moved = Boolean(r.transfer_group_id);
+    const action: ActivityAction = moved
+      ? 'moved'
+      : r.type === 'addition'
+        ? 'stock_in'
+        : r.type === 'depletion'
+          ? 'stock_out'
+          : 'counted';
+
+    items.push({
+      id: `inv-${r.id}`,
+      type: 'inventory',
+      entityNumber: r.item_name,
+      action,
+      timestamp: r.created_at,
+      locationName: r.location_name ?? undefined,
+      quantityLabel: `${Number(r.quantity ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${r.unit}`,
+      href: r.part_id ? `/dashboard/${companyId}/parts/${r.part_id}?tab=inventory` : undefined,
+    });
+  }
+  return items;
+}
+
+/**
  * Operation lifecycle activities. Two sources, both scoped through the inner
  * jobs join (job_operations has no company_id):
  *  - completed_at → 'completed' (internal) or 'received' (external, from vendor)
@@ -797,6 +888,7 @@ async function collectActivity(
   // 'note' and 'photo' both come from notes (one query yields both kinds).
   if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
   if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));
+  if (want('inventory')) tasks.push(fetchInventoryActivity(companyId, before, perSource));
 
   const results = await Promise.all(tasks.map((t) => t.catch(() => [] as ActivityItem[])));
   let items = results.flat();

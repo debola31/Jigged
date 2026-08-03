@@ -13,6 +13,7 @@ const { mockStorage, mockSupabase } = vi.hoisted(() => {
     upload: vi.fn(),
     remove: vi.fn(),
     createSignedUrl: vi.fn(),
+    createSignedUrls: vi.fn(),
     download: vi.fn(),
   };
 
@@ -42,6 +43,7 @@ import {
   uploadFileToStorage,
   deleteFileFromStorage,
   getSignedUrl,
+  getSignedUrls,
   downloadFileFromStorage,
   moveFileInStorage,
 } from '@/utils/storageHelpers';
@@ -375,5 +377,64 @@ describe('storageHelpers', () => {
       // Reset env for other tests
       vi.stubEnv('NEXT_PUBLIC_SUPABASE_S3_BUCKET', 'test-bucket');
     });
+  });
+});
+
+/**
+ * Batched signed URLs.
+ *
+ * The bucket is private, so every private image on a page needs a signed URL. Without a batch
+ * helper a grid pays one round trip per tile — `NoteMediaGallery` works around the gap with
+ * `Promise.all` over singles, and the storage board would have done the same for 22 locations.
+ */
+describe('getSignedUrls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_S3_BUCKET', 'test-bucket');
+  });
+
+  it('asks for every path in ONE request', async () => {
+    mockStorage.createSignedUrls.mockResolvedValue({
+      data: [
+        { path: 'co1/locations/a/x.jpg', signedUrl: 'https://s/a', error: null },
+        { path: 'co1/locations/b/y.jpg', signedUrl: 'https://s/b', error: null },
+      ],
+      error: null,
+    });
+
+    const urls = await getSignedUrls(['co1/locations/a/x.jpg', 'co1/locations/b/y.jpg'], 900);
+
+    expect(mockStorage.createSignedUrls).toHaveBeenCalledTimes(1);
+    expect(mockStorage.createSignedUrls).toHaveBeenCalledWith(
+      ['co1/locations/a/x.jpg', 'co1/locations/b/y.jpg'],
+      900,
+    );
+    expect(urls.get('co1/locations/a/x.jpg')).toBe('https://s/a');
+    expect(urls.size).toBe(2);
+  });
+
+  it('makes no request at all for an empty list', async () => {
+    expect((await getSignedUrls([])).size).toBe(0);
+    expect(mockStorage.createSignedUrls).not.toHaveBeenCalled();
+  });
+
+  /** One unreadable photo must not blank a whole board, so failures are absent rather than thrown. */
+  it('omits the paths that failed and keeps the rest', async () => {
+    mockStorage.createSignedUrls.mockResolvedValue({
+      data: [
+        { path: 'good.jpg', signedUrl: 'https://s/good', error: null },
+        { path: 'gone.jpg', signedUrl: null, error: 'Object not found' },
+      ],
+      error: null,
+    });
+
+    const urls = await getSignedUrls(['good.jpg', 'gone.jpg']);
+    expect(urls.get('good.jpg')).toBe('https://s/good');
+    expect(urls.has('gone.jpg')).toBe(false);
+  });
+
+  it('returns an empty map rather than throwing when the whole call fails', async () => {
+    mockStorage.createSignedUrls.mockResolvedValue({ data: null, error: { message: 'boom' } });
+    expect((await getSignedUrls(['a.jpg'])).size).toBe(0);
   });
 });

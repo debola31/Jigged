@@ -5,6 +5,7 @@ import {
   readQuoteValidityDays,
   readCompanyDefaults,
   readCustomPaymentTerms,
+  readCompanyDefaultPaymentTerms,
 } from '@/lib/companyDefaults';
 import { DEFAULT_QUOTE_VALIDITY_DAYS } from '@/types/quote';
 
@@ -74,5 +75,59 @@ describe('readCustomPaymentTerms', () => {
         },
       }),
     ).toEqual(['Net 30, 1% late', 'Prepay']);
+  });
+});
+
+describe('readCompanyDefaultPaymentTerms', () => {
+  it('reads the shop-wide default from settings.default_payment_terms', () => {
+    expect(
+      readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: '2/10 Net 30' } }),
+    ).toBe('2/10 Net 30');
+  });
+
+  it('trims, so a stray space never reads as a different term downstream', () => {
+    expect(
+      readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: '  Net 30  ' } }),
+    ).toBe('Net 30');
+  });
+
+  it('returns null when unset, blank, or the wrong type', () => {
+    // null (not '') is the single representation of "no shop default", so the
+    // quote form can fall through to leaving the field empty rather than
+    // prefilling something meaningless.
+    expect(readCompanyDefaultPaymentTerms(null)).toBeNull();
+    expect(readCompanyDefaultPaymentTerms(undefined)).toBeNull();
+    expect(readCompanyDefaultPaymentTerms({ settings: {} })).toBeNull();
+    expect(readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: '' } })).toBeNull();
+    expect(readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: '  ' } })).toBeNull();
+    expect(readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: 30 } })).toBeNull();
+    expect(
+      readCompanyDefaultPaymentTerms({ settings: { default_payment_terms: ['Net 30'] } }),
+    ).toBeNull();
+  });
+
+  it('lives BESIDE the numeric defaults block, not inside it', () => {
+    // Regression guard on the placement decision. KNOWN_DEFAULTS is numeric
+    // end-to-end (coerceInt, numeric fallback, a Record<string, number> patch,
+    // a type="number" input), so a string default stored under settings.defaults
+    // would be silently coerced. If someone later "tidies" this key into that
+    // block, this test fails rather than the value quietly becoming a number.
+    expect(
+      readCompanyDefaultPaymentTerms({ settings: { defaults: { default_payment_terms: 'Net 30' } } }),
+    ).toBeNull();
+    expect(KNOWN_DEFAULTS.some((d) => d.key === 'default_payment_terms')).toBe(false);
+  });
+
+  it('is independent of the saved custom-terms list', () => {
+    // Two different settings keys with related names — the shop default is one
+    // value; custom_payment_terms is the reusable picker list.
+    const company = {
+      settings: {
+        default_payment_terms: 'Net 45',
+        custom_payment_terms: ['Net 30, 1% late'],
+      },
+    };
+    expect(readCompanyDefaultPaymentTerms(company)).toBe('Net 45');
+    expect(readCustomPaymentTerms(company)).toEqual(['Net 30, 1% late']);
   });
 });

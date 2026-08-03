@@ -416,12 +416,74 @@ export type Database = {
           },
         ]
       }
+      customer_carrier_accounts: {
+        Row: {
+          account_country_code: string
+          account_number: string | null
+          account_postal_code: string | null
+          bill_to_party: string
+          carrier: string
+          company_id: string
+          created_at: string
+          customer_id: string
+          deleted_at: string | null
+          id: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_country_code?: string
+          account_number?: string | null
+          account_postal_code?: string | null
+          bill_to_party: string
+          carrier: string
+          company_id: string
+          created_at?: string
+          customer_id: string
+          deleted_at?: string | null
+          id?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_country_code?: string
+          account_number?: string | null
+          account_postal_code?: string | null
+          bill_to_party?: string
+          carrier?: string
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          deleted_at?: string | null
+          id?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_carrier_accounts_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_carrier_accounts_customer_fk"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_contacts: {
         Row: {
           created_at: string
           customer_id: string
+          deleted_at: string | null
           email: string | null
           id: string
+          is_billing_default: boolean
           is_primary: boolean
           name: string
           phone: string | null
@@ -432,8 +494,10 @@ export type Database = {
         Insert: {
           created_at?: string
           customer_id: string
+          deleted_at?: string | null
           email?: string | null
           id?: string
+          is_billing_default?: boolean
           is_primary?: boolean
           name: string
           phone?: string | null
@@ -444,8 +508,10 @@ export type Database = {
         Update: {
           created_at?: string
           customer_id?: string
+          deleted_at?: string | null
           email?: string | null
           id?: string
+          is_billing_default?: boolean
           is_primary?: boolean
           name?: string
           phone?: string | null
@@ -467,6 +533,11 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
+          credit_hold_note: string | null
+          credit_status: string
+          default_fob_point: string | null
+          default_lead_time_text: string | null
+          default_payment_terms: string | null
           deleted_at: string | null
           id: string
           name: string
@@ -476,6 +547,11 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string | null
+          credit_hold_note?: string | null
+          credit_status?: string
+          default_fob_point?: string | null
+          default_lead_time_text?: string | null
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name: string
@@ -485,6 +561,11 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string | null
+          credit_hold_note?: string | null
+          credit_status?: string
+          default_fob_point?: string | null
+          default_lead_time_text?: string | null
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name?: string
@@ -571,35 +652,35 @@ export type Database = {
       }
       inventory_locations: {
         Row: {
-          code: string | null
           company_id: string
           created_at: string
           id: string
           kind: string | null
           name: string
           parent_id: string | null
+          photo_path: string | null
           sort_order: number
           updated_at: string
         }
         Insert: {
-          code?: string | null
           company_id: string
           created_at?: string
           id?: string
           kind?: string | null
           name: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
         Update: {
-          code?: string | null
           company_id?: string
           created_at?: string
           id?: string
           kind?: string | null
           name?: string
           parent_id?: string | null
+          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -636,6 +717,7 @@ export type Database = {
           notes: string | null
           operator_id: string | null
           part_id: string | null
+          photo_path: string | null
           quantity: number
           transfer_group_id: string | null
           type: string
@@ -656,6 +738,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity: number
           transfer_group_id?: string | null
           type: string
@@ -676,6 +759,7 @@ export type Database = {
           notes?: string | null
           operator_id?: string | null
           part_id?: string | null
+          photo_path?: string | null
           quantity?: number
           transfer_group_id?: string | null
           type?: string
@@ -1198,20 +1282,25 @@ export type Database = {
           contact_snapshot: Json | null
           created_at: string | null
           created_by: string | null
+          customer_carrier_account_id: string | null
           customer_id: string | null
           customer_name: string | null
           customer_po_number: string | null
           deleted_at: string | null
           due_date: string | null
+          freight_terms: string | null
           fulfillment_status: string
           id: string
           invoicing_status: string
           is_hot: boolean
           job_number: string
+          payment_terms: string | null
           production_status: string
           quote_id: string | null
           ship_to_address: Json | null
+          ship_via: string | null
           shipping_address_id: string | null
+          shipping_instructions: string | null
           started_at: string | null
           status_changed_at: string | null
           updated_at: string | null
@@ -1225,20 +1314,25 @@ export type Database = {
           contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
           deleted_at?: string | null
           due_date?: string | null
+          freight_terms?: string | null
           fulfillment_status: string
           id?: string
           invoicing_status?: string
           is_hot?: boolean
           job_number: string
+          payment_terms?: string | null
           production_status: string
           quote_id?: string | null
           ship_to_address?: Json | null
+          ship_via?: string | null
           shipping_address_id?: string | null
+          shipping_instructions?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
@@ -1252,20 +1346,25 @@ export type Database = {
           contact_snapshot?: Json | null
           created_at?: string | null
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string | null
           customer_name?: string | null
           customer_po_number?: string | null
           deleted_at?: string | null
           due_date?: string | null
+          freight_terms?: string | null
           fulfillment_status?: string
           id?: string
           invoicing_status?: string
           is_hot?: boolean
           job_number?: string
+          payment_terms?: string | null
           production_status?: string
           quote_id?: string | null
           ship_to_address?: Json | null
+          ship_via?: string | null
           shipping_address_id?: string | null
+          shipping_instructions?: string | null
           started_at?: string | null
           status_changed_at?: string | null
           updated_at?: string | null
@@ -1290,6 +1389,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "customer_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_customer_carrier_account_id_fkey"
+            columns: ["customer_carrier_account_id"]
+            isOneToOne: false
+            referencedRelation: "customer_carrier_accounts"
             referencedColumns: ["id"]
           },
           {
@@ -1489,6 +1595,7 @@ export type Database = {
           company_id: string
           corrects_note_id: string | null
           created_at: string
+          edited_at: string | null
           id: string
           job_id: string | null
           job_operation_id: string | null
@@ -1511,6 +1618,7 @@ export type Database = {
           company_id: string
           corrects_note_id?: string | null
           created_at?: string
+          edited_at?: string | null
           id?: string
           job_id?: string | null
           job_operation_id?: string | null
@@ -1533,6 +1641,7 @@ export type Database = {
           company_id?: string
           corrects_note_id?: string | null
           created_at?: string
+          edited_at?: string | null
           id?: string
           job_id?: string | null
           job_operation_id?: string | null
@@ -1743,6 +1852,7 @@ export type Database = {
           body: string
           company_id: string
           created_at: string
+          edited_at: string | null
           id: string
           note_type: string
           part_id: string
@@ -1752,6 +1862,7 @@ export type Database = {
           body: string
           company_id: string
           created_at?: string
+          edited_at?: string | null
           id?: string
           note_type?: string
           part_id: string
@@ -1761,6 +1872,7 @@ export type Database = {
           body?: string
           company_id?: string
           created_at?: string
+          edited_at?: string | null
           id?: string
           note_type?: string
           part_id?: string
@@ -1938,7 +2050,6 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
-          is_location_tracked: boolean
           is_stocked: boolean
           part_name: string
           preferred_vendor_id: string | null
@@ -1955,7 +2066,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name: string
           preferred_vendor_id?: string | null
@@ -1972,7 +2082,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_location_tracked?: boolean
           is_stocked?: boolean
           part_name?: string
           preferred_vendor_id?: string | null
@@ -2096,7 +2205,10 @@ export type Database = {
           default_item_id: string | null
           environment: string
           id: string
+          po_custom_field_id: string | null
+          po_custom_field_name: string | null
           qb_company_name: string | null
+          qb_settings_checked_at: string | null
           realm_id: string
           reconnect_required: boolean
           refresh_expires_at: string | null
@@ -2114,7 +2226,10 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
+          po_custom_field_id?: string | null
+          po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_settings_checked_at?: string | null
           realm_id: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null
@@ -2132,7 +2247,10 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
+          po_custom_field_id?: string | null
+          po_custom_field_name?: string | null
           qb_company_name?: string | null
+          qb_settings_checked_at?: string | null
           realm_id?: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null
@@ -2603,6 +2721,7 @@ export type Database = {
           customer_name: string | null
           deleted_at: string | null
           expiration_date: string | null
+          fob_point: string | null
           id: string
           lead_time_text: string | null
           payment_terms: string | null
@@ -2626,6 +2745,7 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
+          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null
@@ -2649,6 +2769,7 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
+          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null
@@ -2889,8 +3010,11 @@ export type Database = {
           company_id: string
           created_at: string
           created_by: string | null
+          customer_carrier_account_id: string | null
           customer_id: string
           customer_name: string | null
+          freight_account_snapshot: Json | null
+          freight_terms: string | null
           id: string
           job_id: string
           one_time_address: Json | null
@@ -2908,8 +3032,11 @@ export type Database = {
           company_id: string
           created_at?: string
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id: string
           customer_name?: string | null
+          freight_account_snapshot?: Json | null
+          freight_terms?: string | null
           id?: string
           job_id: string
           one_time_address?: Json | null
@@ -2927,8 +3054,11 @@ export type Database = {
           company_id?: string
           created_at?: string
           created_by?: string | null
+          customer_carrier_account_id?: string | null
           customer_id?: string
           customer_name?: string | null
+          freight_account_snapshot?: Json | null
+          freight_terms?: string | null
           id?: string
           job_id?: string
           one_time_address?: Json | null
@@ -2946,6 +3076,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_customer_carrier_account_id_fkey"
+            columns: ["customer_carrier_account_id"]
+            isOneToOne: false
+            referencedRelation: "customer_carrier_accounts"
             referencedColumns: ["id"]
           },
           {
@@ -3339,7 +3476,29 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      inventory_location_occupancy: {
+        Row: {
+          company_id: string | null
+          location_id: string | null
+          part_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_location_stock_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_location_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       _migrate_legacy_shipment_for_job: {
@@ -3355,7 +3514,9 @@ export type Database = {
           p_converted_quantity: number
           p_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_unit: string
         }
@@ -3368,6 +3529,7 @@ export type Database = {
           p_location_id: string
           p_new_quantity: number
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
           p_unit: string
         }
@@ -3394,6 +3556,14 @@ export type Database = {
         Returns: undefined
       }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
+      bulk_put_away: {
+        Args: {
+          p_from_location_id: string
+          p_part_ids: string[]
+          p_to_location_id: string
+        }
+        Returns: Json
+      }
       company_can_write: {
         Args: { check_company_id: string }
         Returns: boolean
@@ -3457,7 +3627,9 @@ export type Database = {
         Args: {
           p_carrier: string
           p_company_id: string
+          p_customer_carrier_account_id?: string
           p_customer_id: string
+          p_freight_terms?: string
           p_line_items: Json
           p_notes?: string
           p_one_time_address: Json
@@ -3466,6 +3638,12 @@ export type Database = {
           p_shipping_method: string
         }
         Returns: string
+      }
+      definer_writers_missing_write_gate: {
+        Args: never
+        Returns: {
+          function_name: string
+        }[]
       }
       delete_location: { Args: { p_location_id: string }; Returns: undefined }
       deplete_stock_at_location: {
@@ -3483,14 +3661,12 @@ export type Database = {
         }
         Returns: Json
       }
-      disable_location_tracking: { Args: { p_part_id: string }; Returns: Json }
-      enable_location_tracking: {
-        Args: { p_initial_location_id?: string; p_part_id: string }
-        Returns: Json
-      }
-      enable_location_tracking_for_company: {
-        Args: { p_company_id: string }
-        Returns: Json
+      function_execute_leaks: {
+        Args: never
+        Returns: {
+          function_name: string
+          role_name: string
+        }[]
       }
       generate_direct_job_number: {
         Args: { company_uuid: string }
@@ -3539,6 +3715,10 @@ export type Database = {
         }[]
       }
       get_user_company_ids: { Args: never; Returns: string[] }
+      inv_assert_can_write: {
+        Args: { p_company_id: string }
+        Returns: undefined
+      }
       inv_assert_location_in_company: {
         Args: { p_company_id: string; p_location_id: string }
         Returns: undefined
@@ -3592,6 +3772,13 @@ export type Database = {
           stored_viewers: number
         }[]
       }
+      note_counter_write_leaks: {
+        Args: never
+        Returns: {
+          column_name: string
+          role_name: string
+        }[]
+      }
       note_viewers: {
         Args: { p_note_id: string }
         Returns: {
@@ -3613,6 +3800,7 @@ export type Database = {
           body: string
           corrects_note_id: string
           created_at: string
+          edited_at: string
           id: string
           job_number: string
           media: Json
@@ -3631,6 +3819,12 @@ export type Database = {
           bom_parents_count: number
           jobs_count: number
           quotes_count: number
+        }[]
+      }
+      playbook_rpc_execute_leaks: {
+        Args: never
+        Returns: {
+          role_name: string
         }[]
       }
       reset_demo_company: {
@@ -3669,7 +3863,9 @@ export type Database = {
           p_converted_quantity: number
           p_from_location_id: string
           p_notes?: string
+          p_operator_id?: string
           p_part_id: string
+          p_photo_path?: string
           p_quantity: number
           p_to_location_id: string
           p_unit: string

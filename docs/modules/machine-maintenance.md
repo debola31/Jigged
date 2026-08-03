@@ -32,6 +32,14 @@
 the only entrance to this module, and the one live defect in it named in
 [§6](#6-phases-and-gates).
 
+> **An entry is a `notes` row**, `subject_kind='work_center'` with `note_type='user'` — not a
+> separate store. So maintenance entries are part of the author's contribution and appear on
+> **My work** beside their job and part notes, where the row names the machine in the slot a job
+> note uses for its job number. The CHECK constraint on `notes` permits exactly one subject, so a
+> maintenance entry carries no part, no operation and no job; before the machine name was
+> selected there, those rows rendered as a bare sentence with nothing saying what they concerned.
+> Anything that changes what an entry carries has to be checked on that surface too.
+
 ---
 
 ## 1. Problem
@@ -189,7 +197,12 @@ real corpus ever argues for categories they come back as a UI change with a cons
 entry pinned to that machine until somebody logs a fix — so the person who meets it is the next
 operator standing at the machine, which is precisely the handoff [§1](#1-problem) says goes wrong.
 Its only intended exit is a second entry describing what was done: there is no dismiss and no close,
-and `notes` is append-only, so clearing the pin and recording the knowledge are the same act.
+so clearing the pin and recording the knowledge are the same act. That used to rest on `notes` being
+append-only; since [#628](https://github.com/debola31/Jigged/issues/628) it rests on something
+narrower and more durable — an entry's **body** is editable by its author, but `maintenance_kind` and
+`resolves_note_id` are immutable under a database guard trigger. So an operator can fix the wording of
+what they noticed and can never un-notice it, and a fix can never be re-pointed at a different item.
+The derived-open list stays trustworthy while the text stays correctable.
 
 ### 4.4 Noticed, then resolved
 
@@ -214,8 +227,14 @@ every outstanding item, and its draft was cleared in exactly one place: a succes
 starting a fix on one item, typing, then tapping "log the fix" on a second item moved the composer
 without moving the text — and submitting filed the first item's sentence as the second item's
 resolution. The second closes on a sentence written about something else, the first stays
-outstanding forever, and because the log is append-only nobody can correct it; the only remedy is a
-second entry saying the first was misfiled.
+outstanding forever. When this was written the log was append-only and nobody could correct it, so the
+only remedy was a second entry saying the first was misfiled. Since
+[#628](https://github.com/debola31/Jigged/issues/628) the author can delete the misfiled fix outright,
+which returns the item it wrongly closed to **Needs attention** — the open list is derived from the
+absence of a resolver, so removing the resolver restores the state with nothing stored to go stale.
+Note the shape of the remedy, because it is not "edit the link": `resolves_note_id` is immutable, so a
+fix filed against the wrong item is deleted and re-logged rather than re-pointed. The prevention below
+still matters more than the cure.
 
 The lesson is about where state lives, not how many composers there are. A draft must not outlive the
 thing it was written about, so the draft now lives **with the target**: the reply composer is mounted

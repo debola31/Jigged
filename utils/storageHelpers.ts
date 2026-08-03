@@ -26,7 +26,19 @@ export function sanitizeFilename(filename: string): string {
  * load-bearing: the bucket's RLS gates on `foldername[1] = companyId`, so adding
  * an entity type here needs no new storage policy.
  */
-export type StorageEntityType = 'quotes' | 'jobs' | 'parts' | 'work-centers';
+export type StorageEntityType =
+  | 'quotes'
+  | 'jobs'
+  | 'parts'
+  | 'work-centers'
+  | 'locations'
+  /**
+   * Evidence photographed when stock moves. Filed under the LOCATION id, not the transaction's —
+   * the row does not exist yet when the file is uploaded, because `photo_path` is written at INSERT
+   * and is immutable afterwards. Grouping by place is the useful fallback anyway when someone has
+   * to go looking in the bucket.
+   */
+  | 'inventory-transactions';
 
 /**
  * Generate storage path with UUID prefix and sanitized filename
@@ -117,6 +129,42 @@ export async function getSignedUrl(
   }
 
   return data.signedUrl;
+}
+
+/**
+ * Signed URLs for MANY paths in ONE request.
+ *
+ * The batched sibling of `getSignedUrl`. Without it, anything rendering a grid of private images
+ * pays a round trip per tile: `NoteMediaGallery` works around the gap with `Promise.all` over
+ * singles, and the storage board would have done the same once every location could carry a photo.
+ *
+ * Returns a `path → url` map rather than an array, so a caller can look up by the value it already
+ * holds. **Paths that fail are simply absent** rather than throwing: one unreadable photo must not
+ * blank an entire board, and the callers all render a placeholder when a path has no URL.
+ */
+export async function getSignedUrls(
+  paths: string[],
+  expiresIn: number = 3600,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (paths.length === 0) return out;
+
+  const supabase = getSupabase();
+  const bucket = getStorageBucket();
+
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrls(paths, expiresIn);
+
+  if (error || !data) {
+    console.error('Failed to create signed URLs:', error);
+    return out;
+  }
+
+  for (const row of data) {
+    if (row.path && row.signedUrl && !row.error) out.set(row.path, row.signedUrl);
+  }
+  return out;
 }
 
 /**

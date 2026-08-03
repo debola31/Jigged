@@ -92,7 +92,7 @@ export default function CustomersPage() {
     loading,
     reload: fetchCustomers,
   } = useLoad(
-    () => getAllCustomers(companyId, 'all', searchDebounced, sortModel.field, sortModel.sort),
+    () => getAllCustomers(companyId, searchDebounced, sortModel.field, sortModel.sort),
     [companyId, searchDebounced, sortModel],
     {
       onError: (error) => {
@@ -210,10 +210,17 @@ export default function CustomersPage() {
       minWidth: 200,
       pinned: 'left' as const,
     },
+    // Contact / Email / Phone are read off the embedded primary contact — they
+    // are NOT columns on `customers`. Sorting is server-side (the colId goes
+    // straight into .order()), so leaving these sortable sent PostgREST a
+    // column name that does not exist and the request failed. Derived columns
+    // stay unsortable until there is something real to sort on, same as
+    // Location below.
     {
       colId: 'primary_contact_name',
       headerName: 'Contact',
       width: 250,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.name ?? '—',
     },
     {
@@ -221,13 +228,25 @@ export default function CustomersPage() {
       headerName: 'Email',
       flex: 2,
       minWidth: 200,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.email ?? '—',
     },
     {
       colId: 'primary_contact_phone',
       headerName: 'Phone',
       width: 180,
+      sortable: false,
       valueGetter: (params) => params.data?.primary_contact?.phone ?? '—',
+    },
+    {
+      // Standing payment terms. Johnny's stated need is memory offload — he can
+      // enter terms on the customer but had nowhere to read them back. `field`
+      // (rather than a bare colId) keeps the colId equal to the DB column, so
+      // handleSortChanged's server-side .order() still works on this column.
+      field: 'default_payment_terms',
+      headerName: 'Payment terms',
+      width: 170,
+      valueGetter: (params) => params.data?.default_payment_terms ?? '—',
     },
     {
       colId: 'location',

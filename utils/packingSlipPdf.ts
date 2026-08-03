@@ -31,7 +31,11 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Company } from '@/utils/companyAccess';
 import type { AddressSnapshot } from '@/types/documentSnapshot';
-import { SHIPPING_METHOD_LABELS, type ShipmentWithRelations } from '@/types/shipment';
+import {
+  SHIPPING_METHOD_LABELS,
+  describeShipmentFreight,
+  type ShipmentWithRelations,
+} from '@/types/shipment';
 import { resolveAttentionLine } from '@/utils/shipmentsAccess';
 
 const MARGIN = 40;
@@ -458,6 +462,17 @@ export async function generatePackingSlipPdf(
   const details: Array<[string, string]> = [];
   if (methodLabel) details.push(['Shipping Method', methodLabel]);
   if (shipment.carrier) details.push(['Carrier', shipment.carrier]);
+  // Freight, rendered from the FROZEN snapshot rather than the live account —
+  // this slip must still say what it said a year from now, even if the account
+  // is edited or archived (Document Snapshot Standard).
+  //
+  // REDACTED BY CONSTRUCTION: the snapshot only ever holds the last 4, because
+  // this page rides in the box past carriers, docks and whoever opens the
+  // carton. `has_account` is what distinguishes "billed to their account" from
+  // "billed on the bill of lading" when nothing can be revealed — an account of
+  // 4 characters or fewer has no last-4, since showing 3 of 4 is not redaction.
+  const freightLine = describeShipmentFreight(shipment);
+  if (freightLine) details.push(['Freight', freightLine]);
 
   if (details.length > 0) {
     doc.setFont('helvetica', 'bold');

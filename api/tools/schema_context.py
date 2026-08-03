@@ -25,8 +25,15 @@ SCHEMA_CONTEXT = """
 - company_id: UUID (FK -> companies.id) -- ALWAYS filter with $1
 - name: TEXT (unique per company)
 - website: TEXT
-- contact_name: TEXT, contact_phone: TEXT, contact_email: TEXT
+- deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
+  any list, count or ranking; a by-id lookup deliberately does not)
+- default_payment_terms: TEXT, default_lead_time_text: TEXT, default_fob_point: TEXT
+  -- the customer's STANDING terms, applied to NEW quotes only. A quote's own
+  payment_terms / lead_time_text / fob_point are what that quote was issued
+  with; never answer "what terms is quote X on?" from these columns.
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: There are no contact_name/contact_phone/contact_email columns. Contacts
+  live on customer_contacts (one row per person, is_primary flags the main one).
 - NOTE: Address fields are stored on a separate customer_addresses table,
   one row per address tagged with default_billing/default_shipping flags.
 
@@ -35,8 +42,8 @@ SCHEMA_CONTEXT = """
 - customer_id: UUID (FK -> customers.id) -- join via customer.id
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT (default 'USA')
-- default_billing: BOOLEAN (at most one per customer — unique partial index)
-- default_shipping: BOOLEAN (at most one per customer — unique partial index)
+- default_billing: BOOLEAN (at most one per customer by product rule)
+- default_shipping: BOOLEAN (at most one per customer by product rule)
 - Both flags can be unset; the row stays on file as a reference.
 - attention_to: TEXT (optional "ATTN:" recipient line for packing slips)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
@@ -117,6 +124,7 @@ SCHEMA_CONTEXT = """
 - converted_at: TIMESTAMPTZ (when accepted/converted to a job)
 - lead_time_text: TEXT (free-text lead time as stated, e.g. "2–3 weeks", "In stock"; does not drive the job due date)
 - payment_terms: TEXT (e.g. 'Net 30', '2/10 Net 30'), expiration_date: DATE
+- fob_point: TEXT (where title/risk transfer, e.g. 'FOB Cleveland, OH'; NOT who pays freight)
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: revenue is NOT on quotes anymore. Sum quote_line_items.total_price
   for per-quote revenue.
@@ -438,6 +446,16 @@ SENSITIVE_TABLES = frozenset({
     "demo_data_templates",
     "quickbooks_connections",
     "quickbooks_customer_map",
+    # The customer's own carrier account number — their shared secret, not ours.
+    # "Which customers ship on their own UPS account?" is a reasonable question
+    # for an owner to type, and answering it from this table would put account
+    # numbers into an AI response and into ai_chat_queries. Triple-blocked, the
+    # same way the quickbooks_* tables are: absent from ALLOWED_TABLES (the
+    # primary boundary), REVOKEd from jigged_ai_readonly in the migration
+    # (the baseline's ALTER DEFAULT PRIVILEGES grants SELECT on every new public
+    # table, so that revoke is load-bearing, not decorative), and no
+    # ai_readonly_select policy. This entry is the whole-word backstop.
+    "customer_carrier_accounts",
     "quickbooks_invoice_links",
     # Read-tracking and capture-funnel instrumentation. "Which operators read the
     # setup notes?" is a natural question for a shop owner to type, and answering

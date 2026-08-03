@@ -73,7 +73,14 @@ describe('JobPartMaterialsCard', () => {
     expect(within(tr).getByText('20 each')).toBeInTheDocument();
   });
 
-  it('summarises how many materials are short, linked to the shop-wide view', async () => {
+  /**
+   * This previously asserted a link to `/dashboard/co1/inventory/shortages` — a route that
+   * was **never built**, so the test was locking in a 404. Every job part with a shortage
+   * rendered a clickable chip that went nowhere.
+   *
+   * The shop-wide shortage lens is the Parts stock filter, which reads `?status=`.
+   */
+  it('summarises how many materials are short, linked to the shop-wide shortage lens', async () => {
     asMock(getJobPartMaterialCheck).mockResolvedValue([
       row({ partId: 'a', shortBy: 5, status: 'short' }),
       row({ partId: 'b', shortBy: 2, status: 'short' }),
@@ -82,7 +89,7 @@ describe('JobPartMaterialsCard', () => {
     renderCard();
 
     const chip = await screen.findByText('2 short');
-    expect(chip.closest('a')).toHaveAttribute('href', '/dashboard/co1/inventory/shortages');
+    expect(chip.closest('a')).toHaveAttribute('href', '/dashboard/co1/parts?status=low');
   });
 
   /**

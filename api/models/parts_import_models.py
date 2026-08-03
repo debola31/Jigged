@@ -184,11 +184,14 @@ class PartExecuteResponse(BaseModel):
     updated_count: int = 0  # Rows upserted via (company_id, part_name) ON CONFLICT path
     skipped_count: int
     errors: list[PartImportError]
-    # Parts whose mapped quantity was deliberately NOT written because the part is
-    # location-tracked (its parts.quantity is a rollup of part_location_stock). Reported so the
-    # UI can say which balances didn't land — a mapped column silently not applying is the
+    # Parts whose mapped quantity was deliberately NOT written because the part already holds
+    # stock at a real place, where "240 on hand" cannot say which shelf to correct. Reported so
+    # the UI can say which balances didn't land — a mapped column silently not applying is the
     # silent-fallback pattern CLAUDE.md bans. Everything else about those rows imported fine.
-    location_tracked_skipped: list[str] = []
+    #
+    # Was `location_tracked_skipped` until 20260802015837, when `is_location_tracked` was dropped
+    # and "the part is tracked by place" stopped distinguishing anything — every part is.
+    quantity_skipped_already_placed: list[str] = []
 
 
 # Target schema for parts table (for AI mapping).

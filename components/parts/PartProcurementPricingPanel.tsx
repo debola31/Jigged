@@ -20,6 +20,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
+import UnsavedChangesBar from '@/components/common/UnsavedChangesBar';
 import {
   getTiersForPart,
   addTier as addTierApi,
@@ -47,6 +48,12 @@ interface PartProcurementPricingPanelProps {
    * cost" indicator live, without a page reload.
    */
   onSaved?: () => void;
+  /**
+   * Reports whether the tier table is holding staged edits, so the workspace
+   * can confirm before a tab switch or page unload throws them away
+   * (interaction-standards.md §2, exit guard). Must be referentially stable.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface EditRow {
@@ -54,6 +61,25 @@ interface EditRow {
   tempKey?: string;
   quantity: string;
   cost: string;
+}
+
+/**
+ * The persisted values a set of rows was seeded from. "Unsaved" is DERIVED by
+ * comparing live rows against this, never latched on edit — so typing 1 → 10 → 1
+ * settles back to clean instead of nagging for a save that would write nothing.
+ */
+interface CostSnapshot {
+  quantity: string;
+  cost: string;
+}
+
+function snapshotRows(rows: EditRow[]): CostSnapshot[] {
+  return rows.map((r) => ({ quantity: r.quantity.trim(), cost: r.cost.trim() }));
+}
+
+function rowDiffersFromBaseline(row: EditRow, base: CostSnapshot | undefined): boolean {
+  if (!base) return true; // a row with no counterpart is newly added
+  return row.quantity.trim() !== base.quantity || row.cost.trim() !== base.cost;
 }
 
 function parseNumber(s: string): number | null {
@@ -90,6 +116,7 @@ export default function PartProcurementPricingPanel({
   companyId,
   preferredVendorId,
   onSaved,
+  onDirtyChange,
 }: PartProcurementPricingPanelProps) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [tiers, setTiers] = useState<ProcurementTier[]>([]);
@@ -107,13 +134,28 @@ export default function PartProcurementPricingPanel({
   // auto-save). `dirty` tracks unsaved tier edits; `saveState` drives the
   // SaveStatus chip + the Save button's disabled state.
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [dirty, setDirty] = useState(false);
+  // The persisted values `rows` was seeded from. Dirty is derived against this
+  // rather than latched, so undoing an edit by hand clears it.
+  const [baseline, setBaseline] = useState<CostSnapshot[]>([]);
   const saving = saveState === 'saving';
+  const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
+  const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
+  // The vendor picker auto-saves, so it needs its OWN status. Sharing the tier
+  // sheet's `saveState` would announce "Saved" about the wrong thing — the
+  // exact "did it save?" ambiguity §2 is trying to prevent.
+  const [vendorSaveState, setVendorSaveState] = useState<SaveState>('idle');
 
+  // Only resets the "Saved" chip — dirtiness itself is derived from `baseline`.
   const markDirty = () => {
-    setDirty(true);
     setSaveState('idle');
   };
+
+  // Publish staged-edit state to the workspace, which owns the exit guard.
+  // Cleared on unmount so a discarded draft can't leave the guard armed.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   const initialLoad = useCallback(async () => {
     try {
@@ -146,20 +188,23 @@ export default function PartProcurementPricingPanel({
   // (initial load, or a reload after Save). No saved tier seeds ONE empty
   // starter row so the user fills the cost in directly (rendered red below).
   // Resets `dirty` — these rows mirror the DB.
+  const seedRowsFrom = useCallback((list: ProcurementTier[]) => {
+    const seeded: EditRow[] =
+      list.length === 0
+        ? [{ tempKey: tempId(), quantity: '', cost: '' }]
+        : list.map((t) => ({
+            id: t.id,
+            quantity: String(t.min_quantity),
+            cost: String(t.cost_per_unit),
+          }));
+    setRows(seeded);
+    // These rows now mirror the database, so they become the clean baseline.
+    setBaseline(snapshotRows(seeded));
+  }, []);
+
   useEffect(() => {
-    if (tiers.length === 0) {
-      setRows([{ tempKey: tempId(), quantity: '', cost: '' }]);
-    } else {
-      setRows(
-        tiers.map((t) => ({
-          id: t.id,
-          quantity: String(t.min_quantity),
-          cost: String(t.cost_per_unit),
-        })),
-      );
-    }
-    setDirty(false);
-  }, [tiers]);
+    seedRowsFrom(tiers);
+  }, [tiers, seedRowsFrom]);
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId) ?? null;
 
@@ -175,7 +220,10 @@ export default function PartProcurementPricingPanel({
   };
 
   const addRow = () => {
-    setRowsAt((prev) => [...prev, { tempKey: tempId(), quantity: '', cost: '' }]);
+    setRowsAt((prev) => [
+      ...prev,
+      { tempKey: tempId(), quantity: '', cost: '' },
+    ]);
     markDirty();
   };
 
@@ -185,6 +233,23 @@ export default function PartProcurementPricingPanel({
     setRowsAt((prev) => prev.filter((_, i) => i !== idx));
     markDirty();
   };
+
+  /**
+   * Drop staged cost edits and re-seed from the persisted tiers. The
+   * counterpart to Save in the unsaved-changes footer — the user needs a
+   * deliberate way to back out that isn't "navigate away and hope".
+   */
+  const handleDiscard = () => {
+    // `tiers` is the persisted sheet — re-seeding from it restores the rows
+    // and clears `dirty`.
+    seedRowsFrom(tiers);
+    setSaveState('idle');
+    setError(null);
+  };
+
+  // "2 unsaved changes" tells the user how much is at stake. Removing a row
+  // leaves no dirty row to count, so fall back to the generic phrasing.
+  const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
 
   const handleSave = async () => {
     // Fully-empty rows (both fields blank) are "not filled in yet" — drop them
@@ -271,13 +336,18 @@ export default function PartProcurementPricingPanel({
 
     const prevId = selectedVendorId;
     setSelectedVendorId(nextId);
+    setVendorSaveState('saving');
     try {
       await updatePartPreferredVendor(partId, nextId);
+      setVendorSaveState('saved');
       // The supplier role on the Vendors page is derived from this, so refresh
-      // the parent.
+      // the parent. Safe for staged edits in sibling cards: the refresh they
+      // receive invalidates derived cost only, never their draft rows
+      // (interaction-standards.md §2, section isolation).
       onSaved?.();
     } catch (err) {
       setSelectedVendorId(prevId);
+      setVendorSaveState('error');
       setError(
         err instanceof Error ? err.message : 'Failed to set preferred vendor',
       );
@@ -310,23 +380,47 @@ export default function PartProcurementPricingPanel({
         </Alert>
       )}
 
-      <Autocomplete<Vendor>
-        options={vendors}
-        value={selectedVendor}
-        onChange={(_e, next) => handleVendorPick(next)}
-        getOptionLabel={(v) => v.name}
-        isOptionEqualToValue={(opt, val) => opt.id === val.id}
-        size="small"
-        sx={{ mb: 2, maxWidth: 480 }}
-        renderInput={(params) => (
-          <TextField
-            {...params}
-            label="Preferred vendor"
-            placeholder="Pick a supplier (optional)"
-            helperText="The default supplier for this part. Cost tiers below apply regardless of vendor."
-          />
-        )}
-      />
+      {/* Preferred vendor is an AUTO-SAVE control living next to an
+          explicit-Save tier table — the one thing interaction-standards.md §2
+          says never to mix inside a single section. It stays auto-save (it's a
+          single, non-financial label, the right mode for it), so the fix is to
+          stop it reading as part of the staged sheet: its own bordered block,
+          its own save status, and a divider before the tiers. The two Save
+          models are now visibly two sections, not one ambiguous card. */}
+      <Box
+        sx={{
+          mb: 2,
+          p: 1.5,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 1,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 1.5,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Autocomplete<Vendor>
+          options={vendors}
+          value={selectedVendor}
+          onChange={(_e, next) => handleVendorPick(next)}
+          getOptionLabel={(v) => v.name}
+          isOptionEqualToValue={(opt, val) => opt.id === val.id}
+          size="small"
+          sx={{ flex: 1, minWidth: 260, maxWidth: 480 }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Preferred vendor"
+              placeholder="Pick a supplier (optional)"
+              helperText="Saved as soon as you pick it. Cost tiers below apply regardless of vendor."
+            />
+          )}
+        />
+        <Box sx={{ pt: 1 }}>
+          <SaveStatus state={vendorSaveState} />
+        </Box>
+      </Box>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
@@ -369,7 +463,19 @@ export default function PartProcurementPricingPanel({
                   const qtyError = needsCost && row.quantity.trim() === '';
                   const costError = needsCost && row.cost.trim() === '';
                   return (
-                    <TableRow key={rowKey}>
+                    <TableRow
+                      key={rowKey}
+                      sx={{
+                        // Same 3px left accent as the incomplete BOM/routing
+                        // rows, one rung down: error.main = broken,
+                        // warning.main = wants attention, transparent = fine.
+                        // An unsaved edit is the middle rung — not a mistake.
+                        '& > td:first-of-type': {
+                          borderLeft: '3px solid',
+                          borderLeftColor: dirtyRowFlags[idx] ? 'warning.main' : 'transparent',
+                        },
+                      }}
+                    >
                       <TableCell sx={{ minWidth: 110 }}>
                         <TextField
                           size="small"
@@ -459,25 +565,22 @@ export default function PartProcurementPricingPanel({
             >
               Add tier
             </Button>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              {dirty && saveState !== 'saving' && (
-                <Typography variant="caption" color="text.secondary">
-                  Unsaved changes
-                </Typography>
-              )}
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleSave}
-                disabled={!dirty || saving}
-                startIcon={
-                  saving ? <CircularProgress size={16} color="inherit" /> : undefined
-                }
-              >
-                Save costs
-              </Button>
-            </Box>
           </Box>
+
+          {/* Unsaved-changes footer — same treatment as the Pricing card, so
+              "staged, needs Save" looks identical on both tier tables. Sticky
+              and persistent: the caption-sized grey hint this replaces sat
+              below the fold and went unread, which is how a staged edit got
+              silently discarded. */}
+          {dirty && (
+            <UnsavedChangesBar
+              count={dirtyRowCount}
+              saveLabel="Save costs"
+              saving={saving}
+              onSave={() => void handleSave()}
+              onDiscard={handleDiscard}
+            />
+          )}
         </>
       )}
     </Box>

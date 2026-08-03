@@ -7,8 +7,20 @@ import { getPartPreviousNotes } from '@/utils/operatorAccess';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { PartPreviousNote } from '@/types/operator';
 
-vi.mock('@/utils/operatorAccess', () => ({ getPartPreviousNotes: vi.fn() }));
+vi.mock('@/utils/operatorAccess', () => ({
+  getPartPreviousNotes: vi.fn(),
+  getCurrentMember: vi.fn().mockResolvedValue(null),
+  updateNoteBody: vi.fn(),
+}));
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
+// The sheet gained edit/delete (#628), which pulls in jobNoteMediaAccess — that
+// module builds a Supabase client at import time, so it has to be mocked here the
+// same way JobFeed's suite does it.
+vi.mock('@/utils/jobNoteMediaAccess', () => ({
+  deleteJobNote: vi.fn(),
+  deleteJobNoteMedia: vi.fn(),
+  getJobNoteMediaUrl: vi.fn().mockResolvedValue('blob:thumb'),
+}));
 vi.mock('@/components/operator/NoteMediaGallery', () => ({ default: () => null }));
 // Dwell tracking imports the Supabase client at module scope; it has its own
 // suite in __tests__/hooks/useNoteDwell.test.tsx.
@@ -25,6 +37,7 @@ function note(over: Partial<PartPreviousNote> = {}): PartPreviousNote {
     body: 'indicate the fixture to 0.001 before the first bore',
     note_type: 'user',
     created_at: '2026-04-19T00:00:00Z',
+    edited_at: null,
     author_name: 'Diego Alvarez',
     subject_kind: 'part',
     viewer_count: 0,

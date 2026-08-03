@@ -24,6 +24,8 @@ interface OperatorReceivePartModalProps {
   locationName: string;
   /** Parts already stored here — excluded from the picker (act on them in-place). */
   excludePartIds: string[];
+  /** `user_company_access.id`, so bin history can name who received this. Null until it loads. */
+  operatorId: string | null;
   onClose: () => void;
   onDone: () => void | Promise<void>;
 }
@@ -41,6 +43,7 @@ export default function OperatorReceivePartModal({
   locationId,
   locationName,
   excludePartIds,
+  operatorId,
   onClose,
   onDone,
 }: OperatorReceivePartModalProps) {
@@ -65,7 +68,8 @@ export default function OperatorReceivePartModal({
     try {
       const all = await getStockedParts(companyId);
       const exclude = new Set(excludePartIds);
-      setParts(all.filter((p) => p.is_location_tracked && !exclude.has(p.id)));
+      // Every part has a place now, so there is nothing to filter on but what is already here.
+      setParts(all.filter((p) => !exclude.has(p.id)));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load parts.');
     } finally {
@@ -96,7 +100,10 @@ export default function OperatorReceivePartModal({
     setSaving(true);
     setError(null);
     try {
-      await addStockAtLocation(part.id, locationId, qty, unit, notes || undefined);
+      await addStockAtLocation(part.id, locationId, qty, unit, {
+        notes: notes || undefined,
+        operatorId: operatorId || undefined,
+      });
       await onDone();
       onClose();
     } catch (e) {

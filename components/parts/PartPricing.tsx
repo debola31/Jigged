@@ -37,12 +37,19 @@ import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
 import { isValidQuantityInput, isValidQuantityValue } from '@/lib/quantityInput';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
+import UnsavedChangesBar, { unsavedFieldSx } from '@/components/common/UnsavedChangesBar';
 
 interface PartPricingProps {
   companyId: string;
   part: Part;
   /** Bumped by the parent whenever the routing changes — triggers a reload + recompute. */
   refreshKey?: number;
+  /**
+   * Reports whether this card is holding staged tier edits, so the workspace can
+   * confirm before a tab switch or page unload throws them away
+   * (interaction-standards.md §2, exit guard). Must be referentially stable.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
   /**
    * Drill-down chain on the page hosting this card — passed through to
    * `pushPartToChain` when building the href on each "Heads up" warning
@@ -76,6 +83,33 @@ interface EditRow {
   /** null when materials are incomplete or the breakdown is missing — render
    * "—" rather than $0. See `RoutingCostBreakdown.materials_complete`. */
   baseCostPerUnit: number | null;
+}
+
+/**
+ * The persisted values a set of rows was seeded from. "Unsaved" is DERIVED by
+ * comparing the live rows against this, never tracked as a sticky flag — so
+ * typing 1 → 10 → 1 ends up genuinely clean again instead of nagging for a save
+ * that would write nothing.
+ *
+ * Only quantity + markup are compared: they are what `replaceTiersForPart`
+ * persists. `unitPrice` is derived (base × markup) and `baseCostPerUnit` is a
+ * fetched display value, so neither can differ without markup differing too.
+ */
+interface TierSnapshot {
+  quantity: string;
+  markupPercent: string;
+}
+
+function snapshotRows(rows: EditRow[]): TierSnapshot[] {
+  return rows.map((r) => ({
+    quantity: r.quantity.trim(),
+    markupPercent: r.markupPercent.trim(),
+  }));
+}
+
+function rowDiffersFromBaseline(row: EditRow, base: TierSnapshot | undefined): boolean {
+  if (!base) return true; // a row with no counterpart is newly added
+  return row.quantity.trim() !== base.quantity || row.markupPercent.trim() !== base.markupPercent;
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -166,6 +200,7 @@ export default function PartPricing({
   refreshKey = 0,
   currentChain = [],
   onPricingChanged,
+  onDirtyChange,
 }: PartPricingProps) {
   const partId = part.id;
   const isBought = part.source === 'bought';
@@ -191,8 +226,21 @@ export default function PartPricing({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [dirty, setDirty] = useState(false);
+  // The persisted values `rows` was seeded from. Dirty state is derived against
+  // this rather than latched on edit, so undoing an edit by hand clears it.
+  const [baseline, setBaseline] = useState<TierSnapshot[]>([]);
+  // Mirrors the derived `dirty` for the load effect's isolation guard. Kept
+  // current by the publish effect below, which MUST stay declared above the load
+  // effect — React runs effects in declaration order within a commit.
+  const dirtyRef = useRef(false);
+  // Which part the tier rows currently hold. A genuine part change must reload
+  // even if the previous part left staged edits behind; a sibling-panel refresh
+  // on the SAME part must not.
+  const loadedPartIdRef = useRef<string | null>(null);
   const saving = saveState === 'saving';
+
+  const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
+  const dirty = rows.length !== baseline.length || dirtyRowFlags.some(Boolean);
 
   // Costing lot size — the production run this part's cost amortizes over, and
   // the quantity it's valued at when consumed as a component. Drives the live
@@ -200,8 +248,18 @@ export default function PartPricing({
   const [costingQtyStr, setCostingQtyStr] = useState<string>(
     String(part.costing_batch_quantity ?? 1),
   );
-  const [costingDirty, setCostingDirty] = useState(false);
+  /**
+   * The persisted batch size this field was seeded from. Kept locally rather
+   * than read straight off `part`, because saving it deliberately does NOT
+   * refresh the parent — so the prop stays stale and would keep the field
+   * looking dirty forever. Same derive-don't-latch rule as the tier tables:
+   * typing 30 → 302 → 30 settles back to clean.
+   */
+  const [costingBaseline, setCostingBaseline] = useState<string>(
+    String(part.costing_batch_quantity ?? 1),
+  );
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
+  const costingDirty = costingQtyStr.trim() !== costingBaseline.trim();
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
   const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
@@ -210,8 +268,11 @@ export default function PartPricing({
   })();
   const costingUnit = unitShortLabel(part.primary_unit) ?? (part.primary_unit || 'unit');
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (opts?: { showSpinner?: boolean }) => {
+    // Only the first load of a given part shows the spinner. A silent reload
+    // (sibling panel saved, or our own save landed) keeps the table on screen
+    // instead of collapsing it to a spinner and back.
+    if (opts?.showSpinner !== false) setLoading(true);
     setError(null);
     try {
       // Only the persisted markup tiers load here. The cost breakdown is owned
@@ -237,8 +298,11 @@ export default function PartPricing({
       // A never-configured part shows a single unfilled row to fill in — NOT
       // dirty, so Save stays disabled until the user actually edits it.
       const seeded = asRows.length > 0 ? asRows : [blankRow()];
-      setRows(seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current)));
-      setDirty(false);
+      const recomputed = seeded.map((r) => recomputeRow(r, tierBaseCostsRef.current));
+      setRows(recomputed);
+      // These rows now mirror the database, so they become the clean baseline.
+      setBaseline(snapshotRows(recomputed));
+      dirtyRef.current = false;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pricing');
     } finally {
@@ -250,9 +314,33 @@ export default function PartPricing({
     // Data-fetch-on-mount false positive: loadAll's setState all runs post-await
     // (documented class in eslint.config.mjs). loadAll seeds the EDITABLE tier
     // rows, so useLoad (immutable data) doesn't fit — kept as-is.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadAll();
-  }, [loadAll, refreshKey]);
+    //
+    // SECTION ISOLATION (docs/interaction-standards.md §2). A `refreshKey` bump
+    // is a SIBLING panel reporting that it saved — a routing operation, a BOM
+    // row, a preferred-vendor pick. That legitimately changes the DERIVED base
+    // cost, which the two effects below refetch. It must never re-seed these
+    // rows from the database: doing so silently discarded staged tier edits
+    // (type a Min qty, then save an operation, and the typed value reverted
+    // with no warning — the reported bug).
+    //
+    // A real part change still reloads: `dirty` belongs to the part we were
+    // editing, so it must not keep the NEXT part's tiers off screen.
+    const partChanged = loadedPartIdRef.current !== partId;
+    if (!partChanged && dirtyRef.current) return;
+    loadedPartIdRef.current = partId;
+    void loadAll({ showSpinner: partChanged });
+  }, [loadAll, partId, refreshKey]);
+
+  // Publish staged-edit state to the workspace, which owns the exit guard, and
+  // keep `dirtyRef` current for the load effect's isolation guard. MUST remain
+  // declared above that effect — effects run in declaration order per commit.
+  // The cleanup clears the parent's flag on unmount so a discarded draft can't
+  // leave the guard armed forever.
+  useEffect(() => {
+    dirtyRef.current = dirty;
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   // Keep the refs current for loadAll (tierBaseCostsRef) and the base-cost fetch
   // guard (partIdRef) — written here, not during render.
@@ -263,9 +351,10 @@ export default function PartPricing({
 
   // Re-seed the costing-qty field when the persisted part value changes.
   useEffect(() => {
+    const persisted = String(part.costing_batch_quantity ?? 1);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCostingQtyStr(String(part.costing_batch_quantity ?? 1));
-    setCostingDirty(false);
+    setCostingQtyStr(persisted);
+    setCostingBaseline(persisted);
     setCostingSaveState('idle');
   }, [part.costing_batch_quantity]);
 
@@ -357,7 +446,8 @@ export default function PartPricing({
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
-    setDirty(true);
+    // No dirty flag to set — it's derived from `baseline` on the next render,
+    // which is what makes an edit-then-undo settle back to clean.
     setSaveState('idle');
   };
 
@@ -404,24 +494,13 @@ export default function PartPricing({
       } catch (noteErr) {
         console.error('Failed to log pricing note:', noteErr);
       }
-      // Reload so newly-inserted rows pick up real ids.
-      const fresh = await getTiersForPart(partId);
-      setRows(
-        fresh.map((t) =>
-          recomputeRow(
-            {
-              id: t.id,
-              sequence: t.sequence,
-              quantity: String(t.quantity),
-              markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-              unitPrice: '',
-              baseCostPerUnit: null,
-            },
-            tierBaseCosts,
-          ),
-        ),
-      );
-      setDirty(false);
+      // Clear the guard first: the reload below re-seeds these rows, and the
+      // isolation guard deliberately refuses to re-seed while dirty. (The
+      // rendered dirty state clears on its own once loadAll resets `baseline`.)
+      dirtyRef.current = false;
+      // Reload so newly-inserted rows pick up real ids. Silent — the table
+      // stays on screen rather than collapsing to a spinner.
+      await loadAll({ showSpinner: false });
       setSaveState('saved');
       // Refresh the parent so the workspace "missing markup" banner reflects
       // the new markup instead of going stale.
@@ -431,6 +510,18 @@ export default function PartPricing({
       setSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save pricing tiers');
     }
+  };
+
+  /**
+   * Drop staged tier edits and re-seed from the database. The counterpart to
+   * Save in the unsaved-changes footer: the user needs a deliberate way to back
+   * out that isn't "navigate away and hope nothing was kept".
+   */
+  const handleDiscard = (): void => {
+    dirtyRef.current = false;
+    setSaveState('idle');
+    setError(null);
+    void loadAll({ showSpinner: false });
   };
 
   const handleQuantityChange = (idx: number, value: string): void => {
@@ -491,21 +582,44 @@ export default function PartPricing({
     updateRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  /**
+   * Batch size commits via an explicit Save, NOT auto-save on blur.
+   *
+   * It looks like a harmless scalar, but `compute_part_cost_at_qty` values this
+   * part as a made child at exactly this quantity in every parent's BOM
+   * (`v_child_val_qty := v_bom.child_costing_batch_quantity`). So a fat-fingered
+   * 30 → 300 silently re-costs every parent part and flows into their quoted
+   * prices. That is financial data by §2's own test, and financial data does not
+   * auto-save.
+   *
+   * Deliberately does NOT call onPricingChanged: the batch size doesn't affect
+   * this part's own pricing tiers (their base is at the order qty) or its
+   * priceability — only its value as a component on OTHER parts' pages. A
+   * refresh here would just re-fetch the same numbers and flicker.
+   */
   const handleCostingSave = async (): Promise<void> => {
     setCostingSaveState('saving');
     try {
       await updatePartCostingBatchQuantity(partId, costingQty);
       setCostingSaveState('saved');
-      setCostingDirty(false);
-      // Deliberately NOT calling onPricingChanged: the batch size doesn't affect
-      // this part's own pricing tiers (their base is at the order qty) or its
-      // priceability — only its value as a component on OTHER parts' pages. A
-      // refresh here would just re-fetch the same numbers and flicker.
+      // The parent is deliberately not refreshed (see above), so `part` keeps
+      // the old value — advance the local baseline or the field stays "dirty".
+      setCostingBaseline(String(costingQty));
     } catch (err) {
       setCostingSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to save costing quantity');
     }
   };
+
+  /** Put the batch size back to the persisted value. */
+  const handleCostingDiscard = (): void => {
+    setCostingQtyStr(costingBaseline);
+    setCostingSaveState('idle');
+  };
+
+  // Removing a row leaves no dirty row to count; UnsavedChangesBar falls back
+  // to generic phrasing rather than claiming zero.
+  const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
 
   const runPerUnit = breakdown ? Math.round(breakdown.total_labor_cost * 100) / 100 : 0;
   // total_setup_cost is the one-time setup; amortize it over the batch here so
@@ -609,23 +723,16 @@ export default function PartPricing({
                 value={costingQtyStr}
                 onChange={(e) => {
                   setCostingQtyStr(e.target.value);
-                  setCostingDirty(true);
                   setCostingSaveState('idle');
                 }}
                 type="number"
                 size="small"
                 inputProps={{ min: 1, step: 'any', inputMode: 'decimal' }}
-                sx={{ width: 170 }}
+                // Marks the changed input itself — the single-field counterpart
+                // to the tier rows' left accent.
+                sx={{ width: 170, ...(costingDirty ? unsavedFieldSx : {}) }}
               />
               <SaveStatus state={costingSaveState} />
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleCostingSave}
-                disabled={!costingDirty || costingSaving}
-              >
-                Save
-              </Button>
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
               Setup spreads across the run this part is made in. This quantity is
@@ -677,6 +784,19 @@ export default function PartPricing({
                 </Box>
               </Box>
             )}
+
+            {/* Batch size is staged-explicit-Save like the tier tables (it
+                re-costs every parent part), so it gets the identical unsaved
+                affordance rather than a lone Save button in the header. No
+                count — a single field. */}
+            {costingDirty && (
+              <UnsavedChangesBar
+                saveLabel="Save batch size"
+                saving={costingSaving}
+                onSave={() => void handleCostingSave()}
+                onDiscard={handleCostingDiscard}
+              />
+            )}
           </CardContent>
         </Card>
       )}
@@ -714,7 +834,22 @@ export default function PartPricing({
               <TableBody>
                 {rows.map((row, idx) => {
                   return (
-                    <TableRow key={row.id ?? `tier-${idx}`}>
+                    <TableRow
+                      key={row.id ?? `tier-${idx}`}
+                      sx={{
+                        // The same 3px left accent the incomplete BOM rows and
+                        // routing rows use, one rung down that ladder:
+                        // error.main = broken, warning.main = wants your
+                        // attention, transparent = fine. An unsaved edit is the
+                        // middle rung — it is not a mistake, so it must not
+                        // read like one. Transparent (not absent) when clean so
+                        // the row doesn't shift when the accent appears.
+                        '& > td:first-of-type': {
+                          borderLeft: '3px solid',
+                          borderLeftColor: dirtyRowFlags[idx] ? 'warning.main' : 'transparent',
+                        },
+                      }}
+                    >
                       <TableCell sx={{ minWidth: 90 }}>
                         <TextField
                           size="small"
@@ -770,23 +905,18 @@ export default function PartPricing({
             <Button size="small" variant="outlined" onClick={addTier} startIcon={<AddIcon />}>
               Add tier
             </Button>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              {dirty && saveState !== 'saving' && (
-                <Typography variant="caption" color="text.secondary">
-                  Unsaved changes
-                </Typography>
-              )}
-              <SaveStatus state={saveState} />
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleSave}
-                disabled={!dirty || saving}
-              >
-                Save pricing
-              </Button>
-            </Box>
+            {!dirty && <SaveStatus state={saveState} />}
           </Box>
+
+          {dirty && (
+            <UnsavedChangesBar
+              count={dirtyRowCount}
+              saveLabel="Save pricing"
+              saving={saving}
+              onSave={() => void handleSave()}
+              onDiscard={handleDiscard}
+            />
+          )}
             </>
           )}
         </CardContent>

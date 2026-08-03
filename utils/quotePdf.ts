@@ -185,6 +185,13 @@ export async function generateQuotePdf(
   if (quote.payment_terms) {
     metaRows.push({ text: `Payment Terms: ${quote.payment_terms}` });
   }
+  // FOB point — where title and risk transfer. Printed as its own row, never
+  // merged with a freight-payment term, because a customer reading
+  // "FOB Destination, Freight Collect" as one phrase is the classic
+  // misunderstanding this separation exists to prevent.
+  if (quote.fob_point) {
+    metaRows.push({ text: `FOB: ${quote.fob_point}` });
+  }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);

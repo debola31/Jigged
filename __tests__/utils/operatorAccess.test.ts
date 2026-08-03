@@ -36,6 +36,7 @@ vi.mock('@/lib/supabaseErrors', () => ({
 import {
   getJobNotes,
   addJobNote,
+  updateNoteBody,
   getAllStationsOperatorJobs,
   getCompletedOperatorJobs,
   getAllStationsCompletedOperatorJobs,
@@ -47,6 +48,7 @@ import {
   markOperationReceived,
   revertOperationCompletion,
   getOutsideOpsForCompany,
+  getCurrentMember,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -341,6 +343,63 @@ describe('addJobNote', () => {
   });
 });
 
+describe('updateNoteBody', () => {
+  beforeEach(() => {
+    mockQueryBuilder.data = { body: 'corrected', edited_at: '2026-08-01T10:00:00Z' };
+    mockQueryBuilder.error = null;
+  });
+
+  it('updates ONLY the body column', async () => {
+    await updateNoteBody('n1', 'corrected');
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('notes');
+    // THE SECURITY ASSERTION OF THIS WHOLE FEATURE, expressed at the unit level.
+    //
+    // The browser holds GRANT UPDATE (body) and nothing else, so viewer_count,
+    // usage_count, author_id and every subject column are unwritable at the
+    // database. This test guards the layer above that: if anyone later adds a
+    // second key to this payload — a counter reset, an edited_at the client
+    // authors itself, a note_type — it fails here rather than at a 42501 in
+    // production. Deliberately an exact key-set check, not objectContaining.
+    const payload = mockQueryBuilder.update.mock.calls[0][0];
+    expect(Object.keys(payload)).toEqual(['body']);
+    expect(payload.body).toBe('corrected');
+
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
+    expect(mockQueryBuilder.select).toHaveBeenCalledWith('body, edited_at');
+  });
+
+  it('trims the body', async () => {
+    await updateNoteBody('n1', '   corrected   ');
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith({ body: 'corrected' });
+  });
+
+  it.each([['', 'empty string'], ['   ', 'whitespace only']])(
+    'normalises %s to null so a media-only note stays legal',
+    async (input) => {
+      await updateNoteBody('n1', input);
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith({ body: null });
+    },
+  );
+
+  it('passes a null body straight through', async () => {
+    await updateNoteBody('n1', null);
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith({ body: null });
+  });
+
+  it('returns the row the database gives back, including the server-stamped edited_at', async () => {
+    const result = await updateNoteBody('n1', 'corrected');
+    // edited_at is never sent by the client — it comes back from the BEFORE
+    // UPDATE trigger, which is what makes the "edited" marker unforgeable.
+    expect(result).toEqual({ body: 'corrected', edited_at: '2026-08-01T10:00:00Z' });
+  });
+
+  it('throws a friendly error when the update is refused', async () => {
+    mockQueryBuilder.error = { message: 'permission denied for column viewer_count' };
+    await expect(updateNoteBody('n1', 'x')).rejects.toThrow(/Could not save that change/);
+  });
+});
+
 // ============================================================================
 // External (outside-vendor) operation lifecycle: send / receive / guards
 // ============================================================================
@@ -485,6 +544,58 @@ describe('getOutsideOpsForCompany', () => {
   });
 });
 
+
+/**
+ * `getCurrentMember` shares one request between simultaneous callers, and keeps nothing
+ * afterwards.
+ *
+ * Both halves matter and they pull against each other. The sharing is the point: every
+ * call opens with `auth.getSession()`, which supabase-js serialises behind a
+ * `navigator.locks` acquisition, so the three callers the "Me" tab fires in one commit
+ * used to queue against each other on the lock that gates every other request on the page.
+ *
+ * Not retaining it is equally the point. A session-length cache of this row is a
+ * cross-user leak on a shared office computer: sign-out is `router.replace` and sign-in is
+ * `router.push`, so module state survives the whole cycle, and this row is what pins
+ * `uploaded_by` / `author_id` on writes whose RLS requires them to match the caller.
+ */
+describe('getCurrentMember request sharing', () => {
+  it('collapses simultaneous callers into ONE round trip', async () => {
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+
+    const [a, b, c] = await Promise.all([
+      getCurrentMember('c1'),
+      getCurrentMember('c1'),
+      getCurrentMember('c1'),
+    ]);
+
+    expect(a).toEqual(b);
+    expect(b).toEqual(c);
+    // One session read and one table read, not three of each.
+    expect(mockSupabase.auth.getSession).toHaveBeenCalledTimes(1);
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps nothing once the request settles, so the next caller re-reads', async () => {
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+    await getCurrentMember('c1');
+
+    // A different person is signed in now. Nothing may be inherited from the last one.
+    mockQueryBuilder.data = { id: 'acc-you', name: 'Priya', user_id: 'auth-user-2', role: 'admin' };
+    const second = await getCurrentMember('c1');
+
+    expect(second?.id).toBe('acc-you');
+    expect(mockSupabase.auth.getSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not pin a failure — a later call can still succeed', async () => {
+    mockQueryBuilder.data = null;
+    expect(await getCurrentMember('c1')).toBeNull();
+
+    mockQueryBuilder.data = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator' };
+    expect((await getCurrentMember('c1'))?.id).toBe('acc-me');
+  });
+});
 
 describe('reactions', () => {
   // getCurrentMember resolves via a single() on user_company_access.

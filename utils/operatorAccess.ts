@@ -18,8 +18,9 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import * as Sentry from '@sentry/nextjs';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
@@ -35,6 +36,7 @@ import type {
   JobNoteMedia,
   PartPreviousNote,
   MyContributionTotals,
+  NewHelpful,
   MyNotesPage,
   MyNote,
   NoteViewer,
@@ -56,6 +58,15 @@ export interface CurrentMember {
    * round trip for a value that is on the row we are already fetching.
    */
   role: string | null;
+  /**
+   * Cursor for the "new since you last looked" recognition block — helpful marks at or
+   * before this instant have already been surfaced. NULL means never dismissed, which the
+   * reader treats as "the recent window", not "everything ever". Selected here rather than
+   * in a second query because this row is already being fetched on the surface that needs
+   * it. Safe to read stale-by-one-render: the in-flight cache does not outlive a request,
+   * so the next call after a dismiss re-reads it.
+   */
+  reactions_seen_at: string | null;
 }
 
 /**
@@ -115,12 +126,40 @@ async function fetchCurrentMember(companyId: string): Promise<CurrentMember | nu
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
-  const { data: member } = await supabase
+  const { data: member, error } = await supabase
     .from('user_company_access')
-    .select('id, name, user_id, role')
+    .select('id, name, user_id, role, reactions_seen_at')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
+
+  // "No row" is a definitive answer: this user is genuinely not a member. ANYTHING ELSE
+  // is "couldn't check", and returning null for it tells 29 call sites the opposite of
+  // what happened — every operator surface renders as though the person were not on the
+  // team. The control flow is unchanged here on purpose (several callers are bare
+  // `.then()` with no rejection handler, so throwing would trade a wrong answer for an
+  // unhandled rejection); what changes is that the failure stops being SILENT.
+  //
+  // The case that made this urgent is a schema mismatch, and it is one this repo's own
+  // workflow produces: worktree migrations are validated on the PR's Supabase preview
+  // branch and deliberately never replayed into the shared local stack, so running this
+  // branch against local yields `42703 column user_company_access.reactions_seen_at does
+  // not exist` — the whole select 400s and every operator page silently empties.
+  if (error && error.code !== 'PGRST116') {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(
+        `getCurrentMember: the member lookup FAILED (${error.code}: ${error.message}). ` +
+          'This is not "not a member" — operator surfaces will render empty. If the code ' +
+          'is 42703, the local database is behind the branch: apply the pending migrations ' +
+          'or point at the PR preview branch.',
+      );
+    }
+    Sentry.captureException(toError(error, 'Could not resolve the current member'), {
+      tags: { area: 'operator_member_lookup' },
+      extra: { companyId },
+    });
+    return null;
+  }
 
   return member;
 }
@@ -2093,6 +2132,160 @@ export async function removeReaction(
   if (error) {
     throw new Error(
       friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not undo that.' }),
+    );
+  }
+}
+
+// ============================================================================
+// NEW RECOGNITION — "helpful" marks the author has not been shown yet
+// ============================================================================
+
+/**
+ * How far back a reaction can be and still count as NEW.
+ *
+ * Not a display duration — the block stays on screen until the operator dismisses it.
+ * This bounds ELIGIBILITY, so somebody back from six months off is not greeted by a
+ * wall of history, and so a reaction that aged out while they were away simply lives on
+ * its note instead of arriving as stale news.
+ *
+ * Eight weeks because that is roughly where the measured effect of a first endorsement
+ * has decayed (Wachs et al.: 12.9% at first, 7.7% by eight weeks, 6.4% by twelve).
+ */
+export const NEW_HELPFUL_WINDOW_DAYS = 56;
+
+/** Names shown before the rest collapse to "and N more". */
+export const MAX_HELPFUL_NAMES = 3;
+
+/**
+ * "Helpful" marks on the caller's own notes that they have not been shown yet.
+ *
+ * GROUPED BY NOTE, because the note is the unit of recognition and the reactors are its
+ * audience. Three people marking one note is one item naming three people, not three
+ * items — several individuals re-described as a single coherent audience is what keeps
+ * the signal at single-target strength rather than fading (Västfjäll et al. 2014), and
+ * it is also the only shape that satisfies the rule that reactions never sum per person.
+ *
+ * DERIVED FROM LIVE ROWS, never a stored notification. A colleague can take a mark back,
+ * and a snapshot taken at delivery time would outlive its own truth — the operator would
+ * be thanked for something that no longer exists. Reading through means a retracted
+ * reaction simply stops appearing, and it is also why no "still valid?" expiry rule is
+ * needed: a nine-month-old reaction is as true as a new one while its row is there.
+ *
+ * Self-reactions cannot occur — the RLS INSERT policy forbids reacting to your own note —
+ * so there is no author filter to write here.
+ */
+export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
+  const supabase = getSupabase();
+
+  const member = await getCurrentMember(companyId);
+  if (!member) return [];
+
+  const windowStart = new Date(Date.now() - NEW_HELPFUL_WINDOW_DAYS * 86_400_000);
+  // NULL cursor means "never dismissed", which is NOT the epoch: it means show the recent
+  // window rather than every reaction ever received.
+  //
+  // THE CURSOR IS FORWARDED AS THE RAW STRING, never re-serialised through a Date. Postgres
+  // keeps timestamptz to the microsecond and JS Date only to the millisecond, so
+  // `new Date('…:36.836237Z').toISOString()` sends `…:36.836Z` — 237µs early. The cursor is
+  // set to the newest reaction ACTUALLY SHOWN, so that reaction's own `created_at` equals
+  // the cursor exactly; truncating makes it compare strictly greater and it returns as
+  // "new" on every load, for ever. Observed on the preview: one note stuck in the block
+  // through a dismissal, a reload and a fresh session.
+  //
+  // The window comparison below still goes through Date, which is fine — it decides only
+  // whether an 8-week-old cursor beats the window, where a millisecond cannot matter.
+  const since =
+    member.reactions_seen_at && new Date(member.reactions_seen_at) > windowStart
+      ? member.reactions_seen_at
+      : windowStart.toISOString();
+
+  // The reactor hint is the FK's real name, not PostgREST's `<table>_<col>_fkey` default:
+  // this schema names newer constraints `<table>_<col>_fk` and older ones `_fkey`, so the
+  // name has to be looked up rather than guessed. A wrong hint is a 400 on every call.
+  const { data, error } = await supabase
+    .from('note_reactions')
+    .select(
+      'created_at, kind, ' +
+        'reactor:user_company_access!note_reactions_reactor_fk(name), ' +
+        'note:notes!inner(id, body, author_id, ' +
+        'job:jobs!notes_job_fk(job_number), ' +
+        'captured_job:jobs!notes_captured_job_fk(job_number), ' +
+        'work_center:work_centers!notes_work_center_fk(name))',
+    )
+    .eq('company_id', companyId)
+    .eq('kind', 'helpful')
+    .eq('note.author_id', member.id)
+    .gt('created_at', since)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'reaction',
+        fallback: 'Could not load what came back.',
+      }),
+    );
+  }
+
+  type Row = {
+    created_at: string;
+    reactor: { name: string | null } | { name: string | null }[] | null;
+    note: {
+      id: string;
+      body: string | null;
+      job: { job_number: string } | { job_number: string }[] | null;
+      captured_job: { job_number: string } | { job_number: string }[] | null;
+      work_center: { name: string | null } | { name: string | null }[] | null;
+    };
+  };
+  const one = <T,>(rel: T | T[] | null): T | null =>
+    (Array.isArray(rel) ? rel[0] : rel) ?? null;
+
+  // Rows arrive newest-first, so first-seen order per note is already newest-first and
+  // the first row for a note carries its latest_at.
+  const byNote = new Map<string, NewHelpful>();
+  for (const r of (data ?? []) as unknown as Row[]) {
+    const existing = byNote.get(r.note.id);
+    const name = one(r.reactor)?.name;
+    if (existing) {
+      if (name) existing.names.push(name);
+      continue;
+    }
+    byNote.set(r.note.id, {
+      note_id: r.note.id,
+      body: r.note.body,
+      reference:
+        one(r.note.work_center)?.name ??
+        one(r.note.job)?.job_number ??
+        one(r.note.captured_job)?.job_number ??
+        null,
+      names: name ? [name] : [],
+      latest_at: r.created_at,
+    });
+  }
+
+  return [...byNote.values()];
+}
+
+/**
+ * Advance the caller's "I have seen these" cursor.
+ *
+ * Takes the newest reaction actually SHOWN rather than defaulting to now(), so a
+ * reaction landing between render and the tap is not marked seen without ever having
+ * been on screen. Dismissing moves this cursor and destroys nothing: every reaction
+ * remains on its note in the list below, forever. That separation is deliberate — this
+ * shop has already lost recognition once to a control where the nag and the reward were
+ * the same object.
+ */
+export async function markHelpfulSeen(companyId: string, seenThrough: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.rpc('mark_reactions_seen', {
+    p_company_id: companyId,
+    p_seen_through: seenThrough,
+  });
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not save that.' }),
     );
   }
 }

@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
+import { writeFileSync, unlinkSync } from 'fs';
 import {
   parseSchema,
   parseSelect,
+  parseForeignKeys,
   extractSelects,
   scanProject,
+  validateFile,
   type Violation,
 } from '../../scripts/schemaEmbedCheck';
 
@@ -81,6 +84,118 @@ describe('schemaEmbedCheck — extraction', () => {
     const out = extractSelects(source);
     const sel = out.find((c) => c.source === 'const SEL');
     expect(sel?.text).toContain('parts(id, name)');
+  });
+
+  /**
+   * A select built by concatenation must be read WHOLE. The original extractor matched one
+   * quoted literal and stopped, so everything after the first `+` went unchecked — which is
+   * how a fabricated foreign-key hint in `getNewHelpful` reached a preview deployment
+   * through a green run of this check.
+   */
+  it('joins a select concatenated across several string literals', () => {
+    const source = `
+      await supabase.from('note_reactions').select(
+        'created_at, kind, ' +
+          'reactor:user_company_access!note_reactions_reactor_fk(name), ' +
+          'note:notes!inner(id, body)',
+      );
+    `;
+    const out = extractSelects(source);
+    expect(out).toHaveLength(1);
+    expect(out[0].text).toContain('note_reactions_reactor_fk');
+    expect(out[0].text).toContain('note:notes!inner(id, body)');
+  });
+
+  it('ignores a second .select() argument, so { count } contributes no phantom column', () => {
+    const source = `
+      await supabase.from('notes').select('id, author:user_company_access(name)', { count: 'exact' });
+    `;
+    const out = extractSelects(source);
+    expect(out[0].text).toContain('user_company_access(name)');
+    expect(out[0].text).not.toContain('exact');
+  });
+
+  /**
+   * Comments inside the argument routinely carry backticks or apostrophes (a note about
+   * `<table>_<col>_fkey` naming, say). Treating those as string delimiters corrupts the
+   * rest of the select — silently, since the result still parses as *something*.
+   */
+  it('skips comments inside the argument, including their backticks and apostrophes', () => {
+    const source = `
+      await supabase.from('note_reactions').select(
+        'created_at, ' +
+          // the FK's real name, not PostgREST's \`<table>_<col>_fkey\` default
+          /* nor this one's */
+          'reactor:user_company_access!note_reactions_reactor_fk(name)',
+      );
+    `;
+    const out = extractSelects(source);
+    expect(out[0].text).toBe(
+      'created_at, reactor:user_company_access!note_reactions_reactor_fk(name)',
+    );
+  });
+});
+
+describe('schemaEmbedCheck — foreign-key hints', () => {
+  const SQL = `
+CREATE TABLE IF NOT EXISTS "public"."user_company_access"
+(
+    "id" uuid NOT NULL,
+    "name" text
+);
+CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
+(
+    "id" uuid NOT NULL,
+    "city" text
+);
+ALTER TABLE ONLY "public"."note_reactions"
+    ADD CONSTRAINT "note_reactions_reactor_fk" FOREIGN KEY (reactor_id) REFERENCES user_company_access(id) ON DELETE CASCADE;
+ALTER TABLE ONLY "public"."shipments"
+    ADD CONSTRAINT "shipments_shipping_address_id_fkey" FOREIGN KEY (shipping_address_id) REFERENCES customer_addresses(id) ON DELETE SET NULL;
+`;
+
+  const check = (select: string): Violation[] => {
+    const file = path.join(REPO_ROOT, '__tmp_embed_hint_fixture.ts');
+    writeFileSync(file, `await supabase.from('x').select('${select}');\n`);
+    try {
+      return validateFile(file, parseSchema(SQL), parseForeignKeys(SQL));
+    } finally {
+      unlinkSync(file);
+    }
+  };
+
+  /**
+   * The bug this check was extended for. The schema names newer constraints
+   * `<table>_<col>_fk` and older ones Postgres' default `<table>_<col>_fkey`, so there is
+   * no rule to guess from — and a hint that resolves to nothing is a 400 on every call,
+   * not a fallback to some default join.
+   */
+  it('flags a hint that names no real foreign key', () => {
+    const v = check('reactor:user_company_access!note_reactions_reactor_id_fkey(name)');
+    expect(v.map((x) => x.reason)).toEqual(['unknown-constraint']);
+    expect(v[0].detail).toBe('note_reactions_reactor_id_fkey');
+  });
+
+  it('accepts a real constraint name', () => {
+    expect(check('reactor:user_company_access!note_reactions_reactor_fk(name)')).toEqual([]);
+  });
+
+  /** Hints chain: the relationship AND the join type, each validated separately. */
+  it('accepts a constraint name chained with a join keyword', () => {
+    expect(check('reactor:user_company_access!note_reactions_reactor_fk!inner(name)')).toEqual([]);
+  });
+
+  /**
+   * PostgREST also disambiguates by the referencing COLUMN. That column lives on the source
+   * table, which this parser can't resolve, so it's matched against every FK pointing AT
+   * the embedded table instead.
+   */
+  it('accepts the referencing column as a hint', () => {
+    expect(check('shipping_address:customer_addresses!shipping_address_id(city)')).toEqual([]);
+  });
+
+  it('accepts plain join keywords', () => {
+    expect(check('addr:customer_addresses!left(city)')).toEqual([]);
   });
 });
 

@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single', 'maybeSingle'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single', 'maybeSingle', 'gt', 'gte', 'lt', 'lte', 'range'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -31,7 +31,15 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/supabaseErrors', () => ({
   friendlyErrorMessage: (_err: unknown, opts?: { fallback?: string }) =>
     opts?.fallback ?? 'error',
+  toError: (value: unknown, fallback = 'Unknown error') =>
+    value instanceof Error ? value : new Error(String((value as { message?: string })?.message ?? fallback)),
 }));
+
+// The member lookup reports indeterminate failures rather than swallowing them. Several
+// tests drive the shared mock into an error state to exercise a DIFFERENT query, and the
+// member lookup runs off that same mock — so it legitimately reports. Silenced here to
+// keep the run readable; the behaviour itself is asserted in its own describe below.
+vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 import {
   getJobNotes,
@@ -49,6 +57,8 @@ import {
   revertOperationCompletion,
   getOutsideOpsForCompany,
   getCurrentMember,
+  getNewHelpful,
+  NEW_HELPFUL_WINDOW_DAYS,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -598,9 +608,61 @@ describe('getCurrentMember request sharing', () => {
 });
 
 describe('reactions', () => {
-  // getCurrentMember resolves via a single() on user_company_access.
+  /**
+   * `addReaction` runs TWO queries off the one shared mock — the member lookup, then the
+   * insert — so a test that drives the mock into an error state to exercise the insert
+   * also fails the member lookup. That used to be invisible, because the lookup ignored
+   * `error` entirely; now that it reports indeterminate failures, the two have to be told
+   * apart. The member lookup is the only query asking for `reactions_seen_at`.
+   */
+  let memberRow: Record<string, unknown> | null = null;
+  let queued: { data: unknown; error: unknown } = { data: null, error: null };
+
+  beforeEach(() => {
+    memberRow = null;
+    queued = { data: null, error: null };
+    let lastSelect = '';
+    (mockQueryBuilder.select as ReturnType<typeof vi.fn>).mockImplementation((s: string) => {
+      lastSelect = s ?? '';
+      return mockQueryBuilder;
+    });
+    // A write never calls .select(), so without this the member lookup's select string
+    // would still be the last one seen and the insert's error would be routed to it.
+    for (const verb of ['insert', 'update', 'delete'] as const) {
+      (mockQueryBuilder[verb] as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        lastSelect = '';
+        return mockQueryBuilder;
+      });
+    }
+    const isMemberLookup = () => lastSelect.includes('reactions_seen_at');
+    Object.defineProperty(mockQueryBuilder, 'data', {
+      configurable: true,
+      get: () => (isMemberLookup() ? memberRow : queued.data),
+      set: (v) => {
+        queued.data = v;
+      },
+    });
+    Object.defineProperty(mockQueryBuilder, 'error', {
+      configurable: true,
+      get: () => (isMemberLookup() ? null : queued.error),
+      set: (v) => {
+        queued.error = v;
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete (mockQueryBuilder as Record<string, unknown>).data;
+    delete (mockQueryBuilder as Record<string, unknown>).error;
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = null;
+    for (const verb of ['select', 'insert', 'update', 'delete'] as const) {
+      (mockQueryBuilder[verb] as ReturnType<typeof vi.fn>).mockImplementation(() => mockQueryBuilder);
+    }
+  });
+
   const asMember = (id: string | null) => {
-    mockQueryBuilder.data = id === null ? null : { id, name: 'Diego', user_id: 'auth-user-1' };
+    memberRow = id === null ? null : { id, name: 'Diego', user_id: 'auth-user-1' };
   };
 
   it('writes the reaction as the caller, never as a supplied identity', async () => {
@@ -690,5 +752,184 @@ describe('station selection', () => {
     mockQueryBuilder.error = { message: 'network down' };
 
     await expect(getStationName('wc1')).rejects.toThrow('network down');
+  });
+});
+
+
+/**
+ * `getNewHelpful` collapses reactions onto the NOTE they are about.
+ *
+ * Three people marking one note is one item naming three people, never three items and
+ * never a per-person total — the note is the unit of recognition, which is both what
+ * holds the signal at single-target strength (Västfjäll et al. 2014) and the standing
+ * rule that keeps reactions off a leaderboard.
+ */
+describe('getNewHelpful', () => {
+  const member = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator', reactions_seen_at: null };
+
+  /** Rows as PostgREST returns them: newest first, one per reactor. */
+  const row = (name: string, createdAt: string, noteId = 'note-1') => ({
+    created_at: createdAt,
+    reactor: { name },
+    note: {
+      id: noteId,
+      body: 'Clamp on the boss, not the flange.',
+      job: { job_number: 'J-0042' },
+      captured_job: null,
+      work_center: null,
+    },
+  });
+
+  it('groups every reactor onto the one note, newest first', async () => {
+    mockQueryBuilder.data = member;
+    const first = await getCurrentMember('c1');
+    expect(first?.id).toBe('acc-me');
+
+    mockQueryBuilder.data = [
+      row('Ray Ellis', '2026-08-02T12:00:00Z'),
+      row('Dee Novak', '2026-08-01T12:00:00Z'),
+      row('Sam Carter', '2026-07-31T12:00:00Z'),
+    ];
+    const out = await getNewHelpful('c1');
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.names).toEqual(['Ray Ellis', 'Dee Novak', 'Sam Carter']);
+    // The cursor must advance to the NEWEST of them, not the first row of the group.
+    expect(out[0]!.latest_at).toBe('2026-08-02T12:00:00Z');
+    expect(out[0]!.reference).toBe('J-0042');
+  });
+
+  it('keeps separate notes separate', async () => {
+    mockQueryBuilder.data = member;
+    await getCurrentMember('c1');
+
+    mockQueryBuilder.data = [
+      row('Ray Ellis', '2026-08-02T12:00:00Z', 'note-1'),
+      row('Dee Novak', '2026-08-01T12:00:00Z', 'note-2'),
+    ];
+    const out = await getNewHelpful('c1');
+
+    expect(out).toHaveLength(2);
+    expect(out.map((i) => i.note_id)).toEqual(['note-1', 'note-2']);
+  });
+
+  it('returns nothing rather than throwing when there is no member', async () => {
+    mockQueryBuilder.data = null;
+    expect(await getNewHelpful('c1')).toEqual([]);
+  });
+
+  /**
+   * THE CURSOR GOES TO POSTGREST AT FULL PRECISION.
+   *
+   * Postgres keeps timestamptz to the microsecond; JS `Date` only to the millisecond. The
+   * cursor is set to the newest reaction actually shown, so that reaction's `created_at`
+   * equals the cursor exactly — and re-serialising through a Date sends a value 237µs
+   * early, making the row compare strictly greater and return as "new" on every load.
+   *
+   * Not hypothetical: the first version did exactly this and one note sat in the block
+   * through a dismissal, a reload and a fresh session on the preview. Every test here
+   * passed the whole time, because they assert the SHAPE of the result and this bug is in
+   * the argument sent to the filter.
+   */
+  /**
+   * `getNewHelpful` runs two queries off the one shared mock, so the member lookup and the
+   * reactions read are told apart by their select string — the member's is the only one
+   * asking for `reactions_seen_at`. Returns the cursor the filter actually received.
+   */
+  async function cursorSentFor(seenAt: string | null): Promise<string> {
+    const select = mockQueryBuilder.select as ReturnType<typeof vi.fn>;
+    const gt = mockQueryBuilder.gt as ReturnType<typeof vi.fn>;
+    const original = Object.getOwnPropertyDescriptor(mockQueryBuilder, 'data');
+    let lastSelect = '';
+    select.mockImplementation((s: string) => {
+      lastSelect = s ?? '';
+      return mockQueryBuilder;
+    });
+    Object.defineProperty(mockQueryBuilder, 'data', {
+      configurable: true,
+      get: () =>
+        lastSelect.includes('reactions_seen_at') ? { ...member, reactions_seen_at: seenAt } : [],
+    });
+    try {
+      gt.mockClear();
+      await getNewHelpful('c1');
+      return gt.mock.calls[0]![1] as string;
+    } finally {
+      delete (mockQueryBuilder as Record<string, unknown>).data;
+      if (original) Object.defineProperty(mockQueryBuilder, 'data', original);
+      select.mockImplementation(() => mockQueryBuilder);
+    }
+  }
+
+  /**
+   * THE CURSOR GOES TO POSTGREST AT FULL PRECISION.
+   *
+   * Postgres keeps timestamptz to the microsecond; JS `Date` only to the millisecond. The
+   * cursor is set to the newest reaction actually shown, so that reaction's `created_at`
+   * equals the cursor exactly — and re-serialising through a Date sends a value 237µs
+   * early, making the row compare strictly greater and return as "new" on every load.
+   *
+   * Not hypothetical: the first version did exactly this and one note sat in the block
+   * through a dismissal, a reload and a fresh session on the preview. Every other test here
+   * passed the whole time, because they assert the SHAPE of the result while this bug lives
+   * in the argument handed to the filter.
+   */
+  it('sends the seen-cursor to the filter without truncating its microseconds', async () => {
+    const microseconds = '2026-08-03T04:49:36.836237+00:00';
+    expect(await cursorSentFor(microseconds)).toBe(microseconds);
+  });
+
+  /** An expired cursor falls back to the window, which is a Date and so legitimately ISO. */
+  it('falls back to the window when the cursor predates it', async () => {
+    const sent = await cursorSentFor('2020-01-01T00:00:00.000001+00:00');
+    expect(sent).not.toBe('2020-01-01T00:00:00.000001+00:00');
+    const ageDays = (Date.now() - new Date(sent).getTime()) / 86_400_000;
+    expect(ageDays).toBeCloseTo(NEW_HELPFUL_WINDOW_DAYS, 1);
+  });
+
+  /** No cursor at all is the window too, never the epoch — see the migration's comment. */
+  it('uses the window, not the epoch, when nothing has been dismissed yet', async () => {
+    const ageDays = (Date.now() - new Date(await cursorSentFor(null)).getTime()) / 86_400_000;
+    expect(ageDays).toBeCloseTo(NEW_HELPFUL_WINDOW_DAYS, 1);
+  });
+});
+
+/**
+ * "Couldn't check" is never "denied" — CLAUDE.md's rule, asserted at the one lookup that
+ * 29 call sites depend on. `fetchCurrentMember` returns null for BOTH "not a member" and
+ * "the query failed", and every caller reads null as the former; a schema or permission
+ * failure therefore renders as though the person were not on the team.
+ *
+ * Control flow is deliberately unchanged (several callers are bare `.then()` with no
+ * rejection handler), so what is asserted here is that the failure is REPORTED rather
+ * than silent. The trigger that made it urgent: this branch added `reactions_seen_at` to
+ * the select, so running it against a database without the migration returns 42703 and
+ * empties every operator surface at once.
+ */
+describe('getCurrentMember failure reporting', () => {
+  it('reports an indeterminate failure instead of silently answering "not a member"', async () => {
+    const Sentry = await import('@sentry/nextjs');
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = {
+      code: '42703',
+      message: 'column user_company_access.reactions_seen_at does not exist',
+    };
+
+    expect(await getCurrentMember('c1')).toBeNull();
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  /** A genuinely absent row IS a definitive answer, and must stay quiet. */
+  it('stays silent when the row is simply not there', async () => {
+    const Sentry = await import('@sentry/nextjs');
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = { code: 'PGRST116', message: 'no rows returned' };
+
+    expect(await getCurrentMember('c1')).toBeNull();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 });

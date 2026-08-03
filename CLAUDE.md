@@ -159,8 +159,12 @@ Always create migration files with `supabase migration new <slug>` (NOT by writi
 3. **If the migration creates a table in `public`, grant it explicitly** — in the same migration, alongside `ENABLE ROW LEVEL SECURITY` and the policies. See "Data API grants" below. Without a `GRANT` the table is invisible to PostgREST/supabase-js and the FastAPI backend.
 4. **Verify locally:** `supabase db reset` replays the baseline + migrations + `supabase/seed.sql` on a fresh local DB — run it plus the relevant tests. This is the deterministic check; there is **no staging project to push to anymore** (we run on Supabase Branching now).
 5. **Open a PR.** Supabase Branching auto-creates a preview branch, applies the migration to it, and reports the **required migration status check**; the Vercel preview points at that branch's DB. If the check is red, fix the migration — it blocks merge.
-6. **Merge to `main` deploys to production.** The merge *is* the deploy — Supabase auto-applies new migrations to prod. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it. The human still owns clicking merge.
-7. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
+   **A green PR does not mean the migration will apply to production.** A preview branch is built by replaying migrations from the baseline; production never was. An object the baseline creates can exist on every preview and not exist on prod — which is exactly how one `REVOKE` blocked the pipeline for two days (2026-08-03).
+6. **Merge to `main` applies migrations to production.** Supabase runs them and posts its verdict as a check on the **merge commit** — not on the PR, which is closed and frozen green by then. Do NOT run `supabase db push` (or `supabase link`) against prod manually; the branching pipeline owns it.
+7. **The frontend deploys only after that verdict is green.** [`deploy-production.yml`](.github/workflows/deploy-production.yml) waits for Supabase's check on the merge commit and runs `vercel deploy --prod` only on success. Vercel's own git auto-deploy is off for `main` (`git.deploymentEnabled` in [`vercel.json`](vercel.json)) so this is the only path to production.
+   **Why:** these used to run in parallel with no ordering. The migration failed, the frontend shipped anyway, and code went live selecting a column production did not have. The gate fails closed — no verdict means no deploy — because shipping against an unverified schema is the failure it exists to prevent.
+   If it blocks, fix the migration and merge again. The manual escape hatch is `vercel deploy --prod`.
+8. After the merge has deployed, optionally run `python scripts/export_schema.py` to refresh the `supabase/schema.prod.sql` snapshot.
 
 Never use the 8-digit date-only prefix for new files — always let the CLI generate the timestamp.
 

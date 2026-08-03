@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
@@ -31,7 +31,15 @@ vi.mock('@/lib/supabase', () => ({
 vi.mock('@/lib/supabaseErrors', () => ({
   friendlyErrorMessage: (_err: unknown, opts?: { fallback?: string }) =>
     opts?.fallback ?? 'error',
+  toError: (value: unknown, fallback = 'Unknown error') =>
+    value instanceof Error ? value : new Error(String((value as { message?: string })?.message ?? fallback)),
 }));
+
+// The member lookup reports indeterminate failures rather than swallowing them. Several
+// tests drive the shared mock into an error state to exercise a DIFFERENT query, and the
+// member lookup runs off that same mock — so it legitimately reports. Silenced here to
+// keep the run readable; the behaviour itself is asserted in its own describe below.
+vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 import {
   getJobNotes,
@@ -600,9 +608,61 @@ describe('getCurrentMember request sharing', () => {
 });
 
 describe('reactions', () => {
-  // getCurrentMember resolves via a single() on user_company_access.
+  /**
+   * `addReaction` runs TWO queries off the one shared mock — the member lookup, then the
+   * insert — so a test that drives the mock into an error state to exercise the insert
+   * also fails the member lookup. That used to be invisible, because the lookup ignored
+   * `error` entirely; now that it reports indeterminate failures, the two have to be told
+   * apart. The member lookup is the only query asking for `reactions_seen_at`.
+   */
+  let memberRow: Record<string, unknown> | null = null;
+  let queued: { data: unknown; error: unknown } = { data: null, error: null };
+
+  beforeEach(() => {
+    memberRow = null;
+    queued = { data: null, error: null };
+    let lastSelect = '';
+    (mockQueryBuilder.select as ReturnType<typeof vi.fn>).mockImplementation((s: string) => {
+      lastSelect = s ?? '';
+      return mockQueryBuilder;
+    });
+    // A write never calls .select(), so without this the member lookup's select string
+    // would still be the last one seen and the insert's error would be routed to it.
+    for (const verb of ['insert', 'update', 'delete'] as const) {
+      (mockQueryBuilder[verb] as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        lastSelect = '';
+        return mockQueryBuilder;
+      });
+    }
+    const isMemberLookup = () => lastSelect.includes('reactions_seen_at');
+    Object.defineProperty(mockQueryBuilder, 'data', {
+      configurable: true,
+      get: () => (isMemberLookup() ? memberRow : queued.data),
+      set: (v) => {
+        queued.data = v;
+      },
+    });
+    Object.defineProperty(mockQueryBuilder, 'error', {
+      configurable: true,
+      get: () => (isMemberLookup() ? null : queued.error),
+      set: (v) => {
+        queued.error = v;
+      },
+    });
+  });
+
+  afterEach(() => {
+    delete (mockQueryBuilder as Record<string, unknown>).data;
+    delete (mockQueryBuilder as Record<string, unknown>).error;
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = null;
+    for (const verb of ['select', 'insert', 'update', 'delete'] as const) {
+      (mockQueryBuilder[verb] as ReturnType<typeof vi.fn>).mockImplementation(() => mockQueryBuilder);
+    }
+  });
+
   const asMember = (id: string | null) => {
-    mockQueryBuilder.data = id === null ? null : { id, name: 'Diego', user_id: 'auth-user-1' };
+    memberRow = id === null ? null : { id, name: 'Diego', user_id: 'auth-user-1' };
   };
 
   it('writes the reaction as the caller, never as a supplied identity', async () => {
@@ -831,5 +891,45 @@ describe('getNewHelpful', () => {
   it('uses the window, not the epoch, when nothing has been dismissed yet', async () => {
     const ageDays = (Date.now() - new Date(await cursorSentFor(null)).getTime()) / 86_400_000;
     expect(ageDays).toBeCloseTo(NEW_HELPFUL_WINDOW_DAYS, 1);
+  });
+});
+
+/**
+ * "Couldn't check" is never "denied" — CLAUDE.md's rule, asserted at the one lookup that
+ * 29 call sites depend on. `fetchCurrentMember` returns null for BOTH "not a member" and
+ * "the query failed", and every caller reads null as the former; a schema or permission
+ * failure therefore renders as though the person were not on the team.
+ *
+ * Control flow is deliberately unchanged (several callers are bare `.then()` with no
+ * rejection handler), so what is asserted here is that the failure is REPORTED rather
+ * than silent. The trigger that made it urgent: this branch added `reactions_seen_at` to
+ * the select, so running it against a database without the migration returns 42703 and
+ * empties every operator surface at once.
+ */
+describe('getCurrentMember failure reporting', () => {
+  it('reports an indeterminate failure instead of silently answering "not a member"', async () => {
+    const Sentry = await import('@sentry/nextjs');
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = {
+      code: '42703',
+      message: 'column user_company_access.reactions_seen_at does not exist',
+    };
+
+    expect(await getCurrentMember('c1')).toBeNull();
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+  });
+
+  /** A genuinely absent row IS a definitive answer, and must stay quiet. */
+  it('stays silent when the row is simply not there', async () => {
+    const Sentry = await import('@sentry/nextjs');
+    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
+
+    mockQueryBuilder.data = null;
+    mockQueryBuilder.error = { code: 'PGRST116', message: 'no rows returned' };
+
+    expect(await getCurrentMember('c1')).toBeNull();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 });

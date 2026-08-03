@@ -18,8 +18,9 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
+import * as Sentry from '@sentry/nextjs';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
@@ -125,12 +126,40 @@ async function fetchCurrentMember(companyId: string): Promise<CurrentMember | nu
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
 
-  const { data: member } = await supabase
+  const { data: member, error } = await supabase
     .from('user_company_access')
     .select('id, name, user_id, role, reactions_seen_at')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
+
+  // "No row" is a definitive answer: this user is genuinely not a member. ANYTHING ELSE
+  // is "couldn't check", and returning null for it tells 29 call sites the opposite of
+  // what happened — every operator surface renders as though the person were not on the
+  // team. The control flow is unchanged here on purpose (several callers are bare
+  // `.then()` with no rejection handler, so throwing would trade a wrong answer for an
+  // unhandled rejection); what changes is that the failure stops being SILENT.
+  //
+  // The case that made this urgent is a schema mismatch, and it is one this repo's own
+  // workflow produces: worktree migrations are validated on the PR's Supabase preview
+  // branch and deliberately never replayed into the shared local stack, so running this
+  // branch against local yields `42703 column user_company_access.reactions_seen_at does
+  // not exist` — the whole select 400s and every operator page silently empties.
+  if (error && error.code !== 'PGRST116') {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(
+        `getCurrentMember: the member lookup FAILED (${error.code}: ${error.message}). ` +
+          'This is not "not a member" — operator surfaces will render empty. If the code ' +
+          'is 42703, the local database is behind the branch: apply the pending migrations ' +
+          'or point at the PR preview branch.',
+      );
+    }
+    Sentry.captureException(toError(error, 'Could not resolve the current member'), {
+      tags: { area: 'operator_member_lookup' },
+      extra: { companyId },
+    });
+    return null;
+  }
 
   return member;
 }

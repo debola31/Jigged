@@ -1094,6 +1094,48 @@ begin
   end loop;
 end $$;
 
+-- ── Recognition cursor: some of the praise has already been read ─────────────
+-- Without this every member's reactions_seen_at is NULL, which the read path treats as
+-- "never dismissed" and answers with the whole 56-day window. That is a real state — it
+-- is what a brand-new member sees — but it is the ONLY state the seed could otherwise
+-- represent, and it is the least interesting one: everything is new, nothing has been
+-- acknowledged, and the "already seen marks stay on their notes below" half of the
+-- design is invisible.
+--
+-- It also makes the seed single-use. `mark_reactions_seen` is deliberately forward-only
+-- and the read filter is strictly-greater, so the FIRST person to tap "Got it" on a
+-- shared dev or preview database empties the block for that account permanently, with no
+-- in-app way back (no browser role can write this column — only the SECURITY DEFINER RPC,
+-- which never moves the cursor backwards). Restoring it means re-seeding, or another
+-- member marking something helpful. Worth knowing before demoing from one account.
+--
+-- Pin the cursor to the THIRD-newest helpful mark on the member's own notes, so exactly
+-- the two newest stay unseen by construction. A flat `now() - interval '2 days'` would
+-- work today but its "how many are new" is an output of the rn % 6 lottery above, and
+-- that lottery has already misfired once in this file — the top-up block immediately
+-- above exists because it left both durable part notes at zero. Ranking is stable no
+-- matter how the notes get reshuffled later.
+--
+-- Members with fewer than three stay NULL: that is the honest first-run state, and it
+-- keeps both operator accounts (two marks each) as the untouched demo of the surface —
+-- which matters, because this is an OPERATOR feature and the dev login is an admin.
+update public.user_company_access uca
+set reactions_seen_at = (
+  select r.created_at
+  from public.note_reactions r
+  join public.notes n on n.id = r.note_id
+  where n.author_id = uca.id and r.kind = 'helpful'
+  order by r.created_at desc
+  offset 2 limit 1
+)
+where uca.company_id = '22222222-2222-2222-2222-222222222222'
+  and (
+    select count(*)
+    from public.note_reactions r
+    join public.notes n on n.id = r.note_id
+    where n.author_id = uca.id and r.kind = 'helpful'
+  ) >= 3;
+
 -- ── Inventory locations (feature-flagged) ────────────────────────────────────
 -- Turned on for the seeded company so the location-tracked half of inventory is
 -- exercised in dev, preview branches and manual testing — not just the aggregate

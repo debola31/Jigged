@@ -112,8 +112,33 @@ REVOKE EXECUTE ON FUNCTION public.user_company_access_fill_email()
   FROM PUBLIC, anon, authenticated;
 
 -- ── 2b. Event-trigger function ────────────────────────────────────────────────
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()
-  FROM PUBLIC, anon, authenticated;
+-- GUARDED, and the only guarded revoke in this migration. rls_auto_enable is an
+-- EVENT TRIGGER function, and creating an event trigger requires SUPERUSER —
+-- which `postgres` is on a local stack but is NOT on a hosted Supabase project.
+-- So the baseline creates it everywhere the baseline actually RUNS (local, every
+-- preview branch) and production, where the baseline was marked-as-applied
+-- against the pre-existing database rather than executed, has never had it.
+--
+-- That asymmetry is invisible to CI by construction: every check we run — local
+-- db reset, the preview-branch migration check — runs somewhere the function
+-- exists. Only production raises 42883, and because migrations are atomic and
+-- ordered, this single statement aborted the whole file and blocked the twelve
+-- migrations behind it for two days while the frontend that depended on them
+-- shipped anyway (customer_contacts.is_billing_default → 400 on jobs, quotes
+-- and customers).
+--
+-- Tolerating absence is the correct resolution rather than creating the missing
+-- function: we cannot create an event trigger on hosted Supabase without
+-- superuser, and the revoke is meaningless where the function does not exist.
+-- Everything else in this migration stays unguarded on purpose — a function
+-- missing anywhere else is a real drift signal and should still be loud.
+DO $$
+BEGIN
+  IF to_regprocedure('public.rls_auto_enable()') IS NOT NULL THEN
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable()'
+         || ' FROM PUBLIC, anon, authenticated';
+  END IF;
+END $$;
 
 -- ── 2c. Internal helpers, reachable only through SECURITY DEFINER parents ─────
 -- inv_* are called by add/adjust/deplete/transfer_stock and enable_location_tracking;

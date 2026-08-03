@@ -75,6 +75,20 @@ export async function getCompanyMembers(companyId: string): Promise<CompanyMembe
 }
 
 /**
+ * Where a member's home is, given their role in that company.
+ *
+ * Operators live on the shop floor and are bounced out of `/dashboard/*` by
+ * `AuthGuard`; everyone else lands in the office. Exported so the four places
+ * that send someone "home" — post-login, `/launch`, the company selector and
+ * invite acceptance — cannot drift apart. Three of them used to hardcode
+ * `/dashboard` and lean on the AuthGuard bounce to correct it, which worked but
+ * cost an extra round trip and a visible flash on a new user's first screen.
+ */
+export function homePathForRole(role: string | null | undefined, companyId: string): string {
+  return role === 'operator' ? `/operator/${companyId}` : `/dashboard/${companyId}`;
+}
+
+/**
  * Get all companies the user has access to
  */
 export async function getUserCompanies(userId: string): Promise<UserCompanyAccess[]> {
@@ -180,8 +194,7 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
     if (companies.length === 1) {
       const companyId = companies[0].company_id;
       await setLastCompany(userId, companyId);
-      const prefix = companies[0].role === 'operator' ? 'operator' : 'dashboard';
-      return `/${prefix}/${companyId}`;
+      return homePathForRole(companies[0].role, companyId);
     }
 
     // Multiple companies - check for last accessed
@@ -191,8 +204,7 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
       // Verify they still have access to last company
       const match = companies.find((c) => c.company_id === lastCompanyId);
       if (match) {
-        const prefix = match.role === 'operator' ? 'operator' : 'dashboard';
-        return `/${prefix}/${lastCompanyId}`;
+        return homePathForRole(match.role, lastCompanyId);
       }
     }
 

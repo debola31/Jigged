@@ -92,8 +92,12 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 ## Authentication
 
 - **Email/password via Supabase Auth**, the same as office staff; role = `operator` in
-  `user_company_access`. `getPostLoginRoute()` sends `operator` to `/operator/{companyId}` and
-  everyone else to `/dashboard/{companyId}`.
+  `user_company_access`. `homePathForRole()` (`utils/companyAccess.ts`) is the single rule —
+  `operator` → `/operator/{companyId}`, everyone else → `/dashboard/{companyId}` — shared by all
+  four places that send someone home (post-login, `/launch`, the company selector, invite
+  acceptance) so they cannot drift apart. Three of them used to hardcode `/dashboard` and lean on
+  the `AuthGuard` bounce to correct it, which worked but cost a round trip and a visible flash on
+  a new user's first screen.
 - Operators use **their own phones**, so the Supabase session persists and sign-in is effectively
   one-time per device. Per-person login also gives clean `completed_by` attribution.
 - **PIN-pad / badge-tap is deliberately deferred, not missing.** It only pays off when one device
@@ -742,7 +746,7 @@ was confirmed to exist on 2026-08-02.
 
 - [ ] **Given** a signed-in operator with no station, **when** they tap one in the picker, **then** it is written to `localStorage` (`jigged_operator_station`), they land on that station's job list, it survives a browser restart, and logout clears it — *verified by `__tests__/components/operator/OperatorStationContext.test.tsx` > `OperatorStationProvider` (5 `it`s)*.
 - [ ] **Given** the station picker, **when** it lists stations, **then** only **internal**, **non-archived** work centres appear — *verified by `__tests__/utils/workCentersAccess.test.ts` > `getWorkCentersByKind`; the operator picker's filters are `getStationOperationTypes`*.
-- [ ] **Given** a signed-in user with `role='operator'`, **when** `getPostLoginRoute` runs, **then** they go to `/operator/{companyId}` and office roles to `/dashboard/{companyId}` — *automation-pending (`getPostLoginRoute` in `utils/companyAccess.ts`)*.
+- [ ] **Given** a signed-in user with `role='operator'`, **when** any of the four "send them home" entry points runs, **then** they go to `/operator/{companyId}` and office roles to `/dashboard/{companyId}` — and an **unknown or absent** role resolves to the office, never the shop floor — *verified by `__tests__/utils/homePathForRole.test.ts` > `homePathForRole` (3 `it`s); the `getPostLoginRoute` wrapper that calls it is automation-pending (#367)*.
 
 **Dispatch list**
 

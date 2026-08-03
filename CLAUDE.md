@@ -781,11 +781,8 @@ RSC payload. `agent-browser console` / `errors` are the fastest triage. Docs:
 
 ### Where the detailed docs live
 
-- [docs/testing/](docs/testing/) — strategy + guides per layer
-  ([README](docs/testing/README.md), [e2e.md](docs/testing/e2e.md),
-  [frontend-setup.md](docs/testing/frontend-setup.md),
-  [backend-setup.md](docs/testing/backend-setup.md),
-  [cicd.md](docs/testing/cicd.md))
+- [docs/testing/README.md](docs/testing/README.md) — where each layer lives, the invariant
+  guards, the local-Supabase JWT fixtures, conventions and known holes
 - [e2e/README.md](e2e/README.md) — env contract + what the seed creates
 
 ---

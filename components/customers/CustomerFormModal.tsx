@@ -72,7 +72,6 @@ export default function CustomerFormModal({
       <DialogContent sx={{ pt: 2 }}>
         <CustomerForm
           key={formKey}
-          mode="create"
           initialData={EMPTY_CUSTOMER_FORM}
           companyId={companyId}
           onSuccess={handleSuccess}

@@ -71,7 +71,13 @@ export default function QuotesPage() {
   const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>(() =>
     parseQuoteStatusParam(searchParams.get('status'))
   );
-  const [customerFilter, setCustomerFilter] = useState<string>('');
+  // Seeded from ?customer=<uuid> so the Related-card count on a customer page
+  // lands here already filtered — and lands it in the VISIBLE dropdown, which
+  // names the customer and clears to "All Customers". An arriving filter the
+  // user cannot see or undo is worse than no deep link at all.
+  const [customerFilter, setCustomerFilter] = useState<string>(
+    () => searchParams.get('customer') ?? '',
+  );
   const [createdByFilter, setCreatedByFilter] = useState<string>('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',

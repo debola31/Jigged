@@ -47,7 +47,6 @@ function getPageTitle(pathname: string): string {
   // Check for customers routes
   if (segments.includes('customers')) {
     if (segments.includes('new')) return 'New Customer';
-    if (segments.includes('edit')) return 'Edit Customer';
     if (segments.includes('import')) return 'Import Customers';
     // Check if there's a customerId (detail page)
     const customersIndex = segments.indexOf('customers');

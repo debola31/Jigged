@@ -185,15 +185,25 @@ export async function getCustomerWithRelations(
 
   // The two counts are independent of each other (and of the customer fetch),
   // so run them in parallel — was two sequential round-trips after the fetch.
+  // Both counts filter deleted_at IS NULL, matching what the Quotes and Jobs
+  // lists actually show. They did not, so an archived quote inflated the number
+  // and then wasn't there when you looked — which mattered twice over once the
+  // counts became links, and was a soft-delete-standard violation anyway.
+  //
+  // No company_id filter: customer_id is already unique per company and RLS
+  // scopes both tables, so adding it would buy nothing and cost a signature
+  // change on every caller.
   const [quotesRes, jobsRes] = await Promise.all([
     supabase
       .from('quotes')
       .select('*', { count: 'exact', head: true })
-      .eq('customer_id', customerId),
+      .eq('customer_id', customerId)
+      .is('deleted_at', null),
     supabase
       .from('jobs')
       .select('*', { count: 'exact', head: true })
-      .eq('customer_id', customerId),
+      .eq('customer_id', customerId)
+      .is('deleted_at', null),
   ]);
 
   // A failed count THROWS. It used to be logged and reported as 0, which turned

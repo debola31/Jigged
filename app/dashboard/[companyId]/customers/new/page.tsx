@@ -7,7 +7,7 @@ import { EMPTY_CUSTOMER_FORM } from '@/types/customer';
 export default function NewCustomerPage() {
   return (
     <Box>
-      <CustomerForm mode="create" initialData={EMPTY_CUSTOMER_FORM} />
+      <CustomerForm initialData={EMPTY_CUSTOMER_FORM} />
     </Box>
   );
 }

@@ -1,8 +1,74 @@
+/**
+ * Manual credit standing. Two states on purpose — E2 carried three and the
+ * pilot shop's quoter could not explain the third, and a state nobody can
+ * define is a state nobody sets correctly.
+ */
+export type CustomerCreditStatus = 'open' | 'hold';
+
+/**
+ * Narrow the DB's `credit_status` to the union above.
+ *
+ * The column is enum-via-CHECK rather than a Postgres enum type, so the
+ * generated `types/database.ts` types it as plain `string` and the typed client
+ * hands us a widened value. This is the boundary where it becomes the union
+ * again — done explicitly rather than with `as`, because a cast would compile
+ * just as happily on a column that had genuinely drifted.
+ *
+ * `customers_credit_status_check` makes any other value unreachable, so the
+ * fallback branch exists only to be honest about the type. It resolves to
+ * 'open' deliberately: if the impossible ever happened, inventing a credit hold
+ * that nobody set is worse than showing none.
+ */
+export function toCreditStatus(value: string | null | undefined): CustomerCreditStatus {
+  return value === 'hold' ? 'hold' : 'open';
+}
+
 export interface Customer {
   id: string;
   company_id: string;
   name: string;
   website: string | null;
+  /**
+   * Standing terms — the customer's commercial defaults, copied onto a NEW
+   * quote at create time and editable there. They are never read by an
+   * existing quote at render time: a quote owns its own payment_terms /
+   * lead_time_text / fob_point from the moment it is created, so editing a
+   * customer here can't rewrite a document already sent. Drift between the
+   * two is surfaced as a chip, never applied (mirrors PricingBasisSnapshot).
+   *
+   * null means "no standing agreement recorded" — the quote field is left
+   * empty rather than guessed.
+   */
+  default_payment_terms: string | null;
+  default_lead_time_text: string | null;
+  /**
+   * Where title and risk transfer, as free text naming a place ("FOB
+   * Cleveland, OH"). Deliberately NOT an origin/destination enum, and
+   * deliberately separate from who *pays* the freight — that axis lives on
+   * jobs/shipments as freight_terms. Keep them apart in the UI too.
+   */
+  default_fob_point: string | null;
+  /**
+   * Manual credit standing, set by the office when a customer is past due.
+   * Never computed, never synced from QuickBooks, never derived from a balance.
+   *
+   * WARN-ONLY. No code path may block on this: a held customer's quote, job and
+   * shipment all proceed, showing a banner. Distinct from the deliberately-
+   * refused numeric credit limit — if this ever grows a threshold, it has
+   * become that feature.
+   */
+  credit_status: CustomerCreditStatus;
+  /** Why they're on hold. Kept after a hold is lifted, as history for next time. */
+  credit_hold_note: string | null;
+  /**
+   * Archive marker. Set by "Delete"; the row survives so every quote, job and
+   * shipment that references it keeps resolving.
+   *
+   * Carried on the type because a BY-ID read deliberately does not filter it —
+   * a quote or job links straight to the customer page, so that page can be
+   * showing an archived customer and needs to say so.
+   */
+  deleted_at: string | null;
   // created_at / updated_at have DEFAULT now() but no NOT NULL constraint —
   // mirror the DB shape. Consumers (e.g. the customer detail page) already
   // handle null via formatDate(string | null).
@@ -67,6 +133,17 @@ export interface CustomerAddressFormData {
 export interface CustomerFormData {
   name: string;
   website: string;
+  /**
+   * Standing terms. Empty string means "not set" at the form layer and is
+   * normalised to NULL on write, so a cleared field genuinely clears the
+   * default rather than storing '' and prefilling blanks onto every quote.
+   */
+  default_payment_terms: string;
+  default_lead_time_text: string;
+  default_fob_point: string;
+  credit_status: CustomerCreditStatus;
+  /** Empty string means "no reason given"; normalised to NULL on write. */
+  credit_hold_note: string;
 }
 
 export type CustomerFilter = 'all' | 'active' | 'inactive';
@@ -84,6 +161,13 @@ export interface CustomerListContact {
   email: string | null;
   phone: string | null;
   is_primary: boolean;
+  is_billing_default: boolean;
+  /**
+   * Carried so a picker can drop archived people while keeping the one a
+   * document already names — blanking a job's contact because that person left
+   * would lose who the work was actually agreed with.
+   */
+  deleted_at: string | null;
 }
 
 export interface CustomerWithRelations extends Customer {
@@ -130,11 +214,21 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
   name: '',
   website: '',
+  default_payment_terms: '',
+  default_lead_time_text: '',
+  default_fob_point: '',
+  credit_status: 'open',
+  credit_hold_note: '',
 };
 
 export function customerToFormData(customer: Customer): CustomerFormData {
   return {
     name: customer.name,
     website: customer.website || '',
+    default_payment_terms: customer.default_payment_terms || '',
+    default_lead_time_text: customer.default_lead_time_text || '',
+    default_fob_point: customer.default_fob_point || '',
+    credit_status: customer.credit_status,
+    credit_hold_note: customer.credit_hold_note || '',
   };
 }

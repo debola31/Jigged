@@ -25,8 +25,11 @@ import { useLoad } from '@/hooks/useLoad';
  * setState in the effect body) so it doesn't trip set-state-in-effect.
  *
  * `companyName` rides along because `getCompany` already returns it. A separate
- * `useCompany()` would have re-fetched the identical row for pages that need both
- * the flag and the name (the locations page prints it on the QR label sheet).
+ * `useCompany()` would re-fetch the identical row for anything that needs both —
+ * which is exactly what the operator "Me" tab was doing, requesting one companies
+ * row twice per mount on the page whose problem was concurrent request volume.
+ * Storage needs both too: the flag gates the page and the name heads its QR label
+ * sheet.
  */
 export function useCompanyFeatures() {
   const params = useParams();

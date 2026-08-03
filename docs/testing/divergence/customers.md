@@ -1,5 +1,15 @@
 # Divergence report — Customers (#333)
 
+> **SUPERSEDED (2026-08-02).** This audited a version of `docs/modules/customers.md`
+> that no longer exists — that doc was rewritten from scratch after the customer-CRM
+> increment (PR #651) added standing terms, a shop-wide default, credit hold and
+> carrier accounts. Findings below are kept as a record of what #333 fixed; several
+> are now stale on their face (notably "`customers` holds only `name` + `website`",
+> the `CustomerStatusChip` removal — since done — and the import field list, which
+> now also carries the three standing-terms columns). For current behaviour and a
+> current list of known defects and coverage gaps, read
+> [`docs/modules/customers.md`](../../modules/customers.md).
+
 Method: compared `docs/modules/customers.md` against the real UI (`app/dashboard/[companyId]/customers/**`, `components/customers/**`), the access layer (`utils/customerAccess.ts`, `utils/customerContactsAccess.ts`, `utils/customerAddressesAccess.ts`), the CSV-import backend (`api/routes/import_routes.py`), the schema (`supabase/schema.prod.sql`), and the tests under `__tests__/utils/`, `__tests__/components/customers/`, and `__tests__/components/import/`.
 
 ## Fixed in this PR

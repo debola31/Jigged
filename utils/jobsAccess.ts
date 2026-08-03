@@ -28,6 +28,7 @@ import type {
 } from '@/types/job';
 import { isJobClosed } from '@/types/job';
 import type { PricingBasisSnapshot } from '@/types/quote';
+import type { FreightTerms } from '@/types/shipment';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 import { orIlikeValue } from '@/utils/searchFilter';
@@ -248,11 +249,15 @@ export async function getJobWithRelations(
       *,
       customers!left(
         id, name,
-        customer_contacts(id, name, role, email, phone, is_primary),
+        customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at),
         addresses:customer_addresses(
           id,
           address_line1, address_line2, city, state, postal_code, country,
           default_billing, default_shipping, attention_to
+        ),
+        carrier_accounts:customer_carrier_accounts(
+          id, carrier, bill_to_party, account_number, account_postal_code,
+          account_country_code, notes, deleted_at
         )
       ),
       quotes!jobs_quote_id_fkey(id, quote_number),
@@ -328,6 +333,14 @@ export async function updateJobAddressContact(
     billing_address_id?: string | null;
     shipping_address_id?: string | null;
     contact_id?: string | null;
+    // Freight rides along with the address/contact save because it is the same
+    // card and the same customer-match trigger guards it: the trigger now also
+    // rejects a carrier account belonging to a different customer, which is what
+    // stops us billing freight to the wrong company.
+    freight_terms?: FreightTerms | null;
+    customer_carrier_account_id?: string | null;
+    ship_via?: string | null;
+    shipping_instructions?: string | null;
   },
 ): Promise<Job> {
   const supabase = getSupabase();
@@ -339,6 +352,10 @@ export async function updateJobAddressContact(
     billing_address_id: toNull(fields.billing_address_id),
     shipping_address_id: toNull(fields.shipping_address_id),
     contact_id: toNull(fields.contact_id),
+    freight_terms: fields.freight_terms === undefined ? undefined : fields.freight_terms,
+    customer_carrier_account_id: toNull(fields.customer_carrier_account_id),
+    ship_via: toNull(fields.ship_via),
+    shipping_instructions: toNull(fields.shipping_instructions),
     updated_at: new Date().toISOString(),
   };
 

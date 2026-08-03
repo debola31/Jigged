@@ -217,6 +217,117 @@ async def status(company_id: str, request: Request):
     )
 
 
+class TermsResponse(BaseModel):
+    """The connected company's QuickBooks payment terms, for the quote picker."""
+
+    connected: bool
+    terms: list[dict] = []
+
+
+@router.get("/{company_id}/terms", response_model=TermsResponse)
+async def terms(company_id: str, request: Request):
+    """List the Terms this company already has in QuickBooks.
+
+    Read-only, and deliberately NOT cached in our own table. A cached copy would
+    be a second list of terms that drifts from QuickBooks' — the exact problem
+    this endpoint exists to remove. The query is four rows and this is not an
+    AI call, so live is affordable.
+
+    Never raises for the ordinary "no QuickBooks" cases. A shop that hasn't
+    connected, or an Intuit outage, must not stop anyone from writing a quote:
+    the caller falls back to Jigged's own presets, and `resolve_term_id` still
+    creates whatever term is chosen at push time. Missing options degrade the
+    picker; they never block the quote.
+    """
+    await _verify_company_access(request, company_id)
+    db = _service_client()
+    conn = qb.get_connection(db, company_id)
+    if not _is_connected(conn) or conn.get("reconnect_required"):
+        return TermsResponse(connected=False)
+    try:
+        return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
+        return TermsResponse(connected=False)
+
+
+class PoFieldResponse(BaseModel):
+    """State of this company's PO custom field in QuickBooks.
+
+    `configured` false is the normal starting state, not an error — the shop has
+    to create the field themselves in the QuickBooks UI, and Jigged genuinely
+    cannot do it for them (see the endpoint docstring).
+    """
+
+    configured: bool
+    field_id: str | None = None
+    field_name: str | None = None
+    # Every enabled sales custom field, so the settings card can show the shop
+    # which of their three slots are taken and by what.
+    candidates: list[dict] = []
+    slots_used: int = 0
+
+
+@router.post("/{company_id}/po-field/refresh", response_model=PoFieldResponse)
+async def refresh_po_field(company_id: str, request: Request):
+    """Re-read QuickBooks Preferences and remember which custom field holds the PO.
+
+    EXPLICITLY USER-TRIGGERED. This is the "I've set it up, check again" button
+    on the settings card — never called on mount or on a push, because it is a
+    round trip to Intuit for a value that changes only when a human edits their
+    QuickBooks settings.
+
+    Jigged CANNOT create the field. Both paths were tested against a live
+    sandbox rather than assumed:
+      * the legacy REST Preferences write returns HTTP 200 and silently changes
+        nothing — three body shapes tried, all no-ops, confirmed by re-read;
+      * the GraphQL Custom Fields API answers 403 without a paid Silver partner
+        tier, whose sandbox host does not resolve at all.
+    Intuit's own capability matrix agrees: "Create custom field names | UI: Yes |
+    API: No". So the shop creates it, and this endpoint finds it.
+    """
+    await _verify_company_access(request, company_id, require_admin=True)
+    db = _service_client()
+    conn = qb.get_connection(db, company_id)
+    if not _is_connected(conn):
+        raise HTTPException(status_code=400, detail="QuickBooks is not connected.")
+    if conn.get("reconnect_required"):
+        raise HTTPException(
+            status_code=400,
+            detail="Reconnect QuickBooks first — we can't read your settings until then.",
+        )
+
+    # A failed read must NOT be written down. Persisting it would turn "we
+    # couldn't ask" into "you have no PO field", wiping an id that was correct
+    # a minute ago and silently dropping the PO from every later invoice. So the
+    # write happens only on a definitive answer, and a failure surfaces as a
+    # retryable error with the stored value untouched.
+    try:
+        found = qb.discover_po_custom_field(db, company_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read QuickBooks settings for %s", company_id, exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Couldn't reach QuickBooks to check your settings. Try again in a moment.",
+        ) from exc
+
+    db.table("quickbooks_connections").update(
+        {
+            "po_custom_field_id": found["id"],
+            "po_custom_field_name": found["name"],
+            "qb_settings_checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("company_id", company_id).execute()
+
+    return PoFieldResponse(
+        configured=found["id"] is not None,
+        field_id=found["id"],
+        field_name=found["name"],
+        candidates=found["candidates"],
+        slots_used=len(found["candidates"]),
+    )
+
+
 @router.post("/{company_id}/disconnect")
 async def disconnect(company_id: str, request: Request):
     await _verify_company_access(request, company_id, require_admin=True)
@@ -238,7 +349,7 @@ async def _load_gated_job(db: Client, company_id: str, job_id: str) -> dict:
         db.table("jobs")
         .select(
             "id, company_id, customer_id, job_number, customer_po_number, "
-            "quote_id, billing_address_id"
+            "quote_id, billing_address_id, payment_terms"
         )
         .eq("id", job_id)
         .eq("company_id", company_id)
@@ -458,6 +569,18 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             )
 
         item_ref = qb.resolve_default_item(db, company_id, conn)
+
+        # Terms the job was sold on -> a QBO Term Id. Best-effort by design: a
+        # term that cannot be resolved or created returns None and the invoice
+        # goes out exactly as it did before this existed, rather than failing.
+        sales_term_id = (
+            qb.resolve_term_id(db, company_id, job["payment_terms"])
+            if job.get("payment_terms")
+            else None
+        )
+
+        # The shop's PO custom field, if they have made one. Read from the cached
+        # discovery on the connection — Preferences is not re-read per push.
         payload = qb.quote_to_invoice_payload(
             customer_ref=customer_ref,
             item_ref=item_ref,
@@ -465,9 +588,14 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             customer_po_number=job.get("customer_po_number"),
             bill_addr=bill_addr,
             lines=lines,
+            sales_term_id=sales_term_id,
+            po_custom_field_id=conn.get("po_custom_field_id"),
+            po_custom_field_name=conn.get("po_custom_field_name"),
         )
         result = qb.create_invoice(db, company_id, payload, request_id)
-        invoice_url = qb.invoice_deep_link(conn.get("environment", ""), result["id"])
+        invoice_url = qb.invoice_deep_link(
+            conn.get("environment", ""), result["id"], conn.get("realm_id")
+        )
     except HTTPException:
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
         raise

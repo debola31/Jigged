@@ -9,6 +9,7 @@ import ListItemText from '@mui/material/ListItemText';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import LaunchIcon from '@mui/icons-material/Launch';
 
 /**
  * Edit / Delete for one note on the OPERATOR surfaces — the job feed, the Playbook
@@ -39,16 +40,29 @@ export default function NoteActionsMenu({
   onDelete,
   /** Distinguishes "note" from "comment" in the labels and aria text. */
   noun = 'note',
+  onOpen,
+  openLabel,
 }: {
   canEdit: boolean;
   canDelete: boolean;
   onEdit: () => void;
   onDelete: () => void;
   noun?: string;
+  /**
+   * Optional navigation away from the note — "Open J-0042" on the operator's own
+   * work list, where the note is the only route back to the job it was written on.
+   * Omitted everywhere else, because the other surfaces ARE the job.
+   *
+   * Listed FIRST, with delete last: docs/interaction-standards.md requires the
+   * destructive option to sit at the end, away from the benign ones, so it is
+   * predictably located rather than crowded next to something routine.
+   */
+  onOpen?: () => void;
+  openLabel?: string;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
 
-  if (!canEdit && !canDelete) return null;
+  if (!canEdit && !canDelete && !onOpen) return null;
 
   const close = () => setAnchorEl(null);
 
@@ -70,6 +84,20 @@ export default function NoteActionsMenu({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
+        {onOpen && (
+          <MenuItem
+            onClick={() => {
+              close();
+              onOpen();
+            }}
+            sx={{ minHeight: 48 }}
+          >
+            <ListItemIcon>
+              <LaunchIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>{openLabel ?? 'Open job'}</ListItemText>
+          </MenuItem>
+        )}
         {canEdit && (
           <MenuItem
             onClick={() => {

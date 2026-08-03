@@ -467,6 +467,47 @@ class TestExecuteEndpoint:
         assert data["skipped_count"] == 0
 
     @pytest.mark.unit
+    async def test_execute_matches_an_existing_customer_regardless_of_case(self, test_client):
+        """A CSV row spelled differently is the SAME customer, not a second one.
+
+        Issue #653 P1. is_new was decided on a lowercased name while the upsert
+        ran on the case-sensitive (company_id, name) constraint — so "acme corp"
+        against a stored "Acme Corp" was counted as an update, denied its
+        contact and address, and still INSERTED a second customer row. The fix
+        rewrites the payload to the stored spelling so the upsert lands on the
+        row it was always meant to update.
+        """
+        existing_customers = [
+            {"id": "existing-1", "name": "Acme Corp"},
+        ]
+
+        request_data = {
+            "company_id": "test-company-id",
+            "mappings": {"Name": "name"},
+            "rows": [
+                {"Name": "  acme corp  "},  # same company: different case AND padding
+            ],
+            "skip_conflicts": True,
+        }
+
+        app.dependency_overrides[get_supabase] = create_mock_supabase_override(existing_customers)
+
+        response = await test_client.post(
+            "/api/customers/import/execute",
+            json=request_data,
+        )
+
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        # The row IS the existing customer. Nothing is created.
+        assert data["imported_count"] == 0
+        assert data["updated_count"] == 1
+        assert data["skipped_count"] == 0
+
+    @pytest.mark.unit
     async def test_execute_returns_correct_counts(self, test_client):
         """Returns correct imported_count and skipped_count."""
         existing_customers = [

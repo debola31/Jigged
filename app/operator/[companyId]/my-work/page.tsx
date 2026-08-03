@@ -1,35 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
+import ButtonBase from '@mui/material/ButtonBase';
+import Tooltip from '@mui/material/Tooltip';
 import CardContent from '@mui/material/CardContent';
-import CardActionArea from '@mui/material/CardActionArea';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import Chip from '@mui/material/Chip';
-import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
-import LaunchIcon from '@mui/icons-material/Launch';
-import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import { getMyContribution, getNoteViewers, updateNoteBody } from '@/utils/operatorAccess';
+import {
+  getMyContributionTotals,
+  getMyNotesPage,
+  getNoteViewers,
+  updateNoteBody,
+} from '@/utils/operatorAccess';
 import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
 import NoteEditDialog from '@/components/notes/NoteEditDialog';
 import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
-import {
-  OperatorIdentityRow,
-  OperatorAccountActions,
-} from '@/components/operator/OperatorAccountBlock';
+import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
 
@@ -59,15 +56,111 @@ function formatDate(value: string): string {
  * quality signal the Playbook ranks by; it is just not the operator's business
  * on this screen.
  */
-function ReachRow({ note }: { note: MyNote }) {
+function ReachRow({
+  note,
+  expanded,
+  onToggle,
+}: {
+  note: MyNote;
+  expanded: boolean;
+  /** Omitted when nobody has read it — there are no names to ask for. */
+  onToggle?: () => void;
+}) {
   const read = note.viewer_count > 0;
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-      <VisibilityOutlinedIcon
-        sx={{ fontSize: 16, color: read ? 'success.light' : 'text.secondary' }}
-      />
-      <Typography variant="caption" sx={{ color: read ? 'success.light' : 'text.secondary' }}>
+  const color = read ? 'success.light' : 'text.secondary';
+
+  const face = (
+    <>
+      <VisibilityOutlinedIcon sx={{ fontSize: 18, color }} />
+      <Typography variant="caption" sx={{ color, fontWeight: 600 }}>
         {note.viewer_count}
+      </Typography>
+    </>
+  );
+
+  // Nobody has read it yet: a number, not a control. This is also what keeps an
+  // unread row down to ONE tap target instead of two.
+  if (!onToggle) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minHeight: 40, pr: 0.5, flexShrink: 0 }}>
+        {face}
+      </Box>
+    );
+  }
+
+  /* THE DISCLOSURE FOR "WHO READ THIS", and deliberately not the whole row.
+     NN/g measured (136 participants, 11 mobile prototypes) that when a row body
+     and a trailing control do different things, people tap them about equally —
+     a coin flip. So the note text stays inert; this opens the readers and the
+     overflow opens the actions, and the two sit DIAGONALLY opposite — this at the
+     bottom-left of the row, the menu at the top-right — so neither is a plausible
+     mis-tap for the other. The count is the label, which is what keeps a bare icon
+     honest.
+
+     Sized to the metadata line rather than to a 48px gutter. The gutter was what
+     stranded it level with the reference instead of the sentence it belongs to, and
+     it cost the note 48px of width on a 375px screen for no reason. 40px tall plus
+     the icon-and-count width clears WCAG 2.5.8's 24px floor with room to spare. */
+  return (
+    <Tooltip title={expanded ? 'Hide readers' : 'Who read this'}>
+      <ButtonBase
+        onClick={onToggle}
+        aria-label={`Who read this note — ${note.viewer_count} so far`}
+        aria-expanded={expanded}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5,
+          minHeight: 40,
+          px: 0.75,
+          ml: -0.75, // absorb the padding so the glyph keeps the note's left edge
+          flexShrink: 0,
+          borderRadius: 1,
+          '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+        }}
+      >
+        {face}
+      </ButtonBase>
+    </Tooltip>
+  );
+}
+
+/**
+ * One figure in the summary: the number, and what it counts.
+ *
+ * A `dt`/`dd` pair, which is the documented semantic for a big-number-plus-caption tile —
+ * it is what programmatically ties "9" to "Times viewed". These were previously
+ * `variant="h4"`, which renders a literal `<h4>`, so a screen reader's heading rotor listed
+ * "17", "0" and "9" as three headings with no antecedent and no link to their captions.
+ *
+ * `column-reverse` puts the number on top while leaving `dt` before `dd` in the DOM, which
+ * HTML requires. Reading "Notes, 17" rather than "17, Notes" is also the better of the two
+ * announcements — the caption frames the number instead of the listener holding a bare
+ * figure in memory until the label arrives.
+ *
+ * Deliberately NOT `tabular-nums`: equal-width digits make a large standalone value look
+ * loose. Column positions are already fixed by the grid, so the row cannot shift as a count
+ * rolls over.
+ */
+function Stat({
+  value,
+  label,
+  align,
+}: {
+  value: number;
+  label: string;
+  align: 'left' | 'center' | 'right';
+}) {
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column-reverse', textAlign: align }}>
+      <Typography component="dt" sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
+        {label}
+      </Typography>
+      <Typography
+        component="dd"
+        sx={{ m: 0, fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}
+      >
+        {value}
       </Typography>
     </Box>
   );
@@ -108,44 +201,32 @@ function NoteRow({
   };
 
   return (
-    <Card component="li" elevation={2} sx={{ ...cardSx, mb: 1.5 }}>
-      {/* The whole row expands. Navigation lives inside the expanded state
-          instead of on the card, so the list stays compact and there is only one
-          tap target per row — a chip up here both bloated the card and stole the
-          row's tap, because a button cannot nest inside a button. */}
-      <CardActionArea onClick={toggle} sx={{ p: 0 }}>
-        <CardContent sx={{ py: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-            {/* Leads the row so every card has a number in the same place — a
-                stable column to scan down, present whether or not the note
-                carries a part. */}
-            <ReachRow note={note} />
-            {note.part_name && (
-              <Typography variant="subtitle2" fontWeight={700} noWrap>
-                {note.part_name}
-              </Typography>
-            )}
-            {note.operation_label && (
-              <Chip size="small" label={note.operation_label} variant="outlined" />
-            )}
-            {note.photo_count > 0 && (
-              <Chip
-                size="small"
-                variant="outlined"
-                icon={<PhotoCameraIcon />}
-                label={note.photo_count}
-              />
-            )}
-            <Box sx={{ flex: 1 }} />
-            {/* Where it came from, sat quietly beside the date — an indication,
-                not an action. The action is one tap away, inside the card. */}
-            <Typography variant="caption" color="text.secondary">
-              {note.job_number ? `${note.job_number} · ` : ''}
-              {formatDate(note.created_at)}
-              <NoteEditedMark editedAt={note.edited_at} />
-            </Typography>
-          </Box>
-
+    /*
+     * A FLAT ROW WITH TWO CONTROLS AT OPPOSITE ENDS, and an inert body between them.
+     *
+     * This used to be a card that was one big CardActionArea: tap anywhere to expand,
+     * with Edit / Delete / Open-job as full-width buttons inside. Two things were wrong
+     * with that. The card chrome cost three notes per phone screen for no information —
+     * NN/g puts ~74% of viewing time in the first two screenfuls, and this screen's job
+     * is reading. And the per-card `backdrop-filter` was one blurred compositing layer
+     * per row, on the one screen that renders an unbounded list of them.
+     *
+     * The controls are split left and right ON PURPOSE. NN/g measured (136 participants,
+     * 11 mobile prototypes) that when a row body and a trailing control do different
+     * things, people tap them roughly equally — a coin flip. So the body does nothing at
+     * all: readers open from the eye on the left, actions from the overflow on the right,
+     * as far apart as the row allows. That also brings this surface into line with the
+     * job feed, the Playbook sheet and the machine logbook, which all use the same
+     * `NoteActionsMenu` — this screen was the only operator note surface rolling its own.
+     */
+    <Box component="li" sx={{ borderBottom: '1px solid', borderColor: 'divider', py: 0.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+        <Box sx={{ flex: 1, minWidth: 0, pt: 1, pb: 0.25, pl: 0.5 }}>
+          {/* THE NOTE ITSELF, first and full width. It used to sit on the second line,
+              under a meta row that held the reference — which left the sentence
+              starting below and to the right of the eye that belonged to it, and gave
+              the row three different left edges. Everything in this column now shares
+              one. */}
           {note.body && (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
               {note.body}
@@ -154,7 +235,13 @@ function NoteRow({
 
           {/* Read-only by necessity, not omission: RLS forbids reacting to your
               own note, so here endorsements are RECEPTION — the same category as
-              the view count above, and the other half of what came back. */}
+              the view count above, and the other half of what came back.
+
+              STAYS INLINE, and is not folded in behind the eye with the readers.
+              A view is involuntary and private, which is why the names sit behind a
+              deliberate tap; a reaction is a voluntary public claim and attribution
+              is the whole point of it. The list already caps at three names then
+              "+N", so it holds at shop scale. */}
           <NoteReactions
             companyId={companyId}
             noteId={note.id}
@@ -163,19 +250,75 @@ function NoteRow({
             memberId={null}
             readOnly
           />
-        </CardContent>
-      </CardActionArea>
 
+          {/* ONE METADATA LINE, under the note it describes.
+              How far it travelled, where it came from, and when — all the same weight,
+              because none of them is the point of the row. The reference is the job
+              number for a job or part note and the machine for a maintenance entry;
+              they are mutually exclusive, since a `notes` row has exactly one subject
+              under the CHECK constraint. `part_name` is the last fallback rather than a
+              normal case: a durable part note outlives the job it was captured on
+              (provenance is ON DELETE SET NULL), so once that job is gone the part is
+              the only reference left.
+
+              The reader count leads it because it IS metadata — it was previously
+              stranded in a 48px gutter of its own, level with the reference rather than
+              with the sentence, which is what made the row look broken. Sitting here it
+              needs no gutter, so the note gets the full width back. */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', minHeight: 40 }}>
+            <ReachRow
+              note={note}
+              expanded={open}
+              onToggle={note.viewer_count > 0 ? toggle : undefined}
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0 }}>
+              {[
+                note.machine_name ?? note.job_number ?? note.part_name,
+                note.maintenance_kind,
+                note.photo_count > 0
+                  ? `${note.photo_count} photo${note.photo_count === 1 ? '' : 's'}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .map((s) => `${s} · `)
+                .join('')}
+              {formatDate(note.created_at)}
+              <NoteEditedMark editedAt={note.edited_at} />
+            </Typography>
+          </Box>
+        </Box>
+
+        {/* THE ONLY OTHER CONTROL, hard right. Every note here is unconditionally the
+            caller's own — getMyNotesPage filters to author_id = me AND note_type =
+            'user' — so there is no permission test to run. */}
+        <NoteActionsMenu
+          canEdit
+          canDelete
+          onEdit={() => setEditing(true)}
+          onDelete={() => setConfirmingDelete(true)}
+          onOpen={
+            note.job_id && note.job_number
+              ? () => router.push(`/operator/${companyId}/jobs/${note.job_id}`)
+              : undefined
+          }
+          openLabel={note.job_number ? `Open ${note.job_number}` : undefined}
+        />
+      </Box>
+
+      {/* Readers only. The actions left this disclosure when they moved to the menu,
+          so what remains is content rather than a second action surface. */}
       <Collapse in={open} unmountOnExit>
-        <Box sx={{ px: 2, pb: 2 }}>
-          <Divider sx={{ mb: 1 }} />
-
+        <Box sx={{ pl: 6.5, pr: 2, pb: 1.5 }}>
           {note.viewer_count > 0 && (
             <>
               {/* Explicitly labelled: the job beside a viewer's name is the job
                   THEY consulted it on, not the job in the header where the note
                   was written. Same format, different meaning — so say which. */}
-              <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ display: 'block', fontWeight: 600, mb: 0.5 }}
+              >
                 Viewed by
               </Typography>
               {loading ? (
@@ -190,55 +333,6 @@ function NoteRow({
               )}
             </>
           )}
-
-          {/* THE PRIMARY HOME FOR EDIT AND DELETE (#628), and the one surface that
-              needs no permission test at all: getMyContribution already filters to
-              author_id = me AND note_type = 'user', so every note on this screen is
-              unconditionally the caller's own editable note.
-
-              Full-width buttons rather than the kebab used in the feeds, because
-              the card is one big CardActionArea and a button cannot nest inside a
-              button — the same constraint that put navigation down here in the
-              first place. */}
-          <Box
-            sx={{
-              display: 'flex',
-              gap: 1,
-              mt: note.viewer_count > 0 ? 1.5 : 0,
-            }}
-          >
-            <Button
-              variant="outlined"
-              fullWidth
-              startIcon={<EditOutlinedIcon />}
-              onClick={() => setEditing(true)}
-              sx={{ minHeight: 48 }}
-            >
-              Edit
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              fullWidth
-              startIcon={<DeleteOutlineIcon />}
-              onClick={() => setConfirmingDelete(true)}
-              sx={{ minHeight: 48 }}
-            >
-              Delete
-            </Button>
-          </Box>
-
-          {note.job_id && note.job_number && (
-            <Button
-              variant="outlined"
-              fullWidth
-              startIcon={<LaunchIcon />}
-              onClick={() => router.push(`/operator/${companyId}/jobs/${note.job_id}`)}
-              sx={{ minHeight: 48, mt: 1.5 }}
-            >
-              Open {note.job_number}
-            </Button>
-          )}
         </Box>
       </Collapse>
 
@@ -246,8 +340,17 @@ function NoteRow({
           remove that you cannot see — so no media is passed and the dialog is
           text-only here. Removing individual photos lives on the three surfaces
           that actually show them. */}
+      {/* MOUNTED ONLY WHILE OPEN, like every other call site (JobFeed, PartNotesSheet,
+          MachineLogPanel all render `{editingNote && <NoteEditDialog open .../>}`).
+          This screen was the exception: it kept one edit dialog and one delete dialog
+          mounted per note row at open={false}, so a list of ten notes carried twenty
+          idle dialog subtrees. They rendered null, which is why nobody noticed — and
+          which is also why the render loop inside NoteEditDialog was invisible while it
+          held a core down. The loop is fixed at its source, but a dialog nobody has
+          opened should not be mounted at all. */}
+      {editing && (
       <NoteEditDialog
-        open={editing}
+        open
         initialBody={note.body}
         saving={busy}
         error={actionError}
@@ -269,9 +372,11 @@ function NoteRow({
           }
         }}
       />
+      )}
 
+      {confirmingDelete && (
       <NoteDeleteDialog
-        open={confirmingDelete}
+        open
         deleting={busy}
         error={actionError}
         onClose={() => {
@@ -295,7 +400,8 @@ function NoteRow({
           }
         }}
       />
-    </Card>
+      )}
+    </Box>
   );
 }
 
@@ -316,39 +422,104 @@ export default function MyWorkPage() {
   const params = useParams();
   const companyId = params.companyId as string;
 
-  useSetOperatorChrome(
-    { back: { href: `/operator/${companyId}/jobs`, label: 'Back to jobs' } },
-    [companyId],
-  );
+  /*
+   * NO `useSetOperatorChrome({ back })` HERE, deliberately.
+   *
+   * Me is a tab root, and a tab root has no "back". The bottom bar already is the way
+   * between tabs, so an arrow up here pointed at Jobs — a destination one tap away in
+   * the nav — and made a top-level destination read like a page you had wandered into.
+   * Declaring no chrome makes the header fall through to the Jigged mark, which is what
+   * Jobs, Inventory and Maintenance have always shown; Me was the only tab opting out.
+   *
+   * The other entry point, NoteUsageBanner on the jobs page, uses a plain `router.push`
+   * rather than `useOperatorNav().push`, so it doesn't bump the chrome depth counter
+   * either — that route lands on the same back-less root, with no special case.
+   */
 
   const { data: identity } = useOperatorIdentity(companyId);
 
   /**
-   * This is the "Me" tab: identity, then the work, then account actions.
+   * This is the "Me" tab: who you are and the two account actions, then the work.
    *
-   * The work is sandwiched rather than replaced — see `OperatorAccountBlock` for why the work
-   * has to lead and why Log out sits at the very bottom.
+   * Both account actions sit ABOVE the work now. They used to sandwich it — Log out last,
+   * Give feedback just before it — on the reasoning that the work must lead and a
+   * consequential action should be slightly slow to reach. The work still leads visually
+   * (a name, an email and a small link are not what the eye lands on), but "below the
+   * list" stopped being a place at all once the list could page: a pilot's feedback
+   * channel that only appears after ten notes and a Show more is a channel nobody uses,
+   * and a Log out you cannot reach is not a safe Log out.
    *
-   * The three loading/error/empty states are INSIDE `MyContribution` on purpose. They used to
-   * be early returns from this component, and leaving them there once Profile stopped being a
-   * tab would have meant a brand-new operator — the case with zero notes, i.e. the common one —
-   * had no Log out button anywhere in the app.
+   * This also means neither action depends on the work loading. `MyContribution` owns its
+   * own loading/error/empty states rather than early-returning from here, which is what
+   * kept a brand-new operator — zero notes, the common case — from losing Log out
+   * entirely; now the ordering makes that structural rather than merely careful.
    */
   return (
     <Box sx={{ pb: 4 }}>
-      <OperatorIdentityRow identity={identity} />
+      <OperatorIdentityRow companyId={companyId} identity={identity} />
       <MyContribution companyId={companyId} />
-      <OperatorAccountActions companyId={companyId} identity={identity} />
     </Box>
   );
 }
 
-/** The operator's own notes and their reception. Owns its own loading/error/empty states. */
+/**
+ * The operator's own notes and their reception. Owns its own loading/error/empty states.
+ *
+ * Two loads, not one: the summary totals cover EVERY note the operator has written, while
+ * the list below is a page at a time. Reducing the totals out of the loaded rows would make
+ * "5 notes" mean "5 notes currently rendered" and climb on every Show more.
+ */
 function MyContribution({ companyId }: { companyId: string }) {
-  const { data, loading, error, reload } = useLoad(
-    () => getMyContribution(companyId),
-    [companyId],
+  const {
+    data: totals,
+    loading,
+    error,
+    reload: reloadTotals,
+  } = useLoad(() => getMyContributionTotals(companyId), [companyId]);
+
+  const {
+    data: firstPage,
+    error: pageError,
+    reload: reloadFirstPage,
+  } = useLoad(() => getMyNotesPage(companyId), [companyId]);
+
+  // Pages 2..n, appended. `useLoad` has no append semantics — it replaces — so the extra
+  // pages accumulate here and the first page stays owned by the hook, which keeps
+  // `reload()` after an edit or delete meaning "go back to one fresh page".
+  const [extraPages, setExtraPages] = useState<MyNote[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState(false);
+  const [exhausted, setExhausted] = useState(false);
+
+  const notes = useMemo(
+    () => [...(firstPage?.notes ?? []), ...extraPages],
+    [firstPage, extraPages],
   );
+  const hasMore = !exhausted && Boolean(firstPage?.hasMore);
+
+  /** Re-read from scratch after an edit or a delete, so the totals and the list agree. */
+  const refresh = useCallback(async () => {
+    setExtraPages([]);
+    setExhausted(false);
+    setMoreError(false);
+    await Promise.all([reloadTotals(), reloadFirstPage()]);
+  }, [reloadTotals, reloadFirstPage]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const next = await getMyNotesPage(companyId, { offset: notes.length });
+      setExtraPages((prev) => [...prev, ...next.notes]);
+      if (!next.hasMore) setExhausted(true);
+    } catch {
+      // Keep what is already on screen and offer the tap again — a failed extra page
+      // must not discard the pages that loaded.
+      setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [companyId, notes.length]);
 
   if (loading) {
     return (
@@ -358,7 +529,7 @@ function MyContribution({ companyId }: { companyId: string }) {
     );
   }
 
-  if (error) {
+  if (error || pageError) {
     return (
       <Box sx={{ p: 1 }}>
         <Alert severity="error">Could not load your work. Try again.</Alert>
@@ -366,7 +537,7 @@ function MyContribution({ companyId }: { companyId: string }) {
     );
   }
 
-  const c = data ?? { noteCount: 0, photoCount: 0, peopleReached: 0, jobsReached: 0, notes: [] };
+  const c = totals ?? { noteCount: 0, photoCount: 0, peopleReached: 0 };
 
   if (c.noteCount === 0) {
     return (
@@ -387,58 +558,106 @@ function MyContribution({ companyId }: { companyId: string }) {
           the point is that writing things down is the work, not a score. */}
       <Card elevation={2} sx={{ ...cardSx, mb: 3 }}>
         <CardContent>
-          <Typography variant="overline" color="text.secondary">
-            What you&apos;ve added
+          {/* A HEADING, and it predicates THE NOTES rather than the operator.
+              "What you've added" was false of the third figure — a view is not something
+              the operator added. Moving the grammatical subject to the notes makes every
+              figure a true predicate of it: the notes number 17, and they have been opened
+              9 times. Google Maps solves the identical card the same way, attaching the
+              possessive to the posts rather than to the views ("total review views … of
+              your posts").
+
+              "so far" and never "this month": a bounded window turns a tally into a rate,
+              and a rate is pace — which the surveillance guardrail forbids outright.
+
+              Sentence case, not the `overline` variant used elsewhere on this screen.
+              Overline stacks 12px + uppercase + letter-spacing, and readers over 55 were
+              measured 29% more likely to misread text set in capitals (Arbel & Toler 2020),
+              with reading speed down 10–20% (Tinker 1955). This is the exact demographic
+              the app is for. A real `h2` because it is a section title, and because it is
+              what lets the captions below stay short enough to fit three across at 14px —
+              they inherit "your notes" from it instead of each repeating it. */}
+          <Typography
+            component="h2"
+            sx={{ fontSize: '1rem', fontWeight: 600, textTransform: 'none', mb: 1.5 }}
+          >
+            Your notes so far
           </Typography>
-          <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', mt: 0.5 }}>
-            <Box>
-              <Typography variant="h4" fontWeight={700}>
-                {c.noteCount}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.noteCount === 1 ? 'note' : 'notes'}
-              </Typography>
-            </Box>
-            <Box>
-              <Typography variant="h4" fontWeight={700}>
-                {c.photoCount}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.photoCount === 1 ? 'photo' : 'photos'}
-              </Typography>
-            </Box>
-            {/* "views", not "people". This sums each note's viewer_count, so one
-                colleague who read three of your notes contributes three — which
-                is a view total, not a headcount. A distinct-people figure would
-                need the note_views rows, which no browser role can read by
-                design. The per-note numbers below are exact. */}
-            <Box>
-              <Typography
-                variant="h4"
-                fontWeight={700}
-                sx={{ color: c.peopleReached > 0 ? 'success.light' : 'text.primary' }}
-              >
-                {c.peopleReached}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {c.peopleReached === 1 ? 'view' : 'views'}
-              </Typography>
-            </Box>
+
+          {/* Three equal columns, each aligned to the edge it sits nearest: first hard
+              left, middle centred, last hard right. Capped at 420px — nothing constrains
+              the operator column's width on this branch, so aligning to the card's own
+              edges would put the first and last figures a thousand pixels apart on a
+              laptop. A phone has ~340px of usable width, so the cap never binds there. */}
+          <Box
+            component="dl"
+            sx={{
+              m: 0,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: 2,
+              maxWidth: 420,
+            }}
+          >
+            <Stat value={c.noteCount} label={c.noteCount === 1 ? 'Note' : 'Notes'} align="left" />
+            <Stat
+              value={c.photoCount}
+              label={c.photoCount === 1 ? 'Photo' : 'Photos'}
+              align="center"
+            />
+            {/* "Times viewed", not "Views": a passive phrasing is what marks this figure as
+                reception rather than contribution now that it sits under a heading covering
+                all three. Still "viewed" and never "used" — all that was recorded is that
+                somebody opened the note and stayed on it.
+
+                A sum, not a headcount: one colleague reading three of these notes counts
+                three. A distinct-people figure would need the note_views rows, which no
+                browser role can read by design. */}
+            <Stat
+              value={c.peopleReached}
+              label={c.peopleReached === 1 ? 'Time viewed' : 'Times viewed'}
+              align="right"
+            />
           </Box>
 
         </CardContent>
       </Card>
 
-      <Typography variant="overline" color="text.secondary" sx={{ px: 0.5 }}>
+      {/* Sentence case and a real heading, matching the summary above it. Uppercase is
+          measurably worse for readers over 55 — see the note on the card's heading — and
+          `overline` applies it along with a 12px size and extra letter-spacing. */}
+      <Typography
+        component="h2"
+        sx={{ fontSize: '1rem', fontWeight: 600, color: 'text.secondary', px: 0.5, mb: 0.5 }}
+      >
         Your notes
       </Typography>
       {/* A real list: it is one semantically, screen readers announce the count,
           and each card becomes an addressable item rather than an anonymous div. */}
       <Box component="ul" sx={{ mt: 0.5, listStyle: 'none', p: 0, m: 0 }}>
-        {c.notes.map((n) => (
-          <NoteRow key={n.id} note={n} companyId={companyId} onChanged={reload} />
+        {notes.map((n) => (
+          <NoteRow key={n.id} note={n} companyId={companyId} onChanged={refresh} />
         ))}
       </Box>
+
+      {/*
+        Show more, not infinite scroll. Everything below this list — Give feedback — moves
+        further away with each page, so growing the list has to be something the operator
+        asks for. Auto-loading on scroll would make the bottom of the page unreachable by
+        design, which is the exact complaint paging was meant to answer.
+      */}
+      {hasMore && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+          <Button onClick={loadMore} disabled={loadingMore} sx={{ minHeight: 48 }}>
+            {loadingMore ? <CircularProgress size={20} /> : 'Show more'}
+          </Button>
+        </Box>
+      )}
+
+      {moreError && (
+        <Alert severity="error" sx={{ mt: 1 }}>
+          Could not load more notes. Try again.
+        </Alert>
+      )}
     </Box>
   );
 }

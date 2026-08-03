@@ -471,7 +471,7 @@ documents; apply the standard above when closing them.
 ### 16. Deletion & Archiving Policy
 
 **"Delete" = archive (soft-delete), universally.** Every user-facing entity — `parts`,
-`customers`, `vendors`, `work_centers`, `jobs`, `quotes` — carries a nullable
+`customers`, `customer_carrier_accounts`, `vendors`, `work_centers`, `jobs`, `quotes` — carries a nullable
 `deleted_at timestamptz`. The UI "Delete" action sets `deleted_at` instead of issuing a
 SQL `DELETE`, and it **never blocks**: the row survives, so every downstream reference
 (quote lines, job parts, shipments, invoices, BOM edges) keeps resolving and no foreign

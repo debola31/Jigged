@@ -56,6 +56,36 @@ export function useLoad<T>(
   // responses (deps changed, or reload() fired, while a fetch was in flight).
   const runId = useRef(0);
 
+  /**
+   * PASS PRIMITIVE DEPS (ids, hrefs, counts). An object or array literal rebuilt each
+   * render is a new identity each render, which re-memoises `load`, which re-runs the
+   * effect, which resolves and setStates a fresh object (no Object.is bailout), which
+   * renders again — an infinite loop.
+   *
+   * It is worth a runtime warning rather than a comment because the failure is silent in
+   * every channel you would normally check. The setState happens in a promise callback,
+   * not synchronously in render, so React's "Maximum update depth exceeded" guard never
+   * fires. If the loader short-circuits (an empty array to map over) there is no network
+   * traffic. And every iteration is sub-millisecond, so a longtask observer sees nothing.
+   * The only symptom is a pegged CPU core — which is exactly how NoteEditDialog's
+   * `media = []` default parameter went unnoticed while it made the operator "Me" tab
+   * feel frozen. Same caller-owned-deps contract as `useSetOperatorChrome`, which carries
+   * the same warning in prose.
+   */
+  if (process.env.NODE_ENV !== 'production') {
+    for (const dep of deps) {
+      if (dep !== null && typeof dep === 'object') {
+        console.error(
+          'useLoad: received a non-primitive dependency (%o). If it is rebuilt each ' +
+            'render this is an infinite render loop. Pass a primitive (id/href), or ' +
+            'memoise the value with a stable identity.',
+          dep,
+        );
+        break;
+      }
+    }
+  }
+
   // Hold the latest onError in a ref so `load` need not depend on a possibly
   // inline callback. Updated AFTER render (the react-hooks/refs rule forbids
   // ref writes in the render body), never during it.

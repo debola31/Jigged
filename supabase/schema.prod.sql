@@ -129,8 +129,14 @@ CREATE TABLE IF NOT EXISTS "public"."customers"
     "created_at" timestamp with time zone DEFAULT now(),
     "updated_at" timestamp with time zone DEFAULT now(),
     "deleted_at" timestamp with time zone,
+    "default_payment_terms" text,
+    "default_lead_time_text" text,
+    "default_fob_point" text,
+    "credit_status" text DEFAULT 'open'::text NOT NULL,
+    "credit_hold_note" text,
     CONSTRAINT "customers_pkey" PRIMARY KEY (id),
-    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name)
+    CONSTRAINT "customers_company_name_unique" UNIQUE (company_id, name),
+    CONSTRAINT "customers_credit_status_check" CHECK ((credit_status = ANY (ARRAY['open'::text, 'hold'::text])))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
@@ -151,6 +157,26 @@ CREATE TABLE IF NOT EXISTS "public"."customer_addresses"
     CONSTRAINT "customer_addresses_pkey" PRIMARY KEY (id)
 );
 
+CREATE TABLE IF NOT EXISTS "public"."customer_carrier_accounts"
+(
+    "id" uuid NOT NULL DEFAULT gen_random_uuid(),
+    "company_id" uuid NOT NULL,
+    "customer_id" uuid NOT NULL,
+    "carrier" text NOT NULL,
+    "bill_to_party" text NOT NULL,
+    "account_number" text,
+    "account_postal_code" text,
+    "account_country_code" text DEFAULT 'US'::text NOT NULL,
+    "notes" text,
+    "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+    "deleted_at" timestamp with time zone,
+    CONSTRAINT "customer_carrier_accounts_pkey" PRIMARY KEY (id),
+    CONSTRAINT "customer_carrier_accounts_bill_to_party_check" CHECK ((bill_to_party = ANY (ARRAY['recipient'::text, 'third_party'::text]))),
+    CONSTRAINT "customer_carrier_accounts_carrier_not_blank" CHECK ((length(btrim(carrier)) > 0)),
+    CONSTRAINT "customer_carrier_accounts_account_required" CHECK (((bill_to_party <> 'third_party'::text) OR ((account_number IS NOT NULL) AND (length(btrim(account_number)) > 0))))
+);
+
 CREATE TABLE IF NOT EXISTS "public"."customer_contacts"
 (
     "id" uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -161,6 +187,8 @@ CREATE TABLE IF NOT EXISTS "public"."customer_contacts"
     "email" text,
     "phone" text,
     "is_primary" boolean NOT NULL DEFAULT false,
+    "is_billing_default" boolean NOT NULL DEFAULT false,
+    "deleted_at" timestamp with time zone,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "customer_contacts_pkey" PRIMARY KEY (id),
@@ -248,6 +276,7 @@ CREATE TABLE IF NOT EXISTS "public"."quotes"
     "contact_snapshot" jsonb,
     "lead_time_text" text,
     "deleted_at" timestamp with time zone,
+    "fob_point" text,
     CONSTRAINT "quotes_pkey" PRIMARY KEY (id),
     CONSTRAINT "quotes_company_id_quote_number_key" UNIQUE (company_id, quote_number),
     CONSTRAINT "quotes_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'expired'::text])))
@@ -280,6 +309,12 @@ CREATE TABLE IF NOT EXISTS "public"."jobs"
     "invoicing_status" text NOT NULL DEFAULT 'uninvoiced'::text,
     "deleted_at" timestamp with time zone,
     "is_hot" boolean NOT NULL DEFAULT false,
+    "freight_terms" text,
+    "customer_carrier_account_id" uuid,
+    "ship_via" text,
+    "shipping_instructions" text,
+    "payment_terms" text,
+    CONSTRAINT "jobs_freight_terms_check" CHECK (((freight_terms IS NULL) OR (freight_terms = ANY (ARRAY['prepaid'::text, 'collect'::text, 'third_party'::text, 'customer_arranged'::text])))),
     CONSTRAINT "jobs_pkey" PRIMARY KEY (id),
     CONSTRAINT "jobs_company_id_job_number_key" UNIQUE (company_id, job_number),
     CONSTRAINT "jobs_fulfillment_status_check" CHECK ((fulfillment_status = ANY (ARRAY['unshipped'::text, 'partially_shipped'::text, 'fully_shipped'::text]))),
@@ -332,9 +367,14 @@ CREATE TABLE IF NOT EXISTS "public"."shipments"
     "customer_name" text,
     "bill_to_address" jsonb,
     "ship_to_address" jsonb,
+    "freight_terms" text,
+    "customer_carrier_account_id" uuid,
+    "freight_account_snapshot" jsonb,
     CONSTRAINT "shipments_pkey" PRIMARY KEY (id),
     CONSTRAINT "shipments_packing_slip_company_unique" UNIQUE (company_id, packing_slip_number),
-    CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text]))))
+    CONSTRAINT "shipments_shipping_method_check" CHECK (((shipping_method IS NULL) OR (shipping_method = ANY (ARRAY['customer_pickup'::text, 'personal_delivery'::text, 'shipment'::text, 'dropship'::text, 'restock'::text])))),
+    CONSTRAINT "shipments_freight_terms_check" CHECK (((freight_terms IS NULL) OR (freight_terms = ANY (ARRAY['prepaid'::text, 'collect'::text, 'third_party'::text, 'customer_arranged'::text])))),
+    CONSTRAINT "shipments_freight_terms_method_check" CHECK (((freight_terms IS NULL) OR (shipping_method = ANY (ARRAY['shipment'::text, 'dropship'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS "public"."job_fulfillment_audit"
@@ -406,6 +446,9 @@ CREATE TABLE IF NOT EXISTS "public"."quickbooks_connections"
     "connected_by" uuid,
     "created_at" timestamp with time zone NOT NULL DEFAULT now(),
     "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+    "po_custom_field_id" text,
+    "po_custom_field_name" text,
+    "qb_settings_checked_at" timestamp with time zone,
     CONSTRAINT "quickbooks_connections_pkey" PRIMARY KEY (id),
     CONSTRAINT "quickbooks_connections_company_id_key" UNIQUE (company_id),
     CONSTRAINT "quickbooks_connections_environment_check" CHECK ((environment = ANY (ARRAY['sandbox'::text, 'production'::text])))
@@ -3466,6 +3509,12 @@ ALTER TABLE "public"."company_order_counters"
 ALTER TABLE "public"."customer_addresses"
     ADD CONSTRAINT "customer_addresses_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
+ALTER TABLE "public"."customer_carrier_accounts"
+    ADD CONSTRAINT "customer_carrier_accounts_company_fk" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
+
+ALTER TABLE "public"."customer_carrier_accounts"
+    ADD CONSTRAINT "customer_carrier_accounts_customer_fk" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
+
 ALTER TABLE "public"."customer_contacts"
     ADD CONSTRAINT "customer_contacts_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE;
 
@@ -3800,7 +3849,7 @@ ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_company_id_fkey" FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE;
 
 ALTER TABLE "public"."quotes"
-    ADD CONSTRAINT "quotes_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id);
+    ADD CONSTRAINT "quotes_contact_id_fkey" FOREIGN KEY (contact_id) REFERENCES customer_contacts(id) ON DELETE SET NULL;
 
 ALTER TABLE "public"."quotes"
     ADD CONSTRAINT "quotes_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id);
@@ -3906,7 +3955,13 @@ CREATE INDEX IF NOT EXISTS idx_companies_is_demo ON public.companies USING btree
 CREATE INDEX IF NOT EXISTS idx_companies_name ON public.companies USING btree (name);
 CREATE INDEX IF NOT EXISTS idx_companies_slug ON public.companies USING btree (slug);
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer ON public.customer_addresses USING btree (customer_id);
-CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE is_primary;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_billing ON public.customer_addresses USING btree (customer_id) WHERE default_billing;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_addresses_one_default_shipping ON public.customer_addresses USING btree (customer_id) WHERE default_shipping;
+CREATE UNIQUE INDEX IF NOT EXISTS customers_company_name_ci_unique ON public.customers USING btree (company_id, lower(btrim(name)));
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_primary ON public.customer_contacts USING btree (customer_id) WHERE (is_primary AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX IF NOT EXISTS customer_contacts_one_billing_default ON public.customer_contacts USING btree (customer_id) WHERE (is_billing_default AND (deleted_at IS NULL));
+CREATE INDEX IF NOT EXISTS idx_customer_carrier_accounts_customer ON public.customer_carrier_accounts USING btree (customer_id) WHERE (deleted_at IS NULL);
+
 CREATE INDEX IF NOT EXISTS idx_customer_contacts_customer ON public.customer_contacts USING btree (customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company ON public.customers USING btree (company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_live_by_company ON public.customers USING btree (company_id) WHERE (deleted_at IS NULL);

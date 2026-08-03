@@ -36,6 +36,7 @@ import {
   type QuoteLineDriftInfo,
   type QuoteLineConversion,
 } from '@/utils/quotesAccess';
+import { hasTermDrift } from '@/utils/customerAccess';
 import { getCompany } from '@/utils/companyAccess';
 import type { Company } from '@/utils/companyAccess';
 import { readQuoteValidityDays } from '@/lib/companyDefaults';
@@ -249,6 +250,29 @@ export default function QuoteDetailPage() {
       ]),
     ).values(),
   );
+
+  // Standing-terms drift: which of this quote's terms no longer match the
+  // customer's CURRENT defaults. Comparison only — a difference is reported,
+  // never applied, because the quote is an offer that was already sent.
+  // A customer with no standing value for a field can't drift on it
+  // (hasTermDrift returns false), so a shop that never fills these sees nothing.
+  //
+  // DELIBERATELY CUSTOMER-SCOPED. The shop-wide default payment terms are NOT
+  // compared here, and must not be added: a quote that inherited the house term
+  // would then chip on every open quote the day the shop changes its house term.
+  // Shop policy moving is not a per-customer promise changing, and a chip that
+  // fires on everything at once is a chip people learn to ignore.
+  const termDrift = quote.customers
+    ? (
+        [
+          { label: 'Payment terms', onQuote: quote.payment_terms, current: quote.customers.default_payment_terms },
+          { label: 'Lead time', onQuote: quote.lead_time_text, current: quote.customers.default_lead_time_text },
+          { label: 'FOB', onQuote: quote.fob_point, current: quote.customers.default_fob_point },
+        ] as const
+      )
+        .filter((f) => hasTermDrift(f.onQuote, f.current))
+        .map((f) => ({ label: f.label, onQuote: f.onQuote ?? '', current: f.current ?? '' }))
+    : [];
 
   // Price-drift summary. detectQuoteLineDrift already excludes override lines, so
   // every entry here is a real, repriceable change. The projected total applies
@@ -466,7 +490,37 @@ export default function QuoteDetailPage() {
                 Payment terms: {quote.payment_terms}
               </Typography>
             )}
+            {quote.fob_point && (
+              <Typography variant="body2" color="text.secondary">
+                FOB: {quote.fob_point}
+              </Typography>
+            )}
           </Box>
+          {/* STANDING-TERMS DRIFT. This quote was issued with the terms above;
+              the customer's standing terms have since changed. We say so and
+              stop there — the quote is an offer already sent as a PDF, so its
+              terms are never rewritten from the customer record. Same discipline
+              as the price-drift banner below, and the reason these defaults are
+              not a repeat of the read-time inheritance that got markup_rates
+              deleted. There is deliberately no "update to current" action:
+              re-agreeing terms is a conversation, not a button. */}
+          {termDrift.length > 0 && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
+              {termDrift.map((d) => (
+                <Tooltip
+                  key={d.label}
+                  title={`This quote says “${d.onQuote || '—'}”. ${quote.customers?.name ?? 'The customer'} is now set to “${d.current}”. The quote keeps what it was issued with.`}
+                >
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    label={`${d.label} differs from standing terms`}
+                  />
+                </Tooltip>
+              ))}
+            </Box>
+          )}
         </Box>
         {/* Document-level + lifecycle actions moved to the single top toolbar
             row (primary "Convert to Job" + overflow menu). Invoicing lives on

@@ -461,8 +461,7 @@ import StatusChip from '@/components/common/StatusChip';
 
 **Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a
 bespoke palette for a domain reason — stock level (`StockStatusChip`), part
-classification (`PartClassificationChips`), customer active state
-(`CustomerStatusChip`), work-center kind — and the `HOT` rush badge
+classification (`PartClassificationChips`), work-center kind — and the `HOT` rush badge
 (`JobHotBadge`), which deliberately mutes to outlined for historical jobs. These
 use custom hex/rgba, not the semantic palette, and are not on/off status badges.
 

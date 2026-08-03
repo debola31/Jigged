@@ -73,3 +73,31 @@ export function projectSlip(
         : 'unshipped';
   return { unitsNow, linesShipping, partsComplete, partsTotal, projectedStatus };
 }
+
+/**
+ * The carrier the shipment moves on, vs the carrier whose account pays for it.
+ *
+ * The packing slip prints these one above the other, so a mismatch reads as a
+ * contradiction to whoever opens the box:
+ *
+ *     Carrier: FedEx
+ *     Freight: Freight collect (their account) — UPS ••••72W9
+ *
+ * It is not always wrong — a shop can move a box on one carrier and bill
+ * another's account — so this returns a message to WARN with, never to block.
+ * Returns null when there is nothing to say: no account, no carrier chosen yet,
+ * freight doesn't apply to this method, or the two agree.
+ *
+ * Case- and whitespace-insensitive, because the account's carrier is free text
+ * ("ups", "UPS ") while the form's is a fixed option.
+ */
+export function carrierAccountMismatch(
+  shipmentCarrier: string,
+  accountCarrier: string,
+): string | null {
+  const chosen = shipmentCarrier.trim();
+  const account = accountCarrier.trim();
+  if (!chosen || !account) return null;
+  if (chosen.toLowerCase() === account.toLowerCase()) return null;
+  return `Shipping ${chosen} but billing the ${account} account — the packing slip will show both.`;
+}

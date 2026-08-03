@@ -62,10 +62,30 @@ export interface NoteEditResult {
  * orphan cleanup for a file that reached storage without its row. A delete is one
  * fast statement with none of that.
  */
+/**
+ * Stable empty default for `media`. MUST be module-level, not a `= []` default parameter.
+ *
+ * A default parameter is re-evaluated on every render, so it produced a NEW array identity
+ * each time. That array is the dependency of the `useLoad` below, and `useLoad` memoises its
+ * loader with `useCallback(fn, deps)` and re-runs on the loader's identity — so a fresh `[]`
+ * per render re-ran the loader per render, and each resolution called setState with a fresh
+ * object (no Object.is bailout), which rendered again, which built another `[]`. An infinite
+ * loop that React never reports, because the setState happens in a promise callback rather
+ * than synchronously in render, so the "Maximum update depth exceeded" guard never fires.
+ *
+ * It was invisible from outside: with `open={false}` the Dialog renders null, so the loop
+ * made no DOM mutations and no network requests, and every task in it was sub-millisecond,
+ * so a longtask observer reported nothing. It simply held a CPU core down for as long as the
+ * page was mounted. The operator "Me" tab was the one surface that mounted this dialog
+ * unconditionally — one per note row — so a screen showing ten notes ran ten of these at
+ * once and everything the operator tapped afterwards competed with a pegged core.
+ */
+const NO_MEDIA: JobNoteMedia[] = [];
+
 export default function NoteEditDialog({
   open,
   initialBody,
-  media = [],
+  media = NO_MEDIA,
   saving = false,
   error = null,
   noun = 'note',

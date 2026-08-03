@@ -629,11 +629,11 @@ The editable entities in the shipped system are: the **invitation** (created wit
 
 **Schema & RLS**
 
-- [ ] **Given** the `invitations` table, **when** inspected, **then** it has the `id`/`company_id`/`email`/`role`/`status`/`invited_by`/`accepted_by`/`expires_at`/`created_at`/`accepted_at` columns (no `token`), the `company_id`/`email` and partial-unique `pending_email_company` indexes, and RLS policies "Admins can manage invitations" + "Users can read invitations for their email" — *manual: `supabase/schema.prod.sql` `invitations` table + `supabase/migrations/20260527151536_baseline.sql` indexes/policies*.
+- [ ] **Given** the `invitations` table, **when** inspected, **then** it has the `id`/`company_id`/`email`/`role`/`status`/`invited_by`/`accepted_by`/`expires_at`/`created_at`/`accepted_at` columns (no `token`), the `company_id`/`email` and partial-unique `pending_email_company` indexes, and RLS policies "Admins can manage invitations" + "Users can read invitations for their email" — *manual: `supabase/migrations/` `invitations` table + `supabase/migrations/20260527151536_baseline.sql` indexes/policies*.
 
 **Referral system (descoped — owner decision)**
 
-- [ ] **Given** the codebase, **when** you search for referral tables, functions, routes, or a `/settings/referrals` page, **then** none exist — the referral half of this spec is **descoped**, not merely unbuilt — *manual: no `referral_links`/`referral_redemptions` in `supabase/schema.prod.sql`; no `redeem_referral`/`validate_referral_code`/`validate_invitation_token` functions; no referral route under `app/`; see Resolved (owner decision) in the divergence report*.
+- [ ] **Given** the codebase, **when** you search for referral tables, functions, routes, or a `/settings/referrals` page, **then** none exist — the referral half of this spec is **descoped**, not merely unbuilt — *manual: no `referral_links`/`referral_redemptions` in `supabase/migrations/`; no `redeem_referral`/`validate_referral_code`/`validate_invitation_token` functions; no referral route under `app/`; see Resolved (owner decision) in the divergence report*.
 
 **Coexistence & Demo Mode**
 

@@ -1,7 +1,7 @@
 /**
  * Static schema/embed drift checker.
  *
- * Parses `supabase/schema.prod.sql` to learn the canonical {table → columns}
+ * Parses `types/database.ts` to learn the canonical {table → columns}
  * shape, then walks `utils/*.ts` (and any other paths passed in) looking for
  * PostgREST embed strings inside `.select(...)` calls and top-level
  * `const SELECT_FIELDS = \`...\`` constants. For every `relation(col1, col2)`
@@ -14,6 +14,28 @@
  * (the select string is opaque to TypeScript), and the one E2E spec that
  * would have failed was runtime-skipping. This check would have flagged
  * the embed on the PR that dropped the column.
+ *
+ * STILL NEEDED AFTER THE TYPED-CLIENT MIGRATION, but only just — and the
+ * remaining gap is worth stating precisely, because it is small enough that
+ * someone will reasonably ask whether this check can go.
+ *
+ * All 37 access files now use `getTypedSupabase()`, and supabase-js validates
+ * select strings at the type level, so `tsc` already catches most of this class.
+ * Measured, by injecting a bogus embed column into each shape:
+ *
+ *   .select(`…`) written inline        → tsc CATCHES it
+ *       SelectQueryError<"column 'bogus' does not exist on 'parts'.">
+ *   .select(SOME_CONST) built from a
+ *   template literal with ${…}          → tsc SEES NOTHING
+ *
+ * Interpolation widens the constant to `string`, and the type-level select
+ * parser has nothing left to read. Four constants are in that blind spot today
+ * — QUOTE_LINE_ITEM_FIELDS, QUOTE_LIST_SELECT, QUOTE_DETAIL_SELECT and
+ * PART_SELECT_COLUMNS — and quotesAccess.ts is exactly where the jobs.status
+ * incident lived. This check is what covers them.
+ *
+ * If those four are ever inlined so `tsc` can read them, this file can be
+ * deleted outright rather than maintained.
  *
  * Scope:
  * - Validates EMBED columns (inside `relation(...)`). Bare top-level columns
@@ -37,52 +59,94 @@ import { join, relative, resolve } from 'path';
 export type Schema = Map<string, Set<string>>;
 
 /**
- * Parse a `CREATE TABLE IF NOT EXISTS "public"."<name>" (...);` dump into
- * a {table → Set<columns>} map. Iterates char-by-char tracking paren depth
- * so column-type expressions like `numeric(12,4)` and inline CHECK
- * constraints don't confuse the boundary detection.
+ * Parse `types/database.ts` into a {table → Set<columns>} map, reading the
+ * `Row` shape of every entry under the `public` schema's `Tables`.
+ *
+ * WHY THIS SOURCE. This used to parse `supabase/schema.prod.sql`, a snapshot
+ * exported from production. That file was deleted because it could — and did —
+ * lie: it was hand-edited in a feature PR to add
+ * `customer_contacts.is_billing_default` while production had no such column,
+ * its `Generated:` header untouched, and it asserted that for two days through
+ * an outage. A schema reference that can be confidently wrong is worse than none.
+ *
+ * `types/database.ts` cannot drift the same way. It is generated from the
+ * migration-replayed schema and CI fails on any diff (issue #406), so it can
+ * neither go stale nor be hand-edited without a red build. It is also the right
+ * reference for a PR-time check: it describes what the code will run against
+ * once merged, whereas production legitimately lags main, making drift against
+ * it ambiguous.
+ *
+ * Views are excluded, preserving this check's previous scope — the old parser
+ * matched only `CREATE TABLE`, so an embed targeting a view was already
+ * reported as an unknown relation.
  */
-export function parseSchema(sql: string): Schema {
+export function parseSchema(ts: string): Schema {
   const out: Schema = new Map();
-  const lines = sql.split('\n');
-  let currentTable: string | null = null;
-  let depth = 0;
-  let cols: Set<string> | null = null;
+  const lines = ts.split('\n');
 
-  for (const line of lines) {
-    if (currentTable === null) {
-      const m = /CREATE TABLE (?:IF NOT EXISTS )?"public"\."([^"]+)"/.exec(line);
-      if (m) {
-        currentTable = m[1];
-        cols = new Set();
-        depth = 0;
-      }
-    }
-    if (currentTable === null) continue;
-
-    let closed = false;
-    for (const ch of line) {
-      if (ch === '(') depth++;
-      else if (ch === ')') {
-        depth--;
-        if (depth === 0) {
-          out.set(currentTable, cols!);
-          currentTable = null;
-          cols = null;
-          closed = true;
-          break;
-        }
-      }
-    }
-    if (closed) continue;
-
-    if (currentTable !== null && depth > 0) {
-      const t = line.trim();
-      if (t.startsWith('CONSTRAINT')) continue;
-      const m = /^"([^"]+)"\s+\S/.exec(t);
-      if (m) cols!.add(m[1]);
-    }
+  // The generator emits the schema type first and a trailing `Constants` object
+  // last, and BOTH contain a `public:` key. Anchor on the type declaration so
+  // the constants block is never mistaken for the schema.
+  const start = lines.findIndex((l) => /^export type Database = \{/.test(l));
+  if (start === -1) {
+    throw new Error('types/database.ts: no `export type Database = {` declaration found');
   }
+
+  // Indentation is load-bearing here, and safe to rely on: the file is emitted
+  // by `supabase gen types` and CI asserts it byte-for-byte, so its formatting
+  // cannot drift without a failing build.
+  let inPublic = false;
+  let inTables = false;
+  let table: string | null = null;
+  let inRow = false;
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!inPublic) {
+      if (/^ {2}public: \{$/.test(line)) inPublic = true;
+      continue;
+    }
+
+    // Leaving the public schema block entirely.
+    if (/^ {2}\}/.test(line)) break;
+
+    if (!inTables) {
+      if (/^ {4}Tables: \{$/.test(line)) inTables = true;
+      continue;
+    }
+
+    // A sibling key at Tables' own depth (Views, Functions, Enums, …) ends it.
+    if (table === null && /^ {4}\w+: [{[]$/.test(line)) break;
+
+    if (table === null) {
+      const m = /^ {6}"?([A-Za-z0-9_]+)"?: \{$/.exec(line);
+      if (m) {
+        table = m[1];
+        out.set(table, new Set());
+      }
+      continue;
+    }
+
+    if (!inRow) {
+      if (/^ {8}Row: \{$/.test(line)) inRow = true;
+      else if (/^ {6}\}$/.test(line)) table = null;
+      continue;
+    }
+
+    if (/^ {8}\}$/.test(line)) {
+      // Row closed. Skip Insert/Update/Relationships — Row is the full column
+      // set, and the others merely re-state it with different optionality plus
+      // generator-only keys.
+      inRow = false;
+      table = null;
+      continue;
+    }
+
+    const col = /^ {10}"?([A-Za-z0-9_]+)"?\??: /.exec(line);
+    if (col) out.get(table)!.add(col[1]);
+  }
+
   return out;
 }
 
@@ -314,7 +378,7 @@ export interface ProjectScanResult {
 }
 
 export function scanProject(repoRoot: string, scanDirs: string[] = ['utils']): ProjectScanResult {
-  const schemaPath = join(repoRoot, 'supabase/schema.prod.sql');
+  const schemaPath = join(repoRoot, 'types/database.ts');
   const schema = parseSchema(readFileSync(schemaPath, 'utf8'));
 
   const files: string[] = [];
@@ -375,8 +439,8 @@ function main(): void {
     console.error(formatViolation(v, repoRoot));
   }
   console.error(
-    '\nIf the schema was regenerated, refresh ' +
-      'supabase/schema.prod.sql via scripts/export_schema.py.\n',
+    '\nIf a migration changed the schema, regenerate the types it is checked ' +
+      'against:\n    supabase start && pnpm gen:db-types\n',
   );
   process.exit(1);
 }

@@ -37,8 +37,8 @@ import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
  * Cast a DB row to Quote. The DB stores `status` as text with a CHECK
- * constraint pinning it to QuoteStatus values (see schema.prod.sql line
- * ~221); the generated Database type only sees `string`. Centralized
+ * constraint pinning it to QuoteStatus values (`quotes_status_check`, in the
+ * baseline migration); the generated Database type only sees `string`. Centralized
  * here so the assertion is documented once instead of scattered.
  */
 function asQuote(row: Record<string, unknown> & { status: string }): Quote {
@@ -394,7 +394,7 @@ export async function createQuote(
     .insert({
       company_id: companyId,
       // quote_number is NOT NULL but the set_quote_number trigger
-      // (supabase/schema.prod.sql ~line 4202) fills it from
+      // (baseline, reworked by 20260621213555_unify_order_numbering) fills it from
       // generate_quote_number() when the value is '' or NULL. Sending ''
       // explicitly satisfies the typed Insert signature without lying
       // about runtime behavior.

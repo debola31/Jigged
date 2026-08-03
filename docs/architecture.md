@@ -61,8 +61,7 @@ Jigged/
 │
 └── supabase/
     ├── migrations/         # Source of truth for schema (timestamped)
-    ├── schema.staging.sql  # Auto-generated; do not edit
-    └── schema.prod.sql     # Auto-generated; do not edit
+    └── seed.sql            # Dev / preview-branch seed data
 ```
 
 Routings live **inline on the part detail page** (`PartRoutingPanel`) — there is no `/parts/[partId]/routing/` page. See [Routings](modules/routings.md).

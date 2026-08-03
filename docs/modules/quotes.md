@@ -590,7 +590,7 @@ This section is the authoritative spec for editing an existing quote. It superse
 
 **Pricing basis snapshot (the data shape this all depends on)**
 
-- [ ] On create and on add-line, a `quote_line_items` row stores the **pricing basis** (the relevant tier breaks, the markup %, and the rates) that produced its `unit_price` — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'buildPricingBasisSnapshot' > 'captures only priced tiers and records the resolved tier'` AND the `pricing_basis_snapshot jsonb` column present on `quote_line_items` in `supabase/schema.prod.sql`; createQuote's snapshot-write path automation-pending (`createQuote`)*.
+- [ ] On create and on add-line, a `quote_line_items` row stores the **pricing basis** (the relevant tier breaks, the markup %, and the rates) that produced its `unit_price` — *verified by `__tests__/utils/quotePricingResolver.test.ts > 'buildPricingBasisSnapshot' > 'captures only priced tiers and records the resolved tier'` AND the `pricing_basis_snapshot jsonb` column present on `quote_line_items` in `supabase/migrations/`; createQuote's snapshot-write path automation-pending (`createQuote`)*.
 - [ ] The pricing basis is stored as a structured snapshot, not only the resolved `unit_price` — *verified by the migration adding a `pricing_basis_snapshot jsonb` (or similarly-named) column to `quote_line_items`*.
 
 **Existing-quote handling (Option C — locked)**

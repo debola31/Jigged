@@ -69,7 +69,7 @@ The hidden demo company approach leverages RLS (`company_id` filtering) which is
 
 The demo dataset is whatever `seed_demo_data()` inserts from the active
 `demo_data_templates` row (see §4.3 for the shape it reads). Grounded in the
-live seeder (`supabase/schema.prod.sql`, `seed_demo_data`), a demo company can
+live seeder (`supabase/migrations/`, `seed_demo_data`), a demo company can
 contain these entity types — the exact counts depend on the template JSON, which
 is authored in prod and **not** committed to the repo:
 
@@ -207,7 +207,7 @@ CREATE POLICY "All authenticated users can read active templates"
 Template-local `_ref` IDs are mapped to real UUIDs during seeding, and any
 `*_ref` field resolves against a `_ref` inserted earlier in the same run
 (`v_ref_map`). The arrays below are exactly the ones `seed_demo_data()` iterates
-(`supabase/schema.prod.sql`), in FK-dependency order: `vendors` → `work_centers`
+(`supabase/migrations/`), in FK-dependency order: `vendors` → `work_centers`
 → `parts` → `parts_bom` → `routings` → `customers` → `quotes` → `jobs`. The
 example is illustrative (one row per array); real counts come from the live
 template.
@@ -369,7 +369,7 @@ AS $$
 $$;
 ```
 
-> **Implementation:** See `supabase/migrations/20260527151536_baseline.sql` (and the authoritative body in `supabase/schema.prod.sql`) for the full `seed_demo_data` function. Routings are a **linear** list — `routing_nodes`/`routing_edges` were renamed to a single `routing_operations` table, and `operation_types` became `work_centers` (with a `kind` distinguishing internal vs external). The seeder does **not** populate `inventory_items`.
+> **Implementation:** See `supabase/migrations/20260527151536_baseline.sql` (and the authoritative body in `supabase/migrations/`) for the full `seed_demo_data` function. Routings are a **linear** list — `routing_nodes`/`routing_edges` were renamed to a single `routing_operations` table, and `operation_types` became `work_centers` (with a `kind` distinguishing internal vs external). The seeder does **not** populate `inventory_items`.
 
 ### 5.2 `create_demo_company()`
 
@@ -842,12 +842,12 @@ The template management API endpoints (section 9.4) exist for programmatic acces
 
 Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #337.
 
-> Note: the demo module ships with **no** unit/integration/E2E tests of its own — the client mutations are RPC wrappers in `utils/demoAccess.ts` and the RPC bodies live in `supabase/schema.prod.sql`. The only citable tests belong to the shared login-redirect path in `__tests__/utils/companyAccess.test.ts`. Everything else is automation-pending with the responsible function/RPC named.
+> Note: the demo module ships with **no** unit/integration/E2E tests of its own — the client mutations are RPC wrappers in `utils/demoAccess.ts` and the RPC bodies live in `supabase/migrations/`. The only citable tests belong to the shared login-redirect path in `__tests__/utils/companyAccess.test.ts`. Everything else is automation-pending with the responsible function/RPC named.
 
 **Schema & platform foundation**
 
-- [ ] **Given** the `companies` table, **when** its columns are inspected, **then** `demo_company_id` (FK → companies, ON DELETE SET NULL) and `is_demo` (boolean, default false) both exist — *manual: `supabase/schema.prod.sql` lines 21–22 + `companies_demo_company_id_fkey`*.
-- [ ] **Given** the platform-admin infrastructure, **when** the schema is inspected, **then** `demo_data_templates` (with system-admin-manage + read-active RLS), `system_admins` (with read/insert RLS), and the `SECURITY DEFINER` `is_system_admin()` helper all exist — *manual: `supabase/schema.prod.sql` (`demo_data_templates`, `system_admins`, `is_system_admin`)*.
+- [ ] **Given** the `companies` table, **when** its columns are inspected, **then** `demo_company_id` (FK → companies, ON DELETE SET NULL) and `is_demo` (boolean, default false) both exist — *manual: `supabase/migrations/` lines 21–22 + `companies_demo_company_id_fkey`*.
+- [ ] **Given** the platform-admin infrastructure, **when** the schema is inspected, **then** `demo_data_templates` (with system-admin-manage + read-active RLS), `system_admins` (with read/insert RLS), and the `SECURITY DEFINER` `is_system_admin()` helper all exist — *manual: `supabase/migrations/` (`demo_data_templates`, `system_admins`, `is_system_admin`)*.
 
 **Enter demo mode (create -> seed -> navigate)**
 

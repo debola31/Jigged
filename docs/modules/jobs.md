@@ -1,20 +1,28 @@
 # Jobs Module
 
-> **As-built, verified 2026-08-03 (issue #634).** Condensed 6,118 → 4,313 words (`wc -w`); the
-> cut would have been deeper but ~700 words of *corrections* were added, because this doc was
-> wrong in fourteen places. Checked against `supabase/schema.prod.sql`, `utils/jobsAccess.ts`,
-> `app/dashboard/[companyId]/jobs/**`, `components/jobs/**`, `types/job.ts` and
-> `__tests__/utils/jobsAccess.test.ts`.
+> **As-built, verified 2026-08-03 (issue #634).** Condensed 6,118 → 4,717 words (`wc -w`); the
+> cut would have been deeper but ~1,100 words of *corrections and restorations* were added,
+> because this doc was wrong in fourteen places. Checked against `supabase/schema.prod.sql`,
+> `utils/jobsAccess.ts`, `app/dashboard/[companyId]/jobs/**`, `components/jobs/**`,
+> `types/job.ts` and `__tests__/utils/jobsAccess.test.ts`.
 >
 > **Cut:** the ASCII status diagram, per-status prose the CHECK constraint already states, UI copy
-> transcribed from JSX, the User Stories table, the `job_materials` column table (owned by
-> [`inventory.md`](inventory.md) §5.9), and acceptance bullets whose Given/When/Then only re-read
-> the test they cited. Test citations were converted from `describe > 'it title'` (which rots) to
-> file + `describe` + it-count.
+> transcribed from JSX, the User Stories table, and acceptance bullets whose Given/When/Then only
+> re-read the test they cited. Test citations were converted from `describe > 'it title'` (which
+> rots) to file + `describe` + it-count.
 >
 > **Kept deliberately:** every withdrawn argument, the bought-parts ERP precedent (JobBOSS/ProShop),
 > the reason the outside-processing queue lives under Vendors, the outside-ops deferral list, the
 > two `_on_qty` trigger names, the local-vs-UTC midnight trap on `due_date`, and every named gap.
+>
+> **Restored by the 2026-08-03 adversarial pass** (the condensation had dropped them): the
+> PO-sourced / `is_quote_override` / `basis_unknown` reprice-eligibility rule; the `started_at` /
+> `completed_at` stamping rule, including the NULL-out on regression; the `job_materials` column
+> shape (`inventory.md` §5.9 owns the *decision to drop it*, not its shape, and
+> [routings.md](routings.md) links here for it); the ad-hoc **Remove stock** path that coexists
+> with the job-tagged take; the `edit → save → reload → persists` acceptance convention; and the
+> `automation-pending` rows for auto-progression, `completeJobOperation` / `undoJobOperation`,
+> and shipment-driven fulfillment.
 >
 > **Fourteen corrections**, each marked inline as *(This doc previously said …)*. The two largest:
 > a `skipped` operation status described in six places that has never existed in
@@ -318,8 +326,9 @@ plating, heat-treat). It is a first-class routing step, not paperwork.
 - Undo steps back one state: received → `sent` (or → `pending` for a legacy op that never went
   through send); `sent` → `pending`.
 
-**Surfaces:** the admin job-detail op card; the operator traveler + operation page ("Outside
-process" badge + vendor); the printed traveler (heavy black outline + bold text, border-only and
+**Surfaces:** the admin job-detail op card; the operator traveler + operation page (**Mark Sent
+Out** / **Mark Received** there too — the shop floor drives the send, not just the office —
+plus the "Outside process" badge + vendor); the printed traveler (heavy black outline + bold text, border-only and
 low-ink after a shop-owner ink complaint, with `OUTSIDE — ship to {vendor}` in the Notes column,
 where internal steps show setup·cycle); and the company-wide **Outside processing** queue — a
 **tab on the Vendors page** (Directory / Outside processing), grouped **Not sent** / **At vendor**,
@@ -406,7 +415,10 @@ The decision to **drop the table** and back consumption onto the ledger is owned
 
 Per-job consumption **is** tracked, as of 2026-07-28, **on the ledger**: journey J7 records an
 `inventory_transactions` depletion tagged with `job_id` when the operator takes material on the
-traveler. `job_materials` was not revived.
+traveler. `job_materials` was not revived. The tagged take is the **primary** path, not the only
+one — an ad-hoc **Remove stock** against the material part (`PartLocationActionModal` /
+`OperatorLocationActionModal`) stays available for every draw that isn't a job take, and simply
+records an untagged depletion.
 **Stock never decrements as a side effect of completing an operation — the take is the event, not
 the completion.**
 
@@ -429,7 +441,10 @@ one material show the same figure, hence the label *"issued to this job"*. One n
 ## Acceptance Criteria
 
 Every row cites a **file + `describe`** with its `it` count, or carries an explicit
-`automation-pending` tag. Doc-vs-code disagreements from the earlier audit are on
+`automation-pending` tag. **The standing convention: every editable entity gets at least one
+`edit → save → reload → persists` row.** Where no E2E reloads after the save yet, the row cites
+the write path's unit tests and tags the reload assertion `automation-pending` — that is why so
+many rows below carry `(#367)`. Doc-vs-code disagreements from the earlier audit are on
 [issue #343](https://github.com/debola31/Jigged/issues/343); missing reload-persistence E2E is
 tracked by [#367](https://github.com/debola31/Jigged/issues/367).
 
@@ -455,6 +470,9 @@ unless stated.
 | A `sent` op holds its part at `in_progress`; admin Complete/Undo refuse an external op | `describe('deriveStatusFromOps with the sent (at-vendor) state')` — 2 it; `describe('admin op guards refuse external (outside-vendor) ops')` — 2 it |
 | Invoice creation advances `invoicing_status` and lists the invoice | [`e2e/job-invoicing.spec.ts`](../../e2e/job-invoicing.spec.ts) `test.describe('Job invoicing (QuickBooks)')` — 1 test |
 | Job-level recompute cascade (part change → `compute_job_production_status` → job row) | `automation-pending` — SQL in `supabase/schema.prod.sql` |
+| Auto-progression: first op complete → job `in_progress` (no manual Start Job); last op across all parts complete → job `completed` (no manual Mark Complete) | `automation-pending` |
+| Marking a ready op complete makes the next-sequence op on that part ready; Undo returns it to pending | `automation-pending` (`completeJobOperation` / `undoJobOperation`) |
+| Creating a shipment record advances `fulfillment_status` as a side effect — there is no "Mark Shipped" production transition | `automation-pending` |
 | Attachment upload / inline view / delete persists across reload | `automation-pending` |
 
 ---

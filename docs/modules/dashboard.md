@@ -1,17 +1,20 @@
 # Dashboard Module
 
-> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,460 → ~940 words.**
-> Cut: the acceptance-criteria block (45% of the doc — bullets that restated their own citation); the
-> ~150-word "Quick Actions" section, which said only what the Overview already says; the User Stories table,
-> which restated the metric list. **Data Refresh** and **Future Enhancements** described the *same* deferred
-> decision three times — now stated once.
-> **Kept:** the deliberate exclusions (no quick-create, no floor chatter on the card, no auto-poll, no SSE for
-> KPIs), the QuickActions dead-code note, the UNION-on-read design note.
+> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634); as-built, verified
+> against the code at `db58ae8`. **2,460 → 1,533 words** (`wc -w`).
 >
-> **Corrections.** *(1) The `/activity` page's source list omitted **inventory** — `collectActivity` fetches
-> `inventory_transactions` under `ActivityType='inventory'` and has done since the locations work. Added.
-> (2) The refresh model was tagged "Planned — see #550"; **#550 is CLOSED** (the #332 audit's finished
-> checklist), so it is now an untracked intention.)*
+> **Cut:** the acceptance-criteria block (45% of the doc — bullets restating their own citation); the
+> ~150-word "Quick Actions" section, which said only what the Overview already says; the User Stories table;
+> display bullets restating the components. **Data Refresh** and **Future Enhancements** stated the *same*
+> deferred decision three times — now once. **Kept:** every deliberate exclusion (no quick-create, no floor
+> chatter on the card, no auto-poll, no SSE for KPIs), every withdrawn approach, the retired-metric keys, the
+> per-source caps, the UNION-on-read note. Above the 1,000-word aim because six verified facts were *added*.
+>
+> **Corrections.** *(1) The `/activity` source list omitted **inventory** (`collectActivity` fetches
+> `inventory_transactions`) and vendor-tagged outside-operation `sent`/`received`. (2) The refresh model was
+> "Planned — see #550"; **#550 is CLOSED** (2026-07-29), so it is an untracked intention. (3) Drill-down hrefs
+> lacked their `/dashboard/{companyId}` prefix. (4) Two code gaps were recorded nowhere: `getCount` not
+> filtering `deleted_at`, and metric errors collapsing to `0`.)*
 
 ## Overview
 

@@ -1,26 +1,37 @@
 # System Architecture
 
-> **Rewritten 2026-08-03 (#634), verified against the code the same day.
-> 3,424 → 3,874 words — it grew by 13%, and that is the honest number.** ~450 words
-> of stale or duplicated material came out; ~870 words of correction, citation and
-> previously-undocumented behaviour went in. **Cut:** §9 Environment Variables and
-> §10 Development Commands (CLAUDE.md owns both, and these copies said
-> `pip install -r requirements.txt` / `python index.py`, against the rule that
-> backend Python runs in the `jigged` conda env and never a per-repo venv); the
-> `app/`/`api/`/`supabase/` listings `ls` reproduces; §13, which duplicated §3 and
-> §7; prose restating the access layer. **§ numbers unchanged** — §8 and §16 are
-> cited by number from CLAUDE.md and five module docs. **Kept deliberately:** every
-> measured number, the withdrawn reasons in §6/§16, both open snapshot gaps in §15.
+> **Rewritten 2026-08-03 (#634), verified against the code the same day; adversarial
+> re-check the same day restored §9 (below).
+> 3,424 → ~4,300 words — it grew, and that is the honest number.** ~300 words of
+> stale or duplicated material came out; the rest of the delta is correction,
+> citation and previously-undocumented behaviour. **Cut:** §10 Development Commands
+> (CLAUDE.md owns it, and this copy said `pip install -r requirements.txt` /
+> `python index.py`, against the rule that backend Python runs in the `jigged` conda
+> env and never a per-repo venv); the `app/`/`api/`/`supabase/` listings `ls`
+> reproduces; §13, which duplicated §3 and §7; prose restating the access layer.
+> **§ numbers unchanged** — §8 and §16 are cited by number from CLAUDE.md and five
+> module docs. **Kept deliberately:** every measured number, the withdrawn reasons
+> in §6/§16, both open snapshot gaps in §15.
 >
-> **Nine corrections, marked inline:** `operation_types` listed live twice
-> (dropped for `work_centers`); `jobs.status` (no such column — three orthogonal
-> axes); an `owner` role (never in the CHECK); two wrong theme hexes;
-> `stripe_routes.py` absent; insights endpoints 4× overcounted; a `getCustomers()`
-> paginated pattern that does not exist; `supabase/schema.staging.sql` (deleted
-> with staging); a `shipments/` route "feature-flagged per tenant" (neither exists).
+> **§9 Environment Variables was cut in the first pass and has been put back**, its
+> stated reason ("CLAUDE.md owns it") being false: CLAUDE.md's Environment Variables
+> section was deleted the same day, and `ALLOWED_ORIGINS` and the backend
+> `SUPABASE_URL` were then written down nowhere in the repo — not in CLAUDE.md, not
+> in the local-dev runbook, not in `.env.local.example`. The restored §9 is the
+> corrected, current contract, not the 2026-04 copy.
+>
+> **Ten corrections, marked inline:** `operation_types` listed live twice (dropped
+> for `work_centers`); `jobs.status` (no such column — three orthogonal axes);
+> `quotes.converted_to_job_id` (no such column); an `owner` role (never in the
+> CHECK); two wrong theme hexes; `stripe_routes.py` absent; insights endpoints 4×
+> overcounted; a `getCustomers()` paginated pattern that does not exist;
+> `supabase/schema.staging.sql` (deleted with staging); a `shipments/` route
+> "feature-flagged per tenant" (neither exists).
 
 Multi-tenant data platform for small-scale precision manufacturing shops.
-Environment variables, dev/test commands and pre-PR validation: **[CLAUDE.md](../CLAUDE.md)**.
+Environment variables are §9; dev/test commands and pre-PR validation live in
+**[CLAUDE.md](../CLAUDE.md)** and
+**[docs/runbooks/local-dev-and-testing.md](runbooks/local-dev-and-testing.md)**.
 
 ---
 
@@ -275,8 +286,52 @@ factory + base/claude/openai/gemini + `model_config`; plus `email`,
 mapping) → **Validate** (conflict detection + preview) → **Execute** (batched
 natural-identity upsert).
 
-*(§9 Environment Variables and §10 Development Commands removed 2026-08-03 —
-CLAUDE.md owns both and these copies were stale.)*
+---
+
+### 9. Environment Variables
+
+**Nothing else in the repo states this contract.** CLAUDE.md's own Environment
+Variables section was removed the same day this doc was condensed;
+[`docs/runbooks/local-dev-and-testing.md`](runbooks/local-dev-and-testing.md) tells
+you to *copy* `.env.local` between worktrees but never says what is in it; and
+`.env.local.example` covers only the frontend keys plus the Stripe/QuickBooks
+blocks — it does **not** list `SUPABASE_URL`, `ALLOWED_ORIGINS` or any AI key. So
+this section is the only place the backend's required vars are written down.
+
+**Frontend (`.env.local`) — inlined at build time, so a change needs a rebuild:**
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=<url>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key>
+NEXT_PUBLIC_SUPABASE_S3_BUCKET=<bucket>        # file attachments
+NEXT_PUBLIC_API_URL=http://localhost:8000      # local dev only; unset in prod (same domain, §1)
+```
+
+Both `NEXT_PUBLIC_SUPABASE_*` are **required, with no fallback**:
+[`lib/supabase.ts`](../lib/supabase.ts) creates the client at module scope, so a
+deployment built without them throws during module evaluation and *every* route
+renders "Something Went Wrong" — it presents as a total outage, not a broken page.
+
+**Backend (`api/`) — server-only, never `NEXT_PUBLIC_*`:**
+
+```bash
+SUPABASE_URL=<url>
+SUPABASE_SECRET_KEY=<service-role key>   # falls back to SUPABASE_SERVICE_ROLE_KEY (api/index.py:66)
+ALLOWED_ORIGINS=<comma-separated CORS origins>   # defaults to http://localhost:3000
+ANTHROPIC_API_KEY=<key>                  # + OPENAI_API_KEY / GOOGLE_AI_API_KEY per provider
+AI_READONLY_DATABASE_URL=<url>           # read-only connection for the insights SQL sandbox
+```
+
+Feature-scoped groups, each owned by its module doc rather than repeated here:
+`STRIPE_RESTRICTED_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` /
+`STRIPE_FOUNDING_PRICE_ID` ([modules/billing.md](modules/billing.md); note §8.4 —
+the restricted key deliberately has **no** fallback to `STRIPE_SECRET_KEY`),
+`QUICKBOOKS_*` + `APP_BASE_URL`, `RESEND_API_KEY` / `QUOTES_FROM_EMAIL`, and
+`SENTRY_DSN` ([observability.md](observability.md)).
+
+*(§10 Development Commands was removed 2026-08-03: CLAUDE.md genuinely does own it,
+and this copy said `pip install -r requirements.txt` / `python index.py` against the
+rule that backend Python runs in the `jigged` conda env and never a per-repo venv.)*
 
 ---
 

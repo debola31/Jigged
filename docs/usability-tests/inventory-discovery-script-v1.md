@@ -1,11 +1,20 @@
 # Inventory Discovery — Remote Script v1
 
-> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 1,512 words**
-> (`wc -w`).
-> This is a **live instrument**, not a record. [`inventory.md`](../modules/inventory.md) §10 specifies the
-> trim — *"vocabulary, bar rack, scanning, never a gate"* — so the probes its §9 already answers are gone,
-> listed once below so nobody re-adds them. The companion `usability-test-script-v1.md` was a spent one-off
-> and was deleted in the same pass.
+> **Trimmed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634): **2,397 → 1,682 words**
+> (`wc -w`) — a 30% cut, most of it spent back on the correction below. This is a **live instrument**, not a record. [`inventory.md`](../modules/inventory.md) §10
+> specifies the trim — *"vocabulary, bar rack, scanning, never a gate"* — so the probes its §9 already answers
+> are gone, listed once below so nobody re-adds them. The companion `usability-test-script-v1.md` was a spent
+> one-off and was deleted in the same pass.
+>
+> **Correction — Part 3 could not have been run as written.** *(It told the facilitator to screen-share the
+> storage-type palette at `…/inventory/locations` → "Build visually" → step 1 and show "the seven cards".
+> There is no such screen. `STORAGE_TYPES` **had 10 entries, not seven**, and it was
+> **unreachable for its entire life** — the builder computes `subdividing = parentId !== null` and its only
+> caller always passes a parent, so the top-level palette never rendered once. Both palettes were then deleted
+> outright with the drawn board (commit `db58ae8`); see the "What used to be here" comment in
+> [`storageTypes.tsx`](../../components/inventory/locations/builder/storageTypes.tsx) and
+> [`inventory.md`](../modules/inventory.md) §5.5. Part 3 is now a paper card sort, which is what it always
+> effectively was.)*
 >
 > **This session gates nothing.** No Phase 1–3 item waits on it. Run it when Shane or Johnny has 25 minutes.
 
@@ -15,7 +24,7 @@ a **pre-call photo request** and a **guided camera walkthrough** where they carr
 up in advance.
 **Participants:** Shane (owner) and/or Johnny (quoter), Contour Tool & Machine.
 **Facilitator:** ______________ **Date:** ______________
-**Plan:** ~25 min — 10 walkthrough, 10 probes, 5 cards. *(The untrimmed v1 was 45: 15 / 25 / 5.)*
+**Plan:** ~25 min — 10 walkthrough, 10 probes, 5 card sort. *(The untrimmed v1 was 45: 15 / 25 / 5.)*
 
 ## Already answered — do not re-ask
 
@@ -43,9 +52,8 @@ worth running — remote discovery without artefacts is just an interview.
 Also ask **"can you walk around with your phone during the call, or should we stay at the desk?"** and have
 both versions of Part 1 ready.
 
-- [ ] **Storage-type palette** open to screen-share: `/dashboard/{companyId}/inventory/locations` → **Build
-      visually** → step 1 only, creating nothing. Confirm `inventory_locations` is enabled for that company or
-      the palette will not load. Save screenshots of the seven cards as a fallback.
+- [ ] **The ten storage-type words written on ten cards** (or ten lines in a shared doc) — see Part 3. There
+      is no palette screen to share; do not go looking for one.
 - [ ] **Ask permission to record.** On a remote call the recording *is* your field notes — you cannot scribble
       and drive at once.
 
@@ -65,7 +73,7 @@ outranks anything in our palette.**
 |---|---|
 | **Their name for each place** | "The bar rack", "the shelf by the saw", "out back". Names that are spatial and informal mean a code scheme like `CAB1-R03-L` will never be used |
 | **Is anything labelled today?** | Existing labels = they already believe in this. None = we are asking for a new habit |
-| **A bar rack — is there one?** | The defining storage object in a machine shop, and our palette has no card for it. Their 22 exported places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) hold none, so it is **weakly refuted** — but they buy in feet. Shipped without the card; reasoning is in a `storageTypes.tsx` comment |
+| **A bar rack — is there one?** | **Withdrawn:** *"a bar rack is the defining storage object in a machine shop"* — wrong because Contour's 22 genuine exported places (`STOCK`, `SHELF`, `YARD`, `CABINET 3-10`) contain none ([`inventory.md`](../modules/inventory.md) §5.5, §9). Ask anyway, once, because they buy in feet: it is the last unsettled bit of vocabulary, and the kind stays out until a pilot shop asks for it |
 | **Floor / corner / outside?** | The palette has no card for either. Ask directly — this is exactly what a camera misses |
 | **Where do drops and offcuts go?** | J8. Dedicated remnant rack vs "back on the shelf" vs the scrap bin |
 
@@ -96,18 +104,19 @@ is in it, what do you call it?"* Weaker; **record which mode you used**, it chan
 ## Part 3 — Storage-type card check (5 min)
 
 PR #419 promised to *"usability-test the storage-type icon set with Johnny/Shane and lock it"* and never ran.
-Screen-share the real palette (fall back to the saved screenshots). Ask them to **read the cards aloud** — on
-a shared screen their narration is the only signal you get about which cards register.
+**A paper card sort, not a screen** — the palette that used to hold these was deleted (see the correction at
+the top), so the vocabulary is now all there is to test, which is the only part that mattered.
 
-**Forward:** show the seven cards — Cabinet, Shelving unit, Pallet rack, Drawer unit, Single shelf, Bins,
-Aisle / zone. For each: *"Do you have one of these? What do you call it?"*
+**Forward:** read out the ten kinds — Cabinet, Shelving unit, Pallet rack, Drawer unit, Single shelf, Bins,
+Aisle / zone, plus the three flat ones added because 118 of Contour's 121 legacy locations were flat: **floor
+space, outside / yard, bench**. For each: *"Do you have one of these? What do you call it?"*
 
-**Reverse:** share **their own pre-call photos** back, one at a time: *"which of these cards is this?"* Using
-their photos rather than your description is what makes this pass work remotely — it removes your vocabulary
-from the question entirely. Record every photo with **no good card**; watch for the bar rack, *floor*,
-*outside* and *under the bench*.
+**Reverse:** share **their own pre-call photos** back, one at a time: *"which of these words is this?"* Using
+their photos rather than your description is what makes this work remotely — it removes your vocabulary from
+the question entirely. Record every photo with **no good word**; watch for *floor*, *outside* and *under the
+bench* landing on the right kinds, and for anything the ten cannot name.
 
-**Output:** a keep / cut / rename list plus the missing types.
+**Output:** a keep / cut / rename list plus the missing kinds.
 
 ## Recording findings
 

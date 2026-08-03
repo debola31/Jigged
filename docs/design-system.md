@@ -20,7 +20,9 @@
 > marketing palette, voice → [brand-guide.md](brand-guide.md).
 
 Material-UI **v7.3.6** *(this doc previously said "MUI v5+")*, Material Design 3, single dark theme,
-no light/dark toggle.
+no light/dark toggle. The dark theme is the one visual decision carrying direct user validation — a
+manufacturing user's verdict on it was *"pretty fucking awesome"* — which is why there is no toggle
+and no second theme to keep in sync.
 
 ---
 
@@ -33,7 +35,8 @@ no light/dark toggle.
 **Withdrawn:** the steel-blue-centre canvas gradient (`#4682B4` at 50%) — wrong because white body
 text directly on the steel measured **4.11:1** app-wide. The deep-indigo base restores **15:1+**.
 
-Two layers, both `backgroundAttachment: fixed`:
+Two layers, both `backgroundAttachment: fixed` — the canvas stays put rather than repainting on every
+scroll frame:
 
 | Layer | Where | What |
 |---|---|---|
@@ -48,6 +51,10 @@ Constraints, each preventing a specific failure:
 - **The lightest point stays under the contrast threshold.** Grey secondary labels on bare canvas
   keep ~**5.9:1**; the top-right bloom tops out around `#426289` (white ≈ **6.4:1**), and that corner
   carries white text/icons only.
+- **The bar is set by the room, not the desk.** Shop floors run **500–1000 lux** of fluorescent
+  light, and the operator surface is a phone held under it — contrast that merely passes in a dim
+  office fails in the place the app is actually read. This is why the thresholds above are treated
+  as hard limits rather than WCAG minimums to squeak past.
 - **Deliberately 2D** — no 3D scene, no looping video behind live data; both read as distracting.
   The marketing hero keeps its own video. Cost evidence against real 3D:
   [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)
@@ -311,6 +318,11 @@ to shrink below the **48px** floor, make the whole row/tile one tap target and g
 action. The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
 5-row × 2-side cabinet into a ~**500px** tile.
 
+**Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only
+because the alternative was losing the depiction entirely. Reach for a sheet when the row's *value is
+what it depicts*, not merely when a row has several actions. It also matches the operator bin view's
+existing drill-down, so the two surfaces read the same way.
+
 | Layer | Role |
 |---|---|
 | Row / tile | One tap target, one accessible name carrying the summary. Mouse affordance only — the name stays a real `<button>`, so the row is keyboard- and screen-reader-reachable without pretending a `<tr>` is a control. |
@@ -371,7 +383,7 @@ system stack as fallback, `textTransform: 'none'` on buttons.
 | Deep Indigo | `#111439` | Background base; dialog paper |
 | Raised Indigo | `#1a1f4a` | Menus, popovers, autocomplete paper |
 | Neutral Gray (`secondary.main`) | `#B0B3B8` | Disabled, subtle UI |
-| Muted Label Gray (`text.secondary`) | `#C8CCD4` | Secondary text / `body2`. **Lightened from `#B0B3B8`**, which lost contrast on the lighter end of the card surface — labels like "Customer PO" were hard to read. |
+| Muted Label Gray (`text.secondary`) | `#C8CCD4` | Secondary text / `body2`. **Lightened from `#B0B3B8`**, which lost contrast on the lighter end of the card surface — labels like "Customer PO" were hard to read. Holds **≥4.5:1** across the whole card surface. |
 
 ### Status Colors
 
@@ -391,13 +403,17 @@ it describes: [`types/job.ts`](../types/job.ts) → `PRODUCTION_STATUS_CONFIG` (
 ## Detail-page layout patterns
 
 CLAUDE.md covers list, create/edit and import pages. This covers **detail pages** — one record of one
-entity. Three patterns; pick the one matching the entity, don't mix. As-built, verified 2026-08-03:
+entity. Three patterns; don't mix them. **Pick by what the user came to do, not by entity size:** a
+*reference* entity is opened to read settings and see relations, not to drive anything; a
+*workflow / document* entity is opened to act on a process (ship, cancel, send PDF) or to step through
+a child collection (operations, line items); a *workspace* is opened to keep editing the record
+itself. As-built, verified 2026-08-03:
 
 | Pattern | Entities | Shape |
 |---|---|---|
 | **A — Reference entity** | Customers, Vendors | Back + Edit/Delete row → **title card** (name + identity chips inline on one row) → `<Grid container>` of two `size={{ xs: 12, md: 6 }}` cards, both `sx={{ height: '100%' }}` so their bottoms align → optional full-width footer. |
 | **B — Workflow / document entity** | Jobs, Quotes | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
-| **C — Maturity-adaptive workspace** | Parts | Sticky identity header + URL-addressable tabs (`?tab=`), edited in place with auto-save on blur; no Edit mode, no `/parts/{id}/edit` route. Owned by [`modules/parts.md` §3](modules/parts.md). |
+| **C — Maturity-adaptive workspace** | Parts | Sticky identity header + URL-addressable tabs (`?tab=`), edited in place with auto-save on blur; no Edit mode, no `/parts/{id}/edit` route. Owned by [`modules/parts.md` § "Part detail workspace"](modules/parts.md). |
 
 *(Corrections 2026-08-03: this doc put **Parts** and **Work Centers** under Pattern A. Parts became
 Pattern C; Work Centers stacks full-width cards with no `md=6` split, as does the Quotes body —
@@ -408,8 +424,10 @@ PDFs and in the scanner. Real right-hand slots: Jobs → `JobBillingShippingCard
 contacts, Vendors → address.)*
 
 **Deviation is fine for** content-driven branching (Parts' stocked vs made-to-order) and document
-chrome (Quotes' Email / View PDF). New detail pages default to one of the three; if none fits, that's
-a signal to push back on the content shape — not to invent a fourth.
+chrome (Quotes' Email / View PDF). **Known gap:** Work Centers fits none of the three — it is a
+reference entity whose right-hand slot never had content, so Pattern A collapsed to two stacked
+full-width cards. New detail pages default to one of the three; if none fits, that's a signal to push
+back on the content shape — not to invent a fourth.
 
 ---
 

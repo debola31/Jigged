@@ -245,8 +245,8 @@ exists yet. The same rule is encoded in the NL→SQL guidance in `schema_context
 
 ## Acceptance Criteria
 
-Given/When/Then with a verification clause — the test file and `describe`, or `automation-pending`
-against [#367](https://github.com/debola31/Jigged/issues/367).
+Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
+`automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).
 
 **The safety boundary**
 

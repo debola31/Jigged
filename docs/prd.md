@@ -246,8 +246,8 @@ quality risk here, not just a comfort one.
 The entity-by-entity data model **lives in the module specs** — [jobs.md](modules/jobs.md),
 [quotes.md](modules/quotes.md), [parts.md](modules/parts.md),
 [inventory.md](modules/inventory.md), [customers.md](modules/customers.md) and their siblings in
-[docs/modules/](modules/) — which are kept against the schema. `supabase/schema.prod.sql` is the
-generated snapshot of what actually exists.
+[docs/modules/](modules/) — which are kept against the schema. `supabase/migrations/` is the only
+record of what actually exists; there is deliberately no cached prod snapshot.
 
 *(This section used to duplicate that model entity by entity, and drifted: it modelled
 `operator_sessions`, `job_templates` and an `operation type` table, all dropped, plus a

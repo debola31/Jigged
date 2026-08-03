@@ -1,35 +1,66 @@
 # Jigged Documentation
 
-Welcome to the Jigged documentation. Jigged is a data platform for small precision manufacturing shops.
+Jigged is a data platform for small precision manufacturing shops.
 
-## Contents
+**Start with [CLAUDE.md](../CLAUDE.md)** — it carries the rules that bind every change (API
+architecture, migrations, grants, the billing write-gate, the design system, and the doc-writing
+standard). This tree carries the detail.
 
-### Product Documentation
-- [Product Requirements Document](prd.md) - Full PRD with functional requirements
-- [System Architecture](architecture.md) - Technical architecture overview
-- [Design System](design-system.md) - UI/UX design guidelines and MUI theme
+## Product
 
-### Module Specifications
-See [modules/](modules/) for detailed specifications:
+| Doc | What it is |
+|---|---|
+| [prd.md](prd.md) | Functional requirements, each with a **verified build status**; the flows; and §4.3, the shop-floor capture model that other docs treat as canon |
+| [architecture.md](architecture.md) | System architecture — the most-linked doc here; §8 (API standard) and §16 (soft-delete) are cited by number |
+| [design-system.md](design-system.md) | The visual spec: canvas, glass cards, buttons, scales, detail-page patterns |
+| [interaction-standards.md](interaction-standards.md) | Normative interaction rules, **machine-enforced** by `scripts/interactionStandardsCheck.ts` |
+| [observability.md](observability.md) | Sentry / PostHog / Vercel — the runbook and the traps |
+| [brand-guide.md](brand-guide.md) | Palette, logo, and the only writing-voice guidance in the repo |
+
+## Modules
+
+Detailed specs live in [modules/](modules/).
 
 > **Journey specs are not a separate tier.** Each module doc carries its own journeys beside its
-> current state — see [modules/inventory.md](modules/inventory.md) and
-> [modules/operator-view.md](modules/operator-view.md). The two-file split was tried twice
+> current state — see [inventory.md](modules/inventory.md) and
+> [operator-view.md](modules/operator-view.md). The two-file split was tried twice
 > (`docs/inventory-flow.md`, `docs/operator-paperless-flow.md`) and **both times the journey doc
-> drifted from its module doc** — the second one ended up contradicting itself about which
-> journeys had shipped. Keep them in one file.
-- [Customers](modules/customers.md)
-- [Parts](modules/parts.md)
-- [Quotes](modules/quotes.md)
-- [Jobs](modules/jobs.md)
-- [Routings](modules/routings.md)
-- [Work Centers](modules/work-centers.md) — unifies internal + external operations (supersedes the old Operations module)
-- [Vendors](modules/vendors.md)
-- [Inventory](modules/inventory.md)
-- [Shipments](modules/shipments.md) — feature-flagged per tenant
-- [Dashboard](modules/dashboard.md)
-- [Operator View](modules/operator-view.md) - Shop-floor app: screens, quantity capture, the notes read-back loop, and the operator journeys
-- [Invitation System](modules/invitation-system.md)
+> drifted from its module doc** — the second ended up contradicting itself about which journeys
+> had shipped. Keep them in one file.
 
-### Testing
-See [testing/](testing/) for testing strategy and guides.
+**Selling and ordering:** [customers.md](modules/customers.md) ·
+[quotes.md](modules/quotes.md) · [invoicing.md](modules/invoicing.md) ·
+[billing.md](modules/billing.md)
+
+**Making:** [parts.md](modules/parts.md) · [routings.md](modules/routings.md) ·
+[jobs.md](modules/jobs.md) ·
+[work-centers.md](modules/work-centers.md) — owns the station = work-centre definition and the
+`operation_types` terminology history ·
+[vendors.md](modules/vendors.md) · [shipments.md](modules/shipments.md)
+
+**Shop floor:** [operator-view.md](modules/operator-view.md) — screens, quantity capture, the
+notes read-back loop, and the operator journeys ·
+[machine-maintenance.md](modules/machine-maintenance.md) — flag-gated pilot with a written kill
+criterion · [inventory.md](modules/inventory.md)
+
+**Office and platform:** [dashboard.md](modules/dashboard.md) ·
+[ai-insights.md](modules/ai-insights.md) — its table allow/denylist is a security boundary ·
+[data-import.md](modules/data-import.md) · [demo-mode.md](modules/demo-mode.md) ·
+[invitation-system.md](modules/invitation-system.md)
+
+## Testing and runbooks
+
+- [testing/README.md](testing/README.md) — where each layer lives, the invariant guards, the
+  local-Supabase JWT fixtures, conventions and known holes
+- [runbooks/local-dev-and-testing.md](runbooks/local-dev-and-testing.md) — E2E setup, running from
+  a git worktree, Vercel-preview verification, and the E2E gotchas
+- [usability-tests/](usability-tests/) — research instruments. Findings are deliberately
+  **not** committed (`.gitignore`: `*findings*`), because they hold session data
+
+## How these are written
+
+The doc-writing standard lives in [CLAUDE.md](../CLAUDE.md#writing-docs-the-concision-standard):
+most information in the fewest words, losing none of it, on the principle that **a claim no build
+can falsify will rot**. Exemplars: [inventory.md](modules/inventory.md) for a journey/decision doc,
+[customers.md](modules/customers.md) for a reference doc, [billing.md](modules/billing.md) for an
+invariant.

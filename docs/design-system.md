@@ -1,175 +1,104 @@
 # Design System
 
-## Overview
+> **Condensed 2026-08-03 · 4,546 → 4,079 words (`wc -w`).** Cut: ~1,400 words restating CLAUDE.md
+> (principles 1–5, component-usage rules, list/create-edit/import layouts, mobile requirements,
+> WCAG); the ~450-word theme-provider example and the `WorkOrderCard` sample; pasted
+> `<Card>`/`<TextField>` snippets; the unused MUI 0–24 elevation ladder; a Do's/Don'ts list that
+> repeated CLAUDE.md. Roughly **950 words of new, code-verified correction** went back in, which is
+> why the net cut is modest — the pre-correction equivalent is ~3,130. Kept deliberately: every
+> withdrawn argument, every measured value, every citation.
+>
+> **Nine corrections, marked inline.** Largest: the steel-blue-centre gradient this doc called
+> "CRITICAL … must be present on all pages" was removed app-wide for a 4.11:1 contrast failure; the
+> drawn storage board behind "tile-and-sheet" was deleted in `db58ae8`; and the pasted `statusColors`
+> map named nine job statuses that do not exist.
+>
+> **Values live in [`lib/theme.ts`](../lib/theme.ts).** This file holds rationale and the decisions
+> no token can express. Delegated: principles / component usage / list-create-import layouts /
+> mobile / WCAG → [CLAUDE.md](../CLAUDE.md#design-system-jigged-manufacturing-data-platform-material-ui);
+> destructive actions + saving → [interaction-standards.md](interaction-standards.md); logo,
+> marketing palette, voice → [brand-guide.md](brand-guide.md).
 
-Jigged uses Material-UI (MUI) v5+ as the component library, following Material Design 3 principles with a **single dark gradient theme** that tested exceptionally well with manufacturing users ("pretty fucking awesome" feedback).
-
-**Theme Philosophy:** Static, professional dark gradient theme optimized for manufacturing environments. No light/dark mode toggle - one polished theme that works everywhere.
-
-> **SOURCE OF TRUTH:** All design values are defined in `lib/theme.ts`. This document describes principles and rationale. For exact values, always refer to the theme file.
-
----
-
-## Brand Identity
-
-### The Gradient (Core Brand Element)
-
-CRITICAL: This must be a LINEAR 3-stop gradient with Steel Blue accent.
-
-The deep gradient background is Jigged's visual signature and must be present on all pages:
-
-```css
-/* Linear 3-stop gradient with Steel Blue accent */
-background: linear-gradient(135deg, #111439 0%, #4682B4 50%, #111439 100%);
-background-attachment: fixed;
-```
-
-**Gradient Specifications:**
-
-- **Type:** LINEAR 3-stop gradient (135 degree angle)
-
-- **Color 1:** Deep Indigo `#111439` at 0% - starts at top-left
-
-- **Color 2:** Steel Blue `#4682B4` at 50% - accent in center
-
-- **Color 3:** Deep Indigo `#111439` at 100% - ends at bottom-right
-
-- **Attachment:** Fixed - gradient stays in place when scrolling
-
-**Why these EXACT colors:**
-
-- `#111439` - Deep indigo provides rich, dark foundation
-
-- `#4682B4` - Steel Blue accent creates industrial, professional feel
-
-- 3-stop creates centered spotlight effect with symmetrical fade
-
-- Matches implementation in `lib/theme.ts`
-
-**Visual Effect:**
-
-The linear 3-stop gradient creates a dramatic spotlight effect with Steel Blue (#4682B4) at the center, fading to Deep Indigo (#111439) at both edges. This creates depth, dimension, and a premium industrial aesthetic - like a precision-machined surface under focused lighting.
-
-**Common Mistake - DO NOT USE MUTED COLORS:**
-
-```css
-/* ✅ CORRECT - Linear 3-stop gradient with Steel Blue accent */
-background: linear-gradient(135deg, #111439 0%, #4682B4 50%, #111439 100%);
-background-attachment: fixed;
-
-/* Alternative: Radial gradient (not currently used) */
-/* background: radial-gradient(circle at top left, #0a0d28 0%, #5a96c9 100%); */
-```
-
-### Supporting Brand Colors
-
-See `lib/theme.ts` for exact values. Primary colors:
-
-- **Steel Blue (Primary):** `#4682B4` - Primary brand color for CTAs, links, accents
-
-- **Light Blue Accent:** `#6FA3D8` - Hover states, highlights (primary.light)
-
-- **Dark Blue Accent:** `#3A6B94` - Pressed states (primary.dark)
-
-- **Deep Indigo:** `#111439` - Foundation color, background base
-
-- **Neutral Gray:** `#B0B3B8` - Disabled states, subtle UI elements
-- **Muted Label Gray:** `#C8CCD4` - Secondary text (`text.secondary` / `body2`); lightened from Neutral Gray so labels stay legible across the lighter end of the card gradient
-
-### Glass Morphism Cards (Critical Styling)
-
-**Principle:** Cards should feel substantial and grounded while retaining subtle depth.
-
-See `lib/theme.ts` for exact values. The key design decisions:
-
-- **Opacity:** Substantial feel for industrial aesthetic with subtle gradient visibility
-- **Blur:** Strong frosted glass effect for premium feel
-- **Border:** Subtle white border defines card edges against gradient
-
-**Visual Effect:**
-
-Cards should feel solid and professional. This achieves "substantial, not playful" per the design principles while maintaining visual polish. Cards use MUI elevation for shadows combined with glassmorphism (backdrop blur + transparency).
-
-**Test:**
-
-Cards should feel substantial and professional. The gradient should be subtly visible, not prominently showing through.
-
-**Usage:**
-
-```typescript
-// Just use MUI Card - theme handles styling automatically
-<Card elevation={2}>
-  <CardContent>
-    {/* Your content */}
-  </CardContent>
-</Card>
-```
+Material-UI **v7.3.6** *(this doc previously said "MUI v5+")*, Material Design 3, single dark theme,
+no light/dark toggle. The dark theme is the one visual decision carrying direct user validation — a
+manufacturing user's verdict on it was *"pretty fucking awesome"* — which is why there is no toggle
+and no second theme to keep in sync.
 
 ---
 
-## MUI Theme Configuration
+## The app canvas
 
-### Single Dark Theme
+*(Corrected 2026-08-03. This doc specified `linear-gradient(135deg, #111439 0%, #4682B4 50%, #111439
+100%)` as "CRITICAL", "the visual signature", "must be present on all pages", and claimed it matched
+`lib/theme.ts`. It was replaced app-wide.)*
 
-The complete theme configuration is in `lib/theme.ts`. Key aspects:
+**Withdrawn:** the steel-blue-centre canvas gradient (`#4682B4` at 50%) — wrong because white body
+text directly on the steel measured **4.11:1** app-wide. The deep-indigo base restores **15:1+**.
 
-- **Palette:** Dark mode with Steel Blue primary, Neutral Gray secondary
-- **Typography:** System font stack, no uppercase transforms
-- **Components:** Card glassmorphism, 48px touch targets, custom button variants
+Two layers, both `backgroundAttachment: fixed` — the canvas stays put rather than repainting on every
+scroll frame:
 
-**Usage:**
+| Layer | Where | What |
+|---|---|---|
+| **Global substrate** | [`ThemeProvider.tsx`](../components/providers/ThemeProvider.tsx) | `#111439` + `linear-gradient(135deg, #111439 0%, #1a1f4a 50%, #111439 100%)` + one steel `radial-gradient` whose centre is pushed off-screen above the fold. Marketing pages keep this bare. |
+| **Workspace canvas** | [`AppAmbientBackdrop.tsx`](../components/layout/AppAmbientBackdrop.tsx) — `fixed`, `aria-hidden`, `pointer-events: none` | A lit steel-indigo `linear-gradient(158deg, …)` + a steel aurora off the top-right and a teal one off the bottom-left. Dashboard and operator shells only. |
 
-```typescript
-import jiggedTheme from '@/lib/theme';
-import { ThemeProvider } from '@mui/material/styles';
+Constraints, each preventing a specific failure:
 
-<ThemeProvider theme={jiggedTheme}>
-  {/* Your app */}
-</ThemeProvider>
-```
+- **Auroras fade to zero-alpha of their own colour, never to `transparent`** — `transparent` is
+  transparent *black*, so the interpolation bands a lighter grey mid-fade. Exactly the bug the
+  rewrite fixed.
+- **The lightest point stays under the contrast threshold.** Grey secondary labels on bare canvas
+  keep ~**5.9:1**; the top-right bloom tops out around `#426289` (white ≈ **6.4:1**), and that corner
+  carries white text/icons only.
+- **The bar is set by the room, not the desk.** Shop floors run **500–1000 lux** of fluorescent
+  light and the operator surface is a phone held under it, so contrast that merely passes in a dim
+  office fails where the app is actually read. Treat the numbers above as hard limits, not WCAG
+  minimums to squeak past.
+- **Deliberately 2D** — no 3D scene, no looping video behind live data; both read as distracting.
+  The marketing hero keeps its own video. Cost evidence against real 3D:
+  [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)
+  (#421 spike).
+- **Opaque cards are the readability firewall** — what lets the canvas be rich at all.
 
-See `lib/theme.ts` for the complete configuration with inline documentation.
+The **brand** gradient is a separate artifact:
+[`marketingStyles.ts`](../components/marketing/marketingStyles.ts) `BRAND_GRADIENT`
+(amber → steel → teal), [brand-guide.md §3](brand-guide.md). Gradient *text* is for large display
+type only — a left-to-right sweep passes through its steel stop (≈4.3:1) and fails small-text
+contrast, so eyebrows use solid `EYEBROW_COLOR` `#7FB3E0` (8:1 on indigo).
+
+**Known leftover:** [the operator login page](../app/operator/[companyId]/login/page.tsx) still
+paints the retired steel-centre gradient — not a contrast failure (its text sits on an opaque
+`rgba(17,20,57,0.95)` Paper), but the one surface out of step.
+
+## Glass cards
+
+`MuiCard` defaults to `elevation={2}`; the theme does the rest. Just write `<Card>`.
+
+| Token | Value | Why |
+|---|---|---|
+| Background | `rgba(32, 38, 82, 0.78)` | A **deep** indigo panel — a pale surface on the lit canvas goes washed-out/muddy. White text sits ~**13:1**. |
+| Blur | `blur(15px)` (+ `WebkitBackdropFilter`) | Frosted, so the lit canvas glows through faintly. |
+| Border | `1px solid rgba(255,255,255,0.20)` | The hairline does edge definition, not a lightness step. **0.18 nearly vanished** on the dark canvas; **0.28**, crisp on a small card, read as a bright frame around full-width tables (Jobs/Parts/Quotes wrap an AG Grid in a Card, so that Card edge *is* the table's outer border). AG Grid's internal row lines keep a fainter **0.12** ([`agGridTheme.ts`](../lib/agGridTheme.ts)). |
+
+*(The `lib/theme.ts` header comment still quotes the pre-rewrite "Card Opacity (0.55)" / "border rgba
+white 0.15"; the `MuiCard` block below it is authoritative.)*
+
+Elevations in use: **0, 1, 2** (default), **3** (auth/emphasis), **4** (`/admin` AppBar). 5–24 unused;
+dialogs and menus get solid `#111439` / `#1a1f4a` overrides instead.
 
 ---
 
-## Design Principles
+## Buttons
 
-### 1. Professional, Not Trendy
+**Every button answers two questions: what rank is it (→ `variant`), and is it destructive
+(→ `color`)?** Those are the only two axes. Do **not** reach for `success` / `warning` / `info`
+*fills* to brighten an ordinary action — those are status-chip colours (see
+[Status Colors](#status-colors)); on an action button they mislead. A green button reads as *already
+done* — exactly the trap we hit with green "Complete" / "Mark Received" buttons.
 
-Must appeal to 50-60 year old shop owners. Avoid flashy animations or overly modern aesthetics. Focus on clarity and function.
-
-### 2. Industrial Aesthetic
-
-Evoke machined metal, precision manufacturing. The Steel Blue gradient suggests depth and professionalism. Colors should feel substantial, not playful.
-
-### 3. Readable in Bright Environments
-
-Shop floors have bright fluorescent lighting (500-1000 lux). White text on dark gradient provides excellent contrast in these conditions.
-
-### 4. No Theme Toggle
-
-Single static theme. No light/dark mode switching. One polished, professional theme that works everywhere.
-
-### 5. Material Design Compliance
-
-Follow Material Design 3 guidelines for consistency, accessibility, and familiar interaction patterns.
-
----
-
-## Component Usage Guidelines
-
-### Buttons
-
-**Every button answers two questions: what rank is it (→ `variant`), and is it
-destructive (→ `color`)?** Those are the only two axes. Do **not** reach for
-`success` / `warning` / `info` *fills* to brighten an ordinary action — those are
-status-chip colors (see [Status Colors](#status-colors)); on an action button they
-mislead. A green button reads as *already done* — exactly the trap we hit with green
-"Complete" / "Mark Received" buttons.
-
-**Rank → variant.** `color` is almost always **omitted** — the theme default is
-`primary` (steel blue). `size="large"` is *not* needed (the theme already floors
-every button at a 48px touch target).
+`color` is almost always **omitted** (theme default `primary`). `size="large"` is never needed — the
+theme floors every button at a **48px** touch target.
 
 | Rank | Style | Use for |
 |---|---|---|
@@ -177,696 +106,333 @@ every button at a 48px touch target).
 | **Secondary** | `variant="outlined"` (white-on-transparent) | Alternate / less-committing actions: Import, Edit, empty-state CTAs |
 | **Tertiary / dismiss** | `variant="text"` | Cancel, Back, Close, Skip, Undo |
 
-```tsx
-<Button variant="contained">Create job</Button>   {/* primary — blue */}
-<Button variant="outlined">Import</Button>          {/* secondary */}
-<Button variant="text">Cancel</Button>             {/* dismiss */}
-```
+**Destructive → `color="error"` (red), always.** Delete / Remove-record / Cancel-job / Void /
+Disconnect / Logout: `contained error` for the final confirm, `outlined` / `text error` at rest. Use
+[`DeleteIconButton`](../components/common/DeleteIconButton.tsx) for the trash affordance —
+[interaction-standards.md §1](interaction-standards.md#1-destructive-actions-delete--remove).
 
-**Destructive → `color="error"` (red), always.** Any Delete / Remove / Cancel-job /
-Void / Disconnect / Logout is red — `contained error` for the final confirm,
-`outlined` / `text error` for the at-rest trigger. This is the one button rule we
-**enforce**: use `components/common/DeleteIconButton` for the trash affordance,
-guarded by a CI source-scan (see [interaction-standards.md §1](interaction-standards.md)).
+**Theme overrides that keep the ranks legible on the canvas** (`MuiButton`): `outlined` is
+transparent with a **35%** white border and **85%** white text, hover brightening the border to
+**60%**; `text` uses `primary.light` `#6FA3D8` with underline-on-hover, a lighter blue that holds
+against both the dark and steel-lit portions. Consequence: **outlined and text buttons are re-coloured
+by the theme regardless of `color`** — which is why the sanctioned outlined exceptions below pass the
+CI scan automatically.
 
-**`success` / `warning` / `info` are for status chips, not action buttons.** The
-only sanctioned exceptions:
+**Grouped secondary actions share one variant** — never an `outlined` beside a `text`. Rank within
+the set by order, weight, an icon, or a count, not by giving one a border and the other none.
 
-- **Send-to-vendor waypoint** — "Mark Sent Out" is `outlined color="warning"`: a
-  reversible "parts left the shop" step, deliberately amber, paired with a blue
-  primary "Mark Received."
-- ~~**Inventory verbs** — **Remove** is `color="error"` (subtractive)~~ — **revised
-  2026-07-29: no stock verb is red.** Add / Remove / Move / Adjust are all `variant`-only:
-  one is `contained`, the rest `outlined`, none carries a `color`.
+### Sanctioned semantic-colour exceptions
 
-  The old rule coloured on the wrong axis. The headline question above is *"is it
-  **destructive**?"*; the exception justified red with *"(subtractive)"*. Those are different
-  things — subtractive describes the arithmetic, destructive describes the risk. Removing stock
-  is reversible and *writes* an append-only ledger row rather than destroying one. And because
-  red is simultaneously our enforced Delete colour, painting the most-pressed button in the
-  module red spent the danger signal on a routine act — the same way an alert that fires on
-  every row stops being an alert.
-
-  **Order is fixed; weight varies.** The four always appear in the same sequence —
-  **Add, Remove, Move, Adjust** — on every surface. Which one is `contained` is decided by
-  frequency, per surface, and is *not* a property of the verb:
-
-  | Surface | Primary | Why |
-  |---|---|---|
-  | Operator bin view | **Remove** | Stock arrives in bulk once (really receiving's job, J6) and leaves in small amounts on every job, all shift |
-  | Admin part page | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it |
-
-  **Do not reorder to emphasise.** Consistency governs *recognition* — where a control is, what
-  it's called, what it does — and those must not move. Emphasis governs *intent*, which is
-  legitimately different for an operator at a shelf and an owner at a desk. Splitting the two
-  serves both users: stable position is what a daily user's hand learns, and the filled button
-  is what a first-timer's eye finds. Moving the control to emphasise it would break the first
-  to serve the second.
-
-  Red still means destructive on these pages: the part's Delete (archive) affordance.
-
-- **Fill state on the storage board** — `success.main` for "has stock", a hollow outline for
-  "empty". Read as *status*, not as *good/bad*: an empty bin isn't a failure, it's the
+- **Send-to-vendor waypoint** — "Mark Sent Out" is `outlined color="warning"`: a reversible "parts
+  left the shop" step, deliberately amber, paired with a blue primary "Mark Received"
+  ([`OutsideWorkPanel`](../components/jobs/OutsideWorkPanel.tsx),
+  [`OperationCard`](../components/jobs/OperationCard.tsx)).
+- **Fill state** — `success.main` for "has stock", a hollow `text.disabled` outline for "empty"
+  (`FillDot`, a 7px dot). Read as *status*, not good/bad: an empty bin isn't a failure, it's the
   [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal that something needs
-  ordering. Green is doing the work of "there is material here", which is the only thing the data
-  supports.
+  ordering. **Never a percentage or a gauge** — we do not know a shelf's capacity, so "72% full"
+  would be an invented number carrying the confidence of a measured one. Binary is the honest
+  resolution; [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)
+  decision 5. *(`display: inline-block` on that dot is load-bearing: a bare `<span>` defaults to
+  `display: inline`, ignores width/height, and renders at zero width while every unit test passes —
+  jsdom has no layout engine.)*
+- ~~Segmented mode selectors may colour options semantically (add = success / remove = error /
+  adjust = info)~~ — **removed 2026-08-03: no such control exists.** The stock verbs are buttons, not
+  a `ToggleButtonGroup`, and the repo's only coloured `ToggleButton` is `value="confirm"` on the
+  vendor-import screen. Unbuilt, not a standing exception.
 
-  **Never a percentage or a gauge.** We do not know a shelf's capacity, so "72% full" would be an
-  invented number presented with the confidence of a measured one. Binary is the honest
-  resolution, and stopping there is a deliberate design decision — see
-  [`inventory.md` §5.5](modules/inventory.md#55-locations-keep-them-visual-change-when-they-appear)
-  decision 5.
+### Subtractive vs destructive
+
+**No stock verb is red** (revised 2026-07-29). **Withdrawn:** "Remove is `color="error"` because it
+is subtractive" — wrong because *subtractive* describes the arithmetic and *destructive* describes
+the risk, and the headline question is the second. Removing stock is reversible and **writes** an
+append-only ledger row rather than destroying one. And red is simultaneously our enforced Delete
+colour: painting the module's most-pressed button red spends the danger signal on a routine act, the
+way an alert that fires on every row stops being an alert.
+
+**Order is fixed; weight varies.** The four always appear as **Add, Remove, Move, Adjust**, on every
+surface, all `variant`-only — one `contained`, the rest `outlined`, none carrying a `color`. Which is
+filled is decided by frequency per surface, and is *not* a property of the verb:
+
+| Surface | Primary | Why |
+|---|---|---|
+| Operator bin view ([`…/inventory/locations/[locationId]/page.tsx`](../app/operator/[companyId]/inventory/locations/[locationId]/page.tsx)) | **Remove** | Stock arrives in bulk once (really receiving's job, J6) and leaves in small amounts on every job, all shift |
+| Admin part page ([`PartLocationInventory`](../components/parts/PartLocationInventory.tsx)) | **Add** | Until J6 exists this is how stock gets in, and an owner here isn't the one consuming it |
+
+**Do not reorder to emphasise.** Consistency governs *recognition* — where a control is, what it's
+called, what it does — and that must not move. Emphasis governs *intent*, legitimately different for
+an operator at a shelf and an owner at a desk. Stable position is what a daily user's hand learns;
+the filled button is what a first-timer's eye finds. Red still means destructive on these pages — the
+part's Delete (archive) affordance.
+
+### Enforcement
+
+[`scripts/interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts) fails CI on any
+`contained <Button>` with a `success` / `warning` / `info` fill (`button-color` rule), any
+value-shaped placeholder (`placeholder` rule), and any grey delete icon (`grey-delete` rule).
+`color={expr}` is left to review. Genuine exceptions go in that scanner's `ALLOWLIST` (currently
+empty).
+
+Tests — [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts):
+`interactionStandardsCheck — button-color rule` (5 it) ·
+`interactionStandardsCheck — placeholder rule` (4 it) ·
+`interactionStandardsCheck — grey-delete rule` (3 it) ·
+`interactionStandardsCheck — repo is clean` (1 it).
 
 ---
 
-## Tile-and-sheet: when a picture outranks per-element controls
+## Callouts & insets (no decorative accent borders)
 
-The storage board draws one tile per unit; a tile's compartments are ~6px tall. The 48px touch
-floor and a legible drawing are in direct conflict here — making each compartment tappable turns a
-5-row × 2-side cabinet into a ~500px tile and destroys the picture, which is the entire reason the
-board exists. (Nesting interactive elements inside a `CardActionArea` is also an a11y violation.)
-
-**The resolution: the whole tile is one tap target, and a detail sheet owns every action.**
-
-| Layer | Role |
-|---|---|
-| Tile (`ButtonBase` wrapping the drawing) | Depicts and summarises. One tap target, one accessible name carrying the summary. |
-| Elements inside the tile | Depict only — fill state, names, codes. Never interactive. |
-| Detail sheet (right-anchored `Drawer`) | Every action, plus drill-down into children and a lazily-loaded contents list. |
-
-Reach for this when a component's **value is the depiction** and per-element controls would have
-to shrink below the touch floor to preserve it. Prefer ordinary rows-with-buttons everywhere else:
-the extra tap is a real cost, justified here because the alternative is losing the drawing. It also
-matches the operator bin view's existing drill-down, so the two surfaces read the same way.
-
-**A photo goes above the drawing, not instead of it.** A location's photo carries *identity* — this
-is the shelf you're standing at — while the drawn compartments carry *state*. Replacing the drawing
-with the photo would trade fill state for recognisability when both are wanted. Photos also stay on
-the board and out of the list view: the list is the find-one-name-among-121 view and has to stay
-cheap, and a private-bucket thumbnail costs a signed URL. Resolve them in one batched call
-(`getSignedUrls`), never one request per tile.
-
----
-
-## Setup pages need a recurring job, or say what they're for
-
-A page whose every control is one-time setup has nothing to bring anyone back, and a first-time
-reader can't tell what it's *for* — they see the controls, not the purpose. That's how the storage
-board landed on review: Add storage, Subdivide, Rename, Print labels, and no answer to "what am I
-supposed to do here?"
-
-Two fixes, and prefer the first:
-
-1. **Give it the recurring job it's missing.** The board's is counting and putting away, so that's
-   the sheet's first action and the only one offered for the `Unassigned` bucket. This is better
-   than explaining, because it makes the page worth returning to rather than merely legible.
-2. **Say plainly what the page is and isn't.** One or two sentences: what you're looking at, and
-   where the adjacent thing happens instead ("adding and removing stock happens on the part itself").
-   Naming what a page *doesn't* do is often the more useful half.
-
-The failure mode this guards against is documented in
-[`inventory.md` §5.11](modules/inventory.md#511-design-for-the-sustain-not-the-setup) — *"design for
-the sustain, not the setup"* — which the board contradicted while the spec that demanded it sat in
-the same repo.
-- **Segmented mode selectors** (`ToggleButtonGroup`) may color options semantically
-  (add = success / remove = error / adjust = info) — they indicate the *selected
-  mode*, not an action.
-
-**Enforced.** A source-scan test fails CI on any `contained` `<Button>` with a
-`success` / `warning` / `info` fill — the `button-color` rule in
-`scripts/interactionStandardsCheck.ts` (the same gate that keeps deletes red).
-`outlined` / `text` buttons are re-colored by the theme regardless of `color`, so
-the sanctioned outlined exceptions pass automatically; `color={expr}` is left to
-review. Genuine exceptions go in that scanner's `ALLOWLIST`.
-
-**Button Variant Theme Overrides:**
-
-The MUI theme includes custom styling for outlined and text button variants to ensure proper contrast against the gradient background:
-
-- **Outlined buttons:** Transparent background with subtle white border (35% opacity) and slightly muted white text (85% opacity). Hover brightens border to 60% opacity.
-
-- **Text buttons:** Use primary.light (#6FA3D8) for link-like appearance with underline on hover. This lighter blue provides good contrast against both dark and Steel Blue portions of the gradient.
-
-```typescript
-// Theme button overrides (lib/theme.ts)
-outlined: {
-  borderColor: "rgba(255, 255, 255, 0.35)",
-  color: "rgba(255, 255, 255, 0.85)",
-  backgroundColor: "transparent",
-  "&:hover": {
-    borderColor: "rgba(255, 255, 255, 0.6)",
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-  },
-},
-text: {
-  color: "#6FA3D8",  // primary.light
-  "&:hover": {
-    backgroundColor: "rgba(111, 163, 216, 0.12)",
-    textDecoration: "underline",
-  },
-},
-```
-
-**Grouped secondary actions share one variant.** When buttons sit together as a
-set (e.g. a reference row), give them the *same* variant so they read as a family
-— don't put an `outlined` button next to a `text` one. Rank within the set by
-order, weight, an icon, or a count — not by giving one a border and the other none.
-
-### Callouts & insets (no decorative accent borders)
-
-Define a callout / inset (instructions, notes, highlighted rows) with a **subtle
-full border** (white ~8%) and/or a neutral translucent background — the same
-"subtle white border defines edges" treatment cards use. **Do not** use a
-decorative colored side-accent border (e.g. a 3px `primary.main` left stripe): it
-reads as generic, templated web styling and cuts against the "substantial, not
-playful — industrial" principle. Reserve a colored border for a *semantic* signal
-(e.g. a red edge on an alert state), never as decoration.
+Define a callout / inset (instructions, notes, highlighted rows) with a **subtle full border**
+(white ~8%) and/or a neutral translucent background — the same "subtle white border defines edges"
+treatment cards use. **Do not** use a decorative coloured side-accent (e.g. a 3px `primary.main` left
+stripe): it reads as generic, templated web styling and cuts against "substantial, not playful —
+industrial". Reserve a coloured border for a *semantic* signal (a red edge on an alert state), never
+as decoration.
 
 ```tsx
 // ✅ neutral inset
 <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: 'rgba(255,255,255,0.04)',
            border: '1px solid rgba(255,255,255,0.08)' }}>…</Box>
 
-// ❌ decorative colored side-accent
+// ❌ decorative coloured side-accent
 <Box sx={{ borderLeft: '3px solid', borderColor: 'primary.main' }}>…</Box>
 ```
 
-### Text Fields
+`automation-pending (#367)` — unenforced.
 
-```javascript
-<TextField
-  fullWidth
-  label="job Number"
-  variant="outlined"
-  margin="normal"
-/>
-```
+## Form validation & required-field feedback
 
-### Form validation & required-field feedback
+When a submit/save button is disabled because the form is incomplete, **tell the user what's still
+missing** — a greyed-out button with no explanation is a dead end. The standard is an inline notice,
+**not** a hover tooltip.
 
-When a submit/save button is disabled because the form is incomplete, **tell the
-user what's still missing** — a greyed-out button with no explanation is a dead
-end. The standard is an inline notice, **not** a hover tooltip.
+> **Withdrawn (2026-07-31, rule unchanged):** "hover is unavailable because the app runs on shop-floor
+> tablets" — wrong because forms are an **admin-surface** concern (office computer, mouse), so hover
+> *is* available; see [the device model](../CLAUDE.md#who-uses-what-on-what--the-device-model). The
+> rule stands on the stronger argument it always had: a hover tooltip is **undiscoverable** (you must
+> already suspect there is something to hover over) and **unreachable by keyboard**. True of a mouse
+> user at a desk too. *(The docstring inside `MissingFieldsNotice.tsx` still carries the withdrawn
+> tablet reason.)*
 
-> **Reason corrected 2026-07-31, rule unchanged.** This said hover is unavailable because
-> "the app runs on shop-floor tablets". Forms are an **admin-surface** concern — office
-> computer, mouse — so hover *is* available (see
-> [the device model](../CLAUDE.md#who-uses-what-on-what--the-device-model)). The rule still
-> stands on the stronger argument it always had: a hover tooltip is **undiscoverable** —
-> you have to already suspect there is something to hover over — and it is unreachable by
-> keyboard. That is true of a mouse user at a desk too.
-
-- **`components/common/MissingFieldsNotice`** — render it just above the submit
-  button with an `items: string[]` of the blocking reasons (it returns `null`
-  when the array is empty). Compute the list from the same conditions that drive
-  the button's `disabled` prop. This is the canonical pattern; see
-  `ConvertToJobModal`, `MaterialRowEditor`, `CompanyShippingSettingsCard`.
-- **Field-level markers** — also set `required` and `error`/`helperText` on the
-  specific blocking inputs so the error is visible at the field, not only in the
-  summary notice.
-- **Typed inputs** — validate with the shared helpers in **`lib/validators`**
-  (`isValidEmail`, `isValidPhone`, `isValidPostalCode`, `parseOptionalNumber`,
-  `parseOptionalInteger`). Don't re-implement email regexes or number parsers per
-  form. Phone fields use `type="tel"`; numeric fields set `inputMode`
-  (`'numeric'` for integers, `'decimal'` for decimals) for the right mobile
-  keyboard.
-- **Addresses** — use **`components/common/CountrySelect`** and **`StateSelect`**
-  (US states / CA provinces, free-text fallback for other countries) instead of
-  free-text country/state. City stays free text. Validate postal codes per
-  country.
+- **[`MissingFieldsNotice`](../components/common/MissingFieldsNotice.tsx)** — render just above the
+  submit button with an `items: string[]` of blocking reasons (returns `null` when empty), computed
+  from the same conditions that drive the button's `disabled`. Callers:
+  [`FeedbackDialog`](../components/feedback/FeedbackDialog.tsx),
+  [`UnitOfMeasurementSelect`](../components/parts/UnitOfMeasurementSelect.tsx),
+  [`ConflictDialog`](../components/import/ConflictDialog.tsx). *(This doc cited `ConvertToJobModal`,
+  `MaterialRowEditor` and `CompanyShippingSettingsCard`; the first two exist but don't use the
+  notice, the third never existed.)*
+- **Field-level markers** — also set `required` and `error`/`helperText` on the blocking inputs, so
+  the error is visible at the field, not only in the summary.
+- **Typed inputs** — validate with [`lib/validators`](../lib/validators.ts) (`isValidEmail`,
+  `isValidPhone`, `isValidPostalCode`, `parseOptionalNumber`, `parseOptionalInteger`,
+  `normalizePhone`, `numberToInputString`); never re-implement an email regex or number parser per
+  form. Phone fields use `type="tel"`; numeric fields set `inputMode` (`'numeric'` / `'decimal'`).
+- **Addresses** — [`CountrySelect`](../components/common/CountrySelect.tsx) +
+  [`StateSelect`](../components/common/StateSelect.tsx) (US states / CA provinces, free-text fallback
+  elsewhere), never free-text country/state. City stays free text; validate postal codes per country.
 
 ### Placeholders
 
-**A placeholder must never resemble real data.** Our users are 50–60 year old shop owners;
-a greyed `25` in an empty Markup % field reads as a *pre-filled value*, not a hint, and
-ships wrong quotes. (This argument never depended on the device — it is about how a low-
-contrast number reads to anyone. The original wording said "on tablets", which was wrong
-about the device and irrelevant to the point.) The misleading set — **banned**:
+**A placeholder must never resemble real data.** Our users are 50–60 year old shop owners; a greyed
+`25` in an empty Markup % field reads as a *pre-filled value*, not a hint, and ships wrong quotes.
+**Withdrawn:** the original wording justified this "on tablets" — wrong about the device and
+irrelevant to the point, which is how a low-contrast number reads to anyone.
 
-- Bare numbers: `placeholder="1"`, `placeholder="25"`.
-- Currency / value-shaped strings: `placeholder="$0.00"`, `placeholder="e.g. 5.50"`,
-  or any computed value (`placeholder={suggestedUnitPrice}`).
+**Banned:** bare numbers (`placeholder="1"`, `"25"`); currency/value-shaped strings
+(`"$0.00"`, `"e.g. 5.50"`) or any computed value (`placeholder={suggestedUnitPrice}`). These fields
+already carry a column header or `label`, so the placeholder adds only confusion — prefer `label` +
+`helperText`.
 
-These fields already carry a column header or `label`, so the placeholder adds
-nothing but confusion. Prefer `label` + `helperText` for guidance on required
-fields (see *Form validation* above).
+**Allowed** — placeholders that can't be mistaken for entered data: search prompts
+(`"Search parts…"`), true format hints (`"customer@example.com"`, `"Suite, unit, etc."`), action
+prompts (`"Note about this part…"`).
 
-**Allowed** — placeholders that can't be mistaken for entered data:
-
-- Search prompts: `placeholder="Search parts…"`.
-- True format hints: `placeholder="customer@example.com"`, `placeholder="Suite, unit, etc."`.
-- Action prompts: `placeholder="Note about this part…"`.
-
-This rule is enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts)
-— a value-shaped placeholder fails CI.
-
-### Cards
-
-```javascript
-<Card elevation={3}>
-  <CardContent>
-    <Typography variant="h6" gutterBottom>
-      job #1234
-    </Typography>
-    <Typography variant="body2" color="text.secondary">
-      Customer: Acme Corp
-    </Typography>
-  </CardContent>
-</Card>
-```
+Enforced — see [Enforcement](#enforcement) above.
 
 ### Status Badges
 
-**Use `StatusChip` (`components/common/StatusChip.tsx`) for every on/off/lifecycle
-status badge — never a hand-rolled `<Chip variant=…>`.** It enforces the one
-variant rule so status chips look identical everywhere (this was previously
-inconsistent — QuickBooks "Connected" was filled while Billing "Active" was
+**Use [`StatusChip`](../components/common/StatusChip.tsx) for every on/off/lifecycle status badge —
+never a hand-rolled `<Chip variant=…>`.** It derives the variant so status chips look identical
+everywhere (previously inconsistent: QuickBooks "Connected" was filled while Billing "Active" was
 outlined):
 
-- a **semantic color** (`info` / `success` / `warning` / `error` / `primary`) →
-  **filled** (draws the eye: Active, Connected, Trial, Overdue…);
-- the neutral **`default`** color → **outlined** (de-emphasized "off" states: No
-  subscription, Not connected, Not set up).
+- a **semantic colour** (`info` / `success` / `warning` / `error` / `primary` / `secondary`) → **filled**
+  (draws the eye: Active, Connected, Trial, Overdue…);
+- the neutral **`default`** → **outlined** (de-emphasised "off" states: No subscription, Not
+  connected, Not set up).
 
-Always `size="small"`. Pass the semantic `color`; the variant is derived for you.
+Pass the semantic `color`; `size="small"` is the default. Enforcement is the component itself
+(`variant` is not an accepted prop) — `automation-pending (#367)` for a lint against raw `<Chip>`.
 
-```jsx
-import StatusChip from '@/components/common/StatusChip';
-
-<StatusChip label="In Progress" color="info" />       {/* filled */}
-<StatusChip label="Complete"    color="success" />    {/* filled */}
-<StatusChip label="Overdue"     color="error" />      {/* filled */}
-<StatusChip label="Not set up" />                     {/* default → outlined */}
-```
-
-**Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a
-bespoke palette for a domain reason — stock level (`StockStatusChip`), part
-classification (`PartClassificationChips`), work-center kind — and the `HOT` rush badge
-(`JobHotBadge`), which deliberately mutes to outlined for historical jobs. These
-use custom hex/rgba, not the semantic palette, and are not on/off status badges.
+**Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a bespoke palette for a
+domain reason — stock level ([`StockStatusChip`](../components/inventory/StockStatusChip.tsx)), part
+classification ([`PartClassificationChips`](../components/parts/PartClassificationChips.tsx)),
+work-centre kind — and the `HOT` rush badge ([`JobHotBadge`](../components/jobs/JobHotBadge.tsx)),
+which deliberately mutes to outlined for historical jobs. These use custom hex/rgba, not the semantic
+palette, and are not on/off status badges.
 
 ### Tabs vs. segmented toggles (role-based)
 
-Two controls look similar but have distinct roles — pick by **what the control does**, not by preference:
+Pick by **what the control does**, not by preference:
 
-- **MUI `Tabs`** (underline indicator) — for **switching between named content views** of a
-  section (e.g. Admins / Users / Operators on Team; Internal / External on Work Centers;
-  Directory / Outside work on Vendors; the part-workspace sections). Use `icon` +
-  `iconPosition="start"` for the polished icon-and-label treatment. Scales to 3–5 views.
-- **MUI `ToggleButtonGroup`** (segmented pill) — for a **compact binary/ternary mode or filter
-  applied to the same content** (e.g. My Station / All Stations; made / bought;
-  addition / depletion / adjustment; this step / all part). Use the shared
-  [`highContrastToggleSx`](../lib/highContrastToggleSx.ts) so the pill reads on the navy
-  surface.
+- **MUI `Tabs`** (underline indicator) — **switching between named content views** of a section:
+  Admins / Users / Operators on Team; Internal / External on Work Centers; Directory / Outside work
+  on Vendors; the part-workspace sections ([`PartHeaderBar`](../components/parts/workspace/PartHeaderBar.tsx)).
+  Use `icon` + `iconPosition="start"`. Scales to 3–5 views.
+- **MUI `ToggleButtonGroup`** (segmented pill) — a **compact binary/ternary mode or filter applied to
+  the same content**: My Station / All Stations; made / bought; Added / Removed / Adjusted on part
+  history; This step / All part. Use the shared
+  [`highContrastToggleSx`](../lib/highContrastToggleSx.ts) so the pill reads on the navy surface —
+  selected is filled `primary.main` + bold, unselected is a dashed 0.7-opacity border.
 
-Rule of thumb: if picking an option **changes which list/panel is shown**, it's a view → Tabs.
-If it **filters or re-modes the panel you're already looking at**, it's a toggle → pill. Don't
-build the same switch two different ways across pages.
-
----
-
-## Typography Scale
-
-- **h1**: 2.5rem (40px) - Page titles
-
-- **h2**: 2rem (32px) - Section headings
-
-- **h3**: 1.75rem (28px) - Subsection headings
-
-- **h4**: 1.5rem (24px) - Card titles
-
-- **h5**: 1.25rem (20px) - Component headings
-
-- **h6**: 1rem (16px) - Small headings
-
-- **body1**: 1rem (16px) - Primary body text
-
-- **body2**: 0.875rem (14px) - Secondary body text
-
-- **caption**: 0.75rem (12px) - Captions, helper text
+Rule of thumb: if picking an option **changes which list/panel is shown**, it's a view → Tabs. If it
+**filters or re-modes the panel you're already looking at**, it's a toggle → pill. Don't build the
+same switch two different ways across pages.
 
 ---
 
-## Spacing System
+## Row-and-sheet: one tap target, a sheet that owns every action
 
-MUI uses an 8px base spacing unit accessed via `theme.spacing(n)`:
+*(Was "Tile-and-sheet". Corrected 2026-08-03: the drawn storage board it described was deleted in
+`db58ae8` for [`LocationTable`](../components/inventory/locations/LocationTable.tsx), an indented
+table. The sheet survives as
+[`LocationDetailSheet`](../components/inventory/locations/board/LocationDetailSheet.tsx) — whose own
+header comment still describes the deleted drawing.)*
 
-- `spacing(1)` = 8px
+**Withdrawn:** the drawn board — wrong because on a real shop it drew almost nothing. A node's `kind`
+only changes the rack border, and the whole tile body was gated behind `children.length > 0` because
+**118 of 121** of Contour's legacy locations are flat. It was already a grid of labels with worse
+density than a table, no sorting, no bulk anything, and could draw only three levels where the
+generator permits four.
 
-- `spacing(2)` = 16px
+**Withdrawn:** "a list is out because Cabinet 1 alone exploded into 15 rows" — wrong because that was
+an artefact of the **wizard**, not of lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in
+one pass. Stop defaulting to it and a flat shop's whole table is **12–18 rows**. Twelve of twelve
+surveyed tools present locations as a tree or table, none draws them — convergent evolution, not user
+research, and **no user has ever been observed using any storage UI here**, board or table.
 
-- `spacing(3)` = 24px
+**The surviving standard.** Where rows or tiles are dense enough that per-element controls would have
+to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet every
+action. The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
+5-row × 2-side cabinet into a ~**500px** tile.
 
-- `spacing(4)` = 32px
+**Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only
+because the alternative was losing the depiction entirely. Reach for a sheet when the row's *value is
+what it depicts*, not merely when a row has several actions. It also matches the operator bin view's
+existing drill-down, so the two surfaces read the same way.
 
-- `spacing(6)` = 48px
+| Layer | Role |
+|---|---|
+| Row / tile | One tap target, one accessible name carrying the summary. Mouse affordance only — the name stays a real `<button>`, so the row is keyboard- and screen-reader-reachable without pretending a `<tr>` is a control. |
+| Elements inside it | Depict only — fill state, names. Never interactive. (Nesting interactive elements inside a `CardActionArea` is also an a11y violation.) |
+| Detail sheet (right-anchored `Drawer`) | Every action, drill-down into children, and a **lazily-loaded** contents list — one request per node opened, never one per row rendered. |
 
-- `spacing(8)` = 64px
+**One gesture, one meaning.** The whole row opens the place; expanding is the *chevron's* job. Making
+a parent row expand instead gives one gesture two meanings depending on whether a row happens to have
+children, and costs parent rows their drawer — where rename, print QR, photo and history live.
 
-**Common usage:**
+**A photo carries identity, not state** — *this is the shelf you're standing at*, versus what's in
+it. Photos live in the sheet, not the table: the list is the find-one-name-among-121 view and has to
+stay cheap, and a private-bucket thumbnail costs a signed URL. Resolve them in one batched
+`getSignedUrls` ([`storageHelpers.ts`](../utils/storageHelpers.ts)), never one request per row.
 
-```javascript
-<Box sx={{ p: 3 }}>  {/* 24px padding on all sides */}
-<Box sx={{ mb: 2 }}>  {/* 16px margin bottom */}
-<Box sx={{ px: 4, py: 2 }}>  {/* 32px horizontal, 16px vertical padding */}
-```
+## Setup pages need a recurring job, or say what they're for
+
+A page whose every control is one-time setup has nothing to bring anyone back, and a first-time reader
+can't tell what it's *for* — they see the controls, not the purpose. That's how Storage landed on
+review: Add storage, Subdivide, Rename, Print labels, and no answer to "what am I supposed to do
+here?" Two fixes, prefer the first:
+
+1. **Give it the recurring job it's missing.** Storage's is counting and putting away — so `Count all
+   parts` is in the toolbar, `Count here` is the sheet's first action and the only one offered for
+   the `Unassigned` bucket. Better than explaining: it makes the page worth returning to rather than
+   merely legible.
+2. **Say plainly what the page is and isn't** — one or two sentences: what you're looking at, and
+   where the adjacent thing happens instead ("adding and removing stock happens on the part itself").
+   Naming what a page *doesn't* do is often the more useful half.
+
+Reusable test, from [`inventory.md` §5.11](modules/inventory.md#511-design-for-the-sustain-not-the-setup):
+**if every control on a page is something you do once, the page has no reason to be visited twice.**
+Both fixes as-built in [`LocationsManager.tsx`](../components/inventory/locations/LocationsManager.tsx).
 
 ---
 
-## Color Palette
+## Scales
 
-### Core Brand Colors
+**Typography** — DM Sans (`var(--font-dm-sans)`, loaded in [`app/layout.tsx`](../app/layout.tsx)),
+system stack as fallback, `textTransform: 'none'` on buttons.
+*(This doc previously said "system font stack"; brand-guide.md §4 still does.)*
 
-See `lib/theme.ts` for exact values:
+| | h1 | h2 | h3 | h4 | h5 | h6 | body1 | body2 | caption |
+|---|---|---|---|---|---|---|---|---|---|
+| size | 2.5rem / 40px | 2rem / 32px | 1.75rem / 28px | 1.5rem / 24px | 1.25rem / 20px | 1rem / 16px | 1rem / 16px | 0.875rem / 14px | 0.75rem / 12px |
+| use | Page titles | Section headings | Subsections | Card titles | Component headings | Small headings | Body | Secondary body (`#C8CCD4`) | Helper text |
 
-- **Steel Blue (Primary):** `#4682B4` - Primary brand color, CTAs, links
+**Spacing** — MUI 8px base via `theme.spacing(n)`: 1 = 8px, 2 = 16px, 3 = 24px, 4 = 32px, 6 = 48px,
+8 = 64px. Use `sx={{ p: 3 }}`, never `padding: '24px'`.
 
-- **Light Blue:** `#6FA3D8` - Hover states (primary.light)
+**Core colours**
 
-- **Dark Blue:** `#3A6B94` - Pressed states (primary.dark)
-
-- **Deep Indigo:** `#111439` - Background base, gradient foundation
-
-- **Neutral Gray:** `#B0B3B8` - Disabled states, subtle UI elements
-- **Muted Label Gray:** `#C8CCD4` - Secondary text (`text.secondary` / `body2`)
+| Token | Hex | Role |
+|---|---|---|
+| Steel Blue (`primary.main`) | `#4682B4` | CTAs, links, accents |
+| Light Blue (`primary.light`) | `#6FA3D8` | Hover states; the `text` button colour |
+| Dark Blue (`primary.dark`) | `#3A6B94` | Pressed states |
+| Deep Indigo | `#111439` | Background base; dialog paper |
+| Raised Indigo | `#1a1f4a` | Menus, popovers, autocomplete paper |
+| Neutral Gray (`secondary.main`) | `#B0B3B8` | Disabled, subtle UI |
+| Muted Label Gray (`text.secondary`) | `#C8CCD4` | Secondary text / `body2`. **Lightened from `#B0B3B8`**, which lost contrast on the lighter end of the card surface — labels like "Customer PO" were hard to read. Holds **≥4.5:1** across the whole card surface. |
 
 ### Status Colors
 
-- Success / Complete: #10b981 - jobs finished, quality passed
+`success` `#10b981` (finished, quality passed) · `warning` `#f59e0b` (approaching deadlines, needs
+attention) · `error` `#ef4444` (late, critical) · `info` `#3b82f6` (active work, informational).
 
-- **Warning / Pending**: `#f59e0b` - Approaching deadlines, needs attention
-
-- **Error / Overdue**: `#ef4444` - Late jobs, critical issues
-
-- **Info / In Progress**: `#3b82f6` - Active work, informational notices
-
-### job Status Colors
-
-```javascript
-const statusColors = {
-  requested: 'default',     // Gray
-  approved: 'info',         // Blue
-  in_progress: 'primary',   // Steel Blue
-  quality_checked: 'info',  // Blue
-  shipped: 'success',       // Green
-  delivered: 'success',     // Green
-  invoiced: 'warning',      // Amber
-  complete: 'success',      // Green
-  overdue: 'error',         // Red
-};
-```
+*(This doc pasted a `statusColors` map keyed `requested / approved / in_progress / quality_checked /
+shipped / delivered / invoiced / complete / overdue`. No such constant exists in the codebase, and
+those are not the job statuses.)* Job status → palette slot is configuration and lives with the type
+it describes: [`types/job.ts`](../types/job.ts) → `PRODUCTION_STATUS_CONFIG` (`not_started` default ·
+`in_progress` info · `completed` success · `cancelled` error), `FULFILLMENT_STATUS_CONFIG`,
+`JOB_LIFECYCLE_STAGE_CONFIG`; rendered by
+[`JobStatusChip.tsx`](../components/jobs/JobStatusChip.tsx), which wraps `StatusChip`.
 
 ---
 
-## Elevation System
-
-MUI provides elevation levels from 0-24:
-
-- **0**: Flat elements (buttons in their default state)
-
-- **1**: Slightly raised cards
-
-- **2**: Standard cards
-
-- **3**: Emphasized cards (auth pages, important forms)
-
-- **4**: App bar, navigation
-
-- **8**: Floating action buttons
-
-- **16**: Modals
-
-- **24**: Full-screen dialogs
-
-**Usage:**
-
-```javascript
-<Card elevation={2}>  {/* Standard card */}
-<Card elevation={3}>  {/* Emphasized card */}
-<AppBar elevation={4}>  {/* Navigation bar */}
-```
-
----
-
-## Accessibility
-
-### WCAG 2.1 Level A Compliance
-
-**Color Contrast:**
-
-- White text (#ffffff) on dark gradient background exceeds 7:1 ratio
-
-- All status colors tested for sufficient contrast
-
-- Secondary text (#C8CCD4) meets minimum 4.5:1 ratio across the card gradient
-
-**Keyboard Navigation:**
-
-- All interactive elements are keyboard accessible
-
-- Focus indicators are visible
-
-- Logical tab order throughout
-
-**Touch Targets:**
-
-- Minimum 48px × 48px for all interactive elements (MUI default)
-
-- Adequate spacing between touch targets
-
-**Screen Reader Support:**
-
-- Semantic HTML via MUI components
-
-- ARIA labels where needed
-
-- Proper heading hierarchy
-
----
-
-## Implementation Example
-
-### App-Level Theme Setup (Next.js)
-
-```typescript
-// src/app/layout.tsx
-'use client';
-
-import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline, Box } from '@mui/material';
-import jiggedTheme from '@/lib/theme';
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html lang="en">
-      <body style={{ margin: 0 }}>
-        <ThemeProvider theme={jiggedTheme}>
-          <CssBaseline />
-          <Box
-            sx={{
-              minHeight: '100vh',
-              background: 'linear-gradient(135deg, #111439 0%, #4682B4 50%, #111439 100%)',
-              backgroundAttachment: 'fixed',
-            }}
-          >
-            {children}
-          </Box>
-        </ThemeProvider>
-      </body>
-    </html>
-  );
-}
-```
-
-### Component Example
-
-```typescript
-import { Card, CardContent, Typography, Button, Chip, Box } from '@mui/material';
-
-function WorkOrderCard({ workOrder }) {
-  return (
-    <Card elevation={3} sx={{ mb: 2 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">
-            WO-{[workOrder.id](http://workorder.id/)}
-          </Typography>
-          <Chip 
-            label={workOrder.status} 
-            color={statusColors[workOrder.status]}
-            size="small"
-          />
-        </Box>
-        
-        <Typography variant="body2" color="text.secondary" gutterBottom>
-          Customer: {workOrder.customer}
-        </Typography>
-        
-        <Typography variant="body2" color="text.secondary">
-          Due: {workOrder.dueDate}
-        </Typography>
-        
-        <Box sx={{ mt: 3 }}>
-          <Button variant="contained" fullWidth>
-            View Details
-          </Button>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-}
-```
-
----
-
-## Do's and Don'ts
-
-### ✅ Do:
-
-- Use MUI components exclusively - no plain HTML elements
-
-- Use the `sx` prop for styling - no external CSS files
-
-- Use theme spacing: `sx={{ p: 3 }}` not `sx={{ padding: '24px' }}`
-
-- Use theme colors: `color="primary"` not hardcoded hex values
-
-- Apply the linear 3-stop gradient background to all pages
-
-- Let cards use theme defaults - don't override card backgrounds
-
-- Test readability in bright lighting conditions
-
-- Reference `lib/theme.ts` for exact design values
-
-### ❌ Don't:
-
-- Mix plain HTML with MUI components
-
-- Write custom CSS files
-
-- Hardcode pixel values - use theme spacing
-
-- Hardcode colors - use theme palette
-
-- Add light/dark mode toggle
-
-- Use flat backgrounds - gradient is brand identity
-
-- Override card backgrounds unless functionally necessary (modals, etc.)
-
-- Use `textTransform: 'uppercase'` on buttons (already set to 'none')
-
-- Use overly playful or trendy styling
-
-- Duplicate design values in documentation - reference theme.ts instead
-
----
-
-## Page Layout Patterns
-
-CLAUDE.md covers list, create/edit, and import pages. This section names the conventions for **detail pages** — the page that shows a single record of an entity.
-
-Two patterns coexist by content type. Pick the one that matches the entity; don't mix.
-
-### Pattern A — Reference entity detail
-
-Used by **Parts, Customers, Vendors, Work Centers**. Reference entities are things users open to read settings, see relations, or scan a QR — not to drive a workflow.
-
-```
-[← Back to <List>]                           [Edit]  [Delete]
-
-┌───────────────────────────────────────────────────────────┐
-│ <Entity name>   [identity chip(s)]   <inline secondary>   │   ← title card
-└───────────────────────────────────────────────────────────┘
-
-┌──────────────────────────┬────────────────────────────────┐
-│ Details (md=6)           │ Secondary (md=6)               │
-│ — key/value rows         │ — QR code, contacts, address…  │
-└──────────────────────────┴────────────────────────────────┘
-
-┌───────────────────────────────────────────────────────────┐
-│ Optional full-width footer: related counts, timestamps    │
-└───────────────────────────────────────────────────────────┘
-```
-
-- **Title card** (separate `<Card>`) holds the name + identity chips (kind, status) inline on one row.
-- **Body** is a `<Grid container>` of `xs=12 md=6` cards. Both cards use `sx={{ height: '100%' }}` so their bottoms align even when content lengths differ.
-- **QR code goes in the md=6 right slot** when present (always visible, no toggle).
-
-### Pattern B — Workflow / document entity detail
-
-Used by **Jobs, Quotes**. Workflow entities are things users open to act on a process (ship, cancel, send PDF) or to step through a child collection (operations, line items).
-
-```
-[← Back to <List>]                  [Workflow action] [Workflow action] [Delete]
-
-<Entity number>  [status pill]  [overdue/etc. badge]           ← inline title strip
-                                                                 (no title card)
-
-┌──────────────────────────┬────────────────────────────────┐
-│ <Entity> Details (md=6)  │ QR Code or other summary (md=6)│
-│ — customer, dates, terms │ — always-visible, no toggle    │
-└──────────────────────────┴────────────────────────────────┘
-
-┌───────────────────────────────────────────────────────────┐
-│ Workhorse panel (full width): parts/operations, line      │
-│ items, etc. — the reason the user opened the page.        │
-└───────────────────────────────────────────────────────────┘
-```
-
-- **No title card.** The entity number, status pill, and any badges sit inline on one row (`flex` + `gap: 2`). Don't stack the pill on its own line below the title — it looks orphaned.
-- **Summary row** of `xs=12 md=6` metadata cards above the workhorse panel. Same `height: '100%'` rule.
-- **Workhorse panel is full-width** below — that's where the user spends their time.
-
-### Where deviation is fine
-
-- **Content-driven branching** (e.g., Parts' stocked vs made-to-order layout): keep it.
-- **Document-style pages with rich document chrome** (Quotes' Email/View PDF buttons): keep the chrome; the body still follows Pattern B.
-- New detail pages should default to one of the two patterns. If neither fits, that's a signal to push back on the content shape — not invent a third pattern.
-
----
-
-## Mobile Considerations
-
-### Shop Floor Requirements
-
-1. **Large Touch Targets**: All buttons, inputs minimum 48px height (MUI default)
-
-2. **Readable Text**: Minimum 16px font size for body text
-
-3. **Gradient Performance**: Use `background-attachment: fixed` to prevent repainting
-
-4. **QR Code Scanning**: Large scanning area, clear instructions
-
-5. Landscape Support: job details should work in landscape
-
-### Mobile-Specific Components
-
-```typescript
-// Bottom navigation for mobile
-import { BottomNavigation, BottomNavigationAction } from '@mui/material';
-import WorkIcon from '@mui/icons-material/Work';
-import InventoryIcon from '@mui/icons-material/Inventory';
-
-<BottomNavigation>
-  <BottomNavigationAction label="jobs" icon={<WorkIcon />} />
-  <BottomNavigationAction label="Inventory" icon={<InventoryIcon />} />
-</BottomNavigation>
-```
+## Detail-page layout patterns
+
+CLAUDE.md covers list, create/edit and import pages. This covers **detail pages** — one record of one
+entity. Three patterns; don't mix them. **Pick by what the user came to do, not by entity size:** a
+*reference* entity is opened to read settings and see relations, not to drive anything; a
+*workflow / document* entity is opened to act on a process (ship, cancel, send PDF) or to step through
+a child collection (operations, line items); a *workspace* is opened to keep editing the record
+itself. As-built, verified 2026-08-03:
+
+| Pattern | Entities | Shape |
+|---|---|---|
+| **A — Reference entity** | Customers, Vendors | Back + Edit/Delete row → **title card** (name + identity chips inline on one row) → `<Grid container>` of two `size={{ xs: 12, md: 6 }}` cards, both `sx={{ height: '100%' }}` so their bottoms align → optional full-width footer. |
+| **B — Workflow / document entity** | Jobs, Quotes | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
+| **C — Maturity-adaptive workspace** | Parts | Sticky identity header + URL-addressable tabs (`?tab=`), edited in place with auto-save on blur; no Edit mode, no `/parts/{id}/edit` route. Owned by [`modules/parts.md` § "Part detail workspace"](modules/parts.md). |
+
+*(Corrections 2026-08-03: this doc put **Parts** and **Work Centers** under Pattern A. Parts became
+Pattern C; Work Centers stacks full-width cards with no `md=6` split, as does the Quotes body —
+Quotes holds its metadata in one full-width card with an internal `sm=6 / md=4` grid. It also
+promised a **QR code in the `md=6` right slot, "always visible, no toggle"** on both patterns;
+**no detail page renders a QR code** — QR survives only on printed location-label and job-traveler
+PDFs and in the scanner. Real right-hand slots: Jobs → `JobBillingShippingCard`, Customers →
+contacts, Vendors → address.)*
+
+**Deviation is fine for** content-driven branching (Parts' stocked vs made-to-order) and document
+chrome (Quotes' Email / View PDF). **Known gap:** Work Centers fits none of the three — it is a
+reference entity whose right-hand slot never had content, so Pattern A collapsed to two stacked
+full-width cards. New detail pages default to one of the three; if none fits, that's a signal to push
+back on the content shape — not to invent a fourth.
 
 ---
 
 ## Resources
 
-- [Material-UI Documentation](https://mui.com/)
-
-- [Material Design 3 Guidelines](https://m3.material.io/)
-
-- [MUI Component API](https://mui.com/material-ui/api/button/)
-
-- [CSS Gradients Guide](https://developer.mozilla.org/en-US/docs/Web/CSS/gradient)
+[Material-UI](https://mui.com/) · [MUI component API](https://mui.com/material-ui/api/button/) ·
+[Material Design 3](https://m3.material.io/) ·
+[MDN — CSS gradients](https://developer.mozilla.org/en-US/docs/Web/CSS/gradient)

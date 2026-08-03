@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-Jigged is a web-based data platform for small-scale precision manufacturing shops. It centralizes jobs, inventory tracking, and shop-floor status with AI-driven insights and gamification for operators.
+Jigged is a web-based data platform for small-scale precision manufacturing shops. It centralizes jobs, inventory tracking, and shop-floor status with AI-driven insights. The operator app is deliberately minimal — record what you finished, write down what you learned.
+
+**There is no gamification, and that is a rule rather than a gap.** No operator-facing surface may reflect an operator's pace or standing back at them — no counts, streaks, averages, points, badges or leaderboards — asserted by test. See [operator-view.md](docs/modules/operator-view.md#surveillance-guardrail-non-negotiable).
 
 ## Tech Stack
 
@@ -405,63 +407,6 @@ All app routes include a `companyId` to ensure data isolation:
 
 ---
 
-## Project Structure
-
-```
-/
-├── app/                      # Next.js App Router pages
-│   ├── layout.tsx           # Root layout with providers
-│   ├── page.tsx             # Home page (redirects)
-│   ├── login/               # Login page
-│   ├── signup/              # Sign up page
-│   ├── select-company/      # Company selector
-│   ├── no-access/           # No access page
-│   └── dashboard/[companyId]/ # Dashboard (protected)
-│       ├── parts/                 # Routing edited inline on the part detail page
-│       ├── quotes/
-│       ├── jobs/
-│       └── operations/
-├── components/
-│   ├── auth/                # Auth-related components
-│   ├── providers/           # Context providers
-│   ├── parts/
-│   │   ├── PartRoutingPanel.tsx       # Inline auto-save routing editor on the part page
-│   │   └── ...                        # PartForm, etc.
-│   ├── routings/            # Linear routing builder (no React Flow, no DAG)
-│   │   ├── RoutingBuilder.tsx         # Side-by-side operations + materials lists
-│   │   ├── RoutingOperationsList.tsx  # Reorder-by-arrow list of operation rows
-│   │   ├── RoutingOperationRow.tsx    # Compact one-line row with modal-edit
-│   │   ├── RoutingMaterialsList.tsx   # Modal-driven list of routing-level materials
-│   │   ├── RoutingMaterialRow.tsx     # Compact one-line material row
-│   │   ├── RoutingViewer.tsx          # Read-only routing display (used by ViewRoutingModal)
-│   │   ├── AddOperationModal.tsx      # Operation picker + setup/run time inputs
-│   │   └── AddMaterialModal.tsx       # Inventory item picker + qty/unit inputs
-│   └── jobs/
-│       ├── JobMaterialsCard.tsx  # Job-level materials (expected + actual consumption)
-│       └── ...                   # OperationsPanel, OperationCard, etc.
-├── lib/
-│   ├── theme.ts            # MUI theme configuration
-│   ├── agGridTheme.ts      # AG Grid theme (matches MUI theme)
-│   └── supabase.ts         # Supabase client
-├── utils/
-│   └── companyAccess.ts    # Company access helpers
-└── api/                     # FastAPI backend
-    └── index.py
-```
-
-Routings are a linear, reorderable list of operations. They live **inline on the part detail page** — there is no separate `/routing/new` or `/routing/edit` page or wizard. The `PartRoutingPanel` component embeds Operations + Materials cards side-by-side and auto-saves every change via `saveRoutingWithOperationsAndMaterials`. Reordering uses up/down arrow buttons (no drag-and-drop). Operation add/edit goes through `AddOperationModal` (operation + setup + run time on one screen). Materials are routing-level (`routing_materials` table) and snapshot into `job_materials` when a job is created.
-
----
-
-## Environment Variables
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
----
-
 ## Development Commands
 
 > **Backend Python runs in the `jigged` conda environment.** Always use it
@@ -576,221 +521,15 @@ If unsure what the change touches: tsc is the universally-cheap default
 `pytest -m unit` (~few seconds). Anything beyond that should be motivated
 by the specific change.
 
-### E2E setup (only needed once per machine)
+### Runbooks — E2E, worktrees, previews
 
-```bash
-# Install the Chromium build Playwright uses
-pnpm exec playwright install chromium
-```
+Those procedures live in **[docs/runbooks/local-dev-and-testing.md](docs/runbooks/local-dev-and-testing.md)**:
+one-time E2E setup, running E2E or `pnpm dev` from a git worktree, visual verification on a
+protected Vercel preview, and the E2E gotchas (the CI-skipped `csv-import` spec, why not to pass
+`CI=1` locally, and how a worktree can silently test the *wrong branch*).
 
-E2E runs against an **ephemeral local Supabase** (`supabase start`), not
-staging. `e2e/global-setup.ts` provisions the test user, company, and the
-whole data graph itself (find-or-insert) with the local **service-role** key
-— so no committed login is needed, only two env vars taken from the running
-local stack:
-
-- `TEST_SUPABASE_URL` = `API_URL` from `supabase status`
-- `TEST_SUPABASE_SECRET_KEY` = `SERVICE_ROLE_KEY` from `supabase status`
-
-These are the local stack's keys and **rotate every `supabase start`** — fetch
-them fresh via the CLI, never hardcode. Standard local run (what
-`.github/workflows/e2e-tests.yml` does in CI):
-
-```bash
-supabase start                        # one local Postgres + Supabase stack
-eval "$(supabase status -o env)"      # exports API_URL / ANON_KEY / SERVICE_ROLE_KEY
-export TEST_SUPABASE_URL=$API_URL
-export TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
-export NEXT_PUBLIC_SUPABASE_URL=$API_URL          # point the app at the same stack
-export NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY
-pnpm exec playwright test --grep-invert "CSV Import"
-```
-
-Playwright auto-launches `pnpm dev` on `localhost:3000` when not in CI
-(see `playwright.config.ts`); reuses an existing dev server if one is
-already running.
-
-### Running E2E (or `pnpm dev`) from a git worktree
-
-Git worktrees do **not** inherit gitignored files, so a fresh worktree has no
-`.env.local` (or any `.env*`). `pnpm dev` and anything that reads Supabase
-creds will fail until you pull them from the **primary checkout** (the first
-entry in `git worktree list`). Do this once at the top of a worktree session:
-
-```bash
-PRIMARY=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
-cp "$PRIMARY/.env.local" .                   # dev-server Supabase creds
-[ -f "$PRIMARY/.env.test.local" ] && cp "$PRIMARY/.env.test.local" .
-[ -f "$PRIMARY/e2e/.env.test.local" ] && cp "$PRIMARY/e2e/.env.test.local" e2e/
-```
-
-They land gitignored in the worktree, so they're never committed. Note the
-**E2E local-Supabase vars are *not* copied** — `TEST_SUPABASE_URL` /
-`TEST_SUPABASE_SECRET_KEY` come from `supabase status -o env` of the running
-local stack (above), so they're correct in any worktree without copying.
-(Claude can run `supabase status -o env`, and `supabase start` if the stack
-isn't up, to fetch them — they're local-only, not secrets.)
-
-**Node deps + Python env in a worktree.** `node_modules` is gitignored too, so
-a fresh worktree has none — run `pnpm install` **inside the worktree** (fast:
-pnpm hardlinks from its global store, so it's correct for that branch's exact
-deps and costs almost no extra disk). Do **not** symlink the primary's
-`node_modules` — it silently breaks when a branch's deps differ, and a stray
-`pnpm install` would mutate the primary. Backend Python uses the shared
-`jigged` conda env (`conda run -n jigged …`) — nothing to install per worktree.
-
-```bash
-pnpm install                                       # node deps for THIS worktree
-conda run -n jigged python -m pytest tests/unit/   # backend tests, jigged env
-```
-
-**The local Supabase stack is a machine-wide singleton, shared by every
-worktree — it is NOT per-worktree.** There is one Postgres container set per
-machine. `supabase start` / `supabase db reset` replay migrations from whatever
-directory invokes them into that one shared DB, so a `db reset` from any
-worktree **replaces the stack for every other worktree** too. It does not track
-a branch; it holds whatever was last replayed into it — in practice the
-primary's, since that's where resets usually run. So when working from a
-worktree:
-
-- **No migration changes in your branch?** The shared local stack is a valid
-  substrate — run `pnpm dev`, unit tests, and E2E against it from the worktree
-  normally (the schema it needs already exists).
-- **Your branch adds or edits migrations?** **Verify them on the PR's Supabase
-  preview branch**, which applies the migration to its own isolated DB — that's
-  the gate. Do **not** `db reset` the shared stack from a worktree to pick up
-  your migrations: with concurrent worktree agents it clobbers the DB the others
-  depend on, and even solo it just confuses what the stack represents. **The
-  rule: worktree migrations go to the preview branch, never the shared local
-  stack.**
-- **Need `types/database.ts` regenerated for a worktree migration?** `pnpm
-  gen:db-types` introspects the shared `--local` stack, so it has the same
-  hazard. Prefer letting **CI regenerate + diff-check** types on the PR (the
-  backend job already fails on a mismatch), or regenerate against a throwaway
-  DB — don't `db reset` the shared stack mid-flight just to gen types. Do **not**
-  hand-edit the file: the drift check diffs a byte-exact regen, so a hand-edit
-  fails CI even when every column is right.
-
-  The generator accepts `--db-url`, so a throwaway container works:
-
-  ```bash
-  docker run -d --rm --name migcheck -e POSTGRES_PASSWORD=x -p 55499:5432 postgres:17-alpine
-  # create the db, apply Supabase-platform stubs (roles anon/authenticated/
-  # service_role/jigged_ai_readonly, schemas auth/storage, auth.uid(),
-  # storage.objects + storage.foldername), then replay supabase/migrations/ in order
-  npx --yes supabase@2.109.0 gen types typescript \
-    --db-url "postgresql://postgres:x@127.0.0.1:55499/jigged" > types/database.ts
-  ```
-
-  **Gotcha that costs a red CI run:** a bare Postgres has no `pg_graphql`, so the
-  generator silently omits the `graphql_public` schema — in **two** places, the
-  schema block *and* the trailing `Constants` export. Splice both back from
-  `main` (this migration never touches them), then diff against `main` and
-  confirm only your intended tables/functions changed. Keep the generator version
-  matching the one pinned in `gen:db-types`.
-
-### Visual verification on a Vercel preview (worktrees, agents)
-
-Preview deployments sit behind Deployment Protection, so an agent gets a login
-page. The project has a **Protection Bypass for Automation** secret; it lives in
-`.env.local` as `VERCEL_AUTOMATION_BYPASS_SECRET` (gitignored — copy `.env.local`
-from the primary checkout in a fresh worktree, and re-copy if it was added after
-your worktree was created).
-
-Pass it as **headers**, not query params, so the secret never lands in a URL,
-shell history, or an agent transcript. `x-vercel-set-bypass-cookie` sets a cookie
-so in-app navigation after the first load keeps working:
-
-```bash
-export S=$(grep '^VERCEL_AUTOMATION_BYPASS_SECRET=' .env.local | cut -d= -f2- | tr -d '"'"'"' \r')
-export HDRS=$(python3 -c "import json,os;print(json.dumps({'x-vercel-protection-bypass':os.environ['S'],'x-vercel-set-bypass-cookie':'true'}))")
-agent-browser open "$PREVIEW_URL/login" --headers "$HDRS"
-```
-
-Then sign in with the seed account (`dev@jigged.test` / `jigged-dev-1234`) — the
-preview branch runs `supabase/seed.sql`, so it has the full Vanguard Precision
-Works data graph. Get `$PREVIEW_URL` from the PR's Vercel comment or
-`gh pr view <n> --json comments`.
-
-**Use a fresh `--session` per preview domain.** The bypass cookie is set for one
-host; carrying a session over from a previous PR's preview makes the new domain
-bounce to Vercel's SSO login even though the headers are correct. `agent-browser
-open … --session <pr-number>` avoids it.
-
-**If the app shows "Something Went Wrong" on every route, it is almost certainly
-not your code.** Check `agent-browser console` for:
-
-```
-@supabase/ssr: Your project's URL and API key are required to create a Supabase client!
-```
-
-That means the deployment has no `NEXT_PUBLIC_SUPABASE_*`. Those are inlined at
-**build** time, so the first Vercel build of a new preview branch can outrun
-Supabase Branching provisioning and bake in empty values. Observed on two
-consecutive PRs. **A rebuild fixes it with no code change** — push any commit, or
-redeploy from the Vercel dashboard.
-
-It presents as a total outage rather than a broken page because
-[`lib/supabase.ts`](lib/supabase.ts) creates the client eagerly at module scope
-(`export const supabase = typeof window !== 'undefined' ? getSupabase() : null`),
-so the throw happens during module evaluation and nothing renders anywhere.
-
-Notes: `agent-browser get text` needs a selector (`get text body`); prefer
-`snapshot -i -c` or `eval` since a not-yet-hydrated App Router page returns raw
-RSC payload. `agent-browser console` / `errors` are the fastest triage. Docs:
-<https://vercel.com/docs/deployment-protection/automated-agent-access>
-- **Merge → local:** merging to `main` auto-applies the migration to **prod**
-  (branching pipeline), but your **local** stack only picks it up when you
-  `git pull` in the primary and `supabase db reset` again. Merge→prod is
-  automatic; merge→local is a manual replay.
-
-### E2E gotchas
-
-- **`csv-import` spec skips in CI** via `test.skip(!!process.env.CI)`.
-  Locally it requires the FastAPI backend (`cd api && python index.py`)
-  for AI column analysis — without it, the spec fails with
-  `Failed to fetch (localhost:8000)`. Filter with
-  `--grep-invert "CSV Import"` if you don't want to run it.
-- **CI mirror locally:** `pnpm exec playwright test --grep-invert "CSV Import"`
-  reproduces the CI-equivalent outcome (5 passing).
-- Don't pass `CI=1` to simulate CI locally — `playwright.config.ts`
-  disables the auto-launched dev server in CI mode, so nothing serves
-  on `localhost:3000`.
-- **Seed contract:** any new spec that depends on a particular data
-  shape (pricing tiers, routings, BOM rows, addresses, …) should
-  extend `e2e/global-setup.ts` rather than runtime-skipping. Skips
-  hide real regressions — see the `jobs.status` prod incident
-  (May 2026) where a runtime-skipped spec masked a broken SELECT.
-- **From a worktree, Playwright will happily test the WRONG BRANCH.**
-  `playwright.config.ts` no longer launches a dev server — it trusts
-  whatever is already serving `localhost:3000`. Run E2E from a worktree
-  while the primary checkout's `pnpm dev` is up and the whole suite
-  exercises the primary's code against your branch's expectations. It
-  fails, or worse passes, for reasons unrelated to your change. The tell
-  is a stale string: renamed UI still showing its old label.
-
-  Serve your own port and point Playwright at it — no need to stop
-  anyone else's server:
-
-  ```bash
-  eval "$(supabase status -o env)"
-  export NEXT_PUBLIC_SUPABASE_URL=$API_URL NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY
-  pnpm next dev -p 3311 &                       # from the worktree
-  export TEST_SUPABASE_URL=$API_URL TEST_SUPABASE_SECRET_KEY=$SERVICE_ROLE_KEY
-  export PLAYWRIGHT_TEST_BASE_URL=http://localhost:3311
-  pnpm exec playwright test e2e/<spec>.spec.ts --reporter=list
-  ```
-
-  Confirm which checkout owns port 3000 before trusting a local E2E run:
-  `lsof -p $(lsof -ti:3000) -a -d cwd`.
-- **`global-setup` is find-or-insert, so an incomplete row STAYS
-  incomplete.** A seeder that early-returns on "the job exists" will
-  never backfill something added to it later — the local stack keeps
-  whatever the first run created until `supabase db reset`. When
-  extending a seeder, ensure each child record separately rather than
-  behind the parent's existence check, and remember CI always starts
-  clean while your machine does not.
-
+They moved out of this file on 2026-08-03: they are runbook rather than rule, and they cost every
+session — including the many that never run E2E — about 4,300 tokens.
 ### Where the detailed docs live
 
 - [docs/testing/README.md](docs/testing/README.md) — where each layer lives, the invariant
@@ -827,8 +566,12 @@ See [docs/modules/](docs/modules/) for detailed module specs:
 - [Operator View](docs/modules/operator-view.md) — carries the operator journeys too
 - [Machine Maintenance](docs/modules/machine-maintenance.md) (operator-logged machine logbook; flag-gated pilot with a written kill criterion)
 - [Invitation System](docs/modules/invitation-system.md)
-- [Data Import](docs/modules/data-import.md) (guided onboarding import; [Phase 2 design](docs/modules/data-import-phase2-design.md))
+- [Data Import](docs/modules/data-import.md) (guided onboarding import — PRD + technical design in one doc)
 - [Billing & Subscriptions](docs/modules/billing.md) (Stripe-hosted checkout/portal; DB-enforced entitlement)
+- [Shipments](docs/modules/shipments.md)
+- [Vendors](docs/modules/vendors.md)
+- [AI Insights](docs/modules/ai-insights.md) (text-to-SQL chat; the table allow/denylist is a security boundary)
+- [Demo Mode](docs/modules/demo-mode.md) (hidden per-company demo behind a mode toggle)
 
 ### Testing Documentation
 
@@ -838,5 +581,57 @@ See [docs/testing/](docs/testing/) for testing strategy and guides.
 
 - **Consult PRD** before implementing new features
 - **Check module specs** for detailed requirements
-- **Keep docs in sync** - update docs if implementation diverges
+- **Keep docs in sync** — update docs if implementation diverges
+
+### Writing docs: the concision standard
+
+Established by the [#634](https://github.com/debola31/Jigged/issues/634) condensation, which took
+`docs/` from ~166,000 words to roughly half that. **Most information in the fewest words, losing
+none of it.** The test is whether a reader gets the same decisions and constraints in a fraction
+of the reading.
+
+**The core rule: a claim no build can falsify will rot.** That is not a slogan, it is what the
+audit measured. Update frequency did not predict accuracy — the two most-edited module docs both
+rotted while the two least-edited stayed correct. Being edited in the same commit as the code did
+not predict it either. What predicted it was whether a red build would have caught the claim
+being wrong.
+
+**What earns its tokens:** pitfalls; rationale; conventions that differ from tool defaults;
+**withdrawn arguments**; measured numbers; "why not the obvious alternative"; named gaps.
+
+**What does not:** anything derivable by reading the code — directory layouts, dependency lists,
+architecture overviews, file-by-file descriptions, prose restating a function — and **counts of
+anything**. Put a count next to the thing that enforces it, or do not write it. Every count in
+`docs/testing/` was wrong by 3–6× for ten weeks while `vitest.config.ts` carried the true numbers
+on the same line as the enforcement.
+
+**Form.** Decision plus a one-line why. Superseded reasoning becomes one line
+(`**Withdrawn:** <claim> — wrong because <reason>`) — never deleted, never expanded, because
+recording that a reason was *wrong* is what stops the next person rebuilding on it. Prose becomes
+a table when the content is really rows. Say it once and link the rest. Cite migration IDs and
+file paths, never test titles. Use as-built framing with a verification date. **If you are
+tempted to add length, add it as a table row.**
+
+**Cite tests as file + `describe`, with an `it` count — never a nested `describe > 'it title'`
+string, and never truncated with an ellipsis.** A title is free text nothing checks; one audited
+section had 15 of 23 citations dangling. Every path a doc cites must exist.
+
+**The failure mode to hunt for**, found in five of six docs condensed by hand: **a superseded
+mechanic left standing beside its replacement**, usually within 100 lines, with nothing saying the
+first one is dead. Deleting the dead half is the cheapest, highest-value edit available.
+
+**Deletion is a first-class edit.** Every doc PR should say what it removes; an add-only change
+needs a reason. Context files grow by accretion and are almost never pruned — that is how this
+got to 166,000 words.
+
+**Exemplars:** [inventory.md](docs/modules/inventory.md) (journey/decision),
+[customers.md](docs/modules/customers.md) (reference), [billing.md](docs/modules/billing.md)
+(invariant — as-built framing, a truth table, the load-bearing *why*, and an invariant named
+against the CI test that enforces it).
+
+**Not yet mechanical, and it should be.** Nothing checks that a cited path exists, that a link
+resolves, or that a doc's copy of a list still matches the code — `ai-insights.md` drifted to
+"20 tables" against a 19-element frozenset with one denylist entry missing. A link check plus a
+cited-path check would catch that class; they belong with the guards this repo already runs
+(`function_execute_leaks()`, `tenant_tables_missing_write_gate()`, `schemaEmbedCheck`).
 

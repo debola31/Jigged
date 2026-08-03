@@ -161,6 +161,62 @@ export function parseSchema(ts: string): Schema {
   return out;
 }
 
+/**
+ * Every foreign key in `types/database.ts`, in the two forms PostgREST accepts
+ * as an embed disambiguation hint (`alias:relation!<hint>(...)`):
+ *
+ * - `names` — the constraint name, e.g. `notes!notes_job_fk(...)`.
+ * - `columnsByTarget` — the referencing COLUMN, keyed by the table it points at, e.g.
+ *   `customer_addresses!shipping_address_id(...)`. The column lives on the source table,
+ *   which this parser cannot resolve (the outer `.from()` may be far away), so the target
+ *   is what makes it checkable: `shipping_address_id` is a legal hint for an embed of
+ *   `customer_addresses` because some FK on that column references it.
+ *
+ * Worth parsing because a hint that resolves to neither is a 400 on every call, and this
+ * schema gives no rule to guess from: older tables carry Postgres' default
+ * `<table>_<col>_fkey` while newer ones use a hand-written `<table>_<col>_fk`.
+ */
+export interface ForeignKeys {
+  names: Set<string>;
+  columnsByTarget: Map<string, Set<string>>;
+}
+
+export function parseForeignKeys(ts: string): ForeignKeys {
+  const names = new Set<string>();
+  const columnsByTarget = new Map<string, Set<string>>();
+
+  // Reads the `Relationships` entries the generator emits under every table:
+  //
+  //     {
+  //       foreignKeyName: "quotes_contact_id_fkey"
+  //       columns: ["contact_id"]
+  //       isOneToOne: false
+  //       referencedRelation: "customer_contacts"
+  //       referencedColumns: ["id"]
+  //     },
+  //
+  // isOneToOne is optional because it is absent on some entries. The pattern is
+  // otherwise anchored field-to-field rather than using a lazy `[\s\S]*?`, so it
+  // cannot run past the end of one object and pair a name with the NEXT entry's
+  // target — which would invent a foreign key that does not exist and let a bad
+  // hint through.
+  const re =
+    /foreignKeyName:\s*"([^"]+)"\s*columns:\s*\[([^\]]*)\]\s*(?:isOneToOne:\s*\w+\s*)?referencedRelation:\s*"([^"]+)"/g;
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(ts)) !== null) {
+    names.add(m[1]);
+    const target = m[3];
+    let cols = columnsByTarget.get(target);
+    if (!cols) columnsByTarget.set(target, (cols = new Set()));
+    for (const c of m[2].split(',')) {
+      const col = c.trim().replace(/"/g, '');
+      if (col) cols.add(col);
+    }
+  }
+  return { names, columnsByTarget };
+}
+
 // ============== Select-string parsing ==============
 
 interface ColumnRef {
@@ -263,17 +319,82 @@ function resolveInterpolations(text: string, sourceFile: string): string {
   });
 }
 
+/**
+ * Read the FIRST argument of a `.select(` starting at the index of its `(`, then glue
+ * together every string literal in it.
+ *
+ * A select is often built by concatenation across lines:
+ *
+ *     .select(
+ *       'created_at, kind, ' +
+ *         'reactor:user_company_access!note_reactions_reactor_fk(name), ' +
+ *         'note:notes!inner(id, body)',
+ *     )
+ *
+ * The original extractor matched one quoted literal and stopped, so it saw
+ * `created_at, kind, ` and NOTHING ELSE — every embed in a concatenated select went
+ * unchecked. That is not a hypothetical gap: it is why a fabricated foreign-key hint in
+ * `getNewHelpful` reached a preview deployment through a green run of this very check.
+ *
+ * Stops at the first top-level comma so a second argument (`{ count: 'exact' }`) does not
+ * contribute `exact` as a phantom column.
+ */
+function readSelectLiterals(source: string, openIdx: number): string | null {
+  let depth = 0;
+  let out = '';
+  for (let i = openIdx; i < source.length; i++) {
+    const ch = source[i];
+
+    // Skip comments before the quote check. A `//` note inside the argument routinely
+    // contains backticks (`\`<table>_<col>_fkey\``) or apostrophes, and treating those as
+    // string delimiters silently corrupts the rest of the select — which is how the very
+    // embed this check was extended to catch stayed invisible one revision longer.
+    if (ch === '/' && source[i + 1] === '/') {
+      i = source.indexOf('\n', i);
+      if (i === -1) return out;
+      continue;
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2);
+      if (end === -1) return out;
+      i = end + 1;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      i++;
+      for (; i < source.length && source[i] !== quote; i++) {
+        if (source[i] === '\\') {
+          out += source[i + 1] ?? '';
+          i++;
+          continue;
+        }
+        out += source[i];
+      }
+      continue;
+    }
+
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) return out;
+    } else if (ch === ',' && depth === 1) return out;
+  }
+  return null;
+}
+
 export function extractSelects(source: string): SelectCandidate[] {
   const out: SelectCandidate[] = [];
 
-  // Inline: .select('...') | .select("...") | .select(`...`)
-  // The lookbehind avoids matching method-chain calls inside larger
-  // expressions accidentally — we anchor on `.select(`.
-  // Use [\s\S] in place of . + s-flag so this compiles under ES2017 target.
-  const inlineRe = /\.select\(\s*(['"`])((?:\\[\s\S]|(?!\1)[\s\S])*?)\1/g;
+  // Inline: .select('...'), including selects concatenated across several literals.
+  const inlineRe = /\.select\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = inlineRe.exec(source)) !== null) {
-    out.push({ source: 'inline .select()', text: resolveInterpolations(m[2], source) });
+    const text = readSelectLiterals(source, m.index + m[0].length - 1);
+    if (text && text.trim()) {
+      out.push({ source: 'inline .select()', text: resolveInterpolations(text, source) });
+    }
   }
 
   // Top-level template-literal constants that look like PostgREST selects.
@@ -299,11 +420,18 @@ export interface Violation {
   file: string;
   source: string;
   context: string;
-  reason: 'unknown-table' | 'unknown-column' | 'unresolved-interpolation';
+  reason:
+    | 'unknown-table'
+    | 'unknown-column'
+    | 'unknown-constraint'
+    | 'unresolved-interpolation';
   table?: string;
   column?: string;
   detail?: string;
 }
+
+/** Hints that select a join type rather than naming a relationship. */
+const HINT_KEYWORDS = new Set(['left', 'inner']);
 
 function validateEmbed(
   embed: ParsedEmbed,
@@ -312,6 +440,7 @@ function validateEmbed(
   sourceLabel: string,
   context: string,
   out: Violation[],
+  fks?: ForeignKeys | null,
 ): void {
   // Skip embeds whose inner contains unresolved `${...}` — we can't tell
   // whether the missing piece names valid columns. Surfaces as a warning
@@ -338,6 +467,34 @@ function validateEmbed(
     return;
   }
 
+  // A hint that is neither `left`/`inner` nor a column name must be a foreign-key
+  // constraint name, and PostgREST 400s if it does not resolve. Only checked when the
+  // caller supplied the constraint set — `validateFile(path, schema)` stays valid.
+  // Hints chain — `parts!parts_bom_parent_part_id_fkey!inner` names the relationship AND
+  // the join type — so each segment is checked on its own. A segment that is not a join
+  // keyword has to resolve to a real relationship: a constraint name, a referencing column
+  // pointing at this table, or a column on the table itself.
+  if (fks && embed.hint) {
+    for (const seg of embed.hint.split('!').map((s) => s.trim())) {
+      if (!seg || HINT_KEYWORDS.has(seg)) continue;
+      if (
+        fks.names.has(seg) ||
+        fks.columnsByTarget.get(embed.name)?.has(seg) ||
+        schema.get(embed.name)!.has(seg)
+      ) {
+        continue;
+      }
+      out.push({
+        file,
+        source: sourceLabel,
+        context: `${context} > ${embed.name}(...)`,
+        reason: 'unknown-constraint',
+        table: embed.name,
+        detail: seg,
+      });
+    }
+  }
+
   const cols = schema.get(embed.name)!;
   const sub = parseSelect(embed.inner);
   for (const col of sub.columns) {
@@ -354,17 +511,21 @@ function validateEmbed(
     }
   }
   for (const nested of sub.embeds) {
-    validateEmbed(nested, schema, file, sourceLabel, `${context} > ${embed.name}`, out);
+    validateEmbed(nested, schema, file, sourceLabel, `${context} > ${embed.name}`, out, fks);
   }
 }
 
-export function validateFile(filePath: string, schema: Schema): Violation[] {
+export function validateFile(
+  filePath: string,
+  schema: Schema,
+  fks?: ForeignKeys | null,
+): Violation[] {
   const source = readFileSync(filePath, 'utf8');
   const out: Violation[] = [];
   for (const cand of extractSelects(source)) {
     const parsed = parseSelect(cand.text);
     for (const embed of parsed.embeds) {
-      validateEmbed(embed, schema, filePath, cand.source, cand.source, out);
+      validateEmbed(embed, schema, filePath, cand.source, cand.source, out, fks);
     }
   }
   return out;
@@ -389,8 +550,12 @@ export interface ProjectScanResult {
 }
 
 export function scanProject(repoRoot: string, scanDirs: string[] = ['utils']): ProjectScanResult {
+  // One read, two parsers: the generated types carry both the column shape and
+  // every foreign key (as each table's `Relationships` array).
   const schemaPath = join(repoRoot, 'types/database.ts');
-  const schema = parseSchema(readFileSync(schemaPath, 'utf8'));
+  const schemaTs = readFileSync(schemaPath, 'utf8');
+  const schema = parseSchema(schemaTs);
+  const fks = parseForeignKeys(schemaTs);
 
   const files: string[] = [];
   for (const dir of scanDirs) {
@@ -404,7 +569,7 @@ export function scanProject(repoRoot: string, scanDirs: string[] = ['utils']): P
 
   const violations: Violation[] = [];
   for (const f of files) {
-    violations.push(...validateFile(f, schema));
+    violations.push(...validateFile(f, schema, fks));
   }
 
   return { filesScanned: files.length, schemaTables: schema.size, violations };
@@ -419,6 +584,8 @@ function formatViolation(v: Violation, repoRoot: string): string {
       return `  ${rel} [${v.context}]: relation "${v.table}" not in schema`;
     case 'unknown-column':
       return `  ${rel} [${v.context}]: ${v.table}.${v.column} does not exist`;
+    case 'unknown-constraint':
+      return `  ${rel} [${v.context}]: no foreign key named "${v.detail}" (PostgREST returns 400)`;
     case 'unresolved-interpolation':
       return `  ${rel} [${v.context}]: unresolved \${…} interpolation in embed (${v.detail})`;
   }

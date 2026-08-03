@@ -44,9 +44,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # To file the issue below. A red ✗ on a commit is not an alert: it appears
-      # on no PR, and nobody browses main's commit list looking for one.
-      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -69,69 +66,78 @@ jobs:
         # lands at all.
         run: python scripts/check_prod_migrations.py --wait 600
 
-      # An issue, not just a red check. This repo's attention lands on PRs and
-      # issues; a failed run on main shows up in neither, and the whole reason
-      # production sat 13 migrations behind for two days is that the signal
-      # existed somewhere nobody was looking. An issue emails the owner, sits in
-      # the Issues tab until closed, and cannot be scrolled past.
-      - name: File an issue so the failure is impossible to miss
+      # EMAIL, not a GitHub issue. An issue opened by github-actions[bot] notifies
+      # nobody: GitHub's default "participating and @mentions" does not fire for a
+      # bot-authored issue in your own repo, and the Issues tab is already used for
+      # ordinary work, so the alert would arrive as silent noise. This sends to the
+      # inbox, through Resend — the same channel the app's transactional mail
+      # already uses, so it is a delivery path that is known to work.
+      #
+      # Never let a broken alerter mask the thing it is alerting about: every
+      # failure path here exits 0, because the verify step above has ALREADY failed
+      # the job. This step's only responsibility is telling someone.
+      - name: Email the alert
         if: failure()
         env:
-          GH_TOKEN: ${{ github.token }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_TO: ${{ vars.ALERT_EMAIL || 'debola31@gmail.com' }}
+          ALERT_FROM: ${{ vars.ALERT_FROM_EMAIL || 'quotes@jigged.app' }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          # Idempotent: a label that already exists is not an error worth failing on.
-          gh label create prod-migrations \
-            --color B60205 \
-            --description "Production database is behind main" 2>/dev/null || true
-
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
-          # One issue per outage, not one per merge. While prod stays behind,
-          # every subsequent push would otherwise file a duplicate and the noise
-          # would train everyone to ignore the label.
-          EXISTING=$(gh issue list --label prod-migrations --state open \
-            --json number --jq '.[0].number // empty')
-
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body \
-              "Still failing as of \`${GITHUB_SHA:0:8}\` — [run](${RUN_URL})."
+          if [ -z "${RESEND_API_KEY:-}" ]; then
+            echo "::warning::RESEND_API_KEY is not set — no email sent."
+            echo "The job still fails; only the notification is missing."
             exit 0
           fi
 
-          gh issue create \
-            --label prod-migrations \
-            --title "Production is behind main — migrations did not apply" \
-            --body "$(cat <<BODY
-          The \`Prod Migrations\` guard failed on [\`${GITHUB_SHA:0:8}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}).
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          SHORT_SHA="${GITHUB_SHA:0:8}"
 
-          **Production does not have every migration on \`main\`.** Supabase Branching
-          applies them on merge, so if they are still pending, that apply failed or
-          never ran. The deployed frontend may already be querying columns the
-          production database does not have.
+          # jq builds the JSON so the body can contain quotes, newlines and
+          # backticks without hand-escaping into a broken payload.
+          PAYLOAD=$(jq -n \
+            --arg from "$ALERT_FROM" \
+            --arg to "$ALERT_TO" \
+            --arg subject "[Jigged] Production is behind main — migrations did not apply" \
+            --arg sha "$SHORT_SHA" \
+            --arg run "$RUN_URL" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{
+              from: $from,
+              to: [$to],
+              subject: $subject,
+              text: (
+                "Production does not have every migration on main.\n\n" +
+                "Commit: " + $sha + " (" + $repo + ")\n" +
+                "Run:    " + $run + "\n\n" +
+                "Supabase Branching applies migrations to production on merge. If they\n" +
+                "are still pending, that apply failed or never ran, and the deployed\n" +
+                "frontend may already be querying columns production does not have.\n\n" +
+                "Migrations are atomic and ordered: read the FIRST pending version in\n" +
+                "the run log. Everything after it is blocked behind it, not\n" +
+                "independently broken.\n\n" +
+                "See the real error:\n" +
+                "    npx supabase@2.109.0 db push --linked --dry-run\n\n" +
+                "Do NOT run `migration repair --status applied` to clear this. That\n" +
+                "marks the file done without running it, so its contents never reach\n" +
+                "production and the next migration depending on them fails the same way.\n"
+              )
+            }')
 
-          [Full run log, including which versions are pending](${RUN_URL})
+          HTTP=$(curl -sS -o /tmp/resend.out -w '%{http_code}' \
+            -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${RESEND_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD") || true
 
-          ### Read the first pending version, not the last
-          Migrations are atomic and ordered. Everything after the first one is
-          blocked behind it, not independently broken.
-
-          ### See the actual error
-          \`\`\`
-          npx supabase@2.109.0 db push --linked --dry-run
-          \`\`\`
-
-          ### Do not "fix" this with migration repair
-          \`migration repair --status applied\` marks the file done without running
-          it, so its contents never reach production and the next migration that
-          depends on them fails the same way.
-
-          This issue does not close itself. Close it once the guard is green again —
-          a stale open one suppresses the alert for the next real failure, because
-          subsequent runs comment here instead of filing a new issue.
-          BODY
-          )"
+          if [ "${HTTP:-000}" = "200" ]; then
+            echo "Alert emailed to ${ALERT_TO}."
+          else
+            echo "::warning::Resend returned HTTP ${HTTP:-000} — alert email not delivered."
+            cat /tmp/resend.out 2>/dev/null || true
+          fi
+          exit 0
 
       - name: Explain a failure in the run summary
         if: failure()

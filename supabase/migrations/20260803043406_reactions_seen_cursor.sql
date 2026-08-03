@@ -81,10 +81,17 @@ GRANT  EXECUTE ON FUNCTION public.mark_reactions_seen(uuid, timestamptz)
 -- 3. THE GUARD KNOWS ABOUT IT
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- `function_execute_leaks()` must stay empty, and it lists every browser-reachable
--- SECURITY DEFINER function that is not deliberately allowlisted. This one is
--- called straight from the Me tab, so it belongs in the "called directly from
--- application code" group. Re-declared in full rather than patched, because the
--- allowlist lives in the function body.
+-- SECURITY DEFINER function that is not deliberately allowlisted. This one is called
+-- straight from the Me tab, so it belongs in the "called directly from application code"
+-- group.
+--
+-- ⚠️ THE ALLOWLIST LIVES IN THE FUNCTION BODY, so adding to it means re-declaring the
+-- whole function — which silently REVERTS any entry added by a migration that landed
+-- after the copy you started from. That is not hypothetical: the first version of this
+-- migration was copied from 20260801024552 and dropped `bulk_put_away`, which
+-- 20260801181116 had added in the meantime. CI caught it. If you add an entry here,
+-- copy the body from the LATEST migration that declares this function, not from the
+-- original, and re-check after any merge of main.
 CREATE OR REPLACE FUNCTION public.function_execute_leaks()
 RETURNS TABLE(function_name text, role_name text)
 LANGUAGE sql
@@ -111,8 +118,13 @@ AS $$
       'create_demo_company', 'create_shipment_with_line_items', 'delete_location',
       'deplete_stock_at_location', 'disable_location_tracking',
       'enable_location_tracking', 'log_note_views', 'log_operator_event',
-      'mark_reactions_seen', 'note_viewers', 'reset_demo_company',
-      'sync_demo_access', 'transfer_stock',
+      'note_viewers', 'reset_demo_company', 'sync_demo_access', 'transfer_stock',
+      -- Added 20260801181116: the count sheet's put-away calls it directly
+      -- (`bulkPutAway` in utils/inventoryLocationsAccess.ts).
+      'bulk_put_away',
+      -- Added 20260803043406: the Me tab dismisses its recognition block through it
+      -- (`markHelpfulSeen` in utils/operatorAccess.ts).
+      'mark_reactions_seen',
       -- Called BY a browser-callable SECURITY INVOKER function, which runs as the
       -- caller — so the caller genuinely needs EXECUTE on this one.
       -- (generate_quote_number / generate_direct_job_number -> next_order_number)

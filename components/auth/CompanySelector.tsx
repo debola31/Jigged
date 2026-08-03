@@ -16,7 +16,12 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Box from '@mui/material/Box';
 import BusinessIcon from '@mui/icons-material/Business';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getUserCompanies, setLastCompany, UserCompanyAccess } from '@/utils/companyAccess';
+import {
+  getUserCompanies,
+  setLastCompany,
+  homePathForRole,
+  UserCompanyAccess,
+} from '@/utils/companyAccess';
 
 export default function CompanySelector() {
   const router = useRouter();
@@ -49,12 +54,18 @@ export default function CompanySelector() {
     fetchCompanies();
   }, [user, router]);
 
-  const handleCompanySelect = async (companyId: string) => {
+  const handleCompanySelect = async (company: UserCompanyAccess) => {
     if (!user) return;
+
+    const { company_id: companyId, role } = company;
 
     try {
       await setLastCompany(user.id, companyId);
-      router.push(`/dashboard/${companyId}`);
+      // Role-aware, so an operator with more than one company goes straight to the shop
+      // floor. This used to push /dashboard unconditionally and rely on AuthGuard to
+      // bounce them back out — it worked, but it cost a round trip and a visible flash
+      // on one of the two screens that shape a new user's first impression.
+      router.push(homePathForRole(role, companyId));
     } catch (err) {
       console.error('Error setting last company:', err);
       Sentry.captureException(err);
@@ -100,7 +111,7 @@ export default function CompanySelector() {
             <Box key={company.company_id}>
               {index > 0 && <Divider />}
               <ListItemButton
-                onClick={() => handleCompanySelect(company.company_id)}
+                onClick={() => handleCompanySelect(company)}
                 sx={{ py: 2 }}
               >
                 <ListItemIcon>

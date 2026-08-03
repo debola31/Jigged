@@ -61,6 +61,29 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Operations')).not.toBeInTheDocument();
   });
 
+  // The Shop floor item is the only one that points off the /dashboard surface, so the
+  // href is the assertion that matters — a regression would silently send people to
+  // /dashboard/{id} (a page that exists), not to a 404 anyone would notice.
+  it('links Shop floor to the operator surface, not a dashboard sub-path', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+
+    render(<Sidebar />);
+
+    const shopFloor = screen.getByRole('link', { name: /shop floor/i });
+    expect(shopFloor).toHaveAttribute('href', '/operator/test-company-id');
+  });
+
+  it('keeps Dashboard on the office surface even though both have an empty path', () => {
+    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
+
+    render(<Sidebar />);
+
+    expect(screen.getByRole('link', { name: /^dashboard$/i })).toHaveAttribute(
+      'href',
+      '/dashboard/test-company-id',
+    );
+  });
+
   it('hides Storage when the locations flag is off — such a shop has no places at all', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
     mockUseCompanyFeatures.mockReturnValue({

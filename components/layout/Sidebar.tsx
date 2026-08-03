@@ -34,6 +34,13 @@ interface MenuItem {
   name: string;
   path: string;
   icon: typeof DashboardIcon;
+  /**
+   * Which top-level surface the item lives on. Defaults to the office
+   * (`/dashboard/{companyId}`); `'operator'` points at the shop floor instead.
+   * Only **Shop floor** uses it — but the alternative was a one-off `absolute`
+   * flag whose handling would have hardcoded the operator path in the renderer.
+   */
+  surface?: 'dashboard' | 'operator';
   adminOnly?: boolean;
   /**
    * When set, the item only renders if the named feature flag is on for
@@ -46,6 +53,14 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { name: 'Dashboard', path: '', icon: DashboardIcon },
+  // The shop floor is a destination of equal rank to the dashboard, not a section of it —
+  // which is why it sits second rather than filed among the data sections below. Until now
+  // the only way in was one outlined button in the toolbar of the jobs *list* page, so an
+  // owner-operator reaching for it on their phone had to know it was there. Every product
+  // that solves this well (Deputy, Homebase, Procore) makes the frontline surface permanent
+  // nav rather than a mode toggle. No role gate: the sidebar is office chrome, and AuthGuard
+  // bounces operators off /dashboard/* before it ever renders for them.
+  { name: 'Shop floor', path: '', surface: 'operator', icon: PrecisionManufacturingIcon },
   { name: 'Activity', path: '/activity', icon: DynamicFeedIcon },
   { name: 'Jobs', path: '/jobs', icon: WorkIcon },
   { name: 'Quotes', path: '/quotes', icon: RequestQuoteIcon },
@@ -84,7 +99,6 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
   const pathname = usePathname();
   const params = useParams();
   const companyId = params.companyId as string;
-  const basePath = `/dashboard/${companyId}`;
   const { isAdmin } = useUserRole();
   const { features, loading: featuresLoading } = useCompanyFeatures();
 
@@ -106,12 +120,12 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
             // item entirely when the flag is off.
             .filter((item) => !item.featureFlag || featuresLoading || features[item.featureFlag])
             .map((item) => {
-              const fullPath = `${basePath}${item.path}`;
+              const fullPath = `/${item.surface ?? 'dashboard'}/${companyId}${item.path}`;
               // Hold the slot with a skeleton while features load; we don't
               // know yet whether to show the live item.
               if (item.featureFlag && featuresLoading) {
                 return (
-                  <ListItem key={`skeleton-${item.path}`} disablePadding>
+                  <ListItem key={`skeleton-${item.name}`} disablePadding>
                     <Box sx={{ px: 2, py: 1.5, width: '100%' }}>
                       <Skeleton
                         variant="rectangular"
@@ -129,7 +143,9 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
               const IconComponent = item.icon;
 
               return (
-                <ListItem key={item.path} disablePadding>
+                // Keyed by name, not path: Dashboard and Shop floor both have an
+                // empty path (they are each a surface root), so path is no longer unique.
+                <ListItem key={item.name} disablePadding>
                   <ListItemButton
                     component={Link}
                     href={fullPath}

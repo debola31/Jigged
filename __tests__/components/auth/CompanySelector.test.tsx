@@ -13,6 +13,11 @@ const setLastCompany = vi.fn();
 vi.mock('@/utils/companyAccess', () => ({
   getUserCompanies: (...args: unknown[]) => getUserCompanies(...args),
   setLastCompany: (...args: unknown[]) => setLastCompany(...args),
+  // Real one-liner rather than a vi.fn(), so these tests assert the destination the
+  // component actually navigates to. The function's own edge cases live in
+  // __tests__/utils/homePathForRole.test.ts.
+  homePathForRole: (role: string | null | undefined, companyId: string) =>
+    role === 'operator' ? `/operator/${companyId}` : `/dashboard/${companyId}`,
 }));
 
 vi.mock('@sentry/nextjs', () => ({
@@ -77,6 +82,23 @@ describe('CompanySelector', () => {
     await waitFor(() => {
       expect(setLastCompany).toHaveBeenCalledWith('user-1', 'co-a');
       expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co-a');
+    });
+  });
+
+  // A multi-company operator used to be pushed to /dashboard and then bounced back out
+  // by AuthGuard. It worked, but it cost a round trip and a flash on the way in.
+  it('sends an operator straight to the shop floor, not through the dashboard', async () => {
+    getUserCompanies.mockResolvedValueOnce([
+      { user_id: 'user-1', company_id: 'co-a', role: 'operator', companies: { id: 'co-a', name: 'Acme Corp' } },
+      { user_id: 'user-1', company_id: 'co-b', role: 'user', companies: { id: 'co-b', name: 'Beta LLC' } },
+    ]);
+    render(<CompanySelector />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Acme Corp'));
+
+    await waitFor(() => {
+      expect(routerMocks.push).toHaveBeenCalledWith('/operator/co-a');
     });
   });
 

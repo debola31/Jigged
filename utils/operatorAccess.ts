@@ -2159,11 +2159,14 @@ export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
       ? new Date(member.reactions_seen_at)
       : windowStart;
 
+  // The reactor hint is the FK's real name, not PostgREST's `<table>_<col>_fkey` default:
+  // this schema names newer constraints `<table>_<col>_fk` and older ones `_fkey`, so the
+  // name has to be looked up rather than guessed. A wrong hint is a 400 on every call.
   const { data, error } = await supabase
     .from('note_reactions')
     .select(
       'created_at, kind, ' +
-        'reactor:user_company_access!note_reactions_reactor_id_fkey(name), ' +
+        'reactor:user_company_access!note_reactions_reactor_fk(name), ' +
         'note:notes!inner(id, body, author_id, ' +
         'job:jobs!notes_job_fk(job_number), ' +
         'captured_job:jobs!notes_captured_job_fk(job_number), ' +

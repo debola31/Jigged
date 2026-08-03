@@ -2,7 +2,9 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import * as Sentry from '@sentry/nextjs';
 import { useLoad } from '@/hooks/useLoad';
+import { toError } from '@/lib/supabaseErrors';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -472,13 +474,25 @@ export default function MyWorkPage() {
 /**
  * What came back since the operator last looked — named, and grouped by note.
  *
- * Silent about its own failures on purpose. This is a reward, not a task: an operator who
- * cannot load it has lost nothing they were trying to do, and an error banner where a
- * compliment should be is worse than the absence of the compliment. The reactions
+ * Silent TO THE OPERATOR about its own failures, on purpose. This is a reward, not a task:
+ * someone who cannot load it has lost nothing they were trying to do, and an error banner
+ * where a compliment should be is worse than the absence of the compliment. The reactions
  * themselves remain on every note in the list below regardless.
+ *
+ * Silent to the operator is NOT silent to us. The first version swallowed the rejection
+ * with `.catch(() => [])`, which made a broken query indistinguishable from "nothing new"
+ * — and it shipped exactly that: a wrong foreign-key hint in the embed returned 400 on
+ * every load, through green CI (unit tests mock the access layer, so the select string
+ * never met a database) and through a preview walkthrough that read the empty block as the
+ * honest empty case. So the failure is reported; only the UI stays quiet.
  */
 function NewHelpful({ companyId }: { companyId: string }) {
-  const { data, reload } = useLoad(() => getNewHelpful(companyId).catch(() => []), [companyId]);
+  const { data, reload } = useLoad(() => getNewHelpful(companyId), [companyId], {
+    onError: (error) =>
+      Sentry.captureException(toError(error, 'Could not load new "helpful" reactions'), {
+        tags: { area: 'note_reactions' },
+      }),
+  });
 
   if (!data || data.length === 0) return null;
 

@@ -12,15 +12,25 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import type { InventoryLocation } from '@/types/inventoryLocations';
-import { isReservedKind, RESERVED_KIND_MESSAGE, LOCATION_KINDS } from '@/lib/locationKinds';
 
-// One vocabulary, shared with the builder's templates — see lib/locationKinds.ts for why the two
-// lists having nothing in common was a real problem and not just untidiness.
-const KIND_SUGGESTIONS: readonly string[] = LOCATION_KINDS;
+/*
+ * There is no "Kind" field any more.
+ *
+ * It asked for a word — cabinet, row, bin — that **nothing read**. Its one consumer was the
+ * board's `unitKind`, which substring-matched it to choose which drawing to render, and the board
+ * was replaced by a table. The visual builder never set one either, so this form was the only
+ * writer of a user-typed kind, and the only reader was this form echoing it back plus a chip in
+ * the detail sheet. A field you fill in so it can be shown back to you is not a field.
+ *
+ * `kind` stays in the database because `'system'` is load-bearing: it marks the auto-managed
+ * `Unassigned` pile, and `resolveFallbackPlace`, `LocationPicker`'s `excludeSystem`, the operator
+ * lookup's put-away split and the detail sheet's structural-actions gate all key off it. That
+ * value is set by `inv_get_or_create_unassigned`, never by a person — which is now true by
+ * construction rather than by a guard.
+ */
 
 export interface LocationFormValues {
   name: string;
-  kind: string | null;
   code: string | null;
 }
 
@@ -52,7 +62,6 @@ export default function LocationFormModal({
   onSubmit,
 }: LocationFormModalProps) {
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +70,6 @@ export default function LocationFormModal({
   // not a setState-in-effect).
   const handleEnter = () => {
     setName(location?.name ?? '');
-    setKind(location?.kind ?? null);
     setCode(location?.code ?? '');
     setError(null);
   };
@@ -88,18 +96,13 @@ export default function LocationFormModal({
       setError('Name is required.');
       return;
     }
-    // Refused here as well as in the access layer: the form should say why rather than let the
-    // write succeed into a location nobody can edit again. See `isReservedKind`.
-    if (isReservedKind(kind)) {
-      setError(RESERVED_KIND_MESSAGE);
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
+      // `kind` is deliberately not sent. Editing keeps whatever the row already has — which for
+      // every hand-made place is null, and for the Unassigned pile is `'system'`, set by the RPC.
       await onSubmit({
         name: name.trim(),
-        kind: kind?.trim() || null,
         code: code.trim() || null,
       });
       onClose();
@@ -145,16 +148,6 @@ export default function LocationFormModal({
                   duplicateOf ? `${parentLabel} already has a ${duplicateOf}.` : undefined
                 }
               />
-            )}
-          />
-          <Autocomplete
-            freeSolo
-            options={KIND_SUGGESTIONS}
-            value={kind}
-            onChange={(_, v) => setKind(v)}
-            onInputChange={(_, v) => setKind(v)}
-            renderInput={(params) => (
-              <TextField {...params} label="Kind (optional)" placeholder="cabinet, row, bin…" />
             )}
           />
           <TextField

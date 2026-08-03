@@ -532,17 +532,6 @@ export default function InventoryCountPage() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [committing]);
 
-  const toggle = (c: CountCandidate) =>
-    setSelected((prev) => {
-      const next = new Map(prev);
-      // Unticking drops the row from the sheet but deliberately leaves its entry alone, so
-      // re-ticking restores the number rather than making someone type it again.
-      const key = countRowKey(c);
-      if (next.has(key)) next.delete(key);
-      else next.set(key, c);
-      return next;
-    });
-
   /**
    * Tick a part: put EVERY place of it on the sheet, or take them all off.
    *
@@ -552,6 +541,8 @@ export default function InventoryCountPage() {
    */
   const toggleGroup = (g: CountGroup) =>
     setSelected((prev) => {
+      // Unticking drops the rows from the sheet but deliberately leaves their entries alone, so
+      // re-ticking restores the numbers rather than making someone type them again.
       const next = new Map(prev);
       const allOn = g.rows.every((r) => next.has(countRowKey(r)));
       for (const r of g.rows) {

@@ -139,18 +139,24 @@ describe('LocationFormModal — basics', () => {
     await user.type(nameField(), '  Cabinet 4  ');
     await user.click(screen.getByRole('button', { name: /create/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Cabinet 4', kind: null, code: null });
+    // No `kind` in the payload at all — the field is gone, and editing keeps whatever the row
+    // already has (null for every hand-made place, 'system' for the Unassigned pile).
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Cabinet 4', code: null });
   });
 
-  // The vocabulary the builder's templates emit, so a hand-added shelf can carry the same word.
-  it('suggests the shared kind vocabulary', async () => {
-    const user = userEvent.setup();
+  /**
+   * Replaces "suggests the shared kind vocabulary".
+   *
+   * The Kind field is gone. It asked for a word nothing read: its only consumer was the board's
+   * `unitKind`, which chose a drawing, and the board is a table now. Asserting the field's ABSENCE
+   * is what stops it drifting back in — it looked harmless, which is how it survived the board.
+   */
+  it('asks for a name and a code, and nothing else', async () => {
     renderForm();
 
-    await user.click(screen.getByRole('combobox', { name: /kind/i }));
-    expect(await screen.findByRole('option', { name: 'cabinet' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'shelving' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'drawer unit' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /name/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /code/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /kind/i })).not.toBeInTheDocument();
   });
 
   it('surfaces a save failure instead of closing', async () => {

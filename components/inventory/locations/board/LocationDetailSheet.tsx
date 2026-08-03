@@ -225,13 +225,11 @@ export default function LocationDetailSheet({
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
                 {node.name}
               </Typography>
+              {/* The `kind` line that sat beside this is gone with the field that fed it — see
+                  the note at the top of LocationFormModal. Nothing read the word; it was shown
+                  here only because it had been typed. */}
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                 {node.code && <Chip size="small" label={node.code} variant="outlined" />}
-                {node.kind && node.kind !== 'system' && (
-                  <Typography variant="caption" color="text.secondary">
-                    {node.kind}
-                  </Typography>
-                )}
               </Stack>
             </Box>
             <IconButton onClick={onClose} aria-label="Close">

@@ -27,8 +27,14 @@
  *
  * Unbounded, which the board never was: it could only draw three levels (unit → section →
  * compartment, with no recursion in the compartment renderer) while the generator permits four, so
- * a four-level tree was already partly invisible. Depth reads three redundant ways — indentation,
- * the `Inside` count, and the full breadcrumb in the detail drawer.
+ * a four-level tree was already partly invisible. Depth reads two ways — indentation, and the full
+ * breadcrumb in the detail drawer.
+ *
+ * There was an `Inside` column too, counting child places. It went because the chevron already
+ * says a row has children and the drawer already lists them, so it was a third telling of the
+ * same fact — and on a flat shop (the reparenting decision measured 118 of 121 as flat) it is a
+ * column of dashes. Its one distinct use, "how much is hidden under this collapsed row", did not
+ * pay for a column on every visit.
  *
  * ## No selection checkboxes
  *
@@ -161,9 +167,6 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
           <TableRow>
             <TableCell sx={{ fontWeight: 600 }}>Place</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Code</TableCell>
-            <TableCell sx={{ fontWeight: 600 }} align="right">
-              Inside
-            </TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Stock</TableCell>
             <TableCell sx={{ fontWeight: 600 }} align="right" />
           </TableRow>
@@ -199,7 +202,6 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                     <Box sx={{ display: 'flex', alignItems: 'center', pl: depth * 3 }}>
                       {node.children.length > 0 ? (
                         <IconButton
-                          size="small"
                           // The row opens the place; this must not also do that.
                           onClick={(e) => {
                             e.stopPropagation();
@@ -208,7 +210,18 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                           aria-label={
                             collapsed.has(node.id) ? `Expand ${node.name}` : `Collapse ${node.name}`
                           }
-                          sx={{ mr: 0.5 }}
+                          /*
+                           * 48px, like the count button at the end of this row — and for the same
+                           * reason its comment gives: the theme applies the design system's 48px
+                           * touch floor to Button, TextField and ListItemButton, but NOT to
+                           * IconButton, so `size="small"` renders about 34px.
+                           *
+                           * That matters more here than anywhere else on the page, because this
+                           * is a small target sitting inside a full-width tappable row that does
+                           * something DIFFERENT — a near-miss opens the drawer instead of
+                           * expanding. On a phone that is most taps.
+                           */
+                          sx={{ width: 48, height: 48, mr: 0.5 }}
                         >
                           {collapsed.has(node.id) ? (
                             <KeyboardArrowRightIcon fontSize="small" />
@@ -217,8 +230,9 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                           )}
                         </IconButton>
                       ) : (
-                        // Keeps names aligned whether or not a row has children.
-                        <Box sx={{ width: 34, flexShrink: 0 }} />
+                        // Keeps names aligned whether or not a row has children. Tracks the
+                        // chevron's width above, including its right margin.
+                        <Box sx={{ width: 52, flexShrink: 0 }} />
                       )}
                       <Box sx={{ minWidth: 0 }}>
                         <Typography
@@ -257,12 +271,6 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
                       {node.code || '—'}
-                    </Typography>
-                  </TableCell>
-
-                  <TableCell align="right">
-                    <Typography variant="body2" color="text.secondary">
-                      {node.children.length || '—'}
                     </Typography>
                   </TableCell>
 

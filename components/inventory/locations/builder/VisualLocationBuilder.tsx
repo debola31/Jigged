@@ -44,7 +44,6 @@ interface VisualLocationBuilderProps {
    * top level. Passing a parent is what turns the wizard into "Subdivide this unit".
    */
   parentId?: string | null;
-  parentCode?: string | null;
   /** Human path of the parent, for the dialog title. */
   parentPath?: string[];
   /**
@@ -69,7 +68,6 @@ export default function VisualLocationBuilder({
   open,
   companyId,
   parentId = null,
-  parentCode = null,
   parentPath,
   existingSiblingNames,
   startSortOrder = 0,
@@ -109,8 +107,8 @@ export default function VisualLocationBuilder({
   };
 
   const uniformTree = useMemo(
-    () => buildSpecFromLevels(levels, { parentCode, existingSiblingNames }),
-    [levels, parentCode, existingSiblingNames],
+    () => buildSpecFromLevels(levels, { existingSiblingNames }),
+    [levels, existingSiblingNames],
   );
   const tree = customized ? editedTree : uniformTree;
   const total = countSpecNodes(tree);

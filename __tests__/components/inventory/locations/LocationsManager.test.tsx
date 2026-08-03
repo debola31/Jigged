@@ -58,7 +58,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   parent_id: null,
   name: over.id,
   kind: null,
-  code: null,
   sort_order: 0,
   created_at: '',
   updated_at: '',
@@ -68,10 +67,10 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
 /** The seed's shape: Unassigned + Cabinet 3 › Shelf A/B + Yard. */
 const SEED_LOCATIONS = [
   loc({ id: 'un', name: 'Unassigned', kind: 'system' }),
-  loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', code: 'CAB3' }),
-  loc({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3', code: 'CAB3-A' }),
-  loc({ id: 'shelf-b', name: 'Shelf B', parent_id: 'cab3', code: 'CAB3-B' }),
-  loc({ id: 'yard', name: 'Yard', kind: 'outside', code: 'YARD' }),
+  loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet' }),
+  loc({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3' }),
+  loc({ id: 'shelf-b', name: 'Shelf B', parent_id: 'cab3' }),
+  loc({ id: 'yard', name: 'Yard', kind: 'outside' }),
 ];
 
 const board = (
@@ -229,7 +228,6 @@ describe('LocationsManager', () => {
     expect(parentId).toBe('cab3');
     // Cabinet 3 already holds Shelf A/B — a different series, so Rows start at 1.
     expect(spec.map((n) => n.name)).toEqual(['Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5']);
-    expect(spec[0].code).toBe('CAB3-R01');
   });
 
   /**
@@ -267,10 +265,10 @@ describe('LocationsManager', () => {
     const user = userEvent.setup();
     vi.mocked(getLocationBoard).mockResolvedValue(
       board([
-        loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet', code: 'CAB3' }),
-        loc({ id: 'r1', name: 'Row 1', parent_id: 'cab3', code: 'CAB3-R01' }),
-        loc({ id: 'r2', name: 'Row 2', parent_id: 'cab3', code: 'CAB3-R02' }),
-        loc({ id: 'r3', name: 'Row 3', parent_id: 'cab3', code: 'CAB3-R03' }),
+        loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet' }),
+        loc({ id: 'r1', name: 'Row 1', parent_id: 'cab3' }),
+        loc({ id: 'r2', name: 'Row 2', parent_id: 'cab3' }),
+        loc({ id: 'r3', name: 'Row 3', parent_id: 'cab3' }),
       ]),
     );
     render(<LocationsManager companyId="co1" />);

@@ -18,7 +18,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   parent_id: null,
   name: over.id,
   kind: null,
-  code: null,
   sort_order: 0,
   created_at: '',
   updated_at: '',
@@ -132,16 +131,17 @@ describe('LocationFormModal — basics', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('trims the name and drops empty optional fields', async () => {
+  it('trims the name', async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderForm();
 
     await user.type(nameField(), '  Cabinet 4  ');
     await user.click(screen.getByRole('button', { name: /create/i }));
 
-    // No `kind` in the payload at all — the field is gone, and editing keeps whatever the row
-    // already has (null for every hand-made place, 'system' for the Unassigned pile).
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Cabinet 4', code: null });
+    // The name is the whole payload. `kind` went with its field (nothing read a typed one) and
+    // `code` with its column in 20260803034616 — a label prints the QR and the full path, and
+    // nothing in the app could ever look a code up.
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Cabinet 4' });
   });
 
   /**
@@ -151,12 +151,14 @@ describe('LocationFormModal — basics', () => {
    * `unitKind`, which chose a drawing, and the board is a table now. Asserting the field's ABSENCE
    * is what stops it drifting back in — it looked harmless, which is how it survived the board.
    */
-  it('asks for a name and a code, and nothing else', async () => {
+  it('asks for a name, and nothing else', async () => {
     renderForm();
 
     expect(screen.getByRole('combobox', { name: /name/i })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /code/i })).toBeInTheDocument();
+    // Asserting the ABSENCE of both, because both looked harmless — which is how `kind` survived
+    // the board it existed for, and `code` survived being printed under the name it duplicated.
     expect(screen.queryByRole('combobox', { name: /kind/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /code/i })).not.toBeInTheDocument();
   });
 
   it('surfaces a save failure instead of closing', async () => {

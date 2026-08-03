@@ -3,75 +3,18 @@
  *
  * The builder collects an ordered list of LevelSpecs (level 0 = the top
  * containers, level 1 = their divisions, …) and this module turns them into a
- * LocationSpecNode tree with names and zero-padded sortable codes. The code
- * scheme is shared with bulkGenerateChildren so the visual and manual builders
- * agree. Every location can hold stock and be printed — no per-node flags.
+ * LocationSpecNode tree of NAMES. Every location can hold stock and be printed — no per-node
+ * flags.
+ *
+ * There was a parallel code scheme here — `CAB1` → `CAB1-R03` → `CAB1-R03-L`, parent-prefixed and
+ * zero-padded, shared with the manual bulk generator so the two agreed. It went with
+ * `inventory_locations.code` in 20260803034616: a label prints the QR and the full path, nothing
+ * in the app resolves a location by code, and a second identifier that only ever appeared printed
+ * under the first one is not one.
  */
 import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
 
-/** Zero-pad a 1-based index to a uniform width (warehouse naming discipline). */
-export function pad(n: number, width: number): string {
-  return String(n).padStart(width, '0');
-}
-
-/** Code for a generated node, e.g. parent "CAB1" + row 3 → "CAB1-R03". */
-export function generatedCode(
-  parentCode: string | null,
-  kind: string,
-  idx: number,
-  width: number,
-): string {
-  const initial = (kind || 'N').charAt(0).toUpperCase();
-  return `${parentCode ? parentCode + '-' : ''}${initial}${pad(idx, width)}`;
-}
-
-/** Code for an explicitly-named node, e.g. parent "CAB1-R03" + "Left" → "CAB1-R03-L". */
-export function explicitCode(parentCode: string | null, name: string): string {
-  const initial = (name.trim().charAt(0) || 'X').toUpperCase();
-  return `${parentCode ? parentCode + '-' : ''}${initial}`;
-}
-
-/** Shortest prefix of `name` not already in `taken`, uppercased. */
-function shortestFreePrefix(name: string, taken: ReadonlySet<string>): string {
-  const clean = name.trim().toUpperCase() || 'X';
-  for (let len = 1; len <= clean.length; len++) {
-    const candidate = clean.slice(0, len);
-    if (!taken.has(candidate)) return candidate;
-  }
-  // Every prefix taken (a genuine duplicate name) — a suffix keeps the sticker distinguishable.
-  let n = 2;
-  while (taken.has(`${clean}${n}`)) n += 1;
-  return `${clean}${n}`;
-}
-
-/**
- * Code for an explicitly-named node, kept distinct from its siblings' codes.
- *
- * `explicitCode` takes one initial, so `['Left', 'Lower']` both derive `…-L` — two different
- * shelves wearing the same printed sticker, which is the kind of collision a human actually
- * confuses. This grows the prefix only as far as needed: **`L` / `LO`**, first-come keeping the
- * short code.
- *
- * Deliberately NOT a uniqueness *constraint*. A duplicate `code` has no functional consequence —
- * QR payloads carry the location UUID and nothing in the app resolves by code — so a DB unique
- * index would buy nothing while risking a mid-flight insert failure inside the sequential,
- * non-transactional `materializeLocationSpec`. See `inventory.md` §5.5.
- *
- * `precedingNames` are the siblings assigned before this one, in order.
- */
-export function explicitCodeIn(
-  parentCode: string | null,
-  name: string,
-  precedingNames: string[],
-): string {
-  const taken = new Set<string>();
-  for (const p of precedingNames) taken.add(shortestFreePrefix(p, taken));
-  return `${parentCode ? parentCode + '-' : ''}${shortestFreePrefix(name, taken)}`;
-}
-
 export interface BuildSpecOptions {
-  /** Code of the parent the tree will be created under (null = top-level). */
-  parentCode?: string | null;
   /**
    * Names the parent ALREADY contains, so a repeat subdivide continues rather than collides.
    *
@@ -101,7 +44,7 @@ function nameBase(name: string): string {
 export interface LevelNaming {
   /** Final names for this level, already shifted past any existing siblings. */
   names: string[];
-  /** 1-based index the first name corresponds to — feeds the generated code. */
+  /** 1-based index the first name corresponds to. */
   startIndex: number;
 }
 
@@ -161,43 +104,28 @@ export function buildSpecFromLevels(
 ): LocationSpecNode[] {
   const buildLevel = (
     depth: number,
-    parentCode: string | null,
     parentKey: string,
     existingSiblingNames: string[],
   ): LocationSpecNode[] => {
     if (depth >= levels.length) return [];
     const level = levels[depth];
 
-    const makeNode = (i: number, name: string, code: string): LocationSpecNode => {
+    const makeNode = (i: number, name: string): LocationSpecNode => {
       const key = parentKey ? `${parentKey}/${i}` : `${i}`;
       return {
         key,
         name,
         kind: level.kind || null,
-        code,
-        children: buildLevel(depth + 1, code, key, []),
+        children: buildLevel(depth + 1, key, []),
       };
     };
 
-    const plan = planLevelNames(level, existingSiblingNames);
-
-    if (level.names && level.names.length > 0) {
-      // Codes grow only as far as needed to stay distinct: ['Left','Lower'] → L / LO, not L / L.
-      return plan.names.map((nm, i) =>
-        makeNode(i, nm, explicitCodeIn(parentCode, nm, plan.names.slice(0, i))),
-      );
-    }
-
-    // Code width tracks the highest index printed, not the count, so a run continuing to Row 12
-    // still pads to two digits rather than one.
-    const highestIdx = plan.startIndex + plan.names.length - 1;
-    const width = Math.max(2, String(highestIdx).length);
-    return plan.names.map((nm, i) =>
-      makeNode(i, nm, generatedCode(parentCode, level.kind, plan.startIndex + i, width)),
-    );
+    // Explicit names and generated ones took different branches only to derive different code
+    // shapes; with codes gone they are one walk, since `planLevelNames` already picked the names.
+    return planLevelNames(level, existingSiblingNames).names.map((nm, i) => makeNode(i, nm));
   };
 
-  return buildLevel(0, opts.parentCode ?? null, '', opts.existingSiblingNames ?? []);
+  return buildLevel(0, '', opts.existingSiblingNames ?? []);
 }
 
 /** Total node count across the spec forest (for the live "will create N" count). */
@@ -220,23 +148,13 @@ export function removeSpecNode(nodes: LocationSpecNode[], key: string): Location
 let addSeq = 0;
 const freshKey = () => `e${addSeq++}`;
 
-/** Code for a hand-added/cloned node, reusing the generated/explicit scheme. */
-function deriveCodeFor(name: string, kind: string, parentCode: string | null): string {
-  const m = name.match(/(\d+)\s*$/);
-  if (m) return generatedCode(parentCode, kind, parseInt(m[1], 10), Math.max(2, m[1].length));
-  return explicitCode(parentCode, name);
-}
-
-/** Deep-clone a subtree with fresh keys and codes re-derived under `parentCode`. */
-function cloneSubtree(node: LocationSpecNode, parentCode: string | null, overrideName?: string): LocationSpecNode {
-  const name = overrideName ?? node.name;
-  const code = deriveCodeFor(name, node.kind ?? '', parentCode);
+/** Deep-clone a subtree with fresh keys. */
+function cloneSubtree(node: LocationSpecNode, overrideName?: string): LocationSpecNode {
   return {
     key: freshKey(),
-    name,
+    name: overrideName ?? node.name,
     kind: node.kind,
-    code,
-    children: node.children.map((c) => cloneSubtree(c, code)),
+    children: node.children.map((c) => cloneSubtree(c)),
   };
 }
 
@@ -282,32 +200,18 @@ export function addChildUnder(tree: LocationSpecNode[], parentKey: string): Loca
   return mapNode(tree, parentKey, (parent) => {
     let child: LocationSpecNode;
     if (parent.children.length === 0) {
-      child = {
-        key: freshKey(),
-        name: 'Item 1',
-        kind: 'item',
-        code: deriveCodeFor('Item 1', 'item', parent.code),
-        children: [],
-      };
+      child = { key: freshKey(), name: 'Item 1', kind: 'item', children: [] };
     } else {
       const last = parent.children[parent.children.length - 1];
-      child = cloneSubtree(last, parent.code, nextSiblingName(parent.children, last));
+      child = cloneSubtree(last, nextSiblingName(parent.children, last));
     }
     return { ...parent, children: [...parent.children, child] };
   });
 }
 
-/** Parent's code, inferred from a child's code ("C01-R03" → "C01", "C01" → null). */
-function parentCodeOf(code: string | null): string | null {
-  if (!code) return null;
-  const i = code.lastIndexOf('-');
-  return i >= 0 ? code.slice(0, i) : null;
-}
-
 /**
- * Duplicate a node (and its subtree) as the NEXT sibling — fresh keys, a bumped
- * name (Cabinet 1 → Cabinet 2), and re-derived codes under the same parent.
- * Works at any level, including top-level entries.
+ * Duplicate a node (and its subtree) as the NEXT sibling — fresh keys and a bumped
+ * name (Cabinet 1 → Cabinet 2). Works at any level, including top-level entries.
  */
 export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSpecNode[] {
   const walk = (nodes: LocationSpecNode[]): LocationSpecNode[] => {
@@ -315,7 +219,7 @@ export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSp
     for (const n of nodes) {
       out.push({ ...n, children: walk(n.children) });
       if (n.key === key) {
-        out.push(cloneSubtree(n, parentCodeOf(n.code), nextSiblingName(nodes, n)));
+        out.push(cloneSubtree(n, nextSiblingName(nodes, n)));
       }
     }
     return out;
@@ -325,19 +229,16 @@ export function duplicateNode(tree: LocationSpecNode[], key: string): LocationSp
 
 /**
  * Duplicate a single (DB-sourced) subtree as a sibling: a bumped name past the
- * EXISTING sibling names (Cabinet 1 → Cabinet 2), fresh keys, and codes
- * re-derived under `parentCode`. Used by the Locations manager's Duplicate —
- * unlike duplicateNode it takes the real sibling names + parent code explicitly
- * (rather than inferring from an in-memory forest), so it can't collide with
- * siblings the in-memory tree doesn't know about.
+ * EXISTING sibling names (Cabinet 1 → Cabinet 2) and fresh keys. Used by the Locations manager's
+ * Duplicate — unlike duplicateNode it takes the real sibling names explicitly (rather than
+ * inferring from an in-memory forest), so it can't collide with siblings the in-memory tree
+ * doesn't know about.
  */
 export function duplicateSubtreeAsSibling(
   rootNode: LocationSpecNode,
-  parentCode: string | null,
   existingSiblingNames: string[],
 ): LocationSpecNode {
   const siblings = existingSiblingNames.map((name) => ({ ...rootNode, name, children: [] }));
-  const name = nextSiblingName(siblings, rootNode);
-  return cloneSubtree(rootNode, parentCode, name);
+  return cloneSubtree(rootNode, nextSiblingName(siblings, rootNode));
 }
 

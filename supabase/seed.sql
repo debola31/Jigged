@@ -1122,11 +1122,14 @@ begin
   -- No is_stockable / is_qr_anchor: both were dropped in
   -- 20260623031347_drop_location_display_flags.sql. Every node is stockable and
   -- every node can carry a QR now.
-  insert into public.inventory_locations (id, company_id, parent_id, name, kind, code, sort_order) values
-    ('71000000-0000-0000-0000-000000000001', v_company, null, 'Cabinet 3', 'cabinet', 'CAB3', 1),
-    (v_shelf_a, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf A', 'shelf', 'CAB3-A', 1),
-    (v_shelf_b, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf B', 'shelf', 'CAB3-B', 2),
-    (v_yard,    v_company, null, 'Yard', 'yard', 'YARD', 2)
+  -- No `code` and no `kind`: the column went in 20260803034616 and the user-facing kind field in
+  -- e2e2f5e. `kind` survives in the schema only for the auto-managed `Unassigned` pile, which
+  -- `inv_get_or_create_unassigned` creates — never a hand-written row like these.
+  insert into public.inventory_locations (id, company_id, parent_id, name, sort_order) values
+    ('71000000-0000-0000-0000-000000000001', v_company, null, 'Cabinet 3', 1),
+    (v_shelf_a, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf A', 1),
+    (v_shelf_b, v_company, '71000000-0000-0000-0000-000000000001', 'Shelf B', 2),
+    (v_yard,    v_company, null, 'Yard', 2)
   on conflict (id) do nothing;
 
   -- Spread stock so all three count-sheet write targets exist in dev data. The

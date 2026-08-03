@@ -10,7 +10,6 @@ import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
@@ -173,7 +172,6 @@ export default function OperatorBinViewPage() {
           <Typography variant="h5" sx={{ fontWeight: 700 }}>
             {node.name}
           </Typography>
-          {node.code && <Chip size="small" label={node.code} variant="outlined" />}
         </Stack>
         {path.length > 1 && (
           <Typography variant="body2" color="text.secondary">
@@ -198,11 +196,6 @@ export default function OperatorBinViewPage() {
                   <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography sx={{ fontWeight: 600 }}>{child.name}</Typography>
-                      {child.code && (
-                        <Typography variant="caption" color="text.secondary">
-                          {child.code}
-                        </Typography>
-                      )}
                     </Box>
                     <KeyboardArrowRightIcon color="action" />
                   </CardContent>

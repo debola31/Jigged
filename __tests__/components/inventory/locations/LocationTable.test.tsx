@@ -19,7 +19,6 @@ const node = (
   company_id: 'co1',
   parent_id: null,
   kind: null,
-  code: null,
   sort_order: 0,
   photo_path: null,
   created_at: '',
@@ -29,10 +28,10 @@ const node = (
   ...over,
 });
 
-const shelfA = node({ id: 'a', name: 'Shelf A', parent_id: 'cab', code: 'CAB3-A', depth: 1 });
-const shelfB = node({ id: 'b', name: 'Shelf B', parent_id: 'cab', code: 'CAB3-B', depth: 1 });
-const cabinet = node({ id: 'cab', name: 'Cabinet 3', code: 'CAB3', children: [shelfA, shelfB] });
-const yard = node({ id: 'yard', name: 'Yard', code: 'YARD', sort_order: 1 });
+const shelfA = node({ id: 'a', name: 'Shelf A', parent_id: 'cab', depth: 1 });
+const shelfB = node({ id: 'b', name: 'Shelf B', parent_id: 'cab', depth: 1 });
+const cabinet = node({ id: 'cab', name: 'Cabinet 3', children: [shelfA, shelfB] });
+const yard = node({ id: 'yard', name: 'Yard', sort_order: 1 });
 const unassigned = node({ id: 'un', name: 'Unassigned', kind: 'system', sort_order: 2 });
 
 const TREE = [cabinet, yard, unassigned];
@@ -83,8 +82,8 @@ describe('LocationTable', () => {
     const user = userEvent.setup();
     renderTable();
 
-    // The Code cell — nowhere near the name.
-    await user.click(within(rowFor('Yard')).getByText('YARD'));
+    // The Stock cell — nowhere near the name.
+    await user.click(within(rowFor('Yard')).getByText(/part|empty/i));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'yard' }));
   });
 
@@ -97,7 +96,7 @@ describe('LocationTable', () => {
     const user = userEvent.setup();
     renderTable();
 
-    await user.click(within(rowFor('Cabinet 3')).getByText('CAB3'));
+    await user.click(within(rowFor('Cabinet 3')).getByText(/part|empty/i));
 
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'cab' }));
     // Still expanded, i.e. the click did not toggle it.

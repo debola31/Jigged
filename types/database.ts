@@ -571,7 +571,6 @@ export type Database = {
       }
       inventory_locations: {
         Row: {
-          code: string | null
           company_id: string
           created_at: string
           id: string
@@ -583,7 +582,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          code?: string | null
           company_id: string
           created_at?: string
           id?: string
@@ -595,7 +593,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          code?: string | null
           company_id?: string
           created_at?: string
           id?: string

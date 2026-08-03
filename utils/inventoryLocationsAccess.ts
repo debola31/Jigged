@@ -39,7 +39,7 @@ import type {
 import type { MaterialLocation } from '@/types/materialCheck';
 
 const LOCATION_COLUMNS =
-  'id, company_id, parent_id, name, kind, code, sort_order, photo_path, created_at, updated_at';
+  'id, company_id, parent_id, name, kind, sort_order, photo_path, created_at, updated_at';
 
 /** Split an id list so a batched `.in()` stays inside PostgREST's URL limits. */
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -297,7 +297,6 @@ async function insertLocation(
       parent_id: input.parent_id ?? null,
       name: input.name.trim(),
       kind: input.kind ?? null,
-      code: input.code ?? null,
       sort_order: input.sort_order ?? 0,
     })
     .select(LOCATION_COLUMNS)
@@ -416,7 +415,6 @@ async function insertSpecForest(
       parent_id: parentId,
       name: node.name,
       kind: node.kind,
-      code: node.code,
       sort_order: sortOrder++,
     });
     created.push(row);
@@ -456,9 +454,7 @@ export async function materializeLocationSpec(
 /**
  * Duplicate a location and its entire subtree as a new sibling — structure
  * only, no stock. The copy's root is named past the existing siblings
- * (Cabinet 1 → Cabinet 2) and sorted after them; every code is re-derived under
- * the same parent from the bumped name + kind (the shared builder/bulk-generate
- * scheme, so a custom edited code is not preserved). Sequential inserts via
+ * (Cabinet 1 → Cabinet 2) and sorted after them. Sequential inserts via
  * materializeLocationSpec.
  */
 export async function duplicateLocation(
@@ -477,17 +473,12 @@ export async function duplicateLocation(
     key: loc.id, // ignored by materialize; cloneSubtree assigns fresh keys
     name: loc.name,
     kind: loc.kind,
-    code: loc.code,
     children: childrenOf(loc.id).map(toSpec),
   });
 
-  const parentCode = target.parent_id
-    ? (all.find((l) => l.id === target.parent_id)?.code ?? null)
-    : null;
   const siblings = childrenOf(target.parent_id);
   const clone = duplicateSubtreeAsSibling(
     toSpec(target),
-    parentCode,
     siblings.map((l) => l.name),
   );
   // Sort the copy after the existing siblings (sort_order ASC, name ASC read
@@ -548,7 +539,6 @@ export async function getBalancesForPart(
       return {
         location_id: r.location_id,
         location_name: loc?.name ?? 'Unknown',
-        location_code: loc?.code ?? null,
         path: computePathNames(r.location_id, byId),
         quantity: Number(r.quantity),
         // Carried so callers can tell a SHELF from the `Unassigned` put-away pile. Without it,

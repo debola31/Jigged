@@ -12,7 +12,6 @@ export interface InventoryLocation {
   parent_id: string | null;
   name: string;
   kind: string | null;
-  code: string | null;
   sort_order: number;
   /** Path in the private `attachments` bucket to a photo of this place — see §5.5 decision 5. */
   photo_path: string | null;
@@ -30,12 +29,11 @@ export interface CreateLocationInput {
   parent_id?: string | null;
   name: string;
   kind?: string | null;
-  code?: string | null;
   sort_order?: number;
 }
 
 export type UpdateLocationInput = Partial<
-  Pick<InventoryLocation, 'name' | 'kind' | 'code' | 'sort_order' | 'photo_path'>
+  Pick<InventoryLocation, 'name' | 'kind' | 'sort_order' | 'photo_path'>
 >;
 
 /**
@@ -56,15 +54,14 @@ export interface LevelSpec {
  * In-memory location tree the visual builder assembles entirely client-side,
  * before any DB write. `materializeLocationSpec` inserts it into
  * inventory_locations on Create. `key` is a stable client id for board
- * rendering / prune (NOT the DB id); `code` is precomputed during assembly
- * (parent-prefixed, zero-padded) to match the manual bulk generator. Every
- * location can hold stock and be printed, so no per-node stockable/QR flags.
+ * rendering / prune (NOT the DB id). Every location can hold stock and be printed, so no
+ * per-node stockable/QR flags — and no `code`: that column went in 20260803034616, along with the
+ * whole parent-prefixed zero-padded scheme that existed to fill it.
  */
 export interface LocationSpecNode {
   key: string;
   name: string;
   kind: string | null;
-  code: string | null;
   children: LocationSpecNode[];
 }
 
@@ -72,7 +69,6 @@ export interface LocationSpecNode {
 export interface PartLocationBalanceWithLocation {
   location_id: string;
   location_name: string;
-  location_code: string | null;
   /** Full path, root → leaf, e.g. ['Cabinet 1', 'Row 3', 'Left']. */
   path: string[];
   quantity: number;

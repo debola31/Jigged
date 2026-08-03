@@ -76,7 +76,6 @@ describe('the level generator', () => {
     expect(parentId).toBe('cab-3');
     // NOT 'Cabinet 1' — the old top-level palette would have nested a cabinet inside a cabinet.
     expect(spec[0].name).toBe('Row 1');
-    expect(spec[0].code).toBe('CAB3-R01');
   });
 
   /** The generator's real value: it continues from what the unit already holds. */
@@ -94,7 +93,6 @@ describe('the level generator', () => {
     expect(spec.map((n: { name: string }) => n.name)).toEqual([
       'Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8',
     ]);
-    expect(spec[0].code).toBe('CAB3-R04');
   });
 
   it('customizes a single branch, then can start over', async () => {

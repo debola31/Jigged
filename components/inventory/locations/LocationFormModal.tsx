@@ -31,7 +31,6 @@ import type { InventoryLocation } from '@/types/inventoryLocations';
 
 export interface LocationFormValues {
   name: string;
-  code: string | null;
 }
 
 interface LocationFormModalProps {
@@ -62,7 +61,6 @@ export default function LocationFormModal({
   onSubmit,
 }: LocationFormModalProps) {
   const [name, setName] = useState('');
-  const [code, setCode] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +68,6 @@ export default function LocationFormModal({
   // not a setState-in-effect).
   const handleEnter = () => {
     setName(location?.name ?? '');
-    setCode(location?.code ?? '');
     setError(null);
   };
 
@@ -103,7 +100,6 @@ export default function LocationFormModal({
       // every hand-made place is null, and for the Unassigned pile is `'system'`, set by the RPC.
       await onSubmit({
         name: name.trim(),
-        code: code.trim() || null,
       });
       onClose();
     } catch (e) {
@@ -149,14 +145,6 @@ export default function LocationFormModal({
                 }
               />
             )}
-          />
-          <TextField
-            label="Code (optional)"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="CAB1-R3-L"
-            helperText="Printed on the label; the QR itself always encodes the location ID."
-            fullWidth
           />
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>

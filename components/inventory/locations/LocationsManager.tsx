@@ -63,7 +63,7 @@ function computePath(id: string, byId: Map<string, InventoryLocation>): string[]
 function collectLabels(node: InventoryLocationNode, byId: Map<string, InventoryLocation>): LocationLabel[] {
   const out: LocationLabel[] = [];
   const walk = (n: InventoryLocationNode) => {
-    if (n.kind !== 'system') out.push({ id: n.id, path: computePath(n.id, byId), code: n.code });
+    if (n.kind !== 'system') out.push({ id: n.id, path: computePath(n.id, byId) });
     n.children.forEach(walk);
   };
   walk(node);
@@ -121,14 +121,12 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const [builder, setBuilder] = useState<{
     open: boolean;
     parentId: string | null;
-    parentCode: string | null;
     parentPath: string[];
     existingSiblingNames: string[];
     startSortOrder: number;
   }>({
     open: false,
     parentId: null,
-    parentCode: null,
     parentPath: [],
     existingSiblingNames: [],
     startSortOrder: 0,
@@ -228,7 +226,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       setBuilder({
         open: true,
         parentId: node.id,
-        parentCode: node.code,
         parentPath: computePath(node.id, byId),
         // What's already inside, so a second subdivide continues the run (Row 4–6) rather than
         // regenerating Row 1–3 and colliding partway through the sequential inserts.
@@ -547,7 +544,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
         open={builder.open}
         companyId={companyId}
         parentId={builder.parentId}
-        parentCode={builder.parentCode}
         parentPath={builder.parentPath}
         existingSiblingNames={builder.existingSiblingNames}
         startSortOrder={builder.startSortOrder}

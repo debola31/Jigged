@@ -14,7 +14,6 @@
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
@@ -225,12 +224,9 @@ export default function LocationDetailSheet({
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
                 {node.name}
               </Typography>
-              {/* The `kind` line that sat beside this is gone with the field that fed it — see
-                  the note at the top of LocationFormModal. Nothing read the word; it was shown
-                  here only because it had been typed. */}
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-                {node.code && <Chip size="small" label={node.code} variant="outlined" />}
-              </Stack>
+              {/* The `kind` and `code` lines that sat here are gone with the fields that fed
+                  them — see the notes at the top of LocationFormModal and in migration
+                  20260803034616. The name and the breadcrumb are the identity. */}
             </Box>
             <IconButton onClick={onClose} aria-label="Close">
               <CloseIcon />

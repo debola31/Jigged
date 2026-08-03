@@ -239,11 +239,6 @@ export default function PartLocationInventory({
             <Paper key={b.location_id} variant="outlined" sx={{ px: 2, py: 1, display: 'flex', alignItems: 'center' }}>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography noWrap>{b.path.join(' › ') || b.location_name}</Typography>
-                {b.location_code && (
-                  <Typography variant="caption" color="text.secondary">
-                    {b.location_code}
-                  </Typography>
-                )}
               </Box>
               <Typography sx={{ fontWeight: 600 }}>
                 {b.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 })} {primaryUnit}

@@ -103,7 +103,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   parent_id: null,
   name: over.id,
   kind: null,
-  code: null,
   sort_order: 0,
   photo_path: null,
   created_at: '',
@@ -340,21 +339,19 @@ describe('materializeLocationSpec', () => {
         key: '0',
         name: 'Cabinet 1',
         kind: 'cabinet',
-        code: 'C01',
         children: [
           {
             key: '0/0',
             name: 'Row 1',
             kind: 'row',
-            code: 'C01-R01',
             children: [],
           },
         ],
       },
     ];
     // One insert per node, and nothing else — see the request-budget test below.
-    queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1', code: 'C01' }), error: null });
-    queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a', code: 'C01-R01' }), error: null });
+    queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1' }), error: null });
+    queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a' }), error: null });
 
     const created = await materializeLocationSpec('co1', null, spec);
 
@@ -365,7 +362,6 @@ describe('materializeLocationSpec', () => {
       expect.objectContaining({
         parent_id: null,
         name: 'Cabinet 1',
-        code: 'C01',
         sort_order: 0,
       }),
     );
@@ -383,10 +379,9 @@ describe('materializeLocationSpec', () => {
         key: '0',
         name: 'Row 1',
         kind: 'row',
-        code: 'C01-R01',
         children: [
-          { key: '0/0', name: 'Left', kind: 'bin', code: 'C01-R01-L', children: [] },
-          { key: '0/1', name: 'Right', kind: 'bin', code: 'C01-R01-R', children: [] },
+          { key: '0/0', name: 'Left', kind: 'bin', children: [] },
+          { key: '0/1', name: 'Right', kind: 'bin', children: [] },
         ],
       },
     ];
@@ -406,7 +401,7 @@ describe('materializeLocationSpec', () => {
   it('still rejects a parent from another company, before writing anything', async () => {
     queueFrom({ data: loc({ id: 'cab', company_id: 'OTHER' }), error: null });
     await expect(
-      materializeLocationSpec('co1', 'cab', [{ key: '0', name: 'Row 1', kind: 'row', code: 'R01', children: [] }]),
+      materializeLocationSpec('co1', 'cab', [{ key: '0', name: 'Row 1', kind: 'row', children: [] }]),
     ).rejects.toThrow(/same company/i);
     expect(mockSupabase.from).toHaveBeenCalledTimes(1);
   });
@@ -417,15 +412,15 @@ describe('duplicateLocation', () => {
     // Existing: Cabinet 1 (C01) → Bin 1 (C01-B01)
     queueFrom({
       data: [
-        loc({ id: 'cab', name: 'Cabinet 1', kind: 'cabinet', code: 'C01' }),
-        loc({ id: 'b1', name: 'Bin 1', kind: 'bin', parent_id: 'cab', code: 'C01-B01' }),
+        loc({ id: 'cab', name: 'Cabinet 1', kind: 'cabinet' }),
+        loc({ id: 'b1', name: 'Bin 1', kind: 'bin', parent_id: 'cab' }),
       ],
       error: null,
     });
     // materialize → new cabinet insert, then the copied bin under it. No per-node parent check:
     // the bin's parent is the cabinet this call just created.
-    queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2', code: 'C02' }), error: null });
-    queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2', code: 'C02-B01' }), error: null });
+    queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2' }), error: null });
+    queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2' }), error: null });
 
     const created = await duplicateLocation('co1', 'cab');
 
@@ -434,12 +429,12 @@ describe('duplicateLocation', () => {
     // the one existing sibling (sort_order 0), so the copy doesn't jump to front.
     const cabInsert = mockSupabase.from.mock.results[1].value as Record<string, ReturnType<typeof vi.fn>>;
     expect(cabInsert.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ parent_id: null, name: 'Cabinet 2', code: 'C02', sort_order: 1 }),
+      expect.objectContaining({ parent_id: null, name: 'Cabinet 2', sort_order: 1 }),
     );
     // #2 = copied bin insert, code re-derived under the new cabinet
     const binInsert = mockSupabase.from.mock.results[2].value as Record<string, ReturnType<typeof vi.fn>>;
     expect(binInsert.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1', code: 'C02-B01' }),
+      expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1' }),
     );
   });
 });
@@ -624,7 +619,7 @@ describe('duplicate sibling names', () => {
     queueFrom({ data: null, error: UNIQUE_VIOLATION });
     await expect(
       materializeLocationSpec('co1', null, [
-        { key: '0', name: 'Row 1', kind: 'row', code: 'R01', children: [] },
+        { key: '0', name: 'Row 1', kind: 'row', children: [] },
       ]),
     ).rejects.toThrow(/already a "Row 1" in the same place/i);
   });

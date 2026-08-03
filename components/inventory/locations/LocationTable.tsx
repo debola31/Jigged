@@ -166,7 +166,6 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
         <TableHead>
           <TableRow>
             <TableCell sx={{ fontWeight: 600 }}>Place</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Code</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Stock</TableCell>
             <TableCell sx={{ fontWeight: 600 }} align="right" />
           </TableRow>
@@ -266,12 +265,6 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                         )}
                       </Box>
                     </Box>
-                  </TableCell>
-
-                  <TableCell>
-                    <Typography variant="body2" color="text.secondary">
-                      {node.code || '—'}
-                    </Typography>
                   </TableCell>
 
                   <TableCell>

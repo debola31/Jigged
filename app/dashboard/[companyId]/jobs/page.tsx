@@ -159,13 +159,18 @@ export default function JobsPage() {
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
   );
-  // Customer deep-link support (e.g. a link from a customer page) with no
-  // toolbar control — the search box already covers customer-name lookup.
-  // Seeded from ?customer=<uuid> — the Related-card count on a customer page
-  // links here. It used to have no setter and no control, so anyone arriving
-  // via that param got a silently filtered list with nothing saying why and no
-  // way out. It is now bound to the visible Customer dropdown below, matching
-  // the Quotes page exactly.
+  // Seeded from ?customer=<uuid> — the customer page's Jobs count links here —
+  // and bound to the visible Customer dropdown below.
+  //
+  // That dropdown was once removed as "redundant, search already matches
+  // customer name". True of the manual case, false of the two that matter:
+  // search_jobs_by_identifier is capped at LIMIT 100 and getAllJobs applies the
+  // status filters AFTER that cap, so a busy customer's search silently
+  // truncates in job-id order with nothing saying rows were dropped; and a
+  // substring cannot express "exactly this customer", which the count link
+  // requires. This filter is .eq('customer_id', …) on the main query, never the
+  // RPC, so it is exact by construction — and it doubles as the on-screen
+  // explanation for an arriving deep link, which previously had none.
   const [customerId, setCustomerId] = useState<string>(
     () => searchParams.get('customer') ?? '',
   );

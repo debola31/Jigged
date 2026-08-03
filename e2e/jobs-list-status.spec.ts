@@ -36,13 +36,22 @@ test.describe('Jobs list — combined status filter', () => {
     await expect(page).toHaveURL(/\/jobs/);
     await waitForGridLoaded(page);
 
-    // Toolbar is simplified: one combined "Status" control replaces the old
-    // Production / Fulfillment / Customer selects and the closed-jobs checkbox.
+    // One combined "Status" control replaces the old Production / Fulfillment
+    // selects and the closed-jobs checkbox.
     await expect(page.getByRole('combobox', { name: /^Status$/i })).toBeVisible();
     await expect(page.getByRole('combobox', { name: /Production Status/i })).toHaveCount(0);
     await expect(page.getByRole('combobox', { name: /Fulfillment Status/i })).toHaveCount(0);
-    await expect(page.getByRole('combobox', { name: /^Customer$/i })).toHaveCount(0);
     await expect(page.getByRole('checkbox', { name: /Show completed & cancelled/i })).toHaveCount(0);
+
+    // Customer is back, and this assertion is INVERTED from what it used to be.
+    // It was removed as "redundant — search already matches customer name",
+    // which is true of the manual case and false of the two that matter:
+    // search_jobs_by_identifier is capped at LIMIT 100 (and jobsAccess applies
+    // the status filters AFTER that cap), so a busy customer's list silently
+    // truncates in UUID order; and a substring can never express "exactly this
+    // customer", which the customer page's Quotes/Jobs count links require.
+    // The dropdown filters on customer_id, so it is exact by construction.
+    await expect(page.getByRole('combobox', { name: /^Customer$/i })).toBeVisible();
 
     // Isolate the seeded jobs by their shared job-number prefix.
     await page.getByPlaceholder(SEARCH).fill('E2E-JS-');

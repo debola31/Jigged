@@ -239,6 +239,17 @@ irreversibility.
   recover *when* a note was read, which combined with `note_viewers()` naming the
   reader reconstructs "Kurtis had to look this up on Tuesday". A count is a number
   the server already told us, so subtracting on the client leaks nothing.
+- **New since you last looked** (My work, above everything) — the NAMED half of the
+  loop. "Sam Carter found it helpful", quoting the note, grouped so that several
+  reactors on one note are ONE item naming them all rather than several items. Names
+  are acceptable here and not on the banner because this is the surface an operator
+  opens about themselves; the banner is glanceable over a shoulder. Renders nothing
+  when there is nothing new. Dismissal (**Got it**, no timer, never auto-cleared by
+  scrolling) advances `user_company_access.reactions_seen_at` via `mark_reactions_seen()`
+  and destroys nothing — every reaction stays on its note below, permanently. Eligibility
+  is capped at 8 weeks so a long absence is not met with stale news; the DISPLAY has no
+  expiry. Derived from live `note_reactions` rows rather than stored messages, so a
+  retracted mark simply stops appearing and no "still valid?" rule is needed.
 - **My work** (`/operator/{companyId}/my-work`) — a summary headed **"Your notes so
   far"** (the heading predicates the NOTES, not the operator: a view is not something
   they added, but the notes *were* viewed, so every figure under it is a true predicate.
@@ -636,6 +647,9 @@ Each bullet is a Given/When/Then scenario carrying a verification clause — a p
 - [ ] **Given** a note whose job has been deleted, **when** My work renders it, **then** the note survives, the Open-job item leaves the overflow menu, and the reference falls back to the part it is anchored to — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'falls back to the part once the capturing job is gone'`*.
 - [ ] **Given** a maintenance entry the operator wrote, **when** My work renders it, **then** the row names the **work center** where a job note names its job — maintenance entries are `notes` rows with `subject_kind='work_center'` and land in this list like anything else the operator wrote — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'names the machine where a job note names its job'`*.
 - [ ] **Given** My work, **when** the operator taps a note's text, **then** nothing happens: the row body is inert, the view count opens the readers and the overflow opens the actions, so no tap is ambiguous between reading and deleting — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'does nothing when the note body is tapped'`; rationale in [interaction-standards.md §1](../interaction-standards.md)*.
+- [ ] **Given** helpful marks the author has not seen, **when** My work renders, **then** they appear grouped by NOTE with the reactors named, and never as a per-person total — *verified by `__tests__/components/operator/NewHelpfulBlock.test.tsx` and `__tests__/utils/operatorAccess.test.ts > getNewHelpful`*.
+- [ ] **Given** the operator taps **Got it**, **then** the cursor advances to the newest instant that was actually on screen (not `now()`), so a reaction that landed mid-render is still shown next time — *verified by `NewHelpfulBlock.test.tsx > 'dismisses with the newest instant it displayed'`*.
+- [ ] **Given** an operator whose notes nobody has opened, **when** the summary renders, **then** the zero stays in place and a forward-looking line appears instead of a standing "0 views" — *verified by `MyWorkPage.test.tsx > 'turns a zero view count forward'`*.
 - [ ] **Given** an operator with more than ten notes, **when** My work renders, **then** ten load and the totals still count every note they have written, not the ten on screen — *verified by `__tests__/app/operator/MyWorkPage.test.tsx > 'reports every note in the summary, not just the page on screen'`*.
 
 **Playbook ordering**

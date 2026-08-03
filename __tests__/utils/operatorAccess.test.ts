@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // --- Chainable Supabase mock (same shape as partAttachmentsAccess.test.ts) ---
 const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
   const builder: Record<string, ReturnType<typeof vi.fn> | unknown> = {};
-  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single', 'maybeSingle'];
+  const chainMethods = ['from', 'select', 'insert', 'update', 'delete', 'eq', 'neq', 'in', 'is', 'not', 'or', 'order', 'limit', 'single', 'maybeSingle', 'gt', 'gte', 'lt', 'lte', 'range'];
   chainMethods.forEach((m) => {
     builder[m] = vi.fn().mockImplementation(() => builder);
   });
@@ -49,6 +49,7 @@ import {
   revertOperationCompletion,
   getOutsideOpsForCompany,
   getCurrentMember,
+  getNewHelpful,
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
@@ -690,5 +691,69 @@ describe('station selection', () => {
     mockQueryBuilder.error = { message: 'network down' };
 
     await expect(getStationName('wc1')).rejects.toThrow('network down');
+  });
+});
+
+
+/**
+ * `getNewHelpful` collapses reactions onto the NOTE they are about.
+ *
+ * Three people marking one note is one item naming three people, never three items and
+ * never a per-person total — the note is the unit of recognition, which is both what
+ * holds the signal at single-target strength (Västfjäll et al. 2014) and the standing
+ * rule that keeps reactions off a leaderboard.
+ */
+describe('getNewHelpful', () => {
+  const member = { id: 'acc-me', name: 'Diego', user_id: 'auth-user-1', role: 'operator', reactions_seen_at: null };
+
+  /** Rows as PostgREST returns them: newest first, one per reactor. */
+  const row = (name: string, createdAt: string, noteId = 'note-1') => ({
+    created_at: createdAt,
+    reactor: { name },
+    note: {
+      id: noteId,
+      body: 'Clamp on the boss, not the flange.',
+      job: { job_number: 'J-0042' },
+      captured_job: null,
+      work_center: null,
+    },
+  });
+
+  it('groups every reactor onto the one note, newest first', async () => {
+    mockQueryBuilder.data = member;
+    const first = await getCurrentMember('c1');
+    expect(first?.id).toBe('acc-me');
+
+    mockQueryBuilder.data = [
+      row('Ray Ellis', '2026-08-02T12:00:00Z'),
+      row('Dee Novak', '2026-08-01T12:00:00Z'),
+      row('Sam Carter', '2026-07-31T12:00:00Z'),
+    ];
+    const out = await getNewHelpful('c1');
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.names).toEqual(['Ray Ellis', 'Dee Novak', 'Sam Carter']);
+    // The cursor must advance to the NEWEST of them, not the first row of the group.
+    expect(out[0]!.latest_at).toBe('2026-08-02T12:00:00Z');
+    expect(out[0]!.reference).toBe('J-0042');
+  });
+
+  it('keeps separate notes separate', async () => {
+    mockQueryBuilder.data = member;
+    await getCurrentMember('c1');
+
+    mockQueryBuilder.data = [
+      row('Ray Ellis', '2026-08-02T12:00:00Z', 'note-1'),
+      row('Dee Novak', '2026-08-01T12:00:00Z', 'note-2'),
+    ];
+    const out = await getNewHelpful('c1');
+
+    expect(out).toHaveLength(2);
+    expect(out.map((i) => i.note_id)).toEqual(['note-1', 'note-2']);
+  });
+
+  it('returns nothing rather than throwing when there is no member', async () => {
+    mockQueryBuilder.data = null;
+    expect(await getNewHelpful('c1')).toEqual([]);
   });
 });

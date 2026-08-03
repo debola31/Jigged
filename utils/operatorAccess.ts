@@ -35,6 +35,7 @@ import type {
   JobNoteMedia,
   PartPreviousNote,
   MyContributionTotals,
+  NewHelpful,
   MyNotesPage,
   MyNote,
   NoteViewer,
@@ -56,6 +57,15 @@ export interface CurrentMember {
    * round trip for a value that is on the row we are already fetching.
    */
   role: string | null;
+  /**
+   * Cursor for the "new since you last looked" recognition block — helpful marks at or
+   * before this instant have already been surfaced. NULL means never dismissed, which the
+   * reader treats as "the recent window", not "everything ever". Selected here rather than
+   * in a second query because this row is already being fetched on the surface that needs
+   * it. Safe to read stale-by-one-render: the in-flight cache does not outlive a request,
+   * so the next call after a dismiss re-reads it.
+   */
+  reactions_seen_at: string | null;
 }
 
 /**
@@ -117,7 +127,7 @@ async function fetchCurrentMember(companyId: string): Promise<CurrentMember | nu
 
   const { data: member } = await supabase
     .from('user_company_access')
-    .select('id, name, user_id, role')
+    .select('id, name, user_id, role, reactions_seen_at')
     .eq('user_id', session.user.id)
     .eq('company_id', companyId)
     .single();
@@ -2093,6 +2103,146 @@ export async function removeReaction(
   if (error) {
     throw new Error(
       friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not undo that.' }),
+    );
+  }
+}
+
+// ============================================================================
+// NEW RECOGNITION — "helpful" marks the author has not been shown yet
+// ============================================================================
+
+/**
+ * How far back a reaction can be and still count as NEW.
+ *
+ * Not a display duration — the block stays on screen until the operator dismisses it.
+ * This bounds ELIGIBILITY, so somebody back from six months off is not greeted by a
+ * wall of history, and so a reaction that aged out while they were away simply lives on
+ * its note instead of arriving as stale news.
+ *
+ * Eight weeks because that is roughly where the measured effect of a first endorsement
+ * has decayed (Wachs et al.: 12.9% at first, 7.7% by eight weeks, 6.4% by twelve).
+ */
+const NEW_HELPFUL_WINDOW_DAYS = 56;
+
+/** Names shown before the rest collapse to "and N more". */
+export const MAX_HELPFUL_NAMES = 3;
+
+/**
+ * "Helpful" marks on the caller's own notes that they have not been shown yet.
+ *
+ * GROUPED BY NOTE, because the note is the unit of recognition and the reactors are its
+ * audience. Three people marking one note is one item naming three people, not three
+ * items — several individuals re-described as a single coherent audience is what keeps
+ * the signal at single-target strength rather than fading (Västfjäll et al. 2014), and
+ * it is also the only shape that satisfies the rule that reactions never sum per person.
+ *
+ * DERIVED FROM LIVE ROWS, never a stored notification. A colleague can take a mark back,
+ * and a snapshot taken at delivery time would outlive its own truth — the operator would
+ * be thanked for something that no longer exists. Reading through means a retracted
+ * reaction simply stops appearing, and it is also why no "still valid?" expiry rule is
+ * needed: a nine-month-old reaction is as true as a new one while its row is there.
+ *
+ * Self-reactions cannot occur — the RLS INSERT policy forbids reacting to your own note —
+ * so there is no author filter to write here.
+ */
+export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
+  const supabase = getSupabase();
+
+  const member = await getCurrentMember(companyId);
+  if (!member) return [];
+
+  const windowStart = new Date(Date.now() - NEW_HELPFUL_WINDOW_DAYS * 86_400_000);
+  // NULL cursor means "never dismissed", which is NOT the epoch: it means show the recent
+  // window rather than every reaction ever received.
+  const since =
+    member.reactions_seen_at && new Date(member.reactions_seen_at) > windowStart
+      ? new Date(member.reactions_seen_at)
+      : windowStart;
+
+  const { data, error } = await supabase
+    .from('note_reactions')
+    .select(
+      'created_at, kind, ' +
+        'reactor:user_company_access!note_reactions_reactor_id_fkey(name), ' +
+        'note:notes!inner(id, body, author_id, ' +
+        'job:jobs!notes_job_fk(job_number), ' +
+        'captured_job:jobs!notes_captured_job_fk(job_number), ' +
+        'work_center:work_centers!notes_work_center_fk(name))',
+    )
+    .eq('company_id', companyId)
+    .eq('kind', 'helpful')
+    .eq('note.author_id', member.id)
+    .gt('created_at', since.toISOString())
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, {
+        entity: 'reaction',
+        fallback: 'Could not load what came back.',
+      }),
+    );
+  }
+
+  type Row = {
+    created_at: string;
+    reactor: { name: string | null } | { name: string | null }[] | null;
+    note: {
+      id: string;
+      body: string | null;
+      job: { job_number: string } | { job_number: string }[] | null;
+      captured_job: { job_number: string } | { job_number: string }[] | null;
+      work_center: { name: string | null } | { name: string | null }[] | null;
+    };
+  };
+  const one = <T,>(rel: T | T[] | null): T | null =>
+    (Array.isArray(rel) ? rel[0] : rel) ?? null;
+
+  // Rows arrive newest-first, so first-seen order per note is already newest-first and
+  // the first row for a note carries its latest_at.
+  const byNote = new Map<string, NewHelpful>();
+  for (const r of (data ?? []) as unknown as Row[]) {
+    const existing = byNote.get(r.note.id);
+    const name = one(r.reactor)?.name;
+    if (existing) {
+      if (name) existing.names.push(name);
+      continue;
+    }
+    byNote.set(r.note.id, {
+      note_id: r.note.id,
+      body: r.note.body,
+      reference:
+        one(r.note.work_center)?.name ??
+        one(r.note.job)?.job_number ??
+        one(r.note.captured_job)?.job_number ??
+        null,
+      names: name ? [name] : [],
+      latest_at: r.created_at,
+    });
+  }
+
+  return [...byNote.values()];
+}
+
+/**
+ * Advance the caller's "I have seen these" cursor.
+ *
+ * Takes the newest reaction actually SHOWN rather than defaulting to now(), so a
+ * reaction landing between render and the tap is not marked seen without ever having
+ * been on screen. Dismissing moves this cursor and destroys nothing: every reaction
+ * remains on its note in the list below, forever. That separation is deliberate — this
+ * shop has already lost recognition once to a control where the nag and the reward were
+ * the same object.
+ */
+export async function markHelpfulSeen(companyId: string, seenThrough: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.rpc('mark_reactions_seen', {
+    p_company_id: companyId,
+    p_seen_through: seenThrough,
+  });
+  if (error) {
+    throw new Error(
+      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not save that.' }),
     );
   }
 }

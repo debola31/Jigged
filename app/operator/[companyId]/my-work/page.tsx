@@ -17,7 +17,9 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import {
   getMyContributionTotals,
   getMyNotesPage,
+  getNewHelpful,
   getNoteViewers,
+  markHelpfulSeen,
   updateNoteBody,
 } from '@/utils/operatorAccess';
 import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
@@ -26,6 +28,7 @@ import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
+import NewHelpfulBlock from '@/components/operator/NewHelpfulBlock';
 import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
@@ -457,8 +460,38 @@ export default function MyWorkPage() {
   return (
     <Box sx={{ pb: 4 }}>
       <OperatorIdentityRow companyId={companyId} identity={identity} />
+      {/* Above the work and above the tally, because it is the only thing on this screen
+          that is news. It renders nothing when there is nothing new, so it costs no space
+          in the common case. */}
+      <NewHelpful companyId={companyId} />
       <MyContribution companyId={companyId} />
     </Box>
+  );
+}
+
+/**
+ * What came back since the operator last looked — named, and grouped by note.
+ *
+ * Silent about its own failures on purpose. This is a reward, not a task: an operator who
+ * cannot load it has lost nothing they were trying to do, and an error banner where a
+ * compliment should be is worse than the absence of the compliment. The reactions
+ * themselves remain on every note in the list below regardless.
+ */
+function NewHelpful({ companyId }: { companyId: string }) {
+  const { data, reload } = useLoad(() => getNewHelpful(companyId).catch(() => []), [companyId]);
+
+  if (!data || data.length === 0) return null;
+
+  return (
+    <NewHelpfulBlock
+      items={data}
+      onDismiss={async (seenThrough) => {
+        await markHelpfulSeen(companyId, seenThrough);
+        // Re-read rather than clearing locally: anything that landed between render and
+        // the tap is newer than the cursor we just set, so it correctly survives.
+        await reload();
+      }}
+    />
   );
 }
 
@@ -619,6 +652,21 @@ function MyContribution({ companyId }: { companyId: string }) {
             />
           </Box>
 
+          {/* NOTHING AT ZERO — or rather, not a bare zero left standing.
+              An operator whose notes nobody has opened yet reads "0 · Times viewed" as a
+              permanent notice that nobody cares, which is the same reason the login
+              banner renders null rather than announcing "0 views". The banner can vanish;
+              this card cannot, because it is the tally.
+
+              So the figure stays — hiding it would move "Times viewed" between columns
+              from one visit to the next, and a zero is a real value rather than a
+              disabled control — and one line underneath turns it forward. Only at zero,
+              so it is never standing chrome. */}
+          {c.peopleReached === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+              Your notes show up for whoever runs the job or the machine next.
+            </Typography>
+          )}
         </CardContent>
       </Card>
 

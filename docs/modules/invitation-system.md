@@ -587,8 +587,8 @@ There is **no** `/dashboard/[companyId]/settings/*` tree and **no** referral rou
 > removed** (only `admin | user | operator` exist, inviter scope is `admin`); **rate
 > limiting is deferred**; and the **referral system is descoped** (no `referral_links` /
 > `referral_redemptions` tables, no `redeem_referral` / `validate_*` DB functions, no
-> referral UI). Remaining doc-vs-reality notes are in
-> `docs/testing/divergence/invitation-system.md`.
+> referral UI). The 2026 audit that produced those findings (#338) closed with nothing
+> outstanding; its report was retired in August 2026 under #634.
 
 Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #338.
 

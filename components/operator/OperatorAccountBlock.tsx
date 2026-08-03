@@ -3,11 +3,15 @@
 /**
  * The identity and account half of the operator's "Me" tab.
  *
- * Two exports, meant to sandwich the operator's own work:
+ * One export, above the operator's own work:
  *
- *   <OperatorIdentityRow />      one compact row — who you are
+ *   <OperatorIdentityRow />      who you are, the way out, and the way to reach us
  *   … the operator's notes …     the reason the tab exists
- *   <OperatorAccountActions />   feedback, then Log out last
+ *
+ * It used to be two, sandwiching the work, with Give feedback and then Log out below the
+ * note list. That stopped being tenable once the list paged: an action below an unbounded
+ * (and now paged) list is not "slightly slower to reach", it is unreachable, and a pilot's
+ * feedback channel that only appears after a Show more is a channel nobody uses.
  *
  * ## Why identity is one row and not a card
  *
@@ -24,17 +28,41 @@
  * direct answer to "this treats My work as spare real estate" — the merge is what gave the
  * work surface its reason to own a tab.
  *
- * ## Why Log out is last, and why there is no confirm dialog
+ * The row carries the email as its third line. It used to sit near the bottom as "Signed in as
+ * …", on the reasoning that it is the least useful thing here to an operator who already knows
+ * who they are. True, but it is still identity, and identity belongs in the identity row — the
+ * caption was a second, worse place for the same fact, parked behind a scroll.
  *
- * Log out sits at the very end, in its own visually distinct block, separated from the benign
- * action above it. NN/g's proximity guidance explicitly endorses using distance to make a
- * consequential action slightly slower to reach, because operators repeating the same taps
- * every shift slip into automaticity — and a mis-tap here is a *slip*, not a mistake, so no
- * amount of clearer labelling fixes it. Only layout does.
+ * ## Why Log out is an isolated icon at the top, and why there is no confirm dialog
  *
- * It is deliberately NOT behind a confirmation dialog: logging out is recoverable by logging
- * back in, and a dialog on a recoverable action is the confirmation-fatigue trap that strips
- * the dialogs that matter of their force.
+ * It used to be a full-width button at the very end of the page, deliberately set apart: NN/g's
+ * proximity guidance endorses using distance to make a consequential action slower to reach,
+ * because operators repeating the same taps every shift slip into automaticity, and a mis-tap
+ * here is a *slip* rather than a mistake — no amount of clearer labelling fixes a slip, only
+ * layout does.
+ *
+ * That argument is now served by ISOLATION instead of distance, because distance stopped being
+ * affordable. Log out sat below the operator's entire note list, which is unbounded, so the only
+ * way to reach it was to scroll past everything they had ever written. An action you cannot
+ * reach is not a safe action, it is a broken one.
+ *
+ * The slip risk the old placement guarded against came specifically from Log out sitting
+ * ADJACENT to a benign button an operator taps often. At the end of a row whose only other
+ * content is static text, there is nothing to slip from: it is the sole tap target in its row,
+ * ≥48px, and its neighbours are the header's dashboard shortcut roughly 64px above and the
+ * Give feedback link below and hard left — diagonally opposite, never beside. Both clear WCAG
+ * 2.5.8's 24px centre-to-centre floor and Material's 8dp by a wide margin. That is the same
+ * reasoning `app/operator/[companyId]/layout.tsx` uses to forbid a second icon button in the
+ * header, applied rather than contradicted.
+ *
+ * This is a real constraint on future edits, not decoration: Give feedback is deliberately a
+ * SIBLING of the identity row rather than a child of it. Moving it inside — to sit next to the
+ * icon, which is the obvious tidy-up — reintroduces exactly the adjacency this is avoiding.
+ * The test `leaves Log out with no neighbouring tap target to slip from` fails if you do.
+ *
+ * It is deliberately NOT behind a confirmation dialog, and moving it up does not change that:
+ * logging out is recoverable by logging back in, and a dialog on a recoverable action is the
+ * confirmation-fatigue trap that strips the dialogs that matter of their force.
  */
 
 import { useState } from 'react';
@@ -43,8 +71,9 @@ import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
 import Snackbar from '@mui/material/Snackbar';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -72,35 +101,7 @@ function initials(name: string): string {
     .join('');
 }
 
-export function OperatorIdentityRow({ identity }: { identity: OperatorIdentity | null }) {
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 1.5,
-        mb: 2,
-        minHeight: 48,
-      }}
-    >
-      <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40 }}>
-        {initials(identity?.name ?? '')}
-      </Avatar>
-      <Box sx={{ minWidth: 0 }}>
-        <Typography sx={{ fontWeight: 600 }} noWrap>
-          {identity?.name || 'You'}
-        </Typography>
-        {identity?.companyName && (
-          <Typography variant="body2" color="text.secondary" noWrap>
-            {identity.companyName}
-          </Typography>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-export function OperatorAccountActions({
+export function OperatorIdentityRow({
   companyId,
   identity,
 }: {
@@ -124,67 +125,108 @@ export function OperatorAccountActions({
   };
 
   return (
-    <Box sx={{ mt: 4 }}>
-      <Divider sx={{ mb: 2 }} />
+    <>
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        minHeight: 48,
+      }}
+    >
+      <Avatar sx={{ bgcolor: 'primary.main', width: 40, height: 40, flexShrink: 0 }}>
+        {initials(identity?.name ?? '')}
+      </Avatar>
+      {/* minWidth: 0 is what lets the three noWrap lines actually truncate instead of
+          forcing the row wider and pushing Log out off a 375px screen. */}
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Typography sx={{ fontWeight: 600 }} noWrap>
+          {identity?.name || 'You'}
+        </Typography>
+        {identity?.companyName && (
+          <Typography variant="body2" color="text.secondary" noWrap>
+            {identity.companyName}
+          </Typography>
+        )}
+        {identity?.email && (
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+            {identity.email}
+          </Typography>
+        )}
+      </Box>
 
+      {/* The only tap target in this row — see the note at the top of this file for why
+          that isolation is what replaced the old "put it last" distance argument. */}
+      <Tooltip title="Log out">
+        <IconButton
+          onClick={handleLogout}
+          aria-label="Log out"
+          sx={{
+            flexShrink: 0,
+            width: 48,
+            height: 48,
+            color: 'text.secondary',
+            '&:hover': { bgcolor: 'rgba(239, 68, 68, 0.1)', color: 'error.main' },
+          }}
+        >
+          <LogoutIcon />
+        </IconButton>
+      </Tooltip>
+    </Box>
+
+    {/*
+      Give feedback, at the top and always on screen.
+
+      It used to be a full-width button at the very bottom of the tab, under the
+      operator's whole note list, which is the one place a pilot's feedback channel
+      must not be: the people most likely to have something to say are the ones who
+      never scrolled that far. Being small is the trade for being permanent — this is
+      a secondary action that must be FINDABLE, not prominent, and a full-width button
+      up here would outrank the operator's own work, which the tab exists for.
+
+      A SIBLING of the identity row, not a child of it. Log out has to stay the only
+      tap target in that row — that isolation is what replaced the old "put it last"
+      distance argument (see the note at the top of this file), and a link sitting
+      beside it would give a habituated thumb something to slip from. Here it is below
+      and hard left, diagonally opposite the icon.
+    */}
+    <Box sx={{ mb: 2, pl: 7 }}>
       <Button
-        variant="outlined"
-        startIcon={<FeedbackIcon />}
         onClick={() => setFeedbackOpen(true)}
-        fullWidth
-        sx={{ minHeight: 48 }}
+        startIcon={<FeedbackIcon fontSize="small" />}
+        size="small"
+        sx={{
+          minHeight: 40,
+          px: 0.5,
+          textTransform: 'none',
+          color: 'text.secondary',
+          '&:hover': { bgcolor: 'transparent', color: 'primary.light' },
+        }}
       >
         Give feedback
       </Button>
-
-      {/* The email lives down here rather than in the identity row: it is the least useful
-          thing on the page to an operator who already knows who they are, and it is the thing
-          a support conversation occasionally needs. */}
-      {identity?.email && (
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: 'block', mt: 2, textAlign: 'center' }}
-        >
-          Signed in as {identity.email}
-        </Typography>
-      )}
-
-      {/* Log out, last and set apart — see the note at the top of this file. The gap above is
-          the point, not spacing for its own sake. */}
-      <Box sx={{ mt: 3 }}>
-        <Divider sx={{ mb: 2 }} />
-        <Button
-          variant="outlined"
-          color="error"
-          startIcon={<LogoutIcon />}
-          onClick={handleLogout}
-          fullWidth
-          sx={{ minHeight: 48 }}
-        >
-          Log out
-        </Button>
-      </Box>
-
-      <FeedbackDialog
-        open={feedbackOpen}
-        onClose={() => setFeedbackOpen(false)}
-        onSuccess={() => {
-          setFeedbackOpen(false);
-          setFeedbackSuccess(true);
-        }}
-        userId={identity?.userId}
-      />
-      <Snackbar
-        open={feedbackSuccess}
-        autoHideDuration={4000}
-        onClose={() => setFeedbackSuccess(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="success" onClose={() => setFeedbackSuccess(false)}>
-          Thanks for your feedback!
-        </Alert>
-      </Snackbar>
     </Box>
+
+    <FeedbackDialog
+      open={feedbackOpen}
+      onClose={() => setFeedbackOpen(false)}
+      onSuccess={() => {
+        setFeedbackOpen(false);
+        setFeedbackSuccess(true);
+      }}
+      userId={identity?.userId}
+    />
+    <Snackbar
+      open={feedbackSuccess}
+      autoHideDuration={4000}
+      onClose={() => setFeedbackSuccess(false)}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+      <Alert severity="success" onClose={() => setFeedbackSuccess(false)}>
+        Thanks for your feedback!
+      </Alert>
+    </Snackbar>
+    </>
   );
 }
+

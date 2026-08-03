@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter, usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
@@ -61,14 +61,42 @@ export default function OperatorLayout({
 
   const supabase = getSupabase();
 
-  // Check authentication on mount
+  // Whether we're on the login screen. Derived to a BOOLEAN on purpose: the auth effect
+  // below keys off this rather than off `pathname`, so it re-runs only when you cross the
+  // login boundary — not on every tap of the bottom bar. See the note on the effect.
+  const isAuthPage = Boolean(pathname?.includes('/login'));
+
+  // The companyId we have already validated in this mount. Guards against a re-run
+  // repeating the network work (React's development double-invoke, or a bounce out to
+  // login and back). Cleared on sign-out and when we land on login, so a NEW session
+  // always re-validates.
+  const validatedFor = useRef<string | null>(null);
+
+  /**
+   * Validate the session once per company, NOT once per navigation.
+   *
+   * `pathname` used to be in this dependency list, so every in-app navigation re-ran the
+   * whole check: another `auth.getSession()`, another `user_company_access` round trip,
+   * another `app_opened`. That mattered because `supabase-js` serialises `getSession()`
+   * behind a `navigator.locks` acquisition and can refresh the token inside that lock —
+   * so on a page that already fans out several session reads (Me was the worst: four),
+   * navigating added one more contender to a queue that was already the slowest thing on
+   * screen. Operators saw it as the Me tab hanging.
+   *
+   * It also fixes `app_opened`, which is documented below as top-of-funnel — one per
+   * session. Counting a tab tap as an app open inflated every ratio measured against it.
+   */
   useEffect(() => {
     const checkAuth = async () => {
-      // Skip auth check on login page
-      if (pathname?.includes('/login')) {
+      // Skip auth check on login page. Clearing the guard here is what makes a fresh
+      // sign-in re-validate rather than inherit the previous user's answer.
+      if (isAuthPage) {
+        validatedFor.current = null;
         setIsLoading(false);
         return;
       }
+
+      if (validatedFor.current === companyId) return;
 
       // 1. Get Supabase session
       const { data: { session } } = await supabase.auth.getSession();
@@ -94,12 +122,15 @@ export default function OperatorLayout({
         return;
       }
 
+      validatedFor.current = companyId;
       setUserRole(operatorAccess.role || 'operator');
 
       // Top of the funnel. Everything else is measured against this: if
       // app_opened is near zero, no downstream number is interpretable and the
       // problem is deployment, not the product. Fired after membership is
-      // confirmed so a bounced sign-in is not counted as a session.
+      // confirmed so a bounced sign-in is not counted as a session — and, since
+      // this effect no longer re-runs per navigation, once per session rather
+      // than once per screen.
       logOperatorEvent(companyId, 'app_opened');
 
       setIsLoading(false);
@@ -110,6 +141,10 @@ export default function OperatorLayout({
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'SIGNED_OUT') {
+        // Drop the validation answer — it was about a user who is no longer signed in.
+        // (`getCurrentMember` needs no equivalent: it only ever caches a request that is
+        // still in flight, so it has nothing that can outlive a session.)
+        validatedFor.current = null;
         router.push(`/operator/${companyId}/login`);
       }
     });
@@ -117,7 +152,7 @@ export default function OperatorLayout({
     return () => {
       subscription.unsubscribe();
     };
-  }, [companyId, router, pathname, supabase]);
+  }, [companyId, router, isAuthPage, supabase]);
 
   // Update nav value based on current path.
   //
@@ -177,9 +212,7 @@ export default function OperatorLayout({
     router.push(scanDestination(companyId, { kind: 'traveler', jobId, jobPartId, operationId }));
   };
 
-  // Don't show header/nav on login page
-  const isAuthPage = pathname?.includes('/login');
-
+  // Don't show header/nav on login page — same `isAuthPage` the auth effect keys off.
   if (isAuthPage) {
     return (
       <Box
@@ -344,7 +377,17 @@ function OperatorShell({
         }}
       >
         <Toolbar sx={{ minHeight: '48px !important', px: 1 }}>
-          {/* Left: back on detail pages, JIG logo on back-less roots. */}
+          {/* Left: back on detail pages, JIG logo on back-less roots — which is every
+              tab the bottom bar owns. A tab root has no "back": the nav bar already IS
+              the way between them, so an arrow there just re-enters a sibling tab and
+              reads as though the operator has gone somewhere they need to leave.
+
+              32px, not the 20px this started at. It alternates in the same slot as the
+              `size="small"` back IconButton (~34px including its ripple), so anything
+              much smaller made the header visibly lurch as you moved between a traveler
+              and a tab root — and at 20px the mark was too small to read as branding at
+              arm's length on a shop floor. 32 clears the 48px Toolbar by 8px either side.
+              `ml` matches the IconButton's own padding so the left edge doesn't shift. */}
           {chrome.back ? (
             <IconButton
               color="inherit"
@@ -355,7 +398,9 @@ function OperatorShell({
               <ArrowBackIcon fontSize="small" />
             </IconButton>
           ) : (
-            <JiggedIcon size={20} />
+            <Box sx={{ display: 'flex', alignItems: 'center', ml: 0.5 }}>
+              <JiggedIcon size={32} />
+            </Box>
           )}
 
           {/* Center: station name + dropdown, centered between the clusters (the
@@ -451,18 +496,37 @@ function OperatorShell({
         </Menu>
       </AppBar>
 
-      {/* Main Content */}
+      {/*
+        Main content. THE DOCUMENT SCROLLS — this box must not.
+
+        It used to be `flex: 1` + `overflow: 'auto'`, which made it a private scroll
+        container: every sibling here is `position: fixed`, so it was the only in-flow
+        item, its flex basis resolved to 0, and it settled at exactly
+        `100vh - 48px - (56px + inset)` with its own scrollbar. Two bugs came out of that,
+        and both read to an operator as "the page is stuck":
+
+          1. `scrollTop` survived tab switches. This layout never unmounts on a client
+             navigation and Next's scroll restoration only touches `window`, so tapping Me
+             from a scrolled jobs list dropped you into the middle of the new page.
+
+          2. The end of the page was unreachable on a phone. `100vh` is the LARGE viewport
+             (browser chrome hidden) while the fixed bottom bar tracks the SMALL one, so at
+             maximum scroll the last chunk of content sat below the fold with no way to
+             reach it. On the Me tab that chunk was Give feedback and Log out.
+
+        Letting the document scroll fixes both for free: native scroll restoration works,
+        and `100vh` stops being load-bearing for anything you have to be able to reach.
+      */}
       <Box
         component="main"
         sx={{
           position: 'relative',
           zIndex: 1, // above the fixed ambient backdrop
-          flex: 1,
+          flexGrow: 1, // fill the viewport so the background reaches the bottom on short pages
           mt: '48px', // Single-row AppBar height
           // BottomNavigation height plus whatever the device reserves at the bottom (the iOS home
           // indicator). `viewportFit: 'cover'` in the root layout is what makes the inset non-zero.
           mb: navVisible ? 'calc(56px + env(safe-area-inset-bottom))' : 0,
-          overflow: 'auto',
           p: 2,
         }}
       >

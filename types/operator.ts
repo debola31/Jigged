@@ -370,10 +370,25 @@ export interface MyNote {
    * Server-stamped, never client-written. See JobNote.edited_at.
    */
   edited_at: string | null;
-  /** "Op 20 · Mill" when the note carries a step, else null. */
-  operation_label: string | null;
   /** Part the note is durably attached to, when it has one. */
   part_name: string | null;
+  /**
+   * Machine this was logged against, for maintenance entries.
+   *
+   * Maintenance is not a separate store — an entry is a `notes` row with
+   * subject_kind='work_center', so it lands in the operator's own list beside their
+   * part and job notes. But that subject carries no part, no operation and no job, so
+   * without the machine name the row rendered as a bare sentence with nothing anywhere
+   * on it saying what it was about. Mutually exclusive with `part_name` and with
+   * `job_number` — the CHECK constraint on `notes` allows exactly one subject.
+   */
+  machine_name: string | null;
+  /**
+   * How the author classified a maintenance entry ('cleaned', 'repaired', 'replaced',
+   * 'adjusted', 'noticed'). Null is legal and common — classifying is optional, and
+   * the DB constraint only permits a value at all on a work_center note.
+   */
+  maintenance_kind: string | null;
   /**
    * The job this note was written on — job_id for a job-subject note,
    * captured_job_id for a durable part-subject one. Null once that job is
@@ -404,8 +419,14 @@ export interface MyNote {
  * Deliberately carries no completion count, streak, average or anything
  * comparable against another person — see the surveillance guardrail in
  * docs. This screen is where a leaderboard would want to grow, and it must not.
+ *
+ * SEPARATE FROM THE NOTE LIST ON PURPOSE. These totals used to be reduced from
+ * the fetched rows, which was only correct while the list was every row the
+ * operator had ever written. Now that the list is paged, deriving them from what
+ * happens to be loaded would quietly turn "notes you have written" into "notes
+ * currently on screen" — a number that grows as you tap Show more.
  */
-export interface MyContribution {
+export interface MyContributionTotals {
   noteCount: number;
   photoCount: number;
   /**
@@ -415,7 +436,13 @@ export interface MyContribution {
    * can read by design.
    */
   peopleReached: number;
+}
+
+/** One page of the operator's own notes, newest first. */
+export interface MyNotesPage {
   notes: MyNote[];
+  /** Whether another page exists after this one. */
+  hasMore: boolean;
 }
 
 /** A named reader of one of your own notes. Authors only — see note_viewers(). */

@@ -1,4 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  },
   "functions": {
     "api/**": {
       "excludeFiles": "{.next,.git,node_modules}/**",

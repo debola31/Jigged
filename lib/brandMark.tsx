@@ -1,17 +1,25 @@
 /**
- * The Jigged mark, as one vector, for every generated icon.
+ * The Jigged mark, as one vector. THE SOURCE FOR THE STATIC ICONS, not a live code path.
  *
- * `app/apple-icon.tsx` had this inline, and the PWA manifest needs the same thing at 192, 512 and
- * 512-maskable. Duplicating the paths four times is how a brand mark quietly drifts between sizes,
- * so it lives here once and each route only chooses a canvas.
+ * Nothing imports this today, and that is deliberate rather than an oversight. It used to back
+ * four `ImageResponse` routes (`app/apple-icon.tsx`, `app/icon-192|512|maskable/route.tsx`) that
+ * rendered these icons on request. Those routes are gone: every route under `app/` is a Serverless
+ * Function, the Hobby plan caps a deployment at 12, and five icon routes were most of that budget
+ * while returning bytes that never change. The icons now sit in `public/` as files.
  *
- * Rendered at request time via `next/og`'s `ImageResponse` — which means **no binary icon assets in
- * the repo, and nothing upscaled**: `public/jigged-logo.png` is only 96×96, so a 512 built from it
- * would be visibly soft.
+ * This file survives the deletion because otherwise those PNGs become opaque binaries nobody can
+ * reproduce. It is the recipe. **If the mark changes, re-render from here rather than editing
+ * pixels** — temporarily reinstate a route that calls `brandIconResponse`, fetch
+ * `/icon-192`, `/icon-512`, `/icon-maskable` and `/apple-icon`, save them into `public/` with a
+ * `.png` extension, then remove the route again.
+ *
+ * The original rationale for generating them still holds and is why nothing here is derived from
+ * `public/jigged-logo.png`: that file is 96×96, so a 512 built from it would be visibly soft. The
+ * committed PNGs were captured from these routes in production, at full size, before removal.
  */
 import { ImageResponse } from 'next/og';
 
-/** Brand colours, matching `app/icon.svg` and the design system. */
+/** Brand colours, matching `public/icon.svg` and the design system. */
 const INK = '#151520';
 const AMBER = '#D4872A';
 const STEEL = '#4682B4';

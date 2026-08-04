@@ -49,10 +49,11 @@ export const metadata: Metadata = {
     'A flexible data platform for small precision manufacturing shops. Real-time visibility, flexible inventory, and operators who actually log their work.',
   icons: {
     icon: '/icon.svg',
-    // `/apple-icon`, NOT `/apple-icon.png`. The route Next generates from `app/apple-icon.tsx` has
-    // no extension, and no such static file exists in `public/` — so this href 404'd and the
-    // home-screen icon was broken. Verified against the dev server: `.png` → 404, bare → 200.
-    apple: '/apple-icon',
+    // `.png` again, and this time it is the correct form — the inverse of what this comment used
+    // to warn about. These were `ImageResponse` routes under `app/`, so the generated href had no
+    // extension and `/apple-icon.png` 404'd. They are now real files in `public/`, so the
+    // extension is required and the bare path is what 404s. Both facts were true; only one is now.
+    apple: '/apple-icon.png',
   },
   /**
    * The home-screen caption, and nothing else.

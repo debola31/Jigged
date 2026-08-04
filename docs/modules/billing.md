@@ -137,9 +137,16 @@ subscription at all). Everything calls it, so behaviour is identical everywhere 
 no code parses event payloads.
 
 Writes go through the `apply_stripe_subscription(...)` RPC (guarded upsert):
-- **Monotonic guard** on `subscription_event_at` (webhooks stamp `event.created`;
-  `/checkout/sync` and reconcile stamp `now()`) — concurrent/out-of-order Vercel
-  lambdas can't lose-update each other.
+- **Monotonic guard** on `subscription_event_at` — **every** path stamps `now()`, because
+  `_sync_customer` is the sole writer and it always passes `_now_iso()`
+  ([`stripe_routes.py`](../../api/routes/stripe_routes.py) `_sync_customer`). Concurrent /
+  out-of-order Vercel lambdas therefore can't lose-update each other, and a redelivered old
+  event still writes, because what it writes is a *fresh refetch*, not the payload.
+  **Withdrawn:** "webhooks stamp `event.created`" — never true in code, and stamping the
+  event time would be wrong here: it would let a stale guard value discard a current read.
+  The `COMMENT ON COLUMN company_billing.subscription_event_at` in
+  [`20260725205821`](../../supabase/migrations/20260725205821_stripe_billing_cache.sql) still
+  carries the old wording and needs a follow-up `COMMENT ON` migration.
 - **Grandfather auto-clear:** `billing_exempt` clears only on `active`/`past_due`
   (a real paying relationship), **never on `trialing`** — so a grandfathered shop
   that starts a trial and cancels mid-trial keeps its free access.

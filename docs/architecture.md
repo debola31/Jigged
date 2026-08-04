@@ -1,8 +1,10 @@
 # System Architecture
 
 > **Rewritten 2026-08-03 (#634), verified against the code the same day; adversarial
-> re-check the same day restored §9 (below).
-> 3,424 → ~4,300 words — it grew, and that is the honest number.** ~300 words of
+> re-check the same day restored §9 (below), and a third pass took ownership of two
+> topics from CLAUDE.md (§6.1 typed client, §16 soft delete) as CLAUDE.md was cut to
+> pointers — 3,424 → ~5,200 words.
+> It grew, and that is the honest number.** ~300 words of
 > stale or duplicated material came out; the rest of the delta is correction,
 > citation and previously-undocumented behaviour. **Cut:** §10 Development Commands
 > (CLAUDE.md owns it, and this copy said `pip install -r requirements.txt` /
@@ -20,13 +22,16 @@
 > in the local-dev runbook, not in `.env.local.example`. The restored §9 is the
 > corrected, current contract, not the 2026-04 copy.
 >
-> **Ten corrections, marked inline:** `operation_types` listed live twice (dropped
+> **Corrections, marked inline:** `operation_types` listed live twice (dropped
 > for `work_centers`); `jobs.status` (no such column — three orthogonal axes);
 > `quotes.converted_to_job_id` (no such column); an `owner` role (never in the
 > CHECK); two wrong theme hexes; `stripe_routes.py` absent; insights endpoints 4×
 > overcounted; a `getCustomers()` paginated pattern that does not exist;
 > `supabase/schema.staging.sql` and `schema.prod.sql` (both since deleted); a `shipments/` route
-> "feature-flagged per tenant" (neither exists).
+> "feature-flagged per tenant" (neither exists); "`utils/*Access.ts` use the untyped
+> `getSupabase()`" (the access layer is fully converted — §6.1); and §16's soft-delete
+> guard cited as `#367`, which is the E2E reload-convention parent (the real issue is
+> `#687`).
 
 Multi-tenant data platform for small-scale precision manufacturing shops.
 Environment variables are §9; dev/test commands and pre-PR validation live in
@@ -152,10 +157,77 @@ value of 500 "kept the IN () list well inside PostgREST's URL limits" — wrong 
 more than double, so any shop with ~200+ stocked parts got a hard 414 on every
 chunk. One home, because four files had independently picked the same wrong number.
 
-**Typed vs untyped client.** `getSupabase()` (untyped, legacy) and
-`getTypedSupabase()` (`<Database>`-generic against [`types/database.ts`](../types/database.ts))
-share one singleton in [`lib/supabase.ts`](../lib/supabase.ts). New access functions
-use the typed getter; conversion is per-file. Regen + CI drift rules: CLAUDE.md.
+#### 6.1 The typed client and `types/database.ts`
+
+*This subsection owns the typed-client contract — CLAUDE.md points here.*
+
+[`lib/supabase.ts`](../lib/supabase.ts) exposes two getters over **one singleton**.
+`getTypedSupabase()` applies the `<Database>` generic from
+[`types/database.ts`](../types/database.ts), so every `.from('t').select('…')` chain
+is checked at compile time; `getSupabase()` returns the *same runtime instance* with
+the generic erased. Same client, different type.
+
+**As built (2026-08-03): the access layer is fully converted.** Every file under
+[`utils/`](../utils) that touches the client imports `getTypedSupabase`, almost always
+aliased `as getSupabase` so the call sites read unchanged. *(This doc and CLAUDE.md
+both said "existing `utils/*Access.ts` files use `getSupabase()`" — true when the
+migration started, false since it finished; the alias is what made it look otherwise.)*
+The untyped getter survives only at the page/component paths in the `files:` grandfather
+block at the bottom of [`eslint.config.mjs`](../eslint.config.mjs) — mostly `supabase.auth.*`
+callers, where the table generic buys nothing. **Drain that block, never extend it**
+([#573](https://github.com/debola31/Jigged/issues/573)).
+
+**Enforced, not aspirational.** `no-restricted-imports` in `eslint.config.mjs` makes
+`import { getSupabase } from '@/lib/supabase'` an **error**, with the grandfathered paths
+as an explicit exemption list, so it ratchets. It exists because the material-yield PR
+dropped `part_procurement_tiers.vendor_id`, `types/database.ts` was regenerated correctly,
+and `PartBomPanel`'s **untyped** cost-ladder query kept filtering the dropped column — it
+compiled clean and shipped a false "No cost on file" on every bought material.
+
+**Regen after any migration that changes columns:** `pnpm gen:db-types`, against a
+**running local stack** (`supabase start`). The generator reads `--local`, not a remote
+project, so without a started stack it has nothing to read.
+
+**CI fails on drift ([#406](https://github.com/debola31/Jigged/issues/406)).** The backend
+job in [`.github/workflows/test.yml`](../.github/workflows/test.yml) replays
+`supabase/migrations/` into a fresh local stack, regenerates, and `git diff --exit-code`s
+`types/database.ts`. A schema change without a regen — or a hand-edited types file — goes
+red. **Treat `types/database.ts` like a lockfile.**
+
+**The CLI version is pinned in three places that must move together**, because that check
+diffs a `--local` regen and any skew is a spurious red: `package.json` → `gen:db-types`
+(`npx --yes supabase@<version>`), `.github/workflows/test.yml` → `setup-cli`, and
+[`.github/workflows/e2e-tests.yml`](../.github/workflows/e2e-tests.yml) → `setup-cli`.
+Bump all three, run `pnpm gen:db-types`, commit the result. Pinning *inside the script*
+is deliberate: a globally-installed `supabase` CLI may then auto-update freely without
+ever affecting generation. A fourth value tracks the CLI — test.yml's
+`POSTGRES_META_VERSION` pre-pull — because `gen types --local` starts its **own**
+postgres-meta container and, unlike `supabase start`, ignores
+`SUPABASE_INTERNAL_IMAGE_REGISTRY`; without the GHCR pull-and-retag it goes straight to
+`public.ecr.aws` and re-flakes on the Docker rate limit.
+
+**What the generated types do NOT contain.** Tables, views, and function *signatures* —
+that is all. **No RLS policies, no `GRANT`s, no `CHECK` constraints, no function bodies.**
+So `jobs.production_status` types as bare `string` although it is CHECK-constrained to
+four values (§7); `Enums` is `{ [_ in never]: never }`; `company_can_write` appears as
+`Args`/`Returns` with nothing about what it enforces. **Absence in this file is not
+absence in the database** — grepping it for a policy or a grant yields "not found" for
+things that exist and are load-bearing. `supabase/migrations/` is the only source for
+those.
+
+**Typed mode does not subsume [`scripts/schemaEmbedCheck.ts`](../scripts/schemaEmbedCheck.ts)
+— measured, not assumed.** Injecting a bogus embed column and running `tsc` project-wide:
+the `jobs → job_parts → parts` embed in `jobsAccess` **errors**; `QUOTE_DETAIL_SELECT` in
+`quotesAccess` produces **nothing**. **Withdrawn:** that the difference is how the select
+string is declared — `as const` and full inlining at the call site were both tested against
+a `jobsAccess` positive control in the same run, and neither helped. It is the select's own
+breadth/depth (`quotes → customers → contacts + addresses`, alongside `line_items → parts`);
+past some size supabase-js's type-level parser silently widens instead of erroring, and
+silence is indistinguishable from success. So the largest, most-nested selects — including
+`quotesAccess.ts`, where the May 2026 `jobs.status` incident actually lived — are covered
+by the scanner only. Driven from
+[`__tests__/schema/embedCheck.test.ts`](../__tests__/schema/embedCheck.test.ts) →
+`describe('schemaEmbedCheck — full project scan')` (2 `it`s).
 
 ---
 
@@ -436,8 +508,11 @@ customer-facing/financial documents; apply the standard above when closing them.
 
 **"Delete" = archive (soft-delete), universally.** Every user-facing entity —
 `parts`, `customers`, `customer_contacts`, `customer_carrier_accounts`, `vendors`,
-`work_centers`, `jobs`, `quotes` — carries a nullable `deleted_at timestamptz`. The
-UI Delete action sets it instead of issuing a SQL `DELETE`, and **never blocks**:
+`work_centers`, `jobs`, `quotes` — carries a nullable `deleted_at timestamptz`. That
+list is not a maintained copy: it is exactly the set of tables with a `deleted_at`
+column in [`types/database.ts`](../types/database.ts) (re-derive with `grep -n deleted_at`),
+re-checked 2026-08-03. *(CLAUDE.md's copy named six, omitting the two customer children.)*
+The UI Delete action sets it instead of issuing a SQL `DELETE`, and **never blocks**:
 the row survives, so every downstream reference (quote lines, job parts, shipments,
 invoices, BOM edges) keeps resolving and no foreign key can trap the user.
 **Withdrawn:** the prior model blocked deletion of anything referenced via
@@ -491,6 +566,9 @@ a shipped/invoiced job or a converted quote is safe — its shipment/invoice/chi
 history is intact, just hidden. **Withdrawn:** the "kept for recordkeeping" hard
 guards on `deleteJob` (`countShipmentsForJob` / invoice checks) — wrong because
 archiving already preserves the record, so the guard only blocked a safe action.
+**Do not re-introduce a records-of-value delete guard** — an invoiced or shipped job
+archives like anything else, and money-record protection belongs only at a future
+permanent-purge step. (One such guard is still live in the UI: #682, below.)
 Jobs keep an orthogonal `cancelled` **production** status (`cancelJob`/`reopenJob`)
 — a shop-floor outcome, not deletion.
 
@@ -505,6 +583,7 @@ retention/purge job must carry the `company_id` tenant predicate under RLS.
 |---|---|---|---|
 | parts | archive; `archive_parts` RPC also strips BOM-child edges | revives | impact dialog shows quote/job/BOM-cost counts |
 | customers, vendors, work_centers | archive (`UPDATE deleted_at`) | revives | import upsert + manual create both revive |
+| customer_contacts, customer_carrier_accounts | archive (`archiveCustomerContact` / `archiveCarrierAccount`) | n/a — customer-scoped, no company-wide name key | children of a customer; their list reads filter, and documents' retained FKs still resolve |
 | jobs | archive (`UPDATE deleted_at`) | n/a | `cancelled` production status is separate; records-of-value guards removed |
 | quotes | archive (`UPDATE deleted_at`) | n/a | `sweepExpiredQuotes` is a status change, not deletion |
 
@@ -516,9 +595,29 @@ Archive behaviour is pinned by the top-level `describe` in each `*Access` suite:
 [`jobsAccess.test.ts`](../__tests__/utils/jobsAccess.test.ts) `describe('jobsAccess')`,
 [`quotesAccess.test.ts`](../__tests__/utils/quotesAccess.test.ts) `describe('quotesAccess utilities')`.
 Revive-on-re-import is pinned server-side in
-[`test_parts_import_api.py`](../api/tests/integration/test_parts_import_api.py). The
-"no list query forgot `deleted_at IS NULL`" invariant has **no automated guard** —
-`automation-pending (#367)`.
+[`test_parts_import_api.py`](../api/tests/integration/test_parts_import_api.py).
+
+**Named gap: this whole policy has no systemic enforcement.** The
+"no list/search/picker/count read forgot `deleted_at IS NULL`" invariant is scoped and
+unbuilt as [#687](https://github.com/debola31/Jigged/issues/687) — a source scanner
+reusing [`scripts/schemaEmbedCheck.ts`](../scripts/schemaEmbedCheck.ts)'s schema parser
+(soft-deletable *is* "has a `deleted_at` column"), classifying by query **shape** so it
+never flags the by-id reads that must stay unfiltered. *(Previously cited here as `#367`,
+which is the E2E reload-convention parent and has nothing to do with soft delete.)*
+Because nothing checks it, **two violations are open right now**, both found by reading
+docs rather than by looking for them:
+
+- [#684](https://github.com/debola31/Jigged/issues/684) — `getCount()` in
+  [`utils/dashboardAccess.ts`](../utils/dashboardAccess.ts) omits the filter, so the
+  `open_quotes` / `not_started_jobs` / `in_progress_jobs` tiles count archived rows,
+  while `getOverdueJobs` and `getCompletedJobsInRange` in the same file get it right.
+- [#682](https://github.com/debola31/Jigged/issues/682) — `app/dashboard/[companyId]/jobs/[jobId]/page.tsx`
+  still refuses to delete a job that has shipments or a QuickBooks invoice link (the
+  records-of-value guard withdrawn above), and its confirm dialog promises a permanent,
+  irreversible delete that does not happen.
+
+The failure is **silent** in every case: an archived customer reappears in a dropdown, a
+count is quietly wrong, nothing errors. Audit every new query by hand until #687 ships.
 
 **Relationship to §15:** complementary. Snapshots keep a document readable if its
 master is edited or deleted; archive means the master usually is *not* deleted at

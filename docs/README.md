@@ -3,8 +3,8 @@
 Jigged is a data platform for small precision manufacturing shops.
 
 **Start with [CLAUDE.md](../CLAUDE.md)** — it carries the rules that bind every change (API
-architecture, migrations, grants, the billing write-gate, the design system, and the doc-writing
-standard). This tree carries the detail.
+architecture, migrations, grants, the billing write-gate, the design system). This tree carries
+the detail, including the doc-writing standard in [writing-docs.md](writing-docs.md).
 
 ## Product
 
@@ -59,7 +59,7 @@ criterion · [inventory.md](modules/inventory.md)
 
 ## How these are written
 
-The doc-writing standard lives in [CLAUDE.md](../CLAUDE.md#writing-docs-the-concision-standard):
+The doc-writing standard lives in [writing-docs.md](writing-docs.md):
 most information in the fewest words, losing none of it, on the principle that **a claim no build
 can falsify will rot**. Exemplars: [inventory.md](modules/inventory.md) for a journey/decision doc,
 [customers.md](modules/customers.md) for a reference doc, [billing.md](modules/billing.md) for an

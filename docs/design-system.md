@@ -1,28 +1,82 @@
 # Design System
 
-> **Condensed 2026-08-03 · 4,546 → 4,079 words (`wc -w`).** Cut: ~1,400 words restating CLAUDE.md
-> (principles 1–5, component-usage rules, list/create-edit/import layouts, mobile requirements,
-> WCAG); the ~450-word theme-provider example and the `WorkOrderCard` sample; pasted
-> `<Card>`/`<TextField>` snippets; the unused MUI 0–24 elevation ladder; a Do's/Don'ts list that
-> repeated CLAUDE.md. Roughly **950 words of new, code-verified correction** went back in, which is
-> why the net cut is modest — the pre-correction equivalent is ~3,130. Kept deliberately: every
+> **Condensed 2026-08-03 · 4,546 → 4,079 words (`wc -w`), then re-expanded to 5,764 by the inversion
+> below.** Cut in the first pass: the ~450-word theme-provider example and the `WorkOrderCard`
+> sample; pasted `<Card>`/`<TextField>` snippets; the unused MUI 0–24 elevation ladder; a Do's/Don'ts
+> list. Roughly **950 words of code-verified correction** went back in. Kept deliberately: every
 > withdrawn argument, every measured value, every citation.
 >
-> **Nine corrections, marked inline.** Largest: the steel-blue-centre gradient this doc called
-> "CRITICAL … must be present on all pages" was removed app-wide for a 4.11:1 contrast failure; the
-> drawn storage board behind "tile-and-sheet" was deleted in `db58ae8`; and the pasted `statusColors`
-> map named nine job statuses that do not exist.
+> **Inverted 2026-08-03 (same day).** The first pass also cut ~1,400 words as "restating CLAUDE.md"
+> and *delegated* principles, component usage, page layouts, mobile requirements and WCAG **to**
+> CLAUDE.md. That was backwards: CLAUDE.md is loaded into every session whether or not anyone is
+> touching UI, so the delegation parked the derivable half in the expensive place and left this file
+> pointing at it. **This file now owns all six**, re-absorbed and verified against the code;
+> CLAUDE.md keeps a pointer here. Four of the six arrived wrong — see [Reach &
+> accessibility](#reach--accessibility) (the 48px claim and the WCAG level), [Scales](#scales) (the
+> 16px body-text minimum) and [Glass cards](#glass-cards) (the elevation ladder).
+>
+> **Nine corrections from the first pass, marked inline.** Largest: the steel-blue-centre gradient
+> this doc called "CRITICAL … must be present on all pages" was removed app-wide for a 4.11:1
+> contrast failure; the drawn storage board behind "tile-and-sheet" was deleted in `db58ae8`; and the
+> pasted `statusColors` map named nine job statuses that do not exist.
 >
 > **Values live in [`lib/theme.ts`](../lib/theme.ts).** This file holds rationale and the decisions
-> no token can express. Delegated: principles / component usage / list-create-import layouts /
-> mobile / WCAG → [CLAUDE.md](../CLAUDE.md#design-system-jigged-manufacturing-data-platform-material-ui);
-> destructive actions + saving → [interaction-standards.md](interaction-standards.md); logo,
-> marketing palette, voice → [brand-guide.md](brand-guide.md).
+> no token can express. Elsewhere: destructive actions + saving →
+> [interaction-standards.md](interaction-standards.md); logo, marketing palette, voice →
+> [brand-guide.md](brand-guide.md); **which surface a change lands on** (office computer / operator
+> phone / machine HMI) → [the device model in
+> CLAUDE.md](../CLAUDE.md#who-uses-what-on-what--the-device-model), which every rule here about
+> hover, density and touch depends on.
 
 Material-UI **v7.3.6** *(this doc previously said "MUI v5+")*, Material Design 3, single dark theme,
 no light/dark toggle. The dark theme is the one visual decision carrying direct user validation — a
 manufacturing user's verdict on it was *"pretty fucking awesome"* — which is why there is no toggle
 and no second theme to keep in sync.
+
+---
+
+## Principles
+
+Four. They are not decoration on the theme — each is the reason a specific decision below went the
+way it did, and the audience is what makes them non-obvious: 50–60 year old shop owners and
+machinists, not designers.
+
+| Principle | Because the reader is | Where it bites |
+|---|---|---|
+| **Professional, not trendy** | someone who reads novelty as *unfinished* | [Callouts & insets](#callouts--insets-no-decorative-accent-borders) — no decorative side-accents; [Placeholders](#placeholders) — nothing that could pass for entered data |
+| **Substantial, not playful** | in a shop, looking at money and schedule | [Glass cards](#glass-cards) — a deep opaque panel, not a pale floating one; deliberately 2D, no 3D scene or video behind live data |
+| **Readable in a bright room** | holding a phone under 500–1000 lux of fluorescent light | [The app canvas](#the-app-canvas) — contrast measured against the room, not the desk |
+| **One dark theme, no toggle** | one validated look, not two kept in sync | the paragraph above — the only visual decision here carrying direct user validation |
+
+**Named gap:** nothing checks any of the four. They earn their place only by being cited at the
+decisions they produced, which is the sole way a reader can tell whether a new screen honours them.
+
+---
+
+## Writing UI
+
+**MUI components, always** — `Button`, `TextField`, `Card`, `Paper`, `Box`, `Typography`, `List` /
+`ListItem` / `ListItemButton` / `ListItemText`, `Alert`, `CircularProgress`, `Chip`, `Container`,
+`Grid`, `Stack`. When you need semantic markup, reach for the **`component` prop**
+(`<Card component="li">`, `<Box component="form">`) rather than dropping to a raw element — it keeps
+the theme applied *and* the HTML semantic, and it is what the repo already does far more often than
+it writes a bare `<div>`.
+
+**Style with `sx`; there is no stylesheet.** The repo contains **no `.css` file at all** outside
+`node_modules` — no global stylesheet, no CSS module, nothing imported by
+[`app/layout.tsx`](../app/layout.tsx). That is a deliberate deviation from Next.js, which supports
+both out of the box. A rule declared in CSS lives outside `lib/theme.ts` *and* outside every
+component's `sx`, so it is invisible from the two places anyone looks when the dark palette breaks.
+Keep it at zero.
+
+**Never hardcode a colour or a pixel in a component.** `color="primary"`,
+`sx={{ color: 'text.secondary', p: 3 }}`. Raw hex belongs in [`lib/theme.ts`](../lib/theme.ts) and in
+the [sanctioned exempt chips](#status-badges) — nowhere else.
+
+**Let theme defaults be the default.** `<Card>` already carries elevation 2, the glass fill and the
+hairline; `<TextField>` is already outlined and 48px tall. Most call sites still pass `elevation={2}`
+explicitly — redundant rather than wrong, but it means a deliberate deviation doesn't stand out, so
+don't add more.
 
 ---
 
@@ -87,6 +141,87 @@ white 0.15"; the `MuiCard` block below it is authoritative.)*
 Elevations in use: **0, 1, 2** (default), **3** (auth/emphasis), **4** (`/admin` AppBar). 5–24 unused;
 dialogs and menus get solid `#111439` / `#1a1f4a` overrides instead.
 
+**Withdrawn:** the ladder "2 = standard cards · 3 = auth cards **and modals** · 4 = **app bar,
+floating elements**" — wrong at both ends. It omitted **0** and **1**, which are in use (flat
+`Accordion`s and `Paper` insets; the import `StatusCards`). Elevation 4 describes exactly one surface,
+[`app/admin/layout.tsx`](../app/admin/layout.tsx) — the operator app bar is `elevation={0}` and the
+dashboard [`Header`](../components/layout/Header.tsx) isn't an `AppBar` at all. And modals never sat
+on the ladder: `MuiDialog` takes a solid paper override instead, so its elevation is moot.
+
+---
+
+## Reach & accessibility
+
+### The 48px floor
+
+**Everything tappable is at least 48px in its smallest dimension.** That is a rule you have to
+uphold, not a guarantee the theme gives you — and the difference is the single claim that was written
+down wrong for as long as it existed.
+
+**Corrected 2026-08-03.** "Touch targets: minimum 48px (theme enforces this)" overclaimed.
+[`lib/theme.ts`](../lib/theme.ts) sets `minHeight: 48` on **three** components and nothing else:
+
+| Control | Floored at 48? |
+|---|---|
+| `Button` · `TextField` (on `.MuiInputBase-root`) · `ListItemButton` | **Yes**, by `lib/theme.ts` |
+| Operator bottom-nav actions | **Yes** — `minHeight: 56`, set by hand in [`app/operator/[companyId]/layout.tsx`](../app/operator/[companyId]/layout.tsx) |
+| `IconButton`, including [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) — which defaults to `size="small"` | **No.** MUI's own padding leaves it well under the floor |
+| `Checkbox` · `Chip` · `Tab` · `ToggleButton` · a hand-rolled `<Box onClick>` or `CardActionArea` | **No.** Nothing constrains them |
+
+**Named gap: nothing measures a target.**
+[`interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts) scans for button colour,
+value-shaped placeholders and grey delete icons — not size. An undersized tap target ships green.
+
+**Where the gap is tolerable, and where it isn't.** Undersized `IconButton`s cluster on admin
+surfaces, which are mouse-driven office computers, and a mouse hits a 30px target fine. On the
+operator surface the floor is real and unforgiving — a phone, one-handed, sometimes gloved. That is
+also the whole origin of [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action):
+the forcing case was an element drawn ~6px tall that could not be raised to 48px in place.
+
+### The operator surface is a phone
+
+What the shell enforces, all in
+[`app/operator/[companyId]/layout.tsx`](../app/operator/[companyId]/layout.tsx) unless noted:
+
+- **Bottom navigation, not a sidebar** — five thumb-reachable slots, the only primary nav on the
+  operator surface. Its `minWidth: '0px'` override is load-bearing, not tidying: MUI's 80px default
+  made five slots demand 400px and clipped both *ends* at a 375px viewport. The measurement lives in
+  the file; don't restate it, don't undo it.
+- **The content column is capped at `maxWidth: 680`**, even in a desktop browser. Uncapped, a
+  four-line movement row rendered ~1,900px wide with its text in the leftmost fifth — which is what
+  made the activity feed read as sparse rather than dense.
+- **Landscape is deliberate** — `orientation: 'any'` in [`app/manifest.ts`](../app/manifest.ts), so
+  job details stay usable turned sideways. *(Its inline comment still says "on a tablet" — the
+  withdrawn device assumption. The setting is right; the reason is stale.)*
+- **QR scanning gets the viewport, not a framed box** —
+  [`LocationScanner`](../components/scanner/LocationScanner.tsx) renders the camera at full width and
+  height with `objectFit: 'cover'`.
+
+### Contrast, keyboard, semantics
+
+**The live standard is the one in [The app canvas](#the-app-canvas):** 4.5:1 body and 3:1 large text
+as a *floor*, measured against a 500–1000 lux shop floor rather than an office monitor, and treated
+as a hard limit rather than a number to squeak past. Every ratio in this file was measured by hand.
+
+**Withdrawn:** the heading "Accessibility (WCAG 2.1 **Level A**)" — wrong twice. Level A imposes no
+contrast requirement at all; 4.5:1 body / 3:1 large text are Level **AA** (SC 1.4.3). And 48px is not
+a WCAG number in any version — WCAG 2.2 asks 24×24 CSS px at AA (SC 2.5.8) and 44×44 at AAA
+(SC 2.5.5). 48px is the Material Design touch-target guideline, which is stricter, which is why we
+keep it. Two standards were live in two files with nothing marking either dead; this is the survivor.
+
+The rest of that block stands, because it is right and cheap:
+
+- **Keyboard-reachable, with a visible focus indicator.** The
+  [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action) rule that a row's name
+  stays a real `<button>` — rather than a `<tr>` pretending to be a control — exists for this.
+- **Semantic HTML and real ARIA labels.** Use MUI's `component` prop for the element, and label every
+  icon-only control: [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) makes
+  `ariaLabel` a *required* prop precisely so it cannot be skipped.
+
+**Named gap: there is no automated accessibility check.** No axe, no contrast assertion, no
+target-size rule anywhere in the Vitest, Playwright or scanner layers. Contrast regressions are caught
+by someone looking — which is how the 4.11:1 canvas survived as long as it did.
+
 ---
 
 ## Buttons
@@ -98,7 +233,8 @@ dialogs and menus get solid `#111439` / `#1a1f4a` overrides instead.
 done* — exactly the trap we hit with green "Complete" / "Mark Received" buttons.
 
 `color` is almost always **omitted** (theme default `primary`). `size="large"` is never needed — the
-theme floors every button at a **48px** touch target.
+theme floors every `Button` at a **48px** touch target. (One of only three components it floors; an
+`IconButton` is not among them — [the 48px floor](#the-48px-floor).)
 
 | Rank | Style | Use for |
 |---|---|---|
@@ -370,6 +506,19 @@ system stack as fallback, `textTransform: 'none'` on buttons.
 | size | 2.5rem / 40px | 2rem / 32px | 1.75rem / 28px | 1.5rem / 24px | 1.25rem / 20px | 1rem / 16px | 1rem / 16px | 0.875rem / 14px | 0.75rem / 12px |
 | use | Page titles | Section headings | Subsections | Card titles | Component headings | Small headings | Body | Secondary body (`#C8CCD4`) | Helper text |
 
+*(`lib/theme.ts` defines h1–h6, `body1`, `body2` and `button` only. `caption` — and `subtitle1` /
+`subtitle2`, unused — are MUI's defaults, listed here because they render, not because we set them.)*
+
+**Use the named variants; never set `fontSize` in `sx`.** `body1` (16px) is the floor for *primary*
+body copy — the thing the user came to read. `body2` (14px) and `caption` (12px) sit below it on
+purpose and are the documented homes for secondary and helper text.
+
+**Withdrawn:** "Readable Text: minimum 16px font size for body text" — wrong as stated, and
+contradicted by the very theme it was describing: `body2` is `0.875rem` (14px) in `lib/theme.ts`,
+carries the `#C8CCD4` label colour, and is in use for secondary text throughout. What it was reaching
+for is the rule above (don't shrink *primary* copy) plus the contrast floor — contrast, not size, is
+what carries 14px in a bright room, which is why `text.secondary` was lightened to hold ≥4.5:1.
+
 **Spacing** — MUI 8px base via `theme.spacing(n)`: 1 = 8px, 2 = 16px, 3 = 24px, 4 = 32px, 6 = 48px,
 8 = 64px. Use `sx={{ p: 3 }}`, never `padding: '24px'`.
 
@@ -400,11 +549,32 @@ it describes: [`types/job.ts`](../types/job.ts) → `PRODUCTION_STATUS_CONFIG` (
 
 ---
 
-## Detail-page layout patterns
+## Page layout patterns
 
-CLAUDE.md covers list, create/edit and import pages. This covers **detail pages** — one record of one
-entity. Three patterns; don't mix them. **Pick by what the user came to do, not by entity size:** a
-*reference* entity is opened to read settings and see relations, not to drive anything; a
+**No page renders its own title.** [`Header`](../components/layout/Header.tsx) derives one from the
+pathname, and [`PageTitleProvider`](../components/layout/PageTitleProvider.tsx) lets a page override
+it with the record's identity (the part page sets the part number) — the app bar sticks, so that
+identity stays visible while scrolling. An inline `<Typography variant="h4">Parts</Typography>` at the
+top of a page is a duplicate that also *loses* the sticky behaviour it duplicates.
+
+**List pages** — `<Box>` with no padding (the layout supplies it) → one flex toolbar row → content.
+The toolbar reads left to right: search `TextField` (`size="small"`), any selection-dependent bulk
+actions, a `<Box sx={{ flex: 1 }} />` spacer, then `outlined` Import and `contained` New … pinned to
+the right edge. Content is a `<Card>` wrapping an AG Grid, swapped for a centred empty-state card at
+zero rows — which is why the Card hairline is tuned for full-width tables ([Glass cards](#glass-cards)).
+Cleanest read: [`customers/page.tsx`](../app/dashboard/[companyId]/customers/page.tsx).
+
+**Create / edit pages** — `<Box>` with no padding, no inline title, the form component rendered
+directly. The form owns its own cards.
+
+**Import pages** — `<Box>` with no padding, an `ArrowBackIcon` "Back" button at top left, content
+below.
+
+### Detail pages
+
+One record of one entity. Three patterns; don't mix them. **Pick by what the user came to do, not by
+entity size:** a *reference* entity is opened to read settings and see relations, not to drive
+anything; a
 *workflow / document* entity is opened to act on a process (ship, cancel, send PDF) or to step through
 a child collection (operations, line items); a *workspace* is opened to keep editing the record
 itself. As-built, verified 2026-08-03:

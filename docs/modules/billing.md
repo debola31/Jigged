@@ -88,18 +88,40 @@ the existing membership policy. **SELECT is never gated.** `service_role` and
 seeder are unaffected.
 
 > ### ⚠ Invariant: every new tenant table must be billing-gated
-> A new `company_id` table without the gate **silently bypasses billing**. To make
-> that a *loud CI failure* instead of tech debt:
-> - Gate a new direct-`company_id` table in one line, in its migration:
->   `SELECT public.apply_billing_write_gate('public.your_table');`
->   (Parent-resolved child tables — no `company_id` — still need hand-written
->   policies that resolve the parent's company; see the
->   `stripe_write_enforcement` migration for the pattern.)
-> - The CI test **`test_no_tenant_table_left_ungated`** calls
->   `public.tenant_tables_missing_write_gate()` and fails if any `company_id` table
->   is neither gated nor on the explicit exempt list. Add a genuinely-exempt table
->   (identity/bootstrap or service-role-only) to that function's list — a conscious
->   one-line decision.
+> A new `company_id` table without the gate **silently bypasses billing** — no error,
+> no broken page, no symptom. Two guards in
+> `api/tests/integration/test_billing_enforcement.py` make that a red build instead of
+> tech debt:
+>
+> | SQL check → CI test | Catches | Fix |
+> |---|---|---|
+> | `tenant_tables_missing_write_gate()` → `test_no_tenant_table_left_ungated` | a `company_id` table with no `billing_gate_insert` policy | `SELECT public.apply_billing_write_gate('public.your_table');` in that table's own migration |
+> | `definer_writers_missing_write_gate()` → `test_no_definer_function_walks_past_the_gate` | a `SECURITY DEFINER` function that writes a gated table without consulting the gate | `PERFORM public.inv_assert_can_write(<company>);` after the membership check |
+>
+> `apply_billing_write_gate` only works on a **direct `company_id`** table.
+> Parent-resolved children (no `company_id`) need hand-written policies that resolve
+> the parent's company — pattern in
+> [`20260725210136_stripe_write_enforcement.sql`](../../supabase/migrations/20260725210136_stripe_write_enforcement.sql).
+>
+> **The first guard checks that a policy *exists*, so it is blind to a definer function
+> walking past a policy that does.** That is how the five location-stock RPCs shipped
+> with no entitlement check (#645), which made billing depend on a feature flag: a
+> lapsed shop with `inventory_locations` OFF was blocked (direct browser insert, gate
+> applies) and the same shop with it ON wrote freely. The second guard exists only
+> because of that blind spot —
+> [`20260801150944_inventory_rpc_billing_write_gate.sql`](../../supabase/migrations/20260801150944_inventory_rpc_billing_write_gate.sql).
+>
+> A genuinely-exempt table (identity/bootstrap, or service-role-only) goes on the exempt
+> list inside `tenant_tables_missing_write_gate()` — a conscious one-line edit.
+> **A false rationale on that list is the failure mode:** `part_location_stock` sat under
+> "writes never come from the browser" while the browser was writing it through definer
+> RPCs, and that one sentence is what carried #645 through review. It has since been
+> removed from the list and gated.
+>
+> **Named gap:** `create_shipment_with_line_items` is browser-callable, writes gated
+> tables, and does not check. It is on the definer exempt list so the guard stays green
+> on a *filed* gap rather than being ignored — whether a lapsed shop may still ship an
+> order it already placed is a billing policy question, tracked separately.
 
 **Storage:** the private `attachments` bucket's `storage.objects` INSERT/DELETE
 policies also call `company_can_write` (company derived from the first path
@@ -206,7 +228,7 @@ backend loads env at startup — restart `python api/index.py` after changing th
 
 - **DB-only (CI, no Stripe):** `api/tests/integration/test_billing_enforcement.py` —
   the RLS write-gate across every state, read-still-works, TS↔SQL parity, the
-  `apply_stripe_subscription` guard, and the completeness check.
+  `apply_stripe_subscription` guard, and both §4 completeness guards.
   `__tests__/lib/entitlement.test.ts` (Vitest) + `scripts/verify_billing_parity.sql`
   cover the entitlement rule. `api/tests/unit/test_stripe_routes.py` covers endpoint
   logic (mocked Stripe).

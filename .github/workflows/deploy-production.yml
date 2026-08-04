@@ -163,73 +163,93 @@ jobs:
           done
 
   deploy:
-    name: Deploy to Vercel production
+    name: Trigger the Vercel production deploy
     needs: gate
     runs-on: ubuntu-latest
-    env:
-      # Read from either tab. Neither ID is sensitive — they identify a project,
-      # they do not authorise anything — so a repo VARIABLE is the tidier home
-      # and stays readable in the UI. But they were configured as secrets, and a
-      # deploy silently receiving an empty string is a worse outcome than an
-      # untidy home: `vercel pull` then fails with a message about the TOKEN,
-      # which sends you looking at the wrong setting entirely.
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID || secrets.VERCEL_PROJECT_ID }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-
-      # Say which setting is missing, before a tool with less context guesses.
-      # The first real run of this workflow had both IDs empty (configured as
-      # secrets while this read vars) and `vercel pull` reported only "The
-      # specified token is not valid" — pointing at the one credential that was
-      # actually present. Ten minutes were spent on the token.
-      - name: Check deploy credentials are present
+      # A deploy HOOK, not a CLI build-and-deploy. Vercel builds this exactly as
+      # it does for a git push; all this workflow decides is WHEN that starts.
+      #
+      # The CLI path was tried first and abandoned after three separate walls, all
+      # of them structural rather than misconfiguration:
+      #
+      #   1. `vercel build` expands vercel.json's `functions: { "api/**" }` glob
+      #      into one function per matched Python file — 82 of them, against a
+      #      12-function cap on Hobby. It also installed dependencies 82 times,
+      #      which is why the build took 21 minutes.
+      #   2. Narrowing that glob to the real entrypoint `api/index.py` gives one
+      #      function of 244 MB, against a 225 MB cap. The bulk is the dependency
+      #      stack (three LLM SDKs, Stripe, Sentry, two Postgres drivers), so
+      #      excluding repo files from the bundle changed the size by nothing.
+      #   3. Building on a runner has no Vercel build cache, so even a working
+      #      version would have traded a ~3 minute deploy for a ~30 minute one.
+      #
+      # Vercel's own builder hits none of these, and has been deploying this app
+      # all along. Handing the build back to it keeps every one of those problems
+      # solved and leaves this workflow responsible only for ordering.
+      #
+      # WHAT THIS STEP DOES AND DOES NOT PROVE. It proves Vercel ACCEPTED the
+      # trigger, not that the deployment succeeded — completion is reported by
+      # Vercel, not here. That is a deliberate limit rather than an oversight: a
+      # build failing after this point leaves production serving the PREVIOUS
+      # code against a database that has already migrated, which is the safe
+      # direction (old code, new schema) and the one additive migrations are
+      # written to survive. The dangerous ordering — new code, old schema — is
+      # what the gate above already refuses.
+      - name: Trigger the deploy
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          set -euo pipefail
-          MISSING=""
-          [ -n "${VERCEL_TOKEN:-}" ]      || MISSING="$MISSING VERCEL_TOKEN(secret)"
-          [ -n "${VERCEL_ORG_ID:-}" ]     || MISSING="$MISSING VERCEL_ORG_ID(variable-or-secret)"
-          [ -n "${VERCEL_PROJECT_ID:-}" ] || MISSING="$MISSING VERCEL_PROJECT_ID(variable-or-secret)"
-          if [ -n "$MISSING" ]; then
-            echo "::error::Missing deploy credentials:$MISSING"
+          set -uo pipefail
+
+          if [ -z "${HOOK_URL:-}" ]; then
+            echo "::error::VERCEL_DEPLOY_HOOK_URL is not set — production was not deployed."
             {
-              echo "## Deploy not attempted — credentials missing"
+              echo "## Production not deployed — no hook configured"
               echo
-              echo "Empty:\`$MISSING\`"
+              echo "The migration gate passed, so the database is ready, but the"
+              echo "deploy was never triggered. Production is still serving the"
+              echo "previous build."
               echo
-              echo "Set under **Settings → Secrets and variables → Actions**."
-              echo "The two IDs are read from either tab; the token must be a secret."
-              echo "Find them in Vercel: token under Account Settings → Tokens,"
-              echo "org ID under Team Settings → General, project ID under the"
-              echo "project's Settings → General."
+              echo "Create the hook with:"
+              echo '```'
+              echo "vercel deploy-hooks create gated-prod-deploy --ref main"
+              echo '```'
+              echo "then store its URL as the \`VERCEL_DEPLOY_HOOK_URL\` secret."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "All three deploy credentials are present."
 
-      - name: Install Vercel CLI
-        run: pnpm add -g vercel@48
+          # -o/-w rather than a bare curl: the response body is written to a file
+          # so nothing that might echo the URL reaches the log, and only the job
+          # id is printed back.
+          HTTP=$(curl -sS -X POST -o /tmp/hook-response.json -w '%{http_code}' "$HOOK_URL") || true
 
-      # `vercel pull` fetches the project's PRODUCTION environment variables from
-      # Vercel itself, so NEXT_PUBLIC_SUPABASE_* and friends keep living in the
-      # Vercel dashboard. They are deliberately NOT duplicated into GitHub
-      # secrets: two copies of an env var is how one of them goes stale.
-      - name: Pull Vercel production environment
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Build
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+          case "${HTTP:-000}" in
+            200|201)
+              JOB=$(jq -r '.job.id // "unknown"' /tmp/hook-response.json 2>/dev/null || echo unknown)
+              echo "✅ Vercel accepted the deploy trigger (job ${JOB})."
+              {
+                echo "## Deploy triggered"
+                echo
+                echo "The migration gate passed and Vercel accepted the trigger"
+                echo "(job \`${JOB}\`). Vercel builds and reports the outcome —"
+                echo "this workflow does not wait for it."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::Vercel rejected the deploy trigger (HTTP ${HTTP:-000})."
+              {
+                echo "## Production not deployed — Vercel rejected the trigger"
+                echo
+                echo "HTTP \`${HTTP:-000}\`. The database has migrated but the new"
+                echo "code was not shipped, so production is serving the previous"
+                echo "build against the new schema."
+                echo
+                echo "Most likely the hook was deleted or regenerated in Vercel."
+                echo "List them with \`vercel deploy-hooks list\` and update the"
+                echo "\`VERCEL_DEPLOY_HOOK_URL\` secret."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+          esac

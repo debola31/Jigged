@@ -57,13 +57,21 @@ import posthog from "posthog-js";
 // NEXT_PUBLIC_POSTHOG_HOST is deliberately not read: ingestion goes through our
 // own origin via the `next.config.ts` rewrites, so `api_host` is the fixed "/ingest"
 // path below. The wizard emitted a variable for it that nothing consumed.
+//
+// THE TOKEN IS THE ENVIRONMENT SWITCH, AND ITS ABSENCE IS THE NORMAL STATE.
+// It is set in Vercel Production only — not Preview, not Development, and commented
+// out in `.env.local` — so `pnpm dev`, the Playwright suite and preview deployments
+// all no-op below. Same reasoning as SENTRY_ENABLED above, but it deliberately does
+// NOT reuse `NODE_ENV`: Vercel builds previews with NODE_ENV=production, which is
+// right for Sentry (a preview crash is a real crash) and wrong here (a preview
+// pageview against seeded data is not a real user). PostHog's free plan caps you at
+// one project, so there is no dev project to send this noise to instead.
+//
+// The wizard's console.error for a missing token is deliberately gone. It fired on
+// every local page load, and it told you to configure the one thing we now leave
+// unconfigured on purpose — an alert that is wrong by construction trains you to
+// ignore the console, which is how the Sentry queue above went bad in the first place.
 const posthogToken = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN;
-
-if (!posthogToken && process.env.NODE_ENV !== "production") {
-  console.error(
-    "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN variable required by PostHog is missing or un-configured, this causes events to be silently missed. This error stops appearing once NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN is configured"
-  );
-}
 
 if (posthogToken) {
   posthog.init(posthogToken, {

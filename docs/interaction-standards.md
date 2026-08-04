@@ -1,5 +1,22 @@
 # Interaction Standards
 
+> **Reviewed & condensed 2026-08-03** (#634). 3,537 → 4,075 words (`wc -w`) — **it got
+> longer, on purpose.** This doc is normative and machine-enforced
+> ([`scripts/interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts)) and 11
+> source files cite it, so there was little safe to cut: collapsing the two all-green
+> "Current state vs this standard" audits saved ~170 words, and the corrections found by
+> checking it against the code cost ~600.
+> **Four corrections, marked inline:** §4's job-delete example (the UI still enforces guards
+> the doc called removed); §4's invoiced-line lock (the "View invoice" button it cited does
+> not exist, and a *cancelled* line is disabled with no visible reason at all); and §1's
+> "recently deleted / restore" affordance (never built — the durable path is
+> `reviveArchivedCustomerByName`). Also added: `describe` names on every test citation. The
+> note-surface rules that were mis-filed inside the §1 audit were promoted to their own
+> normative subsection, not deleted. Kept deliberately: every citation, every withdrawn
+> argument, every named gap, the pricing-tier "doesn't touch existing quotes" mechanics, the
+> as-built inventory of which surfaces carry `SaveStatus` and how the exit guard is wired,
+> and both 2026-07-31 corrections.
+
 How destructive actions and saving should behave across the app, so users build
 one reliable mental model instead of re-learning each screen. Backed by
 Nielsen Norman Group, Material Design 3, GOV.UK, Apple HIG, and Carbon (linked
@@ -33,9 +50,12 @@ to the consequence.
   control is always the **rightmost** item, set apart from the benign actions, so
   the destructive option is predictably located and not crowded next to common
   ones ([NN/g — consequential options near benign ones](https://www.nngroup.com/articles/proximity-consequential-options/)).
-- Enforced by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts):
+- Enforced by [`scripts/interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts),
+  driven by [`__tests__/standards/interactionStandards.test.ts`](../__tests__/standards/interactionStandards.test.ts)
+  (`describe`: *interactionStandardsCheck — grey-delete rule*, and
+  *interactionStandardsCheck — repo is clean*, which scans `components/` + `app/`):
   a delete icon set to `text.secondary` fails CI. (Glyph choice is a per-call-site
-  judgment, not machine-enforced.)
+  judgment, deliberately **not** machine-enforced.)
 - Keep it low-emphasis (ghost icon, no filled-red background) for in-context row
   deletes ([Carbon — Button usage](https://carbondesignsystem.com/components/button/usage/)).
 - Never rely on red **alone** — pair it with an icon/label/confirmation copy.
@@ -53,9 +73,18 @@ the generic "low-stakes ⇒ no dialog" advice.
 
 | Target | Stakes | Treatment |
 |---|---|---|
-| **High-impact / hard to reverse** — e.g. delete a whole **Part**, which **archives** it (soft-delete via `deleted_at`) and never blocks | High | **Confirmation dialog**, danger style, consequences stated, Delete kept away from Cancel ([NN/g — proximity](https://www.nngroup.com/articles/proximity-consequential-options/)). This is [`DeleteImpactDialog`](../components/common/DeleteImpactDialog.tsx), which states the impact (quotes/jobs that reference the part, other parts whose cost will change) — a warning, never a block. See [Architecture §16](architecture.md#16-deletion--archiving-policy). |
-| **Immediately-persisted row delete** — BOM material row, routing operation row (auto-saved on change) | Low–med | **Lightweight confirmation dialog** — same shape as the Part delete, less copy. This is the safety-net *floor*; see the audience note for why NOT an Undo snackbar. |
+| **High-impact / hard to reverse** — e.g. delete a whole **Part**, which **archives** it (soft-delete via `deleted_at`, [`bulkDeleteParts`](../utils/partsAccess.ts)) and never blocks | High | **Confirmation dialog**, danger style, consequences stated, Delete kept away from Cancel ([NN/g — proximity](https://www.nngroup.com/articles/proximity-consequential-options/)). This is [`DeleteImpactDialog`](../components/common/DeleteImpactDialog.tsx), which states the impact (quotes/jobs that reference the part, other parts whose cost will change) — a warning, never a block. See [Architecture §16](architecture.md#16-deletion--archiving-policy). |
+| **Immediately-persisted row delete** — BOM material row, routing operation row (auto-saved on change), note / comment | Low–med | **Lightweight confirmation dialog** — same shape as the Part delete, less copy ([`NoteDeleteDialog`](../components/notes/NoteDeleteDialog.tsx) for notes). This is the safety-net *floor*; see the audience note for why NOT an Undo snackbar. |
 | **Staged (explicit-Save) edit** — pricing-tier removal | Low | **No dialog.** Removal is in-memory until the user clicks Save; the dirty-state indicator + the option to walk away unsaved *is* the safety net. |
+
+Two facts that keep those rows from being re-litigated:
+
+- **A note / comment delete is a HARD delete.** `notes` and `part_comments` carry no
+  `deleted_at`, so this sits outside the Architecture §16 archive standard and there
+  is no restore — which is exactly why it takes the dialog ([#628](https://github.com/debola31/Jigged/issues/628)).
+- **A pricing-tier removal is not the financial hazard it looks like.** It does not
+  alter existing quotes: line items snapshot `unit_price`, and the `source_tier_id`
+  FK is `ON DELETE SET NULL`.
 
 > **Audience floor — why not "inline delete + Undo snackbar":** our users are
 > 50–60, and on the operator surface they are on their own phone on a shop floor with
@@ -71,65 +100,61 @@ the generic "low-stakes ⇒ no dialog" advice.
 > on-screen feedback time ([JMIR 2023](https://mhealth.jmir.org/2023/1/e43186)).
 > NN/g frames Undo as a *complement* to a dialog, not a replacement. So a
 > destructive, immediately-persisted row delete keeps its dialog; only replace a
-> dialog when recovery is **durable** — a soft-delete + "recently deleted /
-> restore" affordance (the pattern already used for customers, `softDeleteCustomer`)
-> — never a timed toast.
+> dialog when recovery is **durable** — soft-delete plus a real way back, which for
+> catalog entities is *revive by reusing the name*
+> ([`softDeleteCustomer`](../utils/customerAccess.ts), plus the
+> `reviveArchivedCustomerByName` path `createCustomer` takes on a `23505`, plus the
+> reassurance `DeleteImpactDialog` renders when `revivableByName`: "You can bring it
+> back anytime by re-creating or re-importing the same name") — never a timed toast.
+>
+> *(Correction 2026-08-03: this previously named a "recently deleted / restore"
+> affordance as "the pattern already used for customers". No Trash / Restore /
+> Permanent-delete UI exists anywhere —
+> [Architecture §16](architecture.md#16-deletion--archiving-policy) lists it as
+> deliberately deferred past v1. Name-reuse revival is the durable path that does
+> exist; its helper is `reviveArchivedCustomerByName`, private to
+> `utils/customerAccess.ts`, not an exported `reviveArchivedCustomer`.)*
 
-### Current state vs this standard
-- ✅ Part delete: red icon + confirmation dialog.
-- ✅ Row deletes (BOM / tier / operation): red icons at rest.
-- ✅ Shared `DeleteIconButton` + a CI source-scan test enforce red-at-rest.
-- ✅ BOM material delete: confirmation dialog (correct — keep it).
-- ✅ Routing-operation delete: now gated by a confirmation dialog. It auto-saves
-  on change, so without this it was a silent, unrecoverable delete — the one real
-  gap, now closed.
-- ✅ Pricing-tier removal: staged behind explicit Save; recoverable by not saving,
-  and it does **not** alter existing quotes (line items snapshot `unit_price`; the
-  `source_tier_id` FK is `ON DELETE SET NULL`), so it is not the financial hazard
-  it appears to be.
-- ✅ Note / comment delete ([#628](https://github.com/debola31/Jigged/issues/628)):
-  confirmation dialog on every surface. `notes` and `part_comments` have no
-  `deleted_at`, so this is a hard delete outside the Architecture §16 archive
-  standard and there is no restore — squarely the "immediately-persisted row
-  delete" row above. The part Activity tab previously deleted a comment on a single
-  click with no confirmation at all; that gap was closed in the same PR.
-- ✅ Note / comment **edit** affordance is deliberately shaped per surface, and this
-  is the one place the standard splits by device rather than by stakes:
-  - *Operator surfaces* (job feed, Playbook sheet, machine log) use a single 48px
-    overflow (kebab) opening Edit / Delete. Those note headers already carry an
-    author, an optional step chip and a timestamp, and already wrap at 375px; two
-    more 48px targets push every header onto a third line. MUI `MenuItem`s clear
-    48px, so the touch floor is met at the point of *choice* — which is where it
-    matters, since a mis-tap on a kebab is harmless and a mis-tap on a bare trash
-    icon is not.
-  - *Office surfaces* (part Activity) keep the destructive control **shown at rest**
-    as an error-coloured trash icon, with a plain edit icon beside it and delete
-    rightmost. Burying delete in a kebab there would regress the red-at-rest and
-    delete-sits-last rules above; desktop has the width and the hover, so the phone
-    constraint does not apply.
-  - *The operator's own work list* (`/operator/[companyId]/my-work`) uses the same
-    kebab, **plus one extra rule the other operator surfaces don't need: the row body
-    must stay inert.** This is the only note surface whose row also has to disclose
-    something — the "Viewed by" reader list, which is content and therefore cannot
-    live in a menu ([NN/g — contextual menus reveal *actions*](https://www.nngroup.com/articles/contextual-menus-guidelines/)).
-    The naive shape (tap the row to expand, kebab for actions) is a **split-button
-    row**, and NN/g measured across 136 participants and 11 mobile prototypes that
-    users "tap fairly equally on both the accordion icon and the accordion label"
-    ([NN/g — accordion icons](https://www.nngroup.com/articles/accordion-icons/)) —
-    i.e. roughly a coin flip on every tap, with a delete menu as one of the outcomes.
-    So the two disclosures sit at **opposite ends** of the row (readers on the eye at
-    far left, actions in the overflow at far right) and nothing between them is
-    tappable. `NoteActionsMenu` also carries an optional third item, "Open J-0042",
-    listed first so delete still sits last; this list is the only place a note is the
-    only route back to its job.
+### Note surfaces — the one place the standard splits by device, not stakes
+
+Note / comment **edit + delete** affordances are shaped per surface:
+
+| Surface | Affordance | Why |
+|---|---|---|
+| **Operator** — job feed, Playbook sheet, machine logbook | One 48px overflow (kebab) → Edit / Delete ([`NoteActionsMenu`](../components/notes/NoteActionsMenu.tsx)) | Note headers already carry author + optional step chip + timestamp and already wrap at 375px; two more 48px targets push every header onto a third line. MUI `MenuItem`s clear 48px, so the touch floor is met at the point of *choice* — which is where it matters, since a mis-tap on a kebab is harmless and a mis-tap on a bare trash icon is not. |
+| **Office** — part Activity ([`HistoryTab`](../components/parts/workspace/tabs/HistoryTab.tsx)) | Destructive control **shown at rest** as an error-coloured trash icon, plain edit icon beside it, delete rightmost | Burying delete in a kebab here would regress the red-at-rest and delete-sits-last rules above. Desktop has the width and the hover; the phone constraint does not apply. |
+| **The operator's own work list** (`/operator/[companyId]/my-work`) | Same kebab, **plus: the row body must stay inert** | See below. |
+
+The work list is the only note surface whose row also has to disclose *content* —
+the "Viewed by" reader list, which cannot live in a menu
+([NN/g — contextual menus reveal *actions*](https://www.nngroup.com/articles/contextual-menus-guidelines/)).
+The naive shape (tap the row to expand, kebab for actions) is a **split-button row**,
+and NN/g measured across **136 participants and 11 mobile prototypes** that users "tap
+fairly equally on both the accordion icon and the accordion label"
+([NN/g — accordion icons](https://www.nngroup.com/articles/accordion-icons/)) — i.e.
+roughly a coin flip on every tap, with a delete menu as one of the outcomes. So the two
+disclosures sit at **opposite ends** of the row (readers on the eye at far left, actions
+in the overflow at far right) and nothing between them is tappable. `NoteActionsMenu`
+also carries an optional third item, "Open J-0042", listed **first** so delete still sits
+last; this list is the only place a note is the only route back to its job.
 
 > **If you are adding a note surface:** the kebab is the rule. Only add a second
 > disclosure if that surface has *content* to reveal as well as actions — and if it
 > does, make the row body inert rather than letting it compete with the menu.
-- 🔄 **Superseded:** the earlier target of "drop the BOM dialog + add Undo
-  snackbars to BOM/tier/operation" is reversed after UX research (the audience
-  floor above). We keep dialogs on destructive row deletes; ephemeral Undo is not
-  our pattern. Issues #394 / #396 were closed with this rationale.
+
+### As-built (verified 2026-08-03)
+
+Every gap this section once tracked is closed: red-at-rest everywhere (CI-scanned),
+confirmation dialogs on the Part delete, BOM material, routing operation and every
+note / comment surface, staged-only removal for pricing tiers. Two closures worth
+remembering — the routing-operation delete auto-saves on change, so before its dialog it
+was a silent unrecoverable delete ([`RoutingOperationsList`](../components/routings/RoutingOperationsList.tsx));
+and the part Activity tab used to delete a comment on a single click with no confirmation.
+
+**Withdrawn:** "drop the BOM dialog and add Undo snackbars to BOM / tier / operation" —
+wrong because of the audience floor above; ephemeral Undo is not our pattern, and
+dialogs stay on destructive row deletes. Issues [#394](https://github.com/debola31/Jigged/issues/394)
+/ [#396](https://github.com/debola31/Jigged/issues/396) were closed with this rationale.
 
 ---
 
@@ -152,14 +177,15 @@ editor is the right shape for a record whose fields are meaningless
 individually, and it is what Polaris recommends for independently-editable
 sections of one page.
 
-> **"Financial" means downstream effect, not field type.** Batch size looks like
-> a harmless scalar and was briefly reclassified as auto-save on that basis. It
-> isn't: `compute_part_cost_at_qty` values this part as a made child at exactly
-> this quantity in **every parent's BOM**
+> **"Financial" means downstream effect, not field type.** `compute_part_cost_at_qty`
+> values a part as a made child at exactly this quantity in **every parent's BOM**
 > (`v_child_val_qty := v_bom.child_costing_batch_quantity`), so a fat-fingered
 > 30 → 300 silently re-costs every parent and flows into their quoted prices.
 > The test is not "is this a price?" but **"can a typo here change what a
 > customer is charged?"** If yes, it stages behind a Save button.
+>
+> **Withdrawn:** "batch size is a costing assumption, not a price, so it can auto-save"
+> — wrong because of the BOM re-cost path above. It stays explicit-Save.
 
 - **One shared indicator:** [`components/common/SaveStatus.tsx`](../components/common/SaveStatus.tsx)
   — "Saving… / Saved", in an `aria-live="polite"` region. Reuse it on every
@@ -178,19 +204,22 @@ sections of one page.
 > rollups, breakdowns). It must never re-seed **user-editable draft** state or
 > clear a dirty flag.
 
-This is the rule the standard was missing, and its absence cost a real customer
-real work. The part page broadcasts one page-wide `refreshKey` after every
-mutation; `PartPricing` consumed it by re-seeding its editable tier rows from
-the database and calling `setDirty(false)`. So typing a new Min qty and *then*
-editing an operation — two cards sitting side by side — silently reverted the
-typed value. The old rule only forbade mixing models *within* a section, and
-said nothing about one section reaching into another.
+The failure it prevents, which cost a real customer real work: the part page
+broadcasts one page-wide `refreshKey` after every mutation, and `PartPricing`
+consumed it by re-seeding its editable tier rows from the database and calling
+`setDirty(false)` — so typing a new Min qty and *then* editing an operation, two
+cards side by side, silently reverted the typed value. The old rule only forbade
+mixing models *within* a section and said nothing about one section reaching
+into another.
 
 The fix shape: gate the draft re-seed on "not dirty" (and on the record not
 having actually changed), while leaving the derived-data refetches on the
 refresh signal untouched. See `PartPricing.tsx`'s load effect, and the
-regression test in
-[`__tests__/components/parts/PartPricing.test.tsx`](../__tests__/components/parts/PartPricing.test.tsx).
+regression tests in
+[`__tests__/components/parts/PartPricing.test.tsx`](../__tests__/components/parts/PartPricing.test.tsx)
+(`describe`: *PartPricing — staged tier edits survive sibling saves*) and
+[`__tests__/components/parts/PartProcurementPricingPanel.test.tsx`](../__tests__/components/parts/PartProcurementPricingPanel.test.tsx)
+(`describe`: *PartProcurementPricingPanel — part-level tiers, explicit save*).
 
 ### Invariant 2 — exit guard
 
@@ -204,7 +233,9 @@ never produces the false positive that trains users to click through
 ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
 `PartWorkspace` owns this: staged-save panels report dirty state up via
 `onDirtyChange`, and a tab switch while dirty raises a Keep-editing / Discard
-dialog.
+dialog. Covered by
+[`__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx`](../__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx)
+(`describe`: *PartWorkspace — unsaved-changes exit guard*).
 
 ### Making "unsaved" visible
 
@@ -213,8 +244,8 @@ in `text.secondary`, at the bottom of the tier table, next to a `size="small"`
 button — was not, and that is *why* the change was still unsaved when the wipe
 hit. Attention is on the field being typed, not the card chrome
 ([NN/g — Change Blindness](https://www.nngroup.com/articles/change-blindness/):
-put feedback next to where the user is working), and users routinely miss a
-separate commit button beside a field they just filled in
+put feedback next to where the user is working); users routinely miss a separate
+commit button beside a field they just filled in
 ([Baymard — avoid "Apply" buttons](https://baymard.com/blog/checkout-usability-apply-buttons)).
 
 **Every staged explicit-Save surface shows both signals. No exceptions** — a
@@ -277,21 +308,18 @@ Where a save deliberately does *not* refresh its parent (the batch size does
 not), keep the baseline **locally** and advance it on save — reading it off a
 stale prop leaves the field looking dirty forever.
 
-### Current state
-- ✅ `SaveStatus` adopted in identity, routing, BOM, procurement, transaction
-  notes. Pricing + procurement tiers are explicit-Save.
-- ✅ **Section isolation** enforced in both tier tables, with a regression test
-  that fails if the guard is removed.
-- ✅ **Exit guard**: tab-switch confirmation + conditional `beforeunload`, both
-  driven by `onDirtyChange` reporting into `PartWorkspace`.
-- ✅ **Dirty state is derived, never latched** on all three staged surfaces.
-- ✅ **All three staged surfaces share `UnsavedChangesBar`** — pricing tiers,
-  procurement cost tiers, and batch size. Batch size was the last holdout: it
-  had a lone Save button with no unsaved marker at all, which is precisely the
-  "some cards prompt you, some don't" inconsistency that started this work.
-- ✅ **Batch size stays explicit-Save**, and the reasoning is recorded above
-  rather than left implicit — it was briefly moved to auto-save on the (wrong)
-  grounds that it is a costing assumption rather than a price.
+### As-built (verified 2026-08-03), and the one open gap
+
+Shipped and regression-tested: `SaveStatus` on the auto-save and row-editor surfaces
+(identity, routing, BOM, procurement, transaction notes); section isolation in both
+tier tables, with a regression test that fails if the guard is removed; the exit
+guard — tab-switch confirmation **plus** a conditional `beforeunload`, both driven by
+`onDirtyChange` reporting into `PartWorkspace`; derived-not-latched dirty state and a
+shared `UnsavedChangesBar` on **all three** staged surfaces —
+pricing tiers, procurement cost tiers, and batch size (the last holdout, which had a
+lone Save button and no unsaved marker at all, precisely the "some cards prompt you,
+some don't" inconsistency that started this work).
+
 - ❌ **Undo-after-save for pricing — still not pursued.** GitLab Pajamas advises
   against auto-saving financial data ([Pajamas](https://design.gitlab.com/usability/saving-and-feedback)),
   so explicit Save stays. With an explicit Save button **plus** a visible dirty
@@ -314,12 +342,12 @@ stale prop leaves the field looking dirty forever.
   > — is real but is an argument for *also* guarding in-app exits with a dialog
   > that can name what's at stake, not for guarding nothing. A generic warning
   > still beats silent loss.
-  >
-  > **Known gap:** in-app *route* navigation (breadcrumb, links in the
-  > completeness banner) is still unguarded. Next.js App Router exposes no
-  > router-event hook, so covering it means intercepting link clicks; that is
-  > deliberately not built rather than half-built. The tab switch — by far the
-  > most common way to leave — is guarded.
+
+- ❌ **Known gap:** in-app *route* navigation (breadcrumb, links in the
+  completeness banner) is still unguarded. Next.js App Router exposes no
+  router-event hook, so covering it means intercepting link clicks; that is
+  deliberately not built rather than half-built. The tab switch — by far the
+  most common way to leave — is guarded.
 
 ---
 
@@ -345,19 +373,47 @@ When an action can't be performed in the current state, prefer (in order):
    than hiding or graying out. A *disabled* button isn't focusable, so keyboard /
    screen-reader users never learn it exists or why, and a hover tooltip hides the
    reason ([NN/g — Why Disabled Buttons Hurt UX](https://www.nngroup.com/videos/why-disabled-buttons-hurt-ux-and-how-to-fix-them/), [NN/g — Disabled Accessibility: the pragmatic approach](https://www.nngroup.com/articles/disabled-accessibility-the-pragmatic-approach/), [Smashing — Disabled Buttons](https://www.smashingmagazine.com/2021/08/frustrating-design-patterns-disabled-buttons/)).
-   Example: Delete shows on **every** job, in any production status. It now
-   **archives** the job (soft-delete via `deleted_at`) rather than hard-deleting, so
-   it **always succeeds** — presented through a consequence-summary dialog, never a
-   confirm→error two-step. The former *records-of-value* guards (which blocked a job
-   that had a shipment or a QuickBooks invoice) were **removed**: archive preserves
-   that history intact, so there is nothing left to block (see
-   [Architecture §16](architecture.md#16-deletion--archiving-policy)). The
-   keep-visible-and-explain rule still governs genuinely-blocked actions — see the
+   Example: Delete shows on **every** job, in any production status.
+   [`deleteJob`](../utils/jobsAccess.ts) **archives** it (soft-delete via `deleted_at`)
+   rather than hard-deleting, so it **always succeeds** — presented through a
+   consequence-summary dialog, never a confirm→error two-step. The former
+   *records-of-value* guards (which blocked a job that had a shipment or a QuickBooks
+   invoice) were **removed** from the access layer: archive preserves that history
+   intact, so there is nothing left to block (see
+   [Architecture §16](architecture.md#16-deletion--archiving-policy)).
+
+   > **Corrected 2026-08-03 — the UI has not caught up with the access layer.** This
+   > doc (and [Architecture §16](architecture.md#16-deletion--archiving-policy)'s jobs
+   > row) described the above as fully shipped. `deleteJob` does archive, but the job
+   > **detail page** still enforces the old guards and still lies about the outcome:
+   > `handleDeleteClick` in [`app/dashboard/[companyId]/jobs/[jobId]/page.tsx`](../app/dashboard/[companyId]/jobs/[jobId]/page.tsx)
+   > refuses on a shipment count or a QuickBooks invoice link, and its confirm dialog
+   > says the delete "permanently removes the job and all of its parts, operations,
+   > notes, and attachments. This cannot be undone." Both statements are false against
+   > the access layer, and it is a hand-rolled dialog rather than `DeleteImpactDialog`.
+   > **Named gap, not a standard — the rule above is the target.**
+
+   The keep-visible-and-explain rule still governs genuinely-blocked actions — see the
    invoiced-line lock in rule 2.
 2. **Disable only for a stable lock** whose disabled state is itself meaningful,
    paired with a *visible* reason (not hover-only); prefer `aria-disabled` so it
-   stays focusable. Example: once invoiced in QuickBooks, "Edit line" is disabled
-   with a 🔒 icon **and** a visible "View invoice" button signalling the lock.
+   stays focusable. Example: once invoiced in QuickBooks, a job's line price is
+   locked with a 🔒 adornment **and** the helper text "Invoiced — price locked"
+   ([`JobEditForm`](../components/jobs/JobEditForm.tsx)) — the reason is on screen,
+   not in a tooltip. The invoice itself is reachable from the job toolbar's
+   **Invoices (N)** menu ([`InvoicesMenu`](../components/jobs/InvoicesMenu.tsx)),
+   which deep-links each one.
+
+   > **Corrected 2026-08-03.** This example previously claimed a visible
+   > "View invoice" **button** signalling the lock. No such control exists: the job
+   > page fetches `qbInvoiceLink` but only reads it to gate Delete and never renders
+   > it; the links live in the `Invoices (N)` menu. Two further caveats on the lock
+   > itself — it uses a real `disabled` prop, not `aria-disabled`, so the "prefer
+   > `aria-disabled`" sentence above is the target rather than the as-built; and
+   > `priceLocked = isCancelled(p) || qtyInvoiced(p) > 0`, while the 🔒 and the
+   > helper text render only when `qtyInvoiced(p) > 0`. **Named gap:** a *cancelled*
+   > line is therefore disabled with a blank helper text and no icon — a disabled
+   > control with no visible reason, exactly what this rule forbids.
 3. **Hide only when the action is irrelevant in this context** — the user's role
    or this object can *never* do it — not when it's merely temporarily blocked.
    Hiding a temporarily-unavailable control hurts learnability: users can't tell

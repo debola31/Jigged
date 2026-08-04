@@ -367,6 +367,31 @@ bisection oracle: narrow it repeatedly and you recover *when* a note was read, w
 `note_viewers()` naming the reader reconstructs "Kurtis had to look this up on Tuesday". A count is
 a number the server already told us, so subtracting on the client leaks nothing.
 
+**New since you last looked** (My work, above everything) — the NAMED half of the loop. *"Diego
+Alvarez found your note helpful"*, quoting the note as a **blockquote** rather than setting it in
+bold: bold read as the block's own headline, so the one thing the surface exists to say — that
+somebody valued something *you* wrote — was the thing it did not say. Reactors are grouped by note,
+so three people marking one note is ONE item naming three, never three items and never a per-person
+total. Names are acceptable here and not on the banner because this is the surface an operator opens
+about themselves; the banner is glanceable over a shoulder. Renders nothing at zero.
+
+**Dismissal destroys nothing.** **Got it** (no timer, never cleared by scrolling past) advances
+`user_company_access.reactions_seen_at` through `mark_reactions_seen()`; every reaction stays on its
+note below, permanently, because the prompt and the record are different objects. The cursor is
+**server-side**, unlike the banner's `localStorage` mark, because what a new device would lose here
+is a name rather than a number — and `note_reactions` is already company-readable, so a "seen
+through T" cursor discloses nothing a member could not already query. It is forwarded to PostgREST
+as the **raw string**: Postgres keeps `timestamptz` to the microsecond and JS `Date` only to the
+millisecond, and since the cursor is set to the newest reaction actually shown, truncating it makes
+that reaction compare strictly greater and return as "new" for ever.
+
+Eligibility is capped at **8 weeks** so a long absence is not met with stale news; the DISPLAY has
+no expiry. Derived from live `note_reactions` rows rather than stored messages, so a retracted mark
+simply stops appearing and no "still valid?" rule is needed. **The cursor is one-way by design**
+(`mark_reactions_seen` never moves it backwards, so two devices cannot un-see each other's
+dismissal) — which means a shared demo database is spent once someone taps Got it, and
+`supabase/seed.sql` therefore sets the cursor deliberately rather than leaving it NULL.
+
 **My work** (`/operator/{companyId}/my-work`, the **Me** tab) — a summary headed *"Your notes so
 far"*, then the operator's notes ten at a time behind **Show more**, each row the note itself with
 one quiet metadata line: view count, one reference, date. Tapping the view count names the viewers;
@@ -736,11 +761,9 @@ went up. **The bottleneck was adoption, not the absence of a print button.**
 
 ## Acceptance Criteria
 
-Each bullet is a Given/When/Then scenario carrying a verification clause — the test file and
-`describe` that proves it, a manual procedure, or an explicit `automation-pending` tag with the
-issue that tracks it. **Cite a file, not a nested test title:** a test title is a free-text string
-nothing checks, and 2026 audits found up to two-thirds of such citations dangling. Every path below
-was confirmed to exist on 2026-08-02.
+Convention (Given/When/Then + a checkable verification clause) is stated once in
+[modules/README.md](README.md#the-acceptance-criteria-convention). Every path below was confirmed to exist on
+2026-08-02.
 
 **Authentication & station selection**
 
@@ -812,6 +835,20 @@ was confirmed to exist on 2026-08-02.
 - [ ] **Given** a note whose job has been deleted, **then** the note survives, the Open-job item leaves the overflow menu, and the reference falls back to the part; **given** a maintenance entry, **then** the row names the **work centre** where a job note names its job — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
 - [ ] **Given** My work, **when** the operator taps a note's body, **then** nothing happens — the view count opens the readers and the overflow opens the actions, so no tap is ambiguous between reading and deleting — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`; rationale in [interaction-standards.md](../interaction-standards.md)*.
 - [ ] **Given** the whole loop end to end, **when** one operator writes a note and another reads it, **then** the count and the named reader reach the author — *verified by `e2e/operator-notes-loop.spec.ts` (2 tests)*.
+
+**New since you last looked** (#661)
+
+- [ ] **Given** helpful marks the author has not seen, **then** they appear grouped by NOTE with the reactors named — three people on one note is one item naming three — and never as a per-person total; **given** nothing new, **then** the block renders nothing — *verified by `__tests__/components/operator/NewHelpfulBlock.test.tsx` and `__tests__/utils/operatorAccess.test.ts > getNewHelpful`*.
+- [ ] **Given** the quoted text, **then** it is a `blockquote` and the line reads "found **your note** helpful" — bold with no framing read as the block's own headline, so the surface failed to say the one thing it exists for — *verified by `__tests__/components/operator/NewHelpfulBlock.test.tsx`*.
+- [ ] **Given** **Got it**, **then** the cursor advances to the newest instant actually on screen (not `now()`), so a reaction landing mid-render is still shown next time; **given** a failed dismiss, **then** the block stays put rather than losing the news — *verified by `NewHelpfulBlock.test.tsx`*.
+- [ ] **Given** a cursor stored at microsecond precision, **when** the block reloads, **then** the newest reaction does **not** return — the cursor goes to PostgREST as the raw string, because a round-trip through JS `Date` truncates to milliseconds and makes that reaction compare strictly greater for ever — *verified by `__tests__/utils/operatorAccess.test.ts` > `getNewHelpful`*.
+- [ ] **Given** an operator whose notes nobody has opened, **when** the summary renders, **then** the zero stays in place and a forward-looking line appears instead of a standing "0 views" — *verified by `__tests__/app/operator/MyWorkPage.test.tsx`*.
+
+**Playbook ordering**
+
+- [ ] **Given** two notes both older than the recency window, **when** the Playbook loads, **then** the one consulted on more jobs comes first even if it is the older — *verified by `api/tests/integration/test_note_views_rls.py > test_playbook_ranks_the_load_bearing_note_first`*.
+- [ ] **Given** a note written today with zero usage and a veteran with several jobs, **when** the Playbook loads, **then** the fresh note is above it — a correction must never be buried — *verified by `api/tests/integration/test_note_views_rls.py > test_a_fresh_note_is_never_buried_by_a_veteran`*.
+- [ ] **Given** two equally-used notes, **when** one carries a helpful mark, **then** it ranks first — *verified by `api/tests/integration/test_note_views_rls.py > test_helpful_breaks_a_usage_tie`*.
 
 **Reactions**
 

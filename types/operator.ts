@@ -450,3 +450,24 @@ export interface NoteViewer {
   viewer_name: string | null;
   job_number: string | null;
 }
+
+/**
+ * One note of the author's that somebody has newly marked helpful.
+ *
+ * THE NOTE IS THE UNIT, not the person. Reactions are grouped per note and the reactors
+ * are its audience — "your note X, which Sam and Dee found helpful" — never per person.
+ * A per-person total ("Diego has 47 helpfuls") is a leaderboard, which the operator
+ * surfaces refuse; it is also the shape measured to BACKFIRE, because an award that
+ * implies you did more than your peers demotivates (Robinson et al. 2021).
+ */
+export interface NewHelpful {
+  note_id: string;
+  /** The note's own words, quoted back. Null for a photo-only note. */
+  body: string | null;
+  /** Job number or machine name, whichever this note's subject is. Null for neither. */
+  reference: string | null;
+  /** Reactor display names, newest first. Never a bare count — see the note above. */
+  names: string[];
+  /** When the most recent of these reactions landed; the cursor is advanced to this. */
+  latest_at: string;
+}

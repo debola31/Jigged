@@ -3132,6 +3132,7 @@ export type Database = {
           id: string
           name: string | null
           pin_hash: string | null
+          reactions_seen_at: string | null
           role: string | null
           user_id: string
         }
@@ -3143,6 +3144,7 @@ export type Database = {
           id?: string
           name?: string | null
           pin_hash?: string | null
+          reactions_seen_at?: string | null
           role?: string | null
           user_id: string
         }
@@ -3154,6 +3156,7 @@ export type Database = {
           id?: string
           name?: string | null
           pin_hash?: string | null
+          reactions_seen_at?: string | null
           role?: string | null
           user_id?: string
         }
@@ -3738,6 +3741,10 @@ export type Database = {
       }
       log_operator_event: {
         Args: { p_company_id: string; p_context?: Json; p_kind: string }
+        Returns: undefined
+      }
+      mark_reactions_seen: {
+        Args: { p_company_id: string; p_seen_through: string }
         Returns: undefined
       }
       my_note_digest: {

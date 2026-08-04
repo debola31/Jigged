@@ -424,9 +424,8 @@ same PDF. The printed document is a faithful record of the price quoted.
 
 ## Acceptance Criteria
 
-Given/When/Then with a verification clause — the test file and `describe` that proves it, or an
-`automation-pending` tag against [#367](https://github.com/debola31/Jigged/issues/367). Cite a
-file and describe, never a nested test title.
+Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-convention);
+`automation-pending` here means [#367](https://github.com/debola31/Jigged/issues/367).
 
 **Create, list, edit**
 
@@ -444,7 +443,7 @@ file and describe, never a nested test title.
 - [ ] **Given** current tiers differing from a line's snapshot, **when** the form loads, **then** that line renders a drift chip with a per-line update control and an "Update all flagged" bulk control — *verified by `__tests__/components/quotes/QuoteForm.test.tsx` > `QuoteForm` (6 drift/basis `it`s of 40)*.
 - [ ] **Given** a drifted line the user never touches, **when** the quote is saved and reloaded, **then** it keeps its original price — the flag is **non-blocking** — *verified by `e2e/quote-edit.spec.ts` > `Quote edit — reload contract`*.
 - [ ] **Given** a pre-snapshot row, **then** `basis_unknown = true`, a "basis unknown" chip renders, and drift falls back to comparing resolved price against the current tier — *verified by `__tests__/components/quotes/QuoteForm.test.tsx` and `__tests__/utils/quotePricingResolver.test.ts` > `isDriftedDegraded — basis_unknown rows`*.
-- [ ] **Given** create or add-line, **then** the row stores a structured `pricing_basis_snapshot`, not merely the resolved price — *verified by `__tests__/utils/quotePricingResolver.test.ts` > `buildPricingBasisSnapshot`, and the `pricing_basis_snapshot jsonb` column in `supabase/schema.prod.sql`; `createQuote`'s write path automation-pending (#367)*.
+- [ ] **Given** create or add-line, **then** the row stores a structured `pricing_basis_snapshot`, not merely the resolved price — *verified by `__tests__/utils/quotePricingResolver.test.ts` > `buildPricingBasisSnapshot`, and the `pricing_basis_snapshot jsonb` column in `supabase/migrations/`; `createQuote`'s write path automation-pending (#367)*.
 
 **Convert**
 

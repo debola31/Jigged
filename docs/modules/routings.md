@@ -1,300 +1,358 @@
+> **Condensed 2026-08-03 (#634).** 4,274 → 3,303 words (`wc -w`), with new verified content
+> added — see below. **Cut:** the 1,319-word Given/When/Then acceptance block (now a table
+> citing file + `describe`/class + it-count, never an `it` title — the old E2E citation had
+> already rotted by truncation); the duplicate Materials section (one fact, stated twice as
+> two full sections); the User Stories table (7 rows, 100% restatement of the builder
+> section); work-centers prose that [work-centers.md](work-centers.md) owns; and the
+> `parts_bom` → `job_materials` snapshot prose that [jobs.md](jobs.md#material-tracking) owns.
+> **Kept deliberately:** every superseded mechanic *with its reason* (new **Superseded
+> mechanics** table — this doc's dead mechanics were previously scattered and unexplained),
+> the #549 importer bug verbatim, all cost formulas + the edge-case table, and the
+> "linear, no DAG" statement other docs point at.
+> **Corrected (4):** the material-cost formula was 5 versions out of date (see
+> [Material cost](#material-cost)); the `total_cost` formula wrongly added `total_setup_cost`,
+> contradicting the sentence above it (see [Total cost](#total-cost)); the warnings renderer
+> is the **Cost** card in `PartPricing.tsx`, not a `PartCostBreakdown` component (never
+> existed); `RoutingViewer` is dead code, not "used by ViewRoutingModal".
+> Anchor `#cost-calculation-from-routing` is linked from [quotes.md](quotes.md) and preserved.
+
 # Routings Module
 
 ## Overview
 
-The Routings module provides a **linear, reorderable operation list** for defining manufacturing processes. A routing is an ordered sequence of operations (plus a routing-level list of materials) that describes how a part is manufactured.
+A routing is a **linear, reorderable list of operations** describing how a part is
+manufactured. Each part has **exactly one** routing (1:1, `routings.part_id` UNIQUE).
 
-Each part has **exactly one routing** (1:1 relationship). Routings are managed from the **part detail page**, not a standalone routings page. There is no separate "Routings" entry in the sidebar navigation.
+**Priority:** Must Have (build after Work Centers, before Jobs). **Dependencies:** Parts
+(routing lives on the part page), Work Centers (`routing_operations.work_center_id`),
+Parts/BOM (materials live on the part). **Tables:** `routings`, `routing_operations`.
 
-Users build routings by adding operations to a list and reordering them with up/down arrow buttons (no drag-and-drop). Each operation row points at a **work center** (internal or external) and, for internal work, holds setup time and cycle (run) time per unit; external work carries a per-unit vendor price instead. Materials are **not** part of the routing — the bill of materials lives on the part itself (`parts_bom`) and is edited by a separate BOM panel.
+| Term | Meaning |
+|---|---|
+| **Routing** | The ordered operation list for one part |
+| **Routing Operation** | One step (`routing_operations`), positioned by `sequence`, pointing at a work center |
+| **Sequence** | Integer execution order, saved in steps of 10 so rows insert between existing ones without renumbering |
+| **Work Center** | Where the step runs. **Internal** = in-house, priced by time at an hourly `labor_rate`. **External** = outsourced to a vendor, priced by a per-unit `external_unit_price`. Owned by [work-centers.md](work-centers.md); the routing only references one and reads its kind to decide how to cost the step. |
+| **BOM (materials)** | Bill of materials, on the **part** (`parts_bom`), **not** the routing — see [parts.md](parts.md) |
 
-### Work centers
-
-A routing operation always **runs AT a work center** (`routing_operations.work_center_id`). A work center is the unit of production capacity that performs the step — either **internal** (an in-house machine, station, or capability priced by an hourly `labor_rate`) or **external** (an outsourced process performed by a vendor, priced by a per-unit `external_unit_price`). Work centers are defined and owned by their own module; the routing only references them and reads their pricing kind to decide how to cost each step. See the [Work Centers module](work-centers.md) for how they are created, the internal/external split, and vendor linkage.
-
-**Priority:** Must Have (Build after Operations, before Jobs)
-
-**Dependencies:**
-
-- Parts module (each part has exactly one routing; routings are accessed from the part detail page)
-
-- Work Centers module (each routing operation points at a `work_center`, internal or external)
-
-- Parts / BOM (materials live on the part as `parts_bom`, not on the routing)
-
-**Database Tables:** `routings`, `routing_operations` (materials are no longer routing-attached — see `parts_bom`)
+**No dedicated routes.** Routings are edited inline on `/dashboard/{companyId}/parts/{partId}`.
+There is no standalone routings page, no `/routing/new`, no `/routing/edit`, and no sidebar
+entry.
 
 ---
 
-## Terminology
+## Superseded mechanics
 
-| Term | Description |
-|---|---|
-| **Routing** | The ordered list of operations that defines how a part is manufactured |
-| **Routing Operation** | A single operation step in the routing, stored in `routing_operations` with a `sequence` that determines its position in the list. Each row points at a `work_center`. |
-| **Sequence** | Integer that defines linear execution order. Saved in steps of 10 (10, 20, 30, ...) so new rows can be inserted between existing ones without renumbering everything |
-| **Work Center** | The internal machine/station or external vendor an operation runs on. Internal work centers carry a `labor_rate` and are priced by time; external ones belong to a vendor and are priced by a per-unit price. |
-| **BOM (materials)** | The bill of materials needed to make the part. Lives on the part (`parts_bom`), **not** on the routing — see the [Parts module](parts.md). |
+Each of these is **dead**; the row records why, so it does not get rebuilt.
+
+| Dead mechanic | Replaced by | Why |
+|---|---|---|
+| `routing_materials` table (routing-level materials) | `parts_bom` on the part | One BOM per manufactured part; cost roll-up pulls material cost from BOM child parts, not a routing list. (An earlier *per-operation* materials model preceded the routing-level one — both are gone.) |
+| `routing_nodes` table name | `routing_operations` | The UI is a list, not a canvas — hence no stored x/y position either |
+| `routing_operations.external_setup_cost` column | nothing | External work bills once per part, so setup is internal-only. Dropped by `20260623022617_drop_external_setup_cost.sql`. **Still referenced by the importer — see [#549 below](#known-importer-bug-549).** |
+| Server-side per-batch `sequence` auto-numbering on import | client-side `numberRoutingOpsInFileOrder` | It reset each 500-row batch, renumbering any part whose steps straddled a batch boundary. (Per-entity `/execute` keeps it as a fallback when called directly with no `sequence` mapping.) |
+| Drag-and-drop reordering | up/down arrow buttons | DnD **was** built (`@dnd-kit/sortable`) and torn out in `03f4a76`: arrows are more familiar than drag for small-shop users |
+| "Save Routing" button | auto-save on every change | Nothing to forget to click — a routing edited and left unsaved was lost work. See [Linear Routing Builder](#linear-routing-builder) |
+| Modal add/edit (`AddOperationModal`) | inline editor row (`RoutingOperationRowEditor`) | Same one-screen field set without a cramped modal over the list |
 
 ---
 
 ## Linear Routing Builder
 
-Routings are edited **inline on the part detail page** via the `PartRoutingPanel` component — there is no separate `/routing/new` or `/routing/edit` page. The panel renders the Operations list and **auto-saves every change to the database** (no "Save Routing" button). It appears only for **made** parts (`part.source === 'made'`); bought parts have no routing. Materials are edited separately by the part's BOM panel — they are not part of this component.
+Edited inline via `components/parts/PartRoutingPanel.tsx`, mounted from
+`components/parts/workspace/tabs/WorkspaceTab.tsx`. Shown only for **made** parts
+(`part.source === 'made'`); bought parts have no routing. Materials are a separate
+`PartBomPanel`.
 
-- **Operations list** — Compact one-line rows: work-center name + an Internal/External chip + setup/run (or vendor price) as subtle text (amber when missing, red with an inline message when the operation can't be priced). Reorder via up/down arrow buttons. Click the pencil to edit the row in place; click the trash to delete (behind a "Remove operation?" confirm dialog — the removal is otherwise silent and unrecoverable). The "Add Operation" button expands an **inline editor row** (`RoutingOperationRowEditor`) at the bottom of the list — not a modal — asking for the work center and its time/price fields on one screen.
+- **Rows** (`components/routings/RoutingOperationRow.tsx`) — one line: work-center name +
+  Internal/External chip + setup/run (or vendor price) as subtle text. Amber border when a
+  field is merely missing; **red border + inline message** when the op can't be priced
+  ("Missing labor rate…", "Missing pricing…"). Reorder with up/down arrows. Pencil edits in
+  place; trash deletes behind a **"Remove operation?"** confirm — the removal is otherwise
+  silent and unrecoverable.
+- **Add** — expands an **inline editor row** (`RoutingOperationRowEditor`) at the bottom, not
+  a modal: work center + its time/price fields on one screen.
+- **Work center is locked in edit mode** (`disabled={isEdit}` on the Autocomplete). Changing
+  which work center a step uses = delete + re-add.
+- **Internal vs external fields** — internal: setup minutes, cycle minutes per unit, optional
+  labor-rate override (pre-filled from the work center default). External: per-unit vendor
+  price, **no setup**. At least one of setup/cycle (internal) or a unit price (external) is
+  required to save.
+- **Auto-save** — every row save, reorder, or delete persists the whole list via
+  `saveRoutingWithOperations` ([`utils/routingsAccess.ts`](../../utils/routingsAccess.ts)),
+  then refetches so temp IDs become real DB IDs. `components/common/SaveStatus.tsx` shows
+  "Saving…" / "All changes saved". The first add implicitly creates the `routings` row, named
+  `Routing - {part_name}`.
+- **Part recency** — each write bumps the owning part's `updated_at` via AFTER triggers
+  (`20260720191253_touch_parts_updated_at_on_satellite_writes.sql`), so a just-edited part
+  rises in the recency-sorted parts list and picker. See [parts.md](parts.md).
+- **No minimum** — zero operations saves fine (it just won't be useful for jobs); the cost
+  breakdown emits `no_operations`. A made part with **no routing at all** is different: it
+  hard-blocks job creation — `createJobFromPurchaseOrder` ([`utils/jobsAccess.ts`](../../utils/jobsAccess.ts))
+  throws *"No routing defined for N made parts. Add a routing on the part before creating a
+  job from a PO."*
 
-- **Work center is locked in edit mode** — the editor's work-center picker is disabled when editing an existing row. To change which work center a step uses, delete the row and re-add it.
-
-- **Internal vs external fields** — an internal work center's editor shows setup minutes, cycle minutes per unit, and an optional labor-rate override (pre-filled from the work center's default). An external work center's editor shows a per-unit vendor price and no setup (external work bills once per part). At least one of setup/cycle (internal) or a unit price (external) is required before the row will save.
-
-- **Auto-save** — Each row-editor save, reorder click, or delete persists the whole operations list immediately via `saveRoutingWithOperations`, then refetches so new temp IDs become real DB IDs. A subtle "Saving…" / "All changes saved" indicator (`SaveStatus`) appears above the list. The first add implicitly creates the routing record if the part doesn't have one yet. Each such write also **bumps the owning part's `updated_at`** (via DB triggers, `touch_parts_updated_at_on_satellite_writes`), so a part whose routing was just edited rises to the top of the recency-sorted parts list and picker — see [Parts](parts.md).
-
-- **No minimum** — A routing can be saved with zero operations during editing (it just won't be useful for jobs). The cost breakdown surfaces a `no_operations` warning; the job-creation flow surfaces a missing routing if needed.
-
-Components live under `components/routings/` (`RoutingOperationsList`, `RoutingOperationRow`, `RoutingOperationRowEditor`, `RoutingViewer`, plus the barrel `index.ts`) and `components/parts/PartRoutingPanel.tsx` (the auto-save wrapper that embeds the operations list on the part page, mounted from `components/parts/workspace/tabs/WorkspaceTab.tsx`).
+**Gap:** `components/routings/RoutingViewer.tsx` is exported from the barrel but imported
+nowhere — dead read-only component. *(CLAUDE.md's `components/routings/` map is stale: of the
+8 files it lists, only `RoutingOperationsList` / `RoutingOperationRow` / `RoutingViewer`
+exist — `RoutingBuilder`, `RoutingMaterialsList`, `RoutingMaterialRow`, `AddOperationModal`,
+`AddMaterialModal` are all gone, and the `ViewRoutingModal` it claims uses `RoutingViewer`
+exists in no source file.)*
 
 ---
 
 ## Execution Order
 
-Operations run one after another in ascending `sequence` order. Total estimated time is the sum of setup + (run time per unit × quantity) across all operations in the routing.
+Operations run one after another in ascending `sequence` (10 → 20 → 30). Total estimated
+time = Σ setup + (run time per unit × quantity).
 
-```plain text
-Seq 10: [CNC Mill] → Seq 20: [Deburr] → Seq 30: [Inspect]
-```
-
-There is no DAG, no edges, no parallel branches, and no dependency graph. If two operations should "run in parallel" in real life, shop-floor scheduling is handled at the job/operator level, not in the routing structure.
+**There is no DAG, no edges, no parallel branches, and no dependency graph.** If two
+operations "run in parallel" in real life, that is shop-floor scheduling at the job/operator
+level, not routing structure.
 
 ---
 
 ## Data Model
 
-### Routings Table (`routings`)
+### `routings`
 
-| Column | Type | Required | Description |
+| Column | Type | Req | Notes |
 |---|---|---|---|
-| id | uuid | Yes | Primary key |
-| company_id | uuid | Yes | FK to companies |
-| part_id | uuid | Yes | FK to parts (unique — one routing per part) |
-| name | text | Yes | Auto-generated from the part name (e.g., "Routing - Custom Reamer") |
-| description | text | No | Optional free-text description |
-| created_by | uuid | No | User who created the routing |
-| created_at | timestamptz | No | Record creation (DEFAULT `now()`) |
-| updated_at | timestamptz | No | Last update (DEFAULT `now()`) |
+| id | uuid | Yes | PK |
+| company_id | uuid | Yes | FK companies |
+| part_id | uuid | Yes | FK parts — `routings_part_id_unique` (one routing per part) |
+| name | text | Yes | Auto-generated `Routing - {part_name}`; no separate uniqueness constraint (the `part_id` UNIQUE already caps a part at one) |
+| description | text | No | Free text |
+| created_by | uuid | No | |
+| created_at / updated_at | timestamptz | No | DEFAULT `now()` |
 
-### Routing Operations Table (`routing_operations`)
+### `routing_operations`
 
-Each row is one operation step in the routing. Position in the list is defined by the `sequence` column; there is no stored x/y position because the UI is a list, not a canvas. (This table was previously named `routing_nodes`.)
-
-| Column | Type | Required | Description |
+| Column | Type | Req | Notes |
 |---|---|---|---|
-| id | uuid | Yes | Primary key |
-| routing_id | uuid | Yes | FK to routings |
-| work_center_id | uuid | Yes | FK to work_centers (internal machine/station or external vendor) |
-| sequence | integer | Yes | Linear order (steps of 10). Unique within a routing. Defaults to 0. |
-| setup_minutes | numeric(8,2) | No | Internal: setup time in minutes (DEFAULT 0) |
-| cycle_minutes_per_unit | numeric(8,4) | No | Internal: cycle (run) time per unit in minutes |
-| labor_rate_override | numeric(10,2) | No | Internal: overrides the work center's `labor_rate` for this step |
-| external_unit_price | numeric(12,4) | No | External: per-unit price the vendor charges for this step |
-| instructions | text | No | Optional per-operation instructions |
-| metadata | jsonb | No | Extensible metadata (DEFAULT `{}`) |
-| created_at | timestamptz | No | Record creation (DEFAULT `now()`) |
-| updated_at | timestamptz | No | Last update (DEFAULT `now()`) |
+| id | uuid | Yes | PK |
+| routing_id | uuid | Yes | FK routings |
+| work_center_id | uuid | Yes | FK work_centers |
+| sequence | integer | Yes | Linear order, steps of 10. DEFAULT 0. `routing_operations_routing_sequence_unique (routing_id, sequence)` |
+| setup_minutes | numeric(8,2) | No | Internal. DEFAULT 0 |
+| cycle_minutes_per_unit | numeric(8,4) | No | Internal |
+| labor_rate_override | numeric(10,2) | No | Internal; overrides the work center's `labor_rate` for this step |
+| external_unit_price | numeric(12,4) | No | External, per unit |
+| instructions | text | No | |
+| metadata | jsonb | No | DEFAULT `{}` |
+| created_at / updated_at | timestamptz | No | DEFAULT `now()` |
 
-A unique constraint on `(routing_id, sequence)` enforces that no two operations in the same routing share a position. The data-access layer handles reorders with a two-phase update (parks existing rows at sequences 100000+ before assigning their final values) so no intermediate duplicate ever exists.
-
-### Materials (no longer a routing table)
-
-Materials are **no longer stored on the routing**. The old `routing_materials` table was removed: the bill of materials is now attached to the **part** (`parts_bom`, one BOM per manufactured part) and edited by the part's BOM panel. Cost roll-up pulls material cost from `parts_bom` child parts, not from a routing-level material list. See the [Parts module](parts.md) for `parts_bom` details.
-
----
-
-## User Stories
-
-| As a... | I want to... | So that... |
-|---|---|---|
-| Owner/Admin | Build a routing for a part as a list of operations | I can define how the part is manufactured |
-| Owner/Admin | Reorder operations with up/down arrow buttons | I can adjust the sequence without learning drag-and-drop |
-| Owner/Admin | Add an operation via an inline editor that asks for the work center and its setup/run time (or vendor unit price) at once | I can't accidentally save an operation with missing time or price data |
-| Owner/Admin | Route a step to either an internal work center or an external vendor | I can cost both in-house machining and outsourced steps in one routing |
-| Owner/Admin | View estimated total time (sum of all operations) | I can accurately quote jobs |
-| Owner/Admin | Edit the routing directly on the part page without leaving | I can manage the routing in context with everything else about the part |
-| Owner/Admin | See changes auto-save as I make them | I never lose work because I forgot to click save |
+**Reorder invariant.** The unique `(routing_id, sequence)` would trip mid-reorder, so
+`saveRoutingWithOperations` does a **two-phase update**: park existing rows at sequences
+100000+, then assign final values. No intermediate duplicate ever exists.
 
 ---
 
 ## Validation Rules
 
-- Routing name is auto-generated from the part name (`Routing - {part_name}`); there is no separate name-uniqueness constraint (the `part_id` unique constraint already limits a part to one routing)
-
-- Each part can have at most one routing (enforced by unique constraint on `part_id`)
-
-- Sequence values must be unique within a routing (enforced by unique constraint on `(routing_id, sequence)`)
-
-- An operation must be saved with pricing data: an internal step needs at least setup or cycle time (and a labor rate, from the work center default or a per-step override); an external step needs a per-unit price
-
----
-
-## Routes
-
-Routings have **no dedicated UI routes**. They live inline on the part detail page (`/dashboard/{companyId}/parts/{partId}`) via the `PartRoutingPanel` component, which auto-saves every change. There is no standalone routings list page either.
+- One routing per part (`routings_part_id_unique`).
+- Sequence unique within a routing (`routing_operations_routing_sequence_unique`).
+- An operation must be priceable to save: internal needs setup **or** cycle time (plus a
+  labor rate, from the work-center default or a per-step override); external needs a per-unit
+  price.
 
 ---
 
 ## Bulk Import (CSV)
 
-Routings can also be created in bulk from a CSV via a **FastAPI** import pipeline (`api/routes/routings_import_routes.py`, prefix `/api/routings/import`) — this is one of the sanctioned backend endpoints because it does AI-powered column mapping and multi-step conflict detection. The pipeline is a three-step handshake, one endpoint per step:
+FastAPI pipeline (`api/routes/routings_import_routes.py`, prefix `/api/routings/import`) —
+sanctioned as backend because it does AI column mapping + multi-step conflict detection.
+Three-step handshake:
 
-- `POST /analyze` — reads the uploaded CSV's headers/sample rows and uses AI column mapping to propose which column feeds which `routing_operations` field (work center, setup/cycle time, labor-rate override, external unit price, instructions), returning the suggested mapping for the user to confirm.
-- `POST /validate` — applies the confirmed mapping to every row, resolves work centers, runs per-kind field validation, and reports per-row conflicts (`unknown_work_center`, invalid numeric fields, external-field-on-internal, …) **without writing anything**.
-- `POST /execute` — on a clean (or user-accepted) validation, creates one `routings` row per part and **upserts** the `routing_operations` on their unique key `(routing_id, sequence)`.
+| Step | Does |
+|---|---|
+| `POST /analyze` | Reads headers/sample rows, AI-proposes which column feeds which `routing_operations` field (work center, setup/cycle time, labor-rate override, external unit price, instructions), returns the mapping to confirm |
+| `POST /validate` | Applies the confirmed mapping to every row, resolves work centers, runs per-kind field validation, reports per-row conflicts (`unknown_work_center`, invalid numerics, external-field-on-internal, …) — **writes nothing** |
+| `POST /execute` | Creates one `routings` row per part and **upserts** `routing_operations` on `(routing_id, sequence)` |
 
-Behavioral details:
+- **One CSV row per operation**, grouped by `part_name`.
+- **Idempotent re-import.** Upserting on `(routing_id, sequence)` means re-importing the same
+  file updates steps in place; the response reports `imported_operations_count` (new) vs
+  `updated_count`. The existing-operation lookup is **paged past PostgREST's 1000-row cap** —
+  unpaged, it saw only the first 1000, so a re-import of thousands of ops fell through to a
+  plain insert and 500'd the batch (the "N errors" a full re-import used to show).
+- **Sequence when the CSV has no step-order column.** A stable `sequence` is what makes the
+  upsert idempotent. A mapped step/operation-number column is used directly; otherwise
+  `lib/dataImportIngest.ts` → `numberRoutingOpsInFileOrder` numbers each part's operations by
+  their order across the **whole file**, on the client, *before* the 500-row batch split
+  (`BATCH_SIZE = 500`), and sends an explicit `sequence`. The Review step shows a
+  `sequence_inferred` info notice (`lib/dataImportAnalyzer.ts`) pointing at the Map step.
+- **Work-center resolution** — `work_center_name` matched against existing `work_centers`.
+  Rows with no name fall back to a work center literally named `MISCELLANEOUS`
+  (case-insensitive) if one exists, else fail as `unknown_work_center`. Work centers are
+  **not** auto-created — import work centers first.
+- **Per-kind field validation** — allowed cost fields follow the resolved work center's kind:
+  internal → `setup_minutes` / `cycle_minutes_per_unit` / `labor_rate_override`; external →
+  `external_unit_price`. An external-only field on an internal row is rejected.
 
-- **One CSV row per operation**, grouped by `part_name`. The importer creates one `routings` row per part (respecting the `routings.part_id` UNIQUE constraint) and **upserts** `routing_operations` on `(routing_id, sequence)`.
-- **Idempotent re-import.** Because operations upsert on `(routing_id, sequence)`, re-importing the same file updates the existing steps in place rather than colliding — the response reports `imported_operations_count` (new) vs `updated_count` (updated in place). The existing-operation lookup is paged past PostgREST's 1000-row cap, so a re-import of thousands of operations no longer leaves most rows undetected and 500-ing on a plain insert (the batch-level "N errors" a full re-import used to show).
-- **Sequence when the CSV has no step-order column.** A stable `sequence` per row is what makes the upsert idempotent. If the file maps a step/operation-number column, that's used directly. If it doesn't, the unified importer (`lib/dataImportIngest.ts` → `numberRoutingOpsInFileOrder`) numbers each part's operations by their order across the **whole file** on the client, before the rows are split into 500-row batches, and sends an explicit `sequence`. This replaces the server's old per-batch auto-numbering, which reset each batch and renumbered any part whose steps straddled a batch boundary. The Review step surfaces an info notice (`sequence_inferred`) when no step-order column is mapped, pointing the user at the Map step if they have one. (Per-entity `/execute` still auto-numbers per batch as a fallback when called directly without a `sequence` mapping.)
-- **Work-center resolution** — `work_center_name` is matched against existing `work_centers`. Rows with no `work_center_name` fall back to a work center literally named `MISCELLANEOUS` (case-insensitive) if one exists; otherwise the row fails validation as `unknown_work_center`. Work centers are **not** auto-created from the CSV — the user imports work centers first.
-- **Per-kind field validation** — the cost fields allowed on a row depend on the resolved work center's kind: internal → `setup_minutes` / `cycle_minutes_per_unit` / `labor_rate_override`; external → `external_unit_price`. Supplying an external-only field on an internal row is rejected.
+### Known importer bug (#549)
 
-> **Known importer bug (#549):** the import pipeline (`api/routes/routings_import_routes.py`, `api/models/routings_import_models.py`) still maps and validates an `external_setup_cost` field, but that column was dropped from `routing_operations` (migration `20260623022617_drop_external_setup_cost.sql` — external work bills once per part, so setup is internal-only). The stale importer reference is tracked in #549.
+> **Known importer bug (#549):** the import pipeline (`api/routes/routings_import_routes.py`,
+> `api/models/routings_import_models.py`) still maps and validates an `external_setup_cost`
+> field, but that column was dropped from `routing_operations` (migration
+> `20260623022617_drop_external_setup_cost.sql` — external work bills once per part, so setup
+> is internal-only). The stale importer reference is tracked in #549.
+
+Still true as of 2026-08-03: the column is absent from `types/database.ts` and
+`supabase/migrations/`, yet the importer maps, validates
+(`invalid_external_setup_cost`), and writes it. The covering test mocks Supabase, so it
+passes on a column that does not exist. The same stale reference also survives in
+`api/routes/parts_import_routes.py`, `api/services/insights_service.py`,
+`api/tools/metric_tools.py`, and `api/tools/schema_context.py` — the last two feed the AI's
+schema context, so the model is told about a dropped column.
 
 ---
 
-## Materials (part-attached BOM, not routing-attached)
+## Materials
 
-Materials are **no longer part of the routing**. The earlier per-operation and then routing-level materials approaches were both replaced: the bill of materials is now attached to the **part** (`parts_bom`, one BOM per manufactured part) and edited by the part's BOM panel — see the [Parts module](parts.md).
-
-### Behavior
-
-- BOM lines are `parts_bom` rows on the part, each linking a child part with a quantity and unit.
-
-- When a job is created, each `parts_bom` line is **snapshotted** into `job_materials` — see [Jobs Module — Material Tracking](jobs.md#material-tracking).
-
-- If a BOM line is later edited or deleted, existing jobs are **not** retroactively updated; they keep their snapshot in `job_materials`. Deleting the source BOM line sets the snapshot's source-row FK to `NULL` (`ON DELETE SET NULL`).
+Materials are **not** routing-attached. BOM lines are `parts_bom` rows on the part (child
+part + quantity + unit), edited by `PartBomPanel` — see [parts.md](parts.md). At job
+creation each line snapshots into `job_materials`; edits/deletes never retro-update existing
+jobs, and deleting the source line NULLs the snapshot's FK
+(`job_materials_parts_bom_id_fkey ON DELETE SET NULL`). Full snapshot semantics:
+[jobs.md — Material Tracking](jobs.md#material-tracking).
 
 ---
 
 ## Cost Calculation from Routing
 
-Routings serve as the source of truth for part costing when available. `calculateRoutingCost(partId, qty = 1)` (in `utils/routingCostCalculation.ts`) rolls a part's routing operations up with its `parts_bom` materials into a per-unit breakdown that feeds the quoting system. It returns `null` when the part has neither a routing nor a BOM.
+The routing is the **source of truth for a part's cost** whenever it has one.
+`calculateRoutingCost(partId, qty = 1)`
+([`utils/routingCostCalculation.ts`](../../utils/routingCostCalculation.ts)) rolls a part's
+routing operations up with its `parts_bom` materials into a per-unit breakdown that feeds
+quoting. Returns `null` when the part has **neither** a routing **nor** a BOM. A non-finite
+or ≤ 0 `qty` is coerced to 1 (`safeQty`).
 
 ### Labor & operation cost
 
-Each operation contributes based on its work center's kind:
-
-**Internal** (priced by time):
-
 ```
-run_cost   = (cycle_minutes_per_unit / 60) × labor_rate     # per unit
-setup_cost = (setup_minutes / 60) × labor_rate              # one-time per batch
-labor_rate = labor_rate_override ?? work_center.labor_rate
-```
+# Internal (priced by time)
+labor_rate = labor_rate_override ?? work_center.labor_rate     # $/hour
+run_cost   = (cycle_minutes_per_unit / 60) × labor_rate        # per unit
+setup_cost = (setup_minutes / 60) × labor_rate                 # one-time per batch
 
-**External** (priced by unit):
-
-```
-op_cost = external_unit_price     # per unit; external work has no setup cost
+# External (priced by unit)
+op_cost    = external_unit_price                               # per unit; no setup
 ```
 
-Where:
-- `cycle_minutes_per_unit` / `setup_minutes` come from `routing_operations`
-- `labor_rate` is the hourly rate in dollars — the per-operation `labor_rate_override` if set, else the `work_centers.labor_rate` default
-
-Setup costs are collected separately in `total_setup_cost` (one-time per parent batch) and are **not** amortized at this layer — callers like `calculateTierPricing` divide setup by the tier quantity to spread it.
+Setup is collected separately in `total_setup_cost` and is **not** amortized at this layer —
+callers such as `calculateTierPricing` divide it by the tier quantity.
 
 ### Material cost
 
-Summed across the part's BOM (`parts_bom`), not the routing:
+*(This doc previously stated `total_material_cost = Σ (bom_line.quantity ×
+child_part.cost_per_unit)`. That predates yield/batch-pinning costing: the code never reads
+`cost_per_unit` here, and unit conversion, whole-unit ceiling, and made-child batch pinning
+all move the number. Corrected 2026-08-03 against `utils/routingCostCalculation.ts`.)*
+
+Per BOM line, summed:
 
 ```
-total_material_cost = Σ (bom_line.quantity × child_part.cost_per_unit)
+qty_in_primary  = bom.quantity × conversion(child, bom.unit → child.primary_unit)
+                  # empty bom.unit is treated as already-primary
+units_consumed  = consume_whole_units ? ceil(qty × qty_in_primary)   # discrete stock
+                                      : qty × qty_in_primary
+child_val_qty   = child.source == 'made' ? (child.costing_batch_quantity ?? 1)  # pinned to
+                                         : units_consumed                      # the lot size
+child_unit_cost = compute_part_cost_at_qty(child.id, child_val_qty)
+
+line_cost_per_parent_unit =
+    (!consume_whole_units && child.source != 'made')
+      ? qty_in_primary × child_unit_cost            # LEGACY expression, kept textually
+                                                    # identical so pre-existing BOM lines
+                                                    # stay byte-identical
+      : (units_consumed × child_unit_cost) / qty
 ```
 
-Child costs come from `compute_part_cost_at_qty` at the cascaded quantity. If **any** BOM line can't be priced, `materials_complete` is `false` and both `total_material_cost` and `total_cost` become `null` (mirroring the SQL NULL-propagation), so the UI never renders a tier built on a silently-missing material.
+A **made** child is valued at its standard-costing lot size (the run its cost amortizes
+over), fixed regardless of order size; a **bought** child at what is actually consumed
+(procurement tier / floor). This mirrors `compute_part_cost_at_qty` exactly — including
+sub-assembly setup, which that function amortizes as `setup_minutes / p_qty`, i.e. over
+`child_val_qty` (the child's pinned lot size when made), **not** over the parent's quantity.
+
+If **any** BOM line can't be priced, `materials_complete = false` and both
+`total_material_cost` and `total_cost` become `null` (mirroring SQL NULL propagation), so
+the UI can never render a tier built on a silently-missing material.
 
 ### Total cost
 
 ```
-total_cost = total_labor_cost + total_setup_cost + total_material_cost   # null if materials incomplete
+total_cost = total_labor_cost + total_material_cost      # null if materials incomplete
 ```
 
-### Integration with Parts
+*(Corrected 2026-08-03: every prior revision wrote `+ total_setup_cost` into this line, which
+contradicted the "setup is not amortized at this layer" rule above it.
+`utils/routingCostCalculation.ts` sums **run labor + materials only**; setup rides along in
+`total_setup_cost` for the caller to amortize. Adding it here would double-count it against
+`calculateTierPricing`.)*
 
-The routing drives the live `Cost Breakdown` card on the part detail page (`calculateRoutingCost(partId)` recomputes on every load and after every routing auto-save). Each `part_pricing_tier` derives its `base_cost_per_unit` and `unit_price` from this calculation; routing edits propagate to all tiers automatically — no Recalculate button.
-
-### Integration with Quotes
-
-Quotes reference parts via `quote_line_items.part_id`. At `createQuote`, per-part cost snapshots (`quote_operations`, `quote_materials`) are written once per distinct part on the quote so the breakdown survives later routing edits. The quote line item itself snapshots `quantity`, `unit_price`, `markup_percent`, and `base_cost_per_unit` from the selected pricing tier (or the salesperson's per-quote override). See [Quotes Module — Snapshotted Line Items](quotes.md#quote_line_items).
-
-### Edge Cases
+### Edge cases
 
 | Scenario | Behavior |
 |---|---|
-| Internal op has no `cycle_minutes_per_unit` and no `setup_minutes` | Skip — `empty_operation` warning on cost breakdown. |
-| Internal op has setup but no cycle time (e.g. Engineering) | First-class — `run_cost = 0`, `setup_cost > 0`. Setup amortizes across tier quantity. |
-| Internal op's work center has no `labor_rate` and no `labor_rate_override` | Skip — `missing_labor_rate` warning for that operation. |
-| External op has no `external_unit_price` | Skip — `missing_external_pricing` warning for that operation. |
-| Part has no BOM lines | $0 material cost. Normal — no warning. |
-| A BOM child part has no priced cost | `missing_material_cost` warning; `materials_complete = false`, so `total_material_cost` and `total_cost` become `null`. |
-| Routing has 0 operations | $0 labor. `no_operations` warning. |
-| Any warnings present | Surfaced inline at the top of `PartCostBreakdown`. |
+| Internal op with no `cycle_minutes_per_unit` and no `setup_minutes` | Skip — `empty_operation` warning |
+| Internal op with setup but no cycle time (e.g. Engineering) | First-class — `run_cost = 0`, `setup_cost > 0`; setup amortizes across tier quantity |
+| Internal op whose work center has no `labor_rate` and no override | Skip — `missing_labor_rate` |
+| External op with no `external_unit_price` | Skip — `missing_external_pricing` |
+| BOM line whose unit ≠ child's `primary_unit` with no `parts_unit_conversions` row | `missing_material_cost`; `materials_complete = false` |
+| BOM child with no priced cost (or a cost lookup that throws) | `missing_material_cost` carrying `child_part_id` / `child_part_name` / deepest offending leaf hint (via the explain RPC) so the BOM panel can link it; `materials_complete = false` |
+| Part has no BOM lines | $0 material cost. Normal — no warning |
+| Routing has 0 operations | $0 labor — `no_operations` |
+| Any warnings present | One "Heads up:" `Alert` above the **Cost** card (`components/parts/PartPricing.tsx`); `missing_material_cost` renders the child part name as a link, other types as plain text (they point at no navigable target) |
 
-Warnings are informational — they do **not** block quote creation. The user can proceed with incomplete cost data and enter a manual override.
+Warnings are informational — they do **not** block quote creation. The user can proceed with
+incomplete cost data and enter a manual override.
+
+### Integration with Parts and Quotes
+
+- **Parts** — drives the live **Cost** card on the part page (`components/parts/PartPricing.tsx`
+  — *this doc previously named a `PartCostBreakdown` component and a "Cost Breakdown" card;
+  neither exists, and a stale comment in `PartRoutingPanel.tsx` still says so*).
+  `calculateRoutingCost(partId)` recomputes on load and after every routing auto-save. Each
+  `part_pricing_tier` derives its `base_cost_per_unit` and `unit_price` from it, so routing
+  edits propagate to all tiers — **no Recalculate button**.
+- **Quotes** — at `createQuote`, per-part cost snapshots (`quote_operations`,
+  `quote_materials`) are written once per distinct part so the breakdown survives later
+  routing edits. See [quotes.md — Snapshotted Line Items](quotes.md#quote_line_items).
 
 ---
 
 ## Acceptance Criteria
 
-Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #339.
+Verification citations are **file + `describe`/class**, never an `it`/test title (those rot —
+the previous revision cited an E2E test title that had already drifted). Every editable
+entity carries at least one **edit → save → reload → persists** row, even where that row is
+still automation-pending. Doc-vs-code divergences from the earlier audit are on issue #339.
 
-**List, view & summary**
+**A** = `__tests__/utils/routingsAccess.test.ts` › `routingsAccess`.
+**C** = `__tests__/utils/routingCostCalculation.test.ts`.
+**I** = `api/tests/integration/test_routings_import_api.py`.
 
-- [ ] **Given** a part with a routing, **when** the routing is fetched by id, **then** its row (with the joined part) is returned — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'getRouting' > 'returns the row when found'`*.
-- [ ] **Given** a routing id that doesn't exist, **when** it's fetched, **then** the access layer returns `null` (PGRST116) rather than throwing — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'getRouting' > 'returns null on PGRST116'`*.
-- [ ] **Given** a part whose routing has several operations, **when** its summary is loaded, **then** the op count and the sum of `cycle_minutes_per_unit` are returned — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'getRoutingSummaryForPart' > 'sums cycle_minutes_per_unit across operations'`*.
-- [ ] **Given** a part with no routing, **when** its summary is loaded, **then** `null` is returned (not an empty shell) — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'getRoutingSummaryForPart' > 'returns null when no routing exists for the part'`*.
-
-**Create**
-
-- [ ] **Given** a made part with no routing, **when** the first operation is added via the inline editor, **then** the routing record is created implicitly and the operation persists — *end-to-end verified by `e2e/parts-and-routing.spec.ts > 'Parts and Routing workflow' > 'create part, add routing with operations, verify cost'`; the single-operation write path is verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'createRoutingOperation' > 'parses numeric form fields and falls back to 0 for setup_minutes'`*.
-- [ ] **Given** the operation editor, **when** setup is left blank but a cycle time is entered, **then** `setup_minutes` is saved as `0` and the trimmed instructions/parsed numbers are written — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'createRoutingOperation' > 'parses numeric form fields and falls back to 0 for setup_minutes'`*.
-- [ ] **Given** a bought part (`source` ≠ 'made'), **when** the part page loads, **then** no routing panel is shown — *manual: `components/parts/workspace/tabs/WorkspaceTab.tsx` gates `PartRoutingPanel` on `part.source === 'made'`*.
-
-**Edit (edit -> save -> reload -> persists)**
-
-- [ ] **Given** an existing routing operation, **when** its setup/cycle/rate/instructions are edited in the row editor and saved, **then** the panel auto-saves the whole list and a reload shows the new values — *write path via `saveRoutingWithOperations` (which calls `updateRoutingOperation` semantics inline); reload-persistence E2E automation-pending (#367) — the existing E2E only asserts add-then-persist, not edit-after-reload (`updateRoutingOperation`)*.
-- [ ] **Given** an operation being edited, **when** the editor is open in edit mode, **then** the work-center picker is locked (change requires delete + re-add) — *manual: `RoutingOperationRowEditor` disables the work-center Autocomplete when `initial` is supplied (`disabled={isEdit}`); `RoutingOperationsList.handleEditorSave` never rewrites `workCenterId` in the edit branch*.
-- [ ] **Given** a routing with several operations, **when** a row is moved with the up/down arrows and auto-saved, **then** the new order persists without ever tripping the `(routing_id, sequence)` unique constraint (two-phase re-sequence) — *automation-pending (`saveRoutingWithOperations`)*.
-- [ ] **Given** an internal operation whose work center has no `labor_rate` and no per-op override, **when** the routing is edited, **then** the row shows an inline "Missing labor rate" error and the operation is skipped in the cost roll-up — *cost-side verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'internal operations' > 'emits missing_labor_rate warning when neither override nor wc.labor_rate is set'`; row-level UI copy automation-pending (`RoutingOperationRow`)*.
-- [ ] **Given** an external operation with no unit price, **when** the routing is edited, **then** the row shows an inline "Missing pricing" error and the operation is skipped in the cost roll-up — *cost-side verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'external operations' > 'emits missing_external_pricing when there is no unit price'`; row-level UI copy automation-pending (`RoutingOperationRow`)*.
-
-**Delete**
-
-- [ ] **Given** a routing operation, **when** the trash icon is confirmed, **then** the operation is deleted by id and the list re-saves — *write path verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'deleteRoutingOperation' > 'deletes the operation by id'`; the "Remove operation?" confirm-dialog gate is automation-pending (`RoutingOperationsList`)*.
-- [ ] **Given** a delete that fails at the DB, **when** `deleteRoutingOperation` runs, **then** it throws a friendly error rather than silently succeeding — *verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'deleteRoutingOperation' > 'throws when supabase returns an error'`*.
-- [ ] **Given** a routing, **when** it is deleted, **then** it is removed by id and its operations cascade — *write path verified by `__tests__/utils/routingsAccess.test.ts > 'routingsAccess' > 'deleteRouting' > 'deletes by id'`*.
-
-**Cost roll-up (drives Parts pricing)**
-
-- [ ] **Given** an internal operation with cycle + setup time, **when** cost is computed, **then** it prices both at the work center's `labor_rate` (per-unit run cost + one-time setup cost) — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'internal operations' > 'prices cycle + setup at the work_center labor_rate when no override'`*.
-- [ ] **Given** an operation with a `labor_rate_override`, **when** cost is computed, **then** the override wins over the work center default — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'internal operations' > 'labor_rate_override takes precedence over the work_center default'`*.
-- [ ] **Given** an external operation, **when** cost is computed, **then** it prices as a per-unit `external_unit_price` with zero setup — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'external operations' > 'prices external ops as per-unit unit_price with zero setup'`*.
-- [ ] **Given** a routing mixing internal and external steps, **when** cost is computed, **then** per-op contributions sum correctly across kinds — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'mixed internal + external routings' > 'sums per-op contributions correctly across kinds'`*.
-- [ ] **Given** a routing with zero operations, **when** cost is computed, **then** a `no_operations` warning is emitted — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'routing edge cases' > 'emits no_operations warning when routing has zero operations'`*.
-- [ ] **Given** a part with a BOM child that has no priced cost, **when** cost is computed, **then** `materials_complete` is false and base/unit price are blanked — *verified by `__tests__/utils/routingCostCalculation.test.ts > 'calculateRoutingCost' > 'BOM materials' > 'calculateTierPricing returns null base + unit price when materials incomplete'`*.
-- [ ] **Given** a routing edit, **when** it auto-saves, **then** the part's Cost Breakdown and pricing tiers recompute (no Recalculate button) — *manual: `PartRoutingPanel.onRoutingSaved` triggers the parent refresh; `calculateRoutingCost(partId)` is called by `PartPricing.tsx` and `partPricingTiersAccess.ts`*.
-
-**Bulk CSV import (FastAPI)**
-
-- [ ] **Given** a routing CSV whose work-center names all resolve, **when** it is validated, **then** validation passes with grouped operations — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsValidate' > 'test_happy_path'`*.
-- [ ] **Given** a row whose `work_center_name` matches no work center and has no fallback, **when** it is validated, **then** it fails as `unknown_work_center` — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsValidate' > 'test_unknown_work_center_fails'`*.
-- [ ] **Given** rows with no `work_center_name` and a `MISCELLANEOUS` work center present, **when** validated, **then** they route to it — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsValidate' > 'test_miscellaneous_fallback_when_present'`*; **and** absent that work center they fail — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsValidate' > 'test_miscellaneous_fallback_fails_when_absent'`*.
-- [ ] **Given** an external-only cost field supplied on an internal row, **when** validated, **then** it is rejected — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsValidate' > 'test_external_field_on_internal_rejected'`*.
-- [ ] **Given** a valid internal row with a `labor_rate_override`, **when** the import executes, **then** the override is written onto the created operation — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsExecute' > 'test_execute_internal_with_labor_rate_override'`*.
-- [ ] **Given** a valid external row, **when** the import executes, **then** the external cost fields (unit price / setup cost) are used — *verified by `api/tests/integration/test_routings_import_api.py > 'TestRoutingsExecute' > 'test_execute_external_uses_external_fields'`*.
-
-**Structure & routes**
-
-- [ ] **Given** the app, **when** a user looks for a standalone routings page or a `/routing/new`|`/routing/edit` route, **then** none exists — routings are edited inline on the part page — *manual: no routings dir under `app/dashboard/[companyId]/`; `PartRoutingPanel` is the only editor*.
+| Behaviour | Verified by |
+|---|---|
+| Fetch by id returns the row (joined part); missing id returns `null` on PGRST116 not a throw; other errors throw | **A** › `getRouting` (3 it) |
+| Summary returns op count + Σ `cycle_minutes_per_unit`; `null` when the part has no routing (not an empty shell); `null` total when the sum is zero | **A** › `getRoutingSummaryForPart` (3 it) |
+| First operation on a made part creates the routing implicitly and persists; blank setup saves as `0`, instructions trimmed, numerics parsed | **A** › `createRoutingOperation` (1 it); e2e `e2e/parts-and-routing.spec.ts` › `Parts and Routing workflow` (1 test) |
+| Operation delete by id, and a DB error throws a friendly message rather than silently succeeding; routing delete by id cascades its operations | **A** › `deleteRoutingOperation` (2 it), `deleteRouting` (1 it) |
+| Internal ops price cycle + setup at the work-center `labor_rate`; `labor_rate_override` wins; `missing_labor_rate` + `empty_operation` emit | **C** › `calculateRoutingCost` › `internal operations` (4 it) |
+| External ops price per-unit with zero setup; `missing_external_pricing` with no price | **C** › `calculateRoutingCost` › `external operations` (2 it) |
+| Mixed kinds sum correctly | **C** › `calculateRoutingCost` › `mixed internal + external routings` (1 it) |
+| Zero operations emits `no_operations`; neither routing nor BOM returns `null` | **C** › `calculateRoutingCost` › `routing edge cases` (1 it), `returns null when there is nothing to cost` (1 it) |
+| BOM child cost rolls into `total_material_cost`; unit fallbacks; `missing_material_cost` blanks base + unit price via `materials_complete = false` | **C** › `calculateRoutingCost` › `BOM materials` (7 it), `combined routing + BOM` (1 it) |
+| Yield: whole-unit ceiling, made-child batch pinning, fractional-unpinned legacy path unchanged, documented diamond-BOM over-consumption limit | **C** › `calculateRoutingCost — yield / ceiling / batch pinning` (8 it) |
+| Setup amortizes across tier quantity; qty ≤ 0 → 1; `null` unit price when markup is null; per-unit base qty-invariant apart from setup | **C** › `calculateTierPricing` (4 it) |
+| Validate: happy path groups ops; unknown work center fails; `MISCELLANEOUS` routes when present, fails when absent; external-only field on an internal row rejected | **I** › `TestRoutingsValidate` (5 tests) |
+| Execute: internal `labor_rate_override` written; external cost fields used; re-import upserts `(routing_id, sequence)` instead of 500-ing | **I** › `TestRoutingsExecute` (3 tests) — the external test asserts `external_setup_cost`, the dropped column ([#549](#known-importer-bug-549)) |
+| Bought parts show no routing panel | manual: `WorkspaceTab.tsx` (`showRoutingPanel = part.source === 'made'`) |
+| Work-center picker locked in edit mode | manual: `RoutingOperationRowEditor` (`disabled={isEdit}`); `RoutingOperationsList.handleEditorSave` never rewrites `workCenterId` in the edit branch |
+| No standalone routings page or `/routing/new`\|`/routing/edit` route | manual: no routings dir under `app/dashboard/[companyId]/`; `PartRoutingPanel` is the only editor |
+| Auto-save recomputes the part's Cost card + pricing tiers (no Recalculate button) | manual: `PartRoutingPanel.onRoutingSaved` refreshes the parent; `calculateRoutingCost(partId)` is called by `components/parts/PartPricing.tsx` and `utils/partPricingTiersAccess.ts` |
+| Edit → save → **reload** → persists | **automation-pending (#367)** — the E2E asserts add-then-persist only. Write path is `saveRoutingWithOperations`, which applies `updateRoutingOperation`'s semantics inline (the standalone `updateRoutingOperation` export is not what the panel calls) |
+| Reorder persists without tripping `(routing_id, sequence)` | **automation-pending (#367)** (`saveRoutingWithOperations`) |
+| "Remove operation?" confirm gates the delete | **automation-pending (#367)** (`RoutingOperationsList`) |
+| Row-level "Missing labor rate" / "Missing pricing" inline copy renders | **automation-pending (#367)** (`RoutingOperationRow`) — the cost-side warnings are covered above |

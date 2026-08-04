@@ -2,7 +2,9 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import * as Sentry from '@sentry/nextjs';
 import { useLoad } from '@/hooks/useLoad';
+import { toError } from '@/lib/supabaseErrors';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -17,7 +19,9 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import {
   getMyContributionTotals,
   getMyNotesPage,
+  getNewHelpful,
   getNoteViewers,
+  markHelpfulSeen,
   updateNoteBody,
 } from '@/utils/operatorAccess';
 import { deleteJobNote } from '@/utils/jobNoteMediaAccess';
@@ -26,6 +30,7 @@ import NoteEditedMark from '@/components/notes/NoteEditedMark';
 import NoteDeleteDialog from '@/components/notes/NoteDeleteDialog';
 import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
+import NewHelpfulBlock from '@/components/operator/NewHelpfulBlock';
 import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
@@ -457,8 +462,50 @@ export default function MyWorkPage() {
   return (
     <Box sx={{ pb: 4 }}>
       <OperatorIdentityRow companyId={companyId} identity={identity} />
+      {/* Above the work and above the tally, because it is the only thing on this screen
+          that is news. It renders nothing when there is nothing new, so it costs no space
+          in the common case. */}
+      <NewHelpful companyId={companyId} />
       <MyContribution companyId={companyId} />
     </Box>
+  );
+}
+
+/**
+ * What came back since the operator last looked — named, and grouped by note.
+ *
+ * Silent TO THE OPERATOR about its own failures, on purpose. This is a reward, not a task:
+ * someone who cannot load it has lost nothing they were trying to do, and an error banner
+ * where a compliment should be is worse than the absence of the compliment. The reactions
+ * themselves remain on every note in the list below regardless.
+ *
+ * Silent to the operator is NOT silent to us. The first version swallowed the rejection
+ * with `.catch(() => [])`, which made a broken query indistinguishable from "nothing new"
+ * — and it shipped exactly that: a wrong foreign-key hint in the embed returned 400 on
+ * every load, through green CI (unit tests mock the access layer, so the select string
+ * never met a database) and through a preview walkthrough that read the empty block as the
+ * honest empty case. So the failure is reported; only the UI stays quiet.
+ */
+function NewHelpful({ companyId }: { companyId: string }) {
+  const { data, reload } = useLoad(() => getNewHelpful(companyId), [companyId], {
+    onError: (error) =>
+      Sentry.captureException(toError(error, 'Could not load new "helpful" reactions'), {
+        tags: { area: 'note_reactions' },
+      }),
+  });
+
+  if (!data || data.length === 0) return null;
+
+  return (
+    <NewHelpfulBlock
+      items={data}
+      onDismiss={async (seenThrough) => {
+        await markHelpfulSeen(companyId, seenThrough);
+        // Re-read rather than clearing locally: anything that landed between render and
+        // the tap is newer than the cursor we just set, so it correctly survives.
+        await reload();
+      }}
+    />
   );
 }
 
@@ -584,10 +631,17 @@ function MyContribution({ companyId }: { companyId: string }) {
           </Typography>
 
           {/* Three equal columns, each aligned to the edge it sits nearest: first hard
-              left, middle centred, last hard right. Capped at 420px — nothing constrains
-              the operator column's width on this branch, so aligning to the card's own
-              edges would put the first and last figures a thousand pixels apart on a
-              laptop. A phone has ~340px of usable width, so the cap never binds there. */}
+              left, middle centred, last hard right — so the row reads as distributed
+              across the card rather than clustered at one end.
+
+              This carried a `maxWidth: 420` when it was written, because at the time
+              nothing constrained the operator column and aligning to the card's own edges
+              would have thrown the first and last figures a thousand pixels apart on a
+              laptop. The shell now caps every operator page at 680px
+              (`app/operator/[companyId]/layout.tsx`), which does that job properly, and
+              the old cap became the bug instead: it pinned three figures into the left
+              62% of a 680px card and left the rest empty. Don't reintroduce it — if the
+              spread ever looks wrong again, the column width is the thing to change. */}
           <Box
             component="dl"
             sx={{
@@ -595,7 +649,6 @@ function MyContribution({ companyId }: { companyId: string }) {
               display: 'grid',
               gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
               gap: 2,
-              maxWidth: 420,
             }}
           >
             <Stat value={c.noteCount} label={c.noteCount === 1 ? 'Note' : 'Notes'} align="left" />
@@ -619,6 +672,21 @@ function MyContribution({ companyId }: { companyId: string }) {
             />
           </Box>
 
+          {/* NOTHING AT ZERO — or rather, not a bare zero left standing.
+              An operator whose notes nobody has opened yet reads "0 · Times viewed" as a
+              permanent notice that nobody cares, which is the same reason the login
+              banner renders null rather than announcing "0 views". The banner can vanish;
+              this card cannot, because it is the tally.
+
+              So the figure stays — hiding it would move "Times viewed" between columns
+              from one visit to the next, and a zero is a real value rather than a
+              disabled control — and one line underneath turns it forward. Only at zero,
+              so it is never standing chrome. */}
+          {c.peopleReached === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+              Your notes show up for whoever runs the job or the machine next.
+            </Typography>
+          )}
         </CardContent>
       </Card>
 

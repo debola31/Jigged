@@ -15,6 +15,9 @@ vi.mock('@/utils/operatorAccess', () => ({
   getMyContributionTotals: vi.fn(),
   getMyNotesPage: vi.fn(),
   getNoteViewers: vi.fn(),
+  getNewHelpful: vi.fn(async () => []),
+  markHelpfulSeen: vi.fn(async () => {}),
+  MAX_HELPFUL_NAMES: 3,
   // The "Me" tab resolves the operator's display name through this.
   getCurrentMember: vi.fn(async () => ({ id: 'm1', name: 'Ada Lovelace', role: 'operator' })),
   MY_NOTES_PAGE_SIZE: 10,
@@ -245,6 +248,31 @@ describe('My Work', () => {
     expect(screen.queryByText(/what you.?ve added/i)).not.toBeInTheDocument();
     // Never a bounded window, which would make it a rate.
     expect(screen.queryByText(/this (week|month)|last \d+ days/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * A standing "0 · Times viewed" is a permanent notice that nobody cares, which is why
+   * the login banner renders null rather than announcing zero. This card cannot vanish —
+   * it is the tally — so the figure stays (hiding it would move "Times viewed" between
+   * columns from one visit to the next, and a zero is a real value, not a disabled
+   * control) and one forward-looking line appears underneath. Only at zero: it must never
+   * become standing chrome.
+   */
+  it('turns a zero view count forward instead of leaving it standing', async () => {
+    stage({ totals: { noteCount: 3, photoCount: 0, peopleReached: 0 } });
+    render(<MyWorkPage />);
+
+    expect(await screen.findByText(/whoever runs the job or the machine next/i)).toBeInTheDocument();
+    // The figure itself stays put — the column must not move between visits.
+    expect(screen.getByText('Times viewed')).toBeInTheDocument();
+  });
+
+  it('drops that line as soon as anyone has read something', async () => {
+    stage({ totals: { noteCount: 3, photoCount: 0, peopleReached: 1 } });
+    render(<MyWorkPage />);
+
+    await screen.findByText('Time viewed');
+    expect(screen.queryByText(/whoever runs the job or the machine next/i)).not.toBeInTheDocument();
   });
 
   /**

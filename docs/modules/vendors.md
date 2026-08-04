@@ -1,165 +1,62 @@
+> **Condensed 2026-08-03** — 1,774 → 949 words (`wc -w`). **Cut:** the Acceptance-Criteria block (~53% of the file, the highest share of any module doc), whose bullets mostly re-described the test they cited; two Access-Layer tables restating function signatures; the archive policy stated three times; "external work centres point at a vendor" stated four times. **Kept:** every number, every citation, the revive-on-collision and never-blocks semantics, and the coverage gap the AC block existed to record. **Corrections after checking the code (5):** the doc never mentioned the **Outside processing** tab that is half the Vendors page; it tagged the CSV import `automation-pending` when 16 backend tests cover it; it omitted the `/edit` page; it presented dead code (`bulkImportVendors`) as a live import path; it credited the one-primary rule to the access layer alone.
+
 # Vendors Module
 
-## Overview
+Master list of external suppliers and outsourced-process providers. **Built; in production.** No dependencies to create. Consumed by [Parts](parts.md) (`parts.preferred_vendor_id`) and [Work Centers](work-centers.md) (`work_centers.vendor_id` — **that doc owns the work-centre side**, not restated here).
 
-The Vendors module manages the master list of external suppliers and outsourced-process providers. Vendors are referenced by parts (`parts.preferred_vendor_id`) and by external work centers (`work_centers.vendor_id`).
+## Data model
 
-**Priority:** Built; in production.
+**`vendors`** — `id` (uuid PK), `company_id`, `name` (required), `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` (defaults `'USA'`), `created_at`, `updated_at`, `deleted_at`. Unique `vendors_unique_per_company (company_id, name)`, kept FULL not partial — name is the identity the CSV importer upserts on, so re-import is idempotent and a re-create revives rather than duplicates.
 
-**Dependencies:** None for create. Consumed by [Parts](parts.md) and [Work Centers](work-centers.md).
+**`vendor_contacts`** — 1-to-many with `vendors`, `ON DELETE CASCADE`: `id`, `vendor_id`, `name` (required), `role`, `role_label`, `email`, `phone`, `is_primary`, `created_at`, `updated_at`.
 
----
-
-## Data Model
-
-### `vendors` table
-
-| Column | Notes |
+| Constraint | Enforces |
 |---|---|
-| `id` | uuid PK |
-| `company_id` | FK |
-| `name` | required |
-| `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` | `country` defaults to `'USA'` |
-| `created_at`, `updated_at` | |
-
-**Unique Constraint:** `(company_id, name)` — the identity key the CSV importer upserts on (`ON CONFLICT (company_id, name)`), so re-importing is idempotent.
-
-### `vendor_contacts` table
-
-1-to-many with `vendors`.
-
-| Column | Notes |
-|---|---|
-| `id` | uuid PK |
-| `vendor_id` | FK |
-| `name` | required |
-| `role` | enum: `sales | accounts_payable | quality | engineering | shipping_receiving | customer_service | other` |
-| `role_label` | required when `role='other'` |
-| `email`, `phone` | optional |
-| `is_primary` | exactly one primary per vendor (enforced in access layer) |
-| `created_at`, `updated_at` | |
-
----
+| `vendor_contacts_role_check` | `role ∈ {sales, accounts_payable, quality, engineering, shipping_receiving, customer_service, other}` |
+| `vendor_contacts_role_label_required` | `role_label` non-empty when `role='other'` |
+| `vendor_contacts_one_primary` (partial unique index on `vendor_id WHERE is_primary`) | at most one primary per vendor *(⚠ This doc previously said one-primary is "enforced in access layer"; the DB enforces it too — the access layer clears the old primary so the index never trips.)* |
 
 ## Pages
 
-### List — `/dashboard/{companyId}/vendors`
-
-AG Grid columns:
-
-- **Name**
-- **Primary contact** — name · email
-- **Location** — city, state
-- **Updated**
-
-Search across name + city. Default sort: name asc. Pagination: 25 / 50 / 100. Bulk export CSV, bulk delete. Single-row entry → vendor detail.
-
-### Detail — `/dashboard/{companyId}/vendors/{vendorId}`
-
-Sections:
-
-- **Header card** — vendor name, created/updated timestamps.
-- **Contacts card** — all `vendor_contacts`; primary marked with a star; per-row actions to edit / set primary / delete.
-- **Address card** — `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country`, formatted multi-line.
-- **Linked Parts** (accordion) — parts where `preferred_vendor_id = this vendor`. Shows `part_name`, `primary_unit`.
-- **Linked Work Centers** (accordion) — work centers where `vendor_id = this vendor`. Shows `name`, `kind` (`internal | external`; external is the case where the FK is set).
-
-The **Delete** button archives the vendor (sets `deleted_at`) and is **never disabled or blocked** — even when parts (`preferred_vendor_id`) or work centers (`vendor_id`) still point at it. The row survives the archive, so those links keep resolving; the vendor simply disappears from lists, search, and pickers (all of which filter `deleted_at IS NULL`). Reusing the name later revives the row. See [architecture.md §16](../architecture.md) for the universal archive (soft-delete) policy.
-
-### Create — `/dashboard/{companyId}/vendors/new`
-
-Renders `VendorForm` in `mode="create"`.
-
-Form fields:
-
-- **Vendor:** name (required), address fields, country (default `USA`).
-- **Initial contact** (create-mode sub-form, optional): name, role, role_label (when `role='other'`), email, phone. If filled, this contact is created with `is_primary=true`.
-
-No "capabilities" checkboxes — what a vendor is used for is derived from inbound references (`parts.preferred_vendor_id`, `work_centers.vendor_id`).
-
-### Import — `/dashboard/{companyId}/vendors/import`
-
-CSV upload, column mapping, validation, then execute via `/api/vendors/import/*` endpoints. Execute upserts `ON CONFLICT (company_id, name)` (case-insensitive match), so a vendor already in the company **updates in place** rather than being skipped — re-importing the same file is idempotent. Within-CSV duplicate names collapse into one row.
-
----
-
-## Access Layer
-
-`utils/vendorsAccess.ts`:
-
-| Function | Purpose |
+| Route | Contents |
 |---|---|
-| `getAllVendors(companyId, search, sortField, sortDir)` | Batched 1000-row fetch; search across name and city |
-| `getAllVendorsWithPrimaryContact(companyId, search, sortField, sortDir)` | `getAllVendors` + each vendor's `is_primary` contact joined — powers the list grid |
-| `getVendor(vendorId)` | Single-row fetch; returns `null` on `PGRST116` (not found) |
-| `checkVendorNameExists(companyId, name, excludeId?)` | Case-insensitive uniqueness check for the create/edit form; scoped to **live** rows (`deleted_at IS NULL`) so an archived name doesn't falsely block — it revives on create instead |
-| `getPartsByPreferredVendor(vendorId)` | `{id, part_name, primary_unit}` — for the detail page Linked Parts accordion |
-| `getWorkCentersByVendor(vendorId)` | `{id, name, kind}` — for the Linked Work Centers accordion |
-| `createVendor(companyId, formData, initialContact?)` | Inserts vendor, optionally inserts one `vendor_contacts` row with `is_primary=true`. On a `23505` name collision with an **archived** vendor, revives that row instead (un-archive + apply form values via `reviveArchivedVendorByName`); a collision with a **live** vendor re-throws as a genuine duplicate |
-| `updateVendor(vendorId, formData)` | Vendor-row update only; contact CRUD is separate |
-| `deleteVendor(vendorId)` | **Archive** — sets `deleted_at` via `.update()` (not a SQL `DELETE`); never blocks on references (parts / work-center links survive the archived row) |
-| `bulkDeleteVendors(vendorIds)` | **Archive** in 100-row batches; same never-blocks semantics |
-| `bulkImportVendors(companyId, rows)` | Direct-client de-dupe-by-name insert (returns `{imported, skipped, errors}`). **Note:** the Import *page* executes via the FastAPI `/api/vendors/import/{analyze,validate,execute}` endpoints (AI column mapping); this function is the direct-client path. |
+| `/dashboard/{companyId}/vendors` | **Two tabs** *(⚠ This doc previously described only the grid; the page renders a `Tabs` switch.)*. **Directory** — AG Grid: Name, Primary Contact (`name · email`), Location (`city, state`), Updated; search name + city, sort name asc, pagination 25/50/100, bulk CSV export, bulk archive, row click → detail. **Outside processing** — `components/jobs/OutsideWorkPanel.tsx`, the company-wide queue of external-vendor operations grouped **Not sent** (`status='pending'`) and **At vendor** (`status='sent'`), each with send/receive actions. The shipping lead's worklist — see [prd.md](../prd.md) FR-6a and [jobs.md](jobs.md#outside-external-vendor-operations). |
+| `…/{vendorId}` | Header card; Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Linked Parts** accordion (`part_name`, `primary_unit`); **Linked Work Centers** accordion (`name`, `kind`). Delete archives and is never disabled. |
+| `…/{vendorId}/edit` | `VendorForm` edit mode — vendor row only; contact CRUD is separate. *(⚠ This doc previously omitted this page.)* |
+| `…/new` | `VendorForm` create mode plus an optional initial-contact sub-form; if filled, that contact is created `is_primary=true`. |
+| `…/import` | CSV upload → column mapping → validation → execute, via FastAPI `/api/vendors/import/{analyze,validate,execute}` (AI column mapping). Execute upserts `ON CONFLICT (company_id, name)` case-insensitively, so an existing vendor **updates in place**; within-CSV duplicate names collapse to one row. |
 
-Contact CRUD lives in `utils/vendorContactsAccess.ts`:
+**Decisions.** No "capabilities" checkboxes on a vendor — what it is used for is derived from inbound references, so it cannot drift from reality. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
 
-| Function | Purpose |
-|---|---|
-| `getContactsForVendor(vendorId)` | All contacts; primary first, then by `created_at` |
-| `createVendorContact(vendorId, formData)` | Insert; clears any existing primary when `is_primary=true` |
-| `updateVendorContact(contactId, formData)` | Update; clears any existing primary when `is_primary=true` |
-| `deleteVendorContact(contactId)` | Delete a contact |
-| `setPrimaryContact(vendorId, contactId)` | Clear all `is_primary` for the vendor, then set the named one |
+## Access layer
 
----
+Signatures live in [`utils/vendorsAccess.ts`](../../utils/vendorsAccess.ts) (11 exports) and [`utils/vendorContactsAccess.ts`](../../utils/vendorContactsAccess.ts) (5 exports). Only non-obvious behaviour is recorded here:
 
-## Acceptance Criteria
+- `getAllVendors` batches 1000 rows per fetch; a whitespace-only search term applies no filter at all.
+- `getVendor` returns `null` on `PGRST116` (not found) rather than throwing.
+- `checkVendorNameExists` is scoped to **live** rows (`deleted_at IS NULL`), so an archived name never falsely blocks a create.
+- `createVendor` on a `23505` collision with an **archived** vendor revives it (`reviveArchivedVendorByName` — un-archive plus apply the form values); a collision with a **live** vendor re-throws as a genuine duplicate.
+- `deleteVendor` and `bulkDeleteVendors` (100-row batches) stamp `deleted_at` via `.update()` — never a SQL `DELETE`, never blocked by a part or work-centre reference. Archive is universal; the standard is [architecture.md §16](../architecture.md).
+- ⚠ **`bulkImportVendors` has no callers** — `git grep` finds only its definition. Dead code, superseded by the FastAPI import route above. *(This doc previously presented it as "the direct-client path", implying a live second path.)*
 
-Given/When/Then scenarios, each carrying a **verification clause** — a test pointer (`*verified by <file> > 'test name'*`), a manual procedure, or an explicit `automation-pending` tag. Every editable entity has at least one `edit → save → reload → persists` bullet. Vendors has unit coverage (`__tests__/utils/vendorsAccess.test.ts`, 9 tests) but **no E2E spec yet** and **no test file for `utils/vendorContactsAccess.ts`**, so UI reload-persistence and all contact bullets are tagged `automation-pending`. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on [issue #344](https://github.com/debola31/Jigged/issues/344).
+## Test coverage
 
-**List, search & sort**
+| Layer | File | Coverage |
+|---|---|---|
+| Vendor access | [`__tests__/utils/vendorsAccess.test.ts`](../../__tests__/utils/vendorsAccess.test.ts) | 9 tests across `getAllVendors`, `getVendor`, `createVendor`, `deleteVendor` |
+| Import API | [`api/tests/integration/test_vendors_import_api.py`](../../api/tests/integration/test_vendors_import_api.py) | 16 tests across `TestVendorsAnalyze`, `TestVendorsValidate`, `TestVendorsExecute` *(⚠ This doc previously tagged the import `automation-pending`; this suite exists.)* |
 
-- [ ] **Given** a company's vendors, **when** a user opens the list, **then** vendors show Name, Primary contact (name · email), Location (city · state), and Updated, default-sorted by name asc, paginated 25/50/100 — *list query verified by `__tests__/utils/vendorsAccess.test.ts > 'getAllVendors' > 'queries the vendors table filtered by company_id'`; grid rendering + pagination automation-pending*.
-- [ ] **Given** the list, **when** a user types a search term, **then** vendors are filtered by name or city (case-insensitive `ilike`), and a whitespace-only term applies no filter — *verified by `__tests__/utils/vendorsAccess.test.ts > 'getAllVendors' > 'applies name + city ilike when search is non-empty'` AND `__tests__/utils/vendorsAccess.test.ts > 'getAllVendors' > 'skips the or() filter when search is whitespace'`*.
-- [ ] **Given** a Supabase failure while listing, **when** the query runs, **then** a friendly error is thrown rather than a silent empty list — *verified by `__tests__/utils/vendorsAccess.test.ts > 'getAllVendors' > 'throws when supabase returns an error'`*.
+### Known gaps
 
-**Create a vendor (edit → save → reload → persists)**
+**There is no E2E spec for vendors and no test file for `utils/vendorContactsAccess.ts`** — so UI reload-persistence and every contact behaviour (create, edit, set-primary, delete) is unverified by automation. This single gap is what the deleted AC block's ~14 `automation-pending` tags were recording; re-verified 2026-08-03 and still true. Doc-vs-code divergences from the original audit: [issue #344](https://github.com/debola31/Jigged/issues/344).
 
-- [ ] **Given** the create form, **when** a user enters a name (required) plus optional address fields and saves, **then** a vendor is created with `company_id` stitched on and `country` defaulting to `USA`, and reloading the list shows it — *insert path verified by `__tests__/utils/vendorsAccess.test.ts > 'createVendor' > 'inserts a vendor row with company_id stitched on'`; reload-persistence E2E automation-pending*.
-- [ ] **Given** the create form with the optional initial-contact sub-form filled, **when** the user saves, **then** the vendor is created together with one `vendor_contacts` row flagged `is_primary=true` — *automation-pending (`createVendor` `initialContact` path)*.
-- [ ] **Given** the create form, **when** a user submits a name already used by a **live** vendor (case-insensitive), **then** it is flagged as a duplicate before insert; a name held only by an **archived** vendor is not blocked — it revives that row instead — *automation-pending (`checkVendorNameExists` is scoped to `deleted_at IS NULL`; `createVendor` revives on the `23505`; DB unique `(company_id, name)`)*.
+### Withdrawn
 
-**Edit a vendor (edit → save → reload → persists)**
-
-- [ ] **Given** an existing vendor, **when** a user edits name / address_line1 / address_line2 / city / state / postal_code / country and saves, **then** reloading the detail page shows the new values — *automation-pending (`updateVendor`)*.
-
-**Contacts (edit → save → reload → persists)**
-
-- [ ] **Given** a vendor, **when** a user adds a contact (name required; `role_label` required when `role='other'`) and saves, **then** reloading shows it in the Contacts card — *automation-pending (`createVendorContact`; `role_label` enforced by DB check `vendor_contacts_role_label_required`)*.
-- [ ] **Given** an existing contact, **when** a user edits its fields and saves, **then** reloading shows the change — *automation-pending (`updateVendorContact`)*.
-- [ ] **Given** a vendor with several contacts, **when** a user marks one primary, **then** exactly one primary remains (the previous one is cleared) and reloading confirms it — *automation-pending (`setPrimaryContact`; enforced by partial unique index `vendor_contacts_one_primary`)*.
-- [ ] **Given** a contact, **when** a user deletes it, **then** reloading shows it gone — *automation-pending (`deleteVendorContact`)*.
-
-**Delete (= archive) & bulk**
-
-- [ ] **Given** any vendor, **when** a user deletes it, **then** it is **archived** — `deleted_at` is stamped via `.update()` (no SQL `DELETE`) — and it disappears from lists, search, and pickers, while a by-id link (`getVendor`) still resolves it — *verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'archives by vendor id (sets deleted_at) instead of deleting'`*.
-- [ ] **Given** a vendor referenced by a part (`preferred_vendor_id`) or work center (`vendor_id`), **when** a user deletes it, **then** the archive still **succeeds — it never blocks** — and the row survives so those references keep resolving (there is no `23503` FK guard, and the detail-page Delete button is never disabled) — *same archive path as above; the former FK-guard test was removed*.
-- [ ] **Given** a Supabase failure while archiving, **when** the update runs, **then** a friendly error is thrown rather than failing silently — *verified by `__tests__/utils/vendorsAccess.test.ts > 'deleteVendor' > 'throws when the archive update errors'`*.
-- [ ] **Given** selected vendors, **when** a user bulk-deletes, **then** they are archived (`deleted_at` set) in 100-row batches, never blocked by references — *automation-pending (`bulkDeleteVendors`)*.
-- [ ] **Given** an archived vendor's name, **when** a user re-creates or re-imports that name, **then** the archived row is **revived** (un-archived + updated) rather than duplicated — *insert-collision revive path in `createVendor` (`reviveArchivedVendorByName`); import upsert sets `deleted_at=None`; automation-pending*.
-
-**Read edge cases**
-
-- [ ] **Given** a vendor id, **when** it is fetched, **then** the row is returned, or `null` when not found (PGRST116) — *verified by `__tests__/utils/vendorsAccess.test.ts > 'getVendor' > 'queries by id and returns the row'` AND `__tests__/utils/vendorsAccess.test.ts > 'getVendor' > 'returns null when supabase returns PGRST116 not-found'`*.
-- [ ] **Given** a vendor detail page, **when** it loads, **then** the Linked Parts and Linked Work Centers accordions list inbound references read-only — *automation-pending (`getPartsByPreferredVendor`, `getWorkCentersByVendor`)*.
-
-**Import**
-
-- [ ] **Given** a vendors CSV, **when** a user maps columns and executes the import, **then** rows are inserted and duplicates (by name, case-insensitive) are skipped, with an imported/skipped/errors summary — *automation-pending (Import page posts to FastAPI `/api/vendors/import/{analyze,validate,execute}`; the `csv-import` E2E is CI-skipped)*.
-
----
+- **Withdrawn:** deleting a vendor referenced by a part or work centre must be blocked by an FK guard (`23503`) — wrong because archiving keeps the row, so those references keep resolving; the guard only trapped users, and its test was removed with it.
+- **Withdrawn:** a vendor carries one embedded contact (`contact_name` / `email` / `phone` columns on `vendors`) — wrong because a vendor has several people with distinct roles; replaced by `vendor_contacts`, and the columns are gone from the schema.
 
 ## See also
 
-- [Parts](parts.md) — preferred vendor link.
-- [Work Centers](work-centers.md) — external work centers point at a vendor.
+- [Parts](parts.md) — preferred-vendor link.
+- [Work Centers](work-centers.md) — owns external work centres and their vendor reference.
+- [Jobs](jobs.md#outside-external-vendor-operations) — the outside-operation lifecycle behind the Outside processing tab.

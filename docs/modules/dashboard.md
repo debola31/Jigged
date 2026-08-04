@@ -1,246 +1,167 @@
 # Dashboard Module
 
+> **Condensed 2026-08-03** for [#634](https://github.com/debola31/Jigged/issues/634); as-built, verified
+> against the code at `db58ae8`. **2,460 → 1,639 words** (`wc -w`).
+>
+> **Cut:** the acceptance-criteria block (45% of the doc — bullets restating their own citation); the
+> ~150-word "Quick Actions" section, which said only what the Overview already says; the User Stories table;
+> display bullets restating the components. **Data Refresh** and **Future Enhancements** stated the *same*
+> deferred decision three times — now once. **Kept:** every deliberate exclusion (no quick-create, no floor
+> chatter on the card, no auto-poll, no SSE for KPIs), every withdrawn approach, the retired-metric keys, the
+> per-source caps, the UNION-on-read note. Above the 1,000-word aim because six verified facts were *added*.
+>
+> **Corrections.** *(1) The `/activity` source list omitted **inventory** (`collectActivity` fetches
+> `inventory_transactions`) and vendor-tagged outside-operation `sent`/`received`. (2) The refresh model was
+> "Planned — see #550"; **#550 is CLOSED** (2026-07-29), so it is an untracked intention. (3) Drill-down hrefs
+> lacked their `/dashboard/{companyId}` prefix. (4) Two code gaps were recorded nowhere: `getCount` not
+> filtering `deleted_at`, and metric errors collapsing to `0`.)*
+
 ## Overview
 
-The Dashboard is the home screen after login - a high-level overview of the shop's current state. It shows key metrics, highlights urgent items, and surfaces recent activity. It is a read/overview surface: there are **no quick-create actions** on the dashboard (no "New Quote" or "New Job" CTA). Quotes are created from the Quotes list; jobs are created only by converting an accepted quote (see [Quotes](quotes.md) → "Convert to Job"). The only create affordance the dashboard offers is the onboarding card shown to an empty tenant, plus drill-down links from the metric tiles into the filtered lists.
+The read/overview home screen after login, at `/dashboard/{companyId}`. **There are no quick-create actions**
+— no "New Quote", no "New Job". Quotes are created from the Quotes list; jobs only by converting an accepted
+quote ([Quotes](quotes.md) → "Convert to Job"), and `/jobs/new` does not exist. The only create affordance is
+the onboarding card shown to an empty tenant; otherwise the tiles' drill-downs are the way out.
 
-**Priority:** Should Have (Build Last in Phase 0)
+*(Dead code: `components/dashboard/QuickActions.tsx` — a "New Quote" button — and `SummaryCard.tsx` are both
+re-exported from `components/dashboard/index.ts`, but `page.tsx` mounts neither.)*
 
-**Dependencies:** All other modules (displays data from quotes and jobs)
-
-**Route:** `/dashboard/{companyId}`
-
----
-
-## User Stories
-
-| As a... | I want to... | So that... |
-|---|---|---|
-| Owner | See a summary of open quotes | I know how much potential work is in the pipeline |
-| Owner | See a count of active jobs | I know how busy the shop is |
-| Owner | See revenue for this week | I know how the business is performing |
-| Owner | See recent activity | I know what's been happening |
+**Priority:** Should Have · **Dependencies:** quotes, jobs, shipments, inventory.
 
 ---
 
-## Metric Scorecards (pinned metrics)
+## Metric scorecards (pinned metrics)
 
-The top of the dashboard is a configurable scorecard grid, not a fixed set of
-cards. The user pins **up to 4** metrics (`PINNED_METRIC_SLOTS`) that render as
-the primary tiles; the rest are reachable via a left/right pager. Pinned
-selection and order live in `user_preferences.preferences.dashboard_pinned_metrics`
-(JSONB) and are edited through `MetricPickerModal` (checkbox to pin/unpin,
-up/down arrows to reorder). Implemented by `components/dashboard/PinnedMetrics.tsx`
-+ `MetricScorecard.tsx`; values are fetched by `getPinnedMetricValues` in
-`utils/dashboardAccess.ts`.
+A configurable grid, not a fixed set. The user pins up to `PINNED_METRIC_SLOTS` (= 4) metrics as primary
+tiles; the rest page in via a left/right pager. Selection and order live in
+`user_preferences.preferences.dashboard_pinned_metrics` (JSONB), edited through `MetricPickerModal`. See
+[`PinnedMetrics.tsx`](../../components/dashboard/PinnedMetrics.tsx), `MetricScorecard.tsx`, and
+`getPinnedMetricValues` in [`utils/dashboardAccess.ts`](../../utils/dashboardAccess.ts).
 
-**Available metrics** (`AVAILABLE_METRICS`):
+`AVAILABLE_METRICS`, with each tile's drill-down (`drillDownHref` in `PinnedMetrics.tsx`). Every href below is
+prefixed `/dashboard/{companyId}` — *(⚠ this doc previously listed them without that prefix, as bare
+`/quotes?…`; those paths do not exist.)*
 
-| Key | Label | Format | Query |
+| Key | Label | Value | Drill-down |
 |---|---|---|---|
-| `open_quotes` | Open Quotes | number | Count `quotes` where `status = 'active'` |
-| `not_started_jobs` | Jobs Not Started | number | Count `jobs` where `production_status = 'not_started'` |
-| `in_progress_jobs` | Jobs In Progress | number | Count `jobs` where `production_status = 'in_progress'` |
-| `revenue` | Revenue | currency | Sum of related `quote_line_items.total_price` for `jobs` where `fulfillment_status = 'fully_shipped'`, bucketed by `updated_at` within the selected period |
-| `completed_jobs` | Completed Jobs | number | Count `jobs` where `fulfillment_status = 'fully_shipped'` within the selected period |
-| `overdue_jobs` | Overdue Jobs | number | Shared overdue predicate (`applyOverdueJobsFilter`, same as the jobs list) |
+| `open_quotes` | Open Quotes | count `quotes.status = 'active'` | `/quotes?status=active` |
+| `not_started_jobs` | Jobs Not Started | count `jobs.production_status = 'not_started'` | `/jobs?status=not_started` |
+| `in_progress_jobs` | Jobs In Progress | count `jobs.production_status = 'in_progress'` | `/jobs?status=in_progress` |
+| `revenue` | Revenue (currency) | sum of related `quote_line_items.total_price` for jobs `fulfillment_status = 'fully_shipped'`, bucketed by `updated_at` in the period | `/jobs?status=shipped` |
+| `completed_jobs` | Completed Jobs | count `jobs.fulfillment_status = 'fully_shipped'` in the period | `/jobs?status=completed` |
+| `overdue_jobs` | Overdue Jobs | the shared `applyOverdueJobsFilter` predicate — same one the jobs list uses | `/jobs?overdue=true` |
 
-**Defaults** (`DEFAULT_PINNED_METRICS`, shown when no preference is stored):
-`overdue_jobs`, `open_quotes`, `not_started_jobs`, `in_progress_jobs`. Overdue
-Jobs is a normal pickable metric (a one-time migration folds it into
-pre-existing dashboards, gated by `dashboard_overdue_selectable_migrated` so a
-deliberate removal sticks).
+Never `jobs.status`; that column was removed (the May 2026 prod regression).
 
-**Time period toggle:** a global **Today / This Week** toggle sits below the
-grid. Time-aware metrics (`revenue`, `completed_jobs` — `supportsTimePeriod`)
-show a period suffix and a period-over-period delta ("vs last week" /
-"vs yesterday"). The chosen period persists per metric in
-`user_preferences.preferences.dashboard_metric_periods`.
+**Defaults** (`DEFAULT_PINNED_METRICS`, when nothing is stored): Overdue Jobs, Open Quotes, Jobs Not Started,
+Jobs In Progress. Overdue is a normal pickable metric; a one-time migration folds it into pre-existing
+dashboards, gated by `dashboard_overdue_selectable_migrated` **so a deliberate removal sticks**.
 
-**Display per tile:**
+**Time period.** A global Today / This Week toggle below the grid (weeks run Sunday 00:00 local → next
+Sunday). Only `revenue` and `completed_jobs` carry `supportsTimePeriod`; those show a period suffix and a
+period-over-period delta chip ("vs last week" / "vs yesterday"). The choice persists per metric in
+`user_preferences.preferences.dashboard_metric_periods`. Stateful counts get no delta — that would need
+historical snapshots. Overdue Jobs renders in an `alert` (red) tone when > 0.
 
-- Large formatted value (number, or currency e.g. "$12,450")
-- Label + optional period suffix
-- Delta chip vs the prior period (time-aware metrics only)
-- Overdue Jobs renders with an `alert` (red-tinted) tone when its value > 0
-- Click → drill-down to the filtered list (`drillDownHref`):
-  - `open_quotes` → `/quotes?status=active`
-  - `not_started_jobs` → `/jobs?status=not_started`
-  - `in_progress_jobs` → `/jobs?status=in_progress`
-  - `completed_jobs` → `/jobs?status=completed`
-  - `overdue_jobs` → `/jobs?overdue=true`
-  - `revenue` → `/jobs?status=shipped`
+**Stored keys migrated or dropped on read** (`getPinnedMetricKeys`, persisted when it changes):
+`weekly_revenue` / `monthly_revenue` → `revenue`; `active_jobs` → `not_started_jobs` (the old union metric was
+split in two — keep one tile in roughly the same slot); `REMOVED_KEYS` = `at_risk_count`,
+`low_inventory_count`, `total_customers`, `total_parts` dropped outright. **Those four are retired — the
+at-risk / alert-bell surface is gone and must not be re-promised.**
+
+**Withdrawn:** bucket revenue by `jobs.shipped_at`, or select `job_last_ship_date` as a computed column —
+wrong because `shipped_at` does not exist in the dual-status model and `job_last_ship_date` is a `(uuid)`
+function, not a jobs-row column, so PostgREST answered 400. `updated_at` is the in-range proxy instead.
+
+**Deliberate approximation:** "completed" is counted from the fulfillment half (`fully_shipped`) of the FR-18
+done predicate, not both — a fully-shipped job is by definition done, so that clause is the tighter one.
+
+**Two gaps, verified in the code, fixed nowhere:** `getCount` — backing `open_quotes`, `not_started_jobs`,
+`in_progress_jobs` — does **not** filter `deleted_at IS NULL`, so those three tiles count archived rows, while
+`getOverdueJobs` / `getRevenueInRange` / `getCompletedJobsInRange` all do; this contradicts the soft-delete
+standard in CLAUDE.md. And `getPinnedMetricValues` catches a per-metric failure as `{ value: 0 }`, so a failed
+read is indistinguishable from a real zero.
 
 ---
 
-## Recent Activity Section
+## Recent Activity
 
-A compact, glanceable feed of the latest **business milestones**, built
-UNION-on-read over the authoritative tables (no separate activity/audit table).
-Implemented by `getDashboardActivity` (`utils/dashboardAccess.ts`) and rendered
-by `components/dashboard/RecentActivity.tsx` (a collapsible accordion whose
-open/closed state persists in `localStorage`).
+A glanceable feed built **UNION-on-read over the authoritative tables** — deliberate, not a pending "activity
+log table": per-tenant volume is tiny and the timestamps already live on the source rows, so a second source
+of truth would only invite drift. `getDashboardActivity` / `getActivityStream` in `utils/dashboardAccess.ts`;
+card rendered by `components/dashboard/RecentActivity.tsx`, a collapsible accordion whose state persists in
+`localStorage` (`jigged-recent-activity-expanded`).
 
-**Query:** merge the sources below, ORDER BY timestamp DESC, default LIMIT 6.
+| Surface | Sources | Limit (per source before the merge) |
+|---|---|---|
+| Dashboard card | Quote created, job created, job completed, shipment (`shipments.created_at` → "shipped") | 6 (`max(limit × 3, 12)`) |
+| `/dashboard/{companyId}/activity` | the above **plus** notes (split into note vs photo events), `job_operations` — both plain completions and vendor-tagged `sent`/`received` for outside operations — and **`inventory_transactions`** (`stock_in` / `stock_out` / `moved` / `counted`, carrying location + quantity, transfers folded to one row by `foldTransfers`, and excluded unless the type is explicitly requested). Type-filter chips + `before`-cursor "Load more" | 30 (`ACTIVITY_PER_SOURCE = 50`) |
 
-**Dashboard card sources** (business milestones only):
-
-- Quote created (`quotes.created_at`)
-- Job created (`jobs.created_at`)
-- Job completed (`jobs.completed_at`)
-- Shipment (`shipments.created_at` → action "shipped")
-
-Shipments come from the real `shipments` table (there is no `jobs.shipped_at`
-column in the dual-status model). Floor chatter — notes, photos, and operation
-completions — is deliberately **excluded** from the dashboard card and lives on
-the dedicated `/activity` page instead.
-
-**Display per row:**
-
-- Icon (colored per activity type)
-
-- Entity number (Q-0089 or J-0042)
-
-- Action text ("created", "completed", "shipped")
-
-- Relative timestamp ("2h ago", "yesterday") with an absolute-time tooltip
-
-**"View all activity" link:** navigates to the full activity stream at
-`/dashboard/{companyId}/activity` (`app/dashboard/[companyId]/activity/page.tsx`)
-— `getActivityStream` there adds `notes` (as note/photo events) and
-`job_operations` completions, with type-filter chips and `before`-cursor
-pagination ("Load more").
-
-**Empty State:** "No recent activity." on the dashboard card; "No activity yet."
-on the `/activity` page.
+Shipments come from the real `shipments` table — there is no `jobs.shipped_at` in the dual-status model.
+**Floor chatter is deliberately excluded from the card** and lives only on the `/activity` page, reached by the
+card's **"View all activity"** link (`viewAllHref`, set by `page.tsx`; the link renders only when it is). Each row:
+type-coloured icon, entity number (Q-0089 / J-0042), action text, relative timestamp with an absolute-time
+tooltip. Empty: "No recent activity." on the card, "No activity yet." on the page.
 
 ---
 
 ## AI Insights
 
-Below Recent Activity the dashboard renders the AI Insights area — an ask-bar
-(`InsightsChat`) and a grid of saved charts (`InsightsSection`) — gated on the
-per-company `ai_insights` feature flag (`page.tsx` shows it only when
-`features.ai_insights` is set and the flag has finished loading). It is **not**
-documented here to avoid duplication: see [AI Insights & Charts](ai-insights.md)
-for the full spec (text-to-SQL flow, saved-insight persistence, prompts, and the
-"AI only on explicit user action" contract). This module doc only records that
-the dashboard hosts it, flag-gated.
+Below Recent Activity: ask-bar (`InsightsChat`) + saved charts (`InsightsSection`), gated on the `ai_insights`
+flag, which is **opt-out** (on unless a system admin turns it off for the tenant) and stays hidden while the
+flag loads so it never flashes in then out. Full spec — text-to-SQL flow, persistence, prompts, and the "AI
+only on explicit user action" contract — is in [AI Insights & Charts](ai-insights.md).
+
+**Nothing on this page may call a paid AI provider on mount.** `page.tsx`'s effects fire plain Supabase reads
+only (`getMetricValue`, `getDashboardActivity`); the ask-bar is driven by a submit. This is stated here, not
+just deferred, because **this is the page the rule was written from** — `AlertBadge` → `/api/insights/{id}/dashboard`
+once fired five Anthropic calls per dashboard load, nobody ever read the output, and it burned the credits in
+days (CLAUDE.md, "AI calls require an explicit user action"). A new tile is the obvious way to reintroduce it.
 
 ---
 
-## Quick Actions
+## Responsive
 
-**The dashboard has no quick-create actions.** There is no "New Quote" or
-"New Job" button on this page — quotes are created from the Quotes list and jobs
-are created only by converting an accepted quote (see [Quotes](quotes.md) →
-"Convert to Job"). This is intentional: the dashboard is an overview surface, not
-a creation entry point.
-
-> **Note:** A `components/dashboard/QuickActions.tsx` component (a "New Quote"
-> button linking to `/dashboard/{companyId}/quotes/new`) still exists in the tree
-> and is re-exported from `components/dashboard/index.ts`, but the live
-> `page.tsx` never mounts it — it is unmounted dead code and renders nothing. A
-> separate "+ New Job" button pointing at `/dashboard/{companyId}/jobs/new` was
-> removed earlier when jobs moved to quote-conversion-only; that route no longer
-> exists.
+≥ 900px (MUI `md`): 4 scorecards per row (`repeat(4, 1fr)`); < 900px: 2 (`repeat(2, 1fr)`). Sections stack
+single-column at every width.
 
 ---
 
-## Responsive Behavior
+## Data refresh
 
-**Desktop / Tablet (≥ 900px, MUI `md`):**
+**As built:** everything is fetched **once on mount** and never again — metrics via `useLoad` in
+`PinnedMetrics` (and `InsightsSection`), Recent Activity and the empty-state check via `useEffect` in
+`page.tsx`. No auto-poll, no live subscription, no refresh button, no pull-to-refresh; fresh data requires
+re-navigating.
 
-- 4 metric scorecards in a row (`repeat(4, 1fr)`)
+**Intended, not built** *(untracked — was "see #550", now closed)*: manual refresh button + fresh-on-mount + a
+visible "last updated HH:MM", so numbers are user-driven and their age is legible. Deliberately excluded from
+the default: **no live subscription, no default auto-poll — KPI tiles must never poll on their own.** A
+hands-free wall display may *opt in* to a slow 5–15 minute refresh. SSE is reserved for a genuinely
+time-critical surface such as machine status or alarms; KPI tiles never use it.
 
-- Single-column stack for the sections below (metrics → activity → insights)
+**Withdrawn:** "auto-refresh every 60s + pull-to-refresh on mobile" — superseded by the model above, not
+planned as written.
 
-**Mobile (< 900px):**
-
-- 2 metric scorecards per row (`repeat(2, 1fr)`)
-
-- Single column, stacked sections
-
----
-
-## Data Refresh
-
-**Current behavior (shipped):** the dashboard fetches all of its data **once on
-mount** and does not refresh after that. Metrics load via `useLoad` in
-`PinnedMetrics` (and `InsightsSection`); Recent Activity and the empty-state
-check load via `useEffect` in `page.tsx`. There is no auto-poll, no live
-subscription, no refresh button, and no pull-to-refresh — a user sees fresh data
-only by re-navigating to the page.
-
-**Canonical refresh model (Planned — see #550):** the intended shape is a
-**manual refresh button** plus **fresh-on-mount** plus a visible
-**"last updated HH:MM" timestamp**, so the numbers are user-driven and their age
-is always legible. Deliberately excluded from the default: **no live
-subscription** and **no default auto-poll** — KPI tiles must never poll on their
-own.
-
-- **Opt-in slow refresh (Planned — see #550):** a hands-free wall display may
-  opt into a slow periodic refresh (5–15 minutes). This is opt-in only, never
-  the default, and is intended purely for an unattended screen.
-- **Real-time (SSE) — only for a time-critical board:** escalate to a real-time
-  push (SSE) *only* for a genuinely time-critical surface such as machine
-  status / alarms. KPI tiles never use SSE.
-
-None of the above ships today; the section describes the target so the current
-"fetch once on mount" behavior is not mistaken for the end state.
+Also wanted: a wider period range for time-aware metrics (Month / Year / All Time).
 
 ---
 
-## Acceptance Criteria
+## Verified behaviour
 
-Each bullet is a Given/When/Then scenario carrying a verification clause — a pointer to the test that proves it, a manual procedure, or an explicit automation-pending tag. Every editable entity has at least one edit -> save -> reload -> persists bullet. Doc-vs-code disagreements this audit surfaced are recorded in the divergence report on issue #340.
+As-built, verified 2026-08-03.
 
-**Metric scorecards (values & drill-down)**
+| Behaviour | Enforced by |
+|---|---|
+| Defaults when nothing is stored; the Overdue fold-in migration, capped at the slot count (and that a deliberate removal sticks); legacy key migration (`weekly_revenue` → `revenue`); the pins/periods upsert round-trip | `__tests__/utils/dashboardPinnedMetrics.test.ts` — `describe('getPinnedMetricKeys — Overdue-selectable migration')`, 7 its |
+| Reopening the picker re-seeds from the stored pins, dropping an unsaved in-modal addition | `__tests__/components/dashboard/MetricPickerModal.test.tsx` — `describe('MetricPickerModal — reopen re-seeds selection from currentKeys')`, 1 it |
+| The overdue count uses one canonical clause set on the same builder as the jobs list, so tile and list agree | `__tests__/utils/jobsAccess.test.ts` — `describe('applyOverdueJobsFilter')`, 1 it |
+| The card returns only business milestones — never notes/photos/operations — newest-first, capped to the requested limit | `__tests__/utils/dashboardAccess.test.ts` — `describe('getDashboardActivity')`, 2 its |
+| `/activity` adds floor activity, separates text notes from photo notes, tags outside-op sent/received by vendor, merges sources newest-first, and **degrades best-effort when one source query errors** (returns the others, never throws) | same file — `describe('getActivityStream')`, 5 its |
+| Inventory events say what moved, how much and where; a transfer folds to the leg saying where stock ended up; a lone depletion leg survives; an adjustment reads as a count; the type is left out unless asked for | same file — `describe('inventory activity')`, 5 its |
 
-- [ ] **Given** a company with no stored pinned-metric preference, **when** the dashboard loads, **then** the four default tiles (Overdue Jobs, Open Quotes, Jobs Not Started, Jobs In Progress) render — *verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'returns defaults (which include Overdue) when no prefs are stored'*.
-- [ ] **Given** the Open Quotes metric, **when** its value is computed, **then** it counts quotes with `status = 'active'` for the company — *automation-pending (`getMetricValue` → `getCount('quotes', …, { status: ['active'] })`); no scorecard-value unit test yet*.
-- [ ] **Given** the Jobs-Not-Started and Jobs-In-Progress metrics, **when** they are computed, **then** they count `jobs.production_status = 'not_started'` and `= 'in_progress'` respectively (never the removed `jobs.status`) — *automation-pending (`getMetricValueWithDelta`)*.
-- [ ] **Given** the Revenue metric with This Week selected, **when** it is computed, **then** it sums related `quote_line_items.total_price` for jobs with `fulfillment_status = 'fully_shipped'` bucketed by `updated_at`, and returns a prior-period value for the delta — *automation-pending (`getRevenueInRange` / `getMetricValueWithDelta` `case 'revenue'`)*.
-- [ ] **Given** the Overdue Jobs tile with a value > 0, **when** it renders, **then** it uses the alert (red) tone and its count matches the jobs-list overdue filter (shared `applyOverdueJobsFilter`) — *automation-pending (`getOverdueJobs`)*.
-- [ ] **Given** any metric tile, **when** it is clicked, **then** it navigates to the matching filtered list (e.g. Open Quotes → `/quotes?status=active`, Jobs Not Started → `/jobs?status=not_started`, Overdue Jobs → `/jobs?overdue=true`), and that list honours the query param — *manual: click each tile; the jobs/quotes list pages read `useSearchParams` (`app/dashboard/[companyId]/jobs/page.tsx`, `.../quotes/page.tsx`)*.
-
-**Edit pinned metrics (edit -> save -> reload -> persists)**
-
-- [ ] **Given** the metric picker open, **when** the user pins/unpins and reorders metrics (up to 4) and saves, **then** the selection + order write to `user_preferences.preferences.dashboard_pinned_metrics` and survive a reload — *write path verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'persists the folded list AND stamps the migration flag'` (which exercises the read/upsert round-trip via `setPinnedMetricKeys`); reload-persistence E2E automation-pending (#367)*.
-- [ ] **Given** the picker already holds 4 metrics, **when** the user tries to add a fifth, **then** the unpicked rows are disabled and the selection stays capped at 4 — *automation-pending (`MetricPickerModal` `PINNED_METRIC_SLOTS` guard; `handleToggle`)*.
-- [ ] **Given** a metric was added inside the picker but not saved, **when** the picker is reopened, **then** the selection re-seeds from the stored pins (no stale in-modal addition) — *verified by `__tests__/components/dashboard/MetricPickerModal.test.tsx > 'MetricPickerModal — reopen re-seeds selection from currentKeys' > 'drops an in-modal-added metric when reopened with the SAME currentKeys (no stale selection)'*.
-- [ ] **Given** pre-existing prefs from before Overdue Jobs was a selectable metric, **when** they load once, **then** Overdue is folded into the front (capped at 4) and the migration flag is stamped so a later deliberate removal sticks — *verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'folds Overdue into the front of a pre-existing list (flag absent)'` AND `'does NOT re-add Overdue once the migration flag is set (deliberate removal sticks)'`*.
-- [ ] **Given** a stored legacy metric key (e.g. `weekly_revenue`), **when** the pinned keys load, **then** it is migrated to the current key (`revenue`) — *verified by `__tests__/utils/dashboardPinnedMetrics.test.ts > 'getPinnedMetricKeys — Overdue-selectable migration' > 'still migrates legacy keys while folding Overdue in'*.
-
-**Edit time period (edit -> save -> reload -> persists)**
-
-- [ ] **Given** the Today / This Week toggle, **when** the user switches period, **then** time-aware tiles re-fetch for that window and the choice writes to `user_preferences.preferences.dashboard_metric_periods` so it is restored on reload — *write path verified indirectly by the `user_preferences` upsert round-trip in `__tests__/utils/dashboardPinnedMetrics.test.ts`; period-specific persistence + reload E2E automation-pending (#367) (`setMetricTimePeriod` / `getMetricTimePeriods`)*.
-
-**Recent Activity feed**
-
-- [ ] **Given** the dashboard, **when** the Recent Activity card loads, **then** it shows only business milestones (jobs created/completed, quotes created, shipments) — never notes/photos/operations — newest first — *verified by `__tests__/utils/dashboardAccess.test.ts > 'getDashboardActivity' > 'returns only business milestones (no notes/photos/operations), newest first'*.
-- [ ] **Given** a requested limit, **when** the dashboard activity is fetched, **then** it is capped to that many rows, still newest-first — *verified by `__tests__/utils/dashboardAccess.test.ts > 'getDashboardActivity' > 'caps the card to the requested limit'*.
-- [ ] **Given** the full `/activity` page, **when** it loads, **then** it also surfaces floor activity and separates text notes from photo notes — *verified by `__tests__/utils/dashboardAccess.test.ts > 'getActivityStream' > 'includes floor activity and separates text notes from photo notes'*.
-- [ ] **Given** the `/activity` stream with a limit, **when** multiple sources are merged, **then** results are newest-first and capped to the limit — *verified by `__tests__/utils/dashboardAccess.test.ts > 'getActivityStream' > 'merges multiple sources newest-first and caps to the limit'*.
-- [ ] **Given** one activity source query errors, **when** the stream is assembled, **then** it degrades best-effort (returns the other sources / empty, never throws) — *verified by `__tests__/utils/dashboardAccess.test.ts > 'getActivityStream' > 'returns [] (best-effort) when a source query errors'*.
-- [ ] **Given** the Recent Activity accordion, **when** the user expands/collapses it, **then** the open state persists across reload via `localStorage` — *automation-pending (`RecentActivity` `STORAGE_KEY = 'jigged-recent-activity-expanded'`)*.
-- [ ] **Given** the Recent Activity card, **when** "View all activity" is clicked, **then** it navigates to `/dashboard/{companyId}/activity` — *manual: the link renders when `viewAllHref` is set (`app/dashboard/[companyId]/page.tsx`)*.
-
-**Load, empty states & no-AI-on-mount**
-
-- [ ] **Given** a logged-in user, **when** they land on `/dashboard/{companyId}`, **then** the dashboard renders as the home screen — *manual: post-login redirect resolves to the dashboard route*.
-- [ ] **Given** a tenant whose four core metrics are all 0, **when** the dashboard loads, **then** the OnboardingCard shows (whole-dashboard empty state) and the Recent Activity card shows "No recent activity." — *automation-pending (`page.tsx` `isEmpty`; `RecentActivity` empty branch)*.
-- [ ] **Given** the dashboard mounts, **when** its effects run, **then** only plain Supabase reads fire (metrics + activity) and no AI endpoint is called on mount — the AI Insights area is gated on the `ai_insights` feature flag and driven by explicit user action — *manual: per the "AI calls require an explicit user action" engineering principle; `page.tsx` fetches via `getMetricValue`/`getDashboardActivity` only*.
-- [ ] **Given** the app, **when** a user looks for a manual "New Job" create route from the dashboard, **then** none exists (jobs are created via quote conversion) — *manual: no `/jobs/new` route under `app/dashboard/[companyId]/jobs/`*.
-
----
-
-## Future Enhancements
-
-- Wider time-period range for time-aware metrics (Month / Year / All Time — a **Today / This Week** toggle already ships; see Metric Scorecards)
-- The canonical refresh model (manual refresh button + last-updated timestamp, optional opt-in slow refresh for a wall display, SSE only for a time-critical board) is tracked separately — see the **Data Refresh** section above and **#550**. The old "auto-refresh every 60s / pull-to-refresh on mobile" idea is superseded by that model and is not planned as written.
-
-> **Note:** activity is served UNION-on-read over the source tables (jobs,
-> quotes, shipments, notes, job_operations) — a deliberate design choice, not
-> a pending "activity log table." See `getActivityStream` in
-> `utils/dashboardAccess.ts`.
+**Gaps, automation-pending ([#367](https://github.com/debola31/Jigged/issues/367)):** every scorecard *value*
+(`getMetricValue`, `getMetricValueWithDelta`, `getRevenueInRange`, `getOverdueJobs`) — there is no
+scorecard-value unit test; the 4-slot cap in `MetricPickerModal`; period persistence across reload; the
+accordion's `localStorage` round-trip; tile → filtered-list navigation; the empty-tenant OnboardingCard
+branch.

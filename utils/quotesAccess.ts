@@ -37,8 +37,8 @@ import type { ComputedPartPricingTier } from '@/types/partPricing';
 
 /**
  * Cast a DB row to Quote. The DB stores `status` as text with a CHECK
- * constraint pinning it to QuoteStatus values (see schema.prod.sql line
- * ~221); the generated Database type only sees `string`. Centralized
+ * constraint pinning it to QuoteStatus values (`quotes_status_check`, in the
+ * baseline migration); the generated Database type only sees `string`. Centralized
  * here so the assertion is documented once instead of scattered.
  */
 function asQuote(row: Record<string, unknown> & { status: string }): Quote {
@@ -102,8 +102,8 @@ function hydrateCreators<T extends QuoteWithRelations>(
 // Select all quote_line_items columns (incl. lead_time_text) plus the joined
 // part. Uses `*` rather than an explicit column list — matching
 // getLineItemsForQuote — so a newly-added column loads without an explicit
-// reference that schemaEmbedCheck would flag against the prod snapshot before
-// the migration has deployed (the snapshot only refreshes post-deploy).
+// reference that schemaEmbedCheck would flag before the column exists in
+// types/database.ts.
 const QUOTE_LINE_ITEM_FIELDS = `
   *,
   parts(id, part_name, description, primary_unit)
@@ -394,7 +394,7 @@ export async function createQuote(
     .insert({
       company_id: companyId,
       // quote_number is NOT NULL but the set_quote_number trigger
-      // (supabase/schema.prod.sql ~line 4202) fills it from
+      // (baseline, reworked by 20260621213555_unify_order_numbering) fills it from
       // generate_quote_number() when the value is '' or NULL. Sending ''
       // explicitly satisfies the typed Insert signature without lying
       // about runtime behavior.

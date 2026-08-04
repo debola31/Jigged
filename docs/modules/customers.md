@@ -413,7 +413,7 @@ Each bullet cites a real test. Gaps are named as gaps rather than implied to be 
 | **`getCompanyDefaultPaymentTerms` / `setCompanyDefaultPaymentTerms` untested** — only the pure reader is covered, so the read-modify-write that actually persists the shop default has no test. |
 | **No test for `packingSlipPdf.ts`** — the printed freight row is unverified in CI. |
 
-Filled since: the contact-archive rules and the billing-default clear-then-set are covered by `__tests__/utils/customerContactsAccess.test.ts`, and the case-insensitive identity by `__tests__/utils/customerAccess.test.ts > 'finds the archived row whatever case the name was typed in'` plus `api/tests/integration/test_import_api.py::test_execute_matches_an_existing_customer_regardless_of_case`.
+Filled since: the contact-archive rules and the billing-default clear-then-set are covered by `__tests__/utils/customerContactsAccess.test.ts`, and the case-insensitive identity by `__tests__/utils/customerAccess.test.ts` plus `api/tests/integration/test_import_api.py::test_execute_matches_an_existing_customer_regardless_of_case`.
 
 ---
 

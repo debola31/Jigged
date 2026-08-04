@@ -68,13 +68,19 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: 'any', // job details are deliberately usable in landscape on a tablet
     icons: [
       { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
-      // Rendered at request time from the same vector as `app/apple-icon.tsx`, so there are no
-      // binary assets to keep in sync and nothing upscaled from the 96px logo.
-      { src: '/icon-192', sizes: '192x192', type: 'image/png' },
-      { src: '/icon-512', sizes: '512x512', type: 'image/png' },
+      // Static files in `public/`, with extensions. They were `ImageResponse` routes rendering
+      // the same vector at request time — one serverless invocation per icon, per cold start, to
+      // return bytes that never change. They are byte-identical to what those routes emitted
+      // (captured from production), so nothing about the rendering changed; only when it happens.
+      //
+      // The routes also had a cost that was not obvious until it bit: every route under `app/` is
+      // a Serverless Function, the Hobby plan caps a deployment at 12, and these five were most of
+      // the budget. See .github/workflows/deploy-production.yml.
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       // `maskable` lets Android crop to its own shape without clipping the mark; it needs the
-      // safe-zone padding that `icon-maskable` builds in.
-      { src: '/icon-maskable', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      // safe-zone padding this icon builds in.
+      { src: '/icon-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
   };
 }

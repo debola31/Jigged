@@ -91,16 +91,49 @@ to `main`, plus `workflow_dispatch` for re-running after a migration is fixed. T
 | Job | What it does |
 |---|---|
 | `gate` — "Database is ready for this code" | Polls the check runs on the merge commit every 15s for the newest run named by `SUPABASE_CHECK_NAME`. `success` → exit 0. Any other conclusion → exit 1, printing Supabase's `.output.summary`. No verdict inside `GATE_TIMEOUT_SECONDS` (600) → exit 1. |
-| `deploy` — needs `gate` | `vercel pull --environment=production`, `vercel build --prod`, `vercel deploy --prebuilt --prod`. |
+| `deploy` — needs `gate` | POSTs the Vercel deploy hook (`VERCEL_DEPLOY_HOOK_URL`). Vercel builds it exactly as it does for a git push. |
+
+**This is the only route to production.** `vercel.json` sets
+`git.deploymentEnabled: { "main": false }`, so pushing to `main` no longer deploys by itself —
+the gate does, after the database says yes. Preview deployments for every other branch are
+unaffected, which matters because they pair with the Supabase preview branches.
 
 **Why it exists:** the migration apply and the frontend build used to run in parallel with no ordering,
 so when one failed the other shipped anyway — the 2026-08-03 outage above. **It fails closed**: no
 verdict is not the same as a good verdict, so a Supabase outage blocks deploys. That cost is
 deliberate. If it blocks, fix the migration and merge again.
 
-**Withdrawn:** an earlier attempt polled production's `schema_migrations` over a direct database
-connection — wrong because it put a prod DB credential in CI and created a second source of truth that
-could disagree with Supabase's own verdict. The gate reads the verdict that already exists instead.
+**The trigger proves acceptance, not completion.** Vercel reports its own build failures; this
+workflow does not wait. That is a deliberate limit: a build failing *after* the gate leaves
+production on the previous code against an already-migrated database — old code, new schema, the
+direction additive migrations are written to survive. The dangerous ordering is new code against old
+schema, and that is what the gate refuses.
+
+### Two withdrawn approaches, and why
+
+**Polling `schema_migrations` directly.** Put a prod DB credential in CI and created a second source
+of truth that could disagree with Supabase's own verdict. The gate reads the existing verdict instead.
+
+**Building and deploying with the Vercel CLI.** Never shipped a single commit; failed three times on
+three different structural limits, none of them misconfiguration:
+
+1. `vercel build` expands this repo's `functions: { "api/**" }` glob into one Serverless Function per
+   matched Python file — **82**, against a **12**-function cap on Hobby. It also installed the Python
+   dependencies 82 times, which is where a 21-minute build came from.
+2. Narrowing the glob to the real entrypoint `api/index.py` gives one function of **244 MB** against a
+   **225 MB** cap. The bulk is the dependency stack (three LLM SDKs, Stripe, Sentry, two Postgres
+   drivers), so excluding `.vercel`, `public`, `docs` and the test directories from the bundle changed
+   the total by **0.00 MB**. Measured, not assumed.
+3. A runner has no Vercel build cache, so even a working version traded a ~3 minute deploy for ~30.
+
+Vercel's own builder hits none of these and had been deploying this app throughout. Handing the build
+back to it left this workflow responsible only for ordering — which was always the point. Measured
+after the change: **gate 5s, trigger 5s.**
+
+**If deploys ever stop reaching production**, the first thing to check is whether the hook still
+exists (`vercel deploy-hooks list`) and matches the `VERCEL_DEPLOY_HOOK_URL` secret. Reverting
+`git.deploymentEnabled` in `vercel.json` restores Vercel's own auto-deploy immediately, at the cost of
+the ordering guarantee.
 
 ### Gotchas in the gate, each of which cost real time
 

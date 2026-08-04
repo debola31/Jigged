@@ -90,7 +90,7 @@ to `main`, plus `workflow_dispatch` for re-running after a migration is fixed. T
 
 | Job | What it does |
 |---|---|
-| `gate` — "Database is ready for this code" | Polls the check runs on the merge commit every 15s for the newest run named by `SUPABASE_CHECK_NAME`. `success` → exit 0. Any other conclusion → exit 1, printing Supabase's `.output.summary`. No verdict inside `GATE_TIMEOUT_SECONDS` (600) → exit 1. |
+| `gate` — "Checks passed and database is ready" | Polls the merge commit's check runs every 15s until **every** name in `REQUIRED_CHECKS` has completed — the migration apply *and* the test suites. All `success` → exit 0. Any other conclusion → exit 1 immediately, listing every failure rather than the first. Anything still incomplete at `GATE_TIMEOUT_SECONDS` (1500) → exit 1. |
 | `deploy` — needs `gate` | POSTs the Vercel deploy hook (`VERCEL_DEPLOY_HOOK_URL`). Vercel builds it exactly as it does for a git push. |
 
 **This is the only route to production.** `vercel.json` sets
@@ -138,8 +138,18 @@ the ordering guarantee.
 ### Gotchas in the gate, each of which cost real time
 
 - **The check is named `Supabase Preview` on the merge commit too** — same name, but there it reports
-  the *production* apply. If Supabase renames it, `SUPABASE_CHECK_NAME` is the one line to change; the
-  gate fails closed until it is corrected.
+  the *production* apply. If Supabase renames it, edit `REQUIRED_CHECKS`; the gate fails closed until
+  it is corrected.
+- **`REQUIRED_CHECKS` matches the API's BARE check name**, not the "Tests / Backend Tests" form the
+  GitHub UI shows. A name that never matches shows as `absent` forever and times the gate out rather
+  than passing it — safe, but the summary tells you to compare against
+  `gh api repos/OWNER/REPO/commits/SHA/check-runs --jq '.check_runs[].name'`.
+- **The gate must never list its own checks.** "Checks passed and database is ready" and "Trigger the
+  Vercel production deploy" are deliberately absent from `REQUIRED_CHECKS`; including either makes the
+  gate wait on itself and time out every run.
+- **An `absent` check counts as waiting, not as missing.** A check that has not been created yet is
+  indistinguishable from one about to be, so treating absence as "fine" would deploy before it ever
+  ran — exactly the ordering bug this workflow exists to prevent, one level up.
 - **The gate parses status and conclusion only, never the summary.** Supabase puts a raw multi-line SQL
   error in `.output.summary`; folding it into the delimited row makes it many lines and every parsed
   field garbage — which reads as a *timeout* rather than a *failure*, the most dangerous possible

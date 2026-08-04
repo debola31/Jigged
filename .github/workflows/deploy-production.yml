@@ -60,105 +60,145 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The check Supabase posts for the production migration apply. Confusingly it
-  # is named "Supabase Preview" on the merge commit too — same name, but there it
-  # reports the PRODUCTION apply rather than a preview branch. If Supabase ever
-  # renames it, this is the one line to change; the gate fails closed until it is
-  # corrected, which is the safe direction.
-  SUPABASE_CHECK_NAME: Supabase Preview
-  # How long to wait for that verdict. Observed: ~38s from merge to conclusion.
-  # Ten minutes is generous enough that a slow apply is never mistaken for a
-  # failed one.
-  GATE_TIMEOUT_SECONDS: 600
+  # EVERY check that must be green before production ships. One per line, matched
+  # against the check-run name exactly as the API reports it — which is the BARE
+  # name, without the "Tests / " workflow prefix the GitHub UI displays. Copy them
+  # from:
+  #
+  #     gh api repos/OWNER/REPO/commits/SHA/check-runs --jq '.check_runs[].name'
+  #
+  # "Supabase Preview" is confusingly named: on a merge commit it reports the
+  # PRODUCTION migration apply, not a preview branch.
+  #
+  # This job's OWN checks are deliberately absent. Listing "Database is ready for
+  # this code" here would make the gate wait for itself and time out every run.
+  REQUIRED_CHECKS: |
+    Supabase Preview
+    Backend Tests
+    Frontend Tests
+    Playwright E2E (local Supabase)
+  # Long enough for the slowest of them. Playwright runs ~9 minutes, so the old
+  # 600s — sized when this waited on Supabase alone (~38s) — would have timed out
+  # on a healthy build and blocked the deploy. Fifteen minutes of headroom is
+  # cheap; a false "no verdict" is not.
+  GATE_TIMEOUT_SECONDS: 1500
 
 jobs:
   gate:
-    name: Database is ready for this code
+    name: Checks passed and database is ready
     runs-on: ubuntu-latest
     permissions:
       contents: read
       checks: read
     steps:
-      - name: Wait for Supabase to finish applying migrations to production
+      - name: Wait for every required check on this commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          echo "Waiting for '${SUPABASE_CHECK_NAME}' on ${GITHUB_SHA:0:8}…"
+          echo "Commit ${GITHUB_SHA:0:8} — waiting for:"
+          printf '%s\n' "$REQUIRED_CHECKS" | sed '/^[[:space:]]*$/d;s/^/  - /'
           DEADLINE=$(( SECONDS + GATE_TIMEOUT_SECONDS ))
 
-          # Selects the newest run of that check. A re-run after a fix must
-          # supersede the original failure rather than be masked by it.
+          # Newest run of a given check name. A re-run after a fix must supersede
+          # the original failure rather than be masked by it.
           NEWEST='[.check_runs[] | select(.name == $n)] | sort_by(.started_at) | last'
 
           while :; do
-            # Status and conclusion ONLY — deliberately not the summary. Supabase
-            # puts the raw multi-line SQL error in .output.summary, so folding it
-            # into this delimited row makes it many lines, and every field parsed
-            # out of it is then garbage. That mistake reads as a timeout rather
-            # than a failure, which is the most dangerous possible misreading
-            # here: it turns "the migration failed" into "no answer yet".
-            STATE=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
-              | jq -r --arg n "$SUPABASE_CHECK_NAME" \
-                  "$NEWEST | if . == null then \"absent|\" else \"\(.status)|\(.conclusion // \"\")\" end")
+            # One API call per poll, reused for every check below. Fetching per
+            # check would multiply requests by the number of gates and read a
+            # slightly different moment for each.
+            RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" --paginate \
+                   | jq -s '{check_runs: (map(.check_runs) | add)}')
 
-            STATUS="${STATE%%|*}"
-            CONCLUSION="${STATE#*|}"
+            WAITING=""
+            FAILED=""
 
-            if [ "$STATUS" = "completed" ]; then
-              # Fetched separately, only when it is about to be printed.
-              SUMMARY=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
-                | jq -r --arg n "$SUPABASE_CHECK_NAME" \
-                    "$NEWEST | .output.summary // \"(no summary provided)\"")
+            while IFS= read -r NAME; do
+              [ -z "${NAME// }" ] && continue
 
-              if [ "$CONCLUSION" = "success" ]; then
-                echo "✅ Migrations applied to production. Safe to deploy."
-                exit 0
+              # Status and conclusion ONLY — deliberately never .output.summary.
+              # Supabase puts a raw multi-line SQL error there, so folding it into
+              # this delimited row makes it many lines and every field parsed out
+              # is garbage. That misreads a genuine FAILURE as a timeout, which is
+              # the most dangerous confusion available here.
+              STATE=$(printf '%s' "$RUNS" | jq -r --arg n "$NAME" \
+                "$NEWEST | if . == null then \"absent|\" else \"\(.status)|\(.conclusion // \"\")\" end")
+
+              STATUS="${STATE%%|*}"
+              CONCLUSION="${STATE#*|}"
+
+              if [ "$STATUS" != "completed" ]; then
+                # `absent` counts as waiting, not missing: a check that has not been
+                # created yet is indistinguishable from one about to be, and
+                # treating it as absent-forever would deploy before it ever ran.
+                WAITING="${WAITING}    ${NAME} (${STATUS})"$'\n'
+              elif [ "$CONCLUSION" != "success" ]; then
+                FAILED="${FAILED}    ${NAME} → ${CONCLUSION}"$'\n'
               fi
+            done <<< "$REQUIRED_CHECKS"
 
-              echo "::error::Supabase reported '${CONCLUSION}' applying migrations to production."
+            # A failure is final — nothing the remaining checks report can make
+            # this commit shippable, so stop rather than wait out the timeout.
+            if [ -n "$FAILED" ]; then
+              echo "::error::Required checks failed on this commit; production was not deployed."
+              printf '%s' "$FAILED"
               {
-                echo "## Production deploy blocked"
+                echo "## Production deploy blocked — required checks failed"
                 echo
-                echo "Supabase could not apply this commit's migrations to production,"
-                echo "so the frontend was **not** deployed. Production is still serving"
-                echo "the previous version, which matches the database it is talking to."
+                echo '```'
+                printf '%s' "$FAILED"
+                echo '```'
                 echo
-                echo "### What Supabase reported"
-                printf '%s\n' "$SUMMARY"
+                echo "Production is still serving the previous build."
                 echo
-                echo "Migrations are atomic and ordered — everything queued behind the"
-                echo "first failure is blocked by it, not independently broken."
+                echo "If the failure is \`Supabase Preview\`, the migration did not reach"
+                echo "production — open that check for the SQL error, fix the migration and"
+                echo "merge again. Never clear it with \`migration repair --status applied\`,"
+                echo "which records the file as done without running it."
                 echo
-                echo "Fix the migration and merge again. Do **not** clear this with"
-                echo "\`migration repair --status applied\`: that records the file as done"
-                echo "without running it, so its contents never reach production and the"
-                echo "next migration that depends on them fails the same way."
+                echo "If it is a test job, main is broken: fix forward or revert. Re-run this"
+                echo "workflow once the checks are green to ship without another merge."
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1
+            fi
+
+            if [ -z "$WAITING" ]; then
+              echo "✅ Every required check passed. Safe to deploy."
+              exit 0
             fi
 
             if [ "$SECONDS" -ge "$DEADLINE" ]; then
-              # FAIL CLOSED. No verdict is not the same as a good verdict, and
-              # shipping code whose schema assumptions are unverified is exactly
-              # what caused the outage this gate exists to prevent. The cost is
-              # that a Supabase outage blocks deploys; the escape hatch is a
-              # manual `vercel deploy --prod`, or re-running this workflow.
-              echo "::error::No verdict from '${SUPABASE_CHECK_NAME}' within ${GATE_TIMEOUT_SECONDS}s."
+              # FAIL CLOSED. No verdict is not a good verdict, and shipping code
+              # whose tests and schema are unverified is the failure this exists to
+              # prevent. The cost is that a stuck check blocks the deploy; re-run
+              # this workflow once it reports.
+              echo "::error::Still waiting after ${GATE_TIMEOUT_SECONDS}s; production was not deployed."
+              printf '%s' "$WAITING"
               {
-                echo "## Production deploy blocked — no answer from Supabase"
+                echo "## Production deploy blocked — checks never reported"
                 echo
-                echo "The migration check never reported within ${GATE_TIMEOUT_SECONDS}s, so"
-                echo "whether production has this commit's schema is **unknown**."
+                echo "Still incomplete after ${GATE_TIMEOUT_SECONDS}s:"
+                echo '```'
+                printf '%s' "$WAITING"
+                echo '```'
                 echo
-                echo "This gate fails closed on purpose: deploying on an unverified"
-                echo "database is the failure it exists to prevent. If Supabase is"
-                echo "healthy and this is a false alarm, re-run the workflow."
+                echo "This gate fails closed on purpose. A check stuck in \`queued\` is"
+                echo "usually a runner backlog — re-run this workflow once it reports."
+                echo
+                echo "A check stuck at \`absent\` instead means it never started, so the"
+                echo "name in \`REQUIRED_CHECKS\` may no longer match what the workflow"
+                echo "posts. Compare against:"
+                echo '```'
+                echo "gh api repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs --jq '.check_runs[].name'"
+                echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
 
+            echo "waiting (${SECONDS}s):"
+            printf '%s' "$WAITING"
             sleep 15
           done
 

@@ -266,7 +266,6 @@ export default function QuoteDetailPage() {
     ? (
         [
           { label: 'Payment terms', onQuote: quote.payment_terms, current: quote.customers.default_payment_terms },
-          { label: 'Lead time', onQuote: quote.lead_time_text, current: quote.customers.default_lead_time_text },
           { label: 'FOB', onQuote: quote.fob_point, current: quote.customers.default_fob_point },
         ] as const
       )

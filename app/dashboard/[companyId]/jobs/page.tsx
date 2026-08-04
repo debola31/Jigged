@@ -20,6 +20,9 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
+import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
+import { getAllCustomers } from '@/utils/customerAccess';
+import type { CustomerWithRelations } from '@/types/customer';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Select, { type SelectChangeEvent } from '@mui/material/Select';
@@ -156,9 +159,21 @@ export default function JobsPage() {
   const [overdueOnly, setOverdueOnly] = useState<boolean>(
     () => searchParams.get('overdue') === 'true'
   );
-  // Customer deep-link support (e.g. a link from a customer page) with no
-  // toolbar control — the search box already covers customer-name lookup.
-  const [customerId] = useState<string>(() => searchParams.get('customer') ?? '');
+  // Seeded from ?customer=<uuid> — the customer page's Jobs count links here —
+  // and bound to the visible Customer dropdown below.
+  //
+  // That dropdown was once removed as "redundant, search already matches
+  // customer name". True of the manual case, false of the two that matter:
+  // search_jobs_by_identifier is capped at LIMIT 100 and getAllJobs applies the
+  // status filters AFTER that cap, so a busy customer's search silently
+  // truncates in job-id order with nothing saying rows were dropped; and a
+  // substring cannot express "exactly this customer", which the count link
+  // requires. This filter is .eq('customer_id', …) on the main query, never the
+  // RPC, so it is exact by construction — and it doubles as the on-screen
+  // explanation for an arriving deep link, which previously had none.
+  const [customerId, setCustomerId] = useState<string>(
+    () => searchParams.get('customer') ?? '',
+  );
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
     field: 'created_at',
     sort: 'desc',
@@ -381,6 +396,13 @@ export default function JobsPage() {
       setCancelling(false);
     }
   };
+
+  // Customers for the filter dropdown. Best-effort: a failed load just means
+  // the filter has no options, never a broken jobs list.
+  const [customers, setCustomers] = useState<CustomerWithRelations[]>([]);
+  useEffect(() => {
+    getAllCustomers(companyId).then(setCustomers).catch(console.error);
+  }, [companyId]);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -661,6 +683,28 @@ export default function JobsPage() {
             ))}
           </Select>
         </FormControl>
+
+        <Box sx={{ minWidth: 220 }}>
+          <SearchableSelect
+            options={customers.map((c): SelectOption => ({ id: c.id, label: c.name }))}
+            value={customerId}
+            onChange={(value) => {
+              setCustomerId(value);
+              clearSelection();
+              // Keep the URL honest so refresh and share reproduce the view.
+              // replace, not push, so Back still returns wherever the user came
+              // from rather than re-applying a filter they just cleared.
+              const next = new URLSearchParams(searchParams.toString());
+              if (value) next.set('customer', value);
+              else next.delete('customer');
+              router.replace(`?${next.toString()}`, { scroll: false });
+            }}
+            label="Customer"
+            allowNone
+            noneLabel="All Customers"
+            size="small"
+          />
+        </Box>
 
         <FormControlLabel
           control={

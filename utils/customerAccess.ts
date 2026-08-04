@@ -23,7 +23,7 @@ import { toError } from '@/lib/supabaseErrors';
 /**
  * Customer access layer.
  *
- * A customer row holds identity (name, website) plus the shop's standing
+ * A customer row holds its name plus the shop's standing
  * commercial position on that customer: three default_* terms copied onto a NEW
  * quote at create time, and a manual credit_status. Contacts, addresses and
  * carrier accounts each live in their own table with their own access module.
@@ -185,15 +185,25 @@ export async function getCustomerWithRelations(
 
   // The two counts are independent of each other (and of the customer fetch),
   // so run them in parallel — was two sequential round-trips after the fetch.
+  // Both counts filter deleted_at IS NULL, matching what the Quotes and Jobs
+  // lists actually show. They did not, so an archived quote inflated the number
+  // and then wasn't there when you looked — which mattered twice over once the
+  // counts became links, and was a soft-delete-standard violation anyway.
+  //
+  // No company_id filter: customer_id is already unique per company and RLS
+  // scopes both tables, so adding it would buy nothing and cost a signature
+  // change on every caller.
   const [quotesRes, jobsRes] = await Promise.all([
     supabase
       .from('quotes')
       .select('*', { count: 'exact', head: true })
-      .eq('customer_id', customerId),
+      .eq('customer_id', customerId)
+      .is('deleted_at', null),
     supabase
       .from('jobs')
       .select('*', { count: 'exact', head: true })
-      .eq('customer_id', customerId),
+      .eq('customer_id', customerId)
+      .is('deleted_at', null),
   ]);
 
   // A failed count THROWS. It used to be logged and reported as 0, which turned
@@ -275,9 +285,7 @@ export async function checkCustomerNameExists(
 function formDataToColumns(formData: CustomerFormData) {
   return {
     name: formData.name.trim(),
-    website: formData.website.trim() || null,
     default_payment_terms: formData.default_payment_terms.trim() || null,
-    default_lead_time_text: formData.default_lead_time_text.trim() || null,
     default_fob_point: formData.default_fob_point.trim() || null,
     credit_status: formData.credit_status,
     credit_hold_note: formData.credit_hold_note.trim() || null,
@@ -379,12 +387,7 @@ async function reviveArchivedCustomerByName(
   // person can see what happened last time.
   const filled = formDataToColumns(formData);
   const revivePatch: Record<string, string | null> = { name: filled.name };
-  for (const key of [
-    'website',
-    'default_payment_terms',
-    'default_lead_time_text',
-    'default_fob_point',
-  ] as const) {
+  for (const key of ['default_payment_terms', 'default_fob_point'] as const) {
     if (filled[key] !== null) revivePatch[key] = filled[key];
   }
 
@@ -554,12 +557,6 @@ export function pickPaymentTerms(
   customer: Pick<Customer, 'default_payment_terms'> | null | undefined,
 ): string | null {
   return customer?.default_payment_terms?.trim() || null;
-}
-
-export function pickLeadTimeText(
-  customer: Pick<Customer, 'default_lead_time_text'> | null | undefined,
-): string | null {
-  return customer?.default_lead_time_text?.trim() || null;
 }
 
 export function pickFobPoint(

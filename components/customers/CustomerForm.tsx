@@ -10,11 +10,6 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogContentText from '@mui/material/DialogContentText';
-import DialogActions from '@mui/material/DialogActions';
 import Grid from '@mui/material/Grid';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
@@ -33,33 +28,35 @@ import {
 import type { CustomerContactFormData } from '@/types/customerContact';
 import {
   createCustomer,
-  updateCustomer,
-  softDeleteCustomer,
   checkCustomerNameExists,
 } from '@/utils/customerAccess';
 import { isValidEmail, isValidPhone } from '@/lib/validators';
 
 interface CustomerFormProps {
-  mode: 'create' | 'edit';
   initialData: CustomerFormData;
-  customerId?: string;
   companyId?: string;
   onSuccess?: (customer: Customer) => void;
   onCancel?: () => void;
 }
 
 /**
- * Customer form for create + edit. Mirrors VendorForm.
+ * Customer form — CREATE ONLY.
  *
- * Contacts and addresses are NOT edited here in edit mode — both are
- * managed via dedicated cards on the customer detail page. In create
- * mode, an embedded "Initial contact" accordion captures one optional
- * primary contact so the user can create + first-contact in one step.
+ * There is no edit mode any more. A customer's own fields are edited in place
+ * on the detail page (auto-save, per docs/interaction-standards.md §2), which
+ * is what let /customers/{id}/edit be deleted — contacts, addresses and carrier
+ * accounts were already editable there, so the customer's own fields being
+ * behind a route was the one inconsistent surface.
+ *
+ * Do NOT restore symmetry with VendorForm by re-adding the route: vendors and
+ * work centers still have edit pages and should follow customers, not the other
+ * way round.
+ *
+ * An embedded "Initial contact" accordion captures one optional primary contact
+ * so the user can create the customer and its first contact in one step.
  */
 export default function CustomerForm({
-  mode,
   initialData,
-  customerId,
   companyId: companyIdProp,
   onSuccess,
   onCancel,
@@ -75,7 +72,6 @@ export default function CustomerForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const handleChange =
     (field: keyof CustomerFormData) =>
@@ -107,7 +103,7 @@ export default function CustomerForm({
         const exists = await checkCustomerNameExists(
           companyId,
           formData.name,
-          mode === 'edit' ? customerId : undefined,
+          undefined,
         );
         if (exists) {
           errors.name = 'A customer with this name already exists';
@@ -121,7 +117,7 @@ export default function CustomerForm({
     // Initial contact validation — create mode only, and only when the
     // sub-form has any of name/email/phone filled in. Empty sub-form →
     // no contact row inserted.
-    if (mode === 'create') {
+    {
       const hasAnyContactField =
         contactData.name.trim() ||
         contactData.email.trim() ||
@@ -162,25 +158,16 @@ export default function CustomerForm({
 
     setLoading(true);
     try {
-      if (mode === 'create') {
-        const hasContact = contactData.name.trim() !== '';
-        const customer = await createCustomer(
-          companyId,
-          formData,
-          hasContact ? { ...contactData, is_primary: true } : undefined,
-        );
-        if (onSuccess) {
-          onSuccess(customer);
-        } else {
-          router.push(`/dashboard/${companyId}/customers/${customer.id}`);
-        }
-      } else if (customerId) {
-        const customer = await updateCustomer(customerId, formData);
-        if (onSuccess) {
-          onSuccess(customer);
-        } else {
-          router.push(`/dashboard/${companyId}/customers/${customerId}`);
-        }
+      const hasContact = contactData.name.trim() !== '';
+      const customer = await createCustomer(
+        companyId,
+        formData,
+        hasContact ? { ...contactData, is_primary: true } : undefined,
+      );
+      if (onSuccess) {
+        onSuccess(customer);
+      } else {
+        router.push(`/dashboard/${companyId}/customers/${customer.id}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -189,25 +176,9 @@ export default function CustomerForm({
     }
   };
 
-  const handleDelete = async () => {
-    if (!customerId) return;
-    setLoading(true);
-    try {
-      await softDeleteCustomer(customerId);
-      router.push(`/dashboard/${companyId}/customers`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-      setDeleteDialogOpen(false);
-    }
-  };
-
   const handleCancel = () => {
     if (onCancel) {
       onCancel();
-    } else if (mode === 'edit' && customerId) {
-      router.push(`/dashboard/${companyId}/customers/${customerId}`);
     } else {
       router.push(`/dashboard/${companyId}/customers`);
     }
@@ -241,14 +212,6 @@ export default function CustomerForm({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Website"
-                value={formData.website}
-                onChange={handleChange('website')}
-                disabled={loading}
-                placeholder="https://example.com"
-              />
             </Grid>
           </Grid>
         </CardContent>
@@ -289,14 +252,6 @@ export default function CustomerForm({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Lead time"
-                value={formData.default_lead_time_text}
-                onChange={handleChange('default_lead_time_text')}
-                disabled={loading}
-                helperText="However you normally phrase it on a quote."
-              />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               {/* FOB is about where title and risk transfer — NOT about who pays
@@ -366,7 +321,7 @@ export default function CustomerForm({
 
       {/* Initial contact — create mode only. Defaults to expanded; can be
           collapsed if the user plans to add contacts later from the detail page. */}
-      {mode === 'create' && (
+      {(
         <Accordion defaultExpanded elevation={2} sx={{ mb: 3 }}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Box>
@@ -461,18 +416,11 @@ export default function CustomerForm({
         </Accordion>
       )}
 
-      {/* Actions */}
+      {/* Actions. No Delete here — archiving lives on the detail page, whose
+          dialog names the customer and reports how many quotes and jobs
+          reference it. Two archive paths with different copy was the other
+          half of the inconsistency this rework removes. */}
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-        {mode === 'edit' && (
-          <Button
-            variant="outlined"
-            color="error"
-            onClick={() => setDeleteDialogOpen(true)}
-            disabled={loading}
-          >
-            Delete
-          </Button>
-        )}
         <Box sx={{ flex: 1 }} />
         <Button variant="outlined" onClick={handleCancel} disabled={loading}>
           Cancel
@@ -483,31 +431,10 @@ export default function CustomerForm({
           disabled={loading}
           startIcon={loading ? <CircularProgress size={20} /> : null}
         >
-          {loading
-            ? 'Saving...'
-            : mode === 'create'
-              ? 'Create Customer'
-              : 'Save Changes'}
+          {loading ? 'Saving...' : 'Create Customer'}
         </Button>
       </Box>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Customer?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            This customer will be removed from your lists. Its contacts, addresses,
-            and any quotes or jobs that reference it are kept — and you can bring it
-            back by re-creating or re-importing the same name.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" variant="contained">
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

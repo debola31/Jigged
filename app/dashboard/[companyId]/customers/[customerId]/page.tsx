@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -21,8 +22,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Stack from '@mui/material/Stack';
 import MuiLink from '@mui/material/Link';
-import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import StarIcon from '@mui/icons-material/Star';
@@ -33,7 +34,18 @@ import ArchiveOutlinedIcon from '@mui/icons-material/ArchiveOutlined';
 import {
   getCustomerWithRelations,
   softDeleteCustomer,
+  updateCustomer,
+  checkCustomerNameExists,
 } from '@/utils/customerAccess';
+import { type SaveState } from '@/components/common/SaveStatus';
+import CustomerIdentityFields from '@/components/customers/CustomerIdentityFields';
+import CustomerTermsCard from '@/components/customers/CustomerTermsCard';
+import CustomerCreditCard from '@/components/customers/CustomerCreditCard';
+import {
+  hasChanged,
+  normalizeSnapshot,
+  type EditableCustomerField,
+} from '@/components/customers/customerFieldEditing';
 import {
   getContactsForCustomer,
   archiveCustomerContact,
@@ -50,7 +62,9 @@ import {
 } from '@/utils/customerCarrierAccountsAccess';
 import { roleDisplayLabel } from '@/types/customerContact';
 import type { CustomerContact } from '@/types/customerContact';
-import type { CustomerAddress } from '@/types/customer';
+import { JOB_LIFECYCLE_STAGE_CONFIG, type JobLifecycleStage } from '@/types/job';
+import type { CustomerAddress, CustomerFormData } from '@/types/customer';
+import { EMPTY_CUSTOMER_FORM, customerToFormData } from '@/types/customer';
 import { BILL_TO_PARTY_LABELS } from '@/types/customerCarrierAccount';
 import type { CustomerCarrierAccount } from '@/types/customerCarrierAccount';
 import {
@@ -79,6 +93,15 @@ function formatDate(iso: string | null): string {
 const EMPTY_CONTACTS: CustomerContact[] = [];
 const EMPTY_ADDRESSES: CustomerAddress[] = [];
 const EMPTY_CARRIER_ACCOUNTS: CustomerCarrierAccount[] = [];
+
+/**
+ * Every lifecycle stage, for the Jobs deep link. The jobs list defaults to the
+ * OPEN stages only, so a link that didn't say otherwise would show fewer rows
+ * than the count promised — and the page also restores a device-local saved
+ * selection whenever ?status= is absent, which would make the same link behave
+ * differently on different machines.
+ */
+const ALL_JOB_STAGES = (Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]).join(',');
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -142,6 +165,105 @@ export default function CustomerDetailPage() {
     },
   );
   const customer = data?.customer ?? null;
+
+  // ---------------------------------------------------------------------------
+  // In-place editing of the customer's OWN fields.
+  // ---------------------------------------------------------------------------
+  // ONE snapshot for the whole page, deliberately. updateCustomer writes the
+  // FULL column set every time (formDataToColumns emits all seven, '' -> null),
+  // so a card holding its own copy would persist STALE siblings: set a credit
+  // hold, then edit Website in the header, and the header's snapshot — still
+  // carrying credit_status 'open' — silently lifts the hold. One state means
+  // that cannot happen. See components/customers/customerFieldEditing.ts.
+  const [form, setForm] = useState<CustomerFormData>(EMPTY_CUSTOMER_FORM);
+  const [savedForm, setSavedForm] = useState<CustomerFormData>(EMPTY_CUSTOMER_FORM);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<EditableCustomerField, string>>
+  >({});
+
+  const isArchived = !!customer?.deleted_at;
+
+  // Seed from the loaded row. Keyed on the customer's updated_at so a reload
+  // after an external change re-seeds, while ordinary re-renders don't stomp
+  // what the user is typing.
+  const seedKey = customer ? `${customer.id}:${customer.updated_at ?? ''}` : null;
+  const [seededKey, setSeededKey] = useState<string | null>(null);
+  if (customer && seedKey !== seededKey) {
+    const seeded = customerToFormData(customer);
+    setForm(seeded);
+    setSavedForm(seeded);
+    setSeededKey(seedKey);
+  }
+
+  const onTextChange = (field: EditableCustomerField, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) setFieldErrors((p) => ({ ...p, [field]: '' }));
+    if (saveState === 'saved') setSaveState('idle');
+  };
+
+  /**
+   * Persist a full next-snapshot.
+   *
+   * The name is checked for uniqueness BEFORE the write, and the three outcomes
+   * are deliberately different:
+   *   unique     -> write
+   *   duplicate  -> field error, no write, the typed value stays put
+   *   check THREW -> "couldn't check", no write
+   * That last one matters: per CLAUDE.md a failed check is never a definitive
+   * negative, so a dropped request must not be reported to the user as "that
+   * name is taken".
+   */
+  const persist = async (next: CustomerFormData) => {
+    if (!customer || isArchived) return;
+    const normalized = normalizeSnapshot(next);
+    if (!hasChanged(normalized, savedForm)) return;
+
+    if (!normalized.name) {
+      setFieldErrors((p) => ({ ...p, name: 'Company name is required' }));
+      setSaveState('error');
+      return;
+    }
+    if (normalized.name !== savedForm.name) {
+      try {
+        const exists = await checkCustomerNameExists(companyId, normalized.name, customer.id);
+        if (exists) {
+          setFieldErrors((p) => ({ ...p, name: 'A customer with this name already exists' }));
+          setSaveState('error');
+          return;
+        }
+      } catch {
+        setFieldErrors((p) => ({ ...p, name: 'Could not check the name — try again' }));
+        setSaveState('error');
+        return;
+      }
+    }
+
+    setSaveState('saving');
+    setError(null);
+    try {
+      const updated = await updateCustomer(customer.id, normalized);
+      const reseeded = customerToFormData(updated);
+      setForm(reseeded);
+      setSavedForm(reseeded);
+      setFieldErrors({});
+      setSaveState('saved');
+      // Refresh so the counts, chips and header reflect the new row without a
+      // second source of truth for what the customer currently says.
+      await fetchAll();
+    } catch (err) {
+      setSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    }
+  };
+
+  const onTextBlur = () => void persist(form);
+  const onSelectChange = (patch: Partial<CustomerFormData>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    void persist(next);
+  };
+
   const contacts = data?.contacts ?? EMPTY_CONTACTS;
   const addresses = data?.addresses ?? EMPTY_ADDRESSES;
   const carrierAccounts = data?.carrierAccounts ?? EMPTY_CARRIER_ACCOUNTS;
@@ -300,14 +422,10 @@ export default function CustomerDetailPage() {
           Back to Customers
         </Button>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            variant="outlined"
-            startIcon={<EditIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/customers/${customerId}/edit`)}
-            disabled={actionLoading}
-          >
-            Edit
-          </Button>
+          {/* No Edit button. Everything on this page is edited in place — the
+              button used to route to /customers/{id}/edit for the customer's
+              own fields while contacts, addresses and carrier accounts were
+              already editable here, which is the inconsistency it removes. */}
           <Tooltip title="Delete (archive) this customer">
             <span>
               <IconButton
@@ -345,13 +463,10 @@ export default function CustomerDetailPage() {
           >
             <Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  {customer.name}
-                </Typography>
                 {/* Credit hold sits beside the name because it changes how you
                     treat everything else on the page. Informational only —
                     nothing here or downstream blocks on it. */}
-                {customer.credit_status === 'hold' && (
+                {form.credit_status === 'hold' && (
                   <Chip label="On credit hold" color="warning" size="small" />
                 )}
                 {/* This page is reachable for an ARCHIVED customer by an
@@ -375,25 +490,29 @@ export default function CustomerDetailPage() {
                   work. Re-creating or re-importing the same name brings it back.
                 </Typography>
               )}
-              {customer.credit_status === 'hold' && customer.credit_hold_note && (
+              {isArchived && form.credit_status === 'hold' && form.credit_hold_note && (
                 <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
-                  {customer.credit_hold_note}
+                  {form.credit_hold_note}
                 </Typography>
               )}
-              {customer.website && (
-                <MuiLink
-                  href={
-                    customer.website.startsWith('http')
-                      ? customer.website
-                      : `https://${customer.website}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{ fontWeight: 500 }}
-                >
-                  {customer.website}
-                </MuiLink>
-              )}
+              {/* The name reads as a heading with a pencil beside it — it is
+                  read constantly and renamed almost never, so an always-live
+                  input in the title position would make the page look like a
+                  form. Everything else on this page (terms, credit) auto-saves
+                  in place; there is no Edit route any more. */}
+              <Box sx={{ mt: isArchived ? 0 : 1 }}>
+                <CustomerIdentityFields
+                  form={form}
+                  fieldErrors={fieldErrors}
+                  onTextChange={onTextChange}
+                  onTextBlur={onTextBlur}
+                  onSelectChange={onSelectChange}
+                  readOnly={isArchived}
+                  saveState={saveState}
+                  displayName={savedForm.name || customer.name}
+                  onCancelEdit={() => setForm(savedForm)}
+                />
+              </Box>
             </Box>
             <Box sx={{ textAlign: 'right' }}>
               <Typography variant="caption" color="text.secondary" display="block">
@@ -731,45 +850,33 @@ export default function CustomerDetailPage() {
             and never see them again, which is the opposite of the "somewhere to
             save it so I don't keep it in my head" the field exists for.
             Values are prose, so body1 rather than the h6 the Related counts use. */}
-        <Grid size={{ xs: 12 }}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Terms
-              </Typography>
-              <Divider sx={{ mb: 2 }} />
-              <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Payment terms
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {customer.default_payment_terms || '—'}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Lead time
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {customer.default_lead_time_text || '—'}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    FOB point
-                  </Typography>
-                  <Typography variant="body1" fontWeight={500}>
-                    {customer.default_fob_point || '—'}
-                  </Typography>
-                </Box>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-                Applied to new quotes for this customer. Quotes you&rsquo;ve already
-                sent keep the terms they were created with.
-              </Typography>
-            </CardContent>
-          </Card>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <CustomerTermsCard
+            companyId={companyId}
+            form={form}
+            fieldErrors={fieldErrors}
+            onTextChange={onTextChange}
+            onTextBlur={onTextBlur}
+            onSelectChange={onSelectChange}
+            readOnly={isArchived}
+            saveState={saveState}
+          />
+        </Grid>
+
+        {/* Credit sits BESIDE Terms, not inside it: what we agreed vs whether
+            we'll ship to them right now are different decisions. It also has no
+            other home — CustomerForm was the only writer until the edit route
+            went away. */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <CustomerCreditCard
+            form={form}
+            fieldErrors={fieldErrors}
+            onTextChange={onTextChange}
+            onTextBlur={onTextBlur}
+            onSelectChange={onSelectChange}
+            readOnly={isArchived}
+            saveState={saveState}
+          />
         </Grid>
 
         {/* Shipping — the customer's own carrier accounts, so their freight
@@ -888,17 +995,39 @@ export default function CustomerDetailPage() {
                 Related
               </Typography>
               <Divider sx={{ mb: 2 }} />
+              {/* Each count opens its list filtered to THIS customer.
+                  The link carries the customer's UUID, never its name: both
+                  destinations filter on customer_id, so the list cannot pick up
+                  a similarly-named company and the number always agrees.
+
+                  The Jobs link also pins every lifecycle stage. Two reasons,
+                  both of which would otherwise break the promise the number
+                  makes: the jobs list hides closed jobs by default (so a
+                  customer with shipped work would show fewer rows than the
+                  count), and it restores a DEVICE-LOCAL saved status selection
+                  when ?status= is absent (so the same link would give the
+                  salesperson a different list from the owner). */}
               <Stack direction="row" spacing={3} flexWrap="wrap">
                 <Box>
-                  <Typography variant="body2" color="text.secondary">
+                  <MuiLink
+                    component={Link}
+                    href={`/dashboard/${companyId}/quotes?customer=${customerId}`}
+                    underline="hover"
+                    variant="body2"
+                  >
                     Quotes
-                  </Typography>
+                  </MuiLink>
                   <Typography variant="h6">{customer.quotes_count}</Typography>
                 </Box>
                 <Box>
-                  <Typography variant="body2" color="text.secondary">
+                  <MuiLink
+                    component={Link}
+                    href={`/dashboard/${companyId}/jobs?customer=${customerId}&status=${ALL_JOB_STAGES}`}
+                    underline="hover"
+                    variant="body2"
+                  >
                     Jobs
-                  </Typography>
+                  </MuiLink>
                   <Typography variant="h6">{customer.jobs_count}</Typography>
                 </Box>
               </Stack>

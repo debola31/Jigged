@@ -33,7 +33,6 @@ describe('CustomerForm', () => {
     it('shows error when name is empty on submit', async () => {
       render(
         <CustomerForm
-          mode="create"
           initialData={EMPTY_CUSTOMER_FORM}
         />
       );
@@ -72,7 +71,7 @@ describe('CustomerForm', () => {
 
       mockCreateCustomer.mockResolvedValue(mockCustomer);
 
-      render(<CustomerForm mode="create" initialData={validFormData} />);
+      render(<CustomerForm initialData={validFormData} />);
 
       const saveButton = screen.getByRole('button', { name: /create customer/i });
       await user.click(saveButton);
@@ -106,7 +105,7 @@ describe('CustomerForm', () => {
       // Customer name already exists
       mockCheckCustomerNameExists.mockResolvedValue(true);
 
-      render(<CustomerForm mode="create" initialData={validFormData} />);
+      render(<CustomerForm initialData={validFormData} />);
 
       const saveButton = screen.getByRole('button', { name: /create customer/i });
       await user.click(saveButton);
@@ -121,30 +120,8 @@ describe('CustomerForm', () => {
     });
   });
 
-  describe('Edit mode', () => {
-    const existingCustomerData: CustomerFormData = {
-      name: 'Existing Company',
-      website: 'https://existing.com',
-    };
-
-    it('pre-fills form with existing customer data', () => {
-      render(
-        <CustomerForm
-          mode="edit"
-          initialData={existingCustomerData}
-          customerId="existing-customer-uuid"
-        />,
-      );
-
-      expect(screen.getByLabelText(/company name/i)).toHaveValue('Existing Company');
-      expect(screen.getByLabelText(/website/i)).toHaveValue('https://existing.com');
-
-      // Edit mode hides the Initial Contact accordion — contacts +
-      // addresses are managed from the detail page.
-      expect(screen.queryByLabelText(/contact name/i)).not.toBeInTheDocument();
-
-      // Delete button is visible in edit mode
-      expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
-    });
-  });
+  // The 'Edit mode' describe that lived here is gone with the mode itself.
+  // /customers/{id}/edit was deleted: a customer's own fields are now edited in
+  // place on the detail page, so this form only ever creates. Coverage for the
+  // in-place editing lives with the detail page's own cards.
 });

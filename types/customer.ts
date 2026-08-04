@@ -27,7 +27,6 @@ export interface Customer {
   id: string;
   company_id: string;
   name: string;
-  website: string | null;
   /**
    * Standing terms — the customer's commercial defaults, copied onto a NEW
    * quote at create time and editable there. They are never read by an
@@ -40,7 +39,6 @@ export interface Customer {
    * empty rather than guessed.
    */
   default_payment_terms: string | null;
-  default_lead_time_text: string | null;
   /**
    * Where title and risk transfer, as free text naming a place ("FOB
    * Cleveland, OH"). Deliberately NOT an origin/destination enum, and
@@ -132,14 +130,12 @@ export interface CustomerAddressFormData {
  */
 export interface CustomerFormData {
   name: string;
-  website: string;
   /**
    * Standing terms. Empty string means "not set" at the form layer and is
    * normalised to NULL on write, so a cleared field genuinely clears the
    * default rather than storing '' and prefilling blanks onto every quote.
    */
   default_payment_terms: string;
-  default_lead_time_text: string;
   default_fob_point: string;
   credit_status: CustomerCreditStatus;
   /** Empty string means "no reason given"; normalised to NULL on write. */
@@ -213,9 +209,7 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
 
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
   name: '',
-  website: '',
   default_payment_terms: '',
-  default_lead_time_text: '',
   default_fob_point: '',
   credit_status: 'open',
   credit_hold_note: '',
@@ -224,9 +218,7 @@ export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
 export function customerToFormData(customer: Customer): CustomerFormData {
   return {
     name: customer.name,
-    website: customer.website || '',
     default_payment_terms: customer.default_payment_terms || '',
-    default_lead_time_text: customer.default_lead_time_text || '',
     default_fob_point: customer.default_fob_point || '',
     credit_status: customer.credit_status,
     credit_hold_note: customer.credit_hold_note || '',

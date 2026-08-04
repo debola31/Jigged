@@ -27,7 +27,7 @@ SCHEMA_CONTEXT = """
 - website: TEXT
 - deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
   any list, count or ranking; a by-id lookup deliberately does not)
-- default_payment_terms: TEXT, default_lead_time_text: TEXT, default_fob_point: TEXT
+- default_payment_terms: TEXT, default_fob_point: TEXT
   -- the customer's STANDING terms, applied to NEW quotes only. A quote's own
   payment_terms / lead_time_text / fob_point are what that quote was issued
   with; never answer "what terms is quote X on?" from these columns.

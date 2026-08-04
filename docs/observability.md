@@ -12,12 +12,18 @@ they *do* overlap are handled deliberately — one avoided, one knowingly accept
 
 ### Overlap 1 — error tracking: avoided
 
-**Sentry owns errors. PostHog must not.** `capture_exceptions` is deliberately `false` in
+**Sentry owns errors. PostHog must not. Never add a second error tracker.**
+`capture_exceptions` is deliberately off in
 [`instrumentation-client.ts`](../instrumentation-client.ts) — Sentry has the grouping,
 breadcrumbs and source-map upload that make a solo triage queue workable, and PostHog's
 error tracking has no advanced grouping. Two trackers means double ingest and two places to
 look during an incident. Turning it on would also make PostHog source-map upload a hard CI
 requirement; leaving it off deletes that work item.
+
+**Named gap:** the option is never *written*. `capture_exceptions` appears in that file only
+inside a comment, so no test and no grep fails if someone turns it on. Verified behaviourally
+instead — the PostHog project has never ingested an `$exception` event; the name is absent
+from its taxonomy entirely (checked 2026-08-03).
 
 **Vercel has no JavaScript error tracking at all**, so it substitutes for neither. A
 client-side crash is invisible in Vercel logs.
@@ -34,9 +40,14 @@ deliberate choice, not an oversight — do not "clean it up".**
   journeys, funnels, retention, drop-off, session replay, feature flags. Vercel can tell you
   conversions fell; only PostHog can tell you where.
 
+**The overlap is also smaller than it looks: Web Vitals are Vercel-only.** PostHog has never
+ingested a `$web_vitals` event here — the name is absent from its taxonomy (checked
+2026-08-03), because nothing turns on `capture_performance`. Deleting `<Analytics />` would
+not move Web Vitals to PostHog; it would end them.
+
 The redundancy costs one script tag. Removing it would trade a free, always-correct traffic
 number for a marginal bundle saving and a dependency on PostHog events being instrumented
-correctly. Keep both.
+correctly. **Keep both — neither is "redundant".**
 
 ---
 
@@ -245,7 +256,22 @@ In [`instrumentation-client.ts`](../instrumentation-client.ts):
 | `EmptyRanges` | A Safari extension. Absent from source, `node_modules` **and** the built bundle |
 | `Lock was stolen` | auth-js's own recovery working as designed; no user-visible effect |
 
-Add to this list only with a verified reason, and record it here.
+Add to this list only with a verified reason, and record it here. An entry with no recorded
+reason is indistinguishable from a mistake.
+
+### Don't re-enable the SDKs outside a production build
+
+`enabled: process.env.NODE_ENV === "production"` guards all three JS configs —
+[`instrumentation-client.ts`](../instrumentation-client.ts),
+[`sentry.server.config.ts`](../sentry.server.config.ts),
+[`sentry.edge.config.ts`](../sentry.edge.config.ts) — and `"pytest" in sys.modules` guards
+the backend (next section). `pnpm dev` and the Playwright suite both run with
+`NODE_ENV=development`, and their errors used to land in the same queue as production; that
+noise is what made the alerts ignorable ([why](#why-any-of-this-matters)).
+
+**The guard costs no deployment coverage.** Vercel builds *previews* with
+`NODE_ENV=production` too — which is where `vercel-preview` in the environment table above
+comes from. Only local and CI runs are silenced.
 
 ---
 

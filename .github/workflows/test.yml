@@ -37,6 +37,16 @@ jobs:
         # toward 0 as warnings are paid off (issue #442); never raise it.
         run: pnpm lint
 
+      - name: Docs check — cited paths and link anchors resolve (issue #686)
+        # Deliberately a NAMED step even though `pnpm test` below re-runs the
+        # same spec. Two reasons: a doc-only PR fails here in seconds instead of
+        # after the full suite, and the failure arrives as a step called "Docs
+        # check" rather than one line inside a 2,000-test log — which is the
+        # difference between a rot report someone reads and one they scroll past.
+        # Driven through vitest, like the repo's other source scanners, so it
+        # needs no runner beyond what is already installed.
+        run: pnpm exec vitest run __tests__/standards/docLinkCheck.test.ts
+
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage
 

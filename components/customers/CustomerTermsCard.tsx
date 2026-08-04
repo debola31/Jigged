@@ -7,6 +7,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 
+import PaymentTermsPicker from '@/components/common/PaymentTermsPicker';
 import SaveStatus, { type SaveState } from '@/components/common/SaveStatus';
 import type { CustomerFieldEditingProps } from '@/components/customers/customerFieldEditing';
 
@@ -30,25 +31,15 @@ import type { CustomerFieldEditingProps } from '@/components/customers/customerF
  * moment someone judges the shop's actual backlog.
  */
 export default function CustomerTermsCard({
+  companyId,
   form,
   fieldErrors,
   onTextChange,
   onTextBlur,
+  onSelectChange,
   readOnly,
   saveState,
-}: CustomerFieldEditingProps & { saveState: SaveState }) {
-  const fields = [
-    {
-      key: 'default_payment_terms' as const,
-      label: 'Payment terms',
-      helper: 'Such as Net 30, or 50% deposit.',
-    },
-    {
-      key: 'default_fob_point' as const,
-      label: 'FOB point',
-      helper: 'Where title and risk transfer. Who pays the freight is set per order.',
-    },
-  ];
+}: CustomerFieldEditingProps & { saveState: SaveState; companyId: string }) {
 
   return (
     <Card elevation={2}>
@@ -64,31 +55,49 @@ export default function CustomerTermsCard({
 
         {readOnly ? (
           <Stack direction="row" spacing={4} sx={{ flexWrap: 'wrap' }}>
-            {fields.map((f) => (
-              <Box key={f.key} sx={{ minWidth: 160 }}>
-                <Typography variant="body2" color="text.secondary">
-                  {f.label}
-                </Typography>
-                <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                  {form[f.key] || '—'}
-                </Typography>
-              </Box>
-            ))}
+            <Box sx={{ minWidth: 160 }}>
+              <Typography variant="body2" color="text.secondary">
+                Payment terms
+              </Typography>
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                {form.default_payment_terms || '—'}
+              </Typography>
+            </Box>
+            <Box sx={{ minWidth: 160 }}>
+              <Typography variant="body2" color="text.secondary">
+                FOB point
+              </Typography>
+              <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                {form.default_fob_point || '—'}
+              </Typography>
+            </Box>
           </Stack>
         ) : (
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-            {fields.map((f) => (
-              <TextField
-                key={f.key}
-                label={f.label}
-                value={form[f.key]}
-                onChange={(e) => onTextChange(f.key, e.target.value)}
-                onBlur={onTextBlur}
-                error={!!fieldErrors[f.key]}
-                helperText={fieldErrors[f.key] || f.helper}
-                fullWidth
-              />
-            ))}
+            {/* The SAME control the quote form uses. It was a bare text box
+                here, which is how "net 45" typed on a customer ends up beside
+                QuickBooks' "Net 45" as a separate option on the quote — the
+                exact drift the picker's QuickBooks-first ordering exists to
+                prevent. A select, so it saves on change rather than on blur. */}
+            <PaymentTermsPicker
+              companyId={companyId}
+              value={form.default_payment_terms}
+              onChange={(next) => onSelectChange({ default_payment_terms: next })}
+              size="medium"
+              helperText="Applied to a new quote for this customer."
+            />
+            <TextField
+              label="FOB point"
+              value={form.default_fob_point}
+              onChange={(e) => onTextChange('default_fob_point', e.target.value)}
+              onBlur={onTextBlur}
+              error={!!fieldErrors.default_fob_point}
+              helperText={
+                fieldErrors.default_fob_point ||
+                'Where title and risk transfer. Who pays the freight is set per order.'
+              }
+              fullWidth
+            />
           </Stack>
         )}
 

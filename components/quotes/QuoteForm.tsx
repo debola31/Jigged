@@ -13,7 +13,7 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
-import Autocomplete, { createFilterOptions } from '@mui/material/Autocomplete';
+import Autocomplete from '@mui/material/Autocomplete';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
@@ -31,14 +31,9 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import type { QuoteFormData } from '@/types/quote';
-import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import {
-  getCustomPaymentTerms,
   getCompanyDefaultPaymentTerms,
-  addCustomPaymentTerm,
-  removeCustomPaymentTerm,
 } from '@/utils/companyAccess';
-import { listQuickBooksTerms } from '@/utils/quickbooksAccess';
 import {
   createQuote,
   updateQuote,
@@ -64,6 +59,7 @@ import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
 import CustomerContactForm from '@/components/customers/CustomerContactForm';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import PaymentTermsPicker from '@/components/common/PaymentTermsPicker';
 import type {
   Customer,
   CustomerAddress,
@@ -141,10 +137,7 @@ const ADD_NEW_ADDRESS_ID = '__add_new_address__';
  * preset. Adding a new term happens via the dropdown's "Add New" footer, not by
  * free-typing, so there's no synthetic create option in the list.
  */
-type PaymentTermOption = { value: string; group: string };
-const paymentTermFilter = createFilterOptions<PaymentTermOption>();
 /** Sentinel value for the "Add New" action row at the bottom of the picker. */
-const ADD_NEW_TERM = '__add_new_payment_term__';
 
 /**
  * The quote fields that can be pre-filled from the customer's standing terms.
@@ -302,17 +295,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   // The company's saved custom payment terms (free-text terms kept for reuse),
   // loaded in loadData. They render first in the payment-terms picker (each with
   // a remove control); choosing "Add New" and submitting a term appends here.
-  const [savedTerms, setSavedTerms] = useState<string[]>([]);
-  // Terms this company already has in QuickBooks. Empty when not connected,
-  // which is the common case and not a failure.
-  const [quickBooksTerms, setQuickBooksTerms] = useState<string[]>([]);
   /** The shop-wide default payment terms, used when the customer has none. */
   const [shopDefaultTerms, setShopDefaultTerms] = useState<string | null>(null);
   // Payment-terms "Add New" flow: choosing the picker's "Add New" row sets
   // addingTerm, which reveals an inline field (below the picker) bound to
   // newTermDraft; submitting it selects + saves the term.
-  const [addingTerm, setAddingTerm] = useState(false);
-  const [newTermDraft, setNewTermDraft] = useState('');
 
   // Drift state (edit mode only):
   //   - driftByLineId: server-detected drift map for the lines currently
@@ -334,18 +321,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       const initialPartIds = Array.from(
         new Set(initialData.parts.map((p) => p.part_id).filter(Boolean)),
       );
-      const [customersData, hydratedParts, customTerms, shopDefaultTerms] = await Promise.all([
+      const [customersData, hydratedParts, shopDefaultTerms] = await Promise.all([
         getAllCustomers(companyId),
         initialPartIds.length > 0
           ? getPartsForSelectByIds(initialPartIds)
           : Promise.resolve([]),
-        // Best-effort: a failed load just means no saved-term suggestions.
-        getCustomPaymentTerms(companyId).catch(() => [] as string[]),
-        // Best-effort too: without it a customer with no terms of their own just
+        // Best-effort: without it a customer with no terms of their own just
         // starts blank, which is exactly the pre-shop-default behaviour.
+        // (The saved-terms list is loaded by PaymentTermsPicker itself.)
         getCompanyDefaultPaymentTerms(companyId).catch(() => null),
       ]);
-      setSavedTerms(customTerms);
       setShopDefaultTerms(shopDefaultTerms);
       setCustomers([
         CREATE_NEW_CUSTOMER,
@@ -376,24 +361,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     loadData();
   }, [loadData]);
 
-  // QuickBooks' own payment terms, fetched OUTSIDE loadData on purpose. It is a
-  // round trip through our backend to Intuit, and putting it in that Promise.all
-  // would make the whole quote form wait on a third party to render. Instead the
-  // picker opens on the local presets and QuickBooks' terms fold in when they
-  // arrive — usually before anyone has reached the field.
-  //
-  // listQuickBooksTerms resolves to an empty list rather than rejecting, so a
-  // shop with no QuickBooks (most of them) takes the same path as a shop whose
-  // connection is momentarily down: the picker is simply the local list.
-  useEffect(() => {
-    let cancelled = false;
-    listQuickBooksTerms(companyId).then((res) => {
-      if (!cancelled) setQuickBooksTerms(res.terms.map((t) => t.name));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
 
   // Edit-mode only: detect drift once on mount. The result is keyed by
   // line item id so each block can decide whether to render the chip.
@@ -489,88 +456,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const standingTermsHelper = (field: StandingTermField, hint: string) =>
     prefilledFrom[field] ? `From ${prefilledFrom[field]} — edit to override` : hint;
 
-  /**
-   * Options for the payment-terms picker, most-authoritative first: the terms
-   * this company already has in QuickBooks, then its own saved custom terms
-   * (each removable), then the built-in presets. If the quote already carries a
-   * term in none of those (an older quote, say), it's included too so the field
-   * can still display it.
-   *
-   * QuickBooks leads because a term it already knows resolves to a real
-   * `SalesTermRef` on the invoice. Dedupe is CASE-INSENSITIVE and QuickBooks'
-   * spelling wins — it ships "Due on receipt" where our preset reads "Due on
-   * Receipt", and showing both would be two rows for one term.
-   *
-   * When there's no QuickBooks the list is exactly what it was before. That is
-   * the fallback, and it costs nothing: a term typed here is created in
-   * QuickBooks at push time anyway, so an unlisted term is never a dead end.
-   */
-  const paymentTermOptions = useMemo<PaymentTermOption[]>(() => {
-    const opts: PaymentTermOption[] = [];
-    const seen = new Set<string>();
-    const add = (list: ReadonlyArray<string>, group: string) => {
-      for (const value of list) {
-        const key = value.trim().toLowerCase();
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        opts.push({ value, group });
-      }
-    };
-    add(quickBooksTerms, 'In QuickBooks');
-    add(savedTerms, 'Your saved terms');
-    add(PAYMENT_TERM_PRESETS, 'Standard terms');
 
-    const cur = formData.payment_terms.trim();
-    if (cur && !opts.some((o) => o.value === cur)) {
-      opts.unshift({ value: cur, group: 'This quote' });
-    }
-    return opts;
-  }, [quickBooksTerms, savedTerms, formData.payment_terms]);
-
-  /**
-   * Commit a payment term (picked from the list, or entered via the inline
-   * "Add New" field). A brand-new custom term (not a preset, not already saved)
-   * is added to the company's saved list — optimistically in the UI, then
-   * persisted best-effort (a failed save still leaves the term usable on this
-   * quote).
-   */
-  const commitPaymentTerm = (term: string, isNewCustom: boolean) => {
-    const trimmed = term.trim();
-    handleFieldChange('payment_terms', trimmed);
-    if (
-      isNewCustom &&
-      trimmed !== '' &&
-      !PAYMENT_TERM_PRESETS.includes(trimmed) &&
-      !savedTerms.includes(trimmed)
-    ) {
-      setSavedTerms((prev) => [trimmed, ...prev.filter((t) => t !== trimmed)]);
-      addCustomPaymentTerm(companyId, trimmed)
-        .then(setSavedTerms)
-        .catch((e) => console.warn('Could not save custom payment term for reuse:', e));
-    }
-  };
-
-  /** Remove a saved custom term from the company's list (optimistic + persist). */
-  const handleRemoveSavedTerm = (term: string) => {
-    setSavedTerms((prev) => prev.filter((t) => t !== term));
-    removeCustomPaymentTerm(companyId, term)
-      .then(setSavedTerms)
-      .catch((e) => console.warn('Could not remove custom payment term:', e));
-  };
-
-  /** Cancel the inline "add a new term" field, reverting to the picker. */
-  const cancelAddTerm = () => {
-    setAddingTerm(false);
-    setNewTermDraft('');
-  };
-
-  /** Commit the inline "add a new term" draft: select it and save it for reuse. */
-  const submitNewTerm = () => {
-    const t = newTermDraft.trim();
-    if (t) commitPaymentTerm(t, true);
-    setAddingTerm(false);
-    setNewTermDraft('');
-  };
 
   /**
    * Customer change clears the previous customer's address/contact FKs
@@ -1930,123 +1816,20 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               />
             </Grid>
             <Grid size={{ xs: 12 }}>
-              {/* Pick-only combobox: the shop's saved custom terms first (each
-                  removable), then the built-in presets, then a highlighted
-                  "Add New" row that reveals the inline field below. New wording
-                  is entered there, never free-typed here. payment_terms stays a
-                  single string. */}
-              <Autocomplete<PaymentTermOption, false, false, false>
-                size="small"
-                fullWidth
-                options={paymentTermOptions}
-                getOptionLabel={(o) => o.value}
-                isOptionEqualToValue={(option, val) => option.value === val.value}
-                filterOptions={(options, params) => {
-                  const filtered = paymentTermFilter(options, params);
-                  // A highlighted "Add New" action is always the last row.
-                  filtered.push({ value: ADD_NEW_TERM, group: 'Add new' });
-                  return filtered;
-                }}
-                value={
-                  paymentTermOptions.find((o) => o.value === formData.payment_terms) ?? null
+              {/* One shared control with the customer page — same vocabulary,
+                  same QuickBooks-first ordering. A bare text box on either side
+                  is how "net 45" and "Net 45" become two terms. */}
+              <PaymentTermsPicker
+                companyId={companyId}
+                value={formData.payment_terms}
+                onChange={(next) => handleFieldChange('payment_terms', next)}
+                required
+                helperText={
+                  prefilledFrom.payment_terms
+                    ? standingTermsHelper('payment_terms', '')
+                    : undefined
                 }
-                onChange={(_e, newValue) => {
-                  if (newValue?.value === ADD_NEW_TERM) {
-                    // "Add New" chosen → reveal the inline add field below.
-                    setNewTermDraft('');
-                    setAddingTerm(true);
-                    return;
-                  }
-                  handleFieldChange('payment_terms', newValue ? newValue.value : '');
-                }}
-                renderOption={(props, option) => {
-                  const { key, ...liProps } = props as typeof props & { key?: string };
-                  if (option.value === ADD_NEW_TERM) {
-                    // Highlighted "Add New" action pinned as the last row.
-                    return (
-                      <li
-                        key={key}
-                        {...liProps}
-                        style={{ borderTop: '1px solid rgba(255, 255, 255, 0.12)' }}
-                      >
-                        <AddIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
-                        <Box component="span" sx={{ color: 'primary.main', fontWeight: 600 }}>
-                          Add New
-                        </Box>
-                      </li>
-                    );
-                  }
-                  if (option.group === 'Your saved terms') {
-                    return (
-                      <li key={key} {...liProps}>
-                        <Box
-                          sx={{ display: 'flex', alignItems: 'center', width: '100%', gap: 1 }}
-                        >
-                          <Box sx={{ flex: 1 }}>{option.value}</Box>
-                          <IconButton
-                            size="small"
-                            aria-label={`Remove ${option.value}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveSavedTerm(option.value);
-                            }}
-                          >
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      </li>
-                    );
-                  }
-                  return (
-                    <li key={key} {...liProps}>
-                      {option.value}
-                    </li>
-                  );
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Payment terms"
-                    required
-                    helperText={prefilledFrom.payment_terms ? standingTermsHelper('payment_terms', '') : undefined}
-                    InputLabelProps={{ ...params.InputLabelProps, shrink: true }}
-                  />
-                )}
               />
-              {addingTerm && (
-                // Choosing "Add New" reveals this inline field just below the
-                // picker (a dropdown menu closes on selection, so the field
-                // can't reliably live inside it). Type + Add saves it for reuse.
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    autoFocus
-                    label="New payment term"
-                    placeholder="e.g. Net 30, 1% late charge"
-                    value={newTermDraft}
-                    onChange={(e) => setNewTermDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        submitNewTerm();
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        cancelAddTerm();
-                      }
-                    }}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                  <Button
-                    variant="contained"
-                    disabled={newTermDraft.trim() === ''}
-                    onClick={submitNewTerm}
-                  >
-                    Add
-                  </Button>
-                  <Button onClick={cancelAddTerm}>Cancel</Button>
-                </Box>
-              )}
             </Grid>
           </Grid>
         </CardContent>

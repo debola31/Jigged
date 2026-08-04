@@ -852,6 +852,7 @@ export default function CustomerDetailPage() {
             Values are prose, so body1 rather than the h6 the Related counts use. */}
         <Grid size={{ xs: 12, md: 6 }}>
           <CustomerTermsCard
+            companyId={companyId}
             form={form}
             fieldErrors={fieldErrors}
             onTextChange={onTextChange}

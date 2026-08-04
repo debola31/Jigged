@@ -512,10 +512,18 @@ async def webhook(request: Request):
     try:
         event = s.Webhook.construct_event(payload, sig, _webhook_secret())
     except ValueError as e:  # malformed payload
+        # Reportable: construct_event verifies the signature BEFORE json.loads, so
+        # a ValueError can only follow a payload Stripe itself signed. That is our
+        # bug (or Stripe's), never a stranger's.
         sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError as e:
-        sentry_sdk.capture_exception(e)
+    except stripe.error.SignatureVerificationError:
+        # Deliberately NOT captured to Sentry. This route is public and
+        # unauthenticated, so anyone who finds the URL can drive this branch at
+        # will — reporting it hands a stranger our Sentry quota and buries real
+        # issues. Genuine signature mismatches (e.g. a rolled secret) show up in
+        # Stripe's own delivery log, which is the authority on them anyway.
+        logger.warning("Stripe webhook rejected: invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     try:

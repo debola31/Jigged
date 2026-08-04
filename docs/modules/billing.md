@@ -202,6 +202,28 @@ the Stripe Dashboard / Vercel label (so the unused `STRIPE_SECRET_KEY` /
 backend loads env at startup — restart `python api/index.py` after changing them
 (`--reload` watches `.py`, not `.env.local`).
 
+### The production webhook URL must be `www.jigged.app` (verified 2026-08-03)
+
+Register the live endpoint as `https://www.jigged.app/api/stripe/webhook` — **on `www`, not the
+apex**. Vercel serves `www` as primary and answers `https://jigged.app/…` with a `307` from its
+edge router, and **Stripe does not follow redirects**: only `2xx` counts as delivered.
+
+This is as-built, not preference. The endpoint was registered on the apex on 2026-07-26 and
+**every live event failed for five days** until Stripe's auto-disable warning surfaced it. Sentry
+saw nothing and could not have — the `307` is issued before the function is invoked, so there is
+no exception to report. `/checkout/sync` and `/reconcile` (§ above) kept the cache correct
+throughout, which is *why* it went unnoticed; treat reconciliation as a safety net, never as
+delivery.
+
+**Enforced by** a Sentry uptime monitor asserting `GET …/api/stripe/webhook` returns `405`
+(route reachable, method not allowed). `405` = healthy, `307` = this bug returning, `404` =
+backend not deployed, `401` = Vercel deployment protection. `GET` is deliberate: it never reaches
+the signature path, so the probe generates no Sentry events.
+
+The apex is still what the code advertises as canonical (`metadataBase`, `og:url`, email
+`SITE_URL`) — that inconsistency is tracked separately. If it is ever resolved by making the apex
+primary in Vercel, **this URL must move back in the same change.**
+
 ## 11. Testing
 
 - **DB-only (CI, no Stripe):** `api/tests/integration/test_billing_enforcement.py` —

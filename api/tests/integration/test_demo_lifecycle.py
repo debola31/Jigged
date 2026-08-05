@@ -531,3 +531,35 @@ def test_sync_demo_features_is_not_reachable_from_the_browser(demo):
             },
         ).execute()
     assert "sync_demo_features" in str(exc.value) or "permission denied" in str(exc.value).lower()
+
+
+def test_every_seeded_part_is_priceable(supabase_admin, demo):
+    """No part in the demo may show the Parts page's "Incomplete — needs setup before it can be
+    quoted" marker.
+
+    Template v3 failed this against 31 of 45 parts and nobody noticed, because the failure is
+    only visible as a column of ⚠ icons — there was no assertion to fail. `get_priceable_part_ids`
+    is what the page itself calls, so this asks the same question the UI asks rather than
+    re-deriving it: priceable = costable AND carrying a markup pricing tier. Re-implementing that
+    rule here would let the two drift apart, which is the whole failure mode.
+    """
+    demo_id = demo["demo_id"]
+
+    priceable = set(
+        supabase_admin.rpc("get_priceable_part_ids", {"p_company_id": demo_id}).execute().data
+        or []
+    )
+    parts = (
+        supabase_admin.table("parts")
+        .select("id, part_name, source")
+        .eq("company_id", demo_id)
+        .execute()
+    ).data
+
+    incomplete = sorted(
+        f"{p['part_name']} ({p['source']})" for p in parts if p["id"] not in priceable
+    )
+    assert not incomplete, (
+        f"{len(incomplete)} of {len(parts)} seeded parts would show the incomplete-setup "
+        f"warning:\n  " + "\n  ".join(incomplete)
+    )

@@ -109,7 +109,7 @@ The `default` v3 graph, all of it written by `seed_demo_data()` in this order:
 |---|---|
 | 19 storage locations, 3 levels deep | 45 parts (24 bought, 21 made) |
 | 6 vendors + 13 contacts | 28 per-location stock balances |
-| 12 work centers (9 internal, 3 outside) | 26 procurement + 29 pricing tiers |
+| 12 work centers (9 internal, 3 outside) | 26 procurement + 71 pricing tiers |
 | 21 routings / 69 operations | 38 BOM edges, 3 levels deep |
 | 8 customers + 13 contacts + 11 addresses | 10 quotes / 17 line items |
 | 16 jobs / 24 job parts / 27 completions | 6 shipments |
@@ -120,6 +120,21 @@ production; `unshipped`, `partially_shipped` and `fully_shipped` fulfillment —
 several overdue, one customer on credit hold, one resold bought part, and outside operations both
 sent and received. Dates are **relative** (`days_ago`, `due_in_days`), so the demo reads as
 current whenever it is seeded rather than ageing into a museum.
+
+**Every part is priceable — no part in the demo shows a setup warning.** The Parts page marks a
+part "Incomplete — needs setup before it can be quoted" from
+[`get_priceable_part_ids`](../../supabase/migrations/), which is a *two*-part test: **costable**
+(a bought part with a non-expired procurement tier, or a made part whose routing ops are all
+priced and whose BOM children are all costable) **and** carrying its own `part_pricing_tiers` row
+with a non-null `markup_percent`. Template v3 satisfied the first half everywhere and the second
+for only 14 of 45 parts, so two thirds of the catalogue rendered as unfinished. v4 gives every
+part a tier — which is also what the real companies carry (630/630 bought and 7816/7816 made at
+Contour; median markup 25%), so seeding raw stock without one was the anomaly. Asserted by
+`test_every_seeded_part_is_priceable` against the same RPC the page calls.
+
+*(The legend under the toolbar names only the costable half — "routing/materials, or a vendor
+cost" — which is why a missing markup reads as a seeding bug. That wording is an app-side
+inaccuracy, not a template one.)*
 
 **Statuses and quantities are derived, never asserted.** The seeder inserts every job as
 `not_started` / `unshipped` and writes `job_operation_completions` and `shipment_line_items`; the
@@ -259,6 +274,7 @@ had **no** coverage at all before 2026-08-05, which is why both failures above s
 | Mirroring never reverts settings edited inside demo mode | `test_mirror_leaves_the_demo_editable_settings_blocks_alone` |
 | Reset re-mirrors flags | `test_reset_re_mirrors_flags` |
 | `sync_demo_features` is unreachable from the browser | `test_sync_demo_features_is_not_reachable_from_the_browser` |
+| Every seeded part is priceable — the demo shows zero setup warnings | `test_every_seeded_part_is_priceable` |
 
 The tests assert **derived** state and **lower-bound** counts, not the template's own numbers —
 asserting the template back at itself would pass with every trigger broken, and equalities would

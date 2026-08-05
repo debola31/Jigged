@@ -96,8 +96,20 @@ export async function resetDemoCompany(sourceCompanyId: string, userId: string):
 }
 
 /**
- * Sync team member access from source company to demo company.
- * Adds missing members and updates changed roles.
+ * Converge a demo company on its source. Called on every entry to an existing
+ * demo (see DemoModeProvider), which is what makes it the place lazy syncing
+ * happens.
+ *
+ * Despite the name it syncs two things: team member access (adds members added
+ * since, updates changed roles) and `settings.features`. Flags are mirrored
+ * because a demo company is filtered out of /admin/companies — the only
+ * feature-flag editor — so there is otherwise no way to set them, and a demo
+ * showing a different product surface than the company it stands in for is a
+ * page that vanishes when you exit demo mode.
+ *
+ * Other `settings` blocks are deliberately left alone: `defaults` and
+ * `default_payment_terms` are editable from the Settings page *inside* demo
+ * mode, and re-mirroring them here would revert the user's own edits.
  */
 export async function syncDemoAccess(sourceCompanyId: string, demoCompanyId: string): Promise<void> {
   const supabase = getSupabase();

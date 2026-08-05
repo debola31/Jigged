@@ -111,6 +111,49 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
     wipe_company("inventory_locations")
 
 
+# A source flag set chosen to cover the case that is easy to get wrong: an opt-IN flag turned on
+# AND an opt-OUT flag explicitly turned off. `readFeatureFlag` resolves an omitted key to the
+# descriptor's default, so squashing "absent" into "false" would silently re-enable ai_insights
+# for a tenant that had killed it.
+SOURCE_SETTINGS = {
+    "features": {
+        "inventory_locations": True,
+        "machine_maintenance": True,
+        "ai_insights": False,
+    },
+    "ai_limits": {"chat_per_hour": 100},
+}
+
+
+def _make_demo(supabase_admin, billing_user, source_settings=None):
+    source_id = billing_user["company_id"]
+    if source_settings is not None:
+        supabase_admin.table("companies").update({"settings": source_settings}).eq(
+            "id", source_id
+        ).execute()
+    billing_user["client"].rpc(
+        "create_demo_company",
+        {"p_source_company_id": source_id, "p_user_id": billing_user["user_id"]},
+    ).execute()
+    return {
+        "source_id": source_id,
+        "demo_id": _demo_id(supabase_admin, source_id),
+        "user": billing_user,
+        "client": billing_user["client"],
+    }
+
+
+def _drop_demo(supabase_admin, made):
+    # The demo company is not the fixture's own company, so _teardown_seeded_user will not
+    # reach it.
+    if made["demo_id"]:
+        _wipe_company(supabase_admin, made["demo_id"])
+        supabase_admin.table("companies").update({"demo_company_id": None}).eq(
+            "id", made["source_id"]
+        ).execute()
+        supabase_admin.table("companies").delete().eq("id", made["demo_id"]).execute()
+
+
 @pytest.fixture
 def demo(supabase_admin, billing_user):
     """A company whose demo has been created through the real RPC, as the real user.
@@ -120,25 +163,29 @@ def demo(supabase_admin, billing_user):
     (`auth.uid()` must equal p_user_id, and the caller must be an admin of the source company).
     Nothing here touches billing.
     """
-    source_id = billing_user["company_id"]
-    client = billing_user["client"]
+    made = _make_demo(supabase_admin, billing_user)
+    yield made
+    _drop_demo(supabase_admin, made)
 
-    client.rpc(
-        "create_demo_company",
-        {"p_source_company_id": source_id, "p_user_id": billing_user["user_id"]},
-    ).execute()
 
-    demo_id = _demo_id(supabase_admin, source_id)
-    yield {"source_id": source_id, "demo_id": demo_id, "user": billing_user, "client": client}
+@pytest.fixture
+def flagged_demo(supabase_admin, billing_user):
+    """Same, but the source company carries SOURCE_SETTINGS *before* the demo is created — so
+    these tests see what `create_demo_company` copied rather than what a later sync fixed up."""
+    made = _make_demo(supabase_admin, billing_user, SOURCE_SETTINGS)
+    yield made
+    _drop_demo(supabase_admin, made)
 
-    # The demo company is not the fixture's own company, so _teardown_seeded_user will not
-    # reach it.
-    if demo_id:
-        _wipe_company(supabase_admin, demo_id)
-        supabase_admin.table("companies").update({"demo_company_id": None}).eq(
-            "id", source_id
-        ).execute()
-        supabase_admin.table("companies").delete().eq("id", demo_id).execute()
+
+def _settings(supabase_admin, company_id: str) -> dict:
+    row = (
+        supabase_admin.table("companies")
+        .select("settings")
+        .eq("id", company_id)
+        .single()
+        .execute()
+    )
+    return row.data["settings"] or {}
 
 
 def test_create_demo_company_seeds_the_graph(supabase_admin, demo):
@@ -376,3 +423,111 @@ def test_reset_rejects_a_caller_who_is_not_the_user(supabase_admin, demo):
             },
         ).execute()
     assert "Access denied" in str(exc.value)
+
+
+# ===========================================================================
+# Feature-flag mirroring
+#
+# A demo company is invisible to /admin/companies — admin_routes.py lists with
+# .eq("is_demo", False) — so its `settings.features` block cannot be edited
+# anywhere. Before mirroring it sat at `{}` forever, meaning every opt-in flag
+# read off no matter what the real company had enabled.
+# ===========================================================================
+
+
+def test_create_mirrors_source_feature_flags(supabase_admin, flagged_demo):
+    """The demo stands in for the user's own company, so it must show the same product
+    surface. Copied verbatim: an explicit `false` has to survive as `false`, because an
+    absent key resolves to the descriptor default and ai_insights defaults to ON."""
+    demo_features = _settings(supabase_admin, flagged_demo["demo_id"]).get("features")
+    assert demo_features == SOURCE_SETTINGS["features"]
+
+
+def test_ai_limits_are_deliberately_not_mirrored(supabase_admin, flagged_demo):
+    """`ai_limits` is admin-only like `features`, and is withheld on purpose: it caps Anthropic
+    spend per company, so copying a raised cap onto a second company_id doubles the exposure.
+    The demo keeps the default (20/hour) instead."""
+    assert "ai_limits" not in _settings(supabase_admin, flagged_demo["demo_id"])
+
+
+def test_entry_sync_propagates_a_flag_flipped_after_creation(supabase_admin, flagged_demo):
+    """Flags change after a demo exists. `sync_demo_access` is what DemoModeProvider calls on
+    every entry, which makes it the one place that convergence can happen."""
+    source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
+
+    changed = dict(SOURCE_SETTINGS["features"])
+    changed["data_import"] = True            # newly enabled
+    changed["inventory_locations"] = False   # newly disabled
+    supabase_admin.table("companies").update(
+        {"settings": {**SOURCE_SETTINGS, "features": changed}}
+    ).eq("id", source_id).execute()
+
+    flagged_demo["client"].rpc(
+        "sync_demo_access",
+        {"p_source_company_id": source_id, "p_demo_company_id": demo_id},
+    ).execute()
+
+    assert _settings(supabase_admin, demo_id)["features"] == changed
+
+
+def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, flagged_demo):
+    """Settings is reachable *inside* demo mode — full CRUD is the point — so `defaults` and
+    `default_payment_terms` can be edited there. Mirroring the whole `settings` object on every
+    entry would silently revert whatever the user had just changed."""
+    source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
+
+    demo_settings = _settings(supabase_admin, demo_id)
+    supabase_admin.table("companies").update(
+        {
+            "settings": {
+                **demo_settings,
+                "defaults": {"quote_validity_days": 30},
+                "default_payment_terms": "Net 15",
+            }
+        }
+    ).eq("id", demo_id).execute()
+
+    # An admin flips a flag on the source; entry re-syncs.
+    supabase_admin.table("companies").update(
+        {"settings": {**SOURCE_SETTINGS, "features": {"data_import": True}}}
+    ).eq("id", source_id).execute()
+    flagged_demo["client"].rpc(
+        "sync_demo_access",
+        {"p_source_company_id": source_id, "p_demo_company_id": demo_id},
+    ).execute()
+
+    after = _settings(supabase_admin, demo_id)
+    assert after["features"] == {"data_import": True}, "the flag change should land"
+    assert after["defaults"] == {"quote_validity_days": 30}, "demo-side edit was reverted"
+    assert after["default_payment_terms"] == "Net 15", "demo-side edit was reverted"
+
+
+def test_reset_re_mirrors_flags(supabase_admin, flagged_demo):
+    """Reset restores the demo's product surface as well as its rows, so it does not depend on
+    when the user last entered."""
+    source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
+
+    supabase_admin.table("companies").update(
+        {"settings": {"features": {"machine_maintenance": True}}}
+    ).eq("id", source_id).execute()
+
+    flagged_demo["client"].rpc(
+        "reset_demo_company",
+        {"p_source_company_id": source_id, "p_user_id": flagged_demo["user"]["user_id"]},
+    ).execute()
+
+    assert _settings(supabase_admin, demo_id)["features"] == {"machine_maintenance": True}
+
+
+def test_sync_demo_features_is_not_reachable_from_the_browser(demo):
+    """It is SECURITY DEFINER and writes companies.settings, so an exposed EXECUTE grant would
+    let any signed-in user rewrite any company's feature block."""
+    with pytest.raises(Exception) as exc:
+        demo["client"].rpc(
+            "sync_demo_features",
+            {
+                "p_source_company_id": demo["source_id"],
+                "p_demo_company_id": demo["demo_id"],
+            },
+        ).execute()
+    assert "sync_demo_features" in str(exc.value) or "permission denied" in str(exc.value).lower()

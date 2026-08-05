@@ -3853,6 +3853,10 @@ export type Database = {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined
       }
+      sync_demo_features: {
+        Args: { p_demo_company_id: string; p_source_company_id: string }
+        Returns: undefined
+      }
       tenant_tables_missing_write_gate: {
         Args: never
         Returns: {

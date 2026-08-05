@@ -58,8 +58,8 @@ Entered from Settings or the onboarding card; exited from Settings or the banner
 page while in demo mode.
 
 - **First entry** creates the hidden demo company, seeds it from the active template, mirrors
-  every `user_company_access` row, and navigates to it. **Later entries** go straight there,
-  lazy-syncing access for team members added since.
+  every `user_company_access` row and the source's feature flags, and navigates to it. **Later
+  entries** go straight there, lazy-syncing both for changes made since.
 - Navigation **preserves page context** both ways — on `/parts` in real, land on `/parts` in
   demo, and back again. Browser history works normally.
 - **Full CRUD.** It is a real company that happens to be pre-populated; users can quote, convert,
@@ -144,10 +144,43 @@ are for.
 | `seed_demo_data(company_id, template)` | The shared seeding helper — resolves `_ref` keys to UUIDs and inserts the graph |
 | `create_demo_company(source_company_id, user_id)` | Creates the hidden company, seeds it, mirrors `user_company_access`, sets `demo_company_id` on the real company. Raises **"No active demo template found"** when none is active |
 | `reset_demo_company(source_company_id, user_id)` | Deletes the demo company's data and re-seeds |
-| `sync_demo_access(source_company_id, demo_company_id)` | Lazy role mirroring on entry |
+| `sync_demo_access(source_company_id, demo_company_id)` | Lazy convergence on entry — roles **and** feature flags |
+| `sync_demo_features(source_company_id, demo_company_id)` | Copies `settings.features` onto the demo. Backend-only; called by the three above |
 
 `sync_demo_access` inserts missing members copying both `role` **and** `name`, then `UPDATE`s
-only the roles that changed — so it stays correct without triggers.
+only the roles that changed — so it stays correct without triggers. Its name still says "access"
+only; broadening it beat renaming, which would churn the RPC, `utils/demoAccess.ts`, the provider
+and the `function_execute_leaks()` allowlist for no behavioural gain.
+
+### Feature flags mirror the source company
+
+**A demo company shows the same product surface as the company it stands in for**, copied from
+`settings.features` at creation, on every entry, and on reset.
+
+It has to come from somewhere, because it cannot be set: the flag editor is `/admin/companies`,
+and [`admin_routes.py`](../../api/routes/admin_routes.py) lists companies with
+`.eq("is_demo", False)` — demo companies are invisible there, as they are to the company switcher
+and the login redirect. Before mirroring, every demo sat at `settings = '{}'`, so **every opt-in
+flag read off regardless of what the real company had enabled**, with no way to change it.
+
+**Withdrawn — turning every flag on in demos.** It would make the demo a sales showcase, which is
+a different product from an onboarding sandbox presented as *your* company. Three concrete
+failures: entering and leaving preserves page context, so a feature on in demo and off in real is
+a page that vanishes on exit; `machine_maintenance` is a one-pilot-shop-at-a-time experiment with
+a written kill criterion, and all-on puts it in front of shops outside the pilot and pollutes the
+measurement; and `ai_insights` is opt-**out**, so all-on re-exposes to a tenant exactly the thing
+they turned off.
+
+The block is copied **verbatim**, not key-by-key: an omitted key resolves to the descriptor's
+`defaultEnabled` while a stored `false` does not, and squashing that distinction is how an
+opt-out kill switch quietly stops killing.
+
+Two deliberate exclusions:
+
+| Not mirrored | Why |
+|---|---|
+| `settings.ai_limits` | Admin-only like `features`, but it caps Anthropic spend per company — copying a raised cap onto a second `company_id` doubles the exposure. Demos keep the default 20/hour |
+| `settings.defaults`, `default_payment_terms`, `custom_payment_terms` | Editable from the Settings page **inside** demo mode, where full CRUD is the point. Re-mirroring on every entry would silently revert the user's own edits |
 
 Access layer is Supabase-first, no FastAPI: `getDemoStatus`, `createDemoCompany`,
 `resetDemoCompany`, `syncDemoAccess` in [`utils/demoAccess.ts`](../../utils/demoAccess.ts),
@@ -220,6 +253,12 @@ had **no** coverage at all before 2026-08-05, which is why both failures above s
 | Reset clears the tables that used to be out of scope | `test_reset_clears_the_tables_that_were_out_of_scope` |
 | Reset keeps membership and never reaches the real company | `test_reset_preserves_membership_and_leaves_the_real_company_alone` |
 | `auth.uid()` check rejects resetting someone else's demo | `test_reset_rejects_a_caller_who_is_not_the_user` |
+| Creation copies the source's flags verbatim, explicit `false` included | `test_create_mirrors_source_feature_flags` |
+| `ai_limits` is *not* copied | `test_ai_limits_are_deliberately_not_mirrored` |
+| A flag flipped after creation converges on the next entry | `test_entry_sync_propagates_a_flag_flipped_after_creation` |
+| Mirroring never reverts settings edited inside demo mode | `test_mirror_leaves_the_demo_editable_settings_blocks_alone` |
+| Reset re-mirrors flags | `test_reset_re_mirrors_flags` |
+| `sync_demo_features` is unreachable from the browser | `test_sync_demo_features_is_not_reachable_from_the_browser` |
 
 The tests assert **derived** state and **lower-bound** counts, not the template's own numbers —
 asserting the template back at itself would pass with every trigger broken, and equalities would
@@ -232,8 +271,8 @@ Separately covered, and the part with money attached:
 | A demo company short-circuits the entitlement check regardless of billing state | `__tests__/lib/entitlement.test.ts` > `demo short-circuits regardless of billing state` |
 | Stripe checkout refuses a demo company | `api/tests/unit/test_stripe_routes.py` > `test_checkout_rejects_demo_company` |
 
-Still untested and worth naming: `sync_demo_access` role mirroring on re-entry, and the
-frontend enter/exit navigation.
+Still untested and worth naming: `sync_demo_access`'s *role* mirroring on re-entry (its flag
+mirroring is covered), and the frontend enter/exit navigation.
 
 ## Resolved questions
 

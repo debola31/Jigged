@@ -14,11 +14,14 @@ context, without mixing demo data with real data or exposing multi-company compl
 >
 > **Corrected against the code.** This doc pasted a `reset_demo_company()` body containing
 > `DELETE FROM operator_sessions` — a table dropped in June 2026 — and claimed Reset "deletes all
-> data in the demo company". **Reset does not delete all the data, and on a demo company that has
-> shipped anything it deletes none of it and throws** — see
-> [#675](https://github.com/debola31/Jigged/issues/675). Function bodies are now linked, not
-> pasted: a copy of SQL in a doc is a second source that drifts silently, which is exactly what
-> happened here.
+> data in the demo company". Function bodies are now linked, not pasted: a copy of SQL in a doc is
+> a second source that drifts silently, which is exactly what happened here.
+
+> **2026-08-05: demo mode was rebuilt.** [#675](https://github.com/debola31/Jigged/issues/675)
+> (Reset broken) and [#550](https://github.com/debola31/Jigged/issues/550) (no committed template)
+> are both closed by
+> [`20260805011938`](../../supabase/migrations/20260805011938_rebuild_demo_seed_for_current_schema.sql).
+> The failure was larger than either issue described — see [What went wrong](#what-went-wrong).
 
 ---
 
@@ -63,8 +66,9 @@ page while in demo mode.
   edit routings and adjust inventory freely. The operator view works the same way — operators
   already have mirrored access, so they enter via Settings like everyone else. There is no
   separate operator toggle.
-- **Reset** restores the demo to its template state, keeping the company row and the access rows —
-  only data is meant to be wiped.
+- **Reset** restores the demo to its template state, keeping the company row and the access rows.
+  It also clears `company_order_counters`, so a re-seeded demo reads `Q-0001` again instead of
+  climbing every time someone resets.
 - **There is no delete action.** The demo is hidden from the company switcher, the login redirect
   and billing, and costs on the order of 50 rows; Reset covers "start fresh", and keeping the
   company means re-entry is instant. A delete would be trivial to add later (CASCADE on the
@@ -94,20 +98,41 @@ The first system admin is inserted directly via SQL; there is no bootstrap UI.
 UUIDs as `seed_demo_data()` inserts. It carries a date-based `schema_version`, and the seeder
 `COALESCE`s every optional field so a template missing a newly-added column still loads.
 
-*(The full JSONB example this doc used to carry has been dropped: the active row is authored in
-prod and is **not committed**, so the example could never be checked against anything.)*
+**The active template is committed**, in the migration that created it — read it there rather
+than querying prod.
 
 ## What the demo contains
 
-Whatever `seed_demo_data()` inserts from the active template — vendors and their contacts, work
-centers (internal, or external linked to a vendor), parts with procurement tiers, multi-level
-`parts_bom` links, routings with a **linear** operations array, customers, quotes with line
-items, and jobs with parts. Job operations are **generated from the routing**, not listed in the
-template.
+The `default` v3 graph, all of it written by `seed_demo_data()` in this order:
 
-The seeder inserts **no** `inventory_items` (no such table on the template path), and there are
-no `operation_types` or routing nodes/edges — superseded by `work_centers` and linear
-`routing_operations`.
+| | |
+|---|---|
+| 19 storage locations, 3 levels deep | 45 parts (24 bought, 21 made) |
+| 6 vendors + 13 contacts | 28 per-location stock balances |
+| 12 work centers (9 internal, 3 outside) | 26 procurement + 29 pricing tiers |
+| 21 routings / 69 operations | 38 BOM edges, 3 levels deep |
+| 8 customers + 13 contacts + 11 addresses | 10 quotes / 17 line items |
+| 16 jobs / 24 job parts / 27 completions | 6 shipments |
+| 29 notes across job, part and machine subjects | 21 inventory transactions |
+
+Jobs span every status the app can show — `not_started`, `in_progress` and `completed`
+production; `unshipped`, `partially_shipped` and `fully_shipped` fulfillment — plus two hot jobs,
+several overdue, one customer on credit hold, one resold bought part, and outside operations both
+sent and received. Dates are **relative** (`days_ago`, `due_in_days`), so the demo reads as
+current whenever it is seeded rather than ageing into a museum.
+
+**Statuses and quantities are derived, never asserted.** The seeder inserts every job as
+`not_started` / `unshipped` and writes `job_operation_completions` and `shipment_line_items`; the
+existing triggers compute the rest. Likewise it writes `part_location_stock` and lets
+`recompute_part_quantity_from_locations` set `parts.quantity`. That is deliberate: a template
+cannot then express a state the app itself cannot produce, and it cannot double-count stock.
+Job operations and `job_materials` are still **generated from the routing**
+(`create_job_part_operations_from_routing`), not listed in the template.
+
+Two actor columns are easy to confuse, and the seeder handles both:
+`notes.author_id` / `note_reactions.reactor_id` reference **`user_company_access.id`** (the
+membership row), while `job_operation_completions.completed_by`, `inventory_transactions
+.created_by` and every `created_by` reference **`auth.users.id`**.
 
 ## Functions
 
@@ -118,7 +143,7 @@ are for.
 |---|---|
 | `seed_demo_data(company_id, template)` | The shared seeding helper — resolves `_ref` keys to UUIDs and inserts the graph |
 | `create_demo_company(source_company_id, user_id)` | Creates the hidden company, seeds it, mirrors `user_company_access`, sets `demo_company_id` on the real company. Raises **"No active demo template found"** when none is active |
-| `reset_demo_company(source_company_id, user_id)` | Deletes the demo company's data and re-seeds. **Broken — see below** |
+| `reset_demo_company(source_company_id, user_id)` | Deletes the demo company's data and re-seeds |
 | `sync_demo_access(source_company_id, demo_company_id)` | Lazy role mirroring on entry |
 
 `sync_demo_access` inserts missing members copying both `role` **and** `name`, then `UPDATE`s
@@ -128,66 +153,87 @@ Access layer is Supabase-first, no FastAPI: `getDemoStatus`, `createDemoCompany`
 `resetDemoCompany`, `syncDemoAccess` in [`utils/demoAccess.ts`](../../utils/demoAccess.ts),
 each an `rpc(...)` call.
 
-### ⚠ Reset is broken — [#675](https://github.com/debola31/Jigged/issues/675)
+### What went wrong
 
-`reset_demo_company()` deletes 19 tables and **never deletes `shipments` or
-`shipment_line_items`.** The FK actions do not save it: `shipment_line_items.job_part_id` blocks
-the `DELETE FROM job_parts`, and `part_location_stock.part_id` / `work_center_attachments
-.work_center_id` are `RESTRICT` against `parts` / `work_centers`. Because the function is one
-plpgsql body, **the exception aborts the whole transaction: nothing is deleted and Reset is
-permanently broken for that demo company.** Verified by replaying the function's own statements
-against a company with shipments.
+Two independent failures, fixed together in
+[`20260805011938`](../../supabase/migrations/20260805011938_rebuild_demo_seed_for_current_schema.sql)
+because a new template under the old seeder is as broken as the old template under the new one.
 
-Separately, **15 `company_id` tables are outside the reset's scope** (asked of Postgres directly,
-following the real `ON DELETE CASCADE` graph):
+**1. The seeder drifted off the schema and nothing noticed for five months.** The active template
+was authored in the prod console on 2026-03-03 and `seed_demo_data()` was written to match. By
+August the function referenced **five columns that no longer existed** —
+`customers.contact_name` (with `contact_email` / `contact_phone` / `address_*` / `website`, all
+dropped when `customer_contacts` and `customer_addresses` landed), `quotes.lead_time_days`
+(now `lead_time_text`), `jobs.status` and `job_parts.status` (both split into
+`production_` / `fulfillment_` / `invoicing_status`) — and the template still spoke the
+pre-unification `is_stockable` / `is_manufacturable` vocabulary instead of `source`, so every part
+seeded as `made` and every template `cost_per_unit` was silently dropped.
 
-```
-ai_config · auth_audit_log · company_billing · company_custom_units · company_order_counters
-feedback · inventory_locations · invitations · operator_events · part_location_stock
-quickbooks_connections · saved_insights · shipments · user_company_access · work_center_attachments
-```
+The user-visible symptom was the *first* wall it hit: `parts_requires_unit`, because the template
+omitted `primary_unit` on four of its eight parts. **This was not a degraded demo — it was an
+unenterable one.** `create_demo_company` calls the same seeder, so any company without a demo
+could not create one either.
 
-Several of those are **correct** to keep — `user_company_access` (the membership Reset is
-documented to preserve), `company_billing`, `invitations`, `quickbooks_connections`, the counters
-and config. But `shipments`, `inventory_locations`, `part_location_stock`, `operator_events`,
-`saved_insights` and `work_center_attachments` are demo data a reset should clear and does not.
+**2. Reset was RESTRICT-blocked by its own output** ([#675](https://github.com/debola31/Jigged/issues/675)).
+The function deleted 19 tables and never touched `shipments`, `shipment_line_items` or
+`part_location_stock`, and the FK actions did not save it: `shipment_line_items.job_part_id`
+blocks `DELETE FROM job_parts`, and `part_location_stock.part_id` /
+`work_center_attachments.work_center_id` are `RESTRICT` against `parts` / `work_centers`. Because
+the body is one plpgsql transaction, the exception **aborted the whole reset — nothing was
+deleted, permanently, for any demo that had shipped anything.**
 
-*(This doc previously pasted a body containing `DELETE FROM operator_sessions`, a table dropped by
-[`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql). The
-real function has never contained that line.)*
+Reset now deletes leaves-first across every table the demo owns. It deliberately **keeps**
+`user_company_access` (the membership it is documented to preserve), `company_billing`,
+`invitations`, `quickbooks_connections`, `ai_config`, `auth_audit_log` and `feedback`.
+
+**Why one reset was not enough to catch it.** The first reset of a demo runs against whatever the
+old seeder managed to write; only the *second* runs against a demo the seeder itself produced,
+which is the state holding shipments and per-location stock. That is why
+`test_reset_is_repeatable` resets twice.
 
 ## Template management
 
-Templates are authored as JSON by system admins and inserted directly — a low-frequency operation
-with no admin UI. Update by inserting a new version with `is_active = TRUE` and deactivating the
-old one. Before inserting, check that every `_ref` is unique, every `*_ref` resolves to a `_ref`
-defined earlier, required fields are present, and `schema_version` matches the schema.
+**A new template version ships as a migration, not a console INSERT** — deactivate the old row and
+insert the new one with `is_active = TRUE` in the same file. This is the direct lesson of #550:
+the v2 row was authored in the prod console and existed nowhere else, so it could not be reviewed,
+could not be replayed onto a fresh stack (`create_demo_company` raised *"No active demo template
+found"* on every local and preview database), and drifted out of step with the schema for five
+months with nothing to compare it against.
 
-> **Known gap (#550).** There is no committed template: no `scripts/seed-demo-template.sql`, and
-> no `demo_data_templates` row in `supabase/seed.sql`. **So on a fresh local or preview stack
-> there is no active template and `create_demo_company` raises "No active demo template found" —
-> demo mode cannot be exercised there at all.** The only tooling is
-> [`scripts/sync_demo_template.py`](../../scripts/sync_demo_template.py), which copies the active
-> row from prod. The intended direction is to source the demo from `supabase/seed.sql` — the same
-> graph the tests seed, differing only by company name — and delete that script. Planned, not
-> shipped.
+Before shipping one, check that every `_ref` is unique, every `*_ref` resolves to a `_ref` defined
+**earlier in seed order**, required fields are present, and `schema_version` matches. The seeding
+order is fixed by `seed_demo_data()` and is listed in its `COMMENT`; parents must precede children
+within `locations` too.
 
-## Coverage — stated, not implied
+## Coverage
 
-**The demo lifecycle has no automated coverage.** Nothing tests `create_demo_company`,
-`reset_demo_company`, `sync_demo_access`, `seed_demo_data`, or entering/exiting demo mode —
-`git grep` over `__tests__/`, `e2e/` and `api/tests/` finds no caller of any of them. That gap is
-why #675 went unnoticed.
+[`api/tests/integration/test_demo_lifecycle.py`](../../api/tests/integration/test_demo_lifecycle.py)
+covers the lifecycle end to end, against a local Supabase. It was written after the fact — this
+had **no** coverage at all before 2026-08-05, which is why both failures above survived so long.
 
-What *is* covered is the **exclusion** behaviour, which is the part with money attached:
+| Behaviour | Test |
+|---|---|
+| First entry creates the hidden company and populates every seeded table | `test_create_demo_company_seeds_the_graph` |
+| `parts.quantity` equals `SUM(part_location_stock)` — the seeder must not write both | `test_seeded_part_quantities_are_derived_not_asserted` |
+| Job statuses are trigger-derived and agree with the rows underneath | `test_seeded_job_statuses_come_from_the_triggers` |
+| Reset survives a demo holding shipments and stock — **#675** | `test_reset_is_repeatable` |
+| Reset clears the tables that used to be out of scope | `test_reset_clears_the_tables_that_were_out_of_scope` |
+| Reset keeps membership and never reaches the real company | `test_reset_preserves_membership_and_leaves_the_real_company_alone` |
+| `auth.uid()` check rejects resetting someone else's demo | `test_reset_rejects_a_caller_who_is_not_the_user` |
+
+The tests assert **derived** state and **lower-bound** counts, not the template's own numbers —
+asserting the template back at itself would pass with every trigger broken, and equalities would
+break the suite each time the template grows.
+
+Separately covered, and the part with money attached:
 
 | Behaviour | Enforced by |
 |---|---|
 | A demo company short-circuits the entitlement check regardless of billing state | `__tests__/lib/entitlement.test.ts` > `demo short-circuits regardless of billing state` |
 | Stripe checkout refuses a demo company | `api/tests/unit/test_stripe_routes.py` > `test_checkout_rejects_demo_company` |
 
-Untested and worth naming: the reset path (**#675**), first-entry creation, access mirroring on
-re-entry, and the "no active template" failure a fresh stack always hits (#550).
+Still untested and worth naming: `sync_demo_access` role mirroring on re-entry, and the
+frontend enter/exit navigation.
 
 ## Resolved questions
 

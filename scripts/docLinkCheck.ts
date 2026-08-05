@@ -71,10 +71,6 @@ export const ALLOWLIST = new Map<string, string>([
     'Historical note about what the old snapshot still showed; the snapshot is gone.',
   ],
   [
-    'docs/modules/demo-mode.md::scripts/seed-demo-template.sql',
-    'Known gap #550 — names the template that does NOT exist yet. Deleting the citation deletes the gap.',
-  ],
-  [
     'docs/README.md::docs/inventory-flow.md',
     'Names a journey doc that was folded into modules/inventory.md and deleted; the failure is the lesson.',
   ],

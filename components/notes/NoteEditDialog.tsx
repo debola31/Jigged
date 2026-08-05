@@ -135,6 +135,12 @@ export default function NoteEditDialog({
   const changed = trimmed !== (initialBody ?? '').trim() || removed.length > 0;
   const canSave = changed && !emptyBlocked && !saving;
 
+  // Keyed on the ids, not the array — same reason as NoteMediaGallery. NO_MEDIA
+  // above already gives the omitted-prop case a stable identity; this covers a
+  // caller that rebuilds a real media array each render, and keeps useLoad's
+  // non-primitive-dep warning meaningful by not firing it here every render.
+  const mediaKey = media.map((m) => m.id).join(',');
+
   // Batch-load thumbnails once per media set, mirroring NoteMediaGallery.
   const { data: urls } = useLoad(async () => {
     const pairs = await Promise.all(
@@ -149,7 +155,7 @@ export default function NoteEditDialog({
     const map: Record<string, string> = {};
     for (const p of pairs) if (p) map[p[0]] = p[1];
     return map;
-  }, [media]);
+  }, [mediaKey]);
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">

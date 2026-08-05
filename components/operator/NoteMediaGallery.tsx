@@ -26,6 +26,11 @@ const THUMB = 72;
 export default function NoteMediaGallery({ media }: { media: JobNoteMedia[] }) {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
+  // Keyed on the ids, not the array — useLoad wants a primitive dep, and the
+  // URLs resolve off thumbnail_path/storage_path, which are fixed per id. So a
+  // parent re-rendering with a new array of the same photos costs nothing.
+  const mediaKey = media.map((m) => m.id).join(',');
+
   // Batch-load this note's thumbnail URLs once.
   const { data: urls, loading } = useLoad(async () => {
     const pairs = await Promise.all(
@@ -40,7 +45,7 @@ export default function NoteMediaGallery({ media }: { media: JobNoteMedia[] }) {
     const map: Record<string, string> = {};
     for (const p of pairs) if (p) map[p[0]] = p[1];
     return map;
-  }, [media]);
+  }, [mediaKey]);
 
   const openViewer = async (m: JobNoteMedia) => {
     try {

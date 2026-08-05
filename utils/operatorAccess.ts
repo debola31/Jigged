@@ -1156,8 +1156,8 @@ export async function getStationOperationTypes(
 }
 
 /**
- * Resolve a station's display name, or null when there is no live machine with
- * that id.
+ * Resolve a station's display name within a company, or null when that company
+ * has no live machine with that id.
  *
  * Filters `deleted_at` even though it is a by-id read, which is the opposite of
  * the usual rule. The distinction is what the read is FOR: a detail page or a
@@ -1166,12 +1166,22 @@ export async function getStationOperationTypes(
  * stored station no longer names anywhere an operator can stand, and the caller
  * drops them back to the picker rather than leaving them on a ghost machine.
  *
- * Throws on a query failure so the caller can tell "this machine is gone" (null)
- * apart from "the network is down" (throw) — the first should clear the stored
- * station, the second must never touch it.
+ * `companyId` is REQUIRED, and RLS is not a substitute for it. One user can hold
+ * access to several companies, so a work center from the company they were in a
+ * minute ago reads back perfectly well — this filter is the only thing that
+ * turns "a machine you may read" into "a machine you are standing at HERE". Not
+ * having it is how a station selected in one company survived a company switch:
+ * the name resolved, so the stale selection looked healthy, and the first note
+ * saved against it died in the `notes_validate_subject()` trigger with
+ * "work center … is not in company …".
+ *
+ * Throws on a query failure so the caller can tell "this machine is not here"
+ * (null) apart from "the network is down" (throw) — the first should clear the
+ * stored station, the second must never touch it.
  */
 export async function getStationName(
   stationId: string,
+  companyId: string,
 ): Promise<string | null> {
   const supabase = getSupabase();
 
@@ -1179,6 +1189,7 @@ export async function getStationName(
     .from('work_centers')
     .select('name')
     .eq('id', stationId)
+    .eq('company_id', companyId)
     .is('deleted_at', null)
     .maybeSingle();
 

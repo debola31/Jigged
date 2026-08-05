@@ -113,8 +113,8 @@ export function OperatorIdentityRow({
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const handleLogout = async () => {
-    // Clears the persisted station (localStorage) on explicit logout — same store
-    // OperatorStationContext uses.
+    // Clears the persisted station (localStorage) on explicit logout — for every
+    // company, not just this one, since the device may change hands.
     clearStoredStation();
     const supabase = getTypedSupabase();
     // Local scope — sign out ONLY this device. An operator logging out here must not revoke

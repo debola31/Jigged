@@ -232,14 +232,26 @@ export function addMachineNoteMedia(
  * A by-id read, so it does NOT filter deleted_at: an archived machine's page
  * stays reachable by direct link and its knowledge stays readable — archiving
  * hides a machine from pickers, not its history (§9).
+ *
+ * `companyId` is a DIFFERENT axis from archival and is required. RLS lets a user
+ * read work centers in every company they belong to, so without this filter a
+ * machine id from another company resolves and its make/model/serial render as
+ * though they belonged to the company on screen. That is not hypothetical: a
+ * stale cross-company station selection did exactly that, and in demo mode —
+ * where the demo tenant is seeded from a real shop — it put a real customer's
+ * machine serial inside the demo. Matches `getMachineLog` below.
  */
-export async function getMachineDetails(workCenterId: string): Promise<MachineDetails | null> {
+export async function getMachineDetails(
+  workCenterId: string,
+  companyId: string,
+): Promise<MachineDetails | null> {
   const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('work_centers')
     .select(MACHINE_DETAIL_COLUMNS)
     .eq('id', workCenterId)
+    .eq('company_id', companyId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);

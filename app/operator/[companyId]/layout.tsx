@@ -29,6 +29,7 @@ import { getSupabase } from '@/lib/supabase';
 import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
@@ -117,7 +118,9 @@ export default function OperatorLayout({
 
       if (!operatorAccess) {
         // Local scope — only clear this device's bad session; don't revoke the
-        // user's sessions on other devices.
+        // user's sessions on other devices. The station goes with it: the
+        // session that chose it is over (see AuthProvider.signOut).
+        clearStoredStation();
         await supabase.auth.signOut({ scope: 'local' });
         router.push(`/operator/${companyId}/login`);
         return;

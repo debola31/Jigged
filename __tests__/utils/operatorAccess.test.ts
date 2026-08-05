@@ -733,16 +733,34 @@ describe('station selection', () => {
   it('resolves a live station to its name', async () => {
     mockQueryBuilder.data = { name: 'Anca Grinder' };
 
-    await expect(getStationName('wc1')).resolves.toBe('Anca Grinder');
+    await expect(getStationName('wc1', 'c1')).resolves.toBe('Anca Grinder');
     expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
+  });
+
+  // The company filter is the whole reason a stale station can no longer survive
+  // a company switch. RLS admits every company the user belongs to, so a machine
+  // in the company they were in a minute ago reads back perfectly well — this
+  // filter is the only thing that turns "a machine you may read" into "a machine
+  // you are standing at HERE". Without it the header named a station missing from
+  // the picker, the job list went silently empty, and the first maintenance note
+  // died in notes_validate_subject() as "Could not save that."
+  it('scopes the lookup to the company, so another company\'s machine is not "yours"', async () => {
+    mockQueryBuilder.data = { name: 'Anca Grinder' };
+
+    await getStationName('wc1', 'c1');
+
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'wc1');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'c1');
   });
 
   it('answers null for an archived machine, which is what tells the caller to forget it', async () => {
     // maybeSingle, not single: "no live row" is an expected answer here, not an
-    // error. The provider clears the stored station on exactly this null.
+    // error. The provider clears the stored station on exactly this null — and
+    // on the null a foreign company_id now produces, which wants identical
+    // handling and so deliberately shares this answer.
     mockQueryBuilder.data = null;
 
-    await expect(getStationName('wc-archived')).resolves.toBeNull();
+    await expect(getStationName('wc-archived', 'c1')).resolves.toBeNull();
     expect(mockQueryBuilder.maybeSingle).toHaveBeenCalled();
   });
 
@@ -751,7 +769,7 @@ describe('station selection', () => {
     // would wipe a valid station off the device every time the wifi blinked.
     mockQueryBuilder.error = { message: 'network down' };
 
-    await expect(getStationName('wc1')).rejects.toThrow('network down');
+    await expect(getStationName('wc1', 'c1')).rejects.toThrow('network down');
   });
 });
 

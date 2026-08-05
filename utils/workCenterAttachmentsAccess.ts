@@ -113,15 +113,25 @@ export async function uploadWorkCenterAttachment(
   return rowToAttachment(data as unknown as AttachmentRow);
 }
 
-/** A machine's manuals, newest first. */
+/**
+ * A machine's manuals, newest first.
+ *
+ * `companyId` is required, and RLS is not a substitute for it: the policy admits
+ * every company the caller belongs to, so filtering on `work_center_id` alone
+ * lists another company's manuals — with signed URLs that open — whenever a
+ * foreign machine id reaches this call. A manual carries part numbers, tooling
+ * and process notes, so that is a real disclosure and not a cosmetic one.
+ */
 export async function listWorkCenterAttachments(
   workCenterId: string,
+  companyId: string,
 ): Promise<WorkCenterAttachment[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('work_center_attachments')
     .select(ATTACHMENT_SELECT)
     .eq('work_center_id', workCenterId)
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -136,13 +146,21 @@ export async function listWorkCenterAttachments(
  * count only decides whether an affordance renders, and a machine with no
  * manuals shows nothing — so a failure degrades to the same thing as an empty
  * machine rather than to a broken screen.
+ *
+ * Company-scoped for the same reason as `listWorkCenterAttachments` — this count
+ * is what renders the "Manuals · N" button that opens that list, so an unscoped
+ * count advertises another company's documents before anyone taps.
  */
-export async function countWorkCenterAttachments(workCenterId: string): Promise<number> {
+export async function countWorkCenterAttachments(
+  workCenterId: string,
+  companyId: string,
+): Promise<number> {
   const supabase = getSupabase();
   const { count, error } = await supabase
     .from('work_center_attachments')
     .select('id', { count: 'exact', head: true })
-    .eq('work_center_id', workCenterId);
+    .eq('work_center_id', workCenterId)
+    .eq('company_id', companyId);
   if (error) {
     console.error('Error counting work center attachments:', error);
     return 0;

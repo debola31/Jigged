@@ -82,14 +82,17 @@ export default function MachineLogPanel({
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not load the log.'),
   });
 
-  const { data: details } = useLoad(() => getMachineDetails(workCenterId), [workCenterId]);
+  const { data: details } = useLoad(
+    () => getMachineDetails(workCenterId, companyId),
+    [workCenterId, companyId],
+  );
 
   // Only decides whether an affordance renders, and returns 0 rather than
   // throwing — so a failure degrades to "this machine has no manuals", which is
   // also what it looks like when it genuinely has none.
   const { data: manualCount } = useLoad(
-    () => countWorkCenterAttachments(workCenterId),
-    [workCenterId],
+    () => countWorkCenterAttachments(workCenterId, companyId),
+    [workCenterId, companyId],
   );
 
   // The precondition for reading any result at all: a container nobody filled
@@ -324,6 +327,7 @@ export default function MachineLogPanel({
         open={manualsOpen}
         onClose={() => setManualsOpen(false)}
         workCenterId={workCenterId}
+        companyId={companyId}
         machineName={machineName}
       />
 

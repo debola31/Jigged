@@ -23,6 +23,11 @@ vi.mock('@sentry/nextjs', () => ({
   setUser: vi.fn(),
 }));
 
+const mockClearStoredStation = vi.fn();
+vi.mock('@/lib/operatorStationStorage', () => ({
+  clearStoredStation: (...a: unknown[]) => mockClearStoredStation(...a),
+}));
+
 // Minimal consumer that exercises the context signOut with each scope.
 function SignOutHarness() {
   const { signOut } = useAuth();
@@ -72,5 +77,39 @@ describe('AuthProvider signOut scope', () => {
       expect(sharedSupabase.auth.signOut).toHaveBeenCalledWith({ scope: 'global' });
       expect(sharedSupabase.auth.signOut).toHaveBeenCalledWith({ scope: 'others' });
     });
+  });
+
+  // The selected station is device-local, so Supabase's own sign-out does not
+  // touch it. Left behind, the next person to sign in on a shared shop phone
+  // inherits whatever machine the last person was standing at, and their notes
+  // get filed against it with nothing on screen to say so.
+  it('forgets the station on every company when a session ends on this device', async () => {
+    render(
+      <AuthProvider>
+        <SignOutHarness />
+      </AuthProvider>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'default' }));
+
+    // No argument — every company, not just whichever one was on screen.
+    await waitFor(() => expect(mockClearStoredStation).toHaveBeenCalledWith());
+  });
+
+  it("leaves the station alone for scope 'others', which keeps THIS device signed in", async () => {
+    // No handover happens, so stripping a working station would just put the
+    // operator in front of the picker for nothing.
+    render(
+      <AuthProvider>
+        <SignOutHarness />
+      </AuthProvider>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'others' }));
+
+    await waitFor(() => {
+      expect(sharedSupabase.auth.signOut).toHaveBeenCalledWith({ scope: 'others' });
+    });
+    expect(mockClearStoredStation).not.toHaveBeenCalled();
   });
 });

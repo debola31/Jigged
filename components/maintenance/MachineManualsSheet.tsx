@@ -52,18 +52,20 @@ export default function MachineManualsSheet({
   open,
   onClose,
   workCenterId,
+  companyId,
   machineName,
 }: {
   open: boolean;
   onClose: () => void;
   workCenterId: string;
+  companyId: string;
   machineName?: string | null;
 }) {
   const [error, setError] = useState<string | null>(null);
 
   const { data: files, loading } = useLoad(
-    () => (open ? listWorkCenterAttachments(workCenterId) : Promise.resolve([])),
-    [open, workCenterId],
+    () => (open ? listWorkCenterAttachments(workCenterId, companyId) : Promise.resolve([])),
+    [open, workCenterId, companyId],
     { onError: (err) => setError(err instanceof Error ? err.message : 'Could not load manuals.') },
   );
 

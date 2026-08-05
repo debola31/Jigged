@@ -33,6 +33,7 @@ import {
   addMachineNote,
   addMachineNoteMedia,
   deriveOpenItems,
+  getMachineDetails,
   getMachineLog,
 } from '@/utils/machineMaintenanceAccess';
 import type { MachineNote } from '@/types/machineMaintenance';
@@ -170,6 +171,38 @@ describe('getMachineLog', () => {
   it('surfaces a query failure instead of showing an empty machine', async () => {
     mockQueryBuilder.error = { message: 'boom' };
     await expect(getMachineLog('wc1', 'c1')).rejects.toThrow('boom');
+  });
+});
+
+describe('getMachineDetails', () => {
+  // RLS admits every company the caller belongs to, so `id` alone is not
+  // tenancy. Unscoped, this rendered one company's make/model/SERIAL as another
+  // company's machine — and in demo mode, where the demo tenant is seeded from a
+  // real shop, that put a real customer's machine inside the demo.
+  it('scopes to the company, not just the machine id', async () => {
+    mockQueryBuilder.data = { make: 'Haas', model: 'VF-4SS', serial_number: 'HS-VF4-8804' };
+
+    await getMachineDetails('wc1', 'c1');
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('work_centers');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'wc1');
+    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'c1');
+  });
+
+  it('still ignores deleted_at, because archiving hides a machine and not its history', async () => {
+    // Company and archival are different axes (§9): an archived machine's page
+    // stays readable by direct link, but only inside its own company.
+    mockQueryBuilder.data = { make: 'Haas' };
+
+    await getMachineDetails('wc-archived', 'c1');
+
+    expect(mockQueryBuilder.is).not.toHaveBeenCalledWith('deleted_at', null);
+  });
+
+  it('answers null when the machine is not in this company', async () => {
+    mockQueryBuilder.data = null;
+
+    await expect(getMachineDetails('wc-foreign', 'c1')).resolves.toBeNull();
   });
 });
 

@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Session, User, AuthChangeEvent } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
 import { redirectToSessionExpiry } from '@/lib/supabaseErrors';
+import { clearStoredStation } from '@/lib/operatorStationStorage';
 
 /**
  * Sign-out scope. `local` (default) ends only this device's session; `others`
@@ -124,6 +125,15 @@ export default function AuthProvider({ children }: AuthProviderProps) {
     // flow (ResetPassword) passes 'global' to kill lost/old devices, and the
     // change-password flow calls supabase.auth.signOut({ scope: 'others' })
     // directly. Do NOT change this default without revisiting those two flows.
+    //
+    // Forget the selected station for EVERY company on the way out. It is
+    // device-local, not account-local, so Supabase's own sign-out does not touch
+    // it: without this, the next person to sign in on a shared shop phone
+    // inherits whatever machine the last person was standing at, and their notes
+    // get filed against it with nothing on screen to say so. Skipped for
+    // `others` on purpose — that scope deliberately keeps THIS device signed in,
+    // so there is no handover and no reason to strip a working station.
+    if (scope !== 'others') clearStoredStation();
     await supabase.auth.signOut({ scope });
   };
 

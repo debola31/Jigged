@@ -18,6 +18,7 @@ import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import { getSupabase } from '@/lib/supabase';
+import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { getCompany } from '@/utils/companyAccess';
 
 /**
@@ -140,7 +141,9 @@ export default function OperatorLoginPage() {
 
       if (opError || !operatorAccess) {
         // Local scope — only clear this device's session; don't revoke the
-        // user's sessions on other devices.
+        // user's sessions on other devices. The station goes with it: the
+        // session that chose it is over (see AuthProvider.signOut).
+        clearStoredStation();
         await supabase.auth.signOut({ scope: 'local' });
         throw new Error('You do not have access to this company');
       }

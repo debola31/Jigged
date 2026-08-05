@@ -6,45 +6,19 @@ import { useParams } from 'next/navigation';
 import { getStationOperationTypes, getStationName } from '@/utils/operatorAccess';
 import type { Station } from '@/types/operator';
 
-// The operator's selected station is a device-local "where am I right now"
-// default. We persist it in localStorage (NOT sessionStorage) so it survives a
-// backgrounded-tab eviction / browser restart — the shop-floor reality that had
-// operators landing on a job with the station picker stacked underneath it every
-// morning.
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 
-const STORAGE_KEY = 'jigged_operator_station';
+// The persistence itself lives in lib/ because sign-out paths outside the
+// operator tree need to clear it — see the note at the top of that module.
+import {
+  readStoredStation,
+  writeStoredStation,
+  clearStoredStation,
+} from '@/lib/operatorStationStorage';
 
-// localStorage access can throw (Safari private mode throws on setItem; access
-// can be blocked entirely). A fallback station default must never white-screen
-// the whole operator app, so every access is guarded and degrades to in-memory.
-function readStoredStation(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredStation(id: string): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, id);
-  } catch {
-    /* storage unavailable — keep the value in memory only */
-  }
-}
-
-/** Clear the persisted station (used on explicit logout). */
-export function clearStoredStation(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
+// Re-exported so existing importers (and the provider's own callers) keep one
+// obvious place to reach for it.
+export { clearStoredStation };
 
 interface StationContextValue {
   stationId: string | null;
@@ -85,15 +59,16 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [initializing, setInitializing] = useState(true);
 
-  // Seed the station from the stored default, exactly once on mount (the effect
-  // has no reactive inputs — localStorage is read, not subscribed).
+  // Seed the station from THIS COMPANY's stored default. Runs once per mounted
+  // company: the App Router keys the `[companyId]` segment subtree by the param
+  // value, so a company switch remounts this provider rather than re-running the
+  // effect under a live instance. localStorage is read, not subscribed.
   // `initializing` flips false here so consumers know the "no station" decision
   // is now trustworthy.
   useEffect(() => {
-    const storedStation = readStoredStation();
-    if (storedStation) setStationId(storedStation);
+    setStationId(readStoredStation(companyId));
     setInitializing(false);
-  }, []);
+  }, [companyId]);
 
   // Fetch all stations for the company
   useEffect(() => {
@@ -125,16 +100,18 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Otherwise fetch it directly.
+      // Otherwise fetch it directly, scoped to this company.
       try {
-        const name = await getStationName(stationId);
+        const name = await getStationName(stationId, companyId);
         if (name === null) {
-          // The stored station names a machine that has been archived (or was
-          // never in this company). Forget it rather than sitting on a station
-          // with no name: the header would read "Select Station" while every
+          // The stored station names a machine that has been archived, or one
+          // that lives in a DIFFERENT company. Both want the same handling, so
+          // getStationName answers null for both rather than making this branch
+          // tell them apart. Forget it rather than sitting on a station with no
+          // name: the header would read "Select Station" while every
           // station-gated surface still believed one was chosen, and nothing on
           // the floor offers a way out of that.
-          clearStoredStation();
+          clearStoredStation(companyId);
           setStationId(null);
           setStationName(null);
         } else {
@@ -149,14 +126,14 @@ export function OperatorStationProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
     resolveName();
-  }, [stationId, stations]);
+  }, [stationId, stations, companyId]);
 
   // One call site covers every route in: the station picker and the header
   // dropdown both land here.
   const setStation = useCallback(
     (id: string) => {
       setStationId(id);
-      writeStoredStation(id);
+      writeStoredStation(companyId, id);
       logOperatorEvent(companyId, 'station_selected', { workCenterId: id });
     },
     [companyId],

@@ -14,7 +14,7 @@ vi.mock('@/utils/machineMaintenanceAccess', () => ({
   getMachineLog: (...a: unknown[]) => mockGetMachineLog(...a),
   getMachineDetails: (...a: unknown[]) => mockGetMachineDetails(...a),
   addMachineNote: (...a: unknown[]) => mockAddMachineNote(...a),
-  addMachineNoteMedia: vi.fn(),
+  uploadMachineNoteMediaFile: vi.fn(async () => 'c1/work-centers/wc1/abcd_p.jpg'),
 }));
 vi.mock('@/utils/operatorEventsAccess', () => ({
   logOperatorEvent: (...a: unknown[]) => mockLogOperatorEvent(...a),
@@ -31,7 +31,8 @@ vi.mock('@/hooks/useNoteDwell', () => ({
 // creates its client at MODULE scope — without this the file throws on import
 // rather than on use. Same reason as OperationActionPage.test.tsx.
 vi.mock('@/utils/jobNoteMediaAccess', () => ({
-  addNoteMedia: vi.fn(),
+  insertNoteMedia: vi.fn(async () => ({ id: 'm1' })),
+  discardNoteMediaUploads: vi.fn(async () => undefined),
   getJobNoteMediaUrl: vi.fn(async () => 'blob:x'),
 }));
 vi.mock('@/utils/imageCompression', () => ({

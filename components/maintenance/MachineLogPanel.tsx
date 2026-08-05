@@ -15,12 +15,12 @@ import { useNoteDwell } from '@/hooks/useNoteDwell';
 import { useNoteCapture } from '@/hooks/useNoteCapture';
 import type { NoteWriter } from '@/hooks/useNoteCapture';
 import { getCurrentMember, updateNoteBody } from '@/utils/operatorAccess';
-import { deleteJobNote, deleteJobNoteMedia } from '@/utils/jobNoteMediaAccess';
+import { deleteJobNote, deleteJobNoteMedia, insertNoteMedia } from '@/utils/jobNoteMediaAccess';
 import {
   addMachineNote,
-  addMachineNoteMedia,
   getMachineDetails,
   getMachineLog,
+  uploadMachineNoteMediaFile,
 } from '@/utils/machineMaintenanceAccess';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import { countWorkCenterAttachments } from '@/utils/workCenterAttachmentsAccess';
@@ -125,8 +125,9 @@ export default function MachineLogPanel({
           // The main composer never resolves anything — that is the reply's job.
           resolvesNoteId: null,
         }),
-      attachMedia: (note, file, dims) =>
-        addMachineNoteMedia(companyId, workCenterId, note.id, file, { dims }),
+      uploadMedia: (file) => uploadMachineNoteMediaFile(companyId, workCenterId, file),
+      linkMedia: (note, upload) =>
+        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { workCenterId, maintenanceKind: kind },
     };

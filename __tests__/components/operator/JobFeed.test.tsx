@@ -4,7 +4,11 @@ import userEvent from '@testing-library/user-event';
 
 import JobFeed from '@/components/operator/JobFeed';
 import { getJobNotes, addJobNote, getCurrentMember } from '@/utils/operatorAccess';
-import { addJobNoteMedia, getJobNoteMediaUrl } from '@/utils/jobNoteMediaAccess';
+import {
+  getJobNoteMediaUrl,
+  insertNoteMedia,
+  uploadJobNoteMediaFile,
+} from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { JobNote } from '@/types/operator';
@@ -16,12 +20,16 @@ vi.mock('@/utils/operatorAccess', () => ({
   updateNoteBody: vi.fn(),
 }));
 vi.mock('@/utils/jobNoteMediaAccess', () => ({
-  addJobNoteMedia: vi.fn(),
+  uploadJobNoteMediaFile: vi.fn(async () => 'company/jobs/job-1/abcd_photo.jpg'),
+  insertNoteMedia: vi.fn(async () => ({ id: 'media1' })),
+  discardNoteMediaUploads: vi.fn(async () => undefined),
   getJobNoteMediaUrl: vi.fn(),
   deleteJobNote: vi.fn(),
   deleteJobNoteMedia: vi.fn(),
 }));
-vi.mock('@/utils/imageCompression', () => ({ compressPhoto: vi.fn() }));
+vi.mock('@/utils/imageCompression', () => ({
+  compressPhoto: vi.fn(async (f: File) => ({ file: f, dims: { width: 10, height: 10 } })),
+}));
 // Dwell tracking imports the Supabase client at module scope; it has its own
 // suite in __tests__/hooks/useNoteDwell.test.tsx.
 vi.mock('@/hooks/useNoteDwell', () => ({ useNoteDwell: () => ({ observe: () => () => {} }) }));
@@ -109,7 +117,8 @@ beforeEach(() => {
   mock(getJobNotes).mockResolvedValue([]);
   mock(getJobNoteMediaUrl).mockResolvedValue('blob:thumb');
   mock(compressPhoto).mockResolvedValue({ file: new File(['x'], 'p.jpg', { type: 'image/jpeg' }) });
-  mock(addJobNoteMedia).mockResolvedValue({ id: 'm1' });
+  mock(uploadJobNoteMediaFile).mockResolvedValue('company/jobs/job1/abcd_p.jpg');
+  mock(insertNoteMedia).mockResolvedValue({ id: 'm1' });
   // Pre-dismiss the mic hint by default so it doesn't collide with offer assertions.
   window.localStorage.setItem('jigged:composer-mic-hint', JSON.stringify({ shows: 0, dismissed: true }));
 });
@@ -233,6 +242,32 @@ describe('JobFeed — capture funnel events', () => {
         (c: unknown[]) => c[1] === 'note_saved' || c[1] === 'note_saved_with_photo',
       ),
     ).toBe(false);
+  });
+
+  it('posts nothing to the feed when the photo upload fails (#624)', async () => {
+    // The shop-floor case: an operator photographs a problem on dropping wifi and
+    // the upload stalls. It used to post a photo-less note anyway, which is the
+    // one outcome that reads as "saved" while losing the thing it was taken for.
+    const user = userEvent.setup();
+    mock(uploadJobNoteMediaFile).mockRejectedValue(new Error('The upload timed out'));
+    mock(addJobNote).mockResolvedValue(makeNote({ id: 'new', body: 'cracked insert' }));
+    renderComposer();
+    await waitFor(() => expect(getJobNotes).toHaveBeenCalled());
+
+    await user.type(
+      screen.getByPlaceholderText('Add a note or photo for this step…'),
+      'cracked insert',
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'p.jpg', { type: 'image/jpeg' }));
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await screen.findByRole('alert');
+    expect(addJobNote).not.toHaveBeenCalled();
+    // The feed is still empty — no photo-less note was prepended.
+    expect(screen.getByText('No activity yet.')).toBeInTheDocument();
+    // Still in hand, so tapping Post again is a retry rather than a second note.
+    expect(screen.getByDisplayValue('cracked insert')).toBeInTheDocument();
   });
 
   it('records composer_abandoned when they open it and leave without saving', async () => {

@@ -58,32 +58,66 @@ function rowToMedia(row: MediaRow): JobNoteMedia {
 }
 
 /**
- * Attach one (already-compressed) photo to a note of ANY subject. Uploads to
- * {companyId}/{entityType}/{entityId}/... then records the metadata row. Rolls
- * back the storage object if the row insert fails so a failed attach never leaks
- * an orphaned file. `dims` (the compressed image's pixel size) is optional.
+ * Put one (already-compressed) photo in the bucket and return where it landed.
  *
- * The folder is a caller decision because a machine-subject note has no job to
- * file under — its photos live beside the machine. The company segment, which is
- * the only one the bucket RLS reads, is unchanged either way.
+ * SPLIT FROM THE ROW INSERT ON PURPOSE, and the split is the whole point of #624. The bytes are
+ * the slow, failure-prone half; the row is a fast local write. Keeping them in one function forced
+ * every caller to have a note row already, so a stalled upload on shop wifi left a note claiming
+ * to be saved with the photo it was taken for missing. Callers now upload first and commit second.
+ *
+ * NOTE THAT THE PATH NEVER CONTAINED THE NOTE ID — it keys on the job or the work center — so this
+ * needs nothing that does not exist before the note does. That is what made the reorder possible.
+ *
+ * The folder is a caller decision because a machine-subject note has no job to file under; its
+ * photos live beside the machine. The company segment, which is the only one the bucket RLS reads,
+ * is unchanged either way.
  */
-export async function addNoteMedia(
+export async function uploadNoteMediaFile(
   companyId: string,
-  noteId: string,
   file: File,
-  opts: {
-    folder: { entityType: StorageEntityType; entityId: string };
-    dims?: { width: number; height: number };
-  },
-): Promise<JobNoteMedia> {
-  const supabase = getSupabase();
+  folder: { entityType: StorageEntityType; entityId: string },
+): Promise<string> {
   const storagePath = generateStoragePath(
     companyId,
-    opts.folder.entityType,
-    opts.folder.entityId,
+    folder.entityType,
+    folder.entityId,
     file.name,
   );
   await uploadFileToStorage(storagePath, file);
+  return storagePath;
+}
+
+/**
+ * Drop photos that reached the bucket before a later step of the same save failed.
+ *
+ * The counterpart to uploading before committing: if the note write or a row insert fails, the
+ * bytes already up would otherwise be orphans. Best-effort and NEVER THROWS — the caller is already
+ * on its way to reporting a real failure, and replacing that message with "cleanup failed" would
+ * tell the operator about our problem instead of theirs. A missed sweep leaves an unreferenced
+ * object, which is invisible and cheap — the same trade `deleteJobNoteMedia` already makes.
+ */
+export async function discardNoteMediaUploads(storagePaths: string[]): Promise<void> {
+  await Promise.all(
+    storagePaths.map((path) =>
+      deleteFileFromStorage(path).catch((err) =>
+        console.warn('Failed to discard an uploaded photo after a failed save:', err),
+      ),
+    ),
+  );
+}
+
+/**
+ * Record the metadata row for a file already in the bucket. Rolls the object back if the insert
+ * fails, so a failed attach never leaks an orphan.
+ */
+export async function insertNoteMedia(
+  companyId: string,
+  noteId: string,
+  storagePath: string,
+  file: File,
+  dims?: { width: number; height: number },
+): Promise<JobNoteMedia> {
+  const supabase = getSupabase();
 
   const { data, error } = await supabase
     .from('note_media')
@@ -94,8 +128,8 @@ export async function addNoteMedia(
       kind: 'photo',
       mime_type: file.type || null,
       size_bytes: file.size,
-      width: opts?.dims?.width ?? null,
-      height: opts?.dims?.height ?? null,
+      width: dims?.width ?? null,
+      height: dims?.height ?? null,
     })
     .select(MEDIA_SELECT)
     .single();
@@ -108,6 +142,36 @@ export async function addNoteMedia(
   }
 
   return rowToMedia(data as unknown as MediaRow);
+}
+
+/**
+ * Upload and record in one step, for callers that already hold a note row and are not carrying the
+ * two halves themselves. The composer deliberately does NOT use this — see `uploadNoteMediaFile`.
+ */
+export async function addNoteMedia(
+  companyId: string,
+  noteId: string,
+  file: File,
+  opts: {
+    folder: { entityType: StorageEntityType; entityId: string };
+    dims?: { width: number; height: number };
+  },
+): Promise<JobNoteMedia> {
+  const storagePath = await uploadNoteMediaFile(companyId, file, opts.folder);
+  return insertNoteMedia(companyId, noteId, storagePath, file, opts.dims);
+}
+
+/**
+ * Upload half of `addJobNoteMedia`, for the composer's upload-then-commit order. Only the folder
+ * choice differs between a job photo and a machine photo, so that is all the two halves split on —
+ * `insertNoteMedia` is shared.
+ */
+export function uploadJobNoteMediaFile(
+  companyId: string,
+  jobId: string,
+  file: File,
+): Promise<string> {
+  return uploadNoteMediaFile(companyId, file, { entityType: 'jobs', entityId: jobId });
 }
 
 /**

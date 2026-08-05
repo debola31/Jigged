@@ -67,6 +67,66 @@ export function generateCompanyLogoPath(
   return `${companyId}/company/logo_${uuid}_${sanitized}`;
 }
 
+/** A storage request that ran past its deadline. Distinct so callers can word it as a network
+ *  condition rather than as a rejection by the server. */
+export class UploadTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UploadTimeoutError';
+  }
+}
+
+/**
+ * Deadlines for storage requests, because a stalled one otherwise hangs forever.
+ *
+ * Supabase's `.upload()` accepts no AbortSignal (still true in storage-js 2.112) and there is no
+ * progress event to hang a stall detector off, so this RACES rather than CANCELS: the request is
+ * abandoned, not stopped. The cost is that a stalled upload whose bytes later land leaves an
+ * orphaned object with no row — invisible, and a category this module already tolerates by design
+ * (see deleteJobNoteMedia). It can never block a retry, because generateStoragePath mints a fresh
+ * uuid per call. If uploads on shop wifi turn out to fail often enough to care, the escalation is
+ * TUS resumable uploads (which Supabase recommends above 6 MB), not a bigger timeout.
+ */
+const UPLOAD_TIMEOUT_BASE_MS = 20_000;
+/**
+ * ≈480 kbit/s sustained — deliberately BELOW any link a phone can meaningfully use, so failing this
+ * budget means the transfer stalled rather than that it was slow. A marginal LTE signal inside a
+ * steel building still sustains around 1 Mbit/s up when it is working at all.
+ */
+const UPLOAD_MIN_BYTES_PER_MS = 60;
+/** Only binds above ~51 MB. No single request should be able to pin a tab for half an hour. */
+const UPLOAD_TIMEOUT_MAX_MS = 15 * 60_000;
+/** A delete carries no payload, so it needs no size term. */
+const DELETE_TIMEOUT_MS = 20_000;
+
+/**
+ * How long an upload of `bytes` may take before it counts as stalled.
+ *
+ * ONE FORMULA CANNOT SERVE BOTH ENDS OF THIS WELL, and the linear term is the compromise: the same
+ * choke point carries 1.5 MB operator photos taken on a phone (~46 s) and 100 MB part model files
+ * uploaded from an office desk (capped at 15 min). If the phone number proves wrong in the pilot,
+ * add a per-call override rather than changing the shared rate.
+ */
+export function uploadTimeoutMs(bytes: number): number {
+  return Math.min(
+    UPLOAD_TIMEOUT_BASE_MS + Math.ceil(bytes / UPLOAD_MIN_BYTES_PER_MS),
+    UPLOAD_TIMEOUT_MAX_MS,
+  );
+}
+
+/** Reject after `ms` if `work` has not settled. Clears its timer either way. */
+async function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new UploadTimeoutError(message)), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Upload file to Supabase Storage
  */
@@ -77,12 +137,16 @@ export async function uploadFileToStorage(
   const supabase = getSupabase();
   const bucket = getStorageBucket();
 
-  const { error } = await supabase.storage
-    .from(bucket)
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: false
-    });
+  const { error } = await withDeadline(
+    supabase.storage
+      .from(bucket)
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false
+      }),
+    uploadTimeoutMs(file.size),
+    'The upload timed out — check your connection and try again.',
+  );
 
   if (error) {
     console.error('Storage upload error:', error);
@@ -99,9 +163,14 @@ export async function deleteFileFromStorage(
   const supabase = getSupabase();
   const bucket = getStorageBucket();
 
-  const { error } = await supabase.storage
-    .from(bucket)
-    .remove([path]);
+  // Bounded for the same reason as the upload, and it is not hypothetical: the media rollback path
+  // awaits this after a failed insert, so a hung remove would hang the composer one branch below
+  // the failure it is cleaning up after.
+  const { error } = await withDeadline(
+    supabase.storage.from(bucket).remove([path]),
+    DELETE_TIMEOUT_MS,
+    'Removing the file timed out — check your connection and try again.',
+  );
 
   if (error) {
     console.error('Storage delete error:', error);

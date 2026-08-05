@@ -41,6 +41,8 @@ import {
   generateStoragePath,
   generateTempStoragePath,
   uploadFileToStorage,
+  uploadTimeoutMs,
+  UploadTimeoutError,
   deleteFileFromStorage,
   getSignedUrl,
   getSignedUrls,
@@ -189,6 +191,74 @@ describe('storageHelpers', () => {
       await uploadFileToStorage('path/to/file.pdf', mockBlob);
 
       expect(mockStorage.upload).toHaveBeenCalled();
+    });
+  });
+
+  // ============== Upload deadline (#624) Tests ==============
+
+  describe('uploadTimeoutMs', () => {
+    // Pinned rather than recomputed, so a change to the constants has to be a
+    // deliberate edit here rather than a silent one. The sizes are the real range
+    // this choke point carries.
+    it('scales the budget with payload size', () => {
+      expect(uploadTimeoutMs(16 * 1024)).toBe(20_274); // the issue's control, observed <5s
+      expect(uploadTimeoutMs(1.5 * 1024 * 1024)).toBe(46_215); // compressed operator photo
+      expect(uploadTimeoutMs(25 * 1024 * 1024)).toBe(456_907); // job / part attachment PDF
+    });
+
+    it('caps the budget so no single request can pin a tab indefinitely', () => {
+      expect(uploadTimeoutMs(100 * 1024 * 1024)).toBe(900_000); // 100MB part model
+      expect(uploadTimeoutMs(5 * 1024 * 1024 * 1024)).toBe(900_000);
+    });
+  });
+
+  describe('uploadFileToStorage deadline', () => {
+    // #624: a stalled upload used to hang forever — no timeout, no error, no way
+    // out — and the composer sat on "Saving…" until the tab was killed.
+    it('rejects an upload that never settles once its budget elapses', async () => {
+      vi.useFakeTimers();
+      try {
+        mockStorage.upload.mockReturnValue(new Promise(() => {}));
+        const photo = new File([new Uint8Array(1024)], 'photo.jpg', { type: 'image/jpeg' });
+
+        const pending = uploadFileToStorage('a/b/photo.jpg', photo);
+        const assertion = expect(pending).rejects.toBeInstanceOf(UploadTimeoutError);
+
+        await vi.advanceTimersByTimeAsync(uploadTimeoutMs(photo.size) + 1);
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('says the upload timed out rather than that the server refused it', async () => {
+      vi.useFakeTimers();
+      try {
+        mockStorage.upload.mockReturnValue(new Promise(() => {}));
+        const photo = new File([new Uint8Array(1024)], 'photo.jpg', { type: 'image/jpeg' });
+
+        const pending = uploadFileToStorage('a/b/photo.jpg', photo);
+        const assertion = expect(pending).rejects.toThrow(/timed out — check your connection/);
+
+        await vi.advanceTimersByTimeAsync(uploadTimeoutMs(photo.size) + 1);
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves no timer armed when the upload lands inside its budget', async () => {
+      vi.useFakeTimers();
+      try {
+        mockStorage.upload.mockResolvedValue({ data: {}, error: null });
+        const photo = new File([new Uint8Array(1024)], 'photo.jpg', { type: 'image/jpeg' });
+
+        await uploadFileToStorage('a/b/photo.jpg', photo);
+
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

@@ -175,7 +175,9 @@ export default function PartsPage() {
           return new Set<string>();
         }),
       ]),
-    [companyId, searchDebounced, sortModel],
+    // Spread sortModel into its two primitives rather than passing the object —
+    // useLoad wants primitive deps (see the warning in hooks/useLoad.ts).
+    [companyId, searchDebounced, sortModel.field, sortModel.sort],
     {
       onError: (error) => {
         console.error('Error fetching parts:', error);

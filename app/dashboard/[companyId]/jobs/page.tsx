@@ -222,6 +222,7 @@ export default function JobsPage() {
   // cancelled), then filter to the exact selected stages client-side via
   // getJobLifecycleStage (see visibleJobs). Closed jobs are fetched only when a
   // closed stage is selected — the default (open stages only) hides them.
+  const statusFilterKey = [...statusFilter].sort().join(',');
   const {
     data: jobsData,
     loading,
@@ -241,12 +242,16 @@ export default function JobsPage() {
       };
       return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
     },
+    // Primitive deps only (see the warning in hooks/useLoad.ts): the selected
+    // stages collapse to a sorted key, and sortModel spreads into its two
+    // fields. Sorted, so merely reordering the multi-select can't refetch.
     [
       companyId,
-      statusFilter,
+      statusFilterKey,
       customerId,
       searchDebounced,
-      sortModel,
+      sortModel.field,
+      sortModel.sort,
       overdueOnly,
     ],
     {

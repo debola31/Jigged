@@ -3,7 +3,8 @@
 import { useMemo } from 'react';
 import MachineComposer from '@/components/maintenance/MachineComposer';
 import { useNoteCapture, type NoteWriter } from '@/hooks/useNoteCapture';
-import { addMachineNote, addMachineNoteMedia } from '@/utils/machineMaintenanceAccess';
+import { addMachineNote, uploadMachineNoteMediaFile } from '@/utils/machineMaintenanceAccess';
+import { insertNoteMedia } from '@/utils/jobNoteMediaAccess';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { MachineNote } from '@/types/machineMaintenance';
 
@@ -59,8 +60,9 @@ export default function MachineReplyComposer({
           maintenanceKind: null,
           resolvesNoteId: target.id,
         }),
-      attachMedia: (note, file, dims) =>
-        addMachineNoteMedia(companyId, workCenterId, note.id, file, { dims }),
+      uploadMedia: (file) => uploadMachineNoteMediaFile(companyId, workCenterId, file),
+      linkMedia: (note, upload) =>
+        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { workCenterId, resolving: true },
     }),

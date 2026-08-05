@@ -521,10 +521,26 @@ no draft persistence, so the only real fix was to stop having two commits. **The
 offer is deleted, not relocated.**
 
 **Submit order is load-bearing and deliberately NOT atomic:** `createOperationCompletion` lands
-first and durably, then `addJobNote` if there is text or a photo, then `addJobNoteMedia` per photo.
-A transaction would be *worse* — it would roll back real finished work because an image failed to
-upload on shop wifi. So if the note fails the completion stands, and the note error surfaces on
-its own next to the text the operator still has.
+first and durably, then the note. A transaction across the two would be *worse* — it would roll back
+real finished work because an image failed to upload on shop wifi. So if the note fails the
+completion stands, and the note error surfaces on its own next to the text the operator still has.
+
+**Within the note, photos upload BEFORE the note row is written** — `uploadJobNoteMediaFile` for
+every photo, then `addJobNote`, then `insertNoteMedia` per photo. Corrected 2026-08-04 from
+[#624](https://github.com/debola31/Jigged/issues/624); it used to be the other way round. Uploading
+is the slow, failure-prone half, so a phone on dropping wifi stalled with the note *already
+committed*: backing out left a note claiming to be saved without the photo it was taken for, and
+nothing said so. Inverted, a failed or timed-out upload leaves **nothing** behind — which is why
+this needs no partial-save state and no second kind of error message. The draft and the photos are
+still in the composer, and tapping save again is a clean retry rather than a second note. It is the
+rule [`OperatorLocationActionModal`](../../components/operator/OperatorLocationActionModal.tsx)
+already states: *upload before the write, never after.* It was reachable here only because the
+storage path keys on the job or the machine and never on the note.
+
+The cost moves rather than vanishing: photos that land before a later step fails are orphans, swept
+best-effort by `discardNoteMediaUploads` and otherwise invisible. A `insertNoteMedia` failure *after*
+the note lands can still leave a text-only note, but that is a fast local write rather than a
+transfer, so it is a far smaller exposure than the one it replaced.
 
 **Capture is always optional.** Completion works with the field empty.
 
@@ -611,6 +627,15 @@ renders them and deliberately owns **no** submit button, because the surface it 
 what "save" means. The photo pipeline copies bytes into a stable `File` **immediately**, because a
 camera-origin `File` on iOS can become unreadable by compress-and-upload time and yield a
 zero-byte blob; unreadable picks are **reported per file**, never dropped silently.
+
+The write side now holds the same line. Both slow steps are **bounded**, because an unbounded one
+reads as a working app rather than a broken one and the operator waits, gives up, and loses the
+photo: compression carries a real `AbortSignal` (30 s, CPU-bound so it only fires when something is
+wrong), and the upload carries a size-aware deadline in
+[`storageHelpers`](../../utils/storageHelpers.ts) — roughly 46 s for a compressed photo, minutes for
+a 100 MB part model, since one choke point serves both. Supabase Storage exposes no cancel or
+progress hook for uploads, so that deadline abandons the request rather than stopping it; if photo
+uploads ever fail often enough to matter, the escalation is TUS resumable uploads, not a longer wait.
 
 ### Triangularity (B5)
 
@@ -812,6 +837,8 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 
 - [ ] **Given** a step WITH a `routing_operation_id`, **when** a note is saved, **then** it is written as a **durable `part` subject** with the job recorded only as provenance; **given** an ad-hoc step with no routing link, **then** it falls back to a `job` subject — a genuine subject difference, not a silent fallback — *verified by `__tests__/utils/operatorNoteSubject.test.ts` (6 `it`s) and `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
 - [ ] **Given** a blank-text note with a photo, **when** it is saved, **then** `body` is stored as null so a media-only note is valid — *verified by `__tests__/utils/operatorAccess.test.ts` > `addJobNote`*.
+- [ ] **Given** a note with a photo, **when** it is saved, **then** every photo reaches storage **before** the note row is written; **given** an upload that fails or times out, **then** no note is created at all, the draft and photos stay in the composer so saving again is a retry rather than a second note, and the photos that did land are swept — *verified by `__tests__/hooks/useNoteCapture.test.tsx` (8 `it`s) and `__tests__/components/operator/JobFeed.test.tsx`*.
+- [ ] **Given** a stalled upload, **when** its size-aware deadline expires, **then** it fails rather than hanging on "Saving…" forever — *verified by `__tests__/utils/storageHelpers.test.ts` > `uploadFileToStorage deadline`*.
 - [ ] **Given** the job feed, **when** it loads, **then** job-subject notes AND durable part-subject notes captured on this job roll up together, newest first — *verified by `__tests__/utils/operatorAccess.test.ts` > `getJobNotes`*.
 - [ ] **Given** an author editing their own note, **when** it saves, **then** only `body` changes, `edited_at` is stamped by the trigger, a "· edited" marker renders, and **the view count does not reset** — *verified by `__tests__/components/notes/NoteEditDialog.test.tsx` (12 `it`s), `__tests__/components/operator/JobFeed.test.tsx` (17 `it`s) and `__tests__/utils/operatorAccess.test.ts` > `updateNoteBody`*.
 - [ ] **Given** an author deleting their own note, **when** it is removed, **then** it disappears from the feed, the Playbook and My work — *verified by `__tests__/components/operator/JobFeed.test.tsx` and `__tests__/app/operator/MyWorkPage.test.tsx` (31 `it`s)*.

@@ -21,6 +21,28 @@ const PHOTO_COMPRESSION_OPTIONS = {
   fileType: 'image/jpeg' as const,
 };
 
+/**
+ * Compression is the OTHER way the composer can hang: it precedes every upload, and a worker that
+ * never reports back leaves the same endless "Saving…" as a stalled request. Unlike the upload,
+ * this one cancels for real — browser-image-compression takes an AbortSignal.
+ *
+ * Generous, because the budget is CPU rather than network: a 12 MP photo on an old phone is a few
+ * seconds, so 30 s only fires when something is genuinely wrong.
+ */
+const COMPRESSION_TIMEOUT_MS = 30_000;
+
+/**
+ * Fresh per call — a module-level signal would start its clock at import and be shared by every
+ * photo. Guarded because `AbortSignal.timeout` needs Safari 16+, and operators are on their own
+ * phones of unknown vintage: on an older one we lose the deadline, which is where we already are,
+ * rather than losing the ability to attach a photo at all.
+ */
+function compressionSignal(): AbortSignal | undefined {
+  return typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(COMPRESSION_TIMEOUT_MS)
+    : undefined;
+}
+
 export interface PreparedPhoto {
   file: File;
   dims?: { width: number; height: number };
@@ -34,7 +56,10 @@ function renameToJpg(name: string): string {
 
 /** Compress + downscale a captured image and read its final pixel dimensions. */
 export async function compressPhoto(input: File): Promise<PreparedPhoto> {
-  const compressed = await imageCompression(input, PHOTO_COMPRESSION_OPTIONS);
+  const compressed = await imageCompression(input, {
+    ...PHOTO_COMPRESSION_OPTIONS,
+    signal: compressionSignal(),
+  });
 
   // Normalize to a File with a .jpg name and image/jpeg type regardless of what
   // the library returns (File or Blob, original extension).

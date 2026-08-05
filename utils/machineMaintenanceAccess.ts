@@ -2,7 +2,7 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { mapReactions } from '@/utils/operatorAccess';
 import type { ReactionRel } from '@/utils/operatorAccess';
-import { addNoteMedia } from '@/utils/jobNoteMediaAccess';
+import { addNoteMedia, uploadNoteMediaFile } from '@/utils/jobNoteMediaAccess';
 import type { JobNoteMedia } from '@/types/operator';
 import type {
   MachineDetails,
@@ -194,6 +194,22 @@ export async function addMachineNote(
   }
 
   return rowToNote(data as unknown as MachineNoteRow);
+}
+
+/**
+ * Upload half of `addMachineNoteMedia`, for the composer's upload-then-commit order. A machine
+ * photo files beside the machine rather than under a job — that folder choice is the only thing
+ * that differs from the job path, which is why it is all the split covers.
+ */
+export function uploadMachineNoteMediaFile(
+  companyId: string,
+  workCenterId: string,
+  file: File,
+): Promise<string> {
+  return uploadNoteMediaFile(companyId, file, {
+    entityType: 'work-centers',
+    entityId: workCenterId,
+  });
 }
 
 /** Attach one already-compressed photo to a machine entry. */

@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addJobNote } from '@/utils/operatorAccess';
-import { addJobNoteMedia } from '@/utils/jobNoteMediaAccess';
+import {
+  discardNoteMediaUploads,
+  insertNoteMedia,
+  uploadJobNoteMediaFile,
+} from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
 import type { OperatorEventContext } from '@/utils/operatorEventsAccess';
@@ -82,15 +86,25 @@ export interface NoteCaptureContext {
  */
 export interface NoteWriter<TNote> {
   createNote: (body: string | null) => Promise<TNote>;
-  attachMedia: (
-    note: TNote,
-    file: File,
-    dims?: { width: number; height: number },
-  ) => Promise<JobNoteMedia>;
+  /**
+   * Put the bytes in the bucket and return where they landed. Takes NO note, because the storage
+   * path keys on the job or the machine and never on the note — which is what lets `submit` get
+   * every photo up before it commits anything. See the ordering comment there.
+   */
+  uploadMedia: (file: File) => Promise<string>;
+  /** Record an already-uploaded file against the note. A fast local write, not a transfer. */
+  linkMedia: (note: TNote, upload: UploadedPhoto) => Promise<JobNoteMedia>;
   /** Merge saved media onto the note for the optimistic prepend. */
   withMedia: (note: TNote, media: JobNoteMedia[]) => TNote;
   /** Merged into every funnel event this composer emits. */
   eventContext?: OperatorEventContext;
+}
+
+/** A compressed photo that is already in the bucket, waiting for a note to belong to. */
+export interface UploadedPhoto {
+  storagePath: string;
+  file: File;
+  dims?: { width: number; height: number };
 }
 
 /**
@@ -124,9 +138,13 @@ export interface NoteCapture<TNote = JobNote> extends NoteCaptureFieldsState {
    * Write the note and its media. Returns the note (with media) so an optimistic
    * list can prepend it, or null when there was nothing to write.
    *
-   * THROWS on failure, deliberately: the caller decides what a partial failure
-   * means. On the completion path the completion has already landed and must
-   * stand, so the error is surfaced on its own rather than rolled back.
+   * THROWS on failure, deliberately: the caller decides what a failure means. On
+   * the completion path the completion has already landed and must stand, so the
+   * error is surfaced on its own rather than rolled back.
+   *
+   * A throw means NOTHING WAS WRITTEN in the overwhelmingly common case — see the
+   * ordering comment in the implementation — so the draft and photos the operator
+   * still has are the whole of what is unsaved, and retrying is safe.
    */
   submit: () => Promise<TNote | null>;
 }
@@ -304,12 +322,47 @@ export function useNoteCapture<TNote = JobNote>(opts: {
     setSaving(true);
     setError(null);
     try {
-      const note = await writer.createNote(body || null);
+      /**
+       * UPLOAD EVERY PHOTO FIRST, COMMIT SECOND. The order is the fix for #624.
+       *
+       * It used to be the other way round: create the note, then upload into it. Uploading is the
+       * slow, failure-prone half — a shop-floor phone on dropping wifi can stall on it for minutes
+       * — and by the time it stalled the note row was already committed. Backing out left a note
+       * that claimed to be saved with the photo it was taken for missing, and nothing said so.
+       *
+       * Inverted, a failed or timed-out upload leaves NOTHING behind. The catch below then tells
+       * the truth with no extra machinery: the draft and the photos are still staged, the error is
+       * accurate, and tapping save again is a clean retry rather than a second note.
+       *
+       * This is the rule OperatorLocationActionModal already states — "upload BEFORE the write,
+       * never after" — and the reason it was reachable here is that the storage path keys on the
+       * job or the machine, never on the note, so it needs nothing the note provides.
+       *
+       * The cost is symmetrical and much smaller: if a later step fails, the photos already in the
+       * bucket are orphans. They are invisible and cheap, and we make a best-effort sweep below.
+       */
+      const uploads: UploadedPhoto[] = [];
+      let note: TNote;
+      try {
+        for (const p of photos) {
+          const prepared = await compressPhoto(p.file);
+          uploads.push({
+            storagePath: await writer.uploadMedia(prepared.file),
+            file: prepared.file,
+            dims: prepared.dims,
+          });
+        }
+        note = await writer.createNote(body || null);
+      } catch (err) {
+        // Everything up to and including the note write is still reversible, so sweep the bytes
+        // that did land rather than leaving them unreferenced.
+        await discardNoteMediaUploads(uploads.map((u) => u.storagePath));
+        throw err;
+      }
 
       const media: JobNoteMedia[] = [];
-      for (const p of photos) {
-        const prepared = await compressPhoto(p.file);
-        media.push(await writer.attachMedia(note, prepared.file, prepared.dims));
+      for (const u of uploads) {
+        media.push(await writer.linkMedia(note, u));
       }
 
       photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
@@ -374,8 +427,9 @@ export function useStepNoteWriter(args: {
           jobPartId: context.jobPartId,
           jobOperationId: context.jobOperationId,
         }),
-      attachMedia: (note, file, dims) =>
-        addJobNoteMedia(companyId, jobId, note.id, file, { dims }),
+      uploadMedia: (file) => uploadJobNoteMediaFile(companyId, jobId, file),
+      linkMedia: (note, upload) =>
+        insertNoteMedia(companyId, note.id, upload.storagePath, upload.file, upload.dims),
       withMedia: (note, media) => ({ ...note, media }),
       eventContext: { jobOperationId: context.jobOperationId },
     };

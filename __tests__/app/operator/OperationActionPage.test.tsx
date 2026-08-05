@@ -62,7 +62,9 @@ vi.mock('@/utils/operatorAccess', () => ({
 // which creates its client at MODULE scope — so without a mock the whole test
 // file throws on import rather than on use.
 vi.mock('@/utils/jobNoteMediaAccess', () => ({
-  addJobNoteMedia: vi.fn(async () => ({ id: 'media1' })),
+  uploadJobNoteMediaFile: vi.fn(async () => 'company/jobs/job1/abcd_p.jpg'),
+  insertNoteMedia: vi.fn(async () => ({ id: 'media1' })),
+  discardNoteMediaUploads: vi.fn(async () => undefined),
   getJobNoteMediaUrl: vi.fn(async () => 'blob:x'),
 }));
 vi.mock('@/utils/imageCompression', () => ({

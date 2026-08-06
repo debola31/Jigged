@@ -19,7 +19,7 @@ vi.mock('@/utils/operatorAccess', () => ({
 
 vi.mock('@/utils/inventoryCountAccess', () => ({
   loadCountCandidates: vi.fn(),
-  loadLocationCountCandidates: vi.fn(),
+  loadCountCandidatesForPlaces: vi.fn(),
   loadPartAtLocationCandidate: vi.fn(),
   loadPartEverywhereCandidates: vi.fn(),
   refreshLocationQuantities: vi.fn(),
@@ -68,7 +68,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
 import InventoryCountPage from '@/app/dashboard/[companyId]/inventory/count/page';
 import {
   loadCountCandidates,
-  loadLocationCountCandidates,
+  loadCountCandidatesForPlaces,
   refreshLocationQuantities,
   commitCount,
   loadPartAtLocationCandidate,
@@ -531,7 +531,7 @@ describe('counting one place', () => {
       { id: 'loc-yard', company_id: 'co1', parent_id: null, name: 'Yard', kind: 'outside', code: null, sort_order: 1, created_at: '', updated_at: '' },
       { id: 'loc-un', company_id: 'co1', parent_id: null, name: 'Unassigned', kind: 'system', code: null, sort_order: 2, created_at: '', updated_at: '' },
     ]);
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
       total: 2,
     });
@@ -561,7 +561,7 @@ describe('counting one place', () => {
   it('names the place it is scoped to instead of the whole shop', async () => {
     renderPage();
     expect(await screen.findByText("What's in Shelf A?")).toBeInTheDocument();
-    expect(loadLocationCountCandidates).toHaveBeenCalledWith(LOC, 'Shelf A', {
+    expect(loadCountCandidatesForPlaces).toHaveBeenCalledWith([{ id: LOC, name: 'Shelf A', path: 'Shelf A' }], {
       search: '',
       offset: 0,
       limit: 2,
@@ -603,15 +603,15 @@ describe('counting one place', () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("What's in Shelf A?");
-    asMock(loadLocationCountCandidates).mockClear();
+    asMock(loadCountCandidatesForPlaces).mockClear();
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('combobox', { name: /send the ticked parts to/i }));
     await user.click(await screen.findByRole('option', { name: /^Yard/ }));
     await user.click(screen.getByRole('button', { name: /put 1 away/i }));
 
-    await waitFor(() => expect(loadLocationCountCandidates).toHaveBeenCalled());
-    const [, , opts] = asMock(loadLocationCountCandidates).mock.calls[0];
+    await waitFor(() => expect(loadCountCandidatesForPlaces).toHaveBeenCalled());
+    const [, opts] = asMock(loadCountCandidatesForPlaces).mock.calls[0];
     expect(opts.offset ?? 0).toBe(0);
   });
 
@@ -680,7 +680,7 @@ describe('counting one place', () => {
    */
   it('pages through a bin instead of showing one capped page', async () => {
     const user = userEvent.setup();
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
       total: 9428,
     });
@@ -692,7 +692,7 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('button', { name: /next/i }));
 
     await waitFor(() =>
-      expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(LOC, 'Shelf A', {
+      expect(loadCountCandidatesForPlaces).toHaveBeenLastCalledWith([{ id: LOC, name: 'Shelf A', path: 'Shelf A' }], {
         search: '',
         offset: 2,
         limit: 2,
@@ -718,7 +718,7 @@ describe('counting one place', () => {
    */
   it('does not reset the page when the mount-time search debounce fires', async () => {
     const user = userEvent.setup();
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
       total: 9428,
     });
@@ -728,17 +728,16 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('button', { name: /next/i }));
 
     await waitFor(() =>
-      expect(loadLocationCountCandidates).toHaveBeenLastCalledWith(
-        LOC,
-        'Shelf A',
+      expect(loadCountCandidatesForPlaces).toHaveBeenLastCalledWith(
+        [{ id: LOC, name: 'Shelf A', path: 'Shelf A' }],
         expect.objectContaining({ offset: 2 }),
       ),
     );
 
     await new Promise((resolve) => setTimeout(resolve, 700));
 
-    const offsets = asMock(loadLocationCountCandidates).mock.calls.map(
-      (call: unknown[]) => (call[2] as { offset: number }).offset,
+    const offsets = asMock(loadCountCandidatesForPlaces).mock.calls.map(
+      (call: unknown[]) => (call[1] as { offset: number }).offset,
     );
     expect(offsets).toEqual([0, 2]);
   });
@@ -746,7 +745,7 @@ describe('counting one place', () => {
   /** A tick on page 1 must survive turning to page 2 — the sheet holds rows, not indexes. */
   it('keeps what is already ticked when the page turns', async () => {
     const user = userEvent.setup();
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [here('BUY-ORING-214', 828), here('BUY-BEARING-608ZZ', 580)],
       total: 9428,
     });
@@ -754,7 +753,7 @@ describe('counting one place', () => {
     await screen.findByText(/1–2 of 9,428 here/i);
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [here('SOMETHING-ELSE', 3)],
       total: 9428,
     });
@@ -767,7 +766,7 @@ describe('counting one place', () => {
   // The RPC caps the array to bound how long it holds row locks; say so before someone selects
   // 2,000 rows and is refused.
   it('refuses to select-all past the cap', async () => {
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: Array.from({ length: 1001 }, (_, i) => here(`P${i}`, 1)),
       total: 1001,
     });
@@ -801,7 +800,7 @@ describe('counting one place — the sheet outlives the search', () => {
     asMock(getLocations).mockResolvedValue([
       { id: LOC2, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
     ]);
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [hereRow('BUY-ORING-214', 828), hereRow('BUY-BEARING-608ZZ', 580)],
       total: 2,
     });
@@ -820,7 +819,7 @@ describe('counting one place — the sheet outlives the search', () => {
     await user.type(inputFor('BUY-ORING-214', 'Shelf A'), '800');
 
     // The server list is replaced by something that does not contain the counted part.
-    asMock(loadLocationCountCandidates).mockResolvedValue({
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
       candidates: [hereRow('SOMETHING-ELSE', 5)],
       total: 1,
     });
@@ -870,7 +869,7 @@ describe('counting one place — adding a part that is not listed', () => {
     asMock(getLocations).mockResolvedValue([
       { id: LOC3, company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, created_at: '', updated_at: '' },
     ]);
-    asMock(loadLocationCountCandidates).mockResolvedValue({ candidates: [], total: 0 });
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({ candidates: [], total: 0 });
     nextAddPick = { id: 'p-missing', part_name: 'BUY-DOWEL-3MM' };
     asMock(loadPartAtLocationCandidate).mockResolvedValue(
       cand({
@@ -1326,5 +1325,115 @@ describe('stock that moved between two counted places', () => {
     // Reported after the fact, as before — the count IS what is on the shelf.
     await waitFor(() => expect(commitCount).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Counting a whole cabinet.
+ *
+ * A container holds no stock of its own since 20260806160053, so a one-bin sheet for one would be
+ * permanently blank. "Count Cabinet 3" means the bins under it — and it needed no new write path,
+ * because `commitCount` already adjusts each line at its own `target.locationId`.
+ */
+describe('counting a container', () => {
+  const CAB = 'loc-cab';
+  const ROW1 = 'loc-row-1';
+  const ROW2 = 'loc-row-2';
+
+  const place = (id: string, name: string, parent: string | null, sort = 0) => ({
+    id,
+    company_id: 'co1',
+    parent_id: parent,
+    name,
+    kind: null,
+    code: null,
+    sort_order: sort,
+    created_at: '',
+    updated_at: '',
+  });
+
+  beforeEach(() => {
+    searchParams.set('location', CAB);
+    asMock(getLocations).mockResolvedValue([
+      place(CAB, 'Cabinet 3', null),
+      place(ROW1, 'Row 1', CAB, 0),
+      place(ROW2, 'Row 2', CAB, 1),
+      place('loc-un', 'Unassigned', null, 9),
+    ]);
+    asMock(loadCountCandidatesForPlaces).mockResolvedValue({
+      candidates: [
+        at('p-bearing', 'BUY-BEARING-608ZZ', ROW1, 'Cabinet 3 › Row 1', 380),
+        at('p-oring', 'BUY-ORING-214', ROW1, 'Cabinet 3 › Row 1', 828),
+        at('p-bearing', 'BUY-BEARING-608ZZ', ROW2, 'Cabinet 3 › Row 2', 200),
+      ],
+      total: 3,
+    });
+    freshBalances({ 'p-bearing::loc-row-1': 380, 'p-bearing::loc-row-2': 200 });
+  });
+
+  afterEach(() => searchParams.delete('location'));
+
+  it('gathers every bin beneath the container, in walking order', async () => {
+    renderPage();
+    await screen.findByText("What's in Cabinet 3?");
+
+    expect(loadCountCandidatesForPlaces).toHaveBeenCalledWith(
+      [
+        { id: ROW1, name: 'Row 1', path: 'Cabinet 3 › Row 1' },
+        { id: ROW2, name: 'Row 2', path: 'Cabinet 3 › Row 2' },
+      ],
+      expect.objectContaining({ offset: 0 }),
+    );
+  });
+
+  /**
+   * The reason this is safe. Aggregating a split part would re-create the exact ambiguity that
+   * forces the company-wide sheet to skip such parts: 380 + 200 counted as 560 has no defensible
+   * home for the −20. Two lines means each number is about one shelf you are standing at.
+   */
+  it('keeps a split part as one line per bin rather than one total', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Cabinet 3?");
+
+    // The picker is part-first — one row per part, whatever its places — so the split shows on the
+    // sheet, which is where the numbers get typed.
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-BEARING-608ZZ/i }));
+    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 places/i }));
+
+    expect(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 1')).toBeInTheDocument();
+    expect(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 2')).toBeInTheDocument();
+  });
+
+  it('commits a line against its own bin, not the container', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("What's in Cabinet 3?");
+
+    await user.click(screen.getByRole('checkbox', { name: /count BUY-BEARING-608ZZ/i }));
+    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 places/i }));
+    // Only Row 2 gets a number, so only Row 2 commits — the other line has no entry.
+    await user.type(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 2'), '190');
+    await user.click(screen.getByRole('button', { name: /^save/i }));
+
+    await waitFor(() => expect(commitCount).toHaveBeenCalled());
+    const [variances] = asMock(commitCount).mock.calls.at(-1)!;
+    const targets = (variances as Array<{ candidate: CountCandidate }>).map(
+      (v) => v.candidate.target.locationId,
+    );
+    expect(targets).toEqual([ROW2]);
+    expect(targets).not.toContain(CAB);
+  });
+
+  /**
+   * `bulk_put_away` moves parts out of ONE location, and the ticked rows here come from several —
+   * so there is no single source to send them from. Counting is unaffected; putting away stays
+   * available one level down, standing at the bin.
+   */
+  it('withholds the bulk put-away, which has no single source on a subtree', async () => {
+    renderPage();
+    await screen.findByText("What's in Cabinet 3?");
+
+    expect(screen.queryByLabelText(/send the ticked parts to/i)).not.toBeInTheDocument();
   });
 });

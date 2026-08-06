@@ -22,7 +22,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
 import { resolveScan, getLocations, getLocationHistory } from '@/utils/inventoryLocationsAccess';
-import type { InventoryLocation } from '@/types/inventoryLocations';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
@@ -116,27 +116,12 @@ export default function OperatorBinViewPage() {
   };
 
   const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
-  const moveDestinations = useMemo(() => {
-    const list = allLocations ?? [];
-    const byId = new Map(list.map((l) => [l.id, l] as const));
-    const pathOf = (id: string): string => {
-      const names: string[] = [];
-      let cursor: string | null = id;
-      const guard = new Set<string>();
-      while (cursor && byId.has(cursor) && !guard.has(cursor)) {
-        guard.add(cursor);
-        const n: InventoryLocation = byId.get(cursor)!;
-        names.unshift(n.name);
-        cursor = n.parent_id;
-      }
-      return names.join(' › ');
-    };
-    // The current location and the `Unassigned` bucket are both dropped by `LocationPicker` now
-    // (`excludeId` / `excludeSystem`), so this only has to build the labelled list.
-    return list
-      .map((l) => ({ id: l.id, label: pathOf(l.id), kind: l.kind }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [allLocations]);
+  // Containers, the `Unassigned` pile and this bin itself are all dropped by the shared rule —
+  // a container cannot hold stock, so moving stock into one would only raise on arrival.
+  const moveDestinations = useMemo(
+    () => stockDestinationOptions(allLocations ?? [], { excludeId: locationId }),
+    [allLocations, locationId],
+  );
 
   const modalUnit = modal?.part.primary_unit || 'ea';
   const unitOptions = useMemo(
@@ -206,7 +191,21 @@ export default function OperatorBinViewPage() {
         </Box>
       )}
 
-      {/* Stock here: act on each part */}
+      {/*
+        A container has no "Stock here" section at all.
+
+        It used to render one, with a "Stock a part" button, above the line "No stock recorded
+        directly here — open a sub-location above." That line was describing a state the button
+        beside it invited you to break, and since 20260806160053 the database refuses the write —
+        so the button now leads to an error rather than a mistake. Neither is worth showing.
+        The sub-locations above are the whole answer for a container, and one line under them says
+        so instead.
+      */}
+      {children.length > 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Stock goes in the sub-locations above, not in {node.name} itself.
+        </Typography>
+      ) : (
       <Box>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
           <Typography variant="overline" color="text.secondary" sx={{ flex: 1 }}>
@@ -220,11 +219,7 @@ export default function OperatorBinViewPage() {
           <Card elevation={2} sx={{ mt: 0.5 }}>
             <CardContent sx={{ textAlign: 'center', py: 4 }}>
               <Inventory2OutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-              <Typography color="text.secondary">
-                {children.length > 0
-                  ? 'No stock recorded directly here — open a sub-location above.'
-                  : 'Nothing stored here yet.'}
-              </Typography>
+              <Typography color="text.secondary">Nothing stored here yet.</Typography>
             </CardContent>
           </Card>
         ) : (
@@ -314,6 +309,7 @@ export default function OperatorBinViewPage() {
           </Stack>
         )}
       </Box>
+      )}
 
       {/* Recent movements, last. The contents above answer "what is here now"; this answers
           "what happened here", including the photo whoever moved it left behind. Before this there
@@ -346,16 +342,20 @@ export default function OperatorBinViewPage() {
         />
       )}
 
-      <OperatorReceivePartModal
-        open={receiveOpen}
-        companyId={companyId}
-        locationId={node.id}
-        locationName={node.name}
-        excludePartIds={contents.map((c) => c.part_id)}
-        operatorId={operatorId}
-        onClose={() => setReceiveOpen(false)}
-        onDone={reloadAll}
-      />
+      {/* Not mounted for a container — there is no button to open it, and a modal that could only
+          ever write somewhere the database refuses has no reason to exist on this page. */}
+      {children.length === 0 && (
+        <OperatorReceivePartModal
+          open={receiveOpen}
+          companyId={companyId}
+          locationId={node.id}
+          locationName={node.name}
+          excludePartIds={contents.map((c) => c.part_id)}
+          operatorId={operatorId}
+          onClose={() => setReceiveOpen(false)}
+          onDone={reloadAll}
+        />
+      )}
     </Box>
   );
 }

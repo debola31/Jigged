@@ -29,8 +29,16 @@
  * bare list of names into "Shelf A — 40 ea / Yard — empty", which is most of what makes the choice
  * an informed one.
  *
- * `excludeSystem` hides `Unassigned`: it is the pile you are emptying, never a destination. No
- * `onCreate` either — creating places is an owner's job, the same call the board makes by
+ * ## What it will not offer
+ *
+ * The option list comes from `stockDestinationOptions`, so three exclusions are the shared rule
+ * rather than this file's opinion: **containers** (a cabinet made of Side 1 and Side 2 is not
+ * somewhere a part goes — and since 20260806160053 the database refuses that write, so offering it
+ * would only produce an error on arrival), the `Unassigned` pile (it is what you are emptying), and
+ * the source. `excludeSystem` stays on the picker as a second line: it is redundant against the
+ * current builder and costs nothing, and it keeps the intent legible at the call site.
+ *
+ * No `onCreate` either — creating places is an owner's job, the same call the board makes by
  * withholding "Add storage".
  */
 
@@ -45,7 +53,7 @@ import Typography from '@mui/material/Typography';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
-import { computePathNames } from '@/utils/inventoryLocationsAccess';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation, PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
 export interface PutAwayPickerDialogProps {
@@ -72,26 +80,12 @@ export default function PutAwayPickerDialog({
 }: PutAwayPickerDialogProps) {
   const [choice, setChoice] = useState<LocationPickerOption | null>(null);
 
-  const options = useMemo<LocationPickerOption[]>(() => {
-    const byId = new Map(locations.map((l) => [l.id, l] as const));
-    const heldAt = new Map(balances.map((b) => [b.location_id, Number(b.quantity ?? 0)] as const));
-    return locations
-      .map((l) => ({
-        id: l.id,
-        label: computePathNames(l.id, byId).join(' › ') || l.name,
-        kind: l.kind,
-        quantity: heldAt.get(l.id) ?? 0,
-      }))
-      // Places already holding some sort first: putting stock back with the rest of it is the
-      // common case, and it keeps one part from scattering across the shop. Alphabetical within
-      // each group so the order is stable and learnable rather than shifting with stock levels.
-      .sort((a, b) => {
-        const aHas = (a.quantity ?? 0) > 0;
-        const bHas = (b.quantity ?? 0) > 0;
-        if (aHas !== bHas) return aHas ? -1 : 1;
-        return a.label.localeCompare(b.label);
-      });
-  }, [locations, balances]);
+  // Leaf-only, pile excluded, already-holding-some sorted first — all of it now the shared rule in
+  // `stockDestinationOptions` rather than a fourth private copy of the same walk.
+  const options = useMemo<LocationPickerOption[]>(
+    () => stockDestinationOptions(locations, { balances }),
+    [locations, balances],
+  );
 
   const close = () => {
     setChoice(null);

@@ -4,6 +4,11 @@
  * What is worth pinning here is the interaction model, because it is the part that changed twice:
  * the whole row opens a place, the chevron is a *separate* target that only expands, and there is
  * no selection column at all.
+ *
+ * It changed a third time, and that is what most of the expand/collapse cases below now assert:
+ * the table is an **accordion with one open branch**. Rows start collapsed and opening a place
+ * closes anything not on its ancestor chain. The old suite assumed the opposite default and read
+ * child rows straight out of the first render — so four cases here are rewrites, not additions.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '../../../test-utils';
@@ -28,18 +33,24 @@ const node = (
   ...over,
 });
 
-const shelfA = node({ id: 'a', name: 'Shelf A', parent_id: 'cab', depth: 1 });
+const bin1 = node({ id: 'bin1', name: 'Bin 1', parent_id: 'a', depth: 2 });
+const shelfA = node({ id: 'a', name: 'Shelf A', parent_id: 'cab', depth: 1, children: [bin1] });
 const shelfB = node({ id: 'b', name: 'Shelf B', parent_id: 'cab', depth: 1 });
 const cabinet = node({ id: 'cab', name: 'Cabinet 3', children: [shelfA, shelfB] });
-const yard = node({ id: 'yard', name: 'Yard', sort_order: 1 });
-const unassigned = node({ id: 'un', name: 'Unassigned', kind: 'system', sort_order: 2 });
+const rackShelf = node({ id: 'rs', name: 'Rack Shelf', parent_id: 'rack', depth: 1 });
+const rack = node({ id: 'rack', name: 'Rack 1', sort_order: 1, children: [rackShelf] });
+const yard = node({ id: 'yard', name: 'Yard', sort_order: 2 });
+const unassigned = node({ id: 'un', name: 'Unassigned', kind: 'system', sort_order: 3 });
 
-const TREE = [cabinet, yard, unassigned];
+const TREE = [cabinet, rack, yard, unassigned];
 
 const onOpen = vi.fn();
 const onCountHere = vi.fn();
 
-const renderTable = (tree = TREE, counts: Array<[string, number]> = [['a', 2], ['b', 1], ['yard', 1]]) =>
+const renderTable = (
+  tree = TREE,
+  counts: Array<[string, number]> = [['bin1', 2], ['b', 1], ['yard', 1]],
+) =>
   render(
     <LocationTable
       tree={tree}
@@ -53,13 +64,35 @@ const rowFor = (name: string) => screen.getByText(name).closest('tr') as HTMLEle
 
 beforeEach(() => vi.clearAllMocks());
 
+const expand = async (user: ReturnType<typeof userEvent.setup>, name: string) =>
+  user.click(screen.getByRole('button', { name: `Expand ${name}` }));
+
 describe('LocationTable', () => {
-  it('shows every level at once, children under their parent', () => {
+  it('starts with roots only, so a generated cabinet does not bury the shop', () => {
     renderTable();
-    const names = screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0].textContent);
-    expect(names?.[0]).toContain('Cabinet 3');
-    expect(names?.[1]).toContain('Shelf A');
-    expect(names?.[2]).toContain('Shelf B');
+    const names = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => within(r).getAllByRole('cell')[0].textContent);
+
+    expect(names).toHaveLength(4);
+    expect(names[0]).toContain('Cabinet 3');
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+  });
+
+  it('shows children under their parent once opened', async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    await expand(user, 'Cabinet 3');
+
+    const names = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => within(r).getAllByRole('cell')[0].textContent);
+    expect(names[0]).toContain('Cabinet 3');
+    expect(names[1]).toContain('Shelf A');
+    expect(names[2]).toContain('Shelf B');
   });
 
   /** The roll-up bug this inherited from the board: a full cabinet must never read empty. */
@@ -99,32 +132,102 @@ describe('LocationTable', () => {
     await user.click(within(rowFor('Cabinet 3')).getByText(/part|empty/i));
 
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'cab' }));
-    // Still expanded, i.e. the click did not toggle it.
-    expect(screen.getByText('Shelf A')).toBeInTheDocument();
+    // Still collapsed, i.e. the click did not toggle it.
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
   });
 
   it('expands and collapses from the chevron without opening anything', async () => {
     const user = userEvent.setup();
     renderTable();
 
-    await user.click(screen.getByRole('button', { name: 'Collapse Cabinet 3' }));
-
-    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
-    expect(onOpen).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: 'Expand Cabinet 3' }));
+    await expand(user, 'Cabinet 3');
     expect(screen.getByText('Shelf A')).toBeInTheDocument();
     expect(onOpen).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Collapse Cabinet 3' }));
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  /** The accordion, at the level the screenshot complained about: two sides open at once. */
+  it('closes the open sibling when another is opened', async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    await expand(user, 'Cabinet 3');
+    await expand(user, 'Shelf A');
+    expect(screen.getByText('Bin 1')).toBeInTheDocument();
+
+    // Shelf B has no children of its own, so opening Shelf A and then Cabinet 3's other branch is
+    // expressed by going back up: re-opening Cabinet 3 collapses it, which takes Shelf A with it.
+    await user.click(screen.getByRole('button', { name: 'Collapse Cabinet 3' }));
+    expect(screen.queryByText('Bin 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+  });
+
+  it('closes the other root entirely — one open branch in the whole table', async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    await expand(user, 'Cabinet 3');
+    await expand(user, 'Shelf A');
+    expect(screen.getByText('Bin 1')).toBeInTheDocument();
+
+    await expand(user, 'Rack 1');
+
+    expect(screen.getByText('Rack Shelf')).toBeInTheDocument();
+    // The whole Cabinet 3 chain went, not just its deepest level.
+    expect(screen.queryByText('Shelf A')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bin 1')).not.toBeInTheDocument();
+  });
+
+  it('keeps the ancestors open when a deeper node is closed', async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    await expand(user, 'Cabinet 3');
+    await expand(user, 'Shelf A');
+    await user.click(screen.getByRole('button', { name: 'Collapse Shelf A' }));
+
+    expect(screen.queryByText('Bin 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Shelf A')).toBeInTheDocument();
+  });
+
+  it('announces the open state, not just a differently worded label', async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    expect(screen.getByRole('button', { name: 'Expand Cabinet 3' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await expand(user, 'Cabinet 3');
+    expect(screen.getByRole('button', { name: 'Collapse Cabinet 3' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
   });
 
   it('counts one place without opening it', async () => {
     const user = userEvent.setup();
     renderTable();
 
-    await user.click(screen.getByRole('button', { name: 'Count Shelf A' }));
+    await user.click(screen.getByRole('button', { name: 'Count Yard' }));
 
-    expect(onCountHere).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    expect(onCountHere).toHaveBeenCalledWith(expect.objectContaining({ id: 'yard' }));
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A container holds no stock of its own (20260806160053), so this button briefly did nothing and
+   * was briefly hidden. Both were wrong — counting a cabinet means counting the bins in it, and the
+   * worksheet resolves the subtree.
+   */
+  it('offers a count action on a container too, for everything inside it', () => {
+    renderTable();
+
+    expect(screen.getByRole('button', { name: 'Count Cabinet 3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Count Yard' })).toBeInTheDocument();
   });
 
   /**

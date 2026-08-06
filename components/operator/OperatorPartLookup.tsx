@@ -38,6 +38,17 @@
  *
  * `is_location_tracked` was what told them apart, and it was removed in 20260802015837: every part
  * has a place. An empty list now means exactly one thing, so the branch is gone.
+ *
+ * ## The empty case is a STOCK statement, not a placement one
+ *
+ * It used to read *"None in any place right now."*, which sounds like a part that exists somewhere
+ * and has not been put away — the very state the blue alert below reports as "not put away yet".
+ * It is not. `parts.quantity` is a pure roll-up of `part_location_stock`, so no rows anywhere means
+ * the shop holds **none of this part at all**, Unassigned included. An operator reading the old
+ * wording would go looking for something that is not in the building.
+ *
+ * Hence **"None available"**: it answers the question the operator actually has, which is whether
+ * they can get one, and it stops promising a location hunt that would find nothing.
  */
 
 import { useMemo, useState } from 'react';
@@ -183,7 +194,7 @@ export default function OperatorPartLookup({
               <CircularProgress size={24} />
             </Box>
           ) : places.length === 0 && !unassigned ? (
-            <Alert severity="warning">None in any place right now.</Alert>
+            <Alert severity="warning">None available</Alert>
           ) : (
             <>
               {/* Stock sitting in the put-away pile is called out FIRST and separately. It is the

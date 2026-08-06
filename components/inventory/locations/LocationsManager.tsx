@@ -33,6 +33,7 @@ import {
   clearLocationPhoto,
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
+import { locationParentOptions } from '@/utils/locationDestinations';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import LocationPicker, { type LocationPickerOption } from './LocationPicker';
@@ -279,6 +280,13 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
    * The options exclude the node itself AND its descendants. `moveLocation` refuses a cycle
    * anyway, but offering a destination that will be rejected is a worse experience than not
    * offering it — the guard is the backstop, not the interface.
+   *
+   * Same reasoning now excludes any place holding stock DIRECTLY. Since 20260806160053 a location
+   * that holds stock cannot become a container, and unlike "Divide it up…" a Move has no
+   * distribution step to hang on it — so the database simply refuses. A cabinet whose *shelves*
+   * are full is still a fine destination, which is why `locationParentOptions` reads `directParts`
+   * rather than the rolled-up `hasStock`: the latter would exclude every populated cabinet in the
+   * shop and quietly empty this list.
    */
   const [moveState, setMoveState] = useState<{ open: boolean; node: InventoryLocationNode | null }>({
     open: false,
@@ -290,27 +298,11 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
   const moveOptions = useMemo<LocationPickerOption[]>(() => {
     const node = moveState.node;
     if (!node) return [];
-    const banned = new Set<string>([node.id]);
-    // One pass is enough: `locations` is parent-before-child by `sort_order` only by accident, so
-    // walk ancestry per row instead of trusting order.
-    const isUnder = (id: string | null): boolean => {
-      let cursor = id;
-      const guard = new Set<string>();
-      while (cursor && !guard.has(cursor)) {
-        if (cursor === node.id) return true;
-        guard.add(cursor);
-        cursor = byId.get(cursor)?.parent_id ?? null;
-      }
-      return false;
-    };
     return [
       { id: TOP_LEVEL, label: 'Top level (not inside anything)', kind: null },
-      ...locations
-        .filter((l) => !banned.has(l.id) && !isUnder(l.parent_id))
-        .map((l) => ({ id: l.id, label: computePath(l.id, byId).join(' › '), kind: l.kind }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
+      ...locationParentOptions(locations, { nodeId: node.id, occupancy }),
     ];
-  }, [moveState.node, locations, byId]);
+  }, [moveState.node, locations, occupancy]);
 
   const confirmMove = async () => {
     const node = moveState.node;

@@ -133,6 +133,25 @@ export function countSpecNodes(nodes: LocationSpecNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countSpecNodes(n.children), 0);
 }
 
+/**
+ * The spec's leaves, each with its path within the spec — the only places stock may be sent when
+ * subdividing, since a node with children cannot hold any (20260806160053).
+ *
+ * Labels are scoped to the spec (`Row 1 › Left`) rather than the whole shop: the parent's own path
+ * is already the dialog's title, and repeating it down every row of the distribute table would push
+ * the part of the name that actually differs off the end.
+ */
+export function collectSpecLeaves(
+  nodes: LocationSpecNode[],
+  prefix: string[] = [],
+): Array<{ key: string; label: string }> {
+  return nodes.flatMap((n) =>
+    n.children.length === 0
+      ? [{ key: n.key, label: [...prefix, n.name].join(' › ') }]
+      : collectSpecLeaves(n.children, [...prefix, n.name]),
+  );
+}
+
 /** Remove a node (and its subtree) by key — used by the prune step. */
 export function removeSpecNode(nodes: LocationSpecNode[], key: string): LocationSpecNode[] {
   return nodes

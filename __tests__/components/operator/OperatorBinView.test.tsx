@@ -80,24 +80,53 @@ beforeEach(() => {
 });
 
 describe('OperatorBinViewPage', () => {
-  it('shows the path, sub-locations (drill-down), and stock here', async () => {
+  it('shows the path and its stock', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
-      scanWith(
-        [loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })],
-        [{ part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12 }],
-      ),
+      scanWith([], [{ part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12 }]),
     );
     renderPage();
 
     expect(await screen.findByText('Bin 3')).toBeInTheDocument();
     expect(screen.getByText('Cabinet 1 › Bin 3')).toBeInTheDocument();
-    expect(screen.getByText('Sub A')).toBeInTheDocument(); // drill-down
     expect(screen.getByText('Steel Rod')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
+  });
 
-    // tapping a sub-location navigates into its bin view
+  it('drills down into a sub-location', async () => {
+    (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
+      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+    );
+    renderPage();
+
+    expect(await screen.findByText('Sub A')).toBeInTheDocument();
+
     await userEvent.click(screen.getByText('Sub A'));
     expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
+  });
+
+  /**
+   * The pair this used to assert together — sub-locations AND stock on one screen — is a state
+   * 20260806160053 made unreachable, so the page stops offering the half that would create it.
+   * It previously rendered "Stock a part" directly above the line "No stock recorded directly here
+   * — open a sub-location above", i.e. a button inviting you to break the sentence beside it. The
+   * database now refuses that write, so the button led to an error rather than a mistake.
+   */
+  it('offers no way to stock a place that has sub-locations', async () => {
+    (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
+      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+    );
+    renderPage();
+
+    expect(await screen.findByText('Sub A')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /stock a part/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/stock goes in the sub-locations above/i)).toBeInTheDocument();
+  });
+
+  it('still offers Stock a part on a bin with no sub-locations', async () => {
+    (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(scanWith([], []));
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: /stock a part/i })).toBeInTheDocument();
   });
 
   it('shows an empty state when nothing is stored here', async () => {

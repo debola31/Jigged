@@ -85,6 +85,15 @@ export interface LocationContent {
   part_name: string;
   primary_unit: string | null;
   quantity: number;
+  /**
+   * Which bin this row is in.
+   *
+   * Redundant when the caller asked about one location and knew the answer already — and required
+   * the moment it asks about several, which counting a whole cabinet does. Kept **non-optional** so
+   * there is one row shape rather than one that sometimes knows where it is: a count line commits
+   * against this id, and a silently-absent field there would write to the wrong shelf.
+   */
+  location_id: string;
 }
 
 /** Result of resolving a scanned location id into a renderable view. */

@@ -178,7 +178,53 @@ worked, leaves): a job attribute.
 | `parts_unit_conversions` | FR-1. `(part_id, from_unit)` UNIQUE, `to_primary_factor` > 0 — bar in lbs: `inches` × 0.166. Custom/cross-category only; names in `company_custom_units`. |
 | `inventory_transactions` | FR-13. `quantity` always positive, direction in `type`; `has_discrepancy` = clamped-to-zero depletion; `transfer_group_id` pairs a transfer's two rows; `notes` the only mutable column (`restrict_transaction_update_to_notes`). |
 | `inventory_locations` | `parent_id` self-FK RESTRICT; `code` **not unique**; **no `path`/`level`/ltree** — depth recomputed client-side each read. The partial unique index `(company_id) WHERE name='Unassigned'` *is* the auto-bucket mechanism, resolved **by name**. Traps: re-parent cycle check is client-side only; Unassigned is that string in SQL but `kind==='system'` in TS. |
-| `part_location_stock` | `(part_id, location_id)` UNIQUE, both FKs RESTRICT, RLS **SELECT-only**. |
+| `part_location_stock` | `(part_id, location_id)` UNIQUE, both FKs RESTRICT, RLS **SELECT-only**. A row exists only while the part is actually there — `CHECK (quantity > 0)`, emptying deletes. **Never at a location with children** — see below. |
+
+### A place is a container or a bin, never both
+
+**Invariant (20260806160053):** *a location with at least one child holds no `part_location_stock`
+rows.* If Cabinet 1-A is just Side 1 and Side 2, nobody means "put it in the cabinet" — they mean a
+side, and every picker used to offer the cabinet anyway.
+
+This partly reverses [`20260623031347`](../../supabase/migrations/20260623031347_drop_location_display_flags.sql),
+which dropped `is_stockable` on the reasoning that *"every location can hold stock"*. That was right
+about leaves and about printing (a container's QR still navigates); it was wrong about containers.
+No flag came back: containment is already `parent_id`, and a flag that must agree with it is a
+second source of truth that can drift.
+
+Both directions are enforced, by two **`DEFERRABLE INITIALLY IMMEDIATE` constraint triggers sharing
+one name** across the two tables:
+
+| Direction | Trigger on | Refuses |
+|---|---|---|
+| (a) | `part_location_stock` INSERT | stock landing on a location that has children |
+| (b) | `inventory_locations` INSERT / UPDATE OF `parent_id` | children under a location that holds stock, and any child under `Unassigned` |
+
+**The row locks in those trigger bodies are load-bearing, not defensive.** Both test cross-row state
+with a plain `EXISTS`, PostgREST runs at READ COMMITTED, and deferral does not help — a deferred
+trigger takes a *fresh* snapshot at commit, which still excludes an uncommitted transaction. Two
+concurrent transactions (one adding children, one adding stock) would each see nothing and both
+commit, breaking the invariant **silently**. Postgres only detects that write skew at SERIALIZABLE.
+So direction (a) takes `FOR SHARE` on the location row and (b) takes `FOR UPDATE`: those conflict,
+the second transaction blocks, and its post-lock `EXISTS` sees the winner's rows. The implicit FK
+locks are both `FOR KEY SHARE` and do not conflict with each other, so they serialise nothing.
+`test_concurrent_subdivide_and_stock_cannot_both_win` in
+[`test_location_children_hold_no_stock.py`](../../api/tests/integration/test_location_children_hold_no_stock.py)
+fails **only** when the locks are removed — every other case in that file passes without them.
+
+Why deferrable at all: subdividing a loaded shelf must pass through the illegal intermediate state
+(create the children, then move the stock down). `subdivide_location(p_parent_id, p_nodes, p_moves)`
+is the only caller allowed through — it takes the parent lock up front, defers both triggers,
+inserts the subtree from a flat `{ref, parent_ref}` list, and delegates each move to the existing
+`transfer_stock` so the ledger and `transfer_group_id` are identical to any other movement. An
+incomplete distribution therefore cannot half-apply: the deferred check fires at COMMIT and rolls
+the sub-locations back with it. It is browser-callable and on the `function_execute_leaks()`
+allowlist.
+
+Client-side, [`utils/locationDestinations.ts`](../../utils/locationDestinations.ts) is the single
+source of the two option rules — `stockDestinationOptions` (leaves only, no pile) and
+`locationParentOptions` (containers required, but not one holding stock directly). Six call sites
+each hand-rolled their own list before, and none filtered containers.
 | `job_materials` | **Write-only** — written by `create_job_part_operations_from_routing()`, read by nothing since `20260614043526_retire_job_material_consumption` dropped its consumption columns; the live BOM is read instead. Slated for removal (§5.9). Older `jobs.md` copies wrongly show those columns and an `inventory_item_id` FK. |
 
 ### The two stock engines
@@ -203,7 +249,10 @@ No item detail/create/edit/import page of its own; that is all Parts UI.
 - **Part → Inventory tab** ([`InventoryTab.tsx`](../../components/parts/workspace/tabs/InventoryTab.tsx)) when `is_stocked`: untracked → Add/Remove/Adjust (`PartLocationActionModal`), tracked → `PartLocationInventory` (+ move). **No longer a gap** — this said "no job selector … only an operator at a bin can tag a job", which was true when written and was repaired on 2026-07-28: `JobTagPicker` is on both engines (`PartLocationActionModal`). §1 already recorded the repair; §3 did not, and the two sat contradicting each other.
 - **`/inventory/locations`** (flag-gated) — [`LocationsManager`](../../components/inventory/locations/LocationsManager.tsx): board only (list view **deleted 2026-07-30**, §5.5), `LocationDetailSheet` owning every action, the in-grid **Add storage** tile the only way in, toolbar just **Print all labels** · **Count all parts** (§5.11).
 - **Subdivide** — one [`VisualLocationBuilder`](../../components/inventory/locations/builder/VisualLocationBuilder.tsx) modal: storage type, then ≤4 levels against a read-only preview → `materializeLocationSpec`. `parentId` swaps in `SUBDIVISION_TYPES`, so subdividing Cabinet 3 can't yield `Cabinet 3 › Cabinet 1`. **"Build visually" is NOT live** — `subdividing = parentId !== null` is always true because the only caller passes a parent, so the 10-card `STORAGE_TYPES` palette and the title `Build storage visually` never render. This line used to claim both were live; §5.5 says the opposite and §5.5 is right. **Superseded 2026-08-01:** the founder has decided the drawn board and this builder are both to be replaced — see the open question below.
-- **Operator** — `/operator/{companyId}/inventory` is the warehouse home (browse top-level places; the flag hides this nav tab); `…/inventory/locations/{locationId}` is **the QR target** (leaf = contents with Add/Remove/Set), reached through `…/login?location={id}`. Operator removals are always graceful (clamp to 0, flag `has_discrepancy`), stamped `operator_id`, job tag optional.
+  - **Second step when the shelf is loaded (2026-08-06):** [`DistributeContentsStep`](../../components/inventory/locations/builder/DistributeContentsStep.tsx) asks where each part goes, allows **splitting one part across several new bins** (you divide a shelf *because* what is on it is already in two piles), and leads with **"Send everything to…"** because `LOCATION_CONTENTS_LIMIT` is 200 and a 200-row table of decisions is not a UI. Create stays disabled until each part's lines sum exactly to its on-hand — not politeness: an incomplete distribution rolls the whole subdivide back at COMMIT, so checking here turns a mystifying failure into arithmetic. An **empty** place keeps the original single screen. `Add one inside` is withheld from a place holding stock (the plain create form has nowhere to ask), and Move drops stocked targets for the same reason.
+- **Storage table** — an **accordion with one open branch** (2026-08-06): rows start collapsed and opening a place closes anything not on its ancestor chain, held as `openPath` (root→deepest ids) rather than a set of expanded ids so the stricter rule is the only representable one. Replaces default-everything-expanded, whose stated reason (12–18 places fit on one screen) does not survive the builder's own 5 × 2 default turning one row into 16.
+- **Counting a container** (2026-08-06) — `?location=<container>` gathers **every bin beneath it**, depth-first, one line per (part, bin). It needed no new write path: `commitCount` already adjusts each line at its own `target.locationId`, so a sheet spanning ten bins is ten independent one-bin assertions. `getContentsPageForLocations` is `getLocationContentsPage` generalised from `.eq` to `.in`, ordered by the bin's `sort_order` then name then part — a walking route as far as one query expresses it; across two shelves it interleaves by sibling position, which is why every row carries its bin's full path. **A split part stays two lines, never one total** — aggregating would re-create exactly the ambiguity that makes the company-wide sheet *skip* split parts. The **bulk put-away is withheld** on a subtree sheet: `bulk_put_away` moves parts out of one location and the ticked rows come from several. (Briefly, containers had no count action at all — the button was hidden rather than the read widened. That was wrong and lasted one commit.)
+- **Operator** — `/operator/{companyId}/inventory` is the warehouse home (browse top-level places; the flag hides this nav tab); `…/inventory/locations/{locationId}` is **the QR target**, reached through `…/login?location={id}`. A **leaf** shows contents with Add/Remove/Move/Adjust and `Stock a part`; a **container** shows only its sub-locations plus one line saying stock goes in them — it used to show `Stock a part` directly above *"No stock recorded directly here"*, a button inviting you to break the sentence beside it. Operator removals are always graceful (clamp to 0, flag `has_discrepancy`), stamped `operator_id`, job tag optional. The zero-stock lookup says **"None available"**, not the old *"None in any place right now."*: `parts.quantity` is a pure roll-up, so no rows means none on hand anywhere — a stock fact the old wording dressed as a placement one.
 - QR labels encode the location **UUID** (`locationLabelPdf.buildLocationScanUrl`): A4, 2 × 5, 34 mm at error-correction H, `kind='system'` excluded. The label prints the QR and the full path — nothing else. There was a `code` line under it until 20260803034616; see below.
 
 ### Access layer
@@ -225,7 +274,7 @@ Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inve
 
 **Archive** — `deletePart`/`bulkDeleteParts` → `archive_parts` stamps `deleted_at`, never blocking on references (architecture.md §16); children (conversions, balances) are kept and return on revive, transactions keep their name snapshots, and re-importing the same `part_name` **revives** rather than duplicating. `delete_location` differs: **empty** subtrees only, no delete-and-relocate.
 
-**Dead/unreachable** — `removePartStockGraceful` · `enableLocationTracking`/`disableLocationTracking` (superseded by auto-track; both now billing-gated anyway, #645) · `enable_location_tracking_for_company`, `inv_location_path_label` · `job_materials`. Deleted 2026-07-29: `getLocationTree`, `buildLocationUrl` (duplicated `buildLocationScanUrl`), `bulkGenerateChildren`/`BulkGenerateModal` (Subdivide is a strict superset with live preview, and it had **zero tests**, so deleting beat porting), `PartLocationBalance`. Path-walking is reimplemented **five times** in TS plus once in unused SQL — worth extracting.
+**Dead/unreachable** — `removePartStockGraceful` · `enableLocationTracking`/`disableLocationTracking` (superseded by auto-track; both now billing-gated anyway, #645) · `enable_location_tracking_for_company`, `inv_location_path_label` · `job_materials`. Deleted 2026-07-29: `getLocationTree`, `buildLocationUrl` (duplicated `buildLocationScanUrl`), `bulkGenerateChildren`/`BulkGenerateModal` (Subdivide is a strict superset with live preview, and it had **zero tests**, so deleting beat porting), `PartLocationBalance`. Path-walking was reimplemented **five times** in TS plus once in unused SQL; **extracted 2026-08-06** to [`lib/locationTree.ts`](../../lib/locationTree.ts) (`computePathNames`, re-exported from `inventoryLocationsAccess` for existing importers). It lives in `lib/` rather than beside the access layer because that module builds a Supabase client at import time, so wanting a display path used to drag the whole access layer — and a `lib/supabase` stub — into every consumer and every test of one.
 
 ---
 
@@ -558,7 +607,7 @@ feature. Spec it recurring, assignable, place-scoped; not a one-off Adjust butto
 
 **Phase 2 ✅ 2026-07-30** — reshaped locations (§5.5), plus **`bulk_put_away`** (atomic RPC, whole-balance, capped 1000) and **place-scoped counting**, both inside J9's worksheet: counting a bin and moving what doesn't belong are one visit. **Rollout gate cleared.** Two pre-existing bugs no test caught: `storage.objects` had no SELECT policy in any migration (it existed only in the prod snapshot), so every attachment read broke on fresh local stacks and preview branches; `friendlyErrorMessage` ignored `check_violation`, flattening every stock RPC message to "Failed to update stock."
 
-Filed: **#618** `materializeLocationSpec` non-transactional · ~~**#619**~~ **fixed 2026-08-01**: `getBalancesForParts` now pages each chunk with a total order (the arithmetic is ≥1,001 rows in one chunk, not 500×2, and only a dropped **non-zero** row misroutes) · **#620** the board drops `TOP_LIMIT`, so windowing past a few hundred units. Deferred: §5.10 spike · bar-rack card · drag-to-reparent (118/121 flat; a **picker** landed 2026-08-01 instead — `moveLocation` had shipped with cycle detection and tests and never had a caller, so a mis-parented cabinet was permanent) · recurring/assignable counts (§5.11) · service worker (offline stock writes ≫ a cache).
+Filed: **#618** `materializeLocationSpec` non-transactional — **still open for the empty-parent path**, but a loaded parent now goes through `subdivide_location`, which is one transaction · ~~**#619**~~ **fixed 2026-08-01**: `getBalancesForParts` now pages each chunk with a total order (the arithmetic is ≥1,001 rows in one chunk, not 500×2, and only a dropped **non-zero** row misroutes) · **#620** the board drops `TOP_LIMIT`, so windowing past a few hundred units. Deferred: §5.10 spike · bar-rack card · drag-to-reparent (118/121 flat; a **picker** landed 2026-08-01 instead — `moveLocation` had shipped with cycle detection and tests and never had a caller, so a mis-parented cabinet was permanent) · recurring/assignable counts (§5.11) · service worker (offline stock writes ≫ a cache).
 
 **Filed 2026-08-01:** **#645** every location-stock RPC bypassed the billing write-gate — `SECURITY DEFINER` runs as the owner, no table sets `FORCE ROW LEVEL SECURITY`, and `part_location_stock` was exempt on the false rationale *"writes never come from the browser"*. Entitlement therefore depended on a feature flag. Fixed the same day across seven functions, plus `definer_writers_missing_write_gate()` and a CI test, because the existing guard checks whether a *policy exists* and cannot see a definer function walking past one. · **#649** `create_shipment_with_line_items` has the identical bug; left open because whether a lapsed shop may ship an order it will invoice for is a billing policy call. · **#646** / **#647** / **#648** the counting, owner-ledger and board-vs-table work from that audit.
 
@@ -615,6 +664,9 @@ Pinned by tests, not by prose.
 | Locations — balances, RPC wrappers, unit conversion, board request budget, contents paging, `bulkPutAway`, photo signed URLs, **transfer folding** | `__tests__/utils/inventoryLocationsAccess.test.ts` |
 | J11 lookup (three answers, put-away picker), bin + shop-wide history, movement photo | `__tests__/components/operator/{OperatorPartLookup,OperatorWarehouseHome,PutAwayPickerDialog,BinHistory,MovementPhotoField}.test.tsx` |
 | Occupancy roll-up, subdivide numbering, board/sheet/builder/form/picker rules | `__tests__/utils/{locationOccupancy,locationSpec}.test.ts`, `__tests__/components/inventory/locations/*.test.tsx` |
+| Container/bin invariant — both directions, subdivide rollback, and the **write-skew race** | [`api/tests/integration/test_location_children_hold_no_stock.py`](../../api/tests/integration/test_location_children_hold_no_stock.py) (psycopg2, not the Supabase client: the race needs two open transactions, which PostgREST cannot give) |
+| Which places may be offered as a destination, for stock vs for a location | [`__tests__/utils/locationDestinations.test.ts`](../../__tests__/utils/locationDestinations.test.ts) |
+| Counting a container — subtree gathering, split parts staying per-bin, commit targeting the bin | `__tests__/components/inventory/InventoryCountPage.test.tsx` (`counting a container`) |
 | J9 count plan, commit routing, bin-scoped count, draft resume | `__tests__/lib/inventoryCountPlan.test.ts`, `__tests__/utils/inventoryCountAccess.test.ts`, `__tests__/components/inventory/InventoryCountPage.test.tsx` |
 | J4 material check | `__tests__/components/jobs/JobPartMaterialsCard.test.tsx`, `__tests__/utils/materialCheckAccess.test.ts` |
 | J7 bin remove/receive + job-tagged depletion; owner-side job tag (#59) | `__tests__/components/operator/{OperatorBinView,OperatorReceivePartModal,OperatorLocationActionModal}.test.tsx`, `__tests__/components/parts/PartTransactionJobTag.test.tsx` |

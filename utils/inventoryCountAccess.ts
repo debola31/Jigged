@@ -17,7 +17,7 @@ import {
   adjustStockAtLocation,
   getBalancesForPart,
   getBalancesForParts,
-  getLocationContentsPage,
+  getContentsPageForLocations,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { resolveFallbackPlace, countNote } from '@/lib/inventoryCountPlan';
@@ -127,21 +127,67 @@ export async function loadLocationCountCandidates(
   locationName: string,
   opts: { search?: string; limit?: number; offset?: number } = {},
 ): Promise<{ candidates: CountCandidate[]; total: number }> {
-  const { contents, total } = await getLocationContentsPage(locationId, opts);
+  return loadCountCandidatesForPlaces(
+    // `locationPath` is the plain name here: every row on this sheet shares one place and the page
+    // title already says which, so an ancestor path would repeat down every row.
+    [{ id: locationId, name: locationName, path: locationName }],
+    opts,
+  );
+}
+
+/** One bin a count sheet may write to, with the label its rows should carry. */
+export interface CountPlace {
+  id: string;
+  name: string;
+  /** How the row names its bin. Full path when a sheet spans several, plain name when it doesn't. */
+  path: string;
+}
+
+/**
+ * Build the count sheet for a SET of bins — what counting a whole cabinet means.
+ *
+ * A container holds no stock itself (20260806160053), so "count Cabinet 1-A" can only be "count
+ * every bin under it". Nothing about committing changes: `commitCount` already adjusts each line at
+ * `candidate.target.locationId`, so a sheet spanning ten bins is ten independent one-bin
+ * assertions. That per-line target is what made this a small change rather than a new engine.
+ *
+ * **A part in two bins gets two lines, not one.** Aggregating would re-create precisely the
+ * ambiguity that forces the company-wide sheet to skip split parts — if a part holds 380 + 200 and
+ * you count 560, no bin defensibly absorbs the −20. Two lines means each number is an assertion
+ * about one shelf you are standing at, which is also how you would physically do it.
+ *
+ * Rows keep the bin's **full path** because, unlike the single-bin sheet, the page title can no
+ * longer say which place a row belongs to.
+ */
+export async function loadCountCandidatesForPlaces(
+  places: CountPlace[],
+  opts: { search?: string; limit?: number; offset?: number } = {},
+): Promise<{ candidates: CountCandidate[]; total: number }> {
+  const byId = new Map(places.map((p) => [p.id, p] as const));
+  const { contents, total } = await getContentsPageForLocations(
+    places.map((p) => p.id),
+    opts,
+  );
 
   return {
-    candidates: contents.map((c) => ({
-      partId: c.part_id,
-      partName: c.part_name,
-      // The paged read is deliberately narrow — it doesn't join descriptions, because this list is
-      // reached by searching for a part you're holding rather than by browsing for one.
-      description: null,
-      unit: c.primary_unit ?? 'ea',
-      systemQuantity: c.quantity,
-      // `locationPath` is the plain name here: every row on this sheet shares one place and the
-      // page title already says which, so an ancestor path would repeat down every row.
-      target: { locationId, locationName, locationPath: locationName },
-    })),
+    candidates: contents.map((c) => {
+      // Every row carries its own bin, so this lookup cannot miss — the ids came from `places`.
+      const place = byId.get(c.location_id);
+      return {
+        partId: c.part_id,
+        partName: c.part_name,
+        // The paged read is deliberately narrow — it doesn't join descriptions, because this list
+        // is reached by searching for a part you're holding rather than by browsing for one.
+        description: null,
+        unit: c.primary_unit ?? 'ea',
+        systemQuantity: c.quantity,
+        target: {
+          locationId: c.location_id,
+          locationName: place?.name ?? '',
+          locationPath: place?.path ?? '',
+        },
+      };
+    }),
     total,
   };
 }

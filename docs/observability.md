@@ -177,6 +177,64 @@ Both workflows are scoped to production so local and CI runs can't page anyone. 
 scoped to an environment nothing emits is silent** — only scope after the code that emits
 that tag has actually deployed.
 
+### What actually alerts, and who receives it
+
+The section above is mechanics. This is the state, and it is recorded here because none of it
+lives in the repo — **all alerting config is server-side only**, which is exactly why the two
+holes below went unnoticed for months. Re-measure with `sentry api` before trusting it.
+
+| | `javascript-nextjs` | `python-fastapi` |
+|---|---|---|
+| Workflow id | 3138841 | 3174587 |
+| Environment | `vercel-production` | `production` |
+| Detector | 6744903 (Issue Stream) | 6806071 (Issue Stream) |
+| Triggers (`any-short`) | `new_high_priority_issue`, `existing_high_priority_issue` | same |
+| Action | `email` → `issue_owners` | same |
+| Frequency | 30 min | 30 min |
+
+Ownership on both projects is `{"raw": null, "fallthrough": true}` — **no CODEOWNERS**, so
+`issue_owners` always falls through to ActiveMembers, which is the org's single member. In
+practice: *every alert goes to the one account email, and nothing routes by area.*
+
+**Trap 1 — the account email is the whole delivery path, and it is not validated by anything.**
+Until 2026-08-05 the org's sole member was an address that did not exist, so five months of alert
+email went nowhere while the workflows reported themselves healthy and `lastTriggered` kept
+advancing. Nothing in Sentry surfaces this. Check it directly, and check it after any account
+change:
+
+```bash
+sentry api '/api/0/organizations/jigged/members/' | jq -r '.[] | "\(.email) active=\(.user.isActive)"'
+```
+
+Sentry also does not deliver to an **unverified** primary address, and the org-scoped CLI token is
+denied on `/users/{id}/emails/` — so verification can only be confirmed in
+Settings → Account → Emails. A green workflow is not evidence anyone was told.
+
+**Trap 2 — a detector with no workflow notifies nobody.** The uptime monitor is live and
+unrouted:
+
+```bash
+sentry api '/api/0/organizations/jigged/detectors/' \
+  | jq -r '.[] | "\(.name) → workflowIds=\(.workflowIds)"'
+# Stripe webhook reachable (405 = healthy) → workflowIds=[]
+```
+
+An empty `workflowIds`, with no workflow listing it in `detectorIds`, means downtime is detected
+and then dropped. Its `intervalSeconds: 3600 × downtimeThreshold: 3` also puts detection ~3 hours
+behind the event. **Any new detector is silent until a workflow claims it** — the uptime UI does
+not warn about this.
+
+**What is deliberately not alerted.** Only *high* priority fires, and Sentry derives priority from
+level: `error`/`fatal` → high, `warning` → medium, `info`/`debug` → low. So the repo's deliberate
+`captureException(…, { level: 'warning' })` sites raise nothing, by construction. That is the
+intended trade — see [why any of this matters](#why-any-of-this-matters) — but it means **lowering
+a capture to `warning` silently opts it out of alerting**, which is easy to do by accident.
+
+**The real ceiling is capture, not routing.** 4 of 34 `utils/*Access.ts` modules import Sentry, so
+most write failures never become an issue at all and no rule can reach them —
+[#708](https://github.com/debola31/Jigged/issues/708). Tuning alerts on a queue that is nearly
+empty because reporting is thin is motion without progress.
+
 ### Inbound filters: what's free and what isn't
 
 Free, per-project, at `/api/0/projects/jigged/<project>/filters/`:

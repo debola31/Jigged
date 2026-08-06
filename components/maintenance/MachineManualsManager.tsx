@@ -57,7 +57,7 @@ export default function MachineManualsManager({
     data: files,
     loading,
     reload,
-  } = useLoad(() => listWorkCenterAttachments(workCenterId), [workCenterId], {
+  } = useLoad(() => listWorkCenterAttachments(workCenterId, companyId), [workCenterId, companyId], {
     onError: (err) => setError(err instanceof Error ? err.message : 'Could not load manuals.'),
   });
 

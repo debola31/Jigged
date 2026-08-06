@@ -316,10 +316,24 @@ describe('LocationsManager — count or put away', () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /^Yard/ }));
     await user.click(await screen.findByRole('button', { name: /count or put away/i }));
 
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=cab3');
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=yard');
+  });
+
+  /**
+   * The worksheet counts what a place holds DIRECTLY, and since 20260806160053 a place with
+   * sub-locations holds nothing directly — so this button could only ever open a blank sheet. Its
+   * children each carry their own.
+   */
+  it('offers no worksheet for a place that has sub-locations', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+
+    expect(screen.queryByRole('button', { name: /count or put away/i })).not.toBeInTheDocument();
   });
 
   /** The put-away entry a real shop needs most: `Unassigned` is where all 9,428 parts start. */

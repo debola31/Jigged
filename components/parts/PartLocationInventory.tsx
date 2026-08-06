@@ -26,6 +26,7 @@ import type {
   PartLocationBalanceWithLocation,
 } from '@/types/inventoryLocations';
 import { createLocation, getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import PartLocationActionModal, {
   type LocationAction,
@@ -37,18 +38,8 @@ import PartLocationActionModal, {
 const EMPTY_BALANCES: PartLocationBalanceWithLocation[] = [];
 const EMPTY_LOCATIONS: InventoryLocation[] = [];
 
-function pathLabel(id: string, byId: Map<string, InventoryLocation>): string {
-  const names: string[] = [];
-  let cursor: string | null = id;
-  const guard = new Set<string>();
-  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
-    guard.add(cursor);
-    const node: InventoryLocation = byId.get(cursor)!;
-    names.unshift(node.name);
-    cursor = node.parent_id;
-  }
-  return names.join(' › ');
-}
+// The private `pathLabel` that used to live here is gone: it was the fourth copy of the same
+// ancestry walk, and `stockDestinationOptions` now builds the labelled list.
 
 interface PartLocationInventoryProps {
   part: Part;
@@ -91,8 +82,6 @@ export default function PartLocationInventory({
 
   const { features } = useCompanyFeatures();
 
-  const byId = useMemo(() => new Map(locations.map((l) => [l.id, l] as const)), [locations]);
-
   /**
    * Whether this shop has been given places at all.
    *
@@ -112,14 +101,12 @@ export default function PartLocationInventory({
    */
   const onePlace = locations.length === 1 && locations[0].kind === 'system';
 
-  // `kind` rides along so the picker can drop the auto-managed `Unassigned` bucket from
-  // destination lists without needing to know how it's identified.
+  // Leaves only: since 20260806160053 a place with sub-locations cannot hold stock, so offering a
+  // cabinet here would put an error behind a legitimate-looking choice. `kind` rides along so the
+  // picker can also drop the auto-managed `Unassigned` bucket without knowing how it's identified.
   const locationOptions = useMemo<LocationOption[]>(
-    () =>
-      locations
-        .map((l) => ({ id: l.id, label: pathLabel(l.id, byId), kind: l.kind }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    [locations, byId],
+    () => stockDestinationOptions(locations),
+    [locations],
   );
 
   /**

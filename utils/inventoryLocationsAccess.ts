@@ -13,6 +13,7 @@ import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
+import { computePathNames } from '@/lib/locationTree';
 import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
 import {
@@ -451,6 +452,91 @@ export async function materializeLocationSpec(
   return insertSpecForest(companyId, parentId, nodes, startSortOrder);
 }
 
+/** One part's stock moving into one of the sub-locations about to be created. */
+export interface SubdivideMove {
+  partId: string;
+  /** `LocationSpecNode.key` of the destination — a leaf of the spec, which does not exist yet. */
+  toRef: string;
+  quantity: number;
+  unit: string;
+}
+
+/** Flatten a spec forest to `{ref, parent_ref}` rows, parent before child, as the RPC requires. */
+function flattenSpec(
+  nodes: LocationSpecNode[],
+  parentRef: string | null,
+  startSortOrder: number,
+): Array<{ ref: string; parent_ref: string | null; name: string; kind: string | null; sort_order: number }> {
+  const out: ReturnType<typeof flattenSpec> = [];
+  let sortOrder = startSortOrder;
+  for (const node of nodes) {
+    out.push({
+      ref: node.key,
+      parent_ref: parentRef,
+      name: node.name,
+      kind: node.kind,
+      sort_order: sortOrder++,
+    });
+    // Depth-first, so a child always follows its parent — the RPC rejects a forward reference
+    // rather than guessing, because silently rooting a node in the wrong place is unrecoverable.
+    out.push(...flattenSpec(node.children, node.key, 0));
+  }
+  return out;
+}
+
+/**
+ * Subdivide a place, moving whatever it holds down into the new sub-locations.
+ *
+ * ## Why this is an RPC and not `materializeLocationSpec` plus some transfers
+ *
+ * Since 20260806160053 a place with sub-locations cannot hold stock, and the two halves of this
+ * operation each break that rule on their own: creating the children first makes the parent a
+ * container while its stock is still in it, and moving the stock first has nowhere to move it to.
+ * Only doing both in one transaction is legal, so `subdivide_location` defers the constraint and
+ * the whole thing either happens or does not.
+ *
+ * It also fixes what `materializeLocationSpec` documents about itself two functions up: that path
+ * is sequential and not transactional, so a failure partway leaves the nodes created before it.
+ *
+ * Conversion happens here, per part, exactly as it does for `transferStock` — the RPC delegates
+ * each move to `transfer_stock`, which wants both the display values and the converted quantity.
+ * One `loadConversionContext` per distinct part rather than per move, since splitting one part
+ * across three bins is three moves against one part.
+ */
+export async function subdivideLocation(
+  parentId: string,
+  nodes: LocationSpecNode[],
+  moves: SubdivideMove[],
+  startSortOrder = 0,
+): Promise<InventoryLocation[]> {
+  const contexts = new Map<string, Awaited<ReturnType<typeof loadConversionContext>>>();
+  for (const partId of new Set(moves.map((m) => m.partId))) {
+    contexts.set(partId, await loadConversionContext(partId));
+  }
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('subdivide_location', {
+    p_parent_id: parentId,
+    p_nodes: flattenSpec(nodes, null, startSortOrder),
+    p_moves: moves.map((m) => {
+      const { primaryUnit, conversions } = contexts.get(m.partId)!;
+      return {
+        part_id: m.partId,
+        to_ref: m.toRef,
+        quantity: m.quantity,
+        unit: m.unit,
+        converted_quantity: convertToBaseUnit(m.quantity, m.unit, primaryUnit, conversions),
+      };
+    }),
+  });
+
+  if (error) {
+    console.error('Error subdividing location:', error);
+    throw error;
+  }
+  return (data ?? []) as InventoryLocation[];
+}
+
 /**
  * Duplicate a location and its entire subtree as a new sibling — structure
  * only, no stock. The copy's root is named past the existing siblings
@@ -492,27 +578,13 @@ export async function duplicateLocation(
 // ===========================================================================
 
 /**
- * Root → leaf names for a location, e.g. `['Cabinet 1', 'Row 3', 'Left']`.
+ * Re-exported so existing importers keep working. The implementation moved to
+ * [`lib/locationTree.ts`](../lib/locationTree.ts) because it needs nothing from this module, and
+ * importing it from here forced a Supabase client into every consumer — and into every test of one.
  *
- * Exported because this walk had been hand-rolled in three other places (the operator bin page,
- * the count page, and `PartLocationInventory`). Use this one rather than writing a fourth — the
- * cycle guard in particular is easy to leave out, and re-parenting can produce one.
+ * New callers should import from `@/lib/locationTree` directly.
  */
-export function computePathNames(
-  locationId: string,
-  byId: Map<string, InventoryLocation>,
-): string[] {
-  const names: string[] = [];
-  let cursor: string | null = locationId;
-  const guard = new Set<string>();
-  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
-    guard.add(cursor);
-    const node: InventoryLocation = byId.get(cursor)!;
-    names.unshift(node.name);
-    cursor = node.parent_id;
-  }
-  return names;
-}
+export { computePathNames };
 
 /** A part's balances across locations, each with its full display path. */
 export async function getBalancesForPart(
@@ -672,7 +744,7 @@ export async function getLocationContents(
   const { data, error, count } = await supabase
     .from('part_location_stock')
     .select(
-      'quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      'location_id, quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
     )
     .eq('location_id', locationId)
@@ -685,15 +757,24 @@ export async function getLocationContents(
     throw error;
   }
 
-  type Row = {
-    quantity: number;
-    part:
-      | { id: string; part_name: string; primary_unit: string | null }
-      | Array<{ id: string; part_name: string; primary_unit: string | null }>
-      | null;
-  };
+  const contents = toLocationContents(data)
+    .sort((a, b) => a.part_name.localeCompare(b.part_name));
 
-  const contents = ((data ?? []) as Row[])
+  return { contents, total: count ?? contents.length };
+}
+
+type ContentRow = {
+  location_id: string;
+  quantity: number;
+  part:
+    | { id: string; part_name: string; primary_unit: string | null }
+    | Array<{ id: string; part_name: string; primary_unit: string | null }>
+    | null;
+};
+
+/** Shared row mapper — PostgREST types a to-one embed as possibly-an-array, so unwrap once. */
+function toLocationContents(data: unknown): LocationContent[] {
+  return ((data ?? []) as ContentRow[])
     .map((row) => {
       const part = Array.isArray(row.part) ? row.part[0] : row.part;
       if (!part) return null;
@@ -702,12 +783,10 @@ export async function getLocationContents(
         part_name: part.part_name,
         primary_unit: part.primary_unit,
         quantity: Number(row.quantity),
+        location_id: row.location_id,
       } as LocationContent;
     })
-    .filter((r): r is LocationContent => r !== null)
-    .sort((a, b) => a.part_name.localeCompare(b.part_name));
-
-  return { contents, total: count ?? contents.length };
+    .filter((r): r is LocationContent => r !== null);
 }
 
 /** Rows per page when working through a location's contents. */
@@ -739,16 +818,45 @@ export interface LocationContentsQuery {
  */
 export async function getLocationContentsPage(
   locationId: string,
+  query: LocationContentsQuery = {},
+): Promise<LocationContentsPage> {
+  return getContentsPageForLocations([locationId], query);
+}
+
+/**
+ * One page of the contents of SEVERAL bins at once — what counting a whole cabinet reads.
+ *
+ * A container holds no stock of its own (20260806160053), so "count Cabinet 1-A" can only mean the
+ * bins beneath it. Every row keeps its own `location_id`, which is what makes that safe: a count
+ * line commits with `adjustStockAtLocation` against the row's own bin, so a sheet spanning ten bins
+ * is ten independent one-bin assertions rather than one ambiguous total.
+ *
+ * That is also why the rows are NOT aggregated per part. A part in two bins yields two lines, and
+ * that is the point — it is exactly the ambiguity that forces the company-wide sheet to *skip*
+ * split parts ("count it at its locations"), and counting bin by bin is how the ambiguity stops
+ * existing.
+ *
+ * **Ordering is a walking route, as far as one query can express it:** by the bin's `sort_order`
+ * then its name, then the part. Across two shelves that interleaves by sibling position rather
+ * than strict depth-first, which is why every row also carries its bin so the sheet can label it —
+ * the label is what tells a counter where to stand, not the sort.
+ */
+export async function getContentsPageForLocations(
+  locationIds: string[],
   { search = '', limit = LOCATION_PAGE_SIZE, offset = 0 }: LocationContentsQuery = {},
 ): Promise<LocationContentsPage> {
+  if (locationIds.length === 0) return { contents: [], total: 0 };
+
   const supabase = getSupabase();
   let query = supabase
     .from('part_location_stock')
     .select(
-      'quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
+      'location_id, quantity, ' +
+        'place:inventory_locations!inner(id, name, sort_order), ' +
+        'part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit)',
       { count: 'exact' },
     )
-    .eq('location_id', locationId)
+    .in('location_id', locationIds)
     .is('part.deleted_at', null);
 
   const term = search.trim();
@@ -758,9 +866,12 @@ export async function getLocationContentsPage(
   if (term) query = query.ilike('part.part_name', `%${term}%`);
 
   const { data, error, count } = await query
-    // `'part'` is the embed's ALIAS, not the table name. `referencedTable: 'parts'` makes PostgREST
-    // reject the whole request with `PGRST108 'parts' is not an embedded resource` — verified
-    // against the running stack, which is the only way this surfaces (it type-checks either way).
+    // `'part'` / `'place'` are the embeds' ALIASES, not table names. `referencedTable: 'parts'`
+    // makes PostgREST reject the whole request with `PGRST108 'parts' is not an embedded resource`
+    // — verified against the running stack, which is the only way this surfaces (it type-checks
+    // either way).
+    .order('sort_order', { referencedTable: 'place', ascending: true })
+    .order('name', { referencedTable: 'place', ascending: true })
     .order('part_name', { referencedTable: 'part', ascending: true })
     .range(offset, offset + limit - 1);
 
@@ -769,27 +880,9 @@ export async function getLocationContentsPage(
     throw error;
   }
 
-  type Row = {
-    quantity: number;
-    part:
-      | { id: string; part_name: string; primary_unit: string | null }
-      | Array<{ id: string; part_name: string; primary_unit: string | null }>
-      | null;
-  };
-
-  const contents = ((data ?? []) as Row[])
-    .map((row) => {
-      const part = Array.isArray(row.part) ? row.part[0] : row.part;
-      if (!part) return null;
-      return {
-        part_id: part.id,
-        part_name: part.part_name,
-        primary_unit: part.primary_unit,
-        quantity: Number(row.quantity),
-      } as LocationContent;
-    })
-    .filter((r): r is LocationContent => r !== null);
-
+  // Order is the server's — deliberately NOT re-sorted here, which would only reshuffle the
+  // current page and make the route jump at every page boundary.
+  const contents = toLocationContents(data);
   return { contents, total: count ?? contents.length };
 }
 

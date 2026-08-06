@@ -30,6 +30,10 @@
  * a four-level tree was already partly invisible. Depth reads two ways — indentation, and the full
  * breadcrumb in the detail drawer.
  *
+ * **You traverse one branch at a time.** Opening a place closes whatever else was open, so the
+ * table never shows two siblings' contents at once and indentation never has to carry more than a
+ * single chain. See `openPath` below for why that is a path and not a set of expanded ids.
+ *
  * There was an `Inside` column too, counting child places. It went because the chevron already
  * says a row has children and the drawer already lists them, so it was a third telling of the
  * same fact — and on a flat shop (the reparenting decision measured 118 of 121 as flat) it is a
@@ -116,17 +120,24 @@ function FillDot({ filled }: { filled: boolean }) {
   );
 }
 
-/** One row per node, parents before children, depth carried for indentation. */
+/**
+ * One row per node, parents before children, depth carried for indentation.
+ *
+ * `ancestors` rides along so a row can compute what the open path becomes when its chevron is
+ * clicked, without a second walk to find where it sits.
+ */
 function flatten(
   nodes: InventoryLocationNode[],
-  collapsed: ReadonlySet<string>,
+  openPath: readonly string[],
   depth = 0,
-): Array<{ node: InventoryLocationNode; depth: number }> {
-  const out: Array<{ node: InventoryLocationNode; depth: number }> = [];
+  ancestors: readonly string[] = [],
+): Array<{ node: InventoryLocationNode; depth: number; ancestors: readonly string[] }> {
+  const out: Array<{ node: InventoryLocationNode; depth: number; ancestors: readonly string[] }> =
+    [];
   for (const node of [...nodes].sort(placeOrder)) {
-    out.push({ node, depth });
-    if (node.children.length > 0 && !collapsed.has(node.id)) {
-      out.push(...flatten(node.children, collapsed, depth + 1));
+    out.push({ node, depth, ancestors });
+    if (node.children.length > 0 && openPath.includes(node.id)) {
+      out.push(...flatten(node.children, openPath, depth + 1, [...ancestors, node.id]));
     }
   }
   return out;
@@ -143,22 +154,36 @@ export interface LocationTableProps {
 
 export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: LocationTableProps) {
   /**
-   * Collapsed, not expanded: the default is everything visible.
+   * ONE open branch in the whole table, held as the chain of ids from a root down to the deepest
+   * open node. Empty means roots only.
    *
-   * At 12–18 places the whole shop fits on one screen, and a tree that starts closed makes you
-   * click to discover you have nothing to discover. Collapsing is for the shop that grows.
+   * ## Why this replaced "everything starts expanded"
+   *
+   * The previous state was a set of *collapsed* ids defaulting to empty, on the reasoning that at
+   * 12–18 places the whole shop fits on one screen and a tree that starts closed makes you click
+   * to discover you have nothing to discover. That reasoning does not survive contact with a
+   * generated cabinet: the builder's own default is 5 rows × 2 bins, so **one** subdivide turns a
+   * single row into 16, and a shop with three such cabinets renders 50 rows of which two matter.
+   * You are not reading a shop, you are scrolling past one.
+   *
+   * An accordion also cannot express "everything expanded" — siblings would start co-open, which
+   * is precisely the state being removed — so default-collapsed is not a separate decision, it is
+   * the same one.
+   *
+   * ## Why a path rather than a set
+   *
+   * "At most one open node per parent" and "at most one open branch overall" differ only in what
+   * happens to a second root, and a path makes the stricter answer the only representable one:
+   * opening a node sets the path to its own ancestry plus itself, so anything not on that chain is
+   * closed by construction rather than by a cleanup pass that could be forgotten.
    */
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [openPath, setOpenPath] = useState<readonly string[]>([]);
 
-  const rows = useMemo(() => flatten(tree, collapsed), [tree, collapsed]);
+  const rows = useMemo(() => flatten(tree, openPath), [tree, openPath]);
 
-  const toggleCollapse = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  /** Open this node (closing whatever else was open), or close it and keep its ancestors open. */
+  const toggleOpen = (id: string, ancestors: readonly string[]) =>
+    setOpenPath((prev) => (prev.includes(id) ? [...ancestors] : [...ancestors, id]));
 
   return (
     <TableContainer component={Paper} elevation={2}>
@@ -171,10 +196,11 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map(({ node, depth }) => {
+          {rows.map(({ node, depth, ancestors }) => {
             const occ = occupancyFor(occupancy, node.id);
             const isSystem = node.kind === SYSTEM_KIND;
             const countLabel = isSystem ? `Put away from ${node.name}` : `Count ${node.name}`;
+            const isOpen = openPath.includes(node.id);
             return (
               <Fragment key={node.id}>
                 {/*
@@ -204,11 +230,12 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                           // The row opens the place; this must not also do that.
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleCollapse(node.id);
+                            toggleOpen(node.id, ancestors);
                           }}
-                          aria-label={
-                            collapsed.has(node.id) ? `Expand ${node.name}` : `Collapse ${node.name}`
-                          }
+                          aria-label={isOpen ? `Collapse ${node.name}` : `Expand ${node.name}`}
+                          // Says the same thing to assistive tech that the chevron says visually.
+                          // The label alone flips wording without ever announcing a state.
+                          aria-expanded={isOpen}
                           /*
                            * 48px, like the count button at the end of this row — and for the same
                            * reason its comment gives: the theme applies the design system's 48px
@@ -222,10 +249,10 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                            */
                           sx={{ width: 48, height: 48, mr: 0.5 }}
                         >
-                          {collapsed.has(node.id) ? (
-                            <KeyboardArrowRightIcon fontSize="small" />
-                          ) : (
+                          {isOpen ? (
                             <KeyboardArrowDownIcon fontSize="small" />
+                          ) : (
+                            <KeyboardArrowRightIcon fontSize="small" />
                           )}
                         </IconButton>
                       ) : (
@@ -282,7 +309,15 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
                   </TableCell>
 
                   <TableCell align="right">
-                    {/* Tooltip and accessible name must agree. They didn't: sighted users read
+                    {/* Offered on containers too, where it counts everything in the bins beneath.
+
+                        A container holds no stock of its own (20260806160053), so this briefly did
+                        nothing and was briefly hidden. Both were wrong: "count this cabinet"
+                        obviously means its bins, which is also how you would physically do it, and
+                        `commitCount` already writes each line at its own bin — so the worksheet
+                        needed a wider read, not the button taking away.
+
+                        Tooltip and accessible name must agree. They didn't: sighted users read
                         "Put away from Unassigned" while a screen reader said "Count Unassigned".
                         The worksheet does both, and at the pile putting away is the real job. */}
                     <Tooltip title={countLabel}>

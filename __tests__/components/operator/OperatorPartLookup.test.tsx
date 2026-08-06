@@ -113,13 +113,19 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
    * the point; the remaining test below is the one true answer.
    */
 
-  it('says a part with no stock is genuinely nowhere', async () => {
+  /**
+   * The wording is a stock statement, not a placement one. It used to read "None in any place
+   * right now.", which sounds like something that exists and has not been put away — the state the
+   * blue "not put away yet" alert reports. No balance rows means the shop holds none of it at all.
+   */
+  it('says a part with no stock anywhere is simply not available', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([]);
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
+    expect(await screen.findByText('None available')).toBeInTheDocument();
+    expect(screen.queryByText(/not put away yet/i)).not.toBeInTheDocument();
   });
 
   it('surfaces a failed read instead of showing an empty answer', async () => {
@@ -215,7 +221,7 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     expect(screen.getByText(/not put away yet/i)).toBeInTheDocument();
   });
 
-  it('still says nowhere when there is genuinely nothing anywhere', async () => {
+  it('still says not available when every row is a zero', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       shelf({ quantity: 0 }),
@@ -224,7 +230,7 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText(/none in any place right now/i)).toBeInTheDocument();
+    expect(await screen.findByText('None available')).toBeInTheDocument();
   });
 });
 

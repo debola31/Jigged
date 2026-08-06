@@ -10,16 +10,25 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 
-import type { LevelSpec, LocationSpecNode } from '@/types/inventoryLocations';
+import type { LevelSpec, LocationContent, LocationSpecNode } from '@/types/inventoryLocations';
 import {
   buildSpecFromLevels,
+  collectSpecLeaves,
   countSpecNodes,
   removeSpecNode,
   addChildUnder,
   duplicateNode,
 } from '@/utils/locationSpec';
-import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
+import {
+  getLocationContents,
+  materializeLocationSpec,
+  subdivideLocation,
+} from '@/utils/inventoryLocationsAccess';
 import LevelConfigStep from './LevelConfigStep';
+import DistributeContentsStep, {
+  isDistributionComplete,
+  type AssignmentMap,
+} from './DistributeContentsStep';
 import { cloneLevels } from './storageTypes';
 
 /**
@@ -97,6 +106,18 @@ export default function VisualLocationBuilder({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * What the parent currently holds, and where each part is going.
+   *
+   * Loaded on open rather than lazily on reaching step 2: whether a second step exists at all
+   * depends on the answer, and a "Create" button that turns into "Next" after a round trip is worse
+   * than a brief moment where it is disabled.
+   */
+  const [contents, setContents] = useState<LocationContent[]>([]);
+  const [loadingContents, setLoadingContents] = useState(false);
+  const [assignments, setAssignments] = useState<AssignmentMap>({});
+  const [step, setStep] = useState<'layout' | 'distribute'>('layout');
+
   const reset = () => {
     setLevels(cloneLevels(DEFAULT_LEVELS));
     setCustomized(false);
@@ -104,6 +125,16 @@ export default function VisualLocationBuilder({
     setStartOverOpen(false);
     setCreating(false);
     setError(null);
+    setContents([]);
+    setAssignments({});
+    setStep('layout');
+
+    if (!parentId) return;
+    setLoadingContents(true);
+    getLocationContents(parentId)
+      .then((page) => setContents(page.contents))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Could not read what is here.'))
+      .finally(() => setLoadingContents(false));
   };
 
   const uniformTree = useMemo(
@@ -137,12 +168,36 @@ export default function VisualLocationBuilder({
     setStartOverOpen(false);
   };
 
+  /** Only a loaded parent needs the second step; an empty one keeps the original single screen. */
+  const needsDistribution = contents.length > 0;
+  const leaves = useMemo(() => collectSpecLeaves(tree), [tree]);
+  const distributionReady = isDistributionComplete(contents, assignments);
+
   const handleCreate = async () => {
     setCreating(true);
     setError(null);
     try {
-      const created = await materializeLocationSpec(companyId, parentId, tree, startSortOrder);
-      onCreated(created.length);
+      if (needsDistribution) {
+        // One transaction: the sub-locations and the stock that moves into them. Doing it in two
+        // steps is not merely slower, it is impossible — see `subdivideLocation`.
+        const created = await subdivideLocation(
+          parentId!,
+          tree,
+          Object.entries(assignments).flatMap(([partId, lines]) =>
+            lines.map((line) => ({
+              partId,
+              toRef: line.toRef,
+              quantity: line.quantity,
+              unit: contents.find((c) => c.part_id === partId)?.primary_unit || 'ea',
+            })),
+          ),
+          startSortOrder,
+        );
+        onCreated(created.length);
+      } else {
+        const created = await materializeLocationSpec(companyId, parentId, tree, startSortOrder);
+        onCreated(created.length);
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create locations.');
@@ -166,21 +221,34 @@ export default function VisualLocationBuilder({
       </DialogTitle>
       <DialogContent dividers sx={{ minHeight: 420 }}>
         <Box>
-            <Box sx={{ minWidth: 0 }}>
-              <LevelConfigStep
-                levels={levels}
-                onChange={setLevels}
-                total={total}
-                customized={customized}
-                tree={tree}
-                onCustomize={enterCustomize}
-                onRemove={editRemove}
-                onAdd={editAdd}
-                onDuplicate={editDuplicate}
-                onStartOver={() => setStartOverOpen(true)}
-                existingSiblingNames={existingSiblingNames}
-              />
-            </Box>
+          <Box sx={{ minWidth: 0, display: step === 'layout' ? 'block' : 'none' }}>
+            {/* Kept mounted rather than unmounted when the distribute step is showing: the level
+                config holds the hand-edited tree, and stepping back to fix a name must not reset
+                it to the generated default. */}
+            <LevelConfigStep
+              levels={levels}
+              onChange={setLevels}
+              total={total}
+              customized={customized}
+              tree={tree}
+              onCustomize={enterCustomize}
+              onRemove={editRemove}
+              onAdd={editAdd}
+              onDuplicate={editDuplicate}
+              onStartOver={() => setStartOverOpen(true)}
+              existingSiblingNames={existingSiblingNames}
+            />
+          </Box>
+
+          {step === 'distribute' && (
+            <DistributeContentsStep
+              parentName={parentPath?.length ? parentPath[parentPath.length - 1] : 'This place'}
+              contents={contents}
+              leaves={leaves}
+              assignments={assignments}
+              onChange={setAssignments}
+            />
+          )}
         </Box>
 
         {error && (
@@ -194,9 +262,41 @@ export default function VisualLocationBuilder({
           Cancel
         </Button>
         <Box sx={{ flex: 1 }} />
-        <Button variant="contained" onClick={handleCreate} disabled={creating || total === 0}>
-          Create {total} location{total === 1 ? '' : 's'}
-        </Button>
+
+        {step === 'distribute' && (
+          <Button onClick={() => setStep('layout')} disabled={creating}>
+            Back
+          </Button>
+        )}
+
+        {/*
+          A loaded shelf gets Next → Create; an empty one keeps the single click it always had.
+          `loadingContents` disables Create rather than hiding the dialog behind a spinner: the
+          layout step is usable while the read is in flight, and it is only the branch between the
+          two buttons that has to wait.
+        */}
+        {needsDistribution && step === 'layout' ? (
+          <Button
+            variant="contained"
+            onClick={() => setStep('distribute')}
+            disabled={creating || total === 0}
+          >
+            Next: where does the stock go?
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            onClick={handleCreate}
+            disabled={
+              creating ||
+              total === 0 ||
+              loadingContents ||
+              (needsDistribution && !distributionReady)
+            }
+          >
+            Create {total} location{total === 1 ? '' : 's'}
+          </Button>
+        )}
       </DialogActions>
 
       <Dialog open={startOverOpen} onClose={() => setStartOverOpen(false)}>

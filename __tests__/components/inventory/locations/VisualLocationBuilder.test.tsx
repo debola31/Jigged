@@ -20,17 +20,27 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen } from '../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
+const countSpec = (ns: { children: unknown[] }[]): number =>
+  ns.reduce((s, n) => s + 1 + countSpec(n.children as { children: unknown[] }[]), 0);
+
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
-  materializeLocationSpec: vi.fn(async (_co: string, _p: string | null, nodes: { children: unknown[] }[]) => {
-    const count = (function c(ns: { children: unknown[] }[]): number {
-      return ns.reduce((s, n) => s + 1 + c(n.children as { children: unknown[] }[]), 0);
-    })(nodes);
-    return Array.from({ length: count }, (_, i) => ({ id: String(i) }));
-  }),
+  materializeLocationSpec: vi.fn(async (_co: string, _p: string | null, nodes: { children: unknown[] }[]) =>
+    Array.from({ length: countSpec(nodes) }, (_, i) => ({ id: String(i) })),
+  ),
+  subdivideLocation: vi.fn(async (_p: string, nodes: { children: unknown[] }[]) =>
+    Array.from({ length: countSpec(nodes) }, (_, i) => ({ id: String(i) })),
+  ),
+  // Empty by default: an empty shelf keeps the single-screen flow these cases were written for.
+  // The distribute-step suite below overrides it.
+  getLocationContents: vi.fn(async () => ({ contents: [], total: 0 })),
 }));
 
 import VisualLocationBuilder from '@/components/inventory/locations/builder/VisualLocationBuilder';
-import { materializeLocationSpec } from '@/utils/inventoryLocationsAccess';
+import {
+  getLocationContents,
+  materializeLocationSpec,
+  subdivideLocation,
+} from '@/utils/inventoryLocationsAccess';
 
 const subdivide = (props: Partial<{ existingSiblingNames: string[] }> = {}) =>
   render(
@@ -123,5 +133,109 @@ describe('the level generator', () => {
 
     // Row 1 plus its two sides, cloned.
     expect(await screen.findByRole('button', { name: /create 18 locations/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Dividing up a shelf that already holds stock.
+ *
+ * The invariant added in 20260806160053 is what makes this a second step rather than a footnote: a
+ * place cannot hold stock and sub-locations at once, so the subdivide has to say where the stock
+ * goes. `subdivide_location` defers the check to COMMIT, which means an incomplete distribution
+ * does not half-apply — it rolls the whole thing back, sub-locations and all. Blocking Create until
+ * the arithmetic balances is what keeps that from being how a user finds out.
+ */
+describe('dividing up a shelf that holds stock', () => {
+  const CONTENTS = [
+    { part_id: 'p1', part_name: 'BEARING-608ZZ', quantity: 100, primary_unit: 'each' },
+    { part_id: 'p2', part_name: 'ORING-214', quantity: 40, primary_unit: 'each' },
+  ];
+
+  beforeEach(() => {
+    (getLocationContents as Mock).mockResolvedValue({ contents: CONTENTS, total: 2 });
+  });
+
+  it('asks where the stock goes before it will create anything', async () => {
+    const user = userEvent.setup();
+    subdivide();
+
+    // Create is not even offered yet — the loaded shelf turns the primary action into Next.
+    const next = await screen.findByRole('button', { name: /where does the stock go/i });
+    expect(screen.queryByRole('button', { name: /^create /i })).not.toBeInTheDocument();
+
+    await user.click(next);
+    expect(screen.getByText('BEARING-608ZZ')).toBeInTheDocument();
+    expect(screen.getByText('ORING-214')).toBeInTheDocument();
+  });
+
+  it('keeps Create disabled until every part is fully placed', async () => {
+    const user = userEvent.setup();
+    subdivide();
+    await user.click(await screen.findByRole('button', { name: /where does the stock go/i }));
+
+    expect(screen.getByRole('button', { name: /^create /i })).toBeDisabled();
+
+    // "Send everything to…" fills every row with its full balance in one interaction.
+    await user.click(screen.getByLabelText(/send everything to/i));
+    await user.click(screen.getAllByRole('option')[0]);
+
+    expect(screen.getByRole('button', { name: /^create /i })).toBeEnabled();
+  });
+
+  it('says how much is still unplaced rather than just refusing', async () => {
+    const user = userEvent.setup();
+    subdivide();
+    await user.click(await screen.findByRole('button', { name: /where does the stock go/i }));
+
+    await user.click(screen.getByLabelText(/send everything to/i));
+    await user.click(screen.getAllByRole('option')[0]);
+
+    // Take 40 off the bearings; the row must say what is left rather than silently disabling.
+    const qtyFields = screen.getAllByLabelText('Qty');
+    await user.clear(qtyFields[0]);
+    await user.type(qtyFields[0], '60');
+
+    expect(await screen.findByText(/40 each still to place/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^create /i })).toBeDisabled();
+  });
+
+  it('sends one part to two places and hands both moves to the RPC', async () => {
+    const user = userEvent.setup();
+    subdivide();
+    await user.click(await screen.findByRole('button', { name: /where does the stock go/i }));
+
+    await user.click(screen.getByLabelText(/send everything to/i));
+    await user.click(screen.getAllByRole('option')[0]);
+
+    // Split the bearings 60/40 across the first two bins.
+    const qtyFields = screen.getAllByLabelText('Qty');
+    await user.clear(qtyFields[0]);
+    await user.type(qtyFields[0], '60');
+    await user.click(screen.getAllByRole('button', { name: /^split$/i })[0]);
+
+    const places = screen.getAllByLabelText('Place');
+    await user.click(places[1]);
+    await user.click(screen.getAllByRole('option')[1]);
+
+    await user.click(screen.getByRole('button', { name: /^create /i }));
+
+    const [, , moves] = (subdivideLocation as Mock).mock.calls.at(-1)!;
+    const bearings = (moves as Array<{ partId: string; quantity: number }>).filter(
+      (m) => m.partId === 'p1',
+    );
+    expect(bearings.map((m) => m.quantity).sort((a, b) => a - b)).toEqual([40, 60]);
+    // The whole balance moved, and the two lines went to different places.
+    expect(new Set(bearings.map((m) => (m as { toRef: string }).toRef)).size).toBe(2);
+  });
+
+  it('leaves an empty shelf on the single-screen flow it always had', async () => {
+    (getLocationContents as Mock).mockResolvedValue({ contents: [], total: 0 });
+    const user = userEvent.setup();
+    subdivide();
+
+    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+
+    expect(materializeLocationSpec).toHaveBeenCalled();
+    expect(subdivideLocation).not.toHaveBeenCalled();
   });
 });

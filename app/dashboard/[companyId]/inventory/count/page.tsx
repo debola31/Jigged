@@ -100,9 +100,10 @@ import {
 import {
   commitCount,
   loadCountCandidates,
-  loadLocationCountCandidates,
+  loadCountCandidatesForPlaces,
   loadPartAtLocationCandidate,
   loadPartEverywhereCandidates,
+  type CountPlace,
 } from '@/utils/inventoryCountAccess';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getCurrentMember } from '@/utils/operatorAccess';
@@ -114,6 +115,8 @@ import {
   getBalancesForParts,
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
+import { computePathNames } from '@/lib/locationTree';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -292,6 +295,14 @@ export default function InventoryCountPage() {
 
   /** Parts held at this location in total — may exceed the page, so the UI can say so. */
   const [hereTotal, setHereTotal] = useState(0);
+  /**
+   * True when `?location=` names a container, so the sheet spans the bins beneath it.
+   *
+   * Gates the bulk put-away below: `bulk_put_away` moves parts FROM one location, and on a subtree
+   * sheet the ticked rows come from several. Counting is unaffected — every line already commits at
+   * its own bin — so this hides one control rather than restricting the sheet.
+   */
+  const [countingSubtree, setCountingSubtree] = useState(false);
 
   /** Put-away state: the destination, and whether a move is in flight. */
   const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
@@ -399,9 +410,43 @@ export default function InventoryCountPage() {
             return;
           }
 
-          const { candidates: found, total } = await loadLocationCountCandidates(
-            locationId,
-            here.name,
+          /*
+           * A container is counted through its bins.
+           *
+           * Since 20260806160053 a place with sub-locations holds no stock of its own, so a
+           * one-bin sheet for a cabinet would be permanently blank. "Count Cabinet 1-A" means the
+           * bins under it — which is also how you would physically do it, walking bin to bin — and
+           * `commitCount` already writes each line at its own `target.locationId`, so a sheet
+           * spanning ten bins needs no new write path.
+           *
+           * A leaf resolves to a one-element list, i.e. exactly what this always did.
+           */
+          const byId = new Map(locations.map((l) => [l.id, l] as const));
+          const childrenOf = (id: string) => locations.filter((l) => l.parent_id === id);
+          const leaves: CountPlace[] = [];
+          const walk = (node: InventoryLocation) => {
+            const kids = childrenOf(node.id);
+            if (kids.length === 0) {
+              leaves.push({
+                id: node.id,
+                name: node.name,
+                // Full path once a sheet spans several bins — the page title can no longer say
+                // which place a row belongs to. A single bin keeps its bare name.
+                path: computePathNames(node.id, byId).join(' › ') || node.name,
+              });
+              return;
+            }
+            [...kids]
+              .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+              .forEach(walk);
+          };
+          walk(here);
+          setCountingSubtree(leaves.length > 1 || leaves[0]?.id !== here.id);
+
+          const { candidates: found, total } = await loadCountCandidatesForPlaces(
+            leaves.length === 1 && leaves[0].id === here.id
+              ? [{ id: here.id, name: here.name, path: here.name }]
+              : leaves,
             { search: serverSearch, offset: page * LOCATION_PAGE_SIZE, limit: LOCATION_PAGE_SIZE },
           );
           if (cancelled) return;
@@ -791,7 +836,9 @@ export default function InventoryCountPage() {
    * is worse than no move at all, because you can't tell what you already did.
    */
   const putAway = async () => {
-    if (!locationId || !moveTo || selected.size === 0) return;
+    // `countingSubtree`: the RPC moves parts out of ONE location, and here the ticked rows come
+    // from several bins. The control is hidden in that mode; this is the backstop.
+    if (!locationId || !moveTo || selected.size === 0 || countingSubtree) return;
     setMoving(true);
     try {
       // `.values()`, not `.keys()`: the map is keyed by row now, and the RPC wants part ids.
@@ -813,9 +860,8 @@ export default function InventoryCountPage() {
       setReloadKey((k) => k + 1);
       setEntries({});
       setMoveTo(null);
-      const { candidates: found, total } = await loadLocationCountCandidates(
-        locationId,
-        locationName,
+      const { candidates: found, total } = await loadCountCandidatesForPlaces(
+        [{ id: locationId, name: locationName, path: locationName }],
         { search: serverSearch },
       );
       setCandidates(found);
@@ -885,25 +931,16 @@ export default function InventoryCountPage() {
     }
   };
 
-  /** Every location, for the destination picker and for "+ Count it somewhere else". */
-  const destinationOptions = useMemo<LocationPickerOption[]>(() => {
-    const byId = new Map(allLocations.map((l) => [l.id, l] as const));
-    const pathOf = (id: string): string => {
-      const names: string[] = [];
-      let cursor: string | null = id;
-      const guard = new Set<string>();
-      while (cursor && byId.has(cursor) && !guard.has(cursor)) {
-        guard.add(cursor);
-        const n: InventoryLocation = byId.get(cursor)!;
-        names.unshift(n.name);
-        cursor = n.parent_id;
-      }
-      return names.join(' › ');
-    };
-    return allLocations
-      .map((l) => ({ id: l.id, label: pathOf(l.id), kind: l.kind }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [allLocations]);
+  /**
+   * Where a count may write, for the destination picker and for "+ Count it somewhere else".
+   *
+   * Containers are excluded: since 20260806160053 stock cannot sit at a place that has
+   * sub-locations, so counting one could only ever commit zero rows or raise.
+   */
+  const destinationOptions = useMemo<LocationPickerOption[]>(
+    () => stockDestinationOptions(allLocations),
+    [allLocations],
+  );
 
   const createDestination = async (name: string): Promise<LocationPickerOption> => {
     const created = await createLocation(companyId, { name });
@@ -1078,8 +1115,14 @@ export default function InventoryCountPage() {
                 </Button>
               </Box>
 
-              {/* ── Put away: the other thing you do standing at a bin ─────────── */}
-              {locationMode && (
+              {/* ── Put away: the other thing you do standing at a bin ───────────
+
+                  Withheld on a subtree sheet. `bulk_put_away` moves parts out of ONE location, and
+                  when you are counting a whole cabinet the ticked rows come from several bins — so
+                  "send the ticked parts to…" has no single source to send them from. Counting is
+                  unaffected; each line still commits at its own bin. Putting away stays available
+                  one level down, standing at the bin, which is where it belongs anyway. */}
+              {locationMode && !countingSubtree && (
                 <Card elevation={2} sx={{ mb: 3 }}>
                   <CardContent
                     sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}

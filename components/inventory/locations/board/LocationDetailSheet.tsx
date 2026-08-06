@@ -261,7 +261,12 @@ export default function LocationDetailSheet({
 
           {/* The one recurring action, so it leads — and it's offered for the system bucket too,
               where it's the *only* thing you can do and the most important thing on the page.
-              Everything below is setup you do once when the shelf arrives. */}
+              Everything below is setup you do once when the shelf arrives.
+
+              On a container it counts everything in the bins beneath — a container holds no stock
+              of its own (20260806160053), so the worksheet gathers its leaves. It says "Count
+              what's inside" there, because "put away" is a single-bin action and the subtree sheet
+              withholds it: there is no one source to send the ticked parts from. */}
           <Button
             fullWidth
             variant="contained"
@@ -269,7 +274,11 @@ export default function LocationDetailSheet({
             onClick={() => actions.onCountHere(node)}
             sx={{ mb: 2 }}
           >
-            {node.kind === 'system' ? 'Put these away' : 'Count or put away'}
+            {node.kind === 'system'
+              ? 'Put these away'
+              : node.children.length > 0
+                ? "Count what's inside"
+                : 'Count or put away'}
           </Button>
 
           {node.children.length > 0 && (
@@ -335,14 +344,23 @@ export default function LocationDetailSheet({
                   Divide it up…
                 </Button>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AddIcon />}
-                    onClick={() => actions.onAddChild(node)}
-                    sx={{ flex: 1, minWidth: 150 }}
-                  >
-                    Add one inside
-                  </Button>
+                  {/* Withheld while this place holds stock DIRECTLY.
+
+                      "Add one inside" goes through the plain create form, which has nowhere to ask
+                      the question a loaded shelf raises — since 20260806160053 a place cannot hold
+                      stock and sub-locations at once, so the create would simply be refused. "Divide
+                      it up…" above is the same operation with that question attached, and its spec
+                      can be pruned to a single node, so nothing is unreachable. */}
+                  {occupancyFor(occupancy, node.id).directParts === 0 && (
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddIcon />}
+                      onClick={() => actions.onAddChild(node)}
+                      sx={{ flex: 1, minWidth: 150 }}
+                    >
+                      Add one inside
+                    </Button>
+                  )}
                   <Button
                     variant="outlined"
                     startIcon={<QrCode2Icon />}

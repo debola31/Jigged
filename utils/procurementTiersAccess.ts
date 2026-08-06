@@ -1,5 +1,6 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
+import { friendlyError } from '@/lib/supabaseErrors';
 import type {
   ProcurementCostResult,
   ProcurementTier,
@@ -170,12 +171,10 @@ export async function deleteTier(tierId: string): Promise<void> {
     .eq('id', tierId);
   if (error) {
     console.error('Error deleting procurement tier:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'procurement tier',
         fallback: 'Failed to delete procurement tier.',
-      }),
-    );
+      });
   }
 }
 
@@ -202,6 +201,7 @@ export async function getProcurementCost(
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'getProcurementCost', area: 'pricing' });
     console.error('Error calling get_procurement_cost:', error);
     throw error;
   }

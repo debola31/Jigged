@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 
 export interface DemoStatus {
   isDemoCompany: boolean;
@@ -72,6 +73,7 @@ export async function createDemoCompany(sourceCompanyId: string, userId: string)
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'createDemoCompany', area: 'demo' });
     throw new Error(`Failed to create demo company: ${error.message}`);
   }
 
@@ -91,6 +93,7 @@ export async function resetDemoCompany(sourceCompanyId: string, userId: string):
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'resetDemoCompany', area: 'demo' });
     throw new Error(`Failed to reset demo company: ${error.message}`);
   }
 }
@@ -120,6 +123,7 @@ export async function syncDemoAccess(sourceCompanyId: string, demoCompanyId: str
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'syncDemoAccess', area: 'demo' });
     throw new Error(`Failed to sync demo access: ${error.message}`);
   }
 }

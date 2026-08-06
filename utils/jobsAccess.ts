@@ -4,7 +4,8 @@
 // this also keeps the diff small for review. See CLAUDE.md "Typed
 // Supabase client (incremental adoption)" for the rollout contract.
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
+import { friendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Update payloads for tables this file mutates conditionally. The typed
@@ -227,6 +228,7 @@ export async function searchJobsByIdentifier(
     p_query: query.trim(),
   });
   if (error) {
+    reportWriteFailure(error, { op: 'searchJobsByIdentifier', area: 'jobs' });
     console.error('search_jobs_by_identifier failed:', error);
     throw new Error(`Search failed: ${error.message}`);
   }
@@ -369,12 +371,10 @@ export async function updateJobAddressContact(
 
   if (error) {
     console.error('Error updating job address/contact:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'job',
         fallback: 'Failed to update job billing/shipping details.',
-      }),
-    );
+      });
   }
 
   return data as Job;
@@ -416,9 +416,7 @@ export async function updateJobDetails(
 
   if (error) {
     console.error('Error updating job details:', error);
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to update job details.' }),
-    );
+    throw friendlyError(error, { entity: 'job', fallback: 'Failed to update job details.' });
   }
   return data as Job;
 }
@@ -593,6 +591,7 @@ export async function createJobFromPurchaseOrder(
     company_uuid: companyId,
   });
   if (numErr || !jobNumber) {
+    reportWriteFailure(numErr, { op: 'generateDirectJobNumber', area: 'jobs', extra: { companyId } });
     console.error('Error generating job number:', numErr);
     throw numErr || new Error('Could not generate a job number.');
   }
@@ -669,6 +668,7 @@ export async function createJobFromPurchaseOrder(
         p_routing_id: routingId,
       });
       if (rpcErr) {
+        reportWriteFailure(rpcErr, { op: 'createJobPartOperationsFromRouting', area: 'jobs' });
         console.error('Failed to copy operations from routing:', rpcErr);
         throw new Error('Job created but failed to copy operations from routing.');
       }
@@ -848,9 +848,7 @@ export async function updateJobPartQuantity(
     .single();
   if (updErr || !updated) {
     console.error('Error updating job_part quantity:', updErr);
-    throw new Error(
-      friendlyErrorMessage(updErr, { entity: 'job', fallback: 'Failed to update the quantity.' }),
-    );
+    throw friendlyError(updErr, { entity: 'job', fallback: 'Failed to update the quantity.' });
   }
 
   return {
@@ -958,9 +956,7 @@ export async function updateJobPartPrice(
     .single();
   if (updErr || !updated) {
     console.error('Error updating job_part price:', updErr);
-    throw new Error(
-      friendlyErrorMessage(updErr, { entity: 'job', fallback: 'Failed to update the price.' }),
-    );
+    throw friendlyError(updErr, { entity: 'job', fallback: 'Failed to update the price.' });
   }
 
   return {
@@ -1045,9 +1041,7 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 
   if (loadErr) {
     console.error('Error loading job for archive:', loadErr);
-    throw new Error(
-      friendlyErrorMessage(loadErr, { entity: 'job', fallback: 'Failed to load job.' }),
-    );
+    throw friendlyError(loadErr, { entity: 'job', fallback: 'Failed to load job.' });
   }
   if (!jobRow) {
     throw new Error('Job not found.');
@@ -1061,9 +1055,7 @@ export async function deleteJob(jobId: string, companyId: string): Promise<void>
 
   if (error) {
     console.error('Error archiving job:', error);
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to delete job.' }),
-    );
+    throw friendlyError(error, { entity: 'job', fallback: 'Failed to delete job.' });
   }
 }
 
@@ -1095,9 +1087,7 @@ export async function bulkCancelJobs(jobIds: string[]): Promise<void> {
 
     if (error) {
       console.error('Error bulk cancelling jobs:', error);
-      throw new Error(
-        friendlyErrorMessage(error, { entity: 'job', fallback: 'Failed to cancel jobs.' }),
-      );
+      throw friendlyError(error, { entity: 'job', fallback: 'Failed to cancel jobs.' });
     }
   }
 }
@@ -1448,6 +1438,9 @@ export async function getReadyOperationsForJobs(
   });
 
   if (error) {
+    // Swallowed into an empty Map for the caller, which is exactly the shape that hid failures
+    // before #708 — so it is reported here even though nothing is thrown.
+    reportWriteFailure(error, { op: 'getReadyOperationsBatch', area: 'jobs' });
     console.error('Error fetching ready operations batch:', error);
     return new Map();
   }

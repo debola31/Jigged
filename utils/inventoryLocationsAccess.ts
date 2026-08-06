@@ -10,6 +10,7 @@
  * both the display values and the converted quantity.
  */
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
@@ -259,6 +260,20 @@ async function assertParentInCompany(
 const PG_UNIQUE_VIOLATION = '23505';
 
 /**
+ * The SQLSTATEs the stock RPCs raise ON PURPOSE, to say something to the operator —
+ * "Insufficient stock at source location (have 5, need 10)", "Too many parts at once".
+ *
+ * Passed to `reportWriteFailure` so those never become Sentry issues. An operator typing a
+ * number bigger than the shelf holds is the system working, and a queue full of it is a queue
+ * nobody reads. Every OTHER code from these RPCs (a permission failure, a missing column, a
+ * foreign-key violation) is a defect and is reported.
+ *
+ * `friendlyErrorMessage` keys off the same two codes to decide the text is ours to show —
+ * see PG_RAISED_BY_US / PG_CHECK_VIOLATION in lib/supabaseErrors.ts.
+ */
+const STOCK_RPC_USER_RAISES = ['P0001', '23514'] as const;
+
+/**
  * Turn a duplicate-sibling-name violation into something a shop owner can act on.
  *
  * `inventory_locations_unique_sibling_name` is the only unique index a write from this module can
@@ -392,8 +407,13 @@ export async function deleteLocation(id: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.rpc('delete_location', { p_location_id: id });
   if (error) {
-    console.error('Error deleting inventory location:', error);
     const msg = error.message ?? '';
+    // "Still holds stock" is the RPC refusing on purpose — the user is told to move it first,
+    // which is the feature working. Anything else is a defect worth an issue.
+    if (!msg.includes('still holds stock')) {
+      reportWriteFailure(error, { op: 'deleteLocation', area: 'inventory', extra: { id } });
+    }
+    console.error('Error deleting inventory location:', error);
     if (msg.includes('still holds stock')) {
       throw new Error('This location (or something inside it) still holds stock. Move it out first.');
     }
@@ -876,6 +896,15 @@ export async function addStockAtLocation(
     p_photo_path: opts.photoPath ?? undefined,
   });
   if (error) {
+    // `.rpc()` is invisible to the Supabase integration by design (#708) — see
+    // `applySupabaseEventPolicy`. The stock RPCs raise P0001/23514 deliberately to tell an
+    // operator their number was too big, so those are not reported; anything else is a defect.
+    reportWriteFailure(error, {
+      op: 'addStockAtLocation',
+      area: 'inventory',
+      extra: { partId, locationId, unit },
+      expectedCodes: STOCK_RPC_USER_RAISES,
+    });
     console.error('Error adding stock at location:', error);
     throw error;
   }
@@ -906,6 +935,12 @@ export async function depleteStockAtLocation(
     p_operator_id: opts.operatorId,
   });
   if (error) {
+    reportWriteFailure(error, {
+      op: 'depleteStockAtLocation',
+      area: 'inventory',
+      extra: { partId, locationId, unit, jobId: opts.jobId },
+      expectedCodes: STOCK_RPC_USER_RAISES,
+    });
     console.error('Error depleting stock at location:', error);
     throw error;
   }
@@ -935,6 +970,12 @@ export async function adjustStockAtLocation(
     p_operator_id: opts.operatorId ?? undefined,
   });
   if (error) {
+    reportWriteFailure(error, {
+      op: 'adjustStockAtLocation',
+      area: 'inventory',
+      extra: { partId, locationId, unit },
+      expectedCodes: STOCK_RPC_USER_RAISES,
+    });
     console.error('Error adjusting stock at location:', error);
     throw error;
   }
@@ -966,6 +1007,12 @@ export async function transferStock(
     p_photo_path: opts.photoPath ?? undefined,
   });
   if (error) {
+    reportWriteFailure(error, {
+      op: 'transferStock',
+      area: 'inventory',
+      extra: { partId, fromLocationId, toLocationId, unit },
+      expectedCodes: STOCK_RPC_USER_RAISES,
+    });
     console.error('Error transferring stock:', error);
     throw error;
   }
@@ -1017,6 +1064,11 @@ export async function bulkPutAway(
     p_part_ids: partIds,
   });
   if (error) {
+    reportWriteFailure(error, {
+      op: 'bulkPutAway',
+      area: 'inventory',
+      expectedCodes: STOCK_RPC_USER_RAISES,
+    });
     console.error('Error putting stock away:', error);
     throw error;
   }

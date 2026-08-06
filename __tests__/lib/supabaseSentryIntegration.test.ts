@@ -15,13 +15,18 @@
  */
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@supabase/supabase-js';
-import { applySupabaseEventPolicy, RPC_SPAN_ATTRIBUTE } from '@/lib/sentryEventPolicy';
+import {
+  applySupabaseEventPolicy,
+  reportWriteFailure,
+  RPC_SPAN_ATTRIBUTE,
+} from '@/lib/sentryEventPolicy';
 
 interface Captured {
   message: string;
   dbTable: unknown;
   isRpc: unknown;
   mechanismType: string | undefined;
+  tags: Record<string, unknown> | undefined;
 }
 
 const captured: Captured[] = [];
@@ -35,6 +40,7 @@ function recordRaw(event: Sentry.ErrorEvent): void {
     dbTable: data?.['db.table'],
     isRpc: data?.[RPC_SPAN_ATTRIBUTE],
     mechanismType: event.exception?.values?.[0]?.mechanism?.type,
+    tags: event.tags,
   });
 }
 
@@ -178,5 +184,64 @@ describe('the policy: what survives beforeSend', () => {
     expect(result).toBe(event);
     // Untouched: a genuine unhandled error must keep saying so.
     expect(result!.exception?.values?.[0]?.mechanism?.handled).toBe(false);
+  });
+});
+
+describe('reportWriteFailure: the half the net cannot see', () => {
+  /**
+   * Goes through the REAL client rather than a spy — `vi.spyOn` cannot patch an ESM namespace,
+   * and this is the better test anyway: it proves the event survives `beforeSend`, which is
+   * where an event can still be dropped.
+   */
+  async function report(...args: Parameters<typeof reportWriteFailure>) {
+    captured.length = 0;
+    reportWriteFailure(...args);
+    await Sentry.flush(200);
+    return captured;
+  }
+
+  it('reports an rpc failure with its area tag', async () => {
+    const seen = await report(
+      { code: '42501', message: 'permission denied for function transfer_stock' },
+      { op: 'transferStock', area: 'inventory' },
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].message).toContain('permission denied');
+    expect(seen[0].tags?.area).toBe('inventory');
+  });
+
+  it('stays quiet for a raise the RPC makes ON PURPOSE, for the user', async () => {
+    const seen = await report(
+      { code: 'P0001', message: 'Insufficient stock at source location (have 5, need 10)' },
+      { op: 'transferStock', area: 'inventory', expectedCodes: ['P0001', '23514'] },
+    );
+
+    expect(seen).toEqual([]);
+  });
+
+  it('still reports a DIFFERENT code from that same RPC — the list is per-code, not per-call', async () => {
+    const seen = await report(
+      { code: '42703', message: 'column does not exist' },
+      { op: 'transferStock', area: 'inventory', expectedCodes: ['P0001', '23514'] },
+    );
+
+    expect(seen).toHaveLength(1);
+  });
+
+  it('applies the same do-not-report list the net uses', async () => {
+    const seen = await report({ code: 'PGRST116', message: 'no rows' }, { op: 'x', area: 'jobs' });
+    expect(seen).toEqual([]);
+  });
+
+  it('normalises a plain Supabase object into a real Error', async () => {
+    // Handing Sentry the raw object is the "issue titled e" failure CLAUDE.md warns about:
+    // it has no type or stack to fingerprint, so it groups as one unreadable blob.
+    const seen = await report(
+      { code: '23503', message: 'violates foreign key' },
+      { op: 'x', area: 'jobs' },
+    );
+
+    expect(seen[0].message).toBe('violates foreign key');
   });
 });

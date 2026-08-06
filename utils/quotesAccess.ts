@@ -3,7 +3,8 @@
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
+import { friendlyError } from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -846,12 +847,10 @@ export async function deleteQuote(quoteId: string, companyId: string): Promise<v
 
   if (error) {
     console.error('Error archiving quote:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'quote',
         fallback: 'Failed to delete quote.',
-      }),
-    );
+      });
   }
 }
 
@@ -1480,6 +1479,7 @@ export async function convertQuoteToJob(
         p_routing_id: routingId,
       });
       if (rpcErr) {
+        reportWriteFailure(rpcErr, { op: 'createJobPartOperationsFromRouting', area: 'quotes' });
         console.error('Failed to copy operations from routing:', rpcErr);
         throw new Error('Job created but failed to copy operations from routing.');
       }

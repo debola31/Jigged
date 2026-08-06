@@ -20,8 +20,11 @@ vi.mock('@/lib/supabase', () => ({
   getTypedSupabase: () => mockSupabase,
 }));
 
-vi.mock('@/lib/supabaseErrors', () => ({
+vi.mock('@/lib/supabaseErrors', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/supabaseErrors')>()),
   friendlyErrorMessage: (_err: unknown, opts?: { fallback?: string }) => opts?.fallback ?? 'error',
+  friendlyError: (_err: unknown, opts?: { fallback?: string }) =>
+    new Error(opts?.fallback ?? 'error'),
 }));
 
 const { mockAddNoteMedia } = vi.hoisted(() => ({ mockAddNoteMedia: vi.fn() }));

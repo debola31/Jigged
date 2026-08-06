@@ -18,7 +18,7 @@
  */
 
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 import type {
   CustomerContact,
@@ -212,12 +212,10 @@ export async function archiveCustomerContact(contactId: string): Promise<void> {
     .eq('id', contactId);
   if (error) {
     console.error('Error archiving customer contact:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'contact',
         fallback: 'Failed to remove contact.',
-      }),
-    );
+      });
   }
 }
 

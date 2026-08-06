@@ -8,7 +8,7 @@ import {
   type CustomerCarrierAccount,
   type CustomerCarrierAccountFormData,
 } from '@/types/customerCarrierAccount';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyError } from '@/lib/supabaseErrors';
 
 /**
  * Customer carrier accounts — a customer's own UPS/FedEx/LTL account, so their
@@ -87,13 +87,11 @@ export async function createCarrierAccount(
     console.error('Error creating carrier account:', error);
     // The account-required CHECK is the one a user can realistically trip, and
     // the raw constraint text would mean nothing to them.
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'carrier account',
         fallback:
           'Failed to save the carrier account. Billing a third party needs an account number.',
-      }),
-    );
+      });
   }
   return rowToAccount(data);
 }
@@ -112,13 +110,11 @@ export async function updateCarrierAccount(
 
   if (error) {
     console.error('Error updating carrier account:', error);
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'carrier account',
         fallback:
           'Failed to save the carrier account. Billing a third party needs an account number.',
-      }),
-    );
+      });
   }
   return rowToAccount(data);
 }

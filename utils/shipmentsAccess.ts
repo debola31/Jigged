@@ -16,6 +16,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 import type {
   CreateShipmentPayload,
   FreightTerms,
@@ -75,6 +76,10 @@ export async function createShipment(
   );
 
   if (error || !shipmentId) {
+    reportWriteFailure(error ?? new Error('createShipment returned no id'), {
+      op: 'createShipmentWithLineItems',
+      area: 'shipments',
+    });
     console.error('createShipment RPC failed:', error);
     throw new Error(
       error?.message
@@ -603,6 +608,7 @@ export async function getJobLastShipDate(jobId: string): Promise<Date | null> {
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'jobLastShipDate', area: 'shipments' });
     console.error('Error calling job_last_ship_date:', error);
     throw new Error('Failed to load last ship date.');
   }

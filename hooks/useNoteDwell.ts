@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
-import * as Sentry from '@sentry/nextjs';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 /**
@@ -81,10 +81,7 @@ export function useNoteDwell(
       })
       .then(({ error }) => {
         if (error) {
-          Sentry.captureException(error, {
-            level: 'warning',
-            tags: { area: 'note_views' },
-          });
+          reportWriteFailure(error, { op: 'logNoteViews', area: 'note_views', level: 'warning' });
         }
       });
   }, [jobId]);

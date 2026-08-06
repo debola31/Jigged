@@ -1,6 +1,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 30 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 import type { Database } from '@/types/database';
 
 // Insert payload for the parts table. company_id is supplied at the call
@@ -1012,6 +1013,7 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
           'Permission denied. You may not have permission to delete these parts.',
         );
       }
+      reportWriteFailure(error, { op: 'archiveParts', area: 'parts', extra: { count: batch.length } });
       console.error('Error archiving parts:', error);
       throw new Error(error.message || 'Failed to archive parts');
     }
@@ -1048,6 +1050,7 @@ export async function getPartsDeletionImpact(partIds: string[]): Promise<PartsDe
   const { data, error } = await supabase.rpc('parts_deletion_impact', { p_ids: partIds });
 
   if (error) {
+    reportWriteFailure(error, { op: 'partsDeletionImpact', area: 'parts' });
     console.error('Error computing parts deletion impact:', error);
     return base;
   }
@@ -1190,6 +1193,7 @@ export async function getComputedPartCost(
   });
 
   if (error) {
+    reportWriteFailure(error, { op: 'computePartCostAtQty', area: 'pricing' });
     console.error('Error computing part cost:', error);
     throw error;
   }
@@ -1264,6 +1268,7 @@ export async function getPartCostExplain(
     .single();
 
   if (error) {
+    reportWriteFailure(error, { op: 'computePartCostExplain', area: 'pricing' });
     console.error('Error explaining part cost:', error);
     throw error;
   }

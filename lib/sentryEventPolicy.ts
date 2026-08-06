@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import type { ErrorEvent, EventHint } from '@sentry/nextjs';
-import { shouldReportSupabaseError } from '@/lib/supabaseErrors';
+import { shouldReportSupabaseError, toError } from '@/lib/supabaseErrors';
 
 /**
  * What the Supabase integration's automatic captures are allowed to become issues.
@@ -84,4 +84,93 @@ export function applySupabaseEventPolicy(
   }
 
   return event;
+}
+
+// ---------------------------------------------------------------------------
+// The other half: reporting what the net cannot see
+// ---------------------------------------------------------------------------
+
+/**
+ * The `area` tag vocabulary, as a union rather than a doc.
+ *
+ * #708 asked for "a short agreed list rather than ad-hoc strings" so alert rules stay
+ * filterable. A union is the version of that which cannot rot: adding a value is a deliberate
+ * edit here, and a typo is a compile error rather than a tag nobody notices is orphaned.
+ *
+ * Seeded from the tags already in use before this existed, plus one per access module that
+ * reports. Keep it coarse — this is for routing an alert, not for describing a call site.
+ */
+export type SentryArea =
+  | 'billing'
+  | 'bom'
+  | 'customers'
+  | 'demo'
+  | 'inventory'
+  | 'jobs'
+  | 'machine_maintenance'
+  | 'note_reactions'
+  | 'note_views'
+  | 'operator'
+  | 'operator_events'
+  | 'parts'
+  | 'pricing'
+  | 'quotes'
+  | 'routings'
+  | 'shipments'
+  | 'storage_upload'
+  | 'vendors'
+  | 'work_centers';
+
+interface ReportOptions {
+  /** The function that failed, e.g. 'transferStock'. Becomes the Sentry message prefix. */
+  op: string;
+  area: SentryArea;
+  /** Ids and arguments worth having while reading the issue. Keep it small. */
+  extra?: Record<string, unknown>;
+  /**
+   * `warning` for fire-and-forget telemetry whose failure costs the user nothing —
+   * `logOperatorEvent`, view logging. Default `error`.
+   */
+  level?: 'error' | 'warning';
+  /**
+   * SQLSTATEs this particular RPC raises ON PURPOSE, to say something to the user.
+   *
+   * Our stock RPCs `RAISE EXCEPTION` with `P0001`/`23514` to produce sentences like
+   * *"Insufficient stock at source location (have 5, need 10)"*. That is the database telling
+   * an operator they typed too big a number — a normal outcome of a normal action, not a defect,
+   * and filing it would recreate exactly the alert fatigue documented in docs/observability.md.
+   *
+   * This is per-call and not a global rule because the same code means the opposite elsewhere:
+   * the incident behind #708 was a `P0001` raised by a trigger, and it was a real bug. Only the
+   * caller knows which of the two its RPC does.
+   */
+  expectedCodes?: readonly string[];
+}
+
+/**
+ * Report a failure the Supabase integration does not see: an `.rpc()`, a storage operation, or
+ * a thrown JS error.
+ *
+ * Does NOT throw or swallow — it reports and returns, so the caller keeps full control of its
+ * own control flow (several of them deliberately continue, and the stock RPCs need to throw a
+ * *translated* error rather than whatever this was handed).
+ *
+ * Skips the expected negatives via the same predicate the net uses, so the two layers agree on
+ * what counts as a failure. It does NOT skip deliberate user-facing raises — the caller decides
+ * that, because only the caller knows whether its `P0001` is a message for the user or a bug.
+ * That judgement is the entire reason rpc is reported here instead of by the net.
+ */
+export function reportWriteFailure(error: unknown, opts: ReportOptions): void {
+  if (!shouldReportSupabaseError(error)) return;
+
+  const code = (error && typeof error === 'object'
+    ? (error as Record<string, unknown>).code
+    : undefined);
+  if (typeof code === 'string' && opts.expectedCodes?.includes(code)) return;
+
+  Sentry.captureException(toError(error, `${opts.op} failed`), {
+    level: opts.level ?? 'error',
+    tags: { area: opts.area },
+    extra: { op: opts.op, ...opts.extra },
+  });
 }

@@ -29,8 +29,10 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
   getTypedSupabase: () => mockSupabase,
 }));
-vi.mock('@/lib/supabaseErrors', () => ({
+vi.mock('@/lib/supabaseErrors', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/supabaseErrors')>()),
   friendlyErrorMessage: (_e: unknown, o?: { fallback?: string }) => o?.fallback ?? 'error',
+  friendlyError: (_e: unknown, o?: { fallback?: string }) => new Error(o?.fallback ?? 'error'),
 }));
 
 import { getPartPreviousNotes } from '@/utils/operatorAccess';

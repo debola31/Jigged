@@ -261,17 +261,64 @@ function referencingEntityFromMessage(message: string): string | null {
 }
 
 /**
+ * Marks an Error whose message has ALREADY been through `friendlyErrorMessage`.
+ *
+ * Non-enumerable so it never shows up in a spread, a JSON dump or a Sentry extra.
+ */
+const FRIENDLY = Symbol.for('jigged.friendlyError');
+
+/** Has this error already been translated for a human? */
+function isAlreadyFriendly(error: unknown): error is Error {
+  return error instanceof Error && (error as unknown as Record<symbol, unknown>)[FRIENDLY] === true;
+}
+
+/**
+ * Build the Error that access-layer functions throw for a failed write.
+ *
+ * Prefer this over `throw new Error(friendlyErrorMessage(error, …))`, which silently DROPS the
+ * diagnosis. That idiom is what turned a precise database message into "Could not save that."
+ * (#708): `addMachineNote` produced *"work center 853e… is not in company 7523…"*, threw it as a
+ * bare `new Error(string)` — losing `code` — and then `useNoteCapture` called
+ * `friendlyErrorMessage` a SECOND time on the now-codeless Error. Every branch in there needs
+ * `code`, none matched, so the specific message was replaced by the generic fallback.
+ *
+ * Two things stop that here: `code`/`details`/`hint` are carried onto the thrown Error, and the
+ * Error is marked so a second translation returns the message it already has instead of
+ * re-deriving one. Translation becomes idempotent, which means a UI may call
+ * `friendlyErrorMessage` defensively without destroying a good message.
+ */
+export function friendlyError(error: unknown, options: FriendlyErrorOptions = {}): Error {
+  const built = toError(error);
+  const friendly = new Error(friendlyErrorMessage(error, options));
+
+  for (const key of ['code', 'details', 'hint'] as const) {
+    const value = (built as unknown as Record<string, unknown>)[key];
+    if (value !== undefined && value !== '') Object.assign(friendly, { [key]: value });
+  }
+  Object.defineProperty(friendly, FRIENDLY, { value: true, enumerable: false });
+
+  return friendly;
+}
+
+/**
  * Translate a raw Supabase/Postgres error into a single user-facing sentence.
  *
- * Access-layer functions should `throw new Error(friendlyErrorMessage(error, …))`
- * so the friendly text propagates to every caller's `err.message` — UIs then show
- * it directly instead of a raw SQLSTATE string. Use `options.entity` to name the
- * thing being acted on; FK-violation copy auto-detects what still references it.
+ * Access-layer functions should `throw friendlyError(error, …)` so the friendly text propagates
+ * to every caller's `err.message` — UIs then show it directly instead of a raw SQLSTATE string.
+ * Use `options.entity` to name the thing being acted on; FK-violation copy auto-detects what
+ * still references it.
+ *
+ * IDEMPOTENT: handed an error this module already translated, it returns that message unchanged
+ * rather than running a second translation over prose. See `friendlyError`.
  */
 export function friendlyErrorMessage(
   error: unknown,
   options: FriendlyErrorOptions = {},
 ): string {
+  // Already ours. Re-deriving would parse the friendly sentence as if it were Postgres output,
+  // which at best returns the same string and at worst downgrades it to the fallback.
+  if (isAlreadyFriendly(error)) return error.message;
+
   const err = asRecord(error);
   const code = typeof err.code === 'string' ? err.code : undefined;
   const message = typeof err.message === 'string' ? err.message : '';

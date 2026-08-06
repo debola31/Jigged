@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/nextjs';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
 
 /**
@@ -81,18 +81,22 @@ export function logOperatorEvent(
       })
       .then(({ error }) => {
         if (error) {
-          Sentry.captureException(error, {
+          reportWriteFailure(error, {
+            op: 'logOperatorEvent',
+            area: 'operator_events',
             level: 'warning',
-            tags: { area: 'operator_events', kind },
+            extra: { kind },
           });
         }
       });
   } catch (err) {
     // Belt and braces: a throw before the promise exists (no client, no session)
     // must still not reach the operator.
-    Sentry.captureException(err, {
+    reportWriteFailure(err, {
+      op: 'logOperatorEvent',
+      area: 'operator_events',
       level: 'warning',
-      tags: { area: 'operator_events', kind },
+      extra: { kind },
     });
   }
 }

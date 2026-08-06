@@ -28,11 +28,15 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 // friendlyErrorMessage just surfaces the fallback so we can assert thrown text.
-vi.mock('@/lib/supabaseErrors', () => ({
+// Spreads the real module rather than replacing it: `friendlyError` and
+// `shouldReportSupabaseError` are both used by paths under test, and a full replacement means
+// every future export added there breaks this file with "No X export is defined".
+vi.mock('@/lib/supabaseErrors', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/supabaseErrors')>()),
   friendlyErrorMessage: (_err: unknown, opts?: { fallback?: string }) =>
     opts?.fallback ?? 'error',
-  toError: (value: unknown, fallback = 'Unknown error') =>
-    value instanceof Error ? value : new Error(String((value as { message?: string })?.message ?? fallback)),
+  friendlyError: (_err: unknown, opts?: { fallback?: string }) =>
+    new Error(opts?.fallback ?? 'error'),
 }));
 
 // The member lookup reports indeterminate failures rather than swallowing them. Several

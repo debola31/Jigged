@@ -19,7 +19,8 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
+import { friendlyError } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
@@ -226,6 +227,15 @@ async function getReadyOperationsForStation(
     // "no jobs" to operators rather than a visible error. Both callers
     // (getOperatorJobs / getAllStationsOperatorJobs) run inside the jobs page's
     // try/catch, which shows this message in an Alert.
+    //
+    // Surfacing it to the operator is not the same as recording it: `.rpc()` is outside the
+    // Supabase integration's net by design (#708), so without this the only trace is an Alert
+    // the operator reads and dismisses.
+    reportWriteFailure(error, {
+      op: 'getReadyOperationsForStation',
+      area: 'operator',
+      extra: { companyId, workCenterId },
+    });
     throw new Error(`Failed to load ready operations for station: ${error.message}`);
   }
 
@@ -1651,12 +1661,10 @@ export async function addJobNote(
     .single();
 
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'note',
         fallback: 'Failed to add note.',
-      }),
-    );
+      });
   }
 
   return mapJobNoteRow(data as unknown as JobNoteRow);
@@ -1705,12 +1713,10 @@ export async function updateNoteBody(
     .single();
 
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'note',
         fallback: 'Could not save that change.',
-      }),
-    );
+      });
   }
 
   return data as { body: string | null; edited_at: string | null };
@@ -1800,7 +1806,10 @@ export async function countPartPreviousNotes(
     { head: true, count: 'exact' },
   );
 
-  if (error) return 0;
+  if (error) {
+    reportWriteFailure(error, { op: 'countUnseenReactions', area: 'note_reactions' });
+    return 0;
+  }
   return count ?? 0;
 }
 
@@ -1828,6 +1837,7 @@ export async function getPartPreviousNotes(
   // second client-side filter would be a redundant source of truth.
   void companyId;
 
+  if (error) reportWriteFailure(error, { op: 'getPartPlaybookNotes', area: 'operator', extra: { partId } });
   if (error || !data) return [];
 
   return (data as unknown as PlaybookRow[]).map((r) => ({
@@ -1904,12 +1914,10 @@ export async function getMyContributionTotals(
   // facts, and rendering the first as the second tells an operator their notes are
   // gone. The caller has an error state; give it something to show.
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'note',
         fallback: 'Could not load your work.',
-      }),
-    );
+      });
   }
   if (!data) return empty;
 
@@ -1998,12 +2006,10 @@ export async function getMyNotesPage(
   // the tab. The caller's catch is what shows the retry, and it can only fire if this
   // rejects.
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'note',
         fallback: 'Could not load your notes.',
-      }),
-    );
+      });
   }
   if (!data) return empty;
 
@@ -2066,6 +2072,7 @@ export async function getMyNotesPage(
 export async function getNoteViewers(noteId: string): Promise<NoteViewer[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase.rpc('note_viewers', { p_note_id: noteId });
+  if (error) reportWriteFailure(error, { op: 'getNoteViewers', area: 'note_views', extra: { noteId } });
   if (error || !data) return [];
   return data as unknown as NoteViewer[];
 }
@@ -2114,9 +2121,7 @@ export async function addReaction(
   // second device. The end state is what the caller asked for, so it is not an
   // error to report.
   if (error && error.code !== '23505') {
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not save that.' }),
-    );
+    throw friendlyError(error, { entity: 'reaction', fallback: 'Could not save that.' });
   }
 }
 
@@ -2139,9 +2144,7 @@ export async function removeReaction(
     .eq('kind', kind);
 
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not undo that.' }),
-    );
+    throw friendlyError(error, { entity: 'reaction', fallback: 'Could not undo that.' });
   }
 }
 
@@ -2228,12 +2231,10 @@ export async function getNewHelpful(companyId: string): Promise<NewHelpful[]> {
     .order('created_at', { ascending: false });
 
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, {
+    throw friendlyError(error, {
         entity: 'reaction',
         fallback: 'Could not load what came back.',
-      }),
-    );
+      });
   }
 
   type Row = {
@@ -2293,8 +2294,7 @@ export async function markHelpfulSeen(companyId: string, seenThrough: string): P
     p_seen_through: seenThrough,
   });
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'reaction', fallback: 'Could not save that.' }),
-    );
+    reportWriteFailure(error, { op: 'markHelpfulSeen', area: 'note_reactions', extra: { companyId } });
+    throw friendlyError(error, { entity: 'reaction', fallback: 'Could not save that.' });
   }
 }

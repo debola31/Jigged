@@ -1,5 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyError } from '@/lib/supabaseErrors';
 import { mapReactions } from '@/utils/operatorAccess';
 import type { ReactionRel } from '@/utils/operatorAccess';
 import { addNoteMedia, uploadNoteMediaFile } from '@/utils/jobNoteMediaAccess';
@@ -188,9 +188,7 @@ export async function addMachineNote(
     .single();
 
   if (error) {
-    throw new Error(
-      friendlyErrorMessage(error, { entity: 'entry', fallback: 'Could not save that.' }),
-    );
+    throw friendlyError(error, { entity: 'entry', fallback: 'Could not save that.' });
   }
 
   return rowToNote(data as unknown as MachineNoteRow);

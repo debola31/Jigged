@@ -85,6 +85,12 @@ export default function MachineComposer({
       // useNoteCapture already put the message in the fields, next to the text
       // the operator is about to lose. A second surface for it would only make
       // the failure louder, not clearer.
+      //
+      // This empty catch is what #708 called "the terminal swallow" — with no rethrow, not even
+      // `onunhandledrejection` fired, so a day of failed saves left nothing behind. It is safe
+      // now for a reason that lives elsewhere: the write underneath is a `.from()` insert, and
+      // the Supabase integration reports it before this catch is ever reached. The UX decision
+      // (don't say it twice) was always right; it was the recording that was missing.
     }
   };
 

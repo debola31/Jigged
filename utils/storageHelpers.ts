@@ -1,4 +1,5 @@
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { reportWriteFailure } from '@/lib/sentryEventPolicy';
 
 /**
  * Get the storage bucket name from environment variable
@@ -149,6 +150,14 @@ export async function uploadFileToStorage(
   );
 
   if (error) {
+    // Storage is outside the Supabase integration's net — it only instruments `.from()` and
+    // auth (#708) — and an upload is the failure-prone half of every photo capture on a
+    // shop-floor phone. Reported here or nowhere.
+    reportWriteFailure(error, {
+      op: 'uploadFileToStorage',
+      area: 'storage_upload',
+      extra: { bucket, sizeBytes: file.size },
+    });
     console.error('Storage upload error:', error);
     throw new Error(`Failed to upload file: ${error.message}`);
   }
@@ -173,6 +182,16 @@ export async function deleteFileFromStorage(
   );
 
   if (error) {
+    // `warning`, not `error`: almost every caller wraps this in `.catch(() => {})` because a
+    // failed cleanup only orphans bytes in the bucket — nothing the user can see is broken. But
+    // orphans accumulate silently and nothing else counts them, so this is the only signal they
+    // exist at all.
+    reportWriteFailure(error, {
+      op: 'deleteFileFromStorage',
+      area: 'storage_upload',
+      level: 'warning',
+      extra: { bucket },
+    });
     console.error('Storage delete error:', error);
     throw new Error(`Failed to delete file: ${error.message}`);
   }

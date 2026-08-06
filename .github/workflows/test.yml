@@ -47,6 +47,14 @@ jobs:
         # needs no runner beyond what is already installed.
         run: pnpm exec vitest run __tests__/standards/docLinkCheck.test.ts
 
+      - name: Capture check — every .rpc()/storage call reports its failures (issue #708)
+        # Named for the same reason as the docs check above: this one fails for a reason a
+        # reviewer can act on in one line, and that is worth more than being the 1,900th line
+        # of the full run. Scoped deliberately narrow — `.from()` reads and writes are reported
+        # by the Supabase integration as configuration, so only rpc and storage have per-call
+        # code left that anyone could forget to write.
+        run: pnpm exec vitest run __tests__/standards/rpcCapture.test.ts
+
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage
 

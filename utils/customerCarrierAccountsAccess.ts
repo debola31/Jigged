@@ -165,3 +165,36 @@ export function pickCarrierAccount(
   if (!accounts || accounts.length !== 1) return null;
   return accounts[0];
 }
+
+/**
+ * The accounts a shipment may bill to: live ones, plus the one the job already
+ * named even if it has since been archived.
+ *
+ * BOTH HALVES MATTER, and they pull in opposite directions.
+ *
+ * Archived accounts must be excluded because `pickCarrierAccount` above resolves
+ * only at exactly one candidate — so a stale row does not merely clutter a list,
+ * it changes the answer. One live + one archived reads as two and silently
+ * resolves to nothing; **zero live + one archived reads as one and bills freight
+ * to a dead account.**
+ *
+ * The job-named account must survive that filter because a shipment created
+ * against an old job has to keep resolving the arrangement that job was quoted
+ * under. Re-opening a historical job and finding its freight blank — or worse,
+ * re-resolved to a different account — is the failure this exception prevents.
+ *
+ * Passing `null` for `jobCarrierAccountId` (customer mode, where no job names an
+ * account) is the plain "live only" case.
+ *
+ * This lives here, rather than inline at the call sites, because it was written
+ * twice in ShipmentForm and only the job-mode copy was correct — the customer-mode
+ * copy passed accounts unfiltered and could bill to an archived account.
+ */
+export function billableCarrierAccounts(
+  accounts: CustomerCarrierAccount[] | null | undefined,
+  jobCarrierAccountId: string | null,
+): CustomerCarrierAccount[] {
+  return (accounts ?? []).filter(
+    (a) => a.deleted_at === null || a.id === jobCarrierAccountId,
+  );
+}

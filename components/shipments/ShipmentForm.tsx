@@ -62,6 +62,7 @@ import {
   carrierAccountMismatch,
   type ShipConsequence,
 } from '@/components/shipments/shipmentMath';
+import { billableCarrierAccounts } from '@/utils/customerCarrierAccountsAccess';
 
 /** UI-only carrier selection. 'other' reveals a free-text field whose value
  *  is what actually gets stored in shipments.carrier. */
@@ -262,8 +263,9 @@ export default function ShipmentForm({
           const freight = resolveFreightLine({
             jobFreightTerms: job.freight_terms,
             jobCarrierAccountId: job.customer_carrier_account_id,
-            customerAccounts: (job.customer.carrier_accounts ?? []).filter(
-              (a) => a.deleted_at === null || a.id === job.customer_carrier_account_id,
+            customerAccounts: billableCarrierAccounts(
+              job.customer.carrier_accounts,
+              job.customer_carrier_account_id,
             ),
           });
           setResolvedFreight(freight);
@@ -353,8 +355,13 @@ export default function ShipmentForm({
           const customerFreight = resolveFreightLine({
             jobFreightTerms: null,
             jobCarrierAccountId: null,
-            customerAccounts: (customerRow.carrier_accounts ??
-              []) as unknown as CustomerCarrierAccount[],
+            // `null` job account: no job is naming one here, so this is the plain
+            // live-only case. Passing the raw list is what billed freight to
+            // archived accounts — see billableCarrierAccounts.
+            customerAccounts: billableCarrierAccounts(
+              customerRow.carrier_accounts as unknown as CustomerCarrierAccount[],
+              null,
+            ),
           });
           setResolvedFreight(customerFreight);
           setFreightTerms(customerFreight.terms ?? '');

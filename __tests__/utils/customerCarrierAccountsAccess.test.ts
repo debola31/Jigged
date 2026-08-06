@@ -12,7 +12,10 @@ vi.mock('@/lib/supabase', () => ({
   supabase: mockSupabase,
 }));
 
-import { pickCarrierAccount } from '@/utils/customerCarrierAccountsAccess';
+import {
+  pickCarrierAccount,
+  billableCarrierAccounts,
+} from '@/utils/customerCarrierAccountsAccess';
 import { resolveFreightLine } from '@/utils/shipmentsAccess';
 import { describeShipmentFreight } from '@/types/shipment';
 import {
@@ -62,6 +65,56 @@ describe('pickCarrierAccount — refuses to guess', () => {
     expect(pickCarrierAccount([])).toBeNull();
     expect(pickCarrierAccount(null)).toBeNull();
     expect(pickCarrierAccount(undefined)).toBeNull();
+  });
+});
+
+describe('billableCarrierAccounts — archived rows change the answer, not just the list', () => {
+  // These two cases ARE the bug this function was extracted for. ShipmentForm's
+  // customer mode passed carrier_accounts unfiltered, and because
+  // pickCarrierAccount resolves only at exactly one candidate, an archived row
+  // is not cosmetic — it moves the count across the threshold in both directions.
+
+  it('one live + one archived does not silently resolve to nothing', () => {
+    const live = account({ id: 'live' });
+    const archived = account({ id: 'dead', deleted_at: '2026-07-15T00:00:00Z' });
+
+    // Unfiltered this is length 2 → pickCarrierAccount returns null → the
+    // shipment saves NULL freight for a customer who plainly has an arrangement.
+    expect(pickCarrierAccount([live, archived])).toBeNull();
+
+    expect(billableCarrierAccounts([live, archived], null)).toEqual([live]);
+    expect(pickCarrierAccount(billableCarrierAccounts([live, archived], null))?.id).toBe('live');
+  });
+
+  it('zero live + one archived does not bill freight to the archived account', () => {
+    const archived = account({ id: 'dead', deleted_at: '2026-07-15T00:00:00Z' });
+
+    // The expensive direction: unfiltered this is length 1, so it resolves —
+    // and the shipment bills to an account the shop deliberately retired.
+    expect(pickCarrierAccount([archived])?.id).toBe('dead');
+
+    expect(billableCarrierAccounts([archived], null)).toEqual([]);
+    expect(pickCarrierAccount(billableCarrierAccounts([archived], null))).toBeNull();
+  });
+
+  it('keeps the account the job named, even once archived', () => {
+    // A shipment created against an old job has to keep resolving the
+    // arrangement that job was quoted under — re-opening a historical job and
+    // finding its freight blank, or re-resolved elsewhere, is the failure here.
+    const archived = account({ id: 'dead', deleted_at: '2026-07-15T00:00:00Z' });
+    expect(billableCarrierAccounts([archived], 'dead')).toEqual([archived]);
+  });
+
+  it('drops archived rows the job did not name', () => {
+    const named = account({ id: 'named', deleted_at: '2026-07-15T00:00:00Z' });
+    const other = account({ id: 'other', deleted_at: '2026-07-15T00:00:00Z' });
+    expect(billableCarrierAccounts([named, other], 'named')).toEqual([named]);
+  });
+
+  it('handles empty, null and undefined', () => {
+    expect(billableCarrierAccounts([], null)).toEqual([]);
+    expect(billableCarrierAccounts(null, null)).toEqual([]);
+    expect(billableCarrierAccounts(undefined, 'anything')).toEqual([]);
   });
 });
 

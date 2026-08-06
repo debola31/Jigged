@@ -80,9 +80,15 @@ before touching Sentry config or triaging. The rules that bind while writing cod
 - **Sentry is the error tracker; PostHog is product analytics.** Never add a second error tracker.
   **Vercel Web Analytics (`<Analytics />`) is kept deliberately** despite overlapping PostHog — do
   not remove either as "redundant".
+- **A failed `.from()` read or write reports itself — don't report it again.** `lib/supabase.ts`
+  installs Sentry's Supabase integration, so every `{ error }` is captured with its query
+  attached. Adding a `captureException` for one files the same failure as two issues. You still
+  capture by hand for **`.rpc()`** (deliberately excluded — only the call site can tell a raise
+  meant for the user from a bug), **storage**, and anything that isn't a Supabase response.
 - **Never pass a raw Supabase error to `Sentry.captureException`** — it can't fingerprint a plain
   object and you get an issue titled `"e"`. Wrap with `toError` from
-  [`lib/supabaseErrors.ts`](lib/supabaseErrors.ts).
+  [`lib/supabaseErrors.ts`](lib/supabaseErrors.ts). (The integration already does this on the
+  paths it covers.)
 - **"Couldn't check" is never "denied."** A failed access check must not render as a definitive
   negative — throw and give the UI a retryable state.
 - **Transient aborts are not failures.** `AbortError: Lock was stolen` means superseded; classify

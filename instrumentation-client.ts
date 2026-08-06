@@ -3,6 +3,7 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { applySupabaseEventPolicy } from "@/lib/sentryEventPolicy";
 
 // Sentry is the error tracker; PostHog (below) is product analytics. They are
 // deliberately NOT both capturing exceptions — see the `capture_exceptions` note.
@@ -48,6 +49,11 @@ Sentry.init({
   // issue (Sentry JAVASCRIPT-NEXTJS-H) rather than leaving it to retrain us to ignore
   // the queue, which is how this project got 55 stale issues in the first place.
   ignoreErrors: ["Invalid login credentials", "EmptyRanges", "Lock was stolen"],
+
+  // Policy for the Supabase integration's automatic captures — which expected failures are
+  // dropped, why `.rpc()` is left to the access layer, and the `db.table` tag. Shared with
+  // sentry.server.config.ts so the two cannot drift. See lib/sentryEventPolicy.ts.
+  beforeSend: applySupabaseEventPolicy,
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

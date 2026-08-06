@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from 'react';
 import { useParams } from 'next/navigation';
-import * as Sentry from '@sentry/nextjs';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { getCompanyBilling, type CompanyBilling } from '@/utils/companyAccess';
 import {
@@ -64,11 +63,14 @@ export default function SubscriptionProvider({ children }: { children: ReactNode
     try {
       const row = await getCompanyBilling(companyId);
       setBilling(row);
-    } catch (err) {
+    } catch {
       // Billing path: surface loudly, never silently default to full. Leaving
       // billing null resolves to `must_subscribe` (a banner, not a block), and the
       // DB still enforces writes regardless of this UI read.
-      Sentry.captureException(err);
+      //
+      // "Loudly" is now the Supabase integration's job (#708). `getCompanyBilling` is a single
+      // `.from('company_billing')` select, so the net reports the same failure with the query
+      // attached; capturing here too would file it twice.
       setBilling(null);
     } finally {
       setIsLoading(false);

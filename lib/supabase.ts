@@ -1,4 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr';
+import * as Sentry from '@sentry/nextjs';
+import { RPC_SPAN_ATTRIBUTE } from '@/lib/sentryEventPolicy';
 import { redirectToSessionExpiry } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
@@ -38,7 +40,7 @@ async function deduplicatedRefresh(): Promise<string | null> {
 }
 
 export function createClient() {
-  return createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
+  const client = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
     global: {
       fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
         const response = await fetch(input, init);
@@ -50,6 +52,20 @@ export function createClient() {
             ? input.href
             : input.url;
         const isAuthEndpoint = url.includes('/auth/');
+
+        /**
+         * Mark the Supabase integration's db span when this request is an `.rpc()`, so
+         * `beforeSend` can drop the net's automatic capture and leave rpc reporting to the
+         * access layer. See `applySupabaseEventPolicy` for why rpc is drawn out of the net.
+         *
+         * This is the one place the distinction is unambiguous — the span itself only records
+         * `db.table`, which for an rpc holds the *function* name and is otherwise
+         * indistinguishable from a table name. The integration starts its span around the whole
+         * request, so the span is still active here.
+         */
+        if (url.includes('/rest/v1/rpc/')) {
+          Sentry.getActiveSpan()?.setAttribute(RPC_SPAN_ATTRIBUTE, true);
+        }
 
         // Check if this is already a retry to prevent infinite loops
         const headers = new Headers(init?.headers);
@@ -79,6 +95,35 @@ export function createClient() {
       },
     },
   });
+
+  /**
+   * THIS IS THE ERROR-REPORTING NET, and it is the whole of it for table reads and
+   * writes (issue #708).
+   *
+   * Supabase returns failures as `{ data, error }` rather than throwing, so a
+   * caller that puts `error` into component state and stops — which is most of
+   * them — leaves no trace anywhere. That is how a cross-company bug made every
+   * maintenance-note save fail for a day with nothing in Sentry to find.
+   *
+   * The integration patches `SupabaseClient.prototype.from`, so every
+   * select/insert/upsert/update/delete captures its own `{ error }` with the
+   * query and body attached, whether or not the call site remembers to. Nothing
+   * per-call-site means nothing to forget — which is the point, since the
+   * alternative was a rule across ~174 call sites with no enforcement.
+   *
+   * It patches a shared prototype, so calling it per client is free after the
+   * first (the integration carries its own `isInstrumented` guard), and capture
+   * is a no-op wherever the SDK is disabled — i.e. everywhere but a production
+   * build.
+   *
+   * `.rpc()` is deliberately NOT covered here even though it partly reaches this
+   * same code path: see the rpc branch in `beforeSend`
+   * (instrumentation-client.ts), which suppresses it so the access layer stays
+   * its sole reporter.
+   */
+  Sentry.instrumentSupabaseClient(client);
+
+  return client;
 }
 
 // Typed shape of the client when the `Database` generic is honored —

@@ -108,6 +108,52 @@ export function isTransientAbortError(error: unknown): boolean {
 }
 
 /**
+ * `PGRST116` — PostgREST's "no rows returned" from `.single()`. A definitive answer, not a
+ * failure: the row genuinely is not there. Callers branch on it deliberately.
+ */
+const PGRST_NO_ROWS = 'PGRST116';
+
+/**
+ * Is this Supabase failure worth an issue in the queue?
+ *
+ * The Supabase Sentry integration (installed in `lib/supabase.ts`) captures EVERY `{ error }`
+ * response unconditionally — it exposes no per-call filter — so this is the only place the
+ * expected failures get dropped, and it runs from `beforeSend` in the Sentry configs.
+ *
+ * Excluding these is not about quota, which has ample headroom. It is that an issue queue with
+ * predictable non-failures in it is one people stop reading, which is the documented history of
+ * this project's queue (docs/observability.md "Why any of this matters").
+ */
+export function shouldReportSupabaseError(error: unknown): boolean {
+  if (!error) return false;
+
+  const code = asRecord(error).code;
+
+  // A `.single()` that matched nothing. The caller asked "is there one?" and got "no".
+  if (code === PGRST_NO_ROWS) return false;
+
+  /**
+   * Superseded, not failed.
+   *
+   * LOAD-BEARING, and not obviously so: postgrest-js does NOT reject on a fetch failure. It
+   * converts one into a resolved `{ error }` carrying `hint: 'Request was aborted (timeout or
+   * manual cancellation)'` (PostgrestBuilder's `res.catch`), which the integration then captures
+   * like any other database error. So every cancelled request — a component unmounting mid-query,
+   * a navigation away — would otherwise arrive as an issue.
+   *
+   * `isTransientAbortError` already matches that exact hint text. That is currently a happy
+   * coincidence rather than a designed contract, which is why the test pins it.
+   */
+  if (isTransientAbortError(error)) return false;
+
+  // Session expiry is not a bug and is already handled: the custom fetch in lib/supabase.ts
+  // refreshes and retries, and `redirectToSessionExpiry` covers the rest.
+  if (isAuthError(error)) return false;
+
+  return true;
+}
+
+/**
  * Normalise anything throwable into a real `Error`, for `Sentry.captureException`.
  *
  * Supabase rejects with a plain object (`{ code, details, hint, message }`), not an

@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/nextjs';
 // Typed Supabase client (typed-client rollout). Aliased so the 8 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
@@ -145,7 +144,11 @@ export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
     const changed =
       withOverdue.length !== pinned.length || withOverdue.some((k, i) => k !== pinned[i]);
     if (changed || overdueFolded) {
-      setPinnedMetricKeys(withOverdue).catch((err) => Sentry.captureException(err, { level: 'warning' }));
+      // The `.catch` stays so a rejection here can never surface as an unhandled one, but it no
+      // longer captures: `setPinnedMetricKeys` doesn't inspect its own upsert error, and that
+      // upsert is now reported by the Supabase integration (#708). Capturing here as well would
+      // duplicate it.
+      setPinnedMetricKeys(withOverdue).catch(() => {});
     }
 
     return withOverdue.length > 0 ? withOverdue : DEFAULT_PINNED_METRICS;

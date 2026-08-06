@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
+import * as Sentry from '@sentry/nextjs';
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/database';
 
@@ -18,7 +19,7 @@ export async function createClient() {
   // CLAUDE.md "Typed Supabase client"). Without it the select-string parser can't know
   // a relation's cardinality and types every embed as an array, so `companies(is_demo)`
   // came back as `{ is_demo }[]` for what is a many-to-one FK.
-  return createServerClient<Database>(
+  const client = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -40,4 +41,12 @@ export async function createClient() {
       },
     }
   );
+
+  // Same net as the browser client — see the long comment in lib/supabase.ts.
+  // A route handler that ignores an `{ error }` is exactly as silent as a
+  // component that does, and this client is created per request, so the
+  // integration's own `isInstrumented` guard is doing real work here.
+  Sentry.instrumentSupabaseClient(client);
+
+  return client;
 }

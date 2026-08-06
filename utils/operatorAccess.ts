@@ -18,9 +18,8 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import * as Sentry from '@sentry/nextjs';
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
@@ -154,10 +153,9 @@ async function fetchCurrentMember(companyId: string): Promise<CurrentMember | nu
           'or point at the PR preview branch.',
       );
     }
-    Sentry.captureException(toError(error, 'Could not resolve the current member'), {
-      tags: { area: 'operator_member_lookup' },
-      extra: { companyId },
-    });
+    // No `captureException` here: the Supabase integration (lib/supabase.ts) already reports
+    // this select's `{ error }` with the query — including both ids this used to pass as
+    // `extra` — and a second capture would just duplicate the issue. See #708.
     return null;
   }
 

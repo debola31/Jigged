@@ -2,9 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import * as Sentry from '@sentry/nextjs';
 import { useLoad } from '@/hooks/useLoad';
-import { toError } from '@/lib/supabaseErrors';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -485,14 +483,13 @@ export default function MyWorkPage() {
  * every load, through green CI (unit tests mock the access layer, so the select string
  * never met a database) and through a preview walkthrough that read the empty block as the
  * honest empty case. So the failure is reported; only the UI stays quiet.
+ *
+ * That reporting now comes from the Supabase integration rather than from an `onError` here
+ * (#708): `getNewHelpful` is a single `.from()` select, so the net sees the same 400 — with the
+ * query attached — and a capture here as well would file the one failure as two issues.
  */
 function NewHelpful({ companyId }: { companyId: string }) {
-  const { data, reload } = useLoad(() => getNewHelpful(companyId), [companyId], {
-    onError: (error) =>
-      Sentry.captureException(toError(error, 'Could not load new "helpful" reactions'), {
-        tags: { area: 'note_reactions' },
-      }),
-  });
+  const { data, reload } = useLoad(() => getNewHelpful(companyId), [companyId]);
 
   if (!data || data.length === 0) return null;
 

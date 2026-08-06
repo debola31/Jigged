@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from "@sentry/nextjs";
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -117,9 +116,11 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
     },
     [companyId, buildTimePeriods],
     {
+      // No `captureException` in this file any more: every call it makes is a `.from()` read or
+      // write in dashboardAccess, and the Supabase integration reports those itself with the
+      // query attached (#708). The console lines stay — they're for local debugging.
       onError: (err) => {
         console.error('Error loading pinned metrics:', err);
-        Sentry.captureException(err);
       },
     },
   );
@@ -133,7 +134,6 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
-      Sentry.captureException(err);
     }
     await setPinnedMetricKeys(keys);
   };
@@ -147,11 +147,10 @@ export default function PinnedMetrics({ companyId }: PinnedMetricsProps) {
       setValues(vals);
     } catch (err) {
       console.error('Error fetching metric values:', err);
-      Sentry.captureException(err);
     }
     for (const m of AVAILABLE_METRICS) {
       if (m.supportsTimePeriod) {
-        setMetricTimePeriod(m.key, newPeriod).catch((err) => Sentry.captureException(err, { level: 'warning' }));
+        setMetricTimePeriod(m.key, newPeriod).catch(() => {});
       }
     }
   };

@@ -1,10 +1,9 @@
-import * as Sentry from '@sentry/nextjs';
 // Typed Supabase client — every .from('quotes').select(...) chain in this
 // file is now validated against types/database.ts at compile time. Aliased
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getTypedSupabase as getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -279,11 +278,14 @@ export async function sweepExpiredQuotes(companyId: string): Promise<void> {
     .lt('expiration_date', today);
 
   if (error) {
+    // The Supabase integration reports this update's failure on its own (#708), so there is no
+    // `captureException` here — a second one would only duplicate the issue.
+    //
+    // ONE THING WAS LOST in that trade, deliberately: this used to report at `level: 'warning'`
+    // because the sweep is best-effort and a failure costs nothing immediately. The net has no
+    // per-call level, so it now arrives as `error`. If that proves noisy, downgrade it in
+    // `applySupabaseEventPolicy` and record the reason there, the way `ignoreErrors` entries are.
     console.warn('sweepExpiredQuotes failed:', error);
-    // Normalised: a raw Supabase error object reaches Sentry as an ungroupable
-    // "Object captured as exception with keys: …" with the real message hidden in a
-    // __serialized__ extra. See toError in lib/supabaseErrors.
-    Sentry.captureException(toError(error, 'sweepExpiredQuotes failed'), { level: 'warning' });
   }
 }
 
@@ -463,10 +465,11 @@ export async function createQuote(
     try {
       await writeCostSnapshotsForPart(quote.id, companyId, partId, qty);
     } catch (snapshotError) {
+      // No `captureException`: every error that can reach here began as a Supabase `{ error }`
+      // that the integration already reported — the inserts below, and `calculateRoutingCost`,
+      // whose only throw is a re-thrown `parts_unit_conversions` select error. Capturing again
+      // would file the same failure twice. (#708)
       console.warn('Failed to write cost snapshot for part:', partId, snapshotError);
-      Sentry.captureException(toError(snapshotError, 'Failed to write cost snapshot'), {
-        level: 'warning',
-      });
     }
   }
 

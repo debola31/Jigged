@@ -919,16 +919,25 @@ describe('getNewHelpful', () => {
  * failure therefore renders as though the person were not on the team.
  *
  * Control flow is deliberately unchanged (several callers are bare `.then()` with no
- * rejection handler), so what is asserted here is that the failure is REPORTED rather
- * than silent. The trigger that made it urgent: this branch added `reactions_seen_at` to
- * the select, so running it against a database without the migration returns 42703 and
+ * rejection handler). The trigger that made it urgent: this branch added `reactions_seen_at`
+ * to the select, so running it against a database without the migration returns 42703 and
  * empties every operator surface at once.
+ *
+ * WHERE THE "IT IS REPORTED" HALF NOW LIVES. This block used to assert
+ * `Sentry.captureException` was called here. It no longer is, and that is the intended change
+ * from #708: the Supabase integration reports this select's failure itself, with the query
+ * attached, so a second capture would file one failure as two issues. The guarantee did not
+ * weaken, it moved — and it is asserted against the real SDK, not a mock, in
+ * `__tests__/lib/supabaseSentryIntegration.test.ts` ("captures a failed table write that no
+ * call site reports" for the 42703 case, and the `PGRST116` row of the drop table for the
+ * absent-row case). It cannot be asserted here at all: this suite mocks both `@sentry/nextjs`
+ * and the Supabase client, so neither the net nor its filter exists in this file's world.
+ *
+ * What stays here is the half that IS this function's own behaviour: null for both outcomes,
+ * so no caller can mistake one for the other on the strength of the return value.
  */
 describe('getCurrentMember failure reporting', () => {
-  it('reports an indeterminate failure instead of silently answering "not a member"', async () => {
-    const Sentry = await import('@sentry/nextjs');
-    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
-
+  it('answers null — not a throw — when the lookup could not be completed', async () => {
     mockQueryBuilder.data = null;
     mockQueryBuilder.error = {
       code: '42703',
@@ -936,18 +945,13 @@ describe('getCurrentMember failure reporting', () => {
     };
 
     expect(await getCurrentMember('c1')).toBeNull();
-    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
   });
 
-  /** A genuinely absent row IS a definitive answer, and must stay quiet. */
-  it('stays silent when the row is simply not there', async () => {
-    const Sentry = await import('@sentry/nextjs');
-    (Sentry.captureException as ReturnType<typeof vi.fn>).mockClear();
-
+  /** A genuinely absent row IS a definitive answer, and takes the same quiet path. */
+  it('answers null when the row is simply not there', async () => {
     mockQueryBuilder.data = null;
     mockQueryBuilder.error = { code: 'PGRST116', message: 'no rows returned' };
 
     expect(await getCurrentMember('c1')).toBeNull();
-    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 });

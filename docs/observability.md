@@ -276,17 +276,80 @@ sentry api '/api/0/organizations/jigged/stats_v2/?statsPeriod=30d&field=sum(quan
 
 ## Rules for writing code
 
+### Supabase failures report themselves — do not report them again
+
+**A failed `.from()` read or write is captured automatically.** `lib/supabase.ts` installs
+Sentry's `instrumentSupabaseClient`, which intercepts every `{ error }` response and files it
+with the query and request body attached. You do not have to remember anything at a call site,
+which is the point: the alternative considered in [#708](https://github.com/debola31/Jigged/issues/708)
+was a rule across ~174 call sites, and a rule nothing enforces decays (see the `deleted_at`
+rule, [#687](https://github.com/debola31/Jigged/issues/687)).
+
+Why it exists at all: Supabase returns failures as `{ data, error }` rather than throwing, so a
+caller that puts `error` into component state and stops — most of them — left no record
+anywhere. On 2026-08-05 that meant a day of failed maintenance-note saves whose only surviving
+trace was the Postgres log, found by hand.
+
+**So the rule is: do not add a `captureException` for a failure the integration already
+reports.** Two captures for one failure is worse than either alone — it becomes two issues,
+fingerprinted differently, and fixing one leaves the other looking live.
+
+**What it does NOT cover, where you still capture by hand:**
+
+| Not covered | Why |
+|---|---|
+| `.rpc()` | Suppressed on purpose — see below |
+| Storage (`supabase.storage.*`) | The integration doesn't instrument it |
+| Anything that isn't a Supabase response | A thrown `Error`, a FastAPI call, a `fetch` |
+
+### `.rpc()` is the access layer's to report, not the net's
+
+`beforeSend` drops the integration's automatic capture for rpc calls, so `utils/*Access.ts`
+stays their only reporter. Two reasons, both load-bearing:
+
+1. **The net's rpc coverage is real but order-dependent.** The integration classifies by HTTP
+   method, so an rpc POST reads as an `insert` — but the builder prototype is only patched as a
+   side effect of a `.from()` chain. An `.rpc()` that is the first Supabase call on a page load
+   is never captured. Coverage that depends on call ordering is not coverage.
+2. **Only the call site can tell a deliberate raise from a bug.** `P0001` covers both
+   *"Insufficient stock at location (have 0, need 999)"*, which is a user being told something,
+   and the cross-company bug behind #708, which was also a `P0001`. No rule in `beforeSend`
+   could separate them.
+
+The mechanism is a span attribute stamped by the client's own `fetch` when the path is
+`/rest/v1/rpc/…` — the one place the distinction is unambiguous. The span records only
+`db.table`, which for an rpc holds the *function* name and is otherwise indistinguishable from
+a table name; the list needed to tell them apart is not available at runtime, since
+`types/database.ts` is types-only.
+
+### What is never reported, and where that is decided
+
+`shouldReportSupabaseError` in [`lib/supabaseErrors.ts`](../lib/supabaseErrors.ts), applied from
+`beforeSend`:
+
+| Dropped | Why |
+|---|---|
+| `PGRST116` | A `.single()` that matched nothing. The caller asked "is there one?" and got "no" |
+| Transient aborts | Superseded, not failed. **Load-bearing:** postgrest-js does not reject on a cancelled request, it resolves `{ error }` with `hint: 'Request was aborted…'`, so without this every navigation-away becomes an issue |
+| Auth errors | Session expiry is already handled by the refresh-and-retry in `lib/supabase.ts` |
+
+Add to this list only with a recorded reason, exactly as with `ignoreErrors` below.
+
 ### Never hand a raw Supabase error to `captureException`
 
-Supabase rejects with a plain object (`{ code, details, hint, message }`), not an `Error`.
-Sentry cannot fingerprint that, so it lands as an issue titled `"e"` or `"<unknown>"` with
-the body *"Object captured as exception with keys: …"*, and the real message is buried in a
-`__serialized__` extra. One such issue went unread for four months.
+Still true wherever you capture by hand (the rpc, storage and thrown-error rows above). Supabase
+returns a plain object (`{ code, details, hint, message }`), not an `Error`. Sentry cannot
+fingerprint that, so it lands as an issue titled `"e"` or `"<unknown>"` with the body *"Object
+captured as exception with keys: …"*, and the real message is buried in a `__serialized__` extra.
+One such issue went unread for four months.
 
 ```ts
 import { toError } from '@/lib/supabaseErrors';
 Sentry.captureException(toError(err, 'Failed to verify company access'));
 ```
+
+The integration does this for you on the paths it covers — it builds a real `Error` and copies
+`code`/`details` onto it, which is the same job `toError` does.
 
 ### "Couldn't check" is not "denied"
 

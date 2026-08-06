@@ -79,9 +79,9 @@ import FeedbackIcon from '@mui/icons-material/Feedback';
 import LogoutIcon from '@mui/icons-material/Logout';
 
 import FeedbackDialog from '@/components/feedback/FeedbackDialog';
-// `getTypedSupabase`, not `getSupabase` — new code uses the typed client (issue #573). Only
+// `getSupabase`, not `getSupabase` — new code uses the typed client (issue #573). Only
 // `auth.signOut` is used here, which is schema-independent.
-import { getTypedSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
 
 export interface OperatorIdentity {
@@ -116,7 +116,7 @@ export function OperatorIdentityRow({
     // Clears the persisted station (localStorage) on explicit logout — for every
     // company, not just this one, since the device may change hands.
     clearStoredStation();
-    const supabase = getTypedSupabase();
+    const supabase = getSupabase();
     // Local scope — sign out ONLY this device. An operator logging out here must not revoke
     // their session on their other devices (which surfaced as a forced re-login when marking
     // a job complete).

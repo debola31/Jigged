@@ -19,7 +19,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 import { getAllVendors, getVendor, createVendor, deleteVendor } from '@/utils/vendorsAccess';

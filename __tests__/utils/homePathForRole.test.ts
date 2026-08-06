@@ -5,7 +5,6 @@ import { describe, it, expect, vi } from 'vitest';
 // without env vars. Same stub every other utils test uses.
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
 }));
 
 import { homePathForRole } from '@/utils/companyAccess';

@@ -126,56 +126,38 @@ export function createClient() {
   return client;
 }
 
-// Typed shape of the client when the `Database` generic is honored —
-// `createClient()` builds with this generic, but the runtime instance is
-// the same regardless of which getter returns it.
+// The client's shape with the `Database` generic honored. `createClient()`
+// has always built with that generic — see `createBrowserClient<Database>` above.
 export type TypedSupabaseClient = ReturnType<typeof createClient>;
-
-// Untyped shape — what every existing access file currently consumes via
-// `getSupabase()`. Cast at the boundary so adoption of typed mode can roll
-// out per-file without forcing a 250-error refactor up front.
-type UntypedSupabaseClient = ReturnType<typeof createBrowserClient>;
 
 let supabaseInstance: TypedSupabaseClient | null = null;
 
 /**
- * Returns the untyped Supabase client — preserves the legacy behavior
- * every `utils/*Access.ts` file currently relies on. Calls compile
- * regardless of whether the embed string matches the schema.
+ * THE Supabase browser client. One getter, always typed: every
+ * `.from('quotes').select('…')` chain is validated against types/database.ts at
+ * compile time, which is what would have caught the May 2026 `jobs.status`
+ * incident and the `part_procurement_tiers.vendor_id` one after it.
  *
- * Prefer `getTypedSupabase()` for new code. Per-file conversion to the
- * typed getter is the incremental adoption path — see comment above
- * `getTypedSupabase` for the contract and the May 2026 ADR in
- * docs/architecture.md for context.
- */
-export function getSupabase(): UntypedSupabaseClient {
-  if (!supabaseInstance) {
-    supabaseInstance = createClient();
-  }
-  return supabaseInstance as unknown as UntypedSupabaseClient;
-}
-
-/**
- * Returns the Supabase client with the `Database` generic applied, so
- * every `.from('quotes').select('...')` chain is validated against
- * types/database.ts at compile time. This is the path that
- * would have caught the May 2026 jobs.status incident.
+ * **There used to be two getters** — this one returning an untyped view, plus a
+ * `getTypedSupabase()` returning the typed one — over a single shared instance.
+ * They were never two clients: `getSupabase()` returned the same singleton with
+ * `as unknown as UntypedSupabaseClient` applied, purely so the typed rollout
+ * could proceed file by file instead of landing ~250 errors at once (#573).
  *
- * Use for any new access function or while converting an existing one.
- * When you switch a file from `getSupabase()` to `getTypedSupabase()`,
- * expect `tsc` to surface real bugs — fix them in that PR, don't paper
- * over with `as any`.
+ * That scaffolding outlived its job. By the time it came down the whole access
+ * layer was already typed, and deleting the cast surfaced exactly **one** type
+ * error in the entire project. The lesson worth keeping: the split cost real
+ * safety for two months after it stopped buying anything, because an
+ * exemption list is easy to keep and hard to notice. Don't reintroduce an
+ * untyped view of this client — if a query won't type-check, the query is
+ * wrong. Never paper over it with `as any` or `as unknown as`.
  */
-export function getTypedSupabase(): TypedSupabaseClient {
+export function getSupabase(): TypedSupabaseClient {
   if (!supabaseInstance) {
     supabaseInstance = createClient();
   }
   return supabaseInstance;
 }
-
-// Export a convenience alias. Stays untyped for back-compat with existing
-// `import { supabase } from '@/lib/supabase'` consumers.
-export const supabase = typeof window !== 'undefined' ? getSupabase() : null;
 
 /**
  * Get the base URL for Supabase Edge Functions.

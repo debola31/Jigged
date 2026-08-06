@@ -9,7 +9,7 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 12 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { orIlikeValue } from '@/utils/searchFilter';
 import type { Database } from '@/types/database';

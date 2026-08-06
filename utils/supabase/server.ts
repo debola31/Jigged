@@ -15,7 +15,7 @@ import type { Database } from '@/types/database';
 export async function createClient() {
   const cookieStore = await cookies();
 
-  // `<Database>`-generic, matching `getTypedSupabase()` on the browser side (see
+  // `<Database>`-generic, matching `getSupabase()` on the browser side (see
   // CLAUDE.md "Typed Supabase client"). Without it the select-string parser can't know
   // a relation's cardinality and types every embed as an array, so `companies(is_demo)`
   // came back as `{ is_demo }[]` for what is a many-to-one FK.

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Isolate the pure validator from the real Supabase client / storage helpers.
-vi.mock('@/lib/supabase', () => ({ getTypedSupabase: () => ({}) }));
+vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
 
 import { validateAttachmentFile } from '@/utils/jobAttachmentsAccess';
 

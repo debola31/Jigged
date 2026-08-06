@@ -15,7 +15,7 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type {
   CreateShipmentPayload,
   FreightTerms,

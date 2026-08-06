@@ -1,4 +1,4 @@
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { Json } from '@/types/database';
 import type { QuoteLineItem } from '@/types/quote';
 import type { ComputedPartPricingTier } from '@/types/partPricing';

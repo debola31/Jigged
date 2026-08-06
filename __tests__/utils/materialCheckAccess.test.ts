@@ -40,7 +40,6 @@ const filterFor = (table: string, method: string) =>
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({ from: fromSpy }),
-  getTypedSupabase: () => ({ from: fromSpy }),
 }));
 
 import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';

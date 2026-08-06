@@ -4,7 +4,7 @@
  * specific units. Used by the UOM combobox to populate the "Custom" group.
  */
 
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { CompanyCustomUnit } from '@/types/units';
 
 /**

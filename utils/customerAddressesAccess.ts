@@ -13,7 +13,7 @@
  * the DEFAULT, not a type assertion on the address.
  */
 
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   CustomerAddress,

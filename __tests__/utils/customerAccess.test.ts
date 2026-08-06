@@ -63,9 +63,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 // Mock the supabase module
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  // customerAccess.ts adopted getTypedSupabase under the typed-client
-  // rollout; both getters return the same singleton at runtime.
-  getTypedSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));

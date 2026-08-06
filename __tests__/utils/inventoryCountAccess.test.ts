@@ -48,7 +48,6 @@ const { sbState, sbMock } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => sbMock,
-  getTypedSupabase: () => sbMock,
 }));
 
 import {

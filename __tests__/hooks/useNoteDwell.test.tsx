@@ -5,7 +5,6 @@ import { useNoteDwell } from '@/hooks/useNoteDwell';
 const rpc = vi.fn().mockResolvedValue({ error: null });
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({ rpc }),
-  getTypedSupabase: () => ({ rpc }),
 }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 

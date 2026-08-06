@@ -9,7 +9,7 @@
  * the caller's (quantity, unit) to the part's primary unit and hand the RPC
  * both the display values and the converted quantity.
  */
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';

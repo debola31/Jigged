@@ -15,7 +15,7 @@
  * exists today. A pump job reads "needs 1 pump core", not the aluminium inside it. The card
  * says so on screen.
  */
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
 
 import { buildRequirement } from '@/lib/materialRequirements';

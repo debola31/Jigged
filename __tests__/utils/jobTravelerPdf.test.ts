@@ -42,7 +42,6 @@ vi.mock('qrcode', () => ({ default: { toDataURL: qrMock } }));
 // supabase: null and a company with no logo_url).
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
   createClient: () => ({}),
 }));
 

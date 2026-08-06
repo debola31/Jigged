@@ -1,6 +1,6 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
 import {

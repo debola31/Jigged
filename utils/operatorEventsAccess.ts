@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 
 /**
  * Capture-funnel instrumentation.

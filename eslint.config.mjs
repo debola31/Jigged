@@ -56,44 +56,13 @@ const eslintConfig = defineConfig([
       // (package.json) rather than mass-suppressed with inline-disables. New
       // instances still surface in review; the cap only ratchets down.
       "react-hooks/set-state-in-effect": "warn",
-      // Typed-client ratchet: forbid the untyped `getSupabase` getter in new
-      // code so a Supabase schema change fails at compile time (types/database.ts
-      // is CI-verified against migrations) instead of silently at runtime.
-      // `getTypedSupabase()` — including `getTypedSupabase as getSupabase` — is
-      // allowed. Existing untyped sites are grandfathered by the block below and
-      // migrated per issue #573.
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "@/lib/supabase",
-              importNames: ["getSupabase"],
-              message:
-                "Use getTypedSupabase() so Supabase schema drift fails at compile time, not silently at runtime. New code must not import the untyped getSupabase. Existing sites are being migrated — see issue #573.",
-            },
-          ],
-        },
-      ],
+      // NOTE: a `no-restricted-imports` ratchet used to live here, forbidding the
+      // untyped `getSupabase` getter, alongside a grandfather block exempting the
+      // not-yet-migrated paths (issue #573). Both are gone: `lib/supabase.ts` now
+      // exports a single, always-typed getter, so there is no untyped symbol left
+      // to import and nothing for a lint rule to guard. Don't reintroduce either —
+      // the guarantee is structural now, not an exemption list someone maintains.
     },
-  },
-  {
-    // Grandfathered untyped `getSupabase` call sites (issue #573). The rule
-    // above blocks NEW untyped imports; these existing files stay exempt until
-    // migrated to getTypedSupabase(). Remove entries as files convert.
-    files: [
-      "components/auth/**",
-      "components/providers/AuthProvider.tsx",
-      "components/shipments/PackingSlipPreviewDialog.tsx",
-      "components/shipments/ShipmentForm.tsx",
-      "components/feedback/FeedbackDialog.tsx",
-      "components/jobs/JobTravelerPreviewDialog.tsx",
-      "app/admin/page.tsx",
-      "app/accept-invite/**",
-      "app/dashboard/**/team/**",
-      "app/operator/**",
-    ],
-    rules: { "no-restricted-imports": "off" },
   },
 ]);
 

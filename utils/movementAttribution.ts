@@ -32,7 +32,7 @@
  * the movements are the point, the names are the caption.
  */
 
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { getSignedUrls } from '@/utils/storageHelpers';
 
 /** Matches the other media surfaces. Owned here, separate from the location-photo constant. */

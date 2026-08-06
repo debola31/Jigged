@@ -78,8 +78,6 @@ vi.mock('@/lib/supabase', () => {
   });
   return {
     getSupabase: makeClient,
-    // typed-client rollout: same singleton at runtime.
-    getTypedSupabase: makeClient,
   };
 });
 

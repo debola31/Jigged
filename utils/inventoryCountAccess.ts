@@ -10,7 +10,7 @@
  * Commit is intentionally per-line and tolerant of partial failure: each counted line is an
  * independent fact, so line 50 failing doesn't invalidate lines 1-49.
  */
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { getStockedParts } from '@/utils/partsAccess';
 import {

@@ -28,7 +28,7 @@ vi.mock('@/lib/supabase', () => {
     auth: { getSession: async () => ({ data: { session: null } }) },
     from: () => ({ select: () => ({ data: [], error: null }) }),
   });
-  return { getSupabase: stub, getTypedSupabase: stub, supabase: stub() };
+  return { getSupabase: stub, supabase: stub() };
 });
 
 vi.mock('next/navigation', () => ({

@@ -6,7 +6,7 @@
  */
 
 import type { ExistingIdentities } from '@/lib/dataImportReconcile';
-import { getTypedSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 
 /** Normalize a query result's identity column into a lookup set, or null on a failed/absent
  *  read (best-effort: those rows are then treated as new). The picker keeps this fully typed —
@@ -20,7 +20,7 @@ function toSet<R>(
 }
 
 export async function fetchExistingIdentities(companyId: string): Promise<ExistingIdentities> {
-  const supabase = getTypedSupabase();
+  const supabase = getSupabase();
   // Explicit per-table literals (not a dynamic `.from(string)`) so the typed client
   // schema-checks each table, its identity column, and the company_id filter.
   const [vendors, parts, workCenters, customers] = await Promise.all([

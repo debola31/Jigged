@@ -9,7 +9,6 @@ import userEvent from '@testing-library/user-event';
  */
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
 }));
 
 import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';

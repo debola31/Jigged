@@ -48,7 +48,6 @@ const { state, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 // The board resolves photo URLs through storageHelpers; stub the module so no real client is

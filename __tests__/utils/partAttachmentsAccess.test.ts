@@ -17,7 +17,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 // --- Storage helpers are mocked: we assert the access layer calls them right ---

@@ -1,4 +1,4 @@
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type {
   WorkCenter,
   WorkCenterFormData,
@@ -8,7 +8,7 @@ import type {
 } from '@/types/workCenter';
 import { orIlikeValue } from '@/utils/searchFilter';
 
-// ONE string literal, deliberately: getTypedSupabase infers the row type from
+// ONE string literal, deliberately: the typed client infers the row type from
 // the select string, and a concatenated expression widens to `string` — which
 // silently degrades every read in this file to GenericStringError. The optional
 // machine attributes (make…purchased_on) are read everywhere a work center is

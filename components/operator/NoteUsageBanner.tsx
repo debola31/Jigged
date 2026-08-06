@@ -6,7 +6,7 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import ThumbUpAltIcon from '@mui/icons-material/ThumbUpAlt';
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 
 /**
  * "2 people found your notes helpful · 3 new views."

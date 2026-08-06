@@ -38,7 +38,6 @@ const { mockSupabase, queueBuilders } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 import {

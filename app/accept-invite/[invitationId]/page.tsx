@@ -80,7 +80,11 @@ export default function AcceptInvitePage() {
 
     if (!session) {
       // Wait for auth state change (hash fragment processing may be async)
-      session = await new Promise<typeof session>((resolve) => {
+      // `Session | null` spelled out rather than `typeof session`: inside this
+      // `if (!session)` block the narrowed type is `null`, so `typeof session`
+      // would type the promise as `Promise<null>` and reject the `resolve(newSession)`
+      // below. It compiled before only because the untyped client made `session` `any`.
+      session = await new Promise<Session | null>((resolve) => {
         const timeout = setTimeout(() => resolve(null), 3000);
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, newSession: Session | null) => {
           if (newSession) {

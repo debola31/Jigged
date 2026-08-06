@@ -18,7 +18,7 @@
 
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {

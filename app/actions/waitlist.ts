@@ -2,6 +2,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+import type { Database } from '@/types/database';
+
 interface WaitlistData {
   email: string;
   name: string;
@@ -18,7 +20,10 @@ export async function submitWaitlist(data: WaitlistData) {
   }
 
   // Secret key client — bypasses RLS. Safe because this is a server action.
-  const supabase = createClient(
+  // `<Database>` because the `no-restricted-imports` ratchet only ever guarded
+  // imports from `@/lib/supabase`; a client built inline here escaped it entirely,
+  // and this one writes to a real table with nothing checking the payload.
+  const supabase = createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!,
   );

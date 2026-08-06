@@ -3,7 +3,7 @@
 // getSupabase so the dozens of call sites below don't need renaming —
 // this also keeps the diff small for review. See CLAUDE.md "Typed
 // Supabase client (incremental adoption)" for the rollout contract.
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 

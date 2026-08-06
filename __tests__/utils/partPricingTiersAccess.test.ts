@@ -16,7 +16,6 @@ const { mockBuilder, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 // The one canonical cost engine — every price (made or bought) derives from it,

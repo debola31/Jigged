@@ -1,4 +1,4 @@
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 import { getBomForPart } from '@/utils/bomAccess';
 import { getComputedPartCost, getPartCostExplain } from '@/utils/partsAccess';

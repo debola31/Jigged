@@ -1,6 +1,6 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 30 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 
 // Insert payload for the parts table. company_id is supplied at the call

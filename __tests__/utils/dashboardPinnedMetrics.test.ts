@@ -32,7 +32,6 @@ const mockSupabase = {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 import {

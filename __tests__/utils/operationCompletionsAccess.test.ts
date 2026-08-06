@@ -37,7 +37,6 @@ const { responses, captured, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 import {

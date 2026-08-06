@@ -2,7 +2,7 @@
 // file is validated against types/database.ts at compile time. Aliased to
 // getSupabase to match the other access modules. See CLAUDE.md "Typed Supabase
 // client (incremental adoption)".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import {
   toBillToParty,
   type CustomerCarrierAccount,

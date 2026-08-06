@@ -27,7 +27,6 @@ const mockSupabase = { from: vi.fn(() => makeBuilder()), rpc: mockRpc };
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 vi.mock('@/lib/supabaseErrors', () => ({
   friendlyErrorMessage: (_e: unknown, o?: { fallback?: string }) => o?.fallback ?? 'error',

@@ -16,7 +16,7 @@
  * because the UI is single-user-per-vendor at any given moment.
  */
 
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 import type {
   VendorContact,

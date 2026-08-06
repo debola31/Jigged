@@ -70,8 +70,6 @@ const { mockSupabase, queueBuilders, mockAuthGetUser } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  // shipmentsAccess.ts adopted getTypedSupabase under the typed-client rollout.
-  getTypedSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));

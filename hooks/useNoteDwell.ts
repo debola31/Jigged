@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import * as Sentry from '@sentry/nextjs';
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 
 /**
  * Logs that a note was actually READ.

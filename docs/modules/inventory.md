@@ -208,7 +208,7 @@ No item detail/create/edit/import page of its own; that is all Parts UI.
 
 ### Access layer
 
-Supabase + RLS via `getTypedSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventoryLocationsAccess.ts`, `inventoryCountAccess.ts`, `locationOccupancy.ts`. Non-obvious:
+Supabase + RLS via `getSupabase()`, **no FastAPI**: `partsAccess.ts`, `inventoryLocationsAccess.ts`, `inventoryCountAccess.ts`, `locationOccupancy.ts`. Non-obvious:
 
 - `getLocationContents` caps at 200 (`LOCATION_CONTENTS_LIMIT`) and shows the exact total: uncapped, PostgREST `max_rows` clipped it silently — invisible on a 14-row seed, wrong on a 9,428-part shop. Archived parts excluded, matching the `inventory_location_occupancy` view.
 - `bulkPutAway` — **one atomic RPC, never chunked** (a half-moved pile is worse than none); it moves whole balances, so N parts cost one request, not 2N — every *other* location-stock wrapper first loads the part's conversion context and sends **both** display and converted quantities, which is the second read that makes an ordinary stock write cost 2; the 1000-part cap sits in the RPC, not the UI.

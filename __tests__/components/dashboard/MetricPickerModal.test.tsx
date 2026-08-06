@@ -14,7 +14,6 @@ import type { MetricKey } from '@/utils/dashboardAccess';
 // and don't touch Supabase, so they stay real.
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
   createClient: () => ({}),
   supabase: null,
 }));

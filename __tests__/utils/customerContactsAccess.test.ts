@@ -29,7 +29,6 @@ const { mockQueryBuilder, mockSupabase, errorQueue } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));

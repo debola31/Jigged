@@ -1,4 +1,4 @@
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import {
   generateStoragePath,
   uploadFileToStorage,

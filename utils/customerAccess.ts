@@ -2,7 +2,7 @@
 // this file is now validated against types/database.ts at compile time.
 // Aliased to getSupabase so the existing call sites stay untouched. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import {
   toCreditStatus,
   type Customer,

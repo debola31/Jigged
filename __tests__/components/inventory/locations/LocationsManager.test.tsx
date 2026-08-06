@@ -15,7 +15,6 @@ import userEvent from '@testing-library/user-event';
 // import time. Stub the client so only the pure helper survives the import.
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
 }));
 
 vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {

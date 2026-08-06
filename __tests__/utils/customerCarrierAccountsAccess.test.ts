@@ -7,7 +7,6 @@ import { describe, it, expect, vi } from 'vitest';
 const { mockSupabase } = vi.hoisted(() => ({ mockSupabase: { from: () => ({}) } }));
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
   createClient: () => mockSupabase,
   supabase: mockSupabase,
 }));

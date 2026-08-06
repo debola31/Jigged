@@ -57,7 +57,6 @@ const mockSupabase = { from: vi.fn((t: string) => makeBuilder(t)) };
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 import { getDashboardActivity, getActivityStream } from '@/utils/dashboardAccess';

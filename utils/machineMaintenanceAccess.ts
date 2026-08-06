@@ -1,4 +1,4 @@
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { mapReactions } from '@/utils/operatorAccess';
 import type { ReactionRel } from '@/utils/operatorAccess';

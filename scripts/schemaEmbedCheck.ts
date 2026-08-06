@@ -19,7 +19,7 @@
  * recording precisely, because the obvious way to make it redundant does not
  * work and someone will otherwise try it again.
  *
- * All 37 access files use `getTypedSupabase()`, and supabase-js validates select
+ * All access files use the typed `getSupabase()`, and supabase-js validates select
  * strings at the type level — so `tsc` does catch part of this class. Measured
  * by injecting a bogus embed column and running the whole project:
  *

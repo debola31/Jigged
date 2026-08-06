@@ -32,12 +32,15 @@ roles `admin | user | operator` — and operators land on `/operator/{companyId}
 ([`homePathForRole`](utils/companyAccess.ts)). Model and auth flow:
 [architecture.md §3](docs/architecture.md).
 
-**Use `getTypedSupabase()` for every new access function** — it type-checks each `.from().select()`
-against [`types/database.ts`](types/database.ts). The untyped `getSupabase()` still exists but no
-`utils/*.ts` imports it any more; schema mistakes compile silently through it, which is how the
-May 2026 `jobs.status` regression shipped. **Regenerate types after any migration that changes
-columns** (`pnpm gen:db-types`, against a running local stack); CI fails on a diff. Details, and the
-three places the generator version is pinned: [architecture.md §6](docs/architecture.md).
+**`getSupabase()` is the only client getter, and it is always typed** — it type-checks each
+`.from().select()` against [`types/database.ts`](types/database.ts). The untyped second getter and
+the lint ratchet that policed it are **gone** (#573): there is no untyped symbol left to import, so
+the guarantee is structural rather than an exemption list. **Never reintroduce an untyped view of
+this client, and never launder a row through `as unknown as` — that erases the query result exactly
+like the old getter did.** Schema mistakes compiling silently is how the May 2026 `jobs.status`
+regression shipped. **Regenerate types after any migration that changes columns**
+(`pnpm gen:db-types`, against a running local stack); CI fails on a diff. Details, and the three
+places the generator version is pinned: [architecture.md §6](docs/architecture.md).
 
 ---
 

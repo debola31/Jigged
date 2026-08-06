@@ -7,7 +7,6 @@ import type { PartSelectOption } from '@/utils/partsAccess';
 /** Module-scope browser client; the import alone throws in jsdom without this. */
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
 }));
 
 /**

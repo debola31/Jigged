@@ -13,7 +13,7 @@
  * enforced, in the DB); the UI warns via operationMath.
  */
 
-import { getTypedSupabase as getSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type {
   CreateOperationCompletionInput,
   OperationCompletionEvent,

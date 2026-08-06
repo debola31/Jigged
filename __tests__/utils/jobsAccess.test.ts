@@ -21,7 +21,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 // updateJobPartQuantity / deleteJob orchestrate cross-module readers — stub them

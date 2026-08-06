@@ -46,7 +46,7 @@ vi.mock('@/lib/supabase', () => {
     },
     from: () => ({ insert: vi.fn(async () => ({ error: null })) }),
   });
-  return { getSupabase: stub, getTypedSupabase: stub, supabase: null };
+  return { getSupabase: stub, supabase: null };
 });
 
 const mockGetTotals = vi.mocked(getMyContributionTotals);

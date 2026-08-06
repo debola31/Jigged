@@ -21,7 +21,6 @@ vi.mock('next/navigation', () => ({
  */
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
-  getTypedSupabase: () => ({}),
 }));
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({

@@ -24,7 +24,6 @@ const { mockQueryBuilder, mockSupabase } = vi.hoisted(() => {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
-  getTypedSupabase: () => mockSupabase,
 }));
 
 // friendlyErrorMessage just surfaces the fallback so we can assert thrown text.

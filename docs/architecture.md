@@ -161,28 +161,37 @@ chunk. One home, because four files had independently picked the same wrong numb
 
 *This subsection owns the typed-client contract — CLAUDE.md points here.*
 
-[`lib/supabase.ts`](../lib/supabase.ts) exposes two getters over **one singleton**.
-`getTypedSupabase()` applies the `<Database>` generic from
-[`types/database.ts`](../types/database.ts), so every `.from('t').select('…')` chain
-is checked at compile time; `getSupabase()` returns the *same runtime instance* with
-the generic erased. Same client, different type.
+[`lib/supabase.ts`](../lib/supabase.ts) exposes **one getter**, `getSupabase()`, and it always
+carries the `<Database>` generic from [`types/database.ts`](../types/database.ts) — so every
+`.from('t').select('…')` chain is checked at compile time.
 
-**As built (2026-08-03): the access layer is fully converted.** Every file under
-[`utils/`](../utils) that touches the client imports `getTypedSupabase`, almost always
-aliased `as getSupabase` so the call sites read unchanged. *(This doc and CLAUDE.md
-both said "existing `utils/*Access.ts` files use `getSupabase()`" — true when the
-migration started, false since it finished; the alias is what made it look otherwise.)*
-The untyped getter survives only at the page/component paths in the `files:` grandfather
-block at the bottom of [`eslint.config.mjs`](../eslint.config.mjs) — mostly `supabase.auth.*`
-callers, where the table generic buys nothing. **Drain that block, never extend it**
-([#573](https://github.com/debola31/Jigged/issues/573)).
+**Withdrawn (2026-08-06, [#573](https://github.com/debola31/Jigged/issues/573)): the
+two-getter split.** This section used to describe `getTypedSupabase()` alongside an untyped
+`getSupabase()`, plus a `no-restricted-imports` ratchet and a `files:` grandfather block in
+`eslint.config.mjs` listing the not-yet-migrated paths. All of it is gone. They were never two
+clients: `createClient()` has always built `createBrowserClient<Database>`, and the untyped
+getter returned that same singleton through `as unknown as UntypedSupabaseClient` — scaffolding
+so the rollout could go file by file instead of landing ~250 errors at once.
 
-**Enforced, not aspirational.** `no-restricted-imports` in `eslint.config.mjs` makes
-`import { getSupabase } from '@/lib/supabase'` an **error**, with the grandfathered paths
-as an explicit exemption list, so it ratchets. It exists because the material-yield PR
-dropped `part_procurement_tiers.vendor_id`, `types/database.ts` was regenerated correctly,
-and `PartBomPanel`'s **untyped** cost-ladder query kept filtering the dropped column — it
-compiled clean and shipped a false "No cost on file" on every bought material.
+**What the migration actually cost, because the estimate was wrong by an order of magnitude.**
+#573 scoped it as an 18-file conversion. Deleting the cast surfaced **one** type error in the
+whole project (`app/accept-invite`, where `session` had been silently `any`). The scaffolding had
+outlived its job by months, and an exemption list is easy to keep and hard to notice — that is
+the part worth remembering. **Never reintroduce an untyped view of this client**; there is no
+symbol left to import, so the guarantee is structural rather than lint-maintained.
+
+**`as unknown as` on a row defeats all of this**, which is why the rule is worth stating
+separately: a `SelectQueryError` from a dropped column casts clean through it, so the generic
+buys nothing at a site that launders its result. Narrowing a single field from `string` to a
+union is fine (the generated types render CHECK-constrained columns as bare `string` — see
+`toCreditStatus` in [`utils/customerAccess.ts`](../utils/customerAccess.ts)); casting a whole
+row is not.
+
+**Why any of this exists:** the material-yield PR dropped `part_procurement_tiers.vendor_id`,
+`types/database.ts` was regenerated correctly, and `PartBomPanel`'s **untyped** cost-ladder query
+kept filtering the dropped column — it compiled clean and shipped a false "No cost on file" on
+every bought material. The CI regen gate (#406) guarantees the types file *describes* the schema;
+the generic is what makes query code *read* it. Neither substitutes for the other.
 
 **Regen after any migration that changes columns:** `pnpm gen:db-types`, against a
 **running local stack** (`supabase start`). The generator reads `--local`, not a remote

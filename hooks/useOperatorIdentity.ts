@@ -22,10 +22,10 @@
 import { useLoad } from '@/hooks/useLoad';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { getCurrentMember } from '@/utils/operatorAccess';
-// `getTypedSupabase`, not `getSupabase` — new code uses the typed client (issue #573). Only
+// `getSupabase`, not `getSupabase` — new code uses the typed client (issue #573). Only
 // `auth.getSession()` is used here, which is schema-independent, so the two behave identically;
 // the typed one is simply what new files are required to reach for.
-import { getTypedSupabase } from '@/lib/supabase';
+import { getSupabase } from '@/lib/supabase';
 import type { OperatorIdentity } from '@/components/operator/OperatorAccountBlock';
 
 export function useOperatorIdentity(companyId: string) {
@@ -38,7 +38,7 @@ export function useOperatorIdentity(companyId: string) {
       // promise — one throw took the whole identity down, name included, rather than degrading
       // to a missing email.
       const [session, member] = await Promise.all([
-        getTypedSupabase()
+        getSupabase()
           .auth.getSession()
           .then((r) => r.data.session)
           .catch(() => null),

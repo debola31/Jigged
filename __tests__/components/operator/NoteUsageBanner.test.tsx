@@ -7,7 +7,6 @@ import NoteUsageBanner from '@/components/operator/NoteUsageBanner';
 const rpc = vi.fn();
 vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({ rpc }),
-  getTypedSupabase: () => ({ rpc }),
 }));
 
 const SEEN_KEY = 'jigged:note-digest-acknowledged';

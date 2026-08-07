@@ -3,7 +3,11 @@
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage, toFriendlyError } from '@/lib/supabaseErrors';
+import {
+  friendlyErrorMessage,
+  isBillingWriteBlocked,
+  toFriendlyError,
+} from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -278,6 +282,15 @@ export async function sweepExpiredQuotes(companyId: string): Promise<void> {
     .lt('expiration_date', today);
 
   if (error) {
+    // A read-only shop cannot sweep, and SHOULD not: this is a background status mutation the
+    // user never asked for, fired on every quotes-page load. Expected, not a failure.
+    //
+    // It only became visible when the billing gate started raising on a blocked UPDATE instead
+    // of filtering it to zero rows — before that this call quietly did nothing. Returning early
+    // keeps a lapsed shop's quotes list loading exactly as it does today. (Sentry already drops
+    // these via shouldReportSupabaseError; this is about not logging noise either.)
+    if (isBillingWriteBlocked(error)) return;
+
     // The Supabase integration reports this update's failure on its own (#708), so there is no
     // `captureException` here — a second one would only duplicate the issue.
     //

@@ -178,7 +178,7 @@ describe('storageHelpers', () => {
       const mockFile = new File(['test'], 'test.pdf', { type: 'application/pdf' });
 
       await expect(uploadFileToStorage('path/to/file.pdf', mockFile)).rejects.toThrow(
-        'Failed to upload file: Upload failed'
+        'Failed to upload that file.'
       );
     });
 
@@ -279,7 +279,7 @@ describe('storageHelpers', () => {
       });
 
       await expect(deleteFileFromStorage('path/to/file.pdf')).rejects.toThrow(
-        'Failed to delete file: Delete failed'
+        'Failed to delete that file.'
       );
     });
   });
@@ -395,7 +395,7 @@ describe('storageHelpers', () => {
       });
 
       await expect(moveFileInStorage('old/path.pdf', 'new/path.pdf')).rejects.toThrow(
-        'Failed to upload file'
+        'Failed to upload that file.'
       );
     });
 

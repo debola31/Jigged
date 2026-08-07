@@ -463,7 +463,10 @@ export async function bulkDeleteWorkCenters(workCenterIds: string[]): Promise<vo
 
     if (error) {
       console.error('Error archiving work centers:', error);
-      throw new Error(error.message || 'Failed to archive work centers');
+      throw toFriendlyError(error, {
+        entity: 'work center',
+        fallback: 'Failed to archive these work centers.',
+      });
     }
   }
 }

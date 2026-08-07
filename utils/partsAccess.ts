@@ -1008,13 +1008,10 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
     const { error } = await supabase.rpc('archive_parts', { p_ids: batch });
 
     if (error) {
-      if (error.code === '42501' || error.message?.includes('policy')) {
-        throw new Error(
-          'Permission denied. You may not have permission to delete these parts.',
-        );
-      }
-      console.error('Error archiving parts:', error);
-      throw new Error(error.message || 'Failed to archive parts');
+      throw toFriendlyError(error, {
+        entity: 'part',
+        fallback: 'Failed to archive these parts.',
+      });
     }
   }
 }

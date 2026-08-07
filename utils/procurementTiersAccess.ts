@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   ProcurementCostResult,
@@ -117,7 +118,7 @@ export async function addTier(
         'A tier already exists at this break. Edit the existing tier instead.',
       );
     }
-    throw error;
+    throw toFriendlyError(error, { entity: 'tier' });
   }
   return normalizeTierRow(data as Record<string, unknown>);
 }
@@ -157,7 +158,7 @@ export async function updateTier(
         'A tier already exists at this break. Edit the existing tier instead.',
       );
     }
-    throw error;
+    throw toFriendlyError(error, { entity: 'tier' });
   }
   return normalizeTierRow(data as Record<string, unknown>);
 }

@@ -82,7 +82,7 @@ async function clearPrimaryForVendor(vendorId: string): Promise<void> {
     .eq('is_primary', true);
   if (error) {
     console.error('Error clearing primary contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
 }
 
@@ -115,7 +115,7 @@ export async function createVendorContact(
       );
     }
     console.error('Error creating vendor contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
   return data as VendorContact;
 }
@@ -175,7 +175,7 @@ export async function updateVendorContact(
       );
     }
     console.error('Error updating vendor contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
   return data as VendorContact;
 }
@@ -218,6 +218,6 @@ export async function setPrimaryContact(
       );
     }
     console.error('Error setting primary contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
 }

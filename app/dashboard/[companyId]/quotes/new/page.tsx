@@ -8,6 +8,7 @@ import { EMPTY_QUOTE_FORM, defaultExpirationDate } from '@/types/quote';
 import { getCompany } from '@/utils/companyAccess';
 import { readQuoteValidityDays } from '@/lib/companyDefaults';
 import { useLoad } from '@/hooks/useLoad';
+import SubscriptionRequiredNotice from '@/components/billing/SubscriptionRequiredNotice';
 
 export default function NewQuotePage() {
   const params = useParams();
@@ -36,6 +37,7 @@ export default function NewQuotePage() {
 
   return (
     <Box>
+      <SubscriptionRequiredNotice entityPlural="quotes" />
       <QuoteForm mode="create" initialData={initialData} />
     </Box>
   );

@@ -406,7 +406,10 @@ export async function bulkDeleteVendors(vendorIds: string[]): Promise<void> {
 
     if (error) {
       console.error('Error archiving vendors:', error);
-      throw new Error(error.message || 'Failed to archive vendors');
+      throw toFriendlyError(error, {
+        entity: 'vendor',
+        fallback: 'Failed to archive these vendors.',
+      });
     }
   }
 }

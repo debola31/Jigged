@@ -481,7 +481,10 @@ export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<vo
         );
       }
       console.error('Error bulk archiving customers:', error);
-      throw new Error(error.message || 'Failed to delete customers');
+      throw toFriendlyError(error, {
+        entity: 'customer',
+        fallback: 'Failed to archive these customers.',
+      });
     }
   }
 }

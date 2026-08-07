@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import PartWorkspace from '@/components/parts/workspace/PartWorkspace';
+import SubscriptionRequiredNotice from '@/components/billing/SubscriptionRequiredNotice';
 
 /**
  * New-part route. Renders the same PartWorkspace as the detail page in create
@@ -18,6 +19,9 @@ export default function NewPartPage() {
         </Box>
       }
     >
+      <Box sx={{ maxWidth: 900, mx: 'auto' }}>
+        <SubscriptionRequiredNotice entityPlural="parts" />
+      </Box>
       <PartWorkspace mode="create" />
     </Suspense>
   );

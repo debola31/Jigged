@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   BomLine,
@@ -281,7 +282,7 @@ export async function addBomLine(
     if (error.code === '23505') {
       throw new Error('This child part is already in the BOM. Adjust the existing line instead.');
     }
-    throw error;
+    throw toFriendlyError(error, { entity: 'BOM line' });
   }
   return data as BomLine;
 }
@@ -340,7 +341,7 @@ export async function updateBomLine(
     if (error.code === '23505') {
       throw new Error('This child part is already in the BOM. Adjust the existing line instead.');
     }
-    throw error;
+    throw toFriendlyError(error, { entity: 'BOM line' });
   }
   return data as BomLine;
 }

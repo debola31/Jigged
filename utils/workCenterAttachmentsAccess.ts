@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import {
   generateStoragePath,
   uploadFileToStorage,
@@ -185,7 +186,7 @@ export async function deleteWorkCenterAttachment(att: {
   const { error } = await supabase.from('work_center_attachments').delete().eq('id', att.id);
   if (error) {
     console.error('Error deleting work center attachment row:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'attachment' });
   }
   await deleteFileFromStorage(att.storage_path).catch((err) =>
     console.warn('Failed to delete manual file after row delete:', err),

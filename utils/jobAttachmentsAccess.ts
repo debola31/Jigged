@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import {
   generateStoragePath,
   uploadFileToStorage,
@@ -101,7 +102,7 @@ export async function deleteJobAttachment(att: {
   const { error } = await supabase.from('job_attachments').delete().eq('id', att.id);
   if (error) {
     console.error('Error deleting job attachment row:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'attachment' });
   }
 }
 

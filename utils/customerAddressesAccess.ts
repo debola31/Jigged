@@ -14,6 +14,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   CustomerAddress,
@@ -74,7 +75,7 @@ async function clearDefaultBillingForCustomer(
   const { error } = await query;
   if (error) {
     console.error('Error clearing default_billing flag:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'address' });
   }
 }
 
@@ -92,7 +93,7 @@ async function clearDefaultShippingForCustomer(
   const { error } = await query;
   if (error) {
     console.error('Error clearing default_shipping flag:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'address' });
   }
 }
 
@@ -118,7 +119,7 @@ export async function createCustomerAddress(
       );
     }
     console.error('Error creating customer address:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'address' });
   }
   return data as CustomerAddress;
 }
@@ -150,7 +151,7 @@ export async function updateCustomerAddress(
       );
     }
     console.error('Error updating customer address:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'address' });
   }
   return data as CustomerAddress;
 }

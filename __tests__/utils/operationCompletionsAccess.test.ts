@@ -85,10 +85,31 @@ describe('createOperationCompletion', () => {
   });
 
   it('throws when the insert fails', async () => {
-    responses['job_operation_completions'] = { data: null, error: { message: 'permission denied' } };
+    // Was asserting the raw DB text reached the caller. It no longer does: the message is now
+    // translated, because 'raw DB strings must never reach a user' (lib/supabaseErrors.ts).
+    responses['job_operation_completions'] = {
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    };
     await expect(
       createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1 }),
-    ).rejects.toThrow(/permission denied/);
+    ).rejects.toThrow(/don't have permission/i);
+  });
+
+  it('tells a lapsed shop about its subscription, not about permissions', async () => {
+    // The operator's most frequent write. Before, a blocked completion read as
+    // 'Failed to record completion: new row violates row-level security policy ...'.
+    responses['job_operation_completions'] = {
+      data: null,
+      error: {
+        code: '42501',
+        message:
+          'new row violates row-level security policy "billing_gate_insert" for table "job_operation_completions"',
+      },
+    };
+    await expect(
+      createOperationCompletion({ companyId: 'co-1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 1 }),
+    ).rejects.toThrow(/subscription isn't active/i);
   });
 });
 

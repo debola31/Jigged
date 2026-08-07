@@ -882,7 +882,10 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
         throw new Error('Permission denied. You may not have permission to delete these quotes.');
       }
       console.error('Error bulk archiving quotes:', error);
-      throw new Error(error.message || 'Failed to delete quotes');
+      throw toFriendlyError(error, {
+        entity: 'quote',
+        fallback: 'Failed to archive these quotes.',
+      });
     }
   }
 }

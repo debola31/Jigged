@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { VendorForm } from '@/components/vendors';
 import { EMPTY_VENDOR_FORM } from '@/types/vendor';
+import SubscriptionRequiredNotice from '@/components/billing/SubscriptionRequiredNotice';
 
 export default function NewVendorPage() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export default function NewVendorPage() {
       >
         Back to Vendors
       </Button>
+      <SubscriptionRequiredNotice entityPlural="vendors" />
       <VendorForm mode="create" initialData={EMPTY_VENDOR_FORM} />
     </Box>
   );

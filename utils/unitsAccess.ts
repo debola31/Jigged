@@ -5,6 +5,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import type { CompanyCustomUnit } from '@/types/units';
 
 /**
@@ -56,7 +57,7 @@ export async function addCompanyCustomUnit(
       throw new Error(`Unit "${trimmed}" already exists for this company`);
     }
     console.error('Error adding company custom unit:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'unit' });
   }
 
   return data as CompanyCustomUnit;

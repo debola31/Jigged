@@ -398,6 +398,14 @@ one quiet metadata line: view count, one reference, date. Tapping the view count
 the overflow carries **Open J-NNNN**, Edit and Delete. Identity, Log out and Give feedback sit at
 the top (`/operator/{companyId}/profile` is now a redirect here).
 
+**Switch company** joins them there, and only for an operator who actually belongs to more than one
+shop — for everyone else `OperatorCompanySwitcher` renders nothing. It exists because the company
+switcher lives in the office sidebar and this surface has no sidebar, so a two-shop operator had no
+route to their second company at all; logging out did not help, since login follows
+`last_company_id` straight back. It sits **beside Give feedback, not in the identity row**: Log out
+has to remain the only tap target in that row, and making the company name already shown there
+tappable is exactly the tidy-up that would break it.
+
 Two details are load-bearing. **The heading predicates the notes, not the operator** — a view is
 not something they added, but the notes *were* viewed, so every figure under it is a true
 predicate; and *"so far"* stays unbounded, because a window would turn a tally into a rate, and a

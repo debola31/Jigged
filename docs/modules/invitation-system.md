@@ -2,8 +2,9 @@
 
 > **Condensed 2026-08-03 (#634). 4,968 → 3,342 words** (`wc -w`; 2,869 after the first pass, plus
 > a verification pass that restored the audit-#338 provenance and corrected §1). Cut: a ~1,200-word acceptance-criteria
-> block in which *every* bullet was `automation-pending` (the module has zero automated tests —
-> now stated once as a named gap); ~10 restatements of "referrals are descoped", ~8 of "there is
+> block in which *every* bullet was `automation-pending` (the module *then* had zero automated
+> tests — stated once as a named gap; partially closed 2026-08-06 when the accept page was split
+> into two paths, see §5.1 and §8); ~10 restatements of "referrals are descoped", ~8 of "there is
 > no `owner` role", ~4 of "the backend is the Edge Function, not FastAPI" (collapsed into one
 > **Never built** table); pasted SQL bodies for `invitations` and `accept_invitation()`; an ASCII
 > grid mockup; prose narrating what each page component does. Kept deliberately: every deferred
@@ -86,7 +87,7 @@ earlier draft of this same spec* and is not in the code today.
 | **`InviteTeamMemberDialog` modal** | **Never built** | Inviting is a full page (§4). |
 | **Scheduled expiry job (`pg_cron`)** | **Not needed** | Expiry is lazy (§6). |
 | **FastAPI invitation routes** | **Never built** | Supabase-first architecture (CLAUDE.md, API Architecture Rule). `api/services/email.py` exists for other transactional mail and its docstring notes invitation email "can ride the same plumbing later" — it is not wired to invitations. |
-| **Automated tests of any kind** | **Standing gap** — `automation-pending (#367)` | See §8. |
+| **Automated tests** | **Partial** — the accept page and the existing-user E2E journey are covered; everything else is still `automation-pending (#367)` | See §8. |
 
 ---
 
@@ -155,7 +156,7 @@ the single-use `token_hash` via `verifyOtp` (setting the cookies the browser cli
 **fails closed to `/login`** on anything missing, invalid, or already consumed.
 
 **Page state machine** (`app/accept-invite/[invitationId]/page.tsx`):
-`loading → { no-session | name-prompt | accepting | error }`.
+`loading → { no-session | confirm-join | name-prompt | accepting | error }`.
 
 1. Processes auth tokens straight off the URL if present — hash-fragment
    `access_token`/`refresh_token` via `setSession`, or `code` via `exchangeCodeForSession` — then
@@ -168,25 +169,70 @@ the single-use `token_hash` via `verifyOtp` (setting the cookies the browser cli
 4. Validates: `status === 'accepted'` → straight to the user's home surface; any other
    non-`pending` status or a past `expires_at` → error; session email ≠ invitation email → error
    naming the invited address.
-5. **name-prompt:** first name, last name (both required), password + confirm (**optional**; if
-   supplied, ≥ 6 chars and must match). Name pre-fills from user metadata; role shown as a chip.
+5. **Picks a path** (see §5.1). Established account → `confirm-join`; brand-new invitee →
+   `name-prompt`.
+6. **name-prompt:** first name, last name, password + confirm — **all four required**. Name
+   pre-fills from user metadata; role shown as a chip. *(Password was optional until the paths
+   split, with helper text reading "Leave blank if you already have one". That sentence existed
+   only because one form served both kinds of invitee. It no longer does, and a blank password now
+   means an account reachable only by emailed magic link.)*
 
-**Submit** (`handleAccept`): `updateUser({ password?, data: { first_name, last_name,
-display_name, invitation_id: null } })` — clearing `invitation_id` is what stops the
-`/auth/callback` fallback re-routing here on every future login → `accept_invitation` RPC →
-PATCH the new `user_company_access` row's `name` via the `team` Edge Function (the RPC stored
-`''`) → `setLastCompany` → `posthog.identify` + `posthog.capture('invitation_accepted', {role})`
-→ `router.replace(homePathForRole(role, companyId))`.
+**Submit** (`acceptAndRedirect`, shared by both paths): `accept_invitation` RPC →
+`updateUser({ password?, data? })` → PATCH the new `user_company_access` row's `name` via the
+`team` Edge Function (the RPC stored `''`) → `setLastCompany` → `posthog.identify` +
+`posthog.capture('invitation_accepted', { role, existing_user })` →
+`router.replace(homePathForRole(role, companyId))`.
+
+**The RPC runs first, and that ordering is load-bearing.** It used to run after `updateUser`, so
+any auth failure — in practice `same_password` — threw before the user was ever added to the
+company. The message named a password problem while the actual outcome was no membership at all.
+Access is what the invitee came for; it must not be contingent on a profile write. If `updateUser`
+fails now, the page says "You've been added to {Company}" and offers a Continue button.
+
+`accept_invitation` is **not idempotent** — it selects `WHERE status = 'pending'` and raises
+`Invalid or expired invitation` on a second call. The page holds the granted company id and skips
+the RPC on a retry; without that, retrying after a partial failure reports the wrong error.
 
 **`homePathForRole`** (`utils/companyAccess.ts`) returns `/operator/{companyId}` for operators
 and `/dashboard/{companyId}` for everyone else. *(This doc previously said acceptance redirects
 to `/dashboard/{company_id}`; that was the pre-operator-surface behaviour and a new operator's
 first screen was a dashboard flash before `AuthGuard` bounced them out.)*
 
-**Already-signed-in invitee:** there is no separate "accept?" confirmation screen — the flow is
-session-first, so they simply land in name-prompt (or get redirected if already accepted, or the
-mismatch error if signed in as someone else). **Reload is idempotent:** re-opening the link after
-acceptance hits step 4 and routes home.
+**Reload is idempotent:** re-opening the link after acceptance hits step 4 and routes home.
+
+### 5.1 Two paths, because there are two kinds of invitee
+
+An existing Jigged user invited to a **second** company already has a name and a password. Showing
+them the new-hire form asked for both, and the password box actively invited the failure: typing
+their real password returns GoTrue's `same_password`
+("New password should be different from the old password").
+
+They cannot be told apart from the link. `generateLink({ type: 'invite' })` fails for an
+already-registered email and the function falls back to a **magic link** (§7), which carries no
+marker saying so. So the page asks the question itself:
+
+```
+established = auth metadata has a name  ||  hasAnyCompanyAccess(userId)
+```
+
+`hasAnyCompanyAccess` (`utils/companyAccess.ts`) is a `head`/`count` read of
+`user_company_access`. Metadata is checked first — it is free and true for anyone who has completed
+setup once — and membership catches the rest (e.g. someone provisioned by a system admin, who has a
+row but no name). It throws rather than returning `false` on a read failure; the page falls back to
+metadata alone rather than guessing someone is brand new.
+
+| Path | Shown | Writes |
+|---|---|---|
+| `confirm-join` (established) | Company name, role chip, "Signed in as …", one **Join {Company}** button, and **Not you? Sign out** | RPC only. No password write at all — not even an empty one. Name for the new membership comes from their existing metadata, falling back to the email's local part |
+| `name-prompt` (new) | First name, last name, password, confirm — all required | RPC, then `updateUser` with password + profile, including `invitation_id: null` so the `/auth/callback` fallback stops re-routing here on future logins |
+
+The single button on `confirm-join` is a deliberate stop rather than an automatic join: it is where
+the invitee sees **which** company and **which** role they are accepting, and it keeps a mail-client
+link prefetch from silently joining them.
+
+`same_password` is treated as the no-op it is — the account already holds exactly that value — and
+swallowed on both paths. Matched on `error.code` with the message as a fallback, since the code
+post-dates some deployed GoTrue versions.
 
 ---
 
@@ -289,18 +335,25 @@ DMARC records, plus `RESEND_API_KEY` set as an Edge Function secret.
 | `/auth/confirm` fails closed | `app/auth/confirm/route.ts` — type allow-list, relative-`next` check, redirect to `/login` on any error | Open redirect; a consumed token rendering a half-authenticated page. |
 | Concurrent acceptance is safe | `SELECT … FOR UPDATE` in `accept_invitation()` + the `WHERE NOT EXISTS` guard on the access insert | Duplicate `user_company_access` rows from a double-clicked link. |
 
-**Named gap — zero automated coverage.** There is no test of this module in `__tests__/`,
-`e2e/`, or `api/tests/`; the two citations above are schema-level guards that happen to touch
-it, not behavioural tests. Everything in §5 and §6 is **`automation-pending (#367)`**. This is
-the same shape as the May 2026 `jobs.status` incident, where an untested read path shipped a
-regression. Intended first coverage, in priority order:
+**Standing gap — still largely uncovered, but no longer zero.** The accept page now has
+behavioural tests, added with the two-path split (§5.1) because the existing-user case is exactly
+the one this table used to list as untested and it had shipped a real defect:
+
+| Layer | Covered | Where |
+|---|---|---|
+| Frontend | Both paths: existing user is shown no password field, joins in one tap and never calls `updateUser`; membership recognised by metadata *or* `hasAnyCompanyAccess`; operator lands on the shop floor; RPC ordered before `updateUser`; `same_password` swallowed; access survives a genuine profile-write failure; the RPC is not re-run on retry; new users must set a password | `__tests__/app/accept-invite/AcceptInvitePage.test.tsx` |
+| E2E | Existing user with a company is invited to a second one → confirm → real `accept_invitation` → membership in the DB, first company intact, invitation marked accepted, **original password still signs them in**, and both companies reachable from the switcher | `e2e/existing-user-second-company.spec.ts` (stubs only the `GET /team-invites/:id` read — see the spec header for why) |
+
+The rest of §5 and §6 remains **`automation-pending (#367)`**. This is the same shape as the May
+2026 `jobs.status` incident, where an untested read path shipped a regression. Remaining coverage,
+in priority order:
 
 | Layer | Target |
 |---|---|
 | DB | `accept_invitation()` — new user, user already in company, expired row, concurrent acceptance |
 | Edge Function | `verifyAdmin` (admin allowed; user/operator/no-access → 401/403); POST valid + invalid-role + demo-company + already-has-access + prior-pending-revoked; GET list lazy-expire; DELETE and resend pending-only |
-| Frontend | Accept page: session-first load, email mismatch, expired/revoked/accepted branches, submit calls the RPC. `/auth/confirm`: valid redirect, open-redirect rejection, fail-closed. Team page: merge, search, demo-mode button hiding |
-| E2E | Invite → email → `/auth/confirm` → accept → `user_company_access` created → home surface; existing-user invite; revoke-then-open-link |
+| Frontend | Accept page: expired/revoked/accepted branches, email mismatch. `/auth/confirm`: valid redirect, open-redirect rejection, fail-closed. Team page: merge, search, demo-mode button hiding |
+| E2E | New-hire invite → email → `/auth/confirm` → accept → `user_company_access` created → home surface; revoke-then-open-link |
 
 ---
 

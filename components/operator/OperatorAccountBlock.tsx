@@ -5,7 +5,8 @@
  *
  * One export, above the operator's own work:
  *
- *   <OperatorIdentityRow />      who you are, the way out, and the way to reach us
+ *   <OperatorIdentityRow />      who you are, the way out, the way to reach us, and — only for the
+ *                                rare operator who works for two shops — the way between them
  *   … the operator's notes …     the reason the tab exists
  *
  * It used to be two, sandwiching the work, with Give feedback and then Log out below the
@@ -83,6 +84,7 @@ import FeedbackDialog from '@/components/feedback/FeedbackDialog';
 // `auth.signOut` is used here, which is schema-independent.
 import { getSupabase } from '@/lib/supabase';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
+import OperatorCompanySwitcher from '@/components/operator/OperatorCompanySwitcher';
 
 export interface OperatorIdentity {
   name: string;
@@ -190,7 +192,7 @@ export function OperatorIdentityRow({
       beside it would give a habituated thumb something to slip from. Here it is below
       and hard left, diagonally opposite the icon.
     */}
-    <Box sx={{ mb: 2, pl: 7 }}>
+    <Box sx={{ mb: 2, pl: 7, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
       <Button
         onClick={() => setFeedbackOpen(true)}
         startIcon={<FeedbackIcon fontSize="small" />}
@@ -205,6 +207,14 @@ export function OperatorIdentityRow({
       >
         Give feedback
       </Button>
+
+      {/*
+        Renders nothing unless this operator actually belongs to more than one company, which
+        almost none do. It sits HERE, beside Give feedback, for the same reason that button does:
+        both are benign secondary actions, so they are safe neighbours for each other, and both
+        must stay out of the identity row where Log out has to remain the only tap target.
+      */}
+      <OperatorCompanySwitcher companyId={companyId} userId={identity?.userId} />
     </Box>
 
     <FeedbackDialog

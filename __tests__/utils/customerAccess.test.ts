@@ -289,14 +289,19 @@ describe('customerAccess utilities', () => {
       expect(result).toEqual(mockCreatedCustomer);
     });
 
-    it('throws error when insert fails', async () => {
+    it('throws a real Error with user-facing copy when insert fails', async () => {
+      // Was `rejects.toEqual({ message: 'Insert failed', code: '23505' })` — the raw Supabase
+      // object. That plain object is exactly the bug: `err instanceof Error` is false, so every
+      // UI catch site fell through to its generic 'Failed to…' fallback and discarded the reason.
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { message: 'Insert failed', code: '23505' };
 
-      await expect(createCustomer('company-1', mockFormData)).rejects.toEqual({
-        message: 'Insert failed',
-        code: '23505',
-      });
+      const rejection = await createCustomer('company-1', mockFormData).catch((e) => e);
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection.message).toMatch(/already exists/i);
+      // The raw error is still reachable for Sentry context and for classification.
+      expect(rejection.code).toBe('23505');
+      expect(rejection.cause).toEqual({ message: 'Insert failed', code: '23505' });
     });
 
     // A name collision with an ARCHIVED customer revives that row rather than

@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
@@ -92,7 +93,9 @@ export default function AcceptPurchaseOrderModal({
   onCreated,
 }: AcceptPurchaseOrderModalProps) {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell
+  // a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
   const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
   // Set when the job was created but we paused (e.g. the PDF failed) so the
   // primary button becomes "Open Job" instead of silently navigating away.
@@ -285,7 +288,7 @@ export default function AcceptPurchaseOrderModal({
       });
       onCreated(result.job_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create the job.');
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -306,10 +309,14 @@ export default function AcceptPurchaseOrderModal({
       <DialogTitle>Accept Purchase Order</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1 }}>
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {error}
-            </Alert>
+          {error != null && (
+            <ErrorAlert
+              error={error}
+              entity="job"
+              fallback="Couldn't create the job. Please try again."
+              onClose={() => setError(null)}
+              sx={{ mb: 2 }}
+            />
           )}
           {attachmentWarning && (
             <Alert severity="warning" sx={{ mb: 2 }}>

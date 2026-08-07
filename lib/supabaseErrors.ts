@@ -303,6 +303,29 @@ export function toFriendlyError(value: unknown, options: FriendlyErrorOptions = 
   return error;
 }
 
+/**
+ * Throw when a DELETE that should have removed one known row removed nothing.
+ *
+ * The billing gate blocks DELETE through a policy `USING` clause, which FILTERS the row out of
+ * the statement rather than raising. Unlike INSERT and UPDATE there is no `WITH CHECK` for a
+ * DELETE policy to fail loudly through, so a blocked delete is indistinguishable from a
+ * successful one at the client — it just quietly removes nothing and the row returns on reload.
+ * Counting the returned rows is the only way to notice.
+ *
+ * The wording is conditional on purpose: zero rows can equally mean the row was already gone (a
+ * double submit, a stale list), so the sentence has to be true either way.
+ *
+ * ONLY for deleting one specific row. Do NOT use where matching nothing is a normal outcome —
+ * clearing an already-empty list, or toggling a reaction off twice — or it reports failure for
+ * an operation that did exactly what was asked.
+ */
+export function assertDeleted(rows: unknown[] | null | undefined, entity: string): void {
+  if (rows && rows.length > 0) return;
+  throw new Error(
+    `That ${entity} couldn't be removed. If your shop's subscription isn't active, an admin can restart it in Settings.`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // User-facing error translation
 // ---------------------------------------------------------------------------

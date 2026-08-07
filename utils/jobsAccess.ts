@@ -4,7 +4,7 @@
 // this also keeps the diff small for review. See CLAUDE.md "Typed
 // Supabase client (incremental adoption)" for the rollout contract.
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Update payloads for tables this file mutates conditionally. The typed
@@ -1319,10 +1319,18 @@ export async function completeJobOperation(
     });
   }
   if (data.notes !== undefined) {
-    await supabase
+    // Checked: postgrest-js resolves with `{ error }` rather than rejecting, so an
+    // un-destructured await threw the note away silently on any write failure.
+    const { error: notesError } = await supabase
       .from('job_operations')
       .update({ notes: data.notes, updated_at: new Date().toISOString() })
       .eq('id', operationId);
+    if (notesError) {
+      throw toFriendlyError(notesError, {
+        entity: 'note',
+        fallback: 'Failed to save the operation note.',
+      });
+    }
   }
 
   // Read back the op + resulting statuses (the trigger already cascaded).

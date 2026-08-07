@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { assertDeleted, toFriendlyError } from '@/lib/supabaseErrors';
 import {
   generateStoragePath,
   uploadFileToStorage,
@@ -209,11 +210,16 @@ export async function deleteJobNoteMedia(media: {
   storage_path: string;
 }): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('note_media').delete().eq('id', media.id);
+  const { data, error } = await supabase
+    .from('note_media')
+    .delete()
+    .eq('id', media.id)
+    .select('id');
   if (error) {
     console.error('Error deleting job note media row:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'photo' });
   }
+  assertDeleted(data, 'photo');
   await deleteFileFromStorage(media.storage_path).catch((err) =>
     console.warn('Failed to delete media file after row delete:', err),
   );
@@ -242,11 +248,16 @@ export async function deleteJobNote(noteId: string): Promise<void> {
       .filter(Boolean);
   }
 
-  const { error } = await supabase.from('notes').delete().eq('id', noteId);
+  const { data, error } = await supabase
+    .from('notes')
+    .delete()
+    .eq('id', noteId)
+    .select('id');
   if (error) {
     console.error('Error deleting job note:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'note' });
   }
+  assertDeleted(data, 'note');
 
   for (const path of paths) {
     await deleteFileFromStorage(path).catch((err) =>

@@ -61,7 +61,6 @@ export default function ErrorAlert({
   sx,
 }: ErrorAlertProps) {
   const subscription = useOptionalSubscription();
-  const { isAdmin, loading: roleLoading } = useUserRole();
 
   if (!error) return null;
 
@@ -70,34 +69,94 @@ export default function ErrorAlert({
   );
   const isBilling = contextSaysBlocked || isBillingWriteBlocked(error);
 
-  if (!isBilling) {
-    const message =
-      typeof error === 'string' ? error : friendlyErrorMessage(error, { entity, references, fallback });
-
+  if (isBilling && subscription) {
     return (
-      <Alert severity="error" onClose={onClose} sx={sx}>
-        {message}
+      <BillingBlockedAlert
+        mustSubscribe={subscription.mustSubscribe}
+        entity={entity ?? 'change'}
+        onClose={onClose}
+        sx={sx}
+      />
+    );
+  }
+
+  if (isBilling) {
+    // No SubscriptionProvider: the operator app. They cannot subscribe and cannot reach Settings,
+    // so name neither — "the office" is what a machinist would actually say.
+    return (
+      <Alert severity="warning" onClose={onClose} sx={sx}>
+        Your shop&apos;s subscription isn&apos;t active, so this can&apos;t be saved. Let the office
+        know — an admin can turn it back on.
       </Alert>
     );
   }
 
-  const noun = entity ?? 'change';
+  return (
+    <Alert severity="error" onClose={onClose} sx={sx}>
+      {messageFor(error, { entity, references, fallback })}
+    </Alert>
+  );
+}
+
+/**
+ * An Error we threw ourselves, whose message is a sentence already written for a human —
+ * "This operation cannot be received.", "A quote must include at least one part."
+ *
+ * Told apart by the absence of a SQLSTATE: a raw Supabase failure is a plain object (not an
+ * Error) carrying `code`, and `toFriendlyError` copies that `code` onto what it produces.
+ * A hand-written Error has neither.
+ *
+ * Without this check those messages were replaced by the generic fallback, because
+ * `friendlyErrorMessage` matches on codes and finds none — a regression against the
+ * `err instanceof Error ? err.message : …` this component replaces, which passed them through.
+ */
+function isHandWrittenMessage(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    !(error as Error & { code?: unknown }).code &&
+    Boolean(error.message)
+  );
+}
+
+function messageFor(
+  error: unknown,
+  options: { entity?: string; references?: string; fallback?: string },
+): string {
+  if (typeof error === 'string') return error;
+  if (isHandWrittenMessage(error)) return error.message;
+  return friendlyErrorMessage(error, options);
+}
+
+/**
+ * The billing branch, split out for one reason: it needs the caller's ROLE, and reading that
+ * pulls in `useAuth` and `useParams`. An error alert must never be the thing that throws — it is
+ * what renders when something has already gone wrong — so those hooks are confined to the one
+ * branch that cannot be reached without a SubscriptionProvider above it.
+ */
+function BillingBlockedAlert({
+  mustSubscribe,
+  entity,
+  onClose,
+  sx,
+}: {
+  mustSubscribe: boolean;
+  entity: string;
+  onClose?: () => void;
+  sx?: SxProps<Theme>;
+}) {
+  const { isAdmin, loading } = useUserRole();
 
   // Only an admin can act on this. `/dashboard/[companyId]/settings` is behind AdminGuard and the
   // Stripe routes call `_verify_company_admin`, so offering the button to anyone else ends in a
-  // 403 — the confirm-then-error two-step interaction-standards.md §4 tells us to avoid. Suppress
-  // it while the role is still loading too, for the same reason.
-  const canSubscribe = Boolean(subscription) && !roleLoading && isAdmin;
+  // 403 — the confirm-then-error two-step interaction-standards.md §4 tells us to avoid. Suppressed
+  // while the role is still loading, for the same reason.
+  const canSubscribe = !loading && isAdmin;
 
   const message = !canSubscribe
-    ? // True whether they are a `user` on the dashboard or an operator on the shop floor. The
-      // operator wording deliberately avoids naming Settings, which they cannot reach.
-      subscription
-      ? `Your shop's subscription isn't active, so this can't be saved. An admin at your shop can restart it in Settings.`
-      : `Your shop's subscription isn't active, so this can't be saved. Let the office know — an admin can turn it back on.`
-    : subscription?.mustSubscribe
-      ? `Your subscription hasn't started yet, so Jigged can't save changes. Start it to save this ${noun}.`
-      : `Your subscription has ended, so Jigged is read-only. Resubscribe to save this ${noun}.`;
+    ? `Your shop's subscription isn't active, so this can't be saved. An admin at your shop can restart it in Settings.`
+    : mustSubscribe
+      ? `Your subscription hasn't started yet, so Jigged can't save changes. Start it to save this ${entity}.`
+      : `Your subscription has ended, so Jigged is read-only. Resubscribe to save this ${entity}.`;
 
   return (
     <Alert
@@ -120,7 +179,7 @@ export default function ErrorAlert({
       {message}
       {canSubscribe && (
         <Box component="span" sx={{ flexShrink: 0 }}>
-          <SubscribeButton label={subscription?.mustSubscribe ? 'Subscribe' : undefined} />
+          <SubscribeButton label={mustSubscribe ? 'Subscribe' : undefined} />
         </Box>
       )}
     </Alert>

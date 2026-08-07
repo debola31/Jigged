@@ -17,6 +17,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { assertDeleted, toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 import type {
   VendorContact,
@@ -181,14 +182,16 @@ export async function updateVendorContact(
 
 export async function deleteVendorContact(contactId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('vendor_contacts')
     .delete()
-    .eq('id', contactId);
+    .eq('id', contactId)
+    .select('id');
   if (error) {
     console.error('Error deleting vendor contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
+  assertDeleted(data, 'contact');
 }
 
 /**

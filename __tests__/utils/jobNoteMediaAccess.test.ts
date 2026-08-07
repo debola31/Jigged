@@ -174,6 +174,9 @@ describe('getJobNoteMediaUrl', () => {
 
 describe('deleteJobNoteMedia', () => {
   it('deletes the row first, then the file (row-first)', async () => {
+    // Returns the removed row — a DELETE blocked by the billing gate is filtered out silently
+    // rather than raising, so the row count is the only way to notice. See assertDeleted.
+    mockQueryBuilder.data = [{ id: 'media-1' }];
     await deleteJobNoteMedia({ id: 'media-1', storage_path: 'c1/jobs/j1/x.jpg' });
     expect(mockSupabase.from).toHaveBeenCalledWith('note_media');
     expect(mockQueryBuilder.delete).toHaveBeenCalled();

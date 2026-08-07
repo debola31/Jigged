@@ -19,7 +19,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 19 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toFriendlyError } from '@/lib/supabaseErrors';
 import { voidAllOperationCompletions } from '@/utils/operationCompletionsAccess';
 import type {
   OperatorJob,
@@ -798,13 +798,29 @@ async function loadOpOutsideContext(jobOperationId: string): Promise<OpOutsideCo
 }
 
 /**
+ * Throw when a write failed, instead of continuing as though it hadn't.
+ *
+ * postgrest-js RESOLVES with `{ error }` rather than rejecting, so `await supabase.from(…)
+ * .update(…)` with nothing destructured discards every failure. Several operator actions did
+ * exactly that and then returned `{ success: true }` — the shop floor was told the work was
+ * recorded while the row sat untouched. A lapsed subscription is one way to hit it (RLS blocks
+ * the write), but so is any constraint or policy failure.
+ *
+ * Matching zero rows is NOT a failure here: several of these updates carry a deliberate `.not(…)`
+ * guard that legitimately matches nothing. Only a real `error` throws.
+ */
+function assertWrote(error: unknown, entity: string, fallback: string): void {
+  if (error) throw toFriendlyError(error, { entity, fallback });
+}
+
+/**
  * Move a job_part to 'in_progress' because work on it has begun. The guard skips
  * parts already in_progress/completed/cancelled, leaving their started_at
  * untouched. Shared by complete, receive, and send (all are "work has begun").
  */
 async function movePartToInProgress(jobPartId: string, now: string): Promise<void> {
   const supabase = getSupabase();
-  await supabase
+  const { error } = await supabase
     .from('job_parts')
     .update({
       production_status: 'in_progress',
@@ -814,6 +830,7 @@ async function movePartToInProgress(jobPartId: string, now: string): Promise<voi
     })
     .eq('id', jobPartId)
     .not('production_status', 'in', '("in_progress","completed","cancelled")');
+  assertWrote(error, 'part', 'Failed to update the part status.');
 }
 
 /**
@@ -834,7 +851,7 @@ async function rollupPartAfterCompletion(jobPartId: string, now: string): Promis
   const partCompleted = !remaining || remaining.length === 0;
 
   if (partCompleted) {
-    await supabase
+    const { error } = await supabase
       .from('job_parts')
       .update({
         production_status: 'completed',
@@ -844,6 +861,7 @@ async function rollupPartAfterCompletion(jobPartId: string, now: string): Promis
       })
       .eq('id', jobPartId)
       .not('production_status', 'in', '("cancelled")');
+    assertWrote(error, 'part', 'Failed to update the part status.');
   } else {
     await movePartToInProgress(jobPartId, now);
   }
@@ -886,10 +904,11 @@ export async function markOperationSent(jobOperationId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   const now = new Date().toISOString();
 
-  await supabase
+  const { error: sendError } = await supabase
     .from('job_operations')
     .update({ status: 'sent', sent_at: now, sent_by: user?.id ?? null })
     .eq('id', jobOperationId);
+  assertWrote(sendError, 'operation', 'Failed to mark the operation sent out.');
 
   await movePartToInProgress(op.job_part_id, now);
 }
@@ -936,7 +955,20 @@ export async function markOperationReceived(
     update.sent_by = user?.id ?? null;
   }
 
-  await supabase.from('job_operations').update(update).eq('id', jobOperationId);
+  // Checked, not fire-and-forget. postgrest-js RESOLVES with `{ error }` rather than rejecting,
+  // so an un-destructured `await` swallows every failure silently — this reported
+  // `{ success: true }` and told the operator the vendor work was back while the row was
+  // untouched. A lapsed subscription is one way to hit it; so is any RLS or constraint failure.
+  const { error: updateError } = await supabase
+    .from('job_operations')
+    .update(update)
+    .eq('id', jobOperationId);
+  if (updateError) {
+    throw toFriendlyError(updateError, {
+      entity: 'operation',
+      fallback: 'Failed to mark the operation received.',
+    });
+  }
 
   const partCompleted = await rollupPartAfterCompletion(op.job_part_id, now);
 
@@ -977,25 +1009,27 @@ export async function revertOperationCompletion(
     const supabase = getSupabase();
     const now = new Date().toISOString();
 
+    let stepBackError: unknown = null;
     if (op.status === 'completed' && op.sent_at) {
       // Received → back to sent (parts are still out); keep sent_at/by.
-      await supabase
+      ({ error: stepBackError } = await supabase
         .from('job_operations')
         .update({ status: 'sent', completed_at: null, completed_by: null })
-        .eq('id', jobOperationId);
+        .eq('id', jobOperationId));
     } else if (op.status === 'sent') {
       // Un-send → back to pending; clear the send stamp.
-      await supabase
+      ({ error: stepBackError } = await supabase
         .from('job_operations')
         .update({ status: 'pending', sent_at: null, sent_by: null })
-        .eq('id', jobOperationId);
+        .eq('id', jobOperationId));
     } else {
       // Legacy external completed op that never went through send → pending.
-      await supabase
+      ({ error: stepBackError } = await supabase
         .from('job_operations')
         .update({ status: 'pending', completed_at: null, completed_by: null, sent_at: null, sent_by: null })
-        .eq('id', jobOperationId);
+        .eq('id', jobOperationId));
     }
+    assertWrote(stepBackError, 'operation', 'Failed to undo the operation.');
 
     const { data: stillCompleted } = await supabase
       .from('job_operations')
@@ -1005,7 +1039,7 @@ export async function revertOperationCompletion(
 
     const hasCompleted = !!stillCompleted && stillCompleted.length > 0;
 
-    await supabase
+    const { error: rollbackError } = await supabase
       .from('job_parts')
       .update({
         production_status: hasCompleted ? 'in_progress' : 'not_started',
@@ -1015,6 +1049,7 @@ export async function revertOperationCompletion(
       })
       .eq('id', op.job_part_id)
       .not('production_status', 'in', '("cancelled")');
+    assertWrote(rollbackError, 'part', 'Failed to undo the operation.');
     return;
   }
 

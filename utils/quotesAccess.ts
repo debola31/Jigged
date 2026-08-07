@@ -3,7 +3,7 @@
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toFriendlyError } from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -417,7 +417,7 @@ export async function createQuote(
 
   if (error) {
     console.error('Error creating quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
 
   // Snapshot one line item per (part, quantity) entry (auto-resolving the
@@ -574,7 +574,7 @@ export async function updateQuote(
 
   if (error) {
     console.error('Error updating quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
 
   await reconcileQuoteLineItems(quoteId, companyId, formData, options);
@@ -928,7 +928,7 @@ async function writeCostSnapshotsForPart(
       setup_cost: item.setup_cost,
     }));
     const { error } = await supabase.from('quote_operations').insert(opRows);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
 
   if (breakdown.material_items.length > 0) {
@@ -949,7 +949,7 @@ async function writeCostSnapshotsForPart(
       units_consumed: item.units_consumed,
     }));
     const { error } = await supabase.from('quote_materials').insert(matRows);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
 }
 
@@ -1034,7 +1034,7 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
 
   if (error) {
     console.error('Error expiring quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
   return asQuote(data);
 }

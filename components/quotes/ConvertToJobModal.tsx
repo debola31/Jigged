@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState, useMemo } from 'react';
 import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
@@ -105,7 +106,9 @@ export default function ConvertToJobModal({
   onConverted,
 }: ConvertToJobModalProps) {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell
+  // a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
 
   // Due date is entered manually — lead time is free text and no longer
   // implies a date. Starts empty; required + not-in-the-past to convert.
@@ -308,7 +311,7 @@ export default function ConvertToJobModal({
       });
       onConverted(result.job.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to convert quote to job');
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -334,10 +337,14 @@ export default function ConvertToJobModal({
       <DialogTitle>Convert to Job</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1 }}>
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {error}
-            </Alert>
+          {error != null && (
+            <ErrorAlert
+              error={error}
+              entity="job"
+              fallback="Couldn't convert this quote to a job. Please try again."
+              onClose={() => setError(null)}
+              sx={{ mb: 2 }}
+            />
           )}
 
           {attachmentWarning && (

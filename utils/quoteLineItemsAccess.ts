@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { assertDeleted, toFriendlyError } from '@/lib/supabaseErrors';
 import type { Json } from '@/types/database';
 import type { QuoteLineItem } from '@/types/quote';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
@@ -153,7 +154,7 @@ export async function insertLineItemForPart(
 
   if (error) {
     console.error('Error inserting quote line item:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
   return data as unknown as QuoteLineItem;
 }
@@ -237,7 +238,7 @@ export async function updateLineItemQuantity(
     .single();
   if (error) {
     console.error('Error updating line item quantity:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
   return data as unknown as QuoteLineItem;
 }
@@ -261,7 +262,7 @@ export async function updateLineItemLeadTime(
     .eq('id', lineItemId);
   if (error) {
     console.error('Error updating line item lead time:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
 }
 
@@ -342,7 +343,7 @@ export async function repriceLineItemToCurrent(
     .single();
   if (error) {
     console.error('Error repricing line item:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
   return data as unknown as QuoteLineItem;
 }
@@ -353,25 +354,30 @@ export async function repriceLineItemToCurrent(
  */
 export async function deleteLineItem(lineItemId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('quote_line_items')
     .delete()
-    .eq('id', lineItemId);
+    .eq('id', lineItemId)
+    .select('id');
   if (error) {
     console.error('Error deleting quote line item:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
+  assertDeleted(data, 'line item');
 }
 
 /**
  * Delete every line item on a quote. Used by bulk delete and by re-snapshot
  * flows that rebuild the full list.
  */
+// No row-count assertion here, unlike deleteLineItem: clearing a quote that already has no line
+// items is a normal outcome (the re-snapshot flow calls this before rebuilding), so zero rows
+// would report a failure for an operation that did exactly what was asked.
 export async function clearLineItemsForQuote(quoteId: string): Promise<void> {
   const supabase = getSupabase();
   const { error } = await supabase.from('quote_line_items').delete().eq('quote_id', quoteId);
   if (error) {
     console.error('Error clearing quote line items:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'line item' });
   }
 }

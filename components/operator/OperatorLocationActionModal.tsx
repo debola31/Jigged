@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState } from 'react';
 import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
@@ -11,7 +12,6 @@ import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import Alert from '@mui/material/Alert';
 
 import {
   addStockAtLocation,
@@ -19,7 +19,6 @@ import {
   adjustStockAtLocation,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { generateStoragePath, uploadFileToStorage } from '@/utils/storageHelpers';
@@ -95,7 +94,9 @@ export default function OperatorLocationActionModal({
   const [unit, setUnit] = useState(primaryUnit);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell a
+  // billing block from an ordinary failure. Validation still sets plain strings, which it renders.
+  const [error, setError] = useState<unknown>(null);
 
   // Optional job tag, deplete only. Loaded on open via onEnter (house
   // convention — not a useEffect, which would trip set-state-in-effect lint).
@@ -211,7 +212,7 @@ export default function OperatorLocationActionModal({
     } catch (e) {
       // Supabase errors are plain objects, not Error instances — `instanceof` would drop the
       // reason the database gave us.
-      setError(friendlyErrorMessage(e, { entity: 'stock', fallback: 'Failed to update stock.' }));
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -293,7 +294,9 @@ export default function OperatorLocationActionModal({
           {showPhoto && (
             <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
           )}
-          {error && <Alert severity="error">{error}</Alert>}
+          {error != null && (
+            <ErrorAlert error={error} entity="stock" fallback="Failed to update stock." />
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>

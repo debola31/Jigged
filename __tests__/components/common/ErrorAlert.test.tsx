@@ -83,6 +83,32 @@ describe('ErrorAlert', () => {
     expect(screen.queryByRole('button', { name: /subscribe/i })).not.toBeInTheDocument();
   });
 
+  it('passes through a hand-written Error message rather than genericising it', () => {
+    // The access layer throws plenty of these — "This operation cannot be received.",
+    // "A quote must include at least one part." They carry no SQLSTATE, so code-matching finds
+    // nothing and would fall back to "Something went wrong"; the message IS the useful part.
+    render(
+      <ErrorAlert
+        error={new Error('This operation cannot be received.')}
+        entity="operation"
+        fallback="Something went wrong. Please try again."
+      />,
+    );
+    expect(screen.getByText('This operation cannot be received.')).toBeInTheDocument();
+  });
+
+  it('does NOT pass through a raw Supabase message', () => {
+    // The other half of that rule: anything carrying a SQLSTATE is DB text, and
+    // "raw DB strings must never reach a user".
+    render(
+      <ErrorAlert
+        error={{ code: '23503', message: 'violates foreign key constraint "x_fkey"' }}
+        entity="address"
+      />,
+    );
+    expect(screen.queryByText(/x_fkey/)).not.toBeInTheDocument();
+  });
+
   describe('context-first classification', () => {
     it('reads a zero-row failure as billing when the shop cannot write', () => {
       // The reason context is checked before error shape. A billing-blocked UPDATE is filtered

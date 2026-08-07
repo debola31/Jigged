@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState, useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { useParams } from 'next/navigation';
@@ -84,7 +85,10 @@ export default function OperatorOperationActionPage() {
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string. This page carries four separate writes
+  // (complete, undo, send, receive) and every one of them can be refused by the billing gate;
+  // ErrorAlert needs the object to say so rather than 'Failed to record completion'.
+  const [error, setError] = useState<unknown>(null);
   // Good-quantity the operator is about to record. Blank until the summary loads,
   // then defaults to the remaining balance (dialled down for a partial).
   const [qtyInput, setQtyInput] = useState('');
@@ -150,7 +154,7 @@ export default function OperatorOperationActionPage() {
     [jobOperationId, companyId],
     {
       onError: (err) => {
-        setError(err instanceof Error ? err.message : 'Failed to load operation');
+        setError(err);
       },
     },
   );
@@ -268,7 +272,7 @@ export default function OperatorOperationActionPage() {
 
       await reloadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record completion');
+      setError(err);
     } finally {
       setActionLoading(false);
     }
@@ -307,7 +311,7 @@ export default function OperatorOperationActionPage() {
       setQtyDirty(false);
       await reloadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to undo completion');
+      setError(err);
     } finally {
       setActionLoading(false);
     }
@@ -322,7 +326,7 @@ export default function OperatorOperationActionPage() {
       await markOperationSent(jobOperationId);
       await loadJob();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to mark sent out');
+      setError(err);
     } finally {
       setActionLoading(false);
     }
@@ -335,7 +339,7 @@ export default function OperatorOperationActionPage() {
       await markOperationReceived(jobOperationId);
       await loadJob();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to mark received');
+      setError(err);
     } finally {
       setActionLoading(false);
     }
@@ -391,10 +395,13 @@ export default function OperatorOperationActionPage() {
     // action bar instead of ending underneath it — the documented failure mode
     // of sticky bars is obscuring the content or the error you need to read.
     <Box>
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
+      {error != null && (
+        <ErrorAlert
+          error={error}
+          entity="operation"
+          fallback="Something went wrong. Please try again."
+          sx={{ mb: 2 }}
+        />
       )}
 
       <Card

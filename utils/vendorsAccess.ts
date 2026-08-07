@@ -1,6 +1,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 11 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 import { orIlikeValue } from '@/utils/searchFilter';
 
@@ -262,11 +263,11 @@ export async function createVendor(
         vendor = revived;
       } else {
         console.error('Error creating vendor:', error);
-        throw error;
+        throw toFriendlyError(error, { entity: 'vendor' });
       }
     } else {
       console.error('Error creating vendor:', error);
-      throw error;
+      throw toFriendlyError(error, { entity: 'vendor' });
     }
   } else {
     vendor = data as Vendor;
@@ -335,7 +336,7 @@ async function reviveArchivedVendorByName(
 
   if (error) {
     console.error('Error reviving archived vendor:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'vendor' });
   }
 
   return data as Vendor;
@@ -359,7 +360,7 @@ export async function updateVendor(
 
   if (error) {
     console.error('Error updating vendor:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'vendor' });
   }
   return data as Vendor;
 }
@@ -379,7 +380,7 @@ export async function deleteVendor(vendorId: string): Promise<void> {
 
   if (error) {
     console.error('Error archiving vendor:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'vendor' });
   }
 }
 

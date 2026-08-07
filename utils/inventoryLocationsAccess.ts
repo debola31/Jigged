@@ -10,6 +10,7 @@
  * both the display values and the converted quantity.
  */
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
@@ -274,7 +275,11 @@ function mapLocationWriteError(error: { code?: string; message?: string }, name?
         : 'There\'s already a location with that name in the same place. Pick a different name.',
     );
   }
-  return new Error(error.message ?? 'Failed to save location.');
+  // Everything else goes through the shared translator rather than passing `error.message`
+  // straight out: that fallback rendered raw PostgREST text to the user, so a lapsed shop saw
+  // 'new row violates row-level security policy "billing_gate_insert"…' instead of being told
+  // its subscription needs restarting.
+  return toFriendlyError(error, { entity: 'location', fallback: 'Failed to save location.' });
 }
 
 /**
@@ -398,7 +403,7 @@ export async function deleteLocation(id: string): Promise<void> {
     if (msg.includes('still holds stock')) {
       throw new Error('This location (or something inside it) still holds stock. Move it out first.');
     }
-    throw new Error('Failed to delete location.');
+    throw toFriendlyError(error, { entity: 'location', fallback: 'Failed to delete location.' });
   }
 }
 
@@ -532,7 +537,7 @@ export async function subdivideLocation(
 
   if (error) {
     console.error('Error subdividing location:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'location' });
   }
   return (data ?? []) as InventoryLocation[];
 }
@@ -970,7 +975,7 @@ export async function addStockAtLocation(
   });
   if (error) {
     console.error('Error adding stock at location:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as StockMutationResult;
 }
@@ -1000,7 +1005,7 @@ export async function depleteStockAtLocation(
   });
   if (error) {
     console.error('Error depleting stock at location:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as StockMutationResult;
 }
@@ -1029,7 +1034,7 @@ export async function adjustStockAtLocation(
   });
   if (error) {
     console.error('Error adjusting stock at location:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as StockMutationResult;
 }
@@ -1060,7 +1065,7 @@ export async function transferStock(
   });
   if (error) {
     console.error('Error transferring stock:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as TransferResult;
 }
@@ -1111,7 +1116,7 @@ export async function bulkPutAway(
   });
   if (error) {
     console.error('Error putting stock away:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'stock' });
   }
   return data as unknown as PutAwayResult;
 }

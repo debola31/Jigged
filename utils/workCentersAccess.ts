@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import type {
   WorkCenter,
   WorkCenterFormData,
@@ -331,7 +332,7 @@ export async function createWorkCenter(
       if (revived) return revived;
     }
     console.error('Error creating work center:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'work center' });
   }
 
   return data as WorkCenter;
@@ -380,7 +381,7 @@ async function reviveArchivedWorkCenterByName(
 
   if (error) {
     console.error('Error reviving archived work center:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'work center' });
   }
 
   return data as WorkCenter;
@@ -412,7 +413,7 @@ export async function updateWorkCenter(
 
   if (error) {
     console.error('Error updating work center:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'work center' });
   }
 
   return data as WorkCenter;
@@ -434,7 +435,7 @@ export async function deleteWorkCenter(workCenterId: string): Promise<void> {
 
   if (error) {
     console.error('Error archiving work center:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'work center' });
   }
 }
 

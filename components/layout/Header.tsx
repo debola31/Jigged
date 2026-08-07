@@ -1,16 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, usePathname, useParams } from 'next/navigation';
+import { usePathname, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import StatusChip from '@/components/common/StatusChip';
-import LogoutIcon from '@mui/icons-material/Logout';
 import MenuIcon from '@mui/icons-material/Menu';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
-import { useAuth } from '@/components/providers/AuthProvider';
+import AccountMenu from '@/components/layout/AccountMenu';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { usePageTitle } from './PageTitleProvider';
 
@@ -147,22 +146,14 @@ interface HeaderProps {
 }
 
 export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const params = useParams();
   const companyId = params.companyId as string | undefined;
-  const { signOut, user } = useAuth();
-  const firstName = user?.user_metadata?.first_name;
   const { isDemoMode } = useDemoMode();
   // A page may override the title (e.g. the part page shows the part number) so
   // the record identity stays visible in the sticky app bar while scrolling.
   const { title: overrideTitle } = usePageTitle();
   const pageTitle = overrideTitle ?? getPageTitle(pathname);
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace('/');
-  };
 
   return (
     <Box
@@ -213,14 +204,6 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
         )}
       </Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-        {!isMobile && firstName && (
-          <Typography
-            variant="body2"
-            sx={{ color: 'rgba(255, 255, 255, 0.7)', mr: 1 }}
-          >
-            Welcome, {firstName}
-          </Typography>
-        )}
         {/* The way to the shop floor, from every office page.
 
             The sidebar carries the same destination, but on a phone the sidebar is
@@ -249,36 +232,10 @@ export default function Header({ isMobile = false, onMenuClick }: HeaderProps) {
             Shop floor
           </Button>
         )}
-        {isMobile ? (
-          <IconButton
-            onClick={handleSignOut}
-            aria-label="Sign out"
-            sx={{
-              color: 'rgba(255, 255, 255, 0.7)',
-              '&:hover': {
-                bgcolor: 'rgba(239, 68, 68, 0.1)',
-                color: 'error.main',
-              },
-            }}
-          >
-            <LogoutIcon />
-          </IconButton>
-        ) : (
-          <Button
-            onClick={handleSignOut}
-            startIcon={<LogoutIcon />}
-            sx={{
-              color: 'rgba(255, 255, 255, 0.7)',
-              textTransform: 'none',
-              '&:hover': {
-                bgcolor: 'rgba(239, 68, 68, 0.1)',
-                color: 'error.main',
-              },
-            }}
-          >
-            Sign Out
-          </Button>
-        )}
+        {/* Who you are signed in as, and the account actions that belong with it — including the
+            sign-out this slot used to hold bare. See components/layout/AccountMenu.tsx for why the
+            name rides on screen beside the avatar rather than living only inside the menu. */}
+        <AccountMenu isMobile={isMobile} />
       </Box>
     </Box>
   );

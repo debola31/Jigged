@@ -1,12 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test-utils';
 import Header from '@/components/layout/Header';
 
 const mockSignOut = vi.fn();
 vi.mock('@/components/providers/AuthProvider', () => ({
   useAuth: () => ({
-    user: { id: 'u1', user_metadata: { first_name: 'Shane' } },
+    user: { id: 'u1', email: 'shane@lltool.test', user_metadata: {} },
     signOut: mockSignOut,
+  }),
+}));
+
+// The header composes the account menu; what the menu itself does with this data — and the fact
+// that the name comes off `user_company_access` rather than auth metadata — is pinned in
+// AccountMenu.test.tsx. Note the auth stub above deliberately carries no `user_metadata.first_name`:
+// the header must not depend on it again.
+vi.mock('@/hooks/useCurrentMember', () => ({
+  useCurrentMember: () => ({
+    name: 'Shane Miller',
+    email: 'shane@lltool.test',
+    role: 'admin',
+    loading: false,
   }),
 }));
 
@@ -44,11 +58,31 @@ describe('Header', () => {
     expect(screen.getByRole('link', { name: /shop floor/i })).toBeInTheDocument();
   });
 
-  it('still renders the page title and sign out', () => {
+  it('still renders the page title', () => {
     render(<Header />);
 
     expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+  });
+
+  // The office surface used to have no way to confirm which account you were in as — the shop
+  // floor did, and the header's `Welcome, {firstName}` read a key most accounts never had. Identity
+  // is now on screen at rest, without a click.
+  it('says who is signed in without making anyone open anything', () => {
+    render(<Header />);
+
+    expect(screen.getByText('Shane Miller')).toBeInTheDocument();
+  });
+
+  // Sign out did not disappear, it moved: it lives with the identity it belongs to instead of
+  // sitting bare beside Shop floor, where at phone widths one mis-tap ended the session.
+  it('reaches sign out through the account menu', async () => {
+    const user = userEvent.setup();
+    render(<Header />);
+
+    expect(screen.queryByRole('button', { name: /sign out/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /account/i }));
+    expect(await screen.findByRole('menuitem', { name: /sign out/i })).toBeInTheDocument();
   });
 
   // The bell that used to sit in this slot was removed in August 2026 — at-risk jobs

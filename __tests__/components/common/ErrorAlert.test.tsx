@@ -24,26 +24,46 @@ vi.mock('@/components/billing/SubscribeButton', () => ({
   default: () => <button type="button">Subscribe</button>,
 }));
 
+/** Copy is derived from `billing.subscription_status`, so the stubs carry a real row. */
+const billingRow = (subscription_status: string | null) => ({
+  billing_exempt: false,
+  subscription_status,
+  current_period_end: null,
+  cancel_at: null,
+  ended_at: null,
+});
+
 /** A shop that can write: the healthy case. */
 const CAN_WRITE = {
   isLoading: false,
   canWrite: true,
   mustSubscribe: false,
   isReadOnly: false,
+  billing: billingRow('active'),
 };
-/** Never subscribed. */
+/** Never subscribed — no company_billing row at all. */
 const MUST_SUBSCRIBE = {
   isLoading: false,
   canWrite: false,
   mustSubscribe: true,
   isReadOnly: false,
+  billing: null,
 };
-/** Subscribed once, lapsed past the grace window. */
+/** Subscribed once, canceled, past the grace window. */
 const READ_ONLY = {
   isLoading: false,
   canWrite: false,
   mustSubscribe: false,
   isReadOnly: true,
+  billing: billingRow('canceled'),
+};
+/** Paused — also read-only, but emphatically NOT ended. */
+const PAUSED = {
+  isLoading: false,
+  canWrite: false,
+  mustSubscribe: false,
+  isReadOnly: true,
+  billing: billingRow('paused'),
 };
 
 const BLOCKED_INSERT = {
@@ -172,6 +192,20 @@ describe('ErrorAlert', () => {
       render(<ErrorAlert error={BLOCKED_INSERT} entity="part" />);
       expect(screen.getByText(/an admin at your shop can restart it/i)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /subscribe/i })).not.toBeInTheDocument();
+    });
+
+    it('does not tell a shop that never subscribed that anything ended', () => {
+      subscriptionStub = { ...MUST_SUBSCRIBE };
+      render(<ErrorAlert error={BLOCKED_INSERT} entity="part" />);
+      expect(screen.queryByText(/ended|resubscribe/i)).not.toBeInTheDocument();
+    });
+
+    it('says paused, not ended, for a paused subscription', () => {
+      // Entitlement collapses paused into read_only alongside canceled/unpaid; the copy must not.
+      subscriptionStub = { ...PAUSED };
+      render(<ErrorAlert error={BLOCKED_INSERT} entity="part" />);
+      expect(screen.getByText(/subscription is paused/i)).toBeInTheDocument();
+      expect(screen.queryByText(/ended/i)).not.toBeInTheDocument();
     });
 
     it('offers no button while the role is still loading', () => {

@@ -5,6 +5,11 @@ import Box from '@mui/material/Box';
 import { useOptionalSubscription } from '@/components/providers/SubscriptionProvider';
 import SubscribeButton from '@/components/billing/SubscribeButton';
 import { useUserRole } from '@/hooks/useUserRole';
+import {
+  blockedNoticeForAdmin,
+  blockedNoticeForNonAdmin,
+  writeBlockedState,
+} from '@/lib/billingCopy';
 
 interface SubscriptionRequiredNoticeProps {
   /** Plural, as it appears mid-sentence: "parts", "customers", "work centers". */
@@ -39,12 +44,13 @@ export default function SubscriptionRequiredNotice({
   if (subscription.canWrite) return null;
 
   const canSubscribe = !roleLoading && isAdmin;
+  // Branch on the real subscription status, not on `mustSubscribe`: entitlement collapses
+  // canceled, unpaid AND paused into `read_only`, so a paused shop was told it "has ended".
+  const state = writeBlockedState(subscription.billing);
 
-  const message = !canSubscribe
-    ? `Your shop's subscription isn't active, so new ${entityPlural} can't be saved yet. An admin at your shop can restart it in Settings.`
-    : subscription.mustSubscribe
-      ? `Start your subscription to add ${entityPlural} to Jigged.`
-      : `Your subscription has ended, so Jigged is read-only. Resubscribe to add ${entityPlural} again.`;
+  const message = canSubscribe
+    ? blockedNoticeForAdmin(state, entityPlural)
+    : blockedNoticeForNonAdmin(state, entityPlural);
 
   return (
     <Alert
@@ -66,7 +72,7 @@ export default function SubscriptionRequiredNotice({
       {message}
       {canSubscribe && (
         <Box component="span" sx={{ flexShrink: 0 }}>
-          <SubscribeButton label={subscription.mustSubscribe ? 'Subscribe' : undefined} />
+          <SubscribeButton />
         </Box>
       )}
     </Alert>

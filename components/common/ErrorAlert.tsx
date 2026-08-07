@@ -7,6 +7,13 @@ import { useOptionalSubscription } from '@/components/providers/SubscriptionProv
 import SubscribeButton from '@/components/billing/SubscribeButton';
 import { useUserRole } from '@/hooks/useUserRole';
 import { friendlyErrorMessage, isBillingWriteBlocked } from '@/lib/supabaseErrors';
+import {
+  blockedMessageForAdmin,
+  blockedMessageForNonAdmin,
+  blockedMessageForOperator,
+  writeBlockedState,
+  type WriteBlockedState,
+} from '@/lib/billingCopy';
 
 interface ErrorAlertProps {
   /** Whatever was caught, or a message a caller already formatted. Falsy renders nothing. */
@@ -72,7 +79,7 @@ export default function ErrorAlert({
   if (isBilling && subscription) {
     return (
       <BillingBlockedAlert
-        mustSubscribe={subscription.mustSubscribe}
+        state={writeBlockedState(subscription.billing)}
         entity={entity ?? 'change'}
         onClose={onClose}
         sx={sx}
@@ -85,8 +92,7 @@ export default function ErrorAlert({
     // so name neither — "the office" is what a machinist would actually say.
     return (
       <Alert severity="warning" onClose={onClose} sx={sx}>
-        Your shop&apos;s subscription isn&apos;t active, so this can&apos;t be saved. Let the office
-        know — an admin can turn it back on.
+        {blockedMessageForOperator()}
       </Alert>
     );
   }
@@ -134,12 +140,12 @@ function messageFor(
  * branch that cannot be reached without a SubscriptionProvider above it.
  */
 function BillingBlockedAlert({
-  mustSubscribe,
+  state,
   entity,
   onClose,
   sx,
 }: {
-  mustSubscribe: boolean;
+  state: WriteBlockedState;
   entity: string;
   onClose?: () => void;
   sx?: SxProps<Theme>;
@@ -152,11 +158,9 @@ function BillingBlockedAlert({
   // while the role is still loading, for the same reason.
   const canSubscribe = !loading && isAdmin;
 
-  const message = !canSubscribe
-    ? `Your shop's subscription isn't active, so this can't be saved. An admin at your shop can restart it in Settings.`
-    : mustSubscribe
-      ? `Your subscription hasn't started yet, so Jigged can't save changes. Start it to save this ${entity}.`
-      : `Your subscription has ended, so Jigged is read-only. Resubscribe to save this ${entity}.`;
+  const message = canSubscribe
+    ? blockedMessageForAdmin(state, entity)
+    : blockedMessageForNonAdmin(state);
 
   return (
     <Alert
@@ -179,7 +183,7 @@ function BillingBlockedAlert({
       {message}
       {canSubscribe && (
         <Box component="span" sx={{ flexShrink: 0 }}>
-          <SubscribeButton label={mustSubscribe ? 'Subscribe' : undefined} />
+          <SubscribeButton />
         </Box>
       )}
     </Alert>

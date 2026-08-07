@@ -215,6 +215,14 @@ The DB refuses the write; the UI has to explain it. That path lives in
 - `SubscriptionRequiredNotice` says it up front on the five create routes, as an
   explanation rather than a disabled control — see
   [interaction-standards §4](../interaction-standards.md).
+- **The wording comes from `subscription_status`, not from entitlement.**
+  [`lib/billingCopy.ts`](../../lib/billingCopy.ts) maps the billing row to
+  `never_started | ended | paused`, because `read_only` deliberately collapses
+  canceled, unpaid *and* paused — right for the write gate, wrong for a sentence.
+  Telling a paused shop it "has ended", or a never-subscribed one to "resubscribe",
+  are both false, and both were shipped before this split. It is the same field
+  `BillingCard` branches on, so the message on a blocked save matches the one in
+  Settings when the user goes looking for the cause.
 - `shouldReportSupabaseError` **drops** billing denials. The Supabase capture net
   files every `{ error }` response, so a lapsed shop would otherwise generate a Sentry
   issue on every write it attempts — the most predictable non-failure the app can

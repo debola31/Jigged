@@ -4,6 +4,7 @@ import Alert from '@mui/material/Alert';
 import { useSubscription } from '@/components/providers/SubscriptionProvider';
 import SubscribeButton from '@/components/billing/SubscribeButton';
 import { useUserRole } from '@/hooks/useUserRole';
+import { blockedMessageForNonAdmin, writeBlockedState } from '@/lib/billingCopy';
 
 /**
  * Persistent, app-wide billing banner rendered below the header (sibling of the
@@ -12,7 +13,7 @@ import { useUserRole } from '@/hooks/useUserRole';
  * DB is the actual write gate.
  */
 export default function BillingBanner() {
-  const { entitlement, isLoading, isPastDue, isReadOnly, mustSubscribe } = useSubscription();
+  const { entitlement, billing, isLoading, isPastDue, isReadOnly, mustSubscribe } = useSubscription();
   // Only an admin can act on any of this: SubscribeButton renders nothing for anyone else, so
   // telling a `user` to "resubscribe" or "update your payment method" would name an action they
   // have no way to take. They get told who can instead.
@@ -28,6 +29,7 @@ export default function BillingBanner() {
   if (!isPastDue && !isReadOnly && !mustSubscribe) return null;
 
   const canAct = !roleLoading && isAdmin;
+  const blockedState = writeBlockedState(billing);
 
   const config = {
     past_due: {
@@ -38,9 +40,11 @@ export default function BillingBanner() {
     },
     read_only: {
       severity: 'error' as const,
+      // `read_only` covers paused as well as canceled/unpaid, so the wording comes from the
+      // actual status — telling a PAUSED shop its subscription "has ended" is untrue.
       message: canAct
-        ? 'Your subscription has ended — your account is read-only. Resubscribe to make changes again.'
-        : "Your shop's subscription has ended, so Jigged is read-only. An admin at your shop can restart it in Settings.",
+        ? `Your subscription ${blockedState === 'paused' ? 'is paused' : 'has ended'} — your account is read-only. ${blockedState === 'paused' ? 'Resume it' : 'Resubscribe'} to make changes again.`
+        : blockedMessageForNonAdmin(blockedState),
     },
     must_subscribe: {
       severity: 'info' as const,

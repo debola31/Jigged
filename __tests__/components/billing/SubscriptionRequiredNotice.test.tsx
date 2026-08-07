@@ -13,7 +13,23 @@ vi.mock('@/components/billing/SubscribeButton', () => ({
   default: () => <button type="button">Subscribe</button>,
 }));
 
-const BASE = { isLoading: false, isDemo: false, canWrite: false, mustSubscribe: true };
+const billingRow = (subscription_status: string | null) => ({
+  billing_exempt: false,
+  subscription_status,
+  current_period_end: null,
+  cancel_at: null,
+  ended_at: null,
+});
+
+// Never subscribed: no company_billing row at all. Copy derives from the row, not from
+// `mustSubscribe`, so the stub has to carry one.
+const BASE = {
+  isLoading: false,
+  isDemo: false,
+  canWrite: false,
+  mustSubscribe: true,
+  billing: null as ReturnType<typeof billingRow> | null,
+};
 
 beforeEach(() => {
   subscriptionStub = { ...BASE };
@@ -28,16 +44,37 @@ describe('SubscriptionRequiredNotice', () => {
   });
 
   it('says "resubscribe" for a shop that lapsed rather than never started', () => {
-    subscriptionStub = { ...BASE, mustSubscribe: false };
+    subscriptionStub = { ...BASE, mustSubscribe: false, billing: billingRow('canceled') };
     render(<SubscriptionRequiredNotice entityPlural="quotes" />);
     expect(screen.getByText(/read-only.*resubscribe to add quotes again/i)).toBeInTheDocument();
   });
 
+  it('says paused, not ended, for a paused subscription', () => {
+    subscriptionStub = { ...BASE, mustSubscribe: false, billing: billingRow('paused') };
+    render(<SubscriptionRequiredNotice entityPlural="quotes" />);
+    expect(screen.getByText(/paused/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ended/i)).not.toBeInTheDocument();
+  });
+
+  it('does not say "ended" to a shop that never subscribed', () => {
+    render(<SubscriptionRequiredNotice entityPlural="parts" />);
+    expect(screen.queryByText(/ended|again/i)).not.toBeInTheDocument();
+  });
+
   it('points a non-admin at their admin and offers no button', () => {
+    // BASE is never-subscribed, so the verb is "start it" — not "restart it", which would imply
+    // there had been something to restart.
+    roleStub = { role: 'user', isAdmin: false, loading: false };
+    render(<SubscriptionRequiredNotice entityPlural="customers" />);
+    expect(screen.getByText(/an admin at your shop can start it/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /subscribe/i })).not.toBeInTheDocument();
+  });
+
+  it('says "restart it" to a non-admin once there was a subscription to restart', () => {
+    subscriptionStub = { ...BASE, mustSubscribe: false, billing: billingRow('canceled') };
     roleStub = { role: 'user', isAdmin: false, loading: false };
     render(<SubscriptionRequiredNotice entityPlural="customers" />);
     expect(screen.getByText(/an admin at your shop can restart it/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /subscribe/i })).not.toBeInTheDocument();
   });
 
   it('renders nothing while entitlement is still loading', () => {

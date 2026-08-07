@@ -557,6 +557,30 @@ it with the record's identity (the part page sets the part number) — the app b
 identity stays visible while scrolling. An inline `<Typography variant="h4">Parts</Typography>` at the
 top of a page is a duplicate that also *loses* the sticky behaviour it duplicates.
 
+### Identity in the office chrome — two slots, two owners
+
+**Workspace identity is top-left; person identity is top-right.** The sidebar's
+[`CompanySwitcher`](../components/layout/CompanySwitcher.tsx) answers *which company*, and
+[`AccountMenu`](../components/layout/AccountMenu.tsx) in the header answers *which account* — name
+and avatar on screen at rest, with email and role a click away. Keep them apart; a second company
+control in the header, or a user name in the sidebar, puts one question in two places.
+
+**Read the person's name from `user_company_access.name`, never `user_metadata.first_name`.** The
+header greeted people from auth metadata for months and rendered *nothing* for every account the two
+sign-up paths didn't create, while the Team page showed the same name correctly off the membership
+row. `user_company_access` is the source every access-granting path populates;
+[`useCurrentMember`](../hooks/useCurrentMember.ts) is the way to read it. When the name is null,
+lead with the email — do not synthesise one from its local part.
+
+**Sign out lives in that menu, last, and `error.main` at rest.**
+[interaction-standards.md §1](interaction-standards.md#1-destructive-actions-delete--remove) names
+Logout destructive and puts the destructive option at the end, and both hold here — the old bare
+header button was grey-until-hover, which this corrected. Burying it is not the kebab anti-pattern
+that section warns about on office surfaces: that rule is about
+record deletes shown red-at-rest, and signing out is recoverable by signing back in. At phone widths
+it is a safety gain — the bare sign-out `IconButton` it replaced sat one mis-tap from ending the
+session, right beside a button people press often.
+
 **List pages** — `<Box>` with no padding (the layout supplies it) → one flex toolbar row → content.
 The toolbar reads left to right: search `TextField` (`size="small"`), any selection-dependent bulk
 actions, a `<Box sx={{ flex: 1 }} />` spacer, then `outlined` Import and `contained` New … pinned to

@@ -83,6 +83,9 @@ import FeedbackDialog from '@/components/feedback/FeedbackDialog';
 // `getSupabase`, not `getSupabase` — new code uses the typed client (issue #573). Only
 // `auth.signOut` is used here, which is schema-independent.
 import { getSupabase } from '@/lib/supabase';
+// First letters of the name, for the avatar. Falls back to a person-shaped blank. Shared with the
+// office header's account menu, which shows the same person the same way.
+import { initials } from '@/lib/initials';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
 import OperatorCompanySwitcher from '@/components/operator/OperatorCompanySwitcher';
 
@@ -91,16 +94,6 @@ export interface OperatorIdentity {
   email: string;
   companyName: string;
   userId: string;
-}
-
-/** First letters of the name, for the avatar. Falls back to a person-shaped blank. */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '';
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0]!.toUpperCase())
-    .join('');
 }
 
 export function OperatorIdentityRow({

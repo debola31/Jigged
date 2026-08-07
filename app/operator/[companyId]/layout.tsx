@@ -26,6 +26,7 @@ import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
+import { isIndeterminateSingleError } from '@/lib/supabaseErrors';
 import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
@@ -60,6 +61,14 @@ export default function OperatorLayout({
   const [userRole, setUserRole] = useState<string>('operator');
   const [navValue, setNavValue] = useState<string>('jobs');
   const [isLoading, setIsLoading] = useState(true);
+  /**
+   * The membership read failed for a reason that is NOT "you are not a member" —
+   * so we do not know the answer and must not act as though we do. See the
+   * PGRST116 branch in checkAuth.
+   */
+  const [accessCheckFailed, setAccessCheckFailed] = useState(false);
+  /** Bumped by the retry button to re-run checkAuth. */
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const supabase = getSupabase();
 
@@ -109,12 +118,27 @@ export default function OperatorLayout({
       }
 
       // 2. Validate user has access to this company (uses user_company_access)
-      const { data: operatorAccess } = await supabase
+      const { data: operatorAccess, error: accessError } = await supabase
         .from('user_company_access')
         .select('id, name, role')
         .eq('user_id', session.user.id)
         .eq('company_id', companyId)
         .single();
+
+      // "COULDN'T CHECK" IS NEVER "DENIED".
+      //
+      // The error used to be discarded here, so a dropped packet and a genuine
+      // non-membership both arrived as `data: null` and took the branch below:
+      // clear the station, sign out, bounce to login. On a personal phone on shop
+      // wifi that is not a rare path, and its cost is an operator mid-job thrown
+      // to a login screen having lost their station. Signing someone out is the
+      // most destructive thing this layout can do, and it was the response to a
+      // network blip.
+      if (isIndeterminateSingleError(accessError)) {
+        setAccessCheckFailed(true);
+        setIsLoading(false);
+        return;
+      }
 
       if (!operatorAccess) {
         // Local scope — only clear this device's bad session; don't revoke the
@@ -156,7 +180,9 @@ export default function OperatorLayout({
     return () => {
       subscription.unsubscribe();
     };
-  }, [companyId, router, isAuthPage, supabase]);
+    // `retryNonce` re-runs the check after a "couldn't check" failure. `validatedFor`
+    // is only set on success, so a failed check leaves nothing to skip past.
+  }, [companyId, router, isAuthPage, supabase, retryNonce]);
 
   // Update nav value based on current path.
   //
@@ -228,6 +254,49 @@ export default function OperatorLayout({
         }}
       >
         {children}
+      </Box>
+    );
+  }
+
+  // We could not determine membership. Deliberately NOT a sign-out and NOT an
+  // "access denied": both would assert something we do not know. The session is
+  // left intact and the stored station untouched, so Retry resumes exactly where
+  // the operator was. Sized for a gloved thumb on a phone, per the operator
+  // surface rules.
+  if (accessCheckFailed) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 3,
+          px: 4,
+          textAlign: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          Couldn&apos;t reach Jigged
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          We couldn&apos;t check your access just now. You&apos;re still signed in — this is
+          usually the shop&apos;s connection.
+        </Typography>
+        <Button
+          variant="contained"
+          size="large"
+          sx={{ minHeight: 56, minWidth: 200, fontSize: '1.05rem' }}
+          onClick={() => {
+            setAccessCheckFailed(false);
+            setIsLoading(true);
+            setRetryNonce((n) => n + 1);
+          }}
+        >
+          Retry
+        </Button>
       </Box>
     );
   }

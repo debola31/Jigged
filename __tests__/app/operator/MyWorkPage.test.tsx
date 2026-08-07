@@ -26,9 +26,41 @@ vi.mock('@/utils/operatorAccess', () => ({
 // This page became the "Me" tab, so it now reaches identity + Log out — which pull in
 // `getCompany` and `getSupabase`. `lib/supabase` creates its client eagerly at module scope
 // whenever `window` exists, so in jsdom merely importing it fails without env vars.
-vi.mock('@/utils/companyAccess', () => ({
-  getCompany: vi.fn(async () => ({ id: 'co1', name: 'Vanguard Precision Works' })),
+// `homePathForRole` and `setLastCompany` come through for the company switcher below; spreading the
+// real module rather than listing stubs keeps `homePathForRole`'s operator/dashboard split honest,
+// which is the whole thing the switcher test is asserting.
+vi.mock('@/utils/companyAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/companyAccess')>();
+  return {
+    ...actual,
+    getCompany: vi.fn(async () => ({ id: 'co1', name: 'Vanguard Precision Works' })),
+    setLastCompany: vi.fn(async () => {}),
+  };
+});
+
+// The operator company switcher reads this. Assigned per test via `stageCompanies`; the factory
+// only closes over the binding and never reads it, so the hoisting trap described above doesn't
+// bite (the arrow runs at render time, long after the `let` initialises).
+let companiesStub: Array<{
+  company_id: string;
+  role: string;
+  companies: { id: string; name: string };
+}> = [];
+vi.mock('@/hooks/useCompanies', () => ({
+  useCompanies: () => ({ companies: companiesStub, loading: false, error: null }),
 }));
+
+const CURRENT_COMPANY_ID = 'test-company-id'; // what the mocked useParams hands the page
+
+function stageCompanies(
+  list: Array<{ id: string; name: string; role: string }> = [],
+) {
+  companiesStub = list.map((c) => ({
+    company_id: c.id,
+    role: c.role,
+    companies: { id: c.id, name: c.name },
+  }));
+}
 // Both getters return the same stub: the page reaches one for Log out and the feedback insert, and
 // `useOperatorIdentity` reaches the other for the session. Stubbing only one left the identity load
 // throwing.
@@ -118,6 +150,8 @@ function stage({
 }
 
 beforeEach(() => {
+  // Single-company by default — which is what nearly every real operator is.
+  stageCompanies([{ id: CURRENT_COMPANY_ID, name: 'Vanguard Precision Works', role: 'operator' }]);
   routerMocks.push.mockClear();
   mockGetTotals.mockReset();
   mockGetNotesPage.mockReset();
@@ -661,5 +695,74 @@ describe('My Work — the "Me" tab', () => {
     expect(
       logout.compareDocumentPosition(firstNote) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+/**
+ * An operator who works for two shops previously had no way to reach the second one: the company
+ * switcher lives in the office sidebar, and the operator surface has no sidebar. Logging out
+ * didn't help either — login routes to `last_company_id`, i.e. straight back.
+ *
+ * It stayed invisible while multi-company operators were vanishingly rare. Fixing invite
+ * acceptance for people who already have an account is what makes holding two memberships an
+ * ordinary thing rather than an accident.
+ */
+describe('My Work — company switching', () => {
+  it('shows nothing at all to the single-company operator', async () => {
+    stage();
+    render(<MyWorkPage />);
+
+    await screen.findByRole('button', { name: /log out/i });
+    expect(screen.queryByRole('button', { name: /switch company/i })).not.toBeInTheDocument();
+  });
+
+  it('lets an operator who works for two shops move between them', async () => {
+    const user = userEvent.setup();
+    stageCompanies([
+      { id: CURRENT_COMPANY_ID, name: 'Vanguard Precision Works', role: 'operator' },
+      { id: 'co2', name: 'Contour Tool & Machine', role: 'operator' },
+    ]);
+    stage();
+    render(<MyWorkPage />);
+
+    await user.click(await screen.findByRole('button', { name: /switch company/i }));
+    await user.click(await screen.findByRole('button', { name: /contour tool & machine/i }));
+
+    // The shop floor, not a dashboard AuthGuard would bounce them straight out of.
+    await waitFor(() => expect(routerMocks.push).toHaveBeenCalledWith('/operator/co2'));
+  });
+
+  it('sends someone who is an operator here but an admin there to the right surface', async () => {
+    // Role is per-company, which is exactly what the old hardcoded /dashboard push got wrong.
+    const user = userEvent.setup();
+    stageCompanies([
+      { id: CURRENT_COMPANY_ID, name: 'Vanguard Precision Works', role: 'operator' },
+      { id: 'co2', name: 'Contour Tool & Machine', role: 'admin' },
+    ]);
+    stage();
+    render(<MyWorkPage />);
+
+    await user.click(await screen.findByRole('button', { name: /switch company/i }));
+    await user.click(await screen.findByRole('button', { name: /contour tool & machine/i }));
+
+    await waitFor(() => expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co2'));
+  });
+
+  it('keeps Log out isolated even with the switcher on screen', async () => {
+    // The switcher is a SIBLING of the identity row for this reason. If it ever migrates into the
+    // row — e.g. by making the company name tappable — this fails, and it should.
+    stageCompanies([
+      { id: CURRENT_COMPANY_ID, name: 'Vanguard Precision Works', role: 'operator' },
+      { id: 'co2', name: 'Contour Tool & Machine', role: 'operator' },
+    ]);
+    stage();
+    render(<MyWorkPage />);
+
+    const logout = await screen.findByRole('button', { name: /log out/i });
+    const row = logout.parentElement!;
+
+    expect(within(row).getAllByRole('button')).toHaveLength(1);
+    expect(within(row).queryAllByRole('link')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /switch company/i })).toBeInTheDocument();
   });
 });

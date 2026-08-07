@@ -248,6 +248,42 @@ export async function verifyCompanyAccess(userId: string, companyId: string): Pr
 }
 
 /**
+ * Does this user already belong to at least one company?
+ *
+ * Used by the invite-acceptance page to tell an established Jigged user from a brand-new hire,
+ * because nothing else on that page can: an invite sent to an already-registered email falls back
+ * to a magic link in the `team-invites` edge function, and a magic link carries no marker saying
+ * so. Without this, a two-year customer invited to a second company is shown the same "set up your
+ * account" form as a new hire and is asked to invent a password they already have.
+ *
+ * Deliberately NOT `getUserCompanies`: that filters out demo companies and joins `companies`. Here
+ * a demo membership still means "this person has an account with a password", which is the only
+ * question being asked, and the join is wasted work.
+ *
+ * Throws rather than returning false on a read failure — "couldn't check" is not "no account".
+ * The caller decides what to do with that; see the accept page, which falls back to the user's
+ * auth metadata rather than guessing.
+ *
+ * `user_company_access` has no `deleted_at` (membership is removed outright, not archived), so
+ * there is no soft-delete filter to apply here.
+ */
+export async function hasAnyCompanyAccess(userId: string): Promise<boolean> {
+  const supabase = getSupabase();
+
+  const { count, error } = await supabase
+    .from('user_company_access')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error checking existing company access:', error);
+    throw toError(error, 'Could not check existing company access');
+  }
+
+  return (count ?? 0) > 0;
+}
+
+/**
  * Get user's role in a specific company
  */
 export async function getUserRole(userId: string, companyId: string): Promise<string | null> {

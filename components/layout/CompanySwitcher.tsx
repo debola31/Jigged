@@ -17,6 +17,7 @@ import Skeleton from '@mui/material/Skeleton';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CheckIcon from '@mui/icons-material/Check';
 import { useCompanies } from '@/hooks/useCompanies';
+import { homePathForRole } from '@/utils/companyAccess';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { JiggedLogo } from '@/components/branding';
 
@@ -58,10 +59,14 @@ export default function CompanySwitcher() {
   };
   const handleClose = () => setDrawerOpen(false);
 
-  const handleSelectCompany = (companyId: string) => {
+  // Role-aware, because a user's role is per-company: someone who is an admin here can be an
+  // operator there. Hardcoding /dashboard sent that person to a page AuthGuard immediately bounces
+  // them out of. `homePathForRole` is the shared helper precisely so the four "send them home"
+  // call sites can't drift.
+  const handleSelectCompany = (companyId: string, role: string | null | undefined) => {
     handleClose();
     if (companyId !== currentCompanyId) {
-      router.push(`/dashboard/${companyId}`);
+      router.push(homePathForRole(role, companyId));
     }
   };
 
@@ -170,7 +175,7 @@ export default function CompanySwitcher() {
             return (
               <ListItem key={company.company_id} disablePadding sx={{ mb: 0.5 }}>
                 <ListItemButton
-                  onClick={() => handleSelectCompany(company.company_id)}
+                  onClick={() => handleSelectCompany(company.company_id, role)}
                   sx={{
                     borderRadius: 2,
                     py: 1.5,

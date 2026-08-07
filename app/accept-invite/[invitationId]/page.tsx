@@ -1,5 +1,38 @@
 'use client';
 
+/**
+ * Invite acceptance.
+ *
+ * ## Two paths, because there are two kinds of invitee
+ *
+ * This page used to have exactly one: everybody got "set up your account" with First name, Last
+ * name and a password box. That is right for a new hire and wrong for the person it hurt — an
+ * existing Jigged user invited to a SECOND company, who already has all three.
+ *
+ * They cannot be told apart from the link alone. `team-invites` calls
+ * `auth.admin.generateLink({ type: 'invite' })`, which fails for an already-registered email, and
+ * silently falls back to a magic link. A magic link carries no marker saying "this person already
+ * exists" — it just signs them in as their existing auth user and drops them here. So the page has
+ * to ask the question itself: `hasAnyCompanyAccess`, backstopped by their auth metadata.
+ *
+ * What that user used to see: a signup form, and a password field whose helper text invited them to
+ * fill it in. Typing their real password got them
+ * "New password should be different from the old password" — GoTrue's `same_password`, thrown from
+ * `updateUser`. Two things were wrong with that and both are fixed here.
+ *
+ * ## Order: access first, profile second
+ *
+ * `updateUser` used to run BEFORE `accept_invitation` and throw, so a password complaint also meant
+ * the user never got access to the company — the message named the wrong problem and hid the real
+ * one. Access is what the invitee came for; it must not be contingent on a profile write. The RPC
+ * runs first now, and a profile failure afterwards leaves them added, told so, and one tap from the
+ * company.
+ *
+ * `accept_invitation` is NOT idempotent — it selects `WHERE status = 'pending'` and raises
+ * `Invalid or expired invitation` on a second call. `grantedCompanyId` is what stops a retry after
+ * a partial failure from re-running it and reporting that as the problem.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
@@ -18,12 +51,29 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import posthog from 'posthog-js';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { getSupabase } from '@/lib/supabase';
-import { setLastCompany, homePathForRole } from '@/utils/companyAccess';
+import { setLastCompany, homePathForRole, hasAnyCompanyAccess } from '@/utils/companyAccess';
 import { getEdgeFunctionUrl } from '@/lib/supabase';
 import { AuthLayout } from '@/components/auth';
 import type { Invitation } from '@/types/team';
 
-type PageState = 'loading' | 'no-session' | 'name-prompt' | 'accepting' | 'error';
+type PageState = 'loading' | 'no-session' | 'confirm-join' | 'name-prompt' | 'accepting' | 'error';
+
+const MIN_PASSWORD_LENGTH = 6;
+
+/**
+ * GoTrue rejects a password change to the password already on the account. On this page that is a
+ * no-op, not a failure: the user typed their real password into a box we should not have shown
+ * them, and the account already holds exactly that value. Swallowing it is the whole point — it is
+ * the error that used to cost people their company access.
+ *
+ * Matched on `code` first (supabase-js surfaces `same_password`) with the message as a fallback,
+ * since the code was added later than some deployed GoTrue versions.
+ */
+function isSamePasswordError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  if (err.code === 'same_password') return true;
+  return /different from the old password/i.test(err.message ?? '');
+}
 
 export default function AcceptInvitePage() {
   const router = useRouter();
@@ -39,8 +89,18 @@ export default function AcceptInvitePage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string>('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  /** True once the user is recognised as an existing Jigged account (the confirm-join path). */
+  const [isExistingUser, setIsExistingUser] = useState(false);
+  /** Set only for an invite that actually wrote `invitation_id` into auth metadata. */
+  const [hasStaleInvitationMeta, setHasStaleInvitationMeta] = useState(false);
+  /**
+   * Company id once `accept_invitation` has succeeded. Doubles as the "access is already granted"
+   * flag — a retry must not call the non-idempotent RPC again.
+   */
+  const [grantedCompanyId, setGrantedCompanyId] = useState<string | null>(null);
 
   const checkSessionAndLoadInvitation = useCallback(async () => {
     const supabase = getSupabase();
@@ -102,13 +162,17 @@ export default function AcceptInvitePage() {
     }
 
     setUserId(session.user.id);
+    setUserEmail(session.user.email ?? '');
 
     // Pre-fill name from user metadata if available
     const meta = session.user.user_metadata;
     if (meta?.first_name) setFirstName(meta.first_name);
     if (meta?.last_name) setLastName(meta.last_name);
-    if (!meta?.first_name && (meta?.name || meta?.full_name)) {
-      const fullName = (meta.name || meta.full_name || '').trim();
+    // `display_name` included because it is what THIS page writes on acceptance, so it is the key
+    // most likely to be the only one an established user has. Without it their membership in the
+    // new company would be named after their email's local part.
+    if (!meta?.first_name && (meta?.display_name || meta?.name || meta?.full_name)) {
+      const fullName = (meta.display_name || meta.name || meta.full_name || '').trim();
       const parts = fullName.split(/\s+/);
       if (parts.length >= 2) {
         setFirstName(parts[0]);
@@ -117,6 +181,7 @@ export default function AcceptInvitePage() {
         setFirstName(parts[0]);
       }
     }
+    setHasStaleInvitationMeta(Boolean(meta?.invitation_id));
 
     // Fetch invitation via edge function (uses service role, bypasses RLS).
     // Direct table queries and RPCs fail due to JWT propagation timing
@@ -177,7 +242,25 @@ export default function AcceptInvitePage() {
     // Company name comes from the RPC join (bypasses RLS)
     setCompanyName(inv.company_name || '');
     setInvitation(inv);
-    setState('name-prompt');
+
+    // Which of the two paths? Membership of any company means they have completed setup once
+    // already, so they have a password and a name and must not be asked for either again.
+    //
+    // The metadata half of the `||` covers the one case membership misses: someone whose access was
+    // removed from every company but whose auth account (and password) still exists. `??` on the
+    // throw rather than a swallowed `false` keeps "couldn't check" from silently becoming "brand
+    // new user" on a network blip — metadata alone decides, which for a real existing user is
+    // populated.
+    let established = Boolean(meta?.first_name || meta?.display_name || meta?.full_name || meta?.name);
+    if (!established) {
+      try {
+        established = await hasAnyCompanyAccess(session.user.id);
+      } catch (err) {
+        console.error('Could not check existing company access; falling back to auth metadata:', err);
+      }
+    }
+    setIsExistingUser(established);
+    setState(established ? 'confirm-join' : 'name-prompt');
   }, [invitationId, router]);
 
   useEffect(() => {
@@ -189,67 +272,65 @@ export default function AcceptInvitePage() {
     checkSessionAndLoadInvitation();
   }, [checkSessionAndLoadInvitation]);
 
-  async function handleAccept(e: React.FormEvent) {
-    e.preventDefault();
-
-    if (!firstName.trim() || !lastName.trim()) {
-      setError('First name and last name are required');
-      return;
-    }
-
-    if (password) {
-      if (password.length < 6) {
-        setError('Password must be at least 6 characters');
-        return;
-      }
-      if (password !== confirmPassword) {
-        setError('Passwords do not match');
-        return;
-      }
-    }
-
+  /**
+   * Grant access, then write the profile. Shared by both paths so the ordering guarantee — and the
+   * retry guard on the non-idempotent RPC — cannot drift between them.
+   *
+   * `newPassword` is only ever passed on the new-user path.
+   */
+  async function acceptAndRedirect(fullName: string, newPassword?: string) {
     if (!invitation || !userId) return;
 
     setState('accepting');
     setError(null);
 
+    const supabase = getSupabase();
+
     try {
-      const supabase = getSupabase();
-
-      // Update user profile (and password if provided)
-      const updatePayload: { password?: string; data: Record<string, string | null> } = {
-        data: {
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          display_name: `${firstName.trim()} ${lastName.trim()}`,
-          // Clear invitation_id so the auth callback fallback doesn't
-          // redirect here on future logins
-          invitation_id: null,
-        },
-      };
-      if (password) {
-        updatePayload.password = password;
-      }
-
-      const { error: updateError } = await supabase.auth.updateUser(updatePayload);
-      if (updateError) {
-        throw new Error(updateError.message || 'Failed to update account');
-      }
-
-      // Accept invitation via database RPC
-      const { data: companyId, error: rpcError } = await supabase
-        .rpc('accept_invitation', {
+      // 1. Access first. Skipped if a previous attempt already got this far.
+      let companyId = grantedCompanyId;
+      if (!companyId) {
+        const { data, error: rpcError } = await supabase.rpc('accept_invitation', {
           p_invitation_id: invitation.id,
           p_user_id: userId,
         });
 
-      if (rpcError) {
-        throw new Error(rpcError.message || 'Failed to accept invitation');
+        if (rpcError) {
+          throw new Error(rpcError.message || 'Failed to accept invitation');
+        }
+        companyId = data as string;
+        setGrantedCompanyId(companyId);
       }
 
-      // Update the user's name on the team record
+      // 2. Profile and password. A failure here no longer costs the user their access.
+      const updatePayload: { password?: string; data?: Record<string, string | null> } = {};
+      if (newPassword) {
+        updatePayload.password = newPassword;
+      }
+      if (!isExistingUser) {
+        updatePayload.data = {
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          display_name: fullName,
+          // Clear invitation_id so the auth callback fallback doesn't
+          // redirect here on future logins
+          invitation_id: null,
+        };
+      } else if (hasStaleInvitationMeta) {
+        // An existing user keeps the name they already chose; the only thing worth clearing is a
+        // stale redirect marker, and only when one was actually written.
+        updatePayload.data = { invitation_id: null };
+      }
+
+      if (updatePayload.password || updatePayload.data) {
+        const { error: updateError } = await supabase.auth.updateUser(updatePayload);
+        if (updateError && !isSamePasswordError(updateError)) {
+          throw new Error(updateError.message || 'Failed to update account');
+        }
+      }
+
+      // 3. Name on the team record.
       const { data: { session } } = await supabase.auth.getSession();
-      const fullName = `${firstName.trim()} ${lastName.trim()}`;
 
       if (session) {
         const teamUrl = getEdgeFunctionUrl('team');
@@ -276,7 +357,10 @@ export default function AcceptInvitePage() {
       await setLastCompany(userId, companyId);
 
       posthog.identify(userId, { email: invitation.email });
-      posthog.capture('invitation_accepted', { role: invitation.role });
+      posthog.capture('invitation_accepted', {
+        role: invitation.role,
+        existing_user: isExistingUser,
+      });
 
       // Straight to the surface the invited role actually works on. A new operator's
       // very first screen used to be a dashboard flash before AuthGuard corrected it.
@@ -284,9 +368,48 @@ export default function AcceptInvitePage() {
     } catch (err) {
       console.error('Error accepting invitation:', err);
       setError(err instanceof Error ? err.message : 'Failed to accept invitation');
-      setState('name-prompt');
+      setState(isExistingUser ? 'confirm-join' : 'name-prompt');
     }
   }
+
+  /** Existing account: one tap, nothing to fill in. */
+  async function handleJoin() {
+    // Name comes from what their account already knows. Falls back to the local part of the
+    // invited email so the team list never shows a blank row.
+    const fromMetadata = `${firstName.trim()} ${lastName.trim()}`.trim();
+    const fullName = fromMetadata || (invitation?.email.split('@')[0] ?? '');
+    await acceptAndRedirect(fullName);
+  }
+
+  /** Not you? Leave, so the right account can accept. */
+  async function handleSignOut() {
+    const supabase = getSupabase();
+    await supabase.auth.signOut({ scope: 'local' });
+    router.push(`/login?returnTo=/accept-invite/${invitationId}`);
+  }
+
+  /** Brand-new account: name and password are both required, because neither exists yet. */
+  async function handleAccept(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!firstName.trim() || !lastName.trim()) {
+      setError('First name and last name are required');
+      return;
+    }
+
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    await acceptAndRedirect(`${firstName.trim()} ${lastName.trim()}`, password);
+  }
+
+  const roleLabel = invitation?.role === 'admin' ? 'Admin' : invitation?.role === 'operator' ? 'Operator' : 'User';
 
   // Loading state
   if (state === 'loading') {
@@ -356,9 +479,67 @@ export default function AcceptInvitePage() {
     );
   }
 
-  // Account setup — main acceptance form
-  const roleLabel = invitation?.role === 'admin' ? 'Admin' : invitation?.role === 'operator' ? 'Operator' : 'User';
+  /*
+   * Shown to anyone who already has a Jigged account. No name fields and no password field —
+   * asking for either is what this whole change exists to stop. The single button is a deliberate
+   * stop rather than an automatic join: it is where the invitee sees WHICH company and WHICH role
+   * they are accepting, and it keeps a mail-client link prefetch from joining them silently.
+   */
+  if (state === 'confirm-join') {
+    return (
+      <AuthLayout>
+        <Card elevation={3}>
+          <CardContent sx={{ p: 4 }}>
+            <Typography variant="h5" component="h2" gutterBottom align="center">
+              Join {companyName || 'Your Team'}
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+              <Chip label={roleLabel} color="primary" />
+            </Box>
 
+            {error && (
+              <Alert severity={grantedCompanyId ? 'warning' : 'error'} sx={{ mb: 3 }}>
+                {grantedCompanyId
+                  ? `You've been added to ${companyName || 'the company'}, but we couldn't finish updating your account: ${error}`
+                  : error}
+              </Alert>
+            )}
+
+            <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 1 }}>
+              You already have a Jigged account. Your name and password carry over — there is
+              nothing to set up.
+            </Typography>
+            {userEmail && (
+              <Typography variant="caption" color="text.secondary" align="center" sx={{ display: 'block', mb: 3 }}>
+                Signed in as {userEmail}
+              </Typography>
+            )}
+
+            <Button
+              variant="contained"
+              fullWidth
+              size="large"
+              onClick={grantedCompanyId
+                ? () => router.replace(homePathForRole(invitation?.role, grantedCompanyId))
+                : handleJoin}
+            >
+              {grantedCompanyId ? 'Continue' : `Join ${companyName || 'Team'}`}
+            </Button>
+
+            <Box sx={{ textAlign: 'center', mt: 2 }}>
+              <Button onClick={handleSignOut} size="small" sx={{ textTransform: 'none' }}>
+                Not you? Sign out
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      </AuthLayout>
+    );
+  }
+
+  // Account setup — new users only, which is why the password is now required rather than
+  // "leave blank if you already have one". Blank no longer means "I have one already"; it means an
+  // account reachable only by emailed magic link.
   return (
     <AuthLayout>
       <Card elevation={3}>
@@ -374,9 +555,22 @@ export default function AcceptInvitePage() {
           </Box>
 
           {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
+            <Alert severity={grantedCompanyId ? 'warning' : 'error'} sx={{ mb: 3 }}>
+              {grantedCompanyId
+                ? `You've been added to ${companyName || 'the company'}, but we couldn't finish setting up your account: ${error}`
+                : error}
             </Alert>
+          )}
+
+          {grantedCompanyId && (
+            <Button
+              variant="outlined"
+              fullWidth
+              sx={{ mb: 3 }}
+              onClick={() => router.replace(homePathForRole(invitation?.role, grantedCompanyId))}
+            >
+              Continue to {companyName || 'your team'}
+            </Button>
           )}
 
           <Box component="form" onSubmit={handleAccept}>
@@ -408,9 +602,10 @@ export default function AcceptInvitePage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               fullWidth
+              required
               sx={{ mb: 2 }}
               autoComplete="new-password"
-              helperText="Set a password for future logins. Leave blank if you already have one."
+              helperText={`At least ${MIN_PASSWORD_LENGTH} characters.`}
               slotProps={{
                 input: {
                   endAdornment: (
@@ -430,6 +625,7 @@ export default function AcceptInvitePage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               fullWidth
+              required
               sx={{ mb: 3 }}
               autoComplete="new-password"
               error={confirmPassword !== '' && password !== confirmPassword}

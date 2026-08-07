@@ -7,6 +7,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Snackbar from '@mui/material/Snackbar';
 import { useParams } from 'next/navigation';
 import { useOptionalSubscription } from '@/components/providers/SubscriptionProvider';
+import { useUserRole } from '@/hooks/useUserRole';
 import { startCheckout, openBillingPortal } from '@/lib/billingApi';
 
 /**
@@ -16,9 +17,14 @@ import { startCheckout, openBillingPortal } from '@/lib/billingApi';
  * details that matter: which of Checkout vs Portal a given billing state needs, and the
  * refresh-on-failure that corrects a stale cache.
  *
- * Renders nothing outside a SubscriptionProvider — the operator app has none, and an operator
- * cannot subscribe anyway. Callers are responsible for the *role* check: the Stripe routes require
- * admin (`_verify_company_admin`), so showing this to a `user` is a two-step dead end.
+ * Renders nothing when pressing it could not work:
+ *   - outside a SubscriptionProvider (the operator app has none, and an operator cannot subscribe);
+ *   - for anyone who is not an admin, or while the role is still unknown. `/settings` is behind
+ *     AdminGuard and both Stripe routes call `_verify_company_admin`, so a `user` who clicked this
+ *     got a 403 — the confirm-then-error two-step interaction-standards.md §4 forbids.
+ *
+ * The role check lives HERE rather than in each caller so the rule cannot drift between them, and
+ * so callers only have to get the *copy* right.
  */
 interface SubscribeButtonProps {
   size?: 'small' | 'medium';
@@ -38,10 +44,12 @@ export default function SubscribeButton({
   const params = useParams();
   const companyId = params.companyId as string;
   const subscription = useOptionalSubscription();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!subscription) return null;
+  if (roleLoading || !isAdmin) return null;
 
   const { mustSubscribe, hasCustomer, refresh } = subscription;
 

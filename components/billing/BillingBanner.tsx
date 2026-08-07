@@ -3,6 +3,7 @@
 import Alert from '@mui/material/Alert';
 import { useSubscription } from '@/components/providers/SubscriptionProvider';
 import SubscribeButton from '@/components/billing/SubscribeButton';
+import { useUserRole } from '@/hooks/useUserRole';
 
 /**
  * Persistent, app-wide billing banner rendered below the header (sibling of the
@@ -12,6 +13,10 @@ import SubscribeButton from '@/components/billing/SubscribeButton';
  */
 export default function BillingBanner() {
   const { entitlement, isLoading, isPastDue, isReadOnly, mustSubscribe } = useSubscription();
+  // Only an admin can act on any of this: SubscribeButton renders nothing for anyone else, so
+  // telling a `user` to "resubscribe" or "update your payment method" would name an action they
+  // have no way to take. They get told who can instead.
+  const { isAdmin, loading: roleLoading } = useUserRole();
 
   // Render nothing until billing is known. While the cache is still loading,
   // `billing` is null → entitlement resolves to `must_subscribe`, which would
@@ -22,20 +27,26 @@ export default function BillingBanner() {
 
   if (!isPastDue && !isReadOnly && !mustSubscribe) return null;
 
+  const canAct = !roleLoading && isAdmin;
+
   const config = {
     past_due: {
       severity: 'warning' as const,
-      message:
-        "Your last payment didn't go through. Update your payment method to keep your shop running.",
+      message: canAct
+        ? "Your last payment didn't go through. Update your payment method to keep your shop running."
+        : "Your shop's last payment didn't go through. An admin at your shop can update the payment method in Settings.",
     },
     read_only: {
       severity: 'error' as const,
-      message:
-        'Your subscription has ended — your account is read-only. Resubscribe to make changes again.',
+      message: canAct
+        ? 'Your subscription has ended — your account is read-only. Resubscribe to make changes again.'
+        : "Your shop's subscription has ended, so Jigged is read-only. An admin at your shop can restart it in Settings.",
     },
     must_subscribe: {
       severity: 'info' as const,
-      message: 'Start your subscription to unlock Jigged for your shop.',
+      message: canAct
+        ? 'Start your subscription to unlock Jigged for your shop.'
+        : "Your shop's subscription hasn't started yet, so changes can't be saved. An admin at your shop can start it in Settings.",
     },
     full: { severity: 'info' as const, message: '' },
   }[entitlement];

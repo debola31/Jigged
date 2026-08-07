@@ -114,6 +114,63 @@ export function isTransientAbortError(error: unknown): boolean {
 const PGRST_NO_ROWS = 'PGRST116';
 
 /**
+ * `insufficient_privilege` — every RLS denial, and every deliberate raise that borrows the code.
+ *
+ * Declared up here rather than with the other SQLSTATE constants below because
+ * `isBillingWriteBlocked` needs it and `shouldReportSupabaseError` needs *that*. `const` is not
+ * hoisted, so the order is load-bearing.
+ */
+const PG_INSUFFICIENT_PRIVILEGE = '42501';
+
+/**
+ * The two shapes a billing-gate denial arrives in — a lapsed or never-subscribed shop hitting the
+ * write gate, as opposed to a member who genuinely lacks permission.
+ *
+ *  1. RLS. A RESTRICTIVE policy carries its OWN name into the message:
+ *       new row violates row-level security policy "billing_gate_insert" for table "parts"
+ *     Postgres emits one WithCheckOption per restrictive policy, each keeping its `polname`, while
+ *     OR-folding all the permissive ones into a single NAMELESS entry. That is why `billing_gate`
+ *     is a safe discriminator: a plain membership denial produces the nameless form and is never
+ *     mistaken for a lapsed subscription. `test_permissive_denial_is_nameless` pins it in CI,
+ *     because the whole Subscribe CTA rests on it.
+ *  2. RPC. `inv_assert_can_write()` raises `insufficient_privilege` with
+ *       company <uuid> has no active subscription
+ *     (migration 20260801150944). The five SECURITY DEFINER stock RPCs bypass RLS by construction,
+ *     so they assert the gate themselves.
+ *
+ * NOT covered, deliberately: a blocked Storage upload. Those policies are permissive with
+ * `company_can_write` inlined, so the message carries no policy name and is indistinguishable by
+ * shape from a real permission failure. `ErrorAlert` catches that case from SubscriptionProvider
+ * context instead — see its classification order.
+ *
+ * Walks `cause` so it still answers correctly after `toFriendlyError` has replaced the message
+ * with user-facing copy. Depth-capped, and tolerant of a self-referential chain.
+ */
+const BILLING_GATE_POLICY_PREFIX = 'billing_gate';
+const BILLING_RPC_PHRASE = 'no active subscription';
+
+export function isBillingWriteBlocked(value: unknown): boolean {
+  let node: unknown = value;
+  for (let depth = 0; node && depth < 4; depth++) {
+    const record = asRecord(node);
+    const code = typeof record.code === 'string' ? record.code : '';
+    const message = typeof record.message === 'string' ? record.message : '';
+
+    if (
+      code === PG_INSUFFICIENT_PRIVILEGE &&
+      (message.includes(BILLING_GATE_POLICY_PREFIX) || message.includes(BILLING_RPC_PHRASE))
+    ) {
+      return true;
+    }
+
+    const next = record.cause;
+    if (next === node) return false;
+    node = next;
+  }
+  return false;
+}
+
+/**
  * Is this Supabase failure worth an issue in the queue?
  *
  * The Supabase Sentry integration (installed in `lib/supabase.ts`) captures EVERY `{ error }`
@@ -149,6 +206,20 @@ export function shouldReportSupabaseError(error: unknown): boolean {
   // Session expiry is not a bug and is already handled: the custom fetch in lib/supabase.ts
   // refreshes and retries, and `redirectToSessionExpiry` covers the rest.
   if (isAuthError(error)) return false;
+
+  /**
+   * The billing write-gate doing its job. A shop whose subscription lapsed generates one of these
+   * on every write it attempts, for as long as it stays lapsed — the single most predictable
+   * non-failure this app can produce, and the queue would fill with it.
+   *
+   * Note this is NOT the same judgement as "don't tell the user": the user gets a clear message
+   * and a Subscribe button (see `friendlyErrorMessage` and `ErrorAlert`). It only means nobody
+   * needs to be paged about a system working exactly as designed.
+   *
+   * A genuine permission denial still reports — that one IS a bug, and it produces the nameless
+   * form `isBillingWriteBlocked` deliberately does not match.
+   */
+  if (isBillingWriteBlocked(error)) return false;
 
   return true;
 }
@@ -186,6 +257,52 @@ export function toError(value: unknown, fallbackMessage = 'Unknown error'): Erro
   return error;
 }
 
+/**
+ * Brands an Error whose `.message` is already user-facing copy, so a second translation pass
+ * knows to leave it alone. `Symbol.for` rather than a property: invisible to `JSON.stringify`,
+ * to Sentry's serialiser, and to any `{ ...err }` spread.
+ */
+const FRIENDLY_ERROR = Symbol.for('jigged.friendlyError');
+
+/** True for an Error produced by `toFriendlyError`. */
+export function isFriendlyError(value: unknown): boolean {
+  return (
+    value instanceof Error &&
+    (value as unknown as Record<symbol, unknown>)[FRIENDLY_ERROR] === true
+  );
+}
+
+/**
+ * The access layer's throw: a real `Error` whose message is already the sentence to show a user.
+ *
+ * WHY THIS EXISTS. Supabase does not reject with an Error on the `{ data, error }` path — the
+ * builder does a bare `error = JSON.parse(body)` and hands back a plain object. (`PostgrestError`
+ * IS an Error subclass, but it is only constructed on the `.throwOnError()` path, which this repo
+ * does not use.) So `throw error` in an access function throws a non-Error, every
+ * `err instanceof Error ? err.message : 'Failed to X'` catch site takes the fallback branch, and
+ * the real reason is discarded — that is how a lapsed subscription rendered as "Failed to create
+ * part". Throwing this instead fixes the copy at ~90 existing catch sites with no UI change.
+ *
+ * `cause` keeps the original so `isBillingWriteBlocked` still classifies it after the message has
+ * been replaced; `code`/`details`/`hint` are copied as own properties so Sentry context survives.
+ * Idempotent, because several UI sites call `friendlyErrorMessage` on whatever they caught.
+ */
+export function toFriendlyError(value: unknown, options: FriendlyErrorOptions = {}): Error {
+  if (isFriendlyError(value)) return value as Error;
+
+  const error = new Error(friendlyErrorMessage(value, options), { cause: value });
+
+  const record = asRecord(value);
+  for (const key of ['code', 'details', 'hint'] as const) {
+    if (record[key] !== undefined && record[key] !== '') {
+      Object.assign(error, { [key]: record[key] });
+    }
+  }
+  Object.defineProperty(error, FRIENDLY_ERROR, { value: true, enumerable: false });
+
+  return error;
+}
+
 // ---------------------------------------------------------------------------
 // User-facing error translation
 // ---------------------------------------------------------------------------
@@ -195,7 +312,7 @@ export function toError(value: unknown, fallbackMessage = 'Unknown error'): Erro
 // never reach a user.
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 const PG_UNIQUE_VIOLATION = '23505';
-const PG_INSUFFICIENT_PRIVILEGE = '42501';
+// PG_INSUFFICIENT_PRIVILEGE ('42501') is declared above, next to isBillingWriteBlocked.
 /**
  * `raise_exception` — what a bare `RAISE EXCEPTION` in one of our own SECURITY DEFINER
  * functions produces. Unlike a constraint code, this means *we* wrote the message deliberately
@@ -272,6 +389,11 @@ export function friendlyErrorMessage(
   error: unknown,
   options: FriendlyErrorOptions = {},
 ): string {
+  // Already translated. Re-deriving from friendly text loses information rather than adding any:
+  // the FK branch reads the *DB* clause to name what still references the row, so a second pass
+  // over "…still referenced by quotes" degrades it to "…by other records".
+  if (isFriendlyError(error)) return (error as Error).message;
+
   const err = asRecord(error);
   const code = typeof err.code === 'string' ? err.code : undefined;
   const message = typeof err.message === 'string' ? err.message : '';
@@ -284,6 +406,18 @@ export function friendlyErrorMessage(
 
   if (code === PG_UNIQUE_VIOLATION) {
     return `That ${entity} already exists — use a different value.`;
+  }
+
+  // Checked BEFORE the generic privilege branch below, which would otherwise answer a billing
+  // question with a role diagnosis — sending the owner to ask their admin for access instead of
+  // to the Subscribe button sitting at the top of the same page.
+  //
+  // Role-agnostic on purpose: this is the copy that appears wherever `ErrorAlert` is not used, so
+  // it has to be true for an operator as well as an owner, while still naming the way out for the
+  // one person who can take it. `ErrorAlert` replaces it with role-aware copy when it knows more.
+  if (isBillingWriteBlocked(error)) {
+    const noun = options.entity && options.entity !== 'item' ? options.entity : 'change';
+    return `Your shop's subscription isn't active, so that ${noun} wasn't saved. An admin can start one in Settings.`;
   }
 
   if (

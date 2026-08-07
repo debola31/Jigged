@@ -4,9 +4,46 @@ import {
   redirectToSessionExpiry,
   consumeSessionExpiry,
   friendlyErrorMessage,
+  isBillingWriteBlocked,
+  isFriendlyError,
   isTransientAbortError,
+  shouldReportSupabaseError,
   toError,
+  toFriendlyError,
 } from '@/lib/supabaseErrors';
+
+/**
+ * The exact payloads Postgres produces for a billing-gate denial. Hard-coded rather than built by
+ * a helper: these strings are a contract with the DB, and the integration tests
+ * (`test_blocked_insert_names_the_billing_policy`) assert the same shapes from the other side.
+ */
+const BLOCKED_INSERT = {
+  code: '42501',
+  details: null,
+  hint: null,
+  message:
+    'new row violates row-level security policy "billing_gate_insert" for table "parts"',
+};
+const BLOCKED_UPDATE = {
+  code: '42501',
+  details: null,
+  hint: null,
+  message:
+    'new row violates row-level security policy "billing_gate_update" for table "parts"',
+};
+const BLOCKED_RPC = {
+  code: '42501',
+  details: null,
+  hint: null,
+  message: 'company 0f3ab1e2-1111-4222-8333-444455556666 has no active subscription',
+};
+/** A membership failure: permissive policies OR-fold into ONE nameless WithCheckOption. */
+const NAMELESS_DENIAL = {
+  code: '42501',
+  details: null,
+  hint: null,
+  message: 'new row violates row-level security policy for table "parts"',
+};
 
 describe('isAuthError', () => {
   it('returns true for PGRST301 (JWT expired)', () => {
@@ -357,5 +394,195 @@ describe('toError', () => {
       message: 'AbortError: Lock was stolen by another request',
     });
     expect(isTransientAbortError(result)).toBe(true);
+  });
+});
+
+describe('isBillingWriteBlocked', () => {
+  it('matches a blocked INSERT by its restrictive policy name', () => {
+    expect(isBillingWriteBlocked(BLOCKED_INSERT)).toBe(true);
+  });
+
+  it('matches a blocked UPDATE by its restrictive policy name', () => {
+    expect(isBillingWriteBlocked(BLOCKED_UPDATE)).toBe(true);
+  });
+
+  it('matches the stock RPC raise from inv_assert_can_write', () => {
+    expect(isBillingWriteBlocked(BLOCKED_RPC)).toBe(true);
+  });
+
+  it('does NOT match a nameless RLS denial', () => {
+    // THE guard for the whole discriminator. Permissive policies OR-fold into a single
+    // nameless WithCheckOption, so a plain membership failure looks like this. If this ever
+    // flips to true, every non-member is shown a Subscribe button for a permission problem
+    // that paying would not fix.
+    expect(isBillingWriteBlocked(NAMELESS_DENIAL)).toBe(false);
+  });
+
+  it('does NOT match a nameless storage 403 (the documented gap ErrorAlert covers)', () => {
+    expect(
+      isBillingWriteBlocked({
+        status: 403,
+        message: 'new row violates row-level security policy',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not match unrelated failures', () => {
+    expect(isBillingWriteBlocked({ code: 'PGRST116', message: 'no rows' })).toBe(false);
+    expect(isBillingWriteBlocked({ code: '23505', message: 'duplicate key' })).toBe(false);
+    expect(isBillingWriteBlocked({ code: '23503', message: 'violates foreign key' })).toBe(false);
+    expect(isBillingWriteBlocked(null)).toBe(false);
+    expect(isBillingWriteBlocked(undefined)).toBe(false);
+    expect(isBillingWriteBlocked('billing_gate_insert')).toBe(false);
+  });
+
+  it('does not match the right message under the wrong code', () => {
+    expect(
+      isBillingWriteBlocked({ code: '23514', message: 'billing_gate_insert' }),
+    ).toBe(false);
+  });
+
+  it('sees through one cause hop, so toFriendlyError output still classifies', () => {
+    expect(isBillingWriteBlocked(toFriendlyError(BLOCKED_INSERT, { entity: 'part' }))).toBe(true);
+  });
+
+  it('sees through two cause hops', () => {
+    const wrapped = new Error('outer', { cause: new Error('inner', { cause: BLOCKED_INSERT }) });
+    expect(isBillingWriteBlocked(wrapped)).toBe(true);
+  });
+
+  it('terminates on a self-referential cause chain', () => {
+    const cyclic: Record<string, unknown> = { code: 'X', message: 'nope' };
+    cyclic.cause = cyclic;
+    expect(() => isBillingWriteBlocked(cyclic)).not.toThrow();
+    expect(isBillingWriteBlocked(cyclic)).toBe(false);
+  });
+
+  it('gives up past the depth cap rather than walking forever', () => {
+    let deep: unknown = BLOCKED_INSERT;
+    for (let i = 0; i < 6; i++) deep = new Error(`layer ${i}`, { cause: deep });
+    expect(isBillingWriteBlocked(deep)).toBe(false);
+  });
+});
+
+describe('friendlyErrorMessage — billing write gate', () => {
+  it('beats the generic privilege branch for a billing denial', () => {
+    // Ordering guard. Both branches match 42501; the billing one must win, or a lapsed shop is
+    // told to go ask their admin for permission instead of to subscribe.
+    const message = friendlyErrorMessage(BLOCKED_INSERT, { entity: 'part' });
+    expect(message).toContain("subscription isn't active");
+    expect(message).not.toContain('permission');
+  });
+
+  it('names the entity', () => {
+    expect(friendlyErrorMessage(BLOCKED_INSERT, { entity: 'part' })).toContain(
+      "that part wasn't saved",
+    );
+  });
+
+  it('says "change" when no entity is given', () => {
+    expect(friendlyErrorMessage(BLOCKED_INSERT)).toContain("that change wasn't saved");
+  });
+
+  it('says "change" rather than the "item" default', () => {
+    expect(friendlyErrorMessage(BLOCKED_INSERT, { entity: 'item' })).toContain(
+      "that change wasn't saved",
+    );
+  });
+
+  it('translates the RPC raise the same way', () => {
+    expect(friendlyErrorMessage(BLOCKED_RPC, { entity: 'stock move' })).toContain(
+      "subscription isn't active",
+    );
+  });
+
+  it('still reports a nameless denial as a permission problem', () => {
+    expect(friendlyErrorMessage(NAMELESS_DENIAL)).toBe("You don't have permission to do that.");
+  });
+});
+
+describe('toFriendlyError', () => {
+  it('returns a real Error, which is what the UI catch sites test for', () => {
+    const result = toFriendlyError(BLOCKED_INSERT, { entity: 'part' });
+    expect(result).toBeInstanceOf(Error);
+    // The bug this whole helper exists to fix: Supabase's plain object fails this check, so
+    // `err instanceof Error ? err.message : 'Failed to create part'` took the fallback.
+    expect(BLOCKED_INSERT instanceof Error).toBe(false);
+  });
+
+  it('carries the friendly copy as its message', () => {
+    const result = toFriendlyError(BLOCKED_INSERT, { entity: 'part' });
+    expect(result.message).toBe(friendlyErrorMessage(BLOCKED_INSERT, { entity: 'part' }));
+  });
+
+  it('keeps code/details/hint as own properties for Sentry context', () => {
+    const result = toFriendlyError({ code: '23505', hint: 'try again', message: 'dup' });
+    expect(result).toHaveProperty('code', '23505');
+    expect(result).toHaveProperty('hint', 'try again');
+  });
+
+  it('sets cause to the original error', () => {
+    expect(toFriendlyError(BLOCKED_INSERT).cause).toBe(BLOCKED_INSERT);
+  });
+
+  it('is idempotent — re-wrapping returns the same instance', () => {
+    const once = toFriendlyError(BLOCKED_INSERT, { entity: 'part' });
+    expect(toFriendlyError(once, { entity: 'something else' })).toBe(once);
+  });
+
+  it('does not degrade FK copy when translated twice', () => {
+    // The regression this brand prevents. The FK branch reads the DB clause to name what still
+    // references the row; a second pass over friendly text would find nothing and fall back to
+    // the vague "other records".
+    const fkError = {
+      code: '23503',
+      message:
+        'delete on table "customer_addresses" violates foreign key constraint "quotes_billing_address_id_fkey" on table "quotes"',
+    };
+    const once = toFriendlyError(fkError, { entity: 'address' });
+    expect(once.message).toContain('quotes');
+    expect(friendlyErrorMessage(once, { entity: 'address' })).toBe(once.message);
+    expect(friendlyErrorMessage(once, { entity: 'address' })).not.toContain('other records');
+  });
+
+  it('brands invisibly, so serialisation is unaffected', () => {
+    const result = toFriendlyError(BLOCKED_INSERT);
+    expect(isFriendlyError(result)).toBe(true);
+    expect(Object.keys(result)).not.toContain('jigged.friendlyError');
+    expect(JSON.stringify({ ...result })).not.toContain('friendlyError');
+  });
+
+  it('isFriendlyError is false for anything it did not make', () => {
+    expect(isFriendlyError(new Error('plain'))).toBe(false);
+    expect(isFriendlyError(BLOCKED_INSERT)).toBe(false);
+    expect(isFriendlyError(null)).toBe(false);
+  });
+});
+
+describe('shouldReportSupabaseError — billing denials', () => {
+  it('drops a blocked INSERT', () => {
+    // The gate working as designed, once per attempted write for as long as the shop stays
+    // lapsed. The user is still told (see friendlyErrorMessage); nobody needs paging.
+    expect(shouldReportSupabaseError(BLOCKED_INSERT)).toBe(false);
+  });
+
+  it('drops a blocked UPDATE and the RPC raise', () => {
+    expect(shouldReportSupabaseError(BLOCKED_UPDATE)).toBe(false);
+    expect(shouldReportSupabaseError(BLOCKED_RPC)).toBe(false);
+  });
+
+  it('drops one that has already been wrapped by toFriendlyError', () => {
+    expect(shouldReportSupabaseError(toFriendlyError(BLOCKED_INSERT))).toBe(false);
+  });
+
+  it('STILL reports a nameless privilege denial', () => {
+    // A real permission failure is a bug — a missing policy or a broken membership row — and
+    // must not be swept up by the billing exemption.
+    expect(shouldReportSupabaseError(NAMELESS_DENIAL)).toBe(true);
+  });
+
+  it('still reports ordinary failures', () => {
+    expect(shouldReportSupabaseError({ code: '23505', message: 'duplicate key' })).toBe(true);
+    expect(shouldReportSupabaseError({ code: '23503', message: 'fk violation' })).toBe(true);
   });
 });

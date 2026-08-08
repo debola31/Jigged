@@ -32,6 +32,7 @@ import {
   OperatorCompanyProvider,
   useOperatorCompany,
 } from '@/components/operator/OperatorCompanyContext';
+import OperatorCompanyLabel from '@/components/operator/OperatorCompanyLabel';
 import OperatorPracticeBar, {
   PRACTICE_BAR_HEIGHT,
 } from '@/components/operator/OperatorPracticeBar';
@@ -390,8 +391,10 @@ function OperatorShell({
   const nav = useOperatorNav();
   // From the context rather than `useCompanyFeatures()` directly: it is the same
   // `getCompany` row, fetched once for the whole operator tree instead of once per
-  // consumer. `companyName` is the REAL shop's name even inside a practice company.
-  const { features, companyName, isDemo } = useOperatorCompany();
+  // consumer. (The company NAME is read by `OperatorCompanyLabel`, which owns the
+  // header slot; the shell only needs to know whether this is a practice company,
+  // because that changes the content offset below.)
+  const { features, isDemo } = useOperatorCompany();
   const pathname = usePathname();
   const router = useRouter();
   /**
@@ -499,31 +502,18 @@ function OperatorShell({
               BEFORE A STATION IS PICKED this slot used to be empty, and that emptiness
               was the bug: the station picker hides the bottom nav too, so the one screen
               where you commit to a working context named neither the shop nor anything
-              else. A multi-company operator — and anyone who has just stepped into the
-              practice shop — had nothing on screen to check against. The company name
-              fills it and then yields to the station, so the slot is never blank and
-              never carries two things at once.
+              else. `OperatorCompanyLabel` fills it and then yields to the station, so the
+              slot is never blank and never carries two things at once.
 
-              Plain text, NOT a control. The note further down forbids a second tap target
-              in this bar on Fitts's-law grounds, and that applies just as much to
-              promoting inert text into a button as to adding an icon beside one. */}
+              THE COMPANY NAME BELONGS HERE AND NOWHERE ELSE on the operator surface. An
+              interim version also put it on the station picker card, which rendered the
+              same words twice within about 100px on that screen. The header wins the one
+              slot because the card is absent on the other screens reachable without a
+              station ("Me" and Inventory both are). Plain text, NOT a control — the note
+              further down forbids a second tap target in this bar on Fitts's-law grounds,
+              and that applies just as much to promoting inert text into a button. */}
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0, px: 1 }}>
-            {!stationId && companyName && (
-              <Typography
-                variant="body1"
-                component="span"
-                sx={{
-                  alignSelf: 'center',
-                  fontWeight: 600,
-                  color: 'rgba(255, 255, 255, 0.85)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {companyName}
-              </Typography>
-            )}
+            <OperatorCompanyLabel />
             {stationId && (
               <Box
                 onClick={handleStationMenuOpen}

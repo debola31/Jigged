@@ -114,17 +114,25 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
   roam. The picker shows internal work centres only, and **excludes archived ones**: without that
   filter it offers a machine nobody can be standing at, and selecting one is unrecoverable from
   the floor.
-- **The picker names the company it is picking a station for**, and so does the AppBar's centre
-  slot while no station is chosen (it yields to the station name once one is). Added 2026-08-08:
-  the jobs page hides its toolbar while the picker is up and the layout hides the bottom nav, so
-  this card was the entire screen and it identified **nothing** — while the operator login page
-  one step earlier does show the company name, which then vanished at exactly the moment you
-  commit to a working context. A person who works two shops, or who has just stepped into the
-  practice company, had nothing on screen to check against. Both read
-  `components/operator/OperatorCompanyContext.tsx`, which resolves the name once for the whole
-  operator tree off the company row the shell already fetches — so this costs no request. Set in
-  **sentence case, not `overline`**, for the same reason the "Me" tab's headings are: uppercase is
-  measurably worse for readers over 55, which is this audience.
+- **The AppBar's centre slot names the company while no station is chosen**, yielding to the
+  station name once one is (`components/operator/OperatorCompanyLabel.tsx`, added 2026-08-08).
+  That slot used to be empty before a station was picked, and the picker hides the bottom nav
+  too — so the one screen where you commit to a working context identified **nothing**, while the
+  operator login page one step earlier does show the company name and then loses it. A person who
+  works two shops, or who has just stepped into the practice company, had nothing to check
+  against. The name comes from
+  [`OperatorCompanyContext`](../../components/operator/OperatorCompanyContext.tsx), resolved once
+  for the whole operator tree off the company row the shell already fetches, so it costs no
+  request; inside a practice company it is the **real** shop's name, matching the office.
+  - **One place, not two.** The picker card deliberately does not repeat it. An interim version
+    showed it in both and rendered the same words twice within ~100px on that screen. The header
+    wins the single slot because the card is absent on the other screens reachable without a
+    station (Me, Inventory), and because it is already where the operator looks for "where am I"
+    once a station exists. `StationSelector` does not even import the company context, so
+    re-adding the line throws rather than silently duplicating.
+  - **A label, never a control.** The header's prohibition on a second tap target (Fitts's law;
+    touch resolves to the nearest control) covers promoting inert text into a button. Switching
+    company stays in the "Me" tab.
 - Selection persists in **`localStorage`** (`jigged_operator_station`, via
   `components/operator/OperatorStationContext.tsx`) — *not* `sessionStorage`, so it survives a
   browser restart or a backgrounded-tab eviction. The header dropdown changes it any time; logout

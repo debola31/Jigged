@@ -120,8 +120,9 @@ by an `is_demo` filter at read time — a filter someone forgets looks exactly l
 needed. The PostHog `demo entered` capture is the opposite case and deliberate: we *do* want to
 know whether anyone practises. See [telemetry.md](../telemetry.md).
 
-**The operator surface also names its company now**, practice or not — the station picker and the
-AppBar's centre slot both show it. That is a separate fix to the same underlying gap; see
+**The operator surface also names its company now**, practice or not — in the AppBar's centre slot
+while no station is chosen, showing the **real** shop's name rather than the internal
+`X - Demo`. That is a separate fix to the same underlying gap; see
 [operator-view.md](operator-view.md).
 
 ## Data model

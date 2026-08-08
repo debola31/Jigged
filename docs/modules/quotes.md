@@ -166,11 +166,24 @@ a per-row total misleads. Totals live on the detail page and PDF, for firm quote
 detail page (`quotes/[quoteId]/page.tsx`), gated on the quote being active and unconverted.
 *(This doc described an `/quotes/{id}/edit` route that never existed.)*
 
-**Parts card** — one block per part, plus **+ Add part**. Each block: a part picker (with **+ New
-Part** inline create), an editable **list of quantity rows** (one per quoted quantity, **Add
-quantity** appends, every row past the first can be deleted), each row showing its resolved
-price stacked over a `Tier {n} {unit}` caption, plus Total (firm) or Extended (options). A
-row below the lowest tier shows a "below minimum break" hint and snaps to the lowest tier price.
+**Parts card** — **a new quote opens with one part block already there** (every quote has at least
+one part, so the click could never be the wrong one to spend), plus **+ Add part** for the rest.
+Each block: a part picker (with **+ New Part** inline create), an editable **list of quantity rows**
+(one per quoted quantity, **Add quantity** appends, every row past the first can be deleted), each
+row showing its resolved price stacked over a `From tier {n}` caption, plus Total (firm) or Extended
+(options). A row below the lowest tier shows a "below minimum break" hint and snaps to the lowest
+tier price.
+
+> **The tier caption carries no unit, deliberately.** The Qty box beside it already shows one
+> wherever a unit is meaningful — `quantityUnitSuffix` returns null for count units, where a bare
+> number is the convention ("10 brackets", not "10 ea"). Repeating it was redundant there, and the
+> old `?? 'ea'` fallback **invented** one for parts whose Qty box shows none, which is how
+> "Tier 1 ea" came to sit beside a unitless quantity.
+
+The quantity row is **top-aligned, not centred**: the price column grows downward (caption, custom
+notice, drift chip) and centring re-centred every other cell against that growth, visibly pushing
+the Qty box out of line with the Unit price box the moment a price was edited. Trailing cells
+re-centre themselves against one input's height instead.
 Prices resolve synchronously off the tiers already loaded with the part — no per-quantity round
 trip, so typing a quantity updates the row immediately.
 The block warns when the part has no priced tiers, linking to the part page.
@@ -180,9 +193,16 @@ replaced it, on the form and on the detail view.
 
 - **Per-quantity price, always editable.** Each quantity row's **Unit price** is a plain text
   field carrying the matched tier's listed price. Typing over it prices that break differently;
-  the row then reads `Custom · Tier {n} {unit} is {auto price}` in `warning.main` with a
+  the row then reads `Custom · tier {n} is {auto price}` in `warning.main` with a
   **Reset** beside it, and saves with `is_quote_override = true`. The part's tier is never
   touched, and markup % is not a quote-form input.
+
+  The field is **subordinate to Qty but never hidden** — it rests at `divider` border weight
+  against Qty's default, rising to `text.secondary` on hover and `primary.main` on focus. Qty is
+  the field you must fill; this one already holds the tier's answer, and the `From tier {n}`
+  caption says so. **Do not take the border away entirely** (Notion-style reveal-on-hover): that
+  pattern's [documented failure](https://webapphuddle.com/inline-edit-design/) is nobody
+  discovering the value is editable — precisely the bug the old toggle had. Quieter, not invisible.
 
   Three things this shape is deliberate about, all of which the previous
   **✏ Use custom price** toggle got wrong:

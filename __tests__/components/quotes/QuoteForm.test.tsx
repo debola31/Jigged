@@ -212,7 +212,8 @@ describe('QuoteForm', () => {
   });
 
   it('disables submit when validation passes initial guard but parts array is empty', async () => {
-    // Customer set, parts empty → "Add at least one part to the quote."
+    // Customer set, no part chosen → the pre-opened block has no part, so
+    // "Every part block must have a part selected." still blocks the save.
     render(
       <QuoteForm
         mode="create"
@@ -222,6 +223,20 @@ describe('QuoteForm', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /create quote/i })).toBeDisabled();
     });
+  });
+
+  it('opens a new quote with one part block already there', async () => {
+    // Every quote has at least one part, so making the user click "Add part"
+    // to reach the form's whole point was a click that could never be wrong
+    // to spend. Edit mode keeps whatever blocks the quote already has.
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+
+    // PartAutocomplete is mocked to null here, so the block's own Remove
+    // control is what proves a block rendered without anyone clicking Add part.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /remove part/i })).toHaveLength(1);
+    });
+    expect(screen.queryByText(/add at least one part to quote/i)).toBeNull();
   });
 
   it('enables submit when initial data is fully valid (populated edit mode)', async () => {
@@ -843,13 +858,16 @@ describe('QuoteForm', () => {
     // The auto price stays on screen — the old toggle hid it, leaving the user
     // nothing to compare their number against.
     await waitFor(() => {
-      expect(screen.getByText(/Custom · Tier 1 ea is \$50\.00/)).toBeInTheDocument();
+      // No unit in the caption: the Qty box beside it already carries one
+      // wherever a unit is meaningful, and the old `?? 'ea'` fallback invented
+      // one for parts whose Qty box shows none.
+      expect(screen.getByText(/Custom · tier 1 is \$50\.00/)).toBeInTheDocument();
     });
 
     await user.click(screen.getByTestId('price-reset-0-0'));
 
     await waitFor(() => expect(priceInput).toHaveValue('50'));
-    expect(screen.queryByText(/Custom · Tier/)).toBeNull();
+    expect(screen.queryByText(/Custom · tier/)).toBeNull();
   });
 
   it('keeps Reset reachable when the price field is emptied — the state that blocks save', async () => {

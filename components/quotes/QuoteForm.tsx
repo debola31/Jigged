@@ -52,7 +52,7 @@ import {
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import { isValidQuantityInput } from '@/lib/quantityInput';
-import { quantityUnitSuffix, unitShortLabel } from '@/lib/standardUnits';
+import { quantityUnitSuffix } from '@/lib/standardUnits';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
@@ -253,9 +253,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const companyId = params.companyId as string;
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
-  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() =>
-    groupPartsIntoBlocks(initialData.parts),
-  );
+  // A new quote opens with one empty part block already there. Every quote has
+  // at least one part, so making the user click "Add part" to reach the form's
+  // whole point was a click that could never be the wrong thing to spend. Edit
+  // mode and any prefilled payload keep their own blocks untouched.
+  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() => {
+    const blocks = groupPartsIntoBlocks(initialData.parts);
+    return blocks.length > 0 ? blocks : [emptyBlock()];
+  });
   // Index of the part block whose part picker should grab focus after it
   // mounts — set when the user clicks "Add part" so the new (empty) entry
   // gets focus and scrolls into view. Cleared once consumed so later
@@ -1360,7 +1365,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             const orderQtyUnitLabel = quantityUnitSuffix(block.part?.primary_unit);
             // Tier caption reads "Tier 0.5 in" / "Tier 1 ea" — always show a
             // unit here (full label, fallback "ea") so counts stay unchanged.
-            const tierUnitLabel = unitShortLabel(block.part?.primary_unit) ?? 'ea';
+            // NOTE: the tier caption deliberately carries NO unit. The Qty box
+            // beside it already shows one wherever a unit is meaningful
+            // (`quantityUnitSuffix` returns null for count units, where a bare
+            // number is the convention), so repeating it was redundant there —
+            // and worse, the old `?? 'ea'` fallback INVENTED one for parts whose
+            // Qty box shows none, which is how "Tier 1 ea" appeared next to a
+            // unitless quantity.
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -1541,7 +1552,26 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                     <InputAdornment position="start">$</InputAdornment>
                                   ),
                                 }}
-                                sx={{ width: 130 }}
+                                sx={{
+                                  width: 130,
+                                  // Subordinate to Qty, but never hidden. Qty is
+                                  // the field you must fill; this one already
+                                  // holds the tier's answer, so it rests at a
+                                  // lighter border weight and comes up to full
+                                  // strength on hover and focus.
+                                  //
+                                  // The tempting move — no border until hover,
+                                  // Notion-style — is the one thing to avoid:
+                                  // that pattern's documented failure is nobody
+                                  // discovering the value is editable, which is
+                                  // exactly the bug the old "Use custom price"
+                                  // toggle had. Quieter, not invisible.
+                                  '& .MuiOutlinedInput-root:not(.Mui-disabled)': {
+                                    '& fieldset': { borderColor: 'divider' },
+                                    '&:hover fieldset': { borderColor: 'text.secondary' },
+                                    '&.Mui-focused fieldset': { borderColor: 'primary.main' },
+                                  },
+                                }}
                               />
                               {/* Reset is offered for the whole time the row is
                                   off its tier price — including when the field
@@ -1575,8 +1605,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                         ? 'Custom price'
                                         : 'Enter a unit price'
                                       : isOverride
-                                        ? `Custom · Tier ${matched.matched_tier_quantity} ${tierUnitLabel} is ${formatCurrency(matched.unit_price)}`
-                                        : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
+                                        ? `Custom · tier ${matched.matched_tier_quantity} is ${formatCurrency(matched.unit_price)}`
+                                        : `From tier ${matched.matched_tier_quantity}`}
                                   </Typography>
                                   {matched && (
                                     <Button
@@ -1602,8 +1632,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                   sx={{ display: 'block', mt: 0.25 }}
                                 >
                                   {matched.below_min
-                                    ? `Below min · Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`
-                                    : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
+                                    ? `Below min · from tier ${matched.matched_tier_quantity}`
+                                    : `From tier ${matched.matched_tier_quantity}`}
                                 </Typography>
                               ) : (
                                 <Typography

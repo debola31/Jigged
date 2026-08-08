@@ -8,7 +8,7 @@ import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import Alert from '@mui/material/Alert';
+import ErrorAlert from '@/components/common/ErrorAlert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
@@ -67,7 +67,9 @@ export default function PartIdentitySection({
     mode === 'existing' && part ? partToFormData(part) : { ...EMPTY_PART_FORM, ...initialDefaults },
   );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error itself, not a pre-formatted string — ErrorAlert needs the object to
+  // tell a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
   const [creating, setCreating] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveState>('idle');
 
@@ -123,7 +125,7 @@ export default function PartIdentitySection({
       onSaved?.(updated);
     } catch (err) {
       setSaveStatus('error');
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err);
     }
   };
 
@@ -182,7 +184,7 @@ export default function PartIdentitySection({
       });
       onCreated?.(created);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create part');
+      setError(err);
       setCreating(false);
     }
   };
@@ -321,10 +323,13 @@ export default function PartIdentitySection({
           {mode === 'existing' && <SaveStatus state={saveStatus} />}
         </Box>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
-          </Alert>
+        {error != null && (
+          <ErrorAlert
+            error={error}
+            entity="part"
+            fallback="Couldn't save this part. Please try again."
+            sx={{ mb: 3 }}
+          />
         )}
 
         {mode === 'create' ? (

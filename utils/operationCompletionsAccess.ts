@@ -14,6 +14,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import type {
   CreateOperationCompletionInput,
   OperationCompletionEvent,
@@ -67,7 +68,10 @@ export async function createOperationCompletion(
 
   if (error || !data) {
     console.error('createOperationCompletion failed:', error);
-    throw new Error(error?.message ?? 'Failed to record completion.');
+    throw toFriendlyError(error, {
+      entity: 'completion',
+      fallback: 'Failed to record completion.',
+    });
   }
   return { id: data.id };
 }
@@ -98,7 +102,10 @@ export async function voidOperationCompletion(completionId: string): Promise<voi
 
   if (error) {
     console.error('voidOperationCompletion failed:', error);
-    throw new Error(`Failed to void completion: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'completion',
+      fallback: 'Failed to void that completion.',
+    });
   }
 }
 
@@ -126,7 +133,10 @@ export async function voidAllOperationCompletions(jobOperationId: string): Promi
 
   if (error) {
     console.error('voidAllOperationCompletions failed:', error);
-    throw new Error(`Failed to undo completion: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'completion',
+      fallback: 'Failed to undo that completion.',
+    });
   }
 }
 

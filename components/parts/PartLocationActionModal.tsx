@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { useState } from 'react';
 import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
@@ -25,7 +26,6 @@ import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPic
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { JobWithRelations } from '@/types/job';
 
 export type LocationAction = 'add' | 'deplete' | 'adjust' | 'move';
@@ -100,7 +100,9 @@ export default function PartLocationActionModal({
   const [unit, setUnit] = useState(primaryUnit);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell a
+  // billing block from an ordinary failure. Validation still sets plain strings, which it renders.
+  const [error, setError] = useState<unknown>(null);
 
   // Optional job tag on a removal — issue #59. The operator path has always had this; the
   // owner path lost it in the May parts unification.
@@ -257,7 +259,7 @@ export default function PartLocationActionModal({
     } catch (e) {
       // Supabase errors are plain objects, not Error instances, so `instanceof` fell through
       // to the generic string and threw away the reason the database gave us.
-      setError(friendlyErrorMessage(e, { entity: 'stock', fallback: 'Failed to update stock.' }));
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -376,7 +378,9 @@ export default function PartLocationActionModal({
             minRows={2}
             fullWidth
           />
-          {error && <Alert severity="error">{error}</Alert>}
+          {error != null && (
+            <ErrorAlert error={error} entity="stock" fallback="Failed to update stock." />
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>

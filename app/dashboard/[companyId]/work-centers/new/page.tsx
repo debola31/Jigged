@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { WorkCenterForm } from '@/components/work-centers';
 import { EMPTY_WORK_CENTER_FORM } from '@/types/workCenter';
+import SubscriptionRequiredNotice from '@/components/billing/SubscriptionRequiredNotice';
 
 export default function NewWorkCenterPage() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export default function NewWorkCenterPage() {
       >
         Back to Work Centers
       </Button>
+      <SubscriptionRequiredNotice entityPlural="work centers" />
       <WorkCenterForm mode="create" initialData={EMPTY_WORK_CENTER_FORM} />
     </Box>
   );

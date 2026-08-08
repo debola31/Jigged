@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
 /**
  * Get the storage bucket name from environment variable
@@ -150,7 +151,10 @@ export async function uploadFileToStorage(
 
   if (error) {
     console.error('Storage upload error:', error);
-    throw new Error(`Failed to upload file: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'file',
+      fallback: 'Failed to upload that file.',
+    });
   }
 }
 
@@ -174,7 +178,10 @@ export async function deleteFileFromStorage(
 
   if (error) {
     console.error('Storage delete error:', error);
-    throw new Error(`Failed to delete file: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'file',
+      fallback: 'Failed to delete that file.',
+    });
   }
 }
 

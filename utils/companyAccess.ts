@@ -8,7 +8,7 @@ import {
   readCompanyDefaultPaymentTerms,
   MAX_CUSTOM_PAYMENT_TERMS,
 } from '@/lib/companyDefaults';
-import { toError } from '@/lib/supabaseErrors';
+import { toError, toFriendlyError } from '@/lib/supabaseErrors';
 
 export interface Company {
   id: string;
@@ -392,7 +392,10 @@ export async function updateCompanyLogo(
 
   if (error) {
     console.error('Error updating company logo:', error);
-    throw new Error(`Failed to update company logo: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'logo',
+      fallback: 'Failed to update the company logo.',
+    });
   }
 }
 
@@ -421,7 +424,10 @@ export async function updateCompanyProfile(
 
   if (error) {
     console.error('Error updating company profile:', error);
-    throw new Error(`Failed to update company profile: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'company profile',
+      fallback: 'Failed to update the company profile.',
+    });
   }
 }
 
@@ -456,7 +462,10 @@ export async function updateCompanyDefaults(
 
   if (error) {
     console.error('Error updating company defaults:', error);
-    throw new Error(`Failed to update company defaults: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'settings',
+      fallback: 'Failed to update company defaults.',
+    });
   }
 }
 
@@ -488,7 +497,10 @@ async function writeCustomPaymentTerms(companyId: string, terms: string[]): Prom
     .eq('id', companyId);
   if (error) {
     console.error('Error updating custom payment terms:', error);
-    throw new Error(`Failed to save payment term: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'payment term',
+      fallback: 'Failed to save that payment term.',
+    });
   }
 }
 
@@ -558,7 +570,10 @@ export async function setCompanyDefaultPaymentTerms(
     .eq('id', companyId);
   if (error) {
     console.error('Error updating default payment terms:', error);
-    throw new Error(`Failed to save default payment terms: ${error.message}`);
+    throw toFriendlyError(error, {
+      entity: 'payment terms',
+      fallback: 'Failed to save default payment terms.',
+    });
   }
   return next;
 }

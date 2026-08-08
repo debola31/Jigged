@@ -421,3 +421,37 @@ When an action can't be performed in the current state, prefer (in order):
 
 Avoid: a confirm dialog that ends in an error ("are you sure?" → "can't do that")
 — two steps to a dead-end. Resolve via rule 1.
+
+### Worked example — a shop whose subscription lapsed (rule 1)
+
+The billing write-gate blocks every write in Postgres, so *every* create and save
+button on the dashboard is a control whose press will be refused. It is the largest
+"unavailable action" surface in the app, and the temptation is rule 3 — hide the New
+buttons — or rule 2, disable them. Both are wrong here: this is not irrelevant to the
+user and not a permanent property of the object. It is temporary, and **the user can
+unlock it themselves**.
+
+So it is rule 1 throughout:
+
+- The controls stay exactly as they are — visible, focusable, pressable. No
+  `disabled`, no hiding, on any of the ~90 write surfaces.
+- Pressing one produces
+  [`ErrorAlert`](../components/common/ErrorAlert.tsx), which says *why* in plain
+  words and carries the fix — a **Subscribe** button, for the one role that can use
+  it. That is the "explain on attempt" half.
+- [`SubscriptionRequiredNotice`](../components/billing/SubscriptionRequiredNotice.tsx)
+  adds the explanation *before* the attempt on the five create routes, so nobody
+  fills a whole form to find out. It is an explanation, **not** a disable — the form
+  and its submit are untouched.
+
+Two details generalise beyond billing:
+
+- **The reason must fit the role.** Only an admin can subscribe (`/settings` is
+  behind `AdminGuard`; the Stripe routes 403 everyone else), so the button renders
+  only for them. Showing it to a `user` would be precisely the confirm-then-error
+  two-step above. Everyone else gets copy naming who *can* act.
+- **Never assert a negative you haven't confirmed.** Entitlement starts unresolved,
+  and unresolved reads as "cannot write" — so both components render nothing until
+  it loads. Otherwise every healthy shop sees a subscription warning flash on every
+  page load, which is the "couldn't check is never denied" rule from
+  [CLAUDE.md](../CLAUDE.md) in UI form.

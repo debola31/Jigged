@@ -125,7 +125,108 @@ seeder are unaffected.
 
 **Storage:** the private `attachments` bucket's `storage.objects` INSERT/DELETE
 policies also call `company_can_write` (company derived from the first path
-segment), so a lapsed shop can't upload; SELECT stays open.
+segment), so a lapsed shop can't upload; SELECT stays open. Note these are
+**permissive**, not restrictive — which is why a blocked upload's message carries no
+policy name (see §4.1).
+
+### 4.1 How a blocked write fails, per verb
+
+The three verbs do **not** fail the same way, and the difference is load-bearing.
+
+| Verb | Policy shape | What the client sees |
+|---|---|---|
+| INSERT | `WITH CHECK (company_can_write(...))` | raises **42501**, message names `billing_gate_insert` |
+| UPDATE | `USING (true) WITH CHECK (company_can_write(...))` | raises **42501**, message names `billing_gate_update` |
+| DELETE | `USING (company_can_write(...))` | **silent** — zero rows, no error |
+
+**UPDATE used to be silent too**, and that was a bug rather than a design:
+`USING (company_can_write(...))` *filters* the row out of the statement instead of
+refusing it, so a blocked save changed nothing and reported nothing. A call site with
+`.select().single()` saw `PGRST116` ("no rows returned") — a misleading *not found*
+for a write that was refused — and one without it saw success.
+`markOperationReceived` returned `{ success: true }` and told the shop floor that
+outside work was back while the row sat untouched.
+[`20260807015028_billing_gate_update_with_check.sql`](../../supabase/migrations/20260807015028_billing_gate_update_with_check.sql)
+moved the check to `WITH CHECK` so it raises. Enforcement is unchanged, because
+`NEW.company_id ≡ OLD.company_id` on every real path — and a
+`<table>_gate_key_immutable` trigger now enforces that for the browser roles, so the
+equivalence is guaranteed rather than argued. It is also one `company_can_write()`
+call per row instead of two.
+
+**DELETE stays silent on purpose.** A DELETE policy has no `WITH CHECK`, so the only
+RLS-shaped fix is `USING (true)` plus a `BEFORE DELETE` trigger that raises — which
+inverts the failure mode from fail-closed to **fail-open** if that trigger is ever
+dropped. Not worth it here: this repo soft-deletes every user-facing entity
+(archive is an UPDATE, so it is covered above), and the remaining hard deletes are
+line items, contacts, tiers and reactions, where the worst outcome is the row
+reappearing on reload. Those call sites assert the returned row count instead —
+`assertDeleted` in [`lib/supabaseErrors.ts`](../../lib/supabaseErrors.ts).
+`test_delete_is_silently_filtered_when_lapsed` pins the decision so it is not
+"fixed" by accident.
+
+**The policy name in the message is a contract.**
+`isBillingWriteBlocked` keys on the `billing_gate` substring to tell a lapsed
+subscription from a plain permission denial, and the user-facing copy, the Subscribe
+button and the Sentry exemption all hang off that. It works because Postgres emits
+one `WithCheckOption` per RESTRICTIVE policy, each carrying its own `polname`, while
+OR-folding the permissive ones into a single **nameless** entry — so a membership
+failure produces the bare `new row violates row-level security policy for table "x"`
+and is never mistaken for a billing block. Both directions are asserted:
+`test_blocked_writes_name_the_billing_policy` and
+`test_permissive_denial_is_nameless`. **Renaming these policies silently reverts
+every billing message in the product to "You don't have permission to do that."**
+
+A third CI guard covers the shape itself:
+`tenant_tables_with_silent_update_gate()` → `test_update_gate_never_filters` fails if
+any `billing_gate_update` still uses a filtering `USING`, because the natural thing
+for the next person to hand-write is the `USING(...) WITH CHECK(...)` pair they see
+on every other policy.
+
+**Triggers are safe by construction, and worth stating so nobody re-audits it:** a
+trigger that cascades an UPDATE onto a gated table only fires because the user's
+primary write succeeded, which means the shop can write, which means the cascade
+passes too. The audit of invoker-rights trigger functions that update gated tables
+found no exceptions.
+
+### 4.2 What the user is told
+
+The DB refuses the write; the UI has to explain it. That path lives in
+[`lib/supabaseErrors.ts`](../../lib/supabaseErrors.ts) and
+[`components/common/ErrorAlert.tsx`](../../components/common/ErrorAlert.tsx):
+
+- `isBillingWriteBlocked(err)` — matches the two denial shapes: the RLS policy name
+  above, and `inv_assert_can_write`'s `company … has no active subscription`. Walks
+  `Error.cause`, so it still classifies after normalisation.
+- `friendlyErrorMessage` checks billing **before** its generic 42501 branch. Without
+  that ordering a lapsed owner was told *"You don't have permission to do that."* —
+  a role diagnosis that sends them to ask an admin for access they already have.
+- `toFriendlyError` is what the access layer throws. Supabase rejects with a plain
+  object on the `{ data, error }` path, so `err instanceof Error` was false at ~179
+  catch sites and every one fell through to a generic `'Failed to …'`.
+- `ErrorAlert` checks **subscription context before error shape**. That ordering is
+  what catches the cases the error cannot describe: a `PGRST116` from a filtered
+  update, and a nameless storage 403. It guards on `!isLoading`, because
+  `isLoading` starts true with `billing: null`, which resolves to `must_subscribe` —
+  so `canWrite` is false for a *healthy* shop during its first fetch.
+- The Subscribe button renders **only for an admin**: `/settings` is behind
+  `AdminGuard` and the Stripe routes call `_verify_company_admin`, so offering it to
+  anyone else ends in a 403. Operators get wording pointing at the office rather than
+  a page they cannot reach.
+- `SubscriptionRequiredNotice` says it up front on the five create routes, as an
+  explanation rather than a disabled control — see
+  [interaction-standards §4](../interaction-standards.md).
+- **The wording comes from `subscription_status`, not from entitlement.**
+  [`lib/billingCopy.ts`](../../lib/billingCopy.ts) maps the billing row to
+  `never_started | ended | paused`, because `read_only` deliberately collapses
+  canceled, unpaid *and* paused — right for the write gate, wrong for a sentence.
+  Telling a paused shop it "has ended", or a never-subscribed one to "resubscribe",
+  are both false, and both were shipped before this split. It is the same field
+  `BillingCard` branches on, so the message on a blocked save matches the one in
+  Settings when the user goes looking for the cause.
+- `shouldReportSupabaseError` **drops** billing denials. The Supabase capture net
+  files every `{ error }` response, so a lapsed shop would otherwise generate a Sentry
+  issue on every write it attempts — the most predictable non-failure the app can
+  produce. A *nameless* privilege denial still reports; that one is a bug.
 
 ## 5. Webhook + sync — single source-of-truth pattern
 

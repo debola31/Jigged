@@ -273,10 +273,19 @@ describe('partsAccess utilities', () => {
 
   describe('deletePartNote', () => {
     it('deletes by id (RLS enforces author/admin)', async () => {
+      // The delete returns the removed row: the billing gate blocks DELETE via a policy USING
+      // clause, which filters the row out silently rather than raising, so the row count is the
+      // only signal that anything happened. See assertDeleted.
+      mockQueryBuilder.data = [{ id: 'n1' }];
       await deletePartNote('n1');
       expect(mockSupabase.from).toHaveBeenCalledWith('part_comments');
       expect(mockQueryBuilder.delete).toHaveBeenCalled();
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('id', 'n1');
+    });
+
+    it('throws when the delete removed nothing (a silently-filtered write)', async () => {
+      mockQueryBuilder.data = [];
+      await expect(deletePartNote('n1')).rejects.toThrow(/couldn't be removed/i);
     });
 
     it('throws on error', async () => {
@@ -650,14 +659,32 @@ describe('partsAccess utilities', () => {
 
     it('re-throws a duplicate-name error when no archived part matches (a live duplicate)', async () => {
       // 23505 with no archived same-name row → reviveArchivedPartByName returns null,
-      // so the original duplicate error is re-thrown (a genuine live duplicate).
+      // so the duplicate is surfaced (a genuine live duplicate). It now arrives as a real Error
+      // carrying user-facing copy rather than the raw Supabase object, which `err instanceof
+      // Error` rejected — the reason "Failed to create part" reached the user instead.
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { message: 'Insert failed', code: '23505' };
 
-      await expect(createPart('company-1', mockFormData)).rejects.toEqual({
-        message: 'Insert failed',
-        code: '23505',
-      });
+      const rejection = await createPart('company-1', mockFormData).catch((e) => e);
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection.message).toMatch(/already exists/i);
+      expect(rejection.code).toBe('23505');
+      expect(rejection.cause).toEqual({ message: 'Insert failed', code: '23505' });
+    });
+
+    it('tells a lapsed shop about its subscription instead of "Failed to create part"', async () => {
+      // The screenshot this whole change came from.
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = {
+        code: '42501',
+        message:
+          'new row violates row-level security policy "billing_gate_insert" for table "parts"',
+      };
+
+      const rejection = await createPart('company-1', mockFormData).catch((e) => e);
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection.message).toMatch(/subscription isn't active/i);
+      expect(rejection.message).not.toMatch(/row-level security/i);
     });
   });
 

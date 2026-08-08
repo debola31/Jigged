@@ -3,7 +3,11 @@
 // to getSupabase so the existing call sites don't need touching. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getSupabase } from '@/lib/supabase';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import {
+  friendlyErrorMessage,
+  isBillingWriteBlocked,
+  toFriendlyError,
+} from '@/lib/supabaseErrors';
 import type {
   Quote,
   QuoteWithRelations,
@@ -278,6 +282,15 @@ export async function sweepExpiredQuotes(companyId: string): Promise<void> {
     .lt('expiration_date', today);
 
   if (error) {
+    // A read-only shop cannot sweep, and SHOULD not: this is a background status mutation the
+    // user never asked for, fired on every quotes-page load. Expected, not a failure.
+    //
+    // It only became visible when the billing gate started raising on a blocked UPDATE instead
+    // of filtering it to zero rows — before that this call quietly did nothing. Returning early
+    // keeps a lapsed shop's quotes list loading exactly as it does today. (Sentry already drops
+    // these via shouldReportSupabaseError; this is about not logging noise either.)
+    if (isBillingWriteBlocked(error)) return;
+
     // The Supabase integration reports this update's failure on its own (#708), so there is no
     // `captureException` here — a second one would only duplicate the issue.
     //
@@ -417,7 +430,7 @@ export async function createQuote(
 
   if (error) {
     console.error('Error creating quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
 
   // Snapshot one line item per (part, quantity) entry (auto-resolving the
@@ -574,7 +587,7 @@ export async function updateQuote(
 
   if (error) {
     console.error('Error updating quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
 
   await reconcileQuoteLineItems(quoteId, companyId, formData, options);
@@ -882,7 +895,10 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
         throw new Error('Permission denied. You may not have permission to delete these quotes.');
       }
       console.error('Error bulk archiving quotes:', error);
-      throw new Error(error.message || 'Failed to delete quotes');
+      throw toFriendlyError(error, {
+        entity: 'quote',
+        fallback: 'Failed to archive these quotes.',
+      });
     }
   }
 }
@@ -928,7 +944,7 @@ async function writeCostSnapshotsForPart(
       setup_cost: item.setup_cost,
     }));
     const { error } = await supabase.from('quote_operations').insert(opRows);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
 
   if (breakdown.material_items.length > 0) {
@@ -949,7 +965,7 @@ async function writeCostSnapshotsForPart(
       units_consumed: item.units_consumed,
     }));
     const { error } = await supabase.from('quote_materials').insert(matRows);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
 }
 
@@ -1034,7 +1050,7 @@ export async function expireQuote(quoteId: string, companyId: string): Promise<Q
 
   if (error) {
     console.error('Error expiring quote:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'quote' });
   }
   return asQuote(data);
 }

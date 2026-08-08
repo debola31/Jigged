@@ -8,7 +8,7 @@ import CardContent from '@mui/material/CardContent';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import Alert from '@mui/material/Alert';
+import ErrorAlert from '@/components/common/ErrorAlert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import FormControl from '@mui/material/FormControl';
@@ -70,7 +70,9 @@ export default function CustomerForm({
     EMPTY_CUSTOMER_CONTACT_FORM,
   );
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell
+  // a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const handleChange =
@@ -170,7 +172,7 @@ export default function CustomerForm({
         router.push(`/dashboard/${companyId}/customers/${customer.id}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -186,10 +188,13 @@ export default function CustomerForm({
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
+      {error != null && (
+        <ErrorAlert
+          error={error}
+          entity="customer"
+          fallback="Couldn't save this customer. Please try again."
+          sx={{ mb: 3 }}
+        />
       )}
 
       {/* Basic Information */}

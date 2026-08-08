@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type {
   PartPricingTier,
@@ -152,7 +153,7 @@ export async function replaceTiersForPart(
       .from('part_pricing_tiers')
       .delete()
       .in('id', toDelete);
-    if (error) throw error;
+    if (error) throw toFriendlyError(error, { entity: 'pricing tier' });
   }
 
   for (const tier of tiers) {
@@ -165,7 +166,7 @@ export async function replaceTiersForPart(
           markup_percent: tier.markup_percent,
         })
         .eq('id', tier.id);
-      if (error) throw error;
+      if (error) throw toFriendlyError(error, { entity: 'pricing tier' });
     } else {
       const { error } = await supabase
         .from('part_pricing_tiers')
@@ -176,7 +177,7 @@ export async function replaceTiersForPart(
           quantity: tier.quantity,
           markup_percent: tier.markup_percent,
         });
-      if (error) throw error;
+      if (error) throw toFriendlyError(error, { entity: 'pricing tier' });
     }
   }
 

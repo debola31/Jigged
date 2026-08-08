@@ -3,6 +3,7 @@
 // Aliased to getSupabase so the existing call sites stay untouched. See
 // CLAUDE.md "Typed Supabase client (incremental adoption)".
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import {
   toCreditStatus,
   type Customer,
@@ -323,7 +324,7 @@ export async function createCustomer(
       if (revived) return revived;
     }
     console.error('Error creating customer:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'customer' });
   }
 
   if (initialContact) {
@@ -404,7 +405,7 @@ async function reviveArchivedCustomerByName(
 
   if (error) {
     console.error('Error reviving archived customer:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'customer' });
   }
 
   return { ...data, credit_status: toCreditStatus(data.credit_status) };
@@ -428,7 +429,7 @@ export async function updateCustomer(
 
   if (error) {
     console.error('Error updating customer:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'customer' });
   }
 
   return { ...data, credit_status: toCreditStatus(data.credit_status) };
@@ -447,7 +448,7 @@ export async function softDeleteCustomer(customerId: string): Promise<void> {
     .eq('id', customerId);
   if (error) {
     console.error('Error archiving customer:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'customer' });
   }
 }
 
@@ -480,7 +481,10 @@ export async function bulkSoftDeleteCustomers(customerIds: string[]): Promise<vo
         );
       }
       console.error('Error bulk archiving customers:', error);
-      throw new Error(error.message || 'Failed to delete customers');
+      throw toFriendlyError(error, {
+        entity: 'customer',
+        fallback: 'Failed to archive these customers.',
+      });
     }
   }
 }

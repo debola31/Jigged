@@ -47,6 +47,20 @@ export function useSubscription(): SubscriptionContextType {
   return context;
 }
 
+/**
+ * The subscription context, or `null` outside a provider.
+ *
+ * For components shared between the two shells. The provider wraps `/dashboard/[companyId]/*` only;
+ * the operator app deliberately does not mount it (operators cannot subscribe, and the bundle costs
+ * them cellular data), so `useSubscription` would throw there.
+ *
+ * `useSubscription` still throws — an accidental omission inside the dashboard should stay loud.
+ * Reach for this one only when rendering outside the provider is a supported case.
+ */
+export function useOptionalSubscription(): SubscriptionContextType | null {
+  return useContext(SubscriptionContext);
+}
+
 export default function SubscriptionProvider({ children }: { children: ReactNode }) {
   const params = useParams();
   const companyId = params.companyId as string;

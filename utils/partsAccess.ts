@@ -1,6 +1,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 30 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import { assertDeleted, toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Insert payload for the parts table. company_id is supplied at the call
@@ -850,7 +851,7 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
       if (revived) return revived;
     }
     console.error('Error creating part:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'part' });
   }
 
   // No pricing is seeded on create — each part owns its markup directly. The
@@ -895,7 +896,7 @@ async function reviveArchivedPartByName(
 
   if (error) {
     console.error('Error reviving archived part:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'part' });
   }
 
   return rowToPart(data as PartRow);
@@ -920,7 +921,7 @@ export async function updatePart(partId: string, formData: PartFormData): Promis
 
   if (error) {
     console.error('Error updating part:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'part' });
   }
 
   return rowToPart(data as PartRow);
@@ -946,7 +947,7 @@ export async function updatePartPreferredVendor(
     .eq('id', partId);
   if (error) {
     console.error('Error updating preferred vendor:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'preferred vendor' });
   }
 }
 
@@ -972,7 +973,7 @@ export async function updatePartCostingBatchQuantity(
     .eq('id', partId);
   if (error) {
     console.error('Error updating costing batch quantity:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'costing quantity' });
   }
 }
 
@@ -1007,13 +1008,10 @@ export async function bulkDeleteParts(partIds: string[]): Promise<void> {
     const { error } = await supabase.rpc('archive_parts', { p_ids: batch });
 
     if (error) {
-      if (error.code === '42501' || error.message?.includes('policy')) {
-        throw new Error(
-          'Permission denied. You may not have permission to delete these parts.',
-        );
-      }
-      console.error('Error archiving parts:', error);
-      throw new Error(error.message || 'Failed to archive parts');
+      throw toFriendlyError(error, {
+        entity: 'part',
+        fallback: 'Failed to archive these parts.',
+      });
     }
   }
 }
@@ -1334,7 +1332,7 @@ export async function updateTransactionNotes(
 
   if (error) {
     console.error('Error updating transaction notes:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'note' });
   }
 }
 
@@ -1493,7 +1491,7 @@ export async function addPartNote(
 
   if (error) {
     console.error('Error adding part note:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'note' });
   }
 
   return mapPartCommentRow(data as unknown as PartCommentRow);
@@ -1526,7 +1524,7 @@ export async function updatePartNote(noteId: string, body: string): Promise<Part
 
   if (error) {
     console.error('Error updating part note:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'note' });
   }
 
   return mapPartCommentRow(data as unknown as PartCommentRow);
@@ -1552,11 +1550,16 @@ export async function addPartPricingNote(
  */
 export async function deletePartNote(noteId: string): Promise<void> {
   const supabase = getSupabase();
-  const { error } = await supabase.from('part_comments').delete().eq('id', noteId);
+  const { data, error } = await supabase
+    .from('part_comments')
+    .delete()
+    .eq('id', noteId)
+    .select('id');
   if (error) {
     console.error('Error deleting part note:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'note' });
   }
+  assertDeleted(data, 'note');
 }
 
 /**

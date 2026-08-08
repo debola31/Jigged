@@ -18,6 +18,7 @@
  */
 
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 import type {
@@ -92,7 +93,7 @@ async function clearPrimaryForCustomer(customerId: string): Promise<void> {
     .eq('is_primary', true);
   if (error) {
     console.error('Error clearing primary contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
 }
 
@@ -125,7 +126,7 @@ export async function createCustomerContact(
       );
     }
     console.error('Error creating customer contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
   return data as CustomerContact;
 }
@@ -180,7 +181,7 @@ export async function updateCustomerContact(
       );
     }
     console.error('Error updating customer contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
   return data as CustomerContact;
 }
@@ -245,7 +246,7 @@ export async function setPrimaryContact(
       );
     }
     console.error('Error setting primary contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
 }
 
@@ -287,6 +288,6 @@ export async function setBillingDefaultContact(
       );
     }
     console.error('Error setting billing-default contact:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'contact' });
   }
 }

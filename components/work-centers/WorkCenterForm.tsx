@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
+import ErrorAlert from '@/components/common/ErrorAlert';
 import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
 import ToggleButton from '@mui/material/ToggleButton';
@@ -73,7 +74,9 @@ export default function WorkCenterForm({
 
   const [formData, setFormData] = useState<WorkCenterFormData>(initialData);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell
+  // a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const handleTextChange = (field: keyof WorkCenterFormData) => (
@@ -186,7 +189,7 @@ export default function WorkCenterForm({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -204,10 +207,13 @@ export default function WorkCenterForm({
 
   return (
     <Box component="form" onSubmit={handleSubmit}>
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
+      {error != null && (
+        <ErrorAlert
+          error={error}
+          entity="work center"
+          fallback="Couldn't save this work center. Please try again."
+          sx={{ mb: 3 }}
+        />
       )}
 
       <Card elevation={2} sx={{ mb: 3 }}>

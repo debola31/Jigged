@@ -607,9 +607,29 @@ describe('duplicate sibling names', () => {
     );
   });
 
-  it('leaves an unrelated write failure with its own message', async () => {
+  it('does not map an unrelated write failure to the duplicate-name copy', async () => {
+    // Renamed from "…with its own message": the fallback no longer passes `error.message`
+    // straight through, because that rendered raw PostgREST text to the user. It now goes
+    // through the shared translator. What still matters here is that a NON-23505 failure does
+    // not get the "There's already a …" wording.
     queueFrom({ data: null, error: { code: '42501', message: 'permission denied' } });
-    await expect(createLocation('co1', { name: 'Shelf A' })).rejects.toThrow(/permission denied/i);
+    await expect(createLocation('co1', { name: 'Shelf A' })).rejects.toThrow(
+      /don't have permission/i,
+    );
+  });
+
+  it('tells a lapsed shop to restart its subscription rather than blaming permissions', async () => {
+    queueFrom({
+      data: null,
+      error: {
+        code: '42501',
+        message:
+          'new row violates row-level security policy "billing_gate_insert" for table "inventory_locations"',
+      },
+    });
+    await expect(createLocation('co1', { name: 'Shelf A' })).rejects.toThrow(
+      /subscription isn't active/i,
+    );
   });
 
   // Every node the wizard generates goes through the same insert, so a collision mid-run surfaces

@@ -3,6 +3,7 @@
 // getSupabase to match the other access modules. See CLAUDE.md "Typed Supabase
 // client (incremental adoption)".
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import {
   toBillToParty,
   type CustomerCarrierAccount,
@@ -137,7 +138,7 @@ export async function archiveCarrierAccount(accountId: string): Promise<void> {
 
   if (error) {
     console.error('Error archiving carrier account:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'carrier account' });
   }
 }
 

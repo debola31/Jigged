@@ -10,6 +10,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 12 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 import { orIlikeValue } from '@/utils/searchFilter';
 import type { Database } from '@/types/database';
@@ -350,7 +351,7 @@ export async function createRoutingOperation(
 
   if (error) {
     console.error('Error creating routing operation:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'operation' });
   }
 
   return data as RoutingOperation;
@@ -374,7 +375,7 @@ export async function updateRoutingOperation(
 
   if (error) {
     console.error('Error updating routing operation:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'operation' });
   }
 
   return data as RoutingOperation;

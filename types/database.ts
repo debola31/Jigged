@@ -3883,6 +3883,12 @@ export type Database = {
           table_name: string
         }[]
       }
+      tenant_tables_with_silent_update_gate: {
+        Args: never
+        Returns: {
+          table_name: string
+        }[]
+      }
       transfer_stock: {
         Args: {
           p_converted_quantity: number

@@ -1,5 +1,6 @@
 'use client';
 
+import ErrorAlert from '@/components/common/ErrorAlert';
 import {
   useCallback,
   useDeferredValue,
@@ -141,7 +142,9 @@ export default function ShipmentForm({
 }: ShipmentFormProps) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Holds the caught error, not a formatted string — ErrorAlert needs the object to tell
+  // a billing block from an ordinary failure.
+  const [error, setError] = useState<unknown>(null);
 
   const [customer, setCustomer] = useState<CustomerContext | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
@@ -634,7 +637,7 @@ export default function ShipmentForm({
       });
     } catch (err) {
       console.error('createShipment failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create shipment.');
+      setError(err);
     } finally {
       setSubmitting(false);
     }
@@ -657,12 +660,20 @@ export default function ShipmentForm({
   }
 
   if (!customer) {
-    return <Alert severity="error">{error ?? 'Shipment context not available.'}</Alert>;
+    return (
+      <ErrorAlert error={error ?? 'Shipment context not available.'} entity="shipment" />
+    );
   }
 
   return (
     <Stack spacing={3}>
-      {error && <Alert severity="error">{error}</Alert>}
+      {error != null && (
+        <ErrorAlert
+          error={error}
+          entity="shipment"
+          fallback="Couldn't save this shipment. Please try again."
+        />
+      )}
 
       {/* CREDIT HOLD — warn, never gate.
           Deliberately a standalone render off `customer`, not an entry in

@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import {
   generateStoragePath,
   uploadFileToStorage,
@@ -203,7 +204,7 @@ export async function deletePartAttachment(att: {
   const { error } = await supabase.from('part_attachments').delete().eq('id', att.id);
   if (error) {
     console.error('Error deleting part attachment row:', error);
-    throw error;
+    throw toFriendlyError(error, { entity: 'attachment' });
   }
   // Row is gone; best-effort remove the file. A failure here is a recoverable
   // orphan, not a user-visible problem, so don't surface it.

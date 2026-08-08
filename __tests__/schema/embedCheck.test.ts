@@ -358,11 +358,28 @@ describe('schemaEmbedCheck — foreign-key hints', () => {
 });
 
 describe('schemaEmbedCheck — full project scan', () => {
-  it('reports no schema/embed drift across utils/', () => {
-    const result = scanProject(REPO_ROOT, ['utils']);
-    const hardErrors = result.violations.filter(
-      (v) => v.reason !== 'unresolved-interpolation',
-    );
+  it('reports no schema/embed drift across the app', () => {
+    // Scans beyond utils/ as a ratchet: components and pages run their own
+    // `.select()` calls (ShipmentForm's job embed is the largest), and nothing
+    // covered them before. Zero findings there today — this is here so a future
+    // component-level embed can't land unchecked.
+    //
+    // NOT `scripts`: this checker's own JSDoc contains an example `.select(`,
+    // and `extractSelects` matches it anywhere in a file including inside a
+    // comment block, which yields two false `unknown-table` violations.
+    const result = scanProject(REPO_ROOT, ['utils', 'components', 'app', 'lib', 'hooks']);
+
+    // `unresolved-interpolation` is a HARD ERROR, not a warning. It used to be
+    // filtered out here, which made it invisible twice over: nothing failed, and
+    // the only place warnings are printed (`main()`) is dead code — `tsx` isn't
+    // installed and no script or CI step invokes it. That mattered more than it
+    // sounds, because `validateEmbed` returns on an unresolved `${…}` BEFORE the
+    // FK-hint check, so each suppressed warning was also silently disabling hint
+    // validation for its embed. Both live instances were in bomAccess.ts and hid
+    // `parts_bom_child_part_id_fkey` / `parts_bom_parent_part_id_fkey` — the only
+    // FK hints in the repo that nothing checked. Resolving a constant is cheap
+    // (see resolveInterpolations); leaving one unresolved is not.
+    const hardErrors = result.violations;
 
     // Self-check: make sure the scanner actually did work. If we scanned
     // zero files or zero tables, the test would be a false negative.
@@ -377,7 +394,7 @@ describe('schemaEmbedCheck — full project scan', () => {
     if (hardErrors.length > 0) {
       const summary = formatErrors(hardErrors, REPO_ROOT);
       throw new Error(
-        `Schema/embed drift detected in utils/. Update the access layer to ` +
+        `Schema/embed drift detected. Update the query to ` +
           `match types/database.ts, or regenerate it with ` +
           `\`supabase start && pnpm gen:db-types\` if a migration legitimately added/removed ` +
           `columns:\n\n${summary}`,

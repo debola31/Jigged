@@ -10,43 +10,58 @@
  *
  * Born from the May 2026 jobs.status prod incident: migration 20260523
  * dropped jobs.status, but two PostgREST embeds in quotesAccess.ts still
- * referenced it. No unit test caught it (they mock supabase), tsc didn't
- * (the select string is opaque to TypeScript), and the one E2E spec that
- * would have failed was runtime-skipping. This check would have flagged
- * the embed on the PR that dropped the column.
+ * referenced it. No unit test caught it (they mock supabase), tsc didn't —
+ * the access layer ran on the UNTYPED client then, so the select string really
+ * was opaque to TypeScript — and the one E2E spec that would have failed was
+ * runtime-skipping. This check would have flagged the embed on the PR that
+ * dropped the column.
  *
- * STILL NEEDED AFTER THE TYPED-CLIENT MIGRATION, and the reason is worth
- * recording precisely, because the obvious way to make it redundant does not
- * work and someone will otherwise try it again.
+ * WHY THIS FILE STILL EXISTS, re-measured 2026-08-07. The previous answer here
+ * was wrong and is worth stating plainly, because it was recorded as "measured,
+ * not assumed" and would otherwise keep being believed.
  *
- * All access files use the typed `getSupabase()`, and supabase-js validates select
- * strings at the type level — so `tsc` does catch part of this class. Measured
- * by injecting a bogus embed column and running the whole project:
+ * WITHDRAWN: that past some breadth/depth supabase-js's type-level parser
+ * "stops resolving and silently widens instead of erroring", and that this is
+ * why QUOTE_DETAIL_SELECT went unchecked. It does not widen. Ask the parser
+ * directly — index into the query's inferred type instead of casting the row —
+ * and QUOTE_DETAIL_SELECT resolves correctly and yields, three levels down:
  *
- *   jobsAccess, `jobs → job_parts → parts`      → tsc CATCHES it
- *       SelectQueryError<"column 'x' does not exist on 'parts'.">
- *   quotesAccess QUOTE_DETAIL_SELECT             → tsc SEES NOTHING
+ *   SelectQueryError<"column 'x' does not exist on 'customer_contacts'.">[]
  *
- * THE DIFFERENCE IS NOT HOW THE STRING IS DECLARED. That was the first guess,
- * and it is wrong. All three of these were tested on the quotes detail select,
- * with a jobsAccess injection in the SAME tsc run as a positive control to prove
- * the experiment could detect anything at all:
+ * The old observation (jobsAccess errors, quotesAccess does not) reproduces
+ * exactly. The inference from it did not survive. What actually decides it:
  *
- *   as a `const` with ${…} interpolation   → not caught
- *   the same const with `as const`         → not caught
- *   fully inlined at the call site         → NOT CAUGHT
+ *   1. SelectQueryError<M> = { error: true } & M is a TYPE, not a compile
+ *      error. It fails a build only where type-checked code READS that field.
+ *   2. Both sites cast the row with a plain `as`. Whether that surfaces the
+ *      error depends on the HAND-WRITTEN TARGET TYPE's permissiveness, not on
+ *      the query: JobWithRelations declares its relations required, so the bad
+ *      row fails comparability and tsc errors; QuoteWithRelations declares
+ *      every relation optional (`customers?`, `customer_contacts?`), so the
+ *      same bad row still "sufficiently overlaps" and the cast is allowed.
+ *      One `?` is the entire difference. An `as unknown as` erases it always.
  *
- * So it is the select's own complexity. `quotes` embeds `customers`, which
- * embeds both `customer_contacts` and `customer_addresses`, alongside
- * `line_items` which embeds `parts`. Past some breadth/depth the type-level
- * parser stops resolving and silently widens instead of erroring — and silence
- * is indistinguishable from success.
+ * SO WHAT KEEPS THIS FILE ALIVE IS NOT THE COLUMN CHECK. Deriving result types
+ * from the query (`QueryData<typeof q>`) instead of hand-writing them makes tsc
+ * cover the column class natively — see docs/runbooks/typed-select-drift.md.
+ * Two classes survive that migration, and they are the real mandate here:
  *
- * The practical consequence: inlining these selects buys NOTHING except three
- * duplicated copies of PART_SELECT_COLUMNS, and deleting this file would leave
- * the largest, most-nested selects in the codebase unchecked — including
- * quotesAccess.ts, which is exactly where the jobs.status incident lived.
- * Re-run the experiment before concluding otherwise.
+ *   - FK HINTS ARE NOT TYPE-CHECKED AT ALL. `notes!totally_made_up_fk(id, body)`
+ *     infers a plausible, fully readable type with no error even when every
+ *     field is read: on a hint miss postgrest-js falls back to matching by
+ *     relation NAME rather than erroring. PostgREST 400s on it at runtime.
+ *     16 live non-keyword hints in utils/, across two naming conventions
+ *     (`_fkey` on older tables, `_fk` on newer), and a fabricated one has
+ *     already reached a preview deploy. The `unknown-constraint` reason below
+ *     is the only thing in the repo covering this class.
+ *   - A DERIVED TYPE IS A DERIVATION, NOT AN ASSERTION. A SelectQueryError in
+ *     one still only errors at a type-checked read. Reading a sibling field,
+ *     JSON.stringify, or .length all stay silent — and `__tests__` is excluded
+ *     from tsconfig, so a test-only read never counts.
+ *
+ * Do not delete this file on the grounds that the typed client covers it. Do
+ * delete the column-existence half once every embed column has a type-checked
+ * reader AND the FK-hint class has a replacement — neither is true today.
  *
  * Scope:
  * - Validates EMBED columns (inside `relation(...)`). Bare top-level columns
@@ -307,15 +322,30 @@ interface SelectCandidate {
   text: string;
 }
 
-/** Substitute `${IDENT}` placeholders with their `const IDENT = \`...\``
- *  values from the same file. One pass is enough for the convention in
- *  this codebase (constants don't nest deeply). Unresolved placeholders
- *  remain as `${IDENT}` so the caller can detect and skip. */
+/** Substitute `${IDENT}` placeholders with their `const IDENT = '...'` values
+ *  from the same file. One pass is enough for the convention in this codebase
+ *  (constants don't nest deeply). Unresolved placeholders remain as `${IDENT}`
+ *  so the caller can detect and skip.
+ *
+ *  ALL THREE QUOTE STYLES, and the single quotes are the load-bearing ones.
+ *  This matched only backticks until 2026-08-07, so a select constant written
+ *  with `'…'` never resolved — and because `validateEmbed` bails on an
+ *  unresolved `${…}` BEFORE it reaches the FK-hint check, that silently
+ *  disabled hint validation for the embed it sat in. `parts_bom_child_part_id_fkey`
+ *  and `parts_bom_parent_part_id_fkey` were checked by nothing at all as a
+ *  result: a fabricated hint there produced no violation, and PostgREST 400s on
+ *  one at runtime. Nothing else in the repo checks FK hints — `tsc` does not
+ *  (a bogus hint infers a plausible type, see docs/architecture.md §6.1).
+ *
+ *  Kept as three separate alternatives rather than one character class so an
+ *  apostrophe inside a backtick constant cannot terminate the match early. */
 function resolveInterpolations(text: string, sourceFile: string): string {
   return text.replace(/\$\{(\w+)\}/g, (orig, name) => {
-    const re = new RegExp(`const\\s+${name}\\s*=\\s*\`([^\`]+)\``);
+    const re = new RegExp(
+      `const\\s+${name}\\s*=\\s*(?:\`([^\`]+)\`|'([^']+)'|"([^"]+)")`,
+    );
     const m = re.exec(sourceFile);
-    return m ? m[1] : orig;
+    return m ? (m[1] ?? m[2] ?? m[3]) : orig;
   });
 }
 

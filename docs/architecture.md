@@ -29,7 +29,7 @@
 > overcounted; a `getCustomers()` paginated pattern that does not exist;
 > `supabase/schema.staging.sql` and `schema.prod.sql` (both since deleted); a `shipments/` route
 > "feature-flagged per tenant" (neither exists); "`utils/*Access.ts` use the untyped
-> `getSupabase()`" (the access layer is fully converted — §6.1); and §16's soft-delete
+> `getSupabase()`" (there is no untyped getter at all any more — §6.1, #573); and §16's soft-delete
 > guard cited as `#367`, which is the E2E reload-convention parent (the real issue is
 > `#687`).
 
@@ -224,18 +224,62 @@ absence in the database** — grepping it for a policy or a grant yields "not fo
 things that exist and are load-bearing. `supabase/migrations/` is the only source for
 those.
 
-**Typed mode does not subsume [`scripts/schemaEmbedCheck.ts`](../scripts/schemaEmbedCheck.ts)
-— measured, not assumed.** Injecting a bogus embed column and running `tsc` project-wide:
-the `jobs → job_parts → parts` embed in `jobsAccess` **errors**; `QUOTE_DETAIL_SELECT` in
-`quotesAccess` produces **nothing**. **Withdrawn:** that the difference is how the select
-string is declared — `as const` and full inlining at the call site were both tested against
-a `jobsAccess` positive control in the same run, and neither helped. It is the select's own
-breadth/depth (`quotes → customers → contacts + addresses`, alongside `line_items → parts`);
-past some size supabase-js's type-level parser silently widens instead of erroring, and
-silence is indistinguishable from success. So the largest, most-nested selects — including
-`quotesAccess.ts`, where the May 2026 `jobs.status` incident actually lived — are covered
-by the scanner only. Driven from
-[`__tests__/schema/embedCheck.test.ts`](../__tests__/schema/embedCheck.test.ts) →
+**Why [`scripts/schemaEmbedCheck.ts`](../scripts/schemaEmbedCheck.ts) still runs, and what
+actually silences `tsc` — re-measured 2026-08-07, and the earlier explanation was wrong.**
+
+The observation is reproducible: inject a bogus embed column, run `tsc` project-wide, and the
+`jobs → job_parts → parts` embed in `jobsAccess` **errors** while `QUOTE_DETAIL_SELECT` in
+`quotesAccess` reports **nothing**.
+
+**Withdrawn: that this is the select's breadth/depth, and that past some size supabase-js's
+type-level parser "silently widens instead of erroring."** It does not widen. Ask the parser
+directly — index into the query's inferred type instead of casting the row — and
+`QUOTE_DETAIL_SELECT`, at full complexity, resolves correctly and yields
+
+```
+SelectQueryError<"column 'bogus_quote_col' does not exist on 'customer_contacts'.">[]
+```
+
+three levels down (`quotes → customers → customer_contacts`). The parser found it. Two things
+then keep it off your screen:
+
+1. **`SelectQueryError<M>` is `{ error: true } & M` — a *type*, not a compile error.** It only
+   fails a build when something *reads* the affected field in a type-checked way. Nothing does,
+   because every one of these access functions casts the row instead.
+2. **Whether the cast surfaces it is decided by the hand-written target type's permissiveness,
+   not by the query.** Both sites use a plain `as`. `JobWithRelations` declares its relations
+   **required**, so a row whose `parts` is a `SelectQueryError` fails the comparability check and
+   `tsc` errors. [`QuoteWithRelations`](../types/quote.ts) declares every relation **optional**
+   (`customers?`, `customer_contacts?`), so the same bad row still "sufficiently overlaps" and the
+   conversion is allowed. That single `?` is the whole difference between the two results above.
+   An `as unknown as` row cast erases it unconditionally, whatever the target type.
+
+So the checked-ness of a query is currently a property of how permissively someone hand-wrote
+its result type — not a guarantee, and invisible at the call site. **The fix is to stop
+hand-writing these types** and derive them with `QueryData<typeof q>`, which makes them exact by
+construction. Plan and staging: [typed-select-drift.md](runbooks/typed-select-drift.md).
+
+**That still does not make the scanner redundant, and this is the part to not get wrong twice.**
+Two classes survive the migration:
+
+- **Foreign-key hints are not type-checked at all.** Measured 2026-08-07:
+  `from('jobs').select('id, notes!notes_TOTALLY_MADE_UP_fk(id, body)')` infers
+  `{ id: string; notes: { id: string; body: string | null }[] }[]` — a plausible, fully readable
+  type, with no error even when every field is read. On a miss, postgrest-js's
+  `FindMatchingHintTableRelationships` falls back to matching by relation *name* rather than
+  emitting an error, so a fabricated hint compiles clean and PostgREST 400s at runtime. There are
+  16 live non-keyword hints in `utils/` across two naming conventions (`_fkey` on older tables,
+  `_fk` on newer), and a wrong one has already reached a preview deploy once. The scanner's
+  `unknown-constraint` check is the **only** thing in the repo covering this.
+- **A derived type is a derivation, not an assertion.** A `SelectQueryError` inside it fails the
+  build only where type-checked code *reads* that field. Reading a sibling, `JSON.stringify`, or
+  `.length` all stay silent, and `__tests__` is excluded from `tsconfig`, so a test-only read
+  never counts.
+
+What the migration *does* subsume are the scanner's two documented blind spots — bare top-level
+columns (which it skips by design) and `${…}` interpolations (which it skips with a warning).
+
+Driven from [`__tests__/schema/embedCheck.test.ts`](../__tests__/schema/embedCheck.test.ts) →
 `describe('schemaEmbedCheck — full project scan')` (2 `it`s).
 
 ---

@@ -54,6 +54,9 @@ criterion · [inventory.md](modules/inventory.md)
   local-Supabase JWT fixtures, conventions and known holes
 - [runbooks/local-dev-and-testing.md](runbooks/local-dev-and-testing.md) — E2E setup, running from
   a git worktree, Vercel-preview verification, and the E2E gotchas
+- [runbooks/typed-select-drift.md](runbooks/typed-select-drift.md) — **proposed**: derive
+  `.select()` result types with `QueryData` instead of hand-writing them. Also records what `tsc`
+  can and cannot see about a select (FK hints: nothing), which is why `schemaEmbedCheck.ts` stays
 - [usability-tests/](usability-tests/) — research instruments. Findings are deliberately
   **not** committed (`.gitignore`: `*findings*`), because they hold session data
 

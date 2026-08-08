@@ -310,6 +310,18 @@ part's kind:
 *(An earlier revision started multi-quantity parts with **no radio selected**, requiring a
 deliberate pick. Radios are gone — `ConvertToJobModal` has none.)*
 
+**Lead time follows the same all-or-nothing rule as the detail view and the PDF:** when any line
+carries its own, the single *Quoted lead time* block is suppressed and each part shows its
+effective value (`lead_time_text ?? quote.lead_time_text`). The modal was the one surface that
+never got this — it read `quote.lead_time_text` alone, so a quote with three per-part lead times
+displayed one, silently.
+
+Because **a job carries one `due_date`**, the modal also warns when the parts *checked for this
+job* were quoted with differing lead times, naming them, and points at the existing escape hatch:
+convert in several passes, one job per PO. Lead time is **not** persisted onto the job — `jobs`
+has no lead-time column (`jobs.lead_time_days` was dropped in `20260713060545`) and free-text lead
+time no longer implies a date.
+
 Also captured: a **required Due date** (not-in-the-past, starts **empty** — no prefill, and no
 longer derived from lead time), a **required Customer PO #** (the authorization, so no job
 without it), and an **optional PO PDF** which uploads to the job after conversion and is

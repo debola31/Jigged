@@ -154,11 +154,23 @@ export default function ConvertToJobModal({
   // needs the salesperson to pick the accepted quantity before converting.
   // Split into the parts still available to convert this pass vs the ones
   // already on a job (shown read-only so the user sees the full picture).
+  // When ANY line carries its own lead time, lead time is shown per part below
+  // and the single quote-level value is suppressed — the same all-or-nothing
+  // rule the PDF (`quotePdf.ts`) and the quote detail page apply, so the three
+  // surfaces can't contradict each other. This modal was the one that never got
+  // it, and showed one lead time no matter how many the quote carried.
+  const hasPerItemLeadTimes = useMemo(
+    () => lineItems.some((li) => (li.lead_time_text ?? '').trim() !== ''),
+    [lineItems],
+  );
+
   const { partGroups, convertedGroups } = useMemo(() => {
     const groups: {
       part_id: string;
       part_name: string;
       unit: string;
+      /** Effective lead time: the part's own value, else the quote-level one. */
+      lead_time: string;
       items: QuoteLineItem[];
     }[] = [];
     const index = new Map<string, number>();
@@ -173,6 +185,7 @@ export default function ConvertToJobModal({
           // Real unit so a fractional order reads "0.32 in" not "0.32 ea";
           // count parts still show "ea". Falls back to "ea" for a unitless part.
           unit: unitShortLabel(li.parts?.primary_unit) ?? 'ea',
+          lead_time: (li.lead_time_text ?? '').trim() || (quote.lead_time_text ?? ''),
           items: [],
         });
       }
@@ -182,7 +195,7 @@ export default function ConvertToJobModal({
       partGroups: groups.filter((g) => !convertedPartIds.has(g.part_id)),
       convertedGroups: groups.filter((g) => convertedPartIds.has(g.part_id)),
     };
-  }, [lineItems, convertedPartIds]);
+  }, [lineItems, convertedPartIds, quote.lead_time_text]);
 
   // part_id → the "base" line item this part converts from. Every part has one
   // (defaults to the lowest-quantity line). For a price-options part its quoted
@@ -206,6 +219,12 @@ export default function ConvertToJobModal({
   const [useTierByPart, setUseTierByPart] = useState<Record<string, boolean>>({});
   const includedGroups = partGroups.filter((g) => includedByPart[g.part_id]);
   const anyIncluded = includedGroups.length > 0;
+  // Distinct lead times across the parts going onto THIS job — the ones the
+  // single due date below has to satisfy. Excluded parts don't count: they stay
+  // on the quote for a later job with its own date.
+  const distinctIncludedLeadTimes = Array.from(
+    new Set(includedGroups.map((g) => g.lead_time).filter((t) => t !== '')),
+  );
   // Every INCLUDED part must have a valid (>0) ordered quantity.
   const allQtysValid = includedGroups.every((g) => parseQty(qtyByPart[g.part_id]) !== null);
 
@@ -508,6 +527,19 @@ export default function ConvertToJobModal({
                         </Typography>
                       </Box>
 
+                      {/* Per-part lead time, shown only when the quote actually
+                          carries differing ones — otherwise the single value
+                          below covers every part and repeating it is noise. */}
+                      {hasPerItemLeadTimes && group.lead_time !== '' && (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ display: 'block', mt: 0.75 }}
+                        >
+                          Lead time: {group.lead_time}
+                        </Typography>
+                      )}
+
                       {/* Firm part only: committed-qty note + reprice opt-in on a break
                           crossing. Price-options parts always price at the tier. */}
                       {!isMultiTier && qtyChanged && (
@@ -564,30 +596,46 @@ export default function ConvertToJobModal({
           )}
 
           <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {!hasPerItemLeadTimes && (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Quoted lead time
+                </Typography>
+                <Typography variant="body1" fontWeight={500}>
+                  {quote.lead_time_text ?? 'Not specified'}
+                </Typography>
+              </Box>
+            )}
             <Box>
-              <Typography variant="body2" color="text.secondary">
-                Quoted lead time
-              </Typography>
-              <Typography variant="body1" fontWeight={500}>
-                {quote.lead_time_text ?? 'Not specified'}
-              </Typography>
+              <TextField
+                label="Due date"
+                type="date"
+                size="small"
+                fullWidth
+                required
+                value={dueDateInput}
+                onChange={(e) => setDueDateInput(e.target.value)}
+                disabled={loading}
+                error={dueDateShowError}
+                helperText={dueDateHelper}
+                slotProps={{
+                  inputLabel: { shrink: true },
+                  htmlInput: { min: today },
+                }}
+              />
+              {/* A job carries ONE due date. When the parts going onto it were
+                  quoted with different lead times, this is the moment that
+                  matters — say so here rather than letting the user pick a date
+                  that silently contradicts half the quote. (Splitting them is
+                  already possible: convert in several passes, one job per PO.) */}
+              {distinctIncludedLeadTimes.length > 1 && (
+                <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+                  These parts were quoted with different lead times (
+                  {distinctIncludedLeadTimes.join(', ')}). One job carries one due date — convert
+                  them separately if they need different dates.
+                </Typography>
+              )}
             </Box>
-            <TextField
-              label="Due date"
-              type="date"
-              size="small"
-              fullWidth
-              required
-              value={dueDateInput}
-              onChange={(e) => setDueDateInput(e.target.value)}
-              disabled={loading}
-              error={dueDateShowError}
-              helperText={dueDateHelper}
-              slotProps={{
-                inputLabel: { shrink: true },
-                htmlInput: { min: today },
-              }}
-            />
             <TextField
               label="Customer PO #"
               size="small"

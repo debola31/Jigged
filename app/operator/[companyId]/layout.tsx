@@ -28,7 +28,14 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import { getSupabase } from '@/lib/supabase';
 import { isIndeterminateSingleError } from '@/lib/supabaseErrors';
 import AppAmbientBackdrop from '@/components/layout/AppAmbientBackdrop';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
+import {
+  OperatorCompanyProvider,
+  useOperatorCompany,
+} from '@/components/operator/OperatorCompanyContext';
+import OperatorCompanyLabel from '@/components/operator/OperatorCompanyLabel';
+import OperatorDemoBar, {
+  DEMO_BAR_HEIGHT,
+} from '@/components/operator/OperatorDemoBar';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
@@ -319,40 +326,47 @@ export default function OperatorLayout({
   }
 
   return (
-    <OperatorStationProvider>
-      <OperatorChromeProvider>
-        <OperatorShell
-          userRole={userRole}
-          companyId={companyId}
-          navValue={navValue}
-          onNavChange={handleNavChange}
-        >
-          {children}
-        </OperatorShell>
+    // OperatorCompanyProvider wraps the rest so ONE `getCompany` answers three questions —
+    // which shop this is, whether it is a demo one, and the feature flags. It sits below
+    // the auth check above (which early-returns) so it never fetches before membership is
+    // confirmed, and outside the shell so the shell can consume it rather than running its
+    // own copy of the same request.
+    <OperatorCompanyProvider>
+      <OperatorStationProvider>
+        <OperatorChromeProvider>
+          <OperatorShell
+            userRole={userRole}
+            companyId={companyId}
+            navValue={navValue}
+            onNavChange={handleNavChange}
+          >
+            {children}
+          </OperatorShell>
 
-        {/*
-          Lives at the layout level, not on a page, because the tab bar owns it — so it opens
-          over whatever screen you were on and closing it returns you there. A Dialog portals
-          out of this position anyway, so being a sibling of the shell costs nothing.
+          {/*
+            Lives at the layout level, not on a page, because the tab bar owns it — so it opens
+            over whatever screen you were on and closing it returns you there. A Dialog portals
+            out of this position anyway, so being a sibling of the shell costs nothing.
 
-          Both handlers mirror the login passthrough's `postLoginPath`, which is what the
-          printed QR would have gone through: same destination, minus the camera-app round trip
-          and the login interstitial.
-        */}
-        <LocationScanner
-          open={scanning}
-          onClose={() => setScanning(false)}
-          onScan={handleScanLocation}
-          onScanTraveler={handleScanTraveler}
-          /* Without this, a label printed by ANOTHER shop decodes fine and both handlers below
-             push the route regardless — the operator lands on someone else's job or bin and gets
-             an RLS error page instead of "that isn't yours". The scanner now refuses it before
-             either handler runs. */
-          expectedCompanyId={companyId}
-          title="Scan a Jigged label"
-        />
-      </OperatorChromeProvider>
-    </OperatorStationProvider>
+            Both handlers mirror the login passthrough's `postLoginPath`, which is what the
+            printed QR would have gone through: same destination, minus the camera-app round trip
+            and the login interstitial.
+          */}
+          <LocationScanner
+            open={scanning}
+            onClose={() => setScanning(false)}
+            onScan={handleScanLocation}
+            onScanTraveler={handleScanTraveler}
+            /* Without this, a label printed by ANOTHER shop decodes fine and both handlers below
+               push the route regardless — the operator lands on someone else's job or bin and gets
+               an RLS error page instead of "that isn't yours". The scanner now refuses it before
+               either handler runs. */
+            expectedCompanyId={companyId}
+            title="Scan a Jigged label"
+          />
+        </OperatorChromeProvider>
+      </OperatorStationProvider>
+    </OperatorCompanyProvider>
   );
 }
 
@@ -375,7 +389,12 @@ function OperatorShell({
   const { stationId, stationName, stations, setStation } = useStationContext();
   const chrome = useOperatorChrome();
   const nav = useOperatorNav();
-  const { features } = useCompanyFeatures();
+  // From the context rather than `useCompanyFeatures()` directly: it is the same
+  // `getCompany` row, fetched once for the whole operator tree instead of once per
+  // consumer. (The company NAME is read by `OperatorCompanyLabel`, which owns the
+  // header slot; the shell only needs to know whether this is a demo company,
+  // because that changes the content offset below.)
+  const { features, isDemo } = useOperatorCompany();
   const pathname = usePathname();
   const router = useRouter();
   /**
@@ -478,8 +497,23 @@ function OperatorShell({
 
           {/* Center: station name + dropdown, centered between the clusters (the
               iOS "title" slot). Kept in a stable spot so it doesn't jump as the
-              operator navigates; truncates rather than colliding with the icons. */}
+              operator navigates; truncates rather than colliding with the icons.
+
+              BEFORE A STATION IS PICKED this slot used to be empty, and that emptiness
+              was the bug: the station picker hides the bottom nav too, so the one screen
+              where you commit to a working context named neither the shop nor anything
+              else. `OperatorCompanyLabel` fills it and then yields to the station, so the
+              slot is never blank and never carries two things at once.
+
+              THE COMPANY NAME BELONGS HERE AND NOWHERE ELSE on the operator surface. An
+              interim version also put it on the station picker card, which rendered the
+              same words twice within about 100px on that screen. The header wins the one
+              slot because the card is absent on the other screens reachable without a
+              station ("Me" and Inventory both are). Plain text, NOT a control — the note
+              further down forbids a second tap target in this bar on Fitts's-law grounds,
+              and that applies just as much to promoting inert text into a button. */}
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0, px: 1 }}>
+            <OperatorCompanyLabel />
             {stationId && (
               <Box
                 onClick={handleStationMenuOpen}
@@ -549,6 +583,12 @@ function OperatorShell({
           */}
         </Toolbar>
 
+        {/* A second row INSIDE the AppBar, so the demo bar is part of the one fixed
+            element rather than a second one to keep in sync. Renders null outside a
+            demo company, which is why the offset below is conditional rather than
+            permanently taller. */}
+        <OperatorDemoBar />
+
         {/* Station Selector Menu */}
         <Menu
           anchorEl={anchorEl}
@@ -602,7 +642,12 @@ function OperatorShell({
           position: 'relative',
           zIndex: 1, // above the fixed ambient backdrop
           flexGrow: 1, // fill the viewport so the background reaches the bottom on short pages
-          mt: '48px', // Single-row AppBar height
+          /* AppBar height. 48px is the Toolbar; in a demo company the AppBar carries a
+             second row (OperatorDemoBar) and this has to grow by exactly its height —
+             the bar is `position: fixed` along with the rest of the AppBar, so it covers the
+             top of the content rather than pushing it. THE ONE PLACE that knows the bar
+             exists; the constant is exported from the bar so the two cannot drift. */
+          mt: isDemo ? `${48 + DEMO_BAR_HEIGHT}px` : '48px',
           // BottomNavigation height plus whatever the device reserves at the bottom (the iOS home
           // indicator). `viewportFit: 'cover'` in the root layout is what makes the inset non-zero.
           mb: navVisible ? 'calc(56px + env(safe-area-inset-bottom))' : 0,

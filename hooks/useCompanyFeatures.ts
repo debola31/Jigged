@@ -30,17 +30,34 @@ import { useLoad } from '@/hooks/useLoad';
  * row twice per mount on the page whose problem was concurrent request volume.
  * Storage needs both too: the flag gates the page and the name heads its QR label
  * sheet.
+ *
+ * `isDemo` and `demoCompanyId` ride along for the same reason and on the same
+ * row — `getCompany` selects both columns already. That is what lets the
+ * operator shell know whether it is standing in a demo company, and whether the
+ * shop has one to offer, without spending a request on the question. A
+ * non-demo operator therefore pays nothing at all for demo mode; see
+ * `components/operator/OperatorCompanyContext.tsx`, which is the only place
+ * that turns these three fields into a decision.
+ *
+ * Both are DEMO-SHAPED FACTS ABOUT THE URL'S COMPANY, not a demo-mode API: the
+ * real company a demo stands in for is a reverse lookup this row cannot answer
+ * (`getDemoSourceCompany`), and nothing here should grow one.
  */
 export function useCompanyFeatures() {
   const params = useParams();
   const companyId = params.companyId as string | undefined;
 
   const { data, loading } = useLoad(
-    async (): Promise<{ features: Record<KnownFeatureKey, boolean>; name: string | null }> => {
+    async (): Promise<CompanyFeaturesResult> => {
       if (!companyId) return EMPTY_RESULT;
       try {
         const company = await getCompany(companyId);
-        return { features: readCompanyFeatures(company), name: company?.name ?? null };
+        return {
+          features: readCompanyFeatures(company),
+          name: company?.name ?? null,
+          isDemo: company?.is_demo ?? false,
+          demoCompanyId: company?.demo_company_id ?? null,
+        };
       } catch (err) {
         console.warn('useCompanyFeatures: failed to load company:', err);
         return EMPTY_RESULT;
@@ -52,8 +69,19 @@ export function useCompanyFeatures() {
   return {
     features: data?.features ?? EMPTY_FEATURES,
     companyName: data?.name ?? null,
+    /** True when the URL's company IS a demo company. */
+    isDemo: data?.isDemo ?? false,
+    /** The demo this company owns, if an admin has created one. Null inside a demo. */
+    demoCompanyId: data?.demoCompanyId ?? null,
     loading,
   };
+}
+
+interface CompanyFeaturesResult {
+  features: Record<KnownFeatureKey, boolean>;
+  name: string | null;
+  isDemo: boolean;
+  demoCompanyId: string | null;
 }
 
 function emptyFeatures(): Record<KnownFeatureKey, boolean> {
@@ -65,4 +93,11 @@ function emptyFeatures(): Record<KnownFeatureKey, boolean> {
 // Stable "all flags false" map — computed once, shared as the loading/fallback
 // value so consumers don't see a new object identity each render.
 const EMPTY_FEATURES: Record<KnownFeatureKey, boolean> = emptyFeatures();
-const EMPTY_RESULT = { features: EMPTY_FEATURES, name: null } as const;
+const EMPTY_RESULT: CompanyFeaturesResult = {
+  features: EMPTY_FEATURES,
+  name: null,
+  // "We could not read the row" must not read as "this is a demo" — a false
+  // positive here would put the demo bar over a real shop's job list.
+  isDemo: false,
+  demoCompanyId: null,
+};

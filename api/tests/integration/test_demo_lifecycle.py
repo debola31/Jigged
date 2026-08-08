@@ -563,3 +563,132 @@ def test_every_seeded_part_is_priceable(supabase_admin, demo):
         f"{len(incomplete)} of {len(parts)} seeded parts would show the incomplete-setup "
         f"warning:\n  " + "\n  ".join(incomplete)
     )
+
+
+# ===========================================================================
+# sync_demo_access authorization
+#
+# The function is SECURITY DEFINER — it must be, since it writes
+# user_company_access rows for OTHER users — and is granted EXECUTE to anon and
+# authenticated. Until 20260808024044 it had no caller check of any kind, and both
+# company ids came straight from the caller. That is a privilege-escalation
+# primitive: pass your own company as the source and a victim as the "demo", and
+# the function inserts you into the victim carrying your own role. Company UUIDs
+# are not secrets; they are in every URL the app renders.
+#
+# It went unnoticed because only the office Settings page (behind AdminGuard)
+# reached this RPC. The operator "Me" tab now calls it too, which is what makes
+# authorizing it a precondition rather than a cleanup.
+# ===========================================================================
+
+
+def test_sync_rejects_a_company_that_is_not_the_source_demo(supabase_admin, demo, seeded_user_b):
+    """THE ESCALATION TEST. User B is a legitimate admin of their own company and names
+    someone else's company as the "demo" to sync into. Nothing about that caller is
+    suspicious — they are signed in and are a member of the source they pass."""
+    victim_id = demo["source_id"]
+    b_company_id = seeded_user_b["company_id"]
+
+    before = _count(supabase_admin, "user_company_access", victim_id)
+
+    with pytest.raises(Exception) as exc:
+        seeded_user_b["client"].rpc(
+            "sync_demo_access",
+            {"p_source_company_id": b_company_id, "p_demo_company_id": victim_id},
+        ).execute()
+    assert "Access denied" in str(exc.value)
+
+    # The assertion that matters is not the raise, it is that nobody was added.
+    assert _count(supabase_admin, "user_company_access", victim_id) == before, (
+        "sync_demo_access inserted membership into a company the caller has no relationship with"
+    )
+
+
+def test_sync_rejects_a_caller_who_is_not_a_member_of_the_source(demo, seeded_user_b):
+    """Guard 1 already makes this harmless in effect — it only copies a company onto its own
+    demo. It is still a write on behalf of a company the caller has nothing to do with, and
+    there is no reason to allow it."""
+    with pytest.raises(Exception) as exc:
+        seeded_user_b["client"].rpc(
+            "sync_demo_access",
+            {
+                "p_source_company_id": demo["source_id"],
+                "p_demo_company_id": demo["demo_id"],
+            },
+        ).execute()
+    assert "Access denied" in str(exc.value)
+
+
+def test_sync_still_works_for_a_member_of_the_source(supabase_admin, demo):
+    """The guards must not break the thing they protect: this is the call both the office
+    provider and the operator "Me" tab make on every entry, and an operator who was hired
+    after the demo was created depends on it for their access row."""
+    supabase_admin.table("user_company_access").delete().eq(
+        "company_id", demo["demo_id"]
+    ).eq("user_id", demo["user"]["user_id"]).execute()
+
+    demo["client"].rpc(
+        "sync_demo_access",
+        {"p_source_company_id": demo["source_id"], "p_demo_company_id": demo["demo_id"]},
+    ).execute()
+
+    restored = (
+        supabase_admin.table("user_company_access")
+        .select("role")
+        .eq("company_id", demo["demo_id"])
+        .eq("user_id", demo["user"]["user_id"])
+        .execute()
+    ).data
+    assert restored, "entry sync did not mirror the member back into the demo"
+
+
+# ===========================================================================
+# operator_events excludes demo companies
+#
+# operator_events is the capture funnel and, for the first weeks of the pilot, the
+# only readable signal — every reading in utils/operatorEventsAccess.ts is a ratio
+# against app_opened. Exploring the demo is exactly the behaviour that fires app_opened,
+# station_selected and completion_recorded in bursts, so a training session would
+# otherwise be indistinguishable from a good week.
+#
+# Decided at the WRITE rather than at read time on purpose: a read-time is_demo
+# filter is the silent missing-filter failure CLAUDE.md names as the repo's
+# most-violated rule. The table cannot contain rows nobody remembers to exclude.
+# ===========================================================================
+
+
+def _operator_event_count(supabase_admin, company_id: str) -> int:
+    res = (
+        supabase_admin.table("operator_events")
+        .select("id", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return res.count or 0
+
+
+def test_operator_events_are_not_recorded_for_a_demo_company(supabase_admin, demo):
+    before = _operator_event_count(supabase_admin, demo["demo_id"])
+
+    demo["client"].rpc(
+        "log_operator_event",
+        {"p_company_id": demo["demo_id"], "p_kind": "app_opened", "p_context": {}},
+    ).execute()
+
+    assert _operator_event_count(supabase_admin, demo["demo_id"]) == before, (
+        "demo-mode activity entered the funnel every adoption ratio is measured against"
+    )
+
+
+def test_operator_events_are_still_recorded_for_the_real_company(supabase_admin, demo):
+    """The control. Without it the test above passes just as well when logging is broken
+    outright, which is the failure mode that would silence the pilot's only signal."""
+    source_id = demo["source_id"]
+    before = _operator_event_count(supabase_admin, source_id)
+
+    demo["client"].rpc(
+        "log_operator_event",
+        {"p_company_id": source_id, "p_kind": "app_opened", "p_context": {}},
+    ).execute()
+
+    assert _operator_event_count(supabase_admin, source_id) == before + 1

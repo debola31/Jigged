@@ -54,8 +54,9 @@ company with the UX of a mode switch.
 
 ## Behaviour
 
-Entered from Settings or the onboarding card; exited from Settings or the banner shown on every
-page while in demo mode.
+In the office: entered from Settings or the onboarding card; exited from Settings or the banner
+shown on every page while in demo mode. The shop floor uses the **same name** and has its own
+entry and exit — [see below](#the-operator-surface-has-its-own-way-in-and-out).
 
 - **First entry** creates the hidden demo company, seeds it from the active template, mirrors
   every `user_company_access` row and the source's feature flags, and navigates to it. **Later
@@ -63,9 +64,7 @@ page while in demo mode.
 - Navigation **preserves page context** both ways — on `/parts` in real, land on `/parts` in
   demo, and back again. Browser history works normally.
 - **Full CRUD.** It is a real company that happens to be pre-populated; users can quote, convert,
-  edit routings and adjust inventory freely. The operator view works the same way — operators
-  already have mirrored access, so they enter via Settings like everyone else. There is no
-  separate operator toggle.
+  edit routings and adjust inventory freely.
 - **Reset** restores the demo to its template state, keeping the company row and the access rows.
   It also clears `company_order_counters`, so a re-seeded demo reads `Q-0001` again instead of
   climbing every time someone resets.
@@ -78,6 +77,65 @@ page while in demo mode.
 records, real reference real, and the two graphs never connect because they are different
 companies. Demo data must be excluded from *non-data* queries — the company selector, the login
 redirect, and billing — by filtering `companies.is_demo = FALSE`.
+
+### The operator surface has its own way in and out
+
+**Corrected 2026-08-08.** This section previously read *"operators already have mirrored access,
+so they enter via Settings like everyone else. There is no separate operator toggle."* **Both
+sentences were false.** The Settings page is wrapped in `AdminGuard`, and before that
+[`AuthGuard`](../../components/auth/AuthGuard.tsx) redirects any `operator`-role user off
+`/dashboard/*` entirely — so an operator could not reach the toggle, and the only way in was an
+admin pasting a `/operator/{demoCompanyId}` URL into a message. Worse, the operator surface had
+**no demo awareness at all**: no badge, no banner, no exit, and the header's "Office" button
+pushes `/dashboard/{companyId}` from the raw route param, carrying an admin back into the *demo*
+dashboard rather than out of demo mode.
+
+| | Office | Operator |
+|---|---|---|
+| Name | "Demo mode" | **"Demo mode"** — the same words, deliberately |
+| Enter | Settings, or the onboarding card | [`OperatorDemoModeButton`](../../components/operator/OperatorDemoModeButton.tsx) in the "Me" tab, beside Give feedback and Switch company |
+| Exit | [`DemoModeBanner`](../../components/demo/DemoModeBanner.tsx), or Settings | [`OperatorDemoBar`](../../components/operator/OperatorDemoBar.tsx) — the same `severity="info"` Alert, as a 56px row inside the AppBar, on every screen |
+| Lands on | The same page you were on | **`/jobs`** — where the demo experience begins (station picker, then the dispatch list). A "Me" tab rendered against demo data is just confusing |
+| Reset | Yes | **No.** Reset is destructive and shop-wide; it stays an admin action in the office |
+
+**Withdrawn — a shop-floor-only name.** An earlier revision called this "practice mode" on the
+operator surface, reasoning that a demo is something you show a buyer while an operator handed a
+phone to learn on is practising. It is one company and one feature, and two names for it is a
+support problem the moment an admin tells an operator to "go into demo mode" and the operator
+cannot find those words anywhere on their screen. The bar reuses the office's Alert styling for
+the same reason. **Do not reintroduce a separate operator-side name.**
+
+The wording is trimmed, though, not renamed: the bar says *"You're in demo mode"* where the office
+says *"You're in demo mode. Changes here won't affect your real company."* The second sentence
+does not fit beside a 48px Leave button at 375px, and the reassurance about real data matters most
+to the admin deciding whether to enter — the office's audience — not the operator already in it.
+
+**Operators enter, they never create.** `create_demo_company` raises for non-admins in the
+database, so the button renders **nothing** until an admin has set the demo up — a control whose
+only outcome is a permission error is worse than no control. `hasDemo` costs no request:
+`companies.demo_company_id` rides on the company row the operator shell already fetched for
+feature flags. The whole of demo-awareness on the operator surface is free for a non-demo
+operator, which is nearly all of them, nearly always; only someone actually inside a demo pays
+one extra read (the reverse lookup for the real company's name).
+
+The entry calls `sync_demo_access` first and **must**: an operator hired after the demo was
+created has no mirrored access row in it and the operator layout's membership check would sign
+them out on arrival. A failure there is logged and does not block — everyone present when the
+demo was made is already mirrored, and the layout's own check is the real gate.
+
+**Demo activity never enters the operator funnel.** `log_operator_event` returns early for a demo
+company ([`20260808024101`](../../supabase/migrations/20260808024101_log_operator_event_skips_demo.sql)).
+`operator_events` is the pilot's only readable signal and every reading of it is a ratio against
+`app_opened`; a training session fires `app_opened`, `station_selected` and `completion_recorded`
+in bursts, which would be indistinguishable from a good week. Decided at the **write** rather than
+by an `is_demo` filter at read time — a filter someone forgets looks exactly like one that was not
+needed. The PostHog `demo entered` capture is the opposite case and deliberate: we *do* want to
+know whether anyone uses it. See [telemetry.md](../telemetry.md).
+
+**The operator surface also names its company now**, demo or not — in the AppBar's centre slot
+while no station is chosen, showing the **real** shop's name rather than the internal
+`X - Demo`. That is a separate fix to the same underlying gap; see
+[operator-view.md](operator-view.md).
 
 ## Data model
 
@@ -159,13 +217,46 @@ are for.
 | `seed_demo_data(company_id, template)` | The shared seeding helper — resolves `_ref` keys to UUIDs and inserts the graph |
 | `create_demo_company(source_company_id, user_id)` | Creates the hidden company, seeds it, mirrors `user_company_access`, sets `demo_company_id` on the real company. Raises **"No active demo template found"** when none is active |
 | `reset_demo_company(source_company_id, user_id)` | Deletes the demo company's data and re-seeds |
-| `sync_demo_access(source_company_id, demo_company_id)` | Lazy convergence on entry — roles **and** feature flags |
+| `sync_demo_access(source_company_id, demo_company_id)` | Lazy convergence on entry — roles **and** feature flags. **Authorized** since [`20260808024044`](../../supabase/migrations/20260808024044_harden_sync_demo_access.sql): see below |
 | `sync_demo_features(source_company_id, demo_company_id)` | Copies `settings.features` onto the demo. Backend-only; called by the three above |
 
 `sync_demo_access` inserts missing members copying both `role` **and** `name`, then `UPDATE`s
 only the roles that changed — so it stays correct without triggers. Its name still says "access"
 only; broadening it beat renaming, which would churn the RPC, `utils/demoAccess.ts`, the provider
 and the `function_execute_leaks()` allowlist for no behavioural gain.
+
+#### `sync_demo_access` had no caller check, and that was a privilege-escalation primitive
+
+Fixed 2026-08-08 in [`20260808024044`](../../supabase/migrations/20260808024044_harden_sync_demo_access.sql).
+The function is `SECURITY DEFINER` — it must be, since it writes `user_company_access` rows for
+*other* users — and is granted `EXECUTE` to `anon` and `authenticated`. Both company ids came
+straight from the caller and **neither was checked against them**. So a signed-in user could pass
+their own company as the source and any other company as the "demo", and the function would insert
+them into that company carrying their own role. Company UUIDs are not secrets; they are in every
+URL the app renders.
+
+Contrast `create_demo_company`, which has checked `auth.uid()` and admin-of-source since the
+baseline. `sync_demo_access` is its sibling and shipped with neither.
+
+Two guards, and both earn their place:
+
+1. **The pair must be a real source→demo pair** (`companies.demo_company_id` must already point at
+   `p_demo_company_id`). This is the one that closes the escalation path, and it is unconditional
+   so it holds for `service_role` too.
+2. **A caller with a JWT must be a member of the source.** Guard 1 alone leaves only a harmless
+   write — converging someone else's demo on its own source — but there is no reason to allow it.
+   Conditioned on `auth.uid() IS NOT NULL` so `service_role` (no JWT, trusted, used by the backend
+   and the integration suite) keeps working.
+
+It surfaced while opening demo mode to operators, which widens the caller set from admins to
+every member. Covered by `test_sync_rejects_a_company_that_is_not_the_source_demo` — which asserts
+that no membership row was created, not merely that the call raised — plus
+`test_sync_rejects_a_caller_who_is_not_a_member_of_the_source` and
+`test_sync_still_works_for_a_member_of_the_source`.
+
+**Still open, and deliberately not fixed here:** `reset_demo_company` checks only
+`p_user_id = auth.uid()` and has **no admin check**, unlike `create_demo_company`. Any member who
+can reach the RPC can reset their company's demo. The UI is admin-only; the RPC is not.
 
 ### Feature flags mirror the source company
 
@@ -275,6 +366,11 @@ had **no** coverage at all before 2026-08-05, which is why both failures above s
 | Reset re-mirrors flags | `test_reset_re_mirrors_flags` |
 | `sync_demo_features` is unreachable from the browser | `test_sync_demo_features_is_not_reachable_from_the_browser` |
 | Every seeded part is priceable — the demo shows zero setup warnings | `test_every_seeded_part_is_priceable` |
+| `sync_demo_access` refuses a company that is not the source's own demo, and adds nobody | `test_sync_rejects_a_company_that_is_not_the_source_demo` |
+| `sync_demo_access` refuses a caller who is not a member of the source | `test_sync_rejects_a_caller_who_is_not_a_member_of_the_source` |
+| …and still works for one who is — the call every entry makes | `test_sync_still_works_for_a_member_of_the_source` |
+| Demo activity is not recorded in the operator funnel | `test_operator_events_are_not_recorded_for_a_demo_company` |
+| …and real activity still is (the control, without which the above passes when logging is broken) | `test_operator_events_are_still_recorded_for_the_real_company` |
 
 The tests assert **derived** state and **lower-bound** counts, not the template's own numbers —
 asserting the template back at itself would pass with every trigger broken, and equalities would
@@ -288,7 +384,11 @@ Separately covered, and the part with money attached:
 | Stripe checkout refuses a demo company | `api/tests/unit/test_stripe_routes.py` > `test_checkout_rejects_demo_company` |
 
 Still untested and worth naming: `sync_demo_access`'s *role* mirroring on re-entry (its flag
-mirroring is covered), and the frontend enter/exit navigation.
+mirroring and its authorization are covered), and the **office** frontend enter/exit navigation.
+The operator side is covered — `__tests__/app/operator/MyWorkPage.test.tsx` for the entry (absent
+without a demo, absent inside one, syncs before navigating, enters anyway if the sync fails, and
+leaves Log out isolated) and `__tests__/components/operator/OperatorDemoBar.test.tsx` for the
+exit.
 
 ## Resolved questions
 

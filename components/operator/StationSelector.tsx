@@ -16,6 +16,19 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
  *
  * When `filteredStations` is provided (e.g. from a job QR scan),
  * only those stations are shown instead of all company stations.
+ *
+ * ## It does NOT name the company, and that is the second answer to the same problem
+ *
+ * This screen used to identify nothing: the jobs page hides its toolbar while the picker is up
+ * and the layout hides the bottom nav, so the card was the whole screen, while the operator LOGIN
+ * page one step earlier does show the company name — it appeared, then vanished at exactly the
+ * moment you commit to a working context.
+ *
+ * The fix belongs in the header, not here. `OperatorCompanyLabel` fills the AppBar's centre slot
+ * whenever no station is chosen, which covers this card AND the screens where it is absent —
+ * "Me" and Inventory are both reachable before a station is picked. An interim version put the
+ * name in both places, and on this screen it rendered twice within about 100px. One fact, one
+ * place: the header owns company identity, this card owns the task.
  */
 export default function StationSelector({
   filteredStations,

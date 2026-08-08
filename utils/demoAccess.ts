@@ -9,6 +9,33 @@ export interface DemoStatus {
 }
 
 /**
+ * The real company a demo stands in for.
+ *
+ * `companies.demo_company_id` points forwards (real → demo), so going the other
+ * way is a reverse lookup rather than a read of the row you already have. Split
+ * out of `getDemoStatus` because the operator shell already holds the demo
+ * company's own row — it needs only this half, and calling `getDemoStatus`
+ * would re-fetch a row it is looking at.
+ *
+ * Returns null when the caller cannot see the source, which for a demo company
+ * means something is wrong rather than "no source exists": every demo has one by
+ * construction. Callers fall back to showing no name rather than a wrong one.
+ */
+export async function getDemoSourceCompany(
+  demoCompanyId: string,
+): Promise<{ id: string; name: string } | null> {
+  const supabase = getSupabase();
+
+  const { data } = await supabase
+    .from('companies')
+    .select('id, name')
+    .eq('demo_company_id', demoCompanyId)
+    .maybeSingle();
+
+  return data ? { id: data.id, name: data.name } : null;
+}
+
+/**
  * Get the demo mode status for a company.
  * If viewing a demo company, resolves the source company via reverse lookup.
  * If viewing a real company, reads demo_company_id directly.
@@ -34,11 +61,7 @@ export async function getDemoStatus(companyId: string): Promise<DemoStatus> {
 
   if (company.is_demo) {
     // We're viewing a demo company — reverse lookup to find the source
-    const { data: source } = await supabase
-      .from('companies')
-      .select('id, name')
-      .eq('demo_company_id', companyId)
-      .single();
+    const source = await getDemoSourceCompany(companyId);
 
     return {
       isDemoCompany: true,

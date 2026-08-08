@@ -37,7 +37,7 @@ def _publishable_key() -> str:
 
 @pytest.fixture
 def shop(supabase_admin):
-    """A demo company with one signed-in operator, and a job to hang a note on."""
+    """A writable company with one signed-in operator, and a job to hang a note on."""
     admin = supabase_admin
     company_id = (
         admin.table("companies")
@@ -45,9 +45,21 @@ def shop(supabase_admin):
         .execute()
         .data[0]["id"]
     )
-    # Demo => company_can_write() is true without a billing row, so the billing
-    # gate cannot mask a result we are trying to assert.
-    admin.table("companies").update({"is_demo": True}).eq("id", company_id).execute()
+    # Unblock the billing write gate so it cannot mask a result we are trying to assert.
+    #
+    # This used to set `is_demo = TRUE`, which company_can_write() also short-circuits on and
+    # which needs no extra row. That was a convenience with no connection to what these tests
+    # are about, and it stopped being free: log_operator_event now writes nothing for a demo
+    # company, deliberately, so that demo-mode activity cannot enter the capture funnel
+    # every adoption ratio is measured against. The reachability test below then failed for a
+    # reason that had nothing to do with EXECUTE grants — exactly the kind of false signal a
+    # guard test must not produce.
+    #
+    # `billing_exempt` is the honest lever: it is the other branch of the same function, it
+    # says what the fixture actually wants, and it carries no other semantics.
+    admin.table("company_billing").insert(
+        {"company_id": company_id, "billing_exempt": True}
+    ).execute()
 
     email = f"fx-{os.urandom(4).hex()}@test.jigged.local"
     password = "test-password-function-grants"

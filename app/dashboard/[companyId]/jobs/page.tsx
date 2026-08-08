@@ -383,7 +383,7 @@ export default function JobsPage() {
     setCancelling(true);
     try {
       await bulkCancelJobs(selectedIds);
-      posthog.capture('jobs_bulk_cancelled', { count: selectedIds.length });
+      posthog.capture('jobs bulk cancelled', { count: selectedIds.length });
       setSelectedIds([]);
       if (gridRef.current?.api) {
         gridRef.current.api.deselectAll();

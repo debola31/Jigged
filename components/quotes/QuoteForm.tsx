@@ -1077,7 +1077,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     try {
       if (mode === 'create') {
         const { quote } = await createQuote(companyId, payload);
-        posthog.capture('quote_created', {
+        posthog.capture('quote created', {
           line_item_count: payload.parts.length,
           customer_id: formData.customer_id,
         });

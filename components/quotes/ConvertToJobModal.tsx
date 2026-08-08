@@ -301,7 +301,7 @@ export default function ConvertToJobModal({
           return;
         }
       }
-      posthog.capture('quote_converted_to_job', {
+      posthog.capture('quote converted to job', {
         quote_id: quote.id,
         part_count: includedGroups.length,
         is_hot: hot,

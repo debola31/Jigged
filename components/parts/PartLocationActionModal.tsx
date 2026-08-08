@@ -245,7 +245,8 @@ export default function PartLocationActionModal({
           operatorId,
         });
       }
-      posthog.capture('inventory_stock_updated', {
+      posthog.capture('stock updated', {
+        surface: 'office',
         action,
         part_id: partId,
         quantity: qty,

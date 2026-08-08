@@ -174,7 +174,7 @@ export default function PartIdentitySection({
       // Properties are the shape choices that drive later journeys (a stocked bought
       // part implies inventory + procurement; a made part implies a routing) — never
       // the part name, which is customer-identifying.
-      posthog.capture('part_created', {
+      posthog.capture('part created', {
         source: formData.source,
         is_stocked: formData.is_stocked,
         has_reorder_point: formData.reorder_point !== null,

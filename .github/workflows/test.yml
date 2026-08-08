@@ -47,6 +47,15 @@ jobs:
         # needs no runner beyond what is already installed.
         run: pnpm exec vitest run __tests__/standards/docLinkCheck.test.ts
 
+      - name: Analytics check — captured events match the tracking plan (issue #702)
+        # Named for the same reason as the docs check above: this fails on a PR
+        # that adds a posthog.capture() without a row in docs/analytics-events.md,
+        # and the author needs to see "Analytics check" rather than one assertion
+        # buried in the full suite. Both directions are enforced — a stale row
+        # describing an event nobody sends fails too, because a registry with one
+        # wrong row stops being read.
+        run: pnpm exec vitest run __tests__/standards/analyticsEvents.test.ts
+
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage
 

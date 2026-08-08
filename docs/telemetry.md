@@ -1,4 +1,19 @@
-# Observability
+# Telemetry
+
+Everything we collect about the running system, and everything we collect about the people using
+it. **Telemetry is the umbrella; the two halves under it are different disciplines and stay named
+apart.**
+
+- **Observability** — inferring system state from its outputs. Sentry and the Vercel surfaces.
+  Permanent: an error signal matters for as long as the code runs.
+- **Product analytics** — what people did and where they dropped off. PostHog. Question-shaped:
+  an event can be retired once its question is answered ([two lifecycles](#two-lifecycles-one-doc)).
+
+They live in one document because they share tools, config surfaces and failure modes — the
+session-replay setting below reaches into the Web Vitals argument above, and splitting them is how
+you get a PR that changes one without noticing the other. They keep separate names because
+"observability" has a specific meaning (metrics, logs, traces) that product analytics is not, and
+because rules like *"Sentry owns errors, PostHog must not"* need two things to keep apart.
 
 Four surfaces across three vendors. They answer different questions, and the two places
 they *do* overlap are handled deliberately — one avoided, one knowingly accepted.
@@ -48,6 +63,154 @@ not move Web Vitals to PostHog; it would end them.
 The redundancy costs one script tag. Removing it would trade a free, always-correct traffic
 number for a marginal bundle saving and a dependency on PostHog events being instrumented
 correctly. **Keep both — neither is "redundant".**
+
+---
+
+## PostHog session replay: on, and why it is configured this way
+
+**Enabled 2026-08-07.** Replay is the highest-value instrument at pilot scale: with three named
+users, watching three sessions beats any aggregate, and rate-based insights over an N that small
+are noise. There is **no code for this** — `instrumentation-client.ts` never sets
+`disable_session_recording`, so the project's remote config governs. The settings below live only
+in PostHog, which is why they are written down here.
+
+| Setting | Value | Why |
+|---|---|---|
+| `session_recording_opt_in` | `true` | The change itself |
+| `session_recording_masking_config` | `{ maskAllInputs: true }` | Never record keystrokes — passwords, prices, quantities. Rendered text stays visible, because a replay with every label masked cannot teach you anything |
+| `recording_domains` | `https://www.jigged.app` | Belt-and-braces production-only. The token already gates this, but a domain allowlist survives someone re-adding it to `.env.local` |
+| `capture_console_log_opt_in` | `false` | Console output routinely holds API responses and user objects. It was `true` and inert while replay was off — enabling replay is what would have armed it |
+| `capture_performance_opt_in` | `false` | **See below** |
+| `session_recording_retention_period` | `30d` | Shortest available |
+
+**`capture_performance` is deliberately off, and turning it on would break an argument made
+above.** Overlap 2 rests on PostHog having never ingested a `$web_vitals` event — that is what
+makes "deleting `<Analytics />` would end Web Vitals, not move them" true. Performance capture is
+part of replay, so enabling replay with it on would start producing `$web_vitals` here, and the
+next person to read that section would find its premise false and reasonably conclude Vercel
+Analytics is now redundant. The cost of keeping it off is network timing in replays, which is not
+worth a load-bearing invariant.
+
+**Not masked: rendered text**, which on admin screens means customer names and part numbers. That
+is the same exposure as autocapture ([#702](https://github.com/debola31/Jigged/issues/702)), traded
+deliberately — a replay is watched by us and expires in 30 days, where an event property is
+queried, exported and retained for a year. Revisit when the pilot ends.
+
+---
+
+## The tracking plan
+
+**Machine-enforced** by [`scripts/analyticsEventsCheck.ts`](../scripts/analyticsEventsCheck.ts):
+an event captured in code but absent from the registry below fails CI, and so does a registry row
+nobody sends. Both directions, because a table with one wrong row stops being read.
+
+### The convention
+
+**`[object] [verb]`, lowercase, spaces, past tense** — `quote created`, not `quote_created` or
+`Create Quote`. This is [PostHog's own recommendation](https://posthog.com/docs/product-analytics/capture-events)
+and what PostHog uses for its own custom events. The object leads so related events sort together.
+
+**Renamed from snake_case on 2026-08-07**, four days into collecting anything. The argument for
+keeping the old names was continuity of historical data; at three users and four days there was no
+history worth the inconsistency. **That argument gets stronger every week** — the disciplined way
+to rename later is to emit both names, migrate the insights, then retire the old one, and it is
+much more work than doing it now.
+
+**Properties describe the shape of the interaction, never the content of the record.** Counts,
+booleans and enums — not names, values or free text. `part created` is the model: it sends
+`has_reorder_point`, a boolean, not the reorder point.
+
+**Properties stay `snake_case`.** They are code identifiers read in filter expressions, not display
+labels.
+
+**A surface is a property, not a name.** Office and operator stock adjustments are one
+`stock updated` event with `surface`, not two events. Encoding a variable in the event name is what
+PostHog's high-cardinality guidance warns against, and it makes the two impossible to total.
+
+### The registry
+
+The properties column is exhaustive, unioned across call sites: a property passed but unlisted
+fails, and so does a listed property nothing passes.
+
+<!-- registry:start -->
+
+| Event | Fires when | Properties | Call site |
+|---|---|---|---|
+| `user signed in` | The login form is submitted successfully | — | [Login.tsx](../components/auth/Login.tsx) |
+| `user signed out` | Supabase emits `SIGNED_OUT` | — | [AuthProvider.tsx](../components/providers/AuthProvider.tsx) |
+| `invitation accepted` | An invitee completes acceptance | `role`, `existing_user` | [accept-invite/page.tsx](../app/accept-invite/[invitationId]/page.tsx) |
+| `quote created` | A new quote is saved | `line_item_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
+| `quote converted to job` | A quote is accepted and becomes a job | `quote_id`, `part_count`, `is_hot` | [ConvertToJobModal.tsx](../components/quotes/ConvertToJobModal.tsx) |
+| `job created from purchase order` | A job is created directly from a PO | `part_count`, `total_value`, `is_hot` | [AcceptPurchaseOrderModal.tsx](../components/jobs/AcceptPurchaseOrderModal.tsx) |
+| `jobs bulk cancelled` | Several jobs are cancelled in one action | `count` | [jobs/page.tsx](../app/dashboard/[companyId]/jobs/page.tsx) |
+| `shipment created` | A shipment is created | `line_item_count`, `shipping_method` | [ShipmentForm.tsx](../components/shipments/ShipmentForm.tsx) |
+| `part created` | A part is created in the parts workspace | `source`, `is_stocked`, `has_reorder_point`, `has_preferred_vendor` | [PartIdentitySection.tsx](../components/parts/workspace/PartIdentitySection.tsx) |
+| `stock updated` | Stock is adjusted. `surface` says which UI; `location_id` is operator-only | `surface`, `action`, `part_id`, `quantity`, `unit`, `location_id` | [PartLocationActionModal.tsx](../components/parts/PartLocationActionModal.tsx) · [OperatorLocationActionModal.tsx](../components/operator/OperatorLocationActionModal.tsx) |
+| `operation completed` | An operator completes an operation. Operator-only, so no `surface` | `job_operation_id`, `quantity_good`, `is_partial` | [operations/page.tsx](../app/operator/[companyId]/jobs/[jobId]/parts/[jobPartId]/operations/[jobOperationId]/page.tsx) |
+
+<!-- registry:end -->
+
+The markers are not decoration — the checker parses only between them, because this document
+contains other tables whose first cells are backticked identifiers.
+
+**Several properties carry customer business data and are scheduled for change** — `total_value`,
+`quantity`, `quantity_good`, and the raw `customer_id` / `part_id` / `quote_id` /
+`job_operation_id` identifiers ([#702](https://github.com/debola31/Jigged/issues/702)). This table
+records what we send, not what we have decided is right.
+
+### Known gap: notes and photos are not instrumented
+
+The operator activity feed — the notes-and-photos loop
+[modules/operator-view.md](modules/operator-view.md) treats as a core surface — sends **no event**.
+A pilot user posted a note on 2026-08-06 and it appeared nowhere in analytics; that is how the gap
+was found.
+
+Measurement today is a PostHog **action** (`Note posted (autocapture proxy)`, id 311795) matching
+autocapture clicks on the `Post` button. It works retroactively, which is why it was worth making,
+but it is text-matched and breaks silently if the label changes.
+
+**This blocks a fix we want.** `mask_all_text` — the remedy for autocapture capturing customer
+names — would also break the proxy. Instrument `note posted` properly and both resolve.
+
+### Autocapture is for discovery, not measurement
+
+Autocapture stays **on** and is the highest-volume event by an order of magnitude. Its job is to
+answer *"what are people doing that we never thought to measure"* — exactly what it did for notes.
+Its job is **not** to be the source of a metric anyone relies on.
+
+The loop: autocapture surfaces a behaviour → the behaviour earns an explicit `posthog.capture()` and
+a registry row → the metric now rests on a stable name. Never let a metric you care about depend on
+autocapture element text; it is fragile, and it is how customer names reach PostHog.
+
+### What the check cannot do
+
+**It cannot tell you that you forgot to instrument something.** It compares code against this
+document; a feature in neither passes green. Notes shipped, went unmeasured, and this check would
+have said nothing. The control is review: a PR adding a user-facing write adds a row or says why not.
+
+**It does not verify the event reaches PostHog.** A bad token, an ad blocker, or an `init` that
+never ran all produce silence indistinguishable from green.
+
+### Two lifecycles, one doc
+
+Analytics events and error signals are collected the same way and read at different times, and the
+difference that matters is **when you stop**.
+
+An observability signal is permanent. Errors and uptime matter for as long as the code runs, and
+nobody prunes them because a feature matured.
+
+An analytics event is a **question with an expiry**. Industry practice treats events as having
+explicit states — proposed, active, deprecated, removed — with periodic audits that retire events
+nobody queries, because unused events cost ingest and clutter the taxonomy. Once *"is anyone using
+Storage?"* is answered, `stock updated` may stop earning its keep.
+
+**Two caveats before pruning anything.** Growth events — activation, retention, the quote-to-cash
+spine — are never retired; they are the denominators everything else is measured against. And
+deleting an event ends the time series: you keep history but lose the future, so retire only what
+you would not miss in a year-over-year comparison.
+
+Nothing here is retired yet — we have days of data. The audit is worth running once there is a
+quarter of it.
 
 ---
 

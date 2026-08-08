@@ -99,7 +99,7 @@ else → `/dashboard/{companyId}`. Tested:
 
 [`AuthGuard.tsx`](../components/auth/AuthGuard.tsx) verifies auth + company access
 and stamps `last_company_id` on success. Two invariants it holds (rationale:
-[observability.md](observability.md)):
+[telemetry.md](telemetry.md)):
 
 - **"Couldn't check" is never "denied."** `verifyCompanyAccess` returns `false`
   only for PostgREST `PGRST116` (genuinely no membership row) and **throws**
@@ -409,7 +409,7 @@ Feature-scoped groups, each owned by its module doc rather than repeated here:
 `STRIPE_FOUNDING_PRICE_ID` ([modules/billing.md](modules/billing.md); note §8.4 —
 the restricted key deliberately has **no** fallback to `STRIPE_SECRET_KEY`),
 `QUICKBOOKS_*` + `APP_BASE_URL`, `RESEND_API_KEY` / `QUOTES_FROM_EMAIL`, and
-`SENTRY_DSN` ([observability.md](observability.md)).
+`SENTRY_DSN` ([telemetry.md](telemetry.md)).
 
 *(§10 Development Commands was removed 2026-08-03: CLAUDE.md genuinely does own it,
 and this copy said `pip install -r requirements.txt` / `python index.py` against the

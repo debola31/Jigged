@@ -278,7 +278,7 @@ export default function AcceptPurchaseOrderModal({
         }
       }
 
-      posthog.capture('job_created_from_po', {
+      posthog.capture('job created from purchase order', {
         part_count: lines.filter((l) => l.part).length,
         total_value: total,
         is_hot: hot,

@@ -95,7 +95,7 @@ export default function AuthProvider({ children }: AuthProviderProps) {
 
         if (event === 'SIGNED_OUT') {
           intentionalSignOut.current = false;
-          posthog.capture('user_signed_out');
+          posthog.capture('user signed out');
           posthog.reset();
         }
       }

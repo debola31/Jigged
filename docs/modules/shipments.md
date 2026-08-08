@@ -94,6 +94,15 @@ itself one clause later with "across non-cancelled parts".)*
 post-conversion edit; conversely `updateJobPartQuantity` refuses to lower a part below
 `max(already-shipped, already-invoiced)`.
 
+⚠ **Two different numbers share the name `qty_remaining`.** The job surfaces (jobs list, ship form,
+`getJobPartShipmentSummaries`) answer *what is open on this job right now* — every non-voided slip
+netted out. The **packing slip's Qty Remaining column** answers *what was still open as of that
+shipment* — only the slips ordered at-or-before it, so opening slip #1 after slip #2 exists still
+reads 10, not 0. Collapsing the two is the bug this column shipped with: it subtracted only the
+slip's own quantity, so slip #2 of a 40-piece job printed "30 remaining" after 30 had already gone
+out. `getShippedBeforeShipment` is the point-in-time half and is deliberately separate from
+`getJobPartShipmentSummaries`, which structurally cannot answer it.
+
 **Invoicing is decoupled from shipping.** Billing is capped at the **ordered** quantity, not the shipped one —
 a packing slip is a document, not a delivery. The invoice picker only *defaults* to shipped-but-unbilled and
 nudges past it, so voiding a shipment does not yank on what you can invoice. A third axis,
@@ -168,7 +177,9 @@ from this doc.
 | `getShipmentsForJob(jobId)` | Non-voided, filtered via `line_items.job_part.job_id`, newest-first |
 | `listShipmentsForCompany(companyId, filters?)` | Flat list, optional customer/date/voided filters. **No current caller** — kept for reporting |
 | `countShipmentsForJob(jobId)` | Counts **all** rows incl. voided via the direct `shipments.job_id` column. No longer gates `deleteJob` ([architecture.md §16](../architecture.md)) |
-| `getJobPartShipmentSummaries(jobId)` | `{job_part_id, qty_ordered, qty_shipped, qty_remaining (clamped ≥0), last_ship_date}` |
+| `getJobPartShipmentSummaries(jobId)` | `{job_part_id, qty_ordered, qty_shipped, qty_remaining (clamped ≥0), last_ship_date}` — sums **every** non-voided slip on the job |
+| `getShippedBeforeShipment(shipment)` | `Map<job_part_id, qty>` for the slips ordered **before** this one — the packing slip's point-in-time backlog. One query on `shipments.job_id` (one slip = one job); voided siblings excluded in SQL; the tuple predicate is applied in TS because PostgREST has no compound `<` |
+| `compareShipmentOrder(a, b)` | Total order over a job's slips: `ship_date` → `created_at` (parsed as an instant, not text) → `id` |
 | `getJobShipmentSummary(jobId)` | Job rollup: ordered/shipped/remaining, last ship date, latest slip #, count |
 | `getOpenJobPartsForCustomer(companyId, customerId, filter?)` | Feeds only the dormant customer-mode branch; same untracked-excision gap |
 | `getJobLastShipDate(jobId)` | Wrapper over the `job_last_ship_date(uuid)` SQL helper |
@@ -198,10 +209,13 @@ As-built, verified 2026-08-03. Each row names the file + `describe`/class that e
 | Freight precedence (job over customer); refusing to guess at >1 account; printed freight comes only from the snapshot | `__tests__/utils/customerCarrierAccountsAccess.test.ts` — `resolveFreightLine — the job wins over the customer default`, `pickCarrierAccount — refuses to guess`, `describeShipmentFreight — everything printed comes from the snapshot` |
 | Raising an ordered quantity above the shipped total recomputes fulfillment; reducing below shipped is blocked | `__tests__/utils/jobsAccess.test.ts` — `updateJobPartQuantity` |
 | Deleting a job **archives** it and never blocks, even with shipments and an invoice — the records-of-value guards were removed | `__tests__/utils/jobsAccess.test.ts` — `deleteJob` |
+| Slip quantities net out prior shipments, clamp over-shipment, survive `numeric(12,2)` fractions, and hand a voided slip's own quantity back to the backlog; the two conditional columns keep head / body / `columnStyles` aligned in all four permutations | `__tests__/utils/packingSlipPdf.test.ts` — `computePackingSlipQuantities`, `generatePackingSlipPdf — the quantity table` |
+| Prior-shipment lookup skips itself, later slips and same-timestamp-greater-id siblings, and throws rather than reporting zero prior | `__tests__/utils/shipmentsAccess.test.ts` — `compareShipmentOrder`, `getShippedBeforeShipment` |
 
 **Gaps, automation-pending ([#367](https://github.com/debola31/Jigged/issues/367)):** reload-persistence E2E
 for create and void; `ShipmentsMenu` rendering; the packing-slip PDF rendering Bill To / Ship To / ATTN from
-the frozen snapshots (`snapshot_shipment_party`, `resolveAttentionLine`, `utils/packingSlipPdf.ts`).
+the frozen snapshots (`snapshot_shipment_party`, `resolveAttentionLine`) — the slip's **quantity table** is
+now covered, the address blocks are not.
 
 ---
 

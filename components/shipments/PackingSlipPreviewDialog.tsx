@@ -24,7 +24,11 @@ import {
   packingSlipPdfFilename,
   type PackingSlipPdfContext,
 } from '@/utils/packingSlipPdf';
-import { getShipmentById, voidShipment } from '@/utils/shipmentsAccess';
+import {
+  getShipmentById,
+  getShippedBeforeShipment,
+  voidShipment,
+} from '@/utils/shipmentsAccess';
 
 export interface PackingSlipPreviewDialogProps {
   open: boolean;
@@ -94,18 +98,24 @@ export default function PackingSlipPreviewDialog({
         const supabase = getSupabase();
         const shipment = await getShipmentById(shipmentId);
 
-        const { data: companyRow, error: companyErr } = await supabase
-          .from('companies')
-          .select('id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website')
-          .eq('id', shipment.company_id)
-          .single();
-        if (companyErr || !companyRow) {
-          throw new Error(companyErr?.message ?? 'Failed to load company.');
+        // Independent reads — the company profile and what shipped on
+        // this job's earlier slips (which the Qty Remaining column nets out).
+        const [companyRes, shippedBeforeByJobPart] = await Promise.all([
+          supabase
+            .from('companies')
+            .select('id, name, logo_url, address_line1, address_line2, city, state, postal_code, country, phone, email, website')
+            .eq('id', shipment.company_id)
+            .single(),
+          getShippedBeforeShipment(shipment),
+        ]);
+        if (companyRes.error || !companyRes.data) {
+          throw new Error(companyRes.error?.message ?? 'Failed to load company.');
         }
 
         const ctx: PackingSlipPdfContext = {
           shipment,
-          company: companyRow as unknown as Company,
+          company: companyRes.data as unknown as Company,
+          shippedBeforeByJobPart,
           supabase,
         };
 

@@ -153,6 +153,88 @@ export async function getShipmentById(
   return shipment;
 }
 
+/** Sort key for the total order over one job's packing slips. */
+export interface ShipmentOrderKey {
+  ship_date: string;
+  created_at: string;
+  id: string;
+}
+
+/**
+ * Total order over a job's packing slips: ship_date, then created_at,
+ * then id.
+ *
+ * ship_date is a 'YYYY-MM-DD' date scalar, so a string compare is
+ * chronological. created_at is compared as an *instant*, not as text —
+ * PostgREST returns ISO-8601 with an offset and a variable number of
+ * fractional-second digits, so a lexicographic compare of
+ * '…:56.7+00:00' against '…:56.68+00:00' is a coin flip. id is the last
+ * tie-break so two slips written with identical timestamps still order
+ * the same way every time the slip is opened.
+ */
+export function compareShipmentOrder(a: ShipmentOrderKey, b: ShipmentOrderKey): number {
+  if (a.ship_date !== b.ship_date) return a.ship_date < b.ship_date ? -1 : 1;
+  const ta = Date.parse(a.created_at);
+  const tb = Date.parse(b.created_at);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta < tb ? -1 : 1;
+  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+  return 0;
+}
+
+/**
+ * Quantity shipped per job_part on the slips issued BEFORE this one.
+ *
+ * The packing slip's Qty Remaining states the backlog as of its own
+ * shipment, so it cannot come from getJobPartShipmentSummaries — that
+ * sums every slip on the job, including later ones and this one, which
+ * would make an earlier slip read 0 remaining once the job closed out.
+ *
+ * One query: shipments.job_id is NOT NULL and RPC-derived (one slip =
+ * one job), so every sibling slip is on that key — no join through
+ * job_parts needed. PostgREST cannot express a compound
+ * (ship_date, created_at) < tuple, so the ordering predicate is applied
+ * in TS; a job has a handful of slips.
+ *
+ * Voided siblings are excluded in SQL: a void removes that shipment's
+ * quantity, the same rule shipment_line_items' table comment and every
+ * other summing helper here follow.
+ */
+export async function getShippedBeforeShipment(
+  shipment: Pick<Shipment, 'id' | 'job_id' | 'ship_date' | 'created_at'>,
+): Promise<Map<string, number>> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('id, ship_date, created_at, shipment_line_items (job_part_id, quantity)')
+    .eq('job_id', shipment.job_id)
+    .is('voided_at', null);
+
+  if (error) {
+    console.error('Error fetching prior shipments:', error);
+    throw new Error(`Failed to load prior shipments: ${error.message}`);
+  }
+
+  const before = new Map<string, number>();
+  for (const sibling of data ?? []) {
+    if (sibling.id === shipment.id) continue;
+    if (compareShipmentOrder(sibling, shipment) >= 0) continue;
+    for (const li of sibling.shipment_line_items ?? []) {
+      before.set(
+        li.job_part_id,
+        (before.get(li.job_part_id) ?? 0) + Number(li.quantity),
+      );
+    }
+  }
+  // quantity is numeric(12,2) — re-round each total so a chain of binary
+  // float adds can't leave 29.999999999999996 to print as "30" while
+  // still comparing > 0 and forcing the Prev Shipped column on.
+  for (const [jobPartId, qty] of before) {
+    before.set(jobPartId, Math.round(qty * 100) / 100);
+  }
+  return before;
+}
+
 /**
  * Look up the salesperson/shipper who created the row. Lives in
  * user_company_access (same shape quotePdf uses). Returns null when

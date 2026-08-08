@@ -12,13 +12,14 @@
  *     from the customer's default-billing address at render time; ship-to
  *     is the shipment.shipping_address_id snapshot. Ship-to surfaces
  *     ATTN: from customer_addresses.attention_to via resolveAttentionLine.
- *   - Line items table (JobBOSS pattern): Job # / Customer PO / Part /
- *     Description / Qty Shipped / Qty Remaining. The Qty Remaining
- *     *column* appears only when at least one line on the slip has
- *     qty_remaining > 0; when present, every cell shows the numeric
- *     value (0 for fully-shipped lines, not blanked). Every slip is a
- *     single job (shipments.job_id), so the per-row Job # / PO are
- *     constant — kept for the JobBOSS-style legibility receiving expects.
+ *   - Line items table: Customer PO / Part / Description / Qty Ordered /
+ *     Prev Shipped / Qty Shipped / Qty Remaining, so the row reconciles
+ *     on its face: ordered − prev − shipped = remaining. Two columns are
+ *     conditional — Prev Shipped appears only once some line has a
+ *     prior shipment, Qty Remaining only while some line is still open —
+ *     and when a column is present every cell shows its number, 0
+ *     included, never blanked. There is no Job # column: every slip is a
+ *     single job (shipments.job_id) and the number is in the meta block.
  *   - Shipment details block: shipping method label + carrier (carrier
  *     only present when the method is a true shipment), notes.
  *   - Signature lines at the bottom: Received By / Date / Signature.
@@ -28,7 +29,7 @@
  */
 
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import autoTable, { type Styles } from 'jspdf-autotable';
 import type { Company } from '@/utils/companyAccess';
 import type { AddressSnapshot } from '@/types/documentSnapshot';
 import {
@@ -67,6 +68,70 @@ function formatNumber(value: number | null | undefined, fractionDigits = 2): str
   return Number(value).toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: fractionDigits,
+  });
+}
+
+export interface PackingSlipQtyLine {
+  jobPartId: string;
+  qtyOrdered: number;
+  qtyShippedThisSlip: number;
+}
+
+export interface PackingSlipQtyRow {
+  qtyOrdered: number;
+  qtyPrevShipped: number;
+  /** This line's own quantity — not the job_part's total on the slip. */
+  qtyShipped: number;
+  qtyRemaining: number;
+}
+
+/**
+ * The slip's quantity block: what was ordered, what went out before,
+ * what goes out on this slip, and what is still open after it.
+ *
+ *   remaining = ordered − prev shipped − this slip, clamped at zero.
+ *
+ * Clamped because over-shipment is allowed (the FR-4 soft warning
+ * confirms it upstream) and "−5 remaining" is not something a receiving
+ * dock can act on.
+ *
+ * `thisSlipCounts` is false for a voided slip: a void removes that
+ * shipment's quantity, so its lines still print their Qty Shipped under
+ * the VOIDED banner while Qty Remaining reports what is genuinely owed.
+ *
+ * Grouped by job_part, not by line. shipment_line_items has no unique
+ * constraint on (shipment_id, job_part_id), so one job_part can legally
+ * appear on two rows of one slip; per-line math would subtract only
+ * half the slip and overstate the remaining on both rows.
+ */
+export function computePackingSlipQuantities(
+  lines: readonly PackingSlipQtyLine[],
+  shippedBeforeByJobPart: ReadonlyMap<string, number>,
+  thisSlipCounts: boolean,
+): PackingSlipQtyRow[] {
+  // quantity is numeric(12,2); round after each accumulation so binary
+  // float drift can't print 9.999999999999998 as "10".
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const num = (n: number) => (Number.isFinite(n) ? n : 0);
+
+  const thisSlipByPart = new Map<string, number>();
+  for (const line of lines) {
+    thisSlipByPart.set(
+      line.jobPartId,
+      round2((thisSlipByPart.get(line.jobPartId) ?? 0) + num(line.qtyShippedThisSlip)),
+    );
+  }
+
+  return lines.map((line) => {
+    const ordered = num(line.qtyOrdered);
+    const prev = Math.max(0, num(shippedBeforeByJobPart.get(line.jobPartId) ?? 0));
+    const onThisSlip = thisSlipCounts ? (thisSlipByPart.get(line.jobPartId) ?? 0) : 0;
+    return {
+      qtyOrdered: ordered,
+      qtyPrevShipped: prev,
+      qtyShipped: num(line.qtyShippedThisSlip),
+      qtyRemaining: Math.max(0, round2(ordered - prev - onThisSlip)),
+    };
   });
 }
 
@@ -177,9 +242,116 @@ export interface SupabaseLike {
 export interface PackingSlipPdfContext {
   shipment: ShipmentWithRelations;
   company: Company;
+  /**
+   * Quantity shipped per job_part on the slips issued before this one —
+   * from getShippedBeforeShipment(). Required, and deliberately not
+   * defaulted to an empty map: silently treating "not supplied" as "no
+   * prior shipments" is what made slip #2 of a 40-piece job claim 30
+   * remaining when 30 had already gone out.
+   */
+  shippedBeforeByJobPart: ReadonlyMap<string, number>;
   /** Optional Supabase client to resolve the logo signed URL. */
   supabase?: SupabaseLike | null;
 }
+
+/**
+ * Fixed column widths, in points. Letter page less two 40pt margins
+ * leaves 532pt; Description is the only 'auto' column and absorbs
+ * whatever the fixed ones don't take — 250 / 200 / 190 / 140pt across
+ * the four visibility permutations. The 140pt worst case is ~24
+ * characters a line at 10pt, and is what decides whether another column
+ * can ever be added here.
+ *
+ * The identifier columns are sized by their *content*, not by taste:
+ * `part` holds "PROD-ACTUATOR-200" and `po` holds "PO-CAS-2207" on one
+ * line, because a part number broken mid-token ("PROD-ACTUATO/R-200")
+ * is what a receiving clerk has to retype. The numeric columns fit
+ * their headers only because the header row drops to 9pt — at 10pt
+ * "Remaining" wraps mid-word to "Remai/ning".
+ */
+const SLIP_COL_WIDTH = {
+  po: 78,
+  part: 104,
+  ordered: 50,
+  prevShipped: 50,
+  shipped: 50,
+  remaining: 60,
+} as const;
+
+interface SlipRowData {
+  po: string;
+  partName: string;
+  description: string;
+  qty: PackingSlipQtyRow;
+}
+
+interface SlipColumnSpec {
+  key: 'po' | 'part' | 'description' | 'ordered' | 'prevShipped' | 'shipped' | 'remaining';
+  header: string;
+  style: Partial<Styles>;
+  cell: (row: SlipRowData) => string;
+  /** Cell used by the single placeholder row when the slip has no lines. */
+  placeholder: string;
+}
+
+/**
+ * One declarative spec drives the header, the body, the placeholder row
+ * and columnStyles, so the four visibility permutations cannot drift out
+ * of alignment — the previous version hand-maintained two index→width
+ * maps and a separate placeholder row, and the placeholder was already
+ * one cell short whenever Qty Remaining showed.
+ */
+const SLIP_COLUMNS: readonly SlipColumnSpec[] = [
+  {
+    key: 'po',
+    header: 'Customer PO',
+    style: { cellWidth: SLIP_COL_WIDTH.po },
+    cell: (r) => r.po || '—',
+    placeholder: '—',
+  },
+  {
+    key: 'part',
+    header: 'Part',
+    style: { cellWidth: SLIP_COL_WIDTH.part, fontStyle: 'bold' },
+    cell: (r) => r.partName,
+    placeholder: '—',
+  },
+  {
+    key: 'description',
+    header: 'Description',
+    style: { cellWidth: 'auto' },
+    cell: (r) => r.description,
+    placeholder: '',
+  },
+  {
+    key: 'ordered',
+    header: 'Qty Ordered',
+    style: { cellWidth: SLIP_COL_WIDTH.ordered, halign: 'right' },
+    cell: (r) => formatNumber(r.qty.qtyOrdered),
+    placeholder: '—',
+  },
+  {
+    key: 'prevShipped',
+    header: 'Prev Shipped',
+    style: { cellWidth: SLIP_COL_WIDTH.prevShipped, halign: 'right' },
+    cell: (r) => formatNumber(r.qty.qtyPrevShipped),
+    placeholder: '—',
+  },
+  {
+    key: 'shipped',
+    header: 'Qty Shipped',
+    style: { cellWidth: SLIP_COL_WIDTH.shipped, halign: 'right' },
+    cell: (r) => formatNumber(r.qty.qtyShipped),
+    placeholder: '—',
+  },
+  {
+    key: 'remaining',
+    header: 'Qty Remaining',
+    style: { cellWidth: SLIP_COL_WIDTH.remaining, halign: 'right' },
+    cell: (r) => formatNumber(r.qty.qtyRemaining),
+    placeholder: '—',
+  },
+];
 
 /**
  * Build the jsPDF document for a shipment and return it without writing
@@ -348,69 +520,49 @@ export async function generatePackingSlipPdf(
 
   // ---------- Line items table ----------
   const lineItems = [...(shipment.shipment_line_items ?? [])];
-  lineItems.sort((a, b) => {
-    const ja = a.job_part?.job?.job_number ?? '';
-    const jb = b.job_part?.job?.job_number ?? '';
-    if (ja !== jb) return ja.localeCompare(jb);
-    const pa = a.job_part?.part?.part_name ?? '';
-    const pb = b.job_part?.part?.part_name ?? '';
-    return pa.localeCompare(pb);
-  });
+  // One slip is one job (shipments.job_id), so part name is the only
+  // ordering that carries information.
+  lineItems.sort((a, b) =>
+    (a.job_part?.part?.part_name ?? '').localeCompare(b.job_part?.part?.part_name ?? ''),
+  );
 
-  // Per-line remaining = qty_ordered minus this shipment's quantity.
-  // Single-document number (not running total) so receiving can
-  // reconcile against the PO. Clamped to zero — the FR-4 soft warning
-  // already covered over-shipment confirmation upstream.
-  const remainingByLine = lineItems.map((li) => {
-    const ordered = Number(li.job_part?.quantity ?? 0);
-    const shipped = Number(li.quantity);
-    return Math.max(0, ordered - shipped);
-  });
-  // Show the Qty Remaining *column* whenever at least one line on the
-  // slip has open backlog. When the column is hidden the whole slip is
-  // a clean "everything ordered, everything shipped" document.
-  const showRemaining = remainingByLine.some((r) => r > 0);
+  const quantities = computePackingSlipQuantities(
+    lineItems.map((li) => ({
+      jobPartId: li.job_part_id,
+      qtyOrdered: Number(li.job_part?.quantity ?? 0),
+      qtyShippedThisSlip: Number(li.quantity),
+    })),
+    ctx.shippedBeforeByJobPart,
+    !shipment.voided_at,
+  );
 
-  // JobBOSS pattern: per-row Job # + Customer PO so a multi-job packing
-  // slip is legible without restructuring into sections. Single-job
-  // slips have the same value on every row — mildly redundant but
-  // consistent with the multi-job case.
-  const headRow = [
-    'Job #',
-    'Customer PO',
-    'Part',
-    'Description',
-    'Qty Shipped',
-  ];
-  if (showRemaining) headRow.push('Qty Remaining');
-  const head = [headRow];
+  // Prev Shipped only earns its width once something went out earlier;
+  // Qty Remaining only while something is still open — a slip that
+  // closes the order out prints a clean "everything shipped" table.
+  const showPrevShipped = quantities.some((q) => q.qtyPrevShipped > 0);
+  const showRemaining = quantities.some((q) => q.qtyRemaining > 0);
 
-  const body = lineItems.map((li, idx) => {
-    const part = li.job_part?.part;
-    const jobNumber = li.job_part?.job?.job_number ?? '';
-    const po = li.job_part?.job?.customer_po_number ?? '';
-    const partName = part?.part_name ?? '—';
-    const description = part?.description?.trim() ?? '';
-    const qtyShipped = formatNumber(Number(li.quantity));
-    const remaining = remainingByLine[idx];
-    const row = [
-      jobNumber || '—',
-      po || '—',
-      partName,
-      description,
-      qtyShipped,
-    ];
-    // PRD v2.1 / FR-8: when the column is present, every cell shows
-    // the numeric value including 0 — cells are not blanked.
-    if (showRemaining) row.push(formatNumber(remaining));
-    return row;
-  });
+  const columns = SLIP_COLUMNS.filter((c) =>
+    c.key === 'prevShipped' ? showPrevShipped : c.key === 'remaining' ? showRemaining : true,
+  );
 
-  if (body.length === 0) {
-    const emptyRow = ['—', '—', '—', '', '—'];
-    if (showRemaining) emptyRow.push('—');
-    body.push(emptyRow);
-  }
+  const rows: SlipRowData[] = lineItems.map((li, idx) => ({
+    po: li.job_part?.job?.customer_po_number ?? '',
+    partName: li.job_part?.part?.part_name ?? '—',
+    description: li.job_part?.part?.description?.trim() ?? '',
+    qty: quantities[idx],
+  }));
+
+  const head = [columns.map((c) => c.header)];
+  // Every cell in a present column shows its number, 0 included —
+  // blanking a zero reads as "unknown" on a receiving dock.
+  const body =
+    rows.length > 0
+      ? rows.map((row) => columns.map((c) => c.cell(row)))
+      : [columns.map((c) => c.placeholder)];
+  const columnStyles: Record<string, Partial<Styles>> = Object.fromEntries(
+    columns.map((c, i) => [String(i), c.style]),
+  );
 
   autoTable(doc, {
     startY: cursorY,
@@ -427,25 +579,13 @@ export async function generatePackingSlipPdf(
       fillColor: [240, 240, 240],
       textColor: [30, 30, 30],
       fontStyle: 'bold',
+      // 9pt, not the body's 10: four numeric headers have to fit their
+      // own column, and "Remaining" wraps mid-word at 10pt.
+      fontSize: 9,
       lineColor: [200, 200, 200],
       lineWidth: 0.5,
     },
-    columnStyles: showRemaining
-      ? {
-          0: { cellWidth: 70 },
-          1: { cellWidth: 80 },
-          2: { cellWidth: 90, fontStyle: 'bold' },
-          3: { cellWidth: 'auto' },
-          4: { cellWidth: 70, halign: 'right' },
-          5: { cellWidth: 80, halign: 'right' },
-        }
-      : {
-          0: { cellWidth: 80 },
-          1: { cellWidth: 90 },
-          2: { cellWidth: 110, fontStyle: 'bold' },
-          3: { cellWidth: 'auto' },
-          4: { cellWidth: 80, halign: 'right' },
-        },
+    columnStyles,
     theme: 'grid',
   });
 

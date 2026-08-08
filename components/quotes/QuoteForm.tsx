@@ -253,14 +253,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const companyId = params.companyId as string;
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
-  // A new quote opens with one empty part block already there. Every quote has
-  // at least one part, so making the user click "Add part" to reach the form's
-  // whole point was a click that could never be the wrong thing to spend. Edit
-  // mode and any prefilled payload keep their own blocks untouched.
-  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() => {
-    const blocks = groupPartsIntoBlocks(initialData.parts);
-    return blocks.length > 0 ? blocks : [emptyBlock()];
-  });
+  // A new quote starts with NO part block — the user clicks "Add part".
+  //
+  // Seeding one looks like a free click saved, and isn't: "Add part" autofocuses
+  // the picker it creates, so a pre-seeded block still needs the same click to
+  // open the selector. What the button does buy is teaching that a quote can
+  // hold several parts, which a form that opens mid-way through its first one
+  // never says. (Tried seeded, reverted — this comment is the reason.)
+  const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() =>
+    groupPartsIntoBlocks(initialData.parts),
+  );
   // Index of the part block whose part picker should grab focus after it
   // mounts — set when the user clicks "Add part" so the new (empty) entry
   // gets focus and scrolls into view. Cleared once consumed so later

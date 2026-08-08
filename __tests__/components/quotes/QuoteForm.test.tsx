@@ -212,8 +212,7 @@ describe('QuoteForm', () => {
   });
 
   it('disables submit when validation passes initial guard but parts array is empty', async () => {
-    // Customer set, no part chosen → the pre-opened block has no part, so
-    // "Every part block must have a part selected." still blocks the save.
+    // Customer set, parts empty → "Add at least one part to the quote."
     render(
       <QuoteForm
         mode="create"
@@ -225,18 +224,16 @@ describe('QuoteForm', () => {
     });
   });
 
-  it('opens a new quote with one part block already there', async () => {
-    // Every quote has at least one part, so making the user click "Add part"
-    // to reach the form's whole point was a click that could never be wrong
-    // to spend. Edit mode keeps whatever blocks the quote already has.
+  it('starts a new quote with no part block — Add part is the way in', async () => {
+    // Deliberate: seeding a block saves no click (Add part autofocuses the
+    // picker it creates) and costs the signal that a quote can hold several
+    // parts. Guards the revert so nobody re-adds the seed as an "improvement".
     render(<QuoteForm mode="create" initialData={initialBlank} />);
 
-    // PartAutocomplete is mocked to null here, so the block's own Remove
-    // control is what proves a block rendered without anyone clicking Add part.
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /remove part/i })).toHaveLength(1);
+      expect(screen.getByText(/add at least one part to quote/i)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/add at least one part to quote/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /remove part/i })).toBeNull();
   });
 
   it('enables submit when initial data is fully valid (populated edit mode)', async () => {

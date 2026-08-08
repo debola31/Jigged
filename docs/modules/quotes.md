@@ -166,13 +166,17 @@ a per-row total misleads. Totals live on the detail page and PDF, for firm quote
 detail page (`quotes/[quoteId]/page.tsx`), gated on the quote being active and unconverted.
 *(This doc described an `/quotes/{id}/edit` route that never existed.)*
 
-**Parts card** — **a new quote opens with one part block already there** (every quote has at least
-one part, so the click could never be the wrong one to spend), plus **+ Add part** for the rest.
-Each block: a part picker (with **+ New Part** inline create), an editable **list of quantity rows**
-(one per quoted quantity, **Add quantity** appends, every row past the first can be deleted), each
-row showing its resolved price stacked over a `From tier {n}` caption, plus Total (firm) or Extended
-(options). A row below the lowest tier shows a "below minimum break" hint and snaps to the lowest
-tier price.
+**Parts card** — one block per part, plus **+ Add part**. Each block: a part picker (with **+ New
+Part** inline create), an editable **list of quantity rows** (one per quoted quantity, **Add
+quantity** appends, every row past the first can be deleted), each row showing its resolved price
+stacked over a `From tier {n}` caption, plus Total (firm) or Extended (options). A row below the
+lowest tier shows a "below minimum break" hint and snaps to the lowest tier price.
+
+> **A new quote deliberately starts with NO part block.** Seeding one looks like a free click
+> saved and isn't — **+ Add part** autofocuses the picker it creates, so a pre-seeded block still
+> costs the same click to open the selector. What the button buys is teaching that a quote can hold
+> **several** parts, which a form that opens mid-way through its first one never says. Tried and
+> reverted 2026-08-08; `QuoteForm.test.tsx` guards it.
 
 > **The tier caption carries no unit, deliberately.** The Qty box beside it already shows one
 > wherever a unit is meaningful — `quantityUnitSuffix` returns null for count units, where a bare

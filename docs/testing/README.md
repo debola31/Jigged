@@ -36,9 +36,12 @@ This page holds only what nothing else owns. Everything else is a pointer, on pu
 Two directories under `__tests__/` are not mirrors and are worth knowing about:
 
 - **`__tests__/schema/`** — parses `types/database.ts` and migration *text*, so drift that
-  TypeScript cannot see still fails a build. That last clause is load-bearing: supabase-js's
-  typed client stops resolving the largest nested selects and silently widens instead of
-  erroring, so `tsc` passes them regardless of what they reference.
+  TypeScript cannot see still fails a build. **Withdrawn (2026-08-07):** that this is because
+  "supabase-js's typed client stops resolving the largest nested selects and silently widens
+  instead of erroring". It does not widen — it resolves them and emits `SelectQueryError`. What
+  `tsc` genuinely cannot see is a **wrong foreign-key hint** (`notes!made_up_fk(…)` infers a
+  plausible type and PostgREST 400s at runtime), and any drift at a site that casts the row or
+  never reads the affected field. [architecture.md §6.1](../architecture.md) has the measurement.
 - **`__tests__/standards/`** — scans component source for house-rule violations (see
   [interaction-standards.md](../interaction-standards.md)).
 

@@ -83,8 +83,10 @@ function todayLocalISODate(): string {
  * (local date, not a UTC timestamp). The client-side mirror, applied per-row for
  * the overdue icon/badge, is isJobOverdue() in types/job.ts.
  *
- * Typed structurally (method syntax) so it accepts both the untyped and typed
- * Supabase filter builders and returns the same builder for further chaining.
+ * Typed structurally (method syntax) so it accepts any Supabase filter builder
+ * and returns the same builder for further chaining. (It predates #573, when
+ * this had to straddle an untyped and a typed client; there is only one client
+ * now, but the structural typing still keeps it reusable across query shapes.)
  */
 export function applyOverdueJobsFilter<
   Q extends {

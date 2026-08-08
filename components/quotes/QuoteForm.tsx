@@ -50,8 +50,7 @@ import {
   pickFobPoint,
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
-import { resolveTier, resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import { resolveTier } from '@/utils/quotePricingResolver';
 import { isValidQuantityInput } from '@/lib/quantityInput';
 import { quantityUnitSuffix, unitShortLabel } from '@/lib/standardUnits';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
@@ -852,58 +851,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setCustomerModalOpen(false);
   };
 
-  // Base cost per (part | order-qty), from the ONE canonical engine
-  // (compute_part_cost_at_qty) at the ACTUAL order quantity. The row price is
-  // base × the markup tier that applies at that qty — the same single-source
-  // rule the persisted line uses — so the form shows exactly what gets saved,
-  // and a ceiling/batch part is priced exactly at any qty (not snapped to a
-  // tier breakpoint). Keyed by `${partId}|${qty}`; a stored `null` means the
-  // part can't currently be costed. Debounced so typing a qty doesn't refetch
-  // on every keystroke.
-  const [orderQtyBaseCosts, setOrderQtyBaseCosts] = useState<Map<string, number | null>>(new Map());
-  const inFlightBaseKeys = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    const wanted: Array<{ key: string; partId: string; qty: number }> = [];
-    for (const block of partBlocks) {
-      if (!block.part) continue;
-      for (const row of block.rows) {
-        const qty = Number(row.quantity);
-        if (!Number.isFinite(qty) || qty <= 0) continue;
-        wanted.push({ key: `${block.part.id}|${qty}`, partId: block.part.id, qty });
-      }
-    }
-    const missing = wanted.filter(
-      (w) => !orderQtyBaseCosts.has(w.key) && !inFlightBaseKeys.current.has(w.key),
-    );
-    if (missing.length === 0) return;
-
-    let cancelled = false;
-    const handle = setTimeout(() => {
-      for (const { key, partId, qty } of missing) {
-        inFlightBaseKeys.current.add(key);
-        getComputedPartCost(partId, qty)
-          .catch(() => null)
-          .then((base) => {
-            inFlightBaseKeys.current.delete(key);
-            if (cancelled) return;
-            setOrderQtyBaseCosts((prev) => {
-              const next = new Map(prev);
-              next.set(key, base);
-              return next;
-            });
-          });
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-  }, [partBlocks, orderQtyBaseCosts]);
-
-  /** Per-row live preview: blockPreviews[block][row] = { resolved, total, loading }.
-   *  `resolved.unit_price` = base(orderQty) × markup(orderQty) — the single
-   *  source of truth. `loading` is true while the base cost is being fetched.
+  /** Per-row live preview: blockPreviews[block][row] = { resolved, total }.
+   *  `resolved.unit_price` is the price the matched tier LISTS — the same number
+   *  the part page shows for that break — because the tier ladder is a price
+   *  list and a break's price holds for its whole band. `block.tiers` already
+   *  carries those prices (getTiersWithComputedPrices, fetched when the part is
+   *  picked), so this is synchronous: no per-quantity round trip.
    *  A part-level custom price (block.override_*) applies to every row. */
   const blockPreviews = useMemo(() => {
     return partBlocks.map((block) => {
@@ -918,39 +871,24 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         const empty = {
           resolved: null as ReturnType<typeof resolveTier>,
           total: null as number | null,
-          loading: false,
         };
         if (!Number.isFinite(orderQty) || orderQty <= 0) return empty;
         if (overrideValid) {
           return {
             resolved: null as ReturnType<typeof resolveTier>,
             total: Math.round((overridePrice as number) * orderQty * 100) / 100,
-            loading: false,
           };
         }
         if (!block.part) return empty;
-        const markup = resolveMarkupAtQty(block.tiers, orderQty);
-        if (!markup) return empty;
-        const key = `${block.part.id}|${orderQty}`;
-        const loading = !orderQtyBaseCosts.has(key);
-        const base = orderQtyBaseCosts.get(key) ?? null;
-        const unitPrice = unitPriceFromBase(base, markup.markup_percent);
+        const resolved = resolveTier(block.tiers, orderQty);
+        if (!resolved) return empty;
         return {
-          resolved:
-            unitPrice !== null
-              ? {
-                  unit_price: unitPrice,
-                  source_tier_id: markup.source_tier_id,
-                  matched_tier_quantity: markup.matched_tier_quantity,
-                  below_min: markup.below_min,
-                }
-              : null,
-          total: unitPrice !== null ? Math.round(unitPrice * orderQty * 100) / 100 : null,
-          loading,
+          resolved,
+          total: Math.round(resolved.unit_price * orderQty * 100) / 100,
         };
       });
     });
-  }, [partBlocks, orderQtyBaseCosts]);
+  }, [partBlocks]);
 
   /**
    * Firm order = every part has exactly one quantity → show a grand total.
@@ -1562,10 +1500,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                       : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
                                   </Typography>
                                 </>
-                              ) : preview?.loading ? (
-                                <Typography variant="caption" color="text.secondary">
-                                  Pricing…
-                                </Typography>
                               ) : (
                                 <Typography variant="caption" color="warning.main">
                                   No priced tier — add a tier or use a custom price

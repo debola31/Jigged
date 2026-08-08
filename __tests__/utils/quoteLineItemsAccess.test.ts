@@ -61,8 +61,9 @@ function makeTier(partial: Partial<ComputedPartPricingTier>): ComputedPartPricin
   };
 }
 
-// A frozen snapshot carrying one markup tier (t100 @ qty 100, 20% markup) — the
-// edit path resolves markup from here, then re-costs base live at the new qty.
+// A frozen snapshot carrying one priced tier (t100 @ qty 100, listed 45.50).
+// The edit path reads the LISTED price straight off this ladder — a quantity
+// move walks the frozen price list, it does not re-cost.
 const SNAPSHOT: PricingBasisSnapshot = {
   tiers: [{ id: 't100', quantity: 100, unit_price: 45.5, markup_percent: 20 }],
   resolved_tier_id: 't100',
@@ -86,33 +87,11 @@ beforeEach(() => {
   buildPricingBasisSnapshotMock.mockReturnValue(SNAPSHOT_SENTINEL);
 });
 
-describe('insertLineItemForPart — single-source pricing (base@qty × markup)', () => {
-  // One tier: markup 25% for orders >= 10.
-  const tiers = [makeTier({ id: 't10', quantity: 10, markup_percent: 25 })];
+describe('insertLineItemForPart — the matched tier’s listed price', () => {
+  // One tier: orders >= 10 list at 50.00 (base 40 × 1.25 at qty 10).
+  const tiers = [makeTier({ id: 't10', quantity: 10, markup_percent: 25, unit_price: 50 })];
 
-  it('prices at base(orderQty) × markup, rounds unit and total to cents', async () => {
-    // base 26.6664 × 1.25 = 33.3330 → 33.33; total = 33.33 × 3 = 99.99.
-    getComputedPartCostMock.mockResolvedValue(26.6664);
-    mockQueryBuilder.data = { id: 'li-1' };
-
-    await insertLineItemForPart('q1', 'co-1', 'part-1', 3, tiers, 0);
-
-    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        unit_price: 33.33,
-        quantity: 3,
-        total_price: 99.99,
-        base_cost_per_unit: 26.6664,
-        markup_percent: 25,
-        source_tier_id: 't10',
-        is_quote_override: false,
-        basis_unknown: false,
-      }),
-    );
-  });
-
-  it('base × markup with the tier that applies at the order qty', async () => {
-    // qty 12 >= 10 → tier t10, markup 25; base 40 × 1.25 = 50; total 600.
+  it('quotes the tier’s listed price and rounds the total to cents', async () => {
     getComputedPartCostMock.mockResolvedValue(40);
     mockQueryBuilder.data = { id: 'li-1' };
 
@@ -121,11 +100,54 @@ describe('insertLineItemForPart — single-source pricing (base@qty × markup)',
     expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         unit_price: 50,
-        source_tier_id: 't10',
-        markup_percent: 25,
+        quantity: 12,
         total_price: 600,
-        base_cost_per_unit: 40,
+        markup_percent: 25,
+        source_tier_id: 't10',
+        is_quote_override: false,
+        basis_unknown: false,
       }),
+    );
+  });
+
+  it('quotes the SAME price well above the break — setup is not re-amortized', async () => {
+    // The regression this whole rule exists for: a part listing 50.00 at its
+    // qty-10 break quotes 50.00 at 500, not a cheaper number recomputed at 500.
+    getComputedPartCostMock.mockResolvedValue(40);
+    mockQueryBuilder.data = { id: 'li-1' };
+
+    await insertLineItemForPart('q1', 'co-1', 'part-1', 500, tiers, 0);
+
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_price: 50, total_price: 25000, source_tier_id: 't10' }),
+    );
+  });
+
+  it('snapshots base_cost_per_unit at the BREAK qty, so the row’s arithmetic holds', async () => {
+    // unit_price = base_cost_per_unit × (1 + markup/100) is what the column
+    // records, so the base must come from the qty the price was derived at (10)
+    // — never the order qty (500), where setup amortizes differently.
+    getComputedPartCostMock.mockResolvedValue(40);
+    mockQueryBuilder.data = { id: 'li-1' };
+
+    await insertLineItemForPart('q1', 'co-1', 'part-1', 500, tiers, 0);
+
+    expect(getComputedPartCostMock).toHaveBeenCalledWith('part-1', 10);
+    const written = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(written.base_cost_per_unit).toBe(40);
+    expect(
+      Math.round(written.base_cost_per_unit * (1 + written.markup_percent / 100) * 100) / 100,
+    ).toBe(written.unit_price);
+  });
+
+  it('below the lowest break, snaps to that break’s listed price', async () => {
+    getComputedPartCostMock.mockResolvedValue(40);
+    mockQueryBuilder.data = { id: 'li-1' };
+
+    await insertLineItemForPart('q1', 'co-1', 'part-1', 3, tiers, 0);
+
+    expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_price: 50, total_price: 150, source_tier_id: 't10' }),
     );
   });
 
@@ -149,7 +171,7 @@ describe('insertLineItemForPart — single-source pricing (base@qty × markup)',
     );
   });
 
-  it('throws when no markup tier applies and no override is supplied', async () => {
+  it('throws when no priced tier applies and no override is supplied', async () => {
     getComputedPartCostMock.mockResolvedValue(40);
     await expect(
       insertLineItemForPart('q1', 'co-1', 'part-1', 5, [makeTier({ markup_percent: null })], 0),
@@ -157,9 +179,9 @@ describe('insertLineItemForPart — single-source pricing (base@qty × markup)',
     expect(mockQueryBuilder.insert).not.toHaveBeenCalled();
   });
 
-  it('falls back to the resolved tier price when the live base cost is null', async () => {
-    // base null (cost can't compute) → fall back to the ladder's priced tier so
-    // the line still gets a sensible price instead of NaN.
+  it('still writes the tier price when the base cost cannot be computed', async () => {
+    // The price comes off the ladder, so a part that momentarily can't cost
+    // still quotes correctly — only the base_cost_per_unit snapshot goes null.
     getComputedPartCostMock.mockResolvedValue(null);
     mockQueryBuilder.data = { id: 'li-1' };
 
@@ -178,8 +200,8 @@ describe('insertLineItemForPart — single-source pricing (base@qty × markup)',
   });
 });
 
-describe('updateLineItemQuantity — re-cost base at new qty × frozen markup', () => {
-  it('recomputes unit_price from base(newQty) × the snapshot markup', async () => {
+describe('updateLineItemQuantity — walks the frozen price list', () => {
+  it('takes unit_price from the snapshot tier, without re-costing', async () => {
     mockQueryBuilder.data = {
       id: 'li-1',
       part_id: 'part-1',
@@ -189,19 +211,37 @@ describe('updateLineItemQuantity — re-cost base at new qty × frozen markup', 
       unit_price: 99,
       source_tier_id: 't1',
     };
-    // base(100) = 40; markup from snapshot tier t100 = 20% → unit 48; total 4800.
-    getComputedPartCostMock.mockResolvedValue(40);
 
     await updateLineItemQuantity('li-1', 100);
 
-    expect(getComputedPartCostMock).toHaveBeenCalledWith('part-1', 100);
+    // The frozen ladder lists 45.50 at t100 → 45.50 × 100 = 4550. No cost call:
+    // a quantity move reads the price list, it does not re-derive a price.
+    expect(getComputedPartCostMock).not.toHaveBeenCalled();
     expect(mockQueryBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({
         quantity: 100,
-        unit_price: 48,
+        unit_price: 45.5,
         source_tier_id: 't100',
-        total_price: 4800,
+        total_price: 4550,
       }),
+    );
+  });
+
+  it('holds that price above the break instead of drifting below it', async () => {
+    mockQueryBuilder.data = {
+      id: 'li-1',
+      part_id: 'part-1',
+      is_quote_override: false,
+      basis_unknown: false,
+      pricing_basis_snapshot: SNAPSHOT,
+      unit_price: 45.5,
+      source_tier_id: 't100',
+    };
+
+    await updateLineItemQuantity('li-1', 400);
+
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ quantity: 400, unit_price: 45.5, total_price: 18200 }),
     );
   });
 
@@ -244,8 +284,10 @@ describe('updateLineItemQuantity — re-cost base at new qty × frozen markup', 
   });
 });
 
-describe('repriceLineItemToCurrent — base(lineQty) × current markup', () => {
-  const currentTiers = [makeTier({ id: 't50', quantity: 50, markup_percent: 30 })];
+describe('repriceLineItemToCurrent — the current ladder’s listed price', () => {
+  const currentTiers = [
+    makeTier({ id: 't50', quantity: 50, markup_percent: 30, unit_price: 41.11 }),
+  ];
 
   it('throws for override rows', async () => {
     mockQueryBuilder.data = { id: 'li-1', part_id: 'part-1', is_quote_override: true, quantity: 50 };
@@ -263,9 +305,9 @@ describe('repriceLineItemToCurrent — base(lineQty) × current markup', () => {
     ).rejects.toThrow(/no priced tiers/);
   });
 
-  it('recomputes base(lineQty) × current markup, total, and rebuilds the snapshot', async () => {
+  it('takes the current tier’s listed price, refreshes the base and the snapshot', async () => {
     mockQueryBuilder.data = { id: 'li-1', part_id: 'part-1', is_quote_override: false, quantity: 50 };
-    // base(50) = 31.62; markup 30% → 41.106 → 41.11; total 41.11 × 50 = 2055.5.
+    // t50 lists 41.11 (base 31.62 × 1.30 at qty 50); total 41.11 × 50 = 2055.5.
     getComputedPartCostMock.mockResolvedValue(31.62);
 
     await repriceLineItemToCurrent('li-1', currentTiers);
@@ -276,10 +318,25 @@ describe('repriceLineItemToCurrent — base(lineQty) × current markup', () => {
         unit_price: 41.11,
         source_tier_id: 't50',
         markup_percent: 30,
+        base_cost_per_unit: 31.62,
         total_price: 2055.5,
         pricing_basis_snapshot: SNAPSHOT_SENTINEL,
         basis_unknown: false,
       }),
+    );
+  });
+
+  it('re-costs at the matched BREAK, not the line qty, when they differ', async () => {
+    // Line sits at 500 but the ladder tops out at 50: the price is t50's listed
+    // price, so the refreshed base must be the one behind it (qty 50).
+    mockQueryBuilder.data = { id: 'li-1', part_id: 'part-1', is_quote_override: false, quantity: 500 };
+    getComputedPartCostMock.mockResolvedValue(31.62);
+
+    await repriceLineItemToCurrent('li-1', currentTiers);
+
+    expect(getComputedPartCostMock).toHaveBeenCalledWith('part-1', 50);
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_price: 41.11, total_price: 20555 }),
     );
   });
 });

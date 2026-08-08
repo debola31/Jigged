@@ -18,16 +18,27 @@ export interface ResolvedMarkup {
 /**
  * SINGLE SOURCE OF TRUTH for a part's price at a quantity.
  *
- * Every surface (Pricing card tier rows, the Pricing "Cost at qty" preview, the
- * quote form's live price, and the persisted quote line) computes price the same
- * way: a base cost from the ONE canonical engine `compute_part_cost_at_qty`
- * (via `getComputedPartCost`) at the ACTUAL quantity, times the markup of the
- * tier that applies at that quantity. The markup ladder is a step function of
- * qty; the base cost is exact at qty — so the price is exact at every qty and
- * identical across screens (no per-breakpoint approximation, no TS/SQL engine
- * split on the money path).
+ * **A part's tier ladder is a price list, and the price listed at a break holds
+ * for that break's whole band.** Quoting 180 of a part whose tier-80 break lists
+ * $33.40 quotes $33.40 — not a number recomputed at 180.
  *
- * `resolveMarkupAtQty` picks the markup; `unitPriceFromBase` applies it.
+ * That matters because the base cost is a *function of quantity*: setup
+ * amortizes over whatever quantity `compute_part_cost_at_qty` is called with. So
+ * "base at the order qty × the tier's markup" produces a different number for
+ * every quantity, and the price a shop deliberately set on the part page would
+ * be quoted only at the exact break quantity — silently drifting below it
+ * everywhere else. The tier row is where a price is decided; a quote reads it.
+ *
+ * `resolveTier` is therefore the price path: it returns the matched tier's own
+ * listed `unit_price`, computed once per tier by `getTiersWithComputedPrices` at
+ * that tier's quantity — the same number `PartPricing` renders. Every pricing
+ * surface goes through it or through `resolveTierFromSnapshot` (the frozen
+ * equivalent, for lines already committed to a quote).
+ *
+ * `resolveMarkupAtQty` + `unitPriceFromBase` remain the *costing* pair: they
+ * build a tier's listed price from a base in `getTiersWithComputedPrices`, and
+ * resolve which tier an override borrows its `source_tier_id` from. They are not
+ * the quote-time price path — reaching for them there reintroduces the drift.
  */
 
 /**

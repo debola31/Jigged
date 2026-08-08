@@ -139,7 +139,7 @@ fails, and so does a listed property nothing passes.
 | `user signed in` | The login form is submitted successfully | — | [Login.tsx](../components/auth/Login.tsx) |
 | `user signed out` | Supabase emits `SIGNED_OUT` | — | [AuthProvider.tsx](../components/providers/AuthProvider.tsx) |
 | `invitation accepted` | An invitee completes acceptance | `role`, `existing_user` | [accept-invite/page.tsx](../app/accept-invite/[invitationId]/page.tsx) |
-| `quote created` | A new quote is saved | `line_item_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
+| `quote created` | A new quote is saved | `line_item_count`, `custom_priced_line_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
 | `quote converted to job` | A quote is accepted and becomes a job | `quote_id`, `part_count`, `is_hot` | [ConvertToJobModal.tsx](../components/quotes/ConvertToJobModal.tsx) |
 | `job created from purchase order` | A job is created directly from a PO | `part_count`, `total_value`, `is_hot` | [AcceptPurchaseOrderModal.tsx](../components/jobs/AcceptPurchaseOrderModal.tsx) |
 | `jobs bulk cancelled` | Several jobs are cancelled in one action | `count` | [jobs/page.tsx](../app/dashboard/[companyId]/jobs/page.tsx) |

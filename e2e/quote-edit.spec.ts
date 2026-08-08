@@ -183,7 +183,7 @@ test.describe('Quote edit — reload contract', () => {
     // Wait for tier resolution before submitting — see quote-to-job.spec.ts.
     // The Create Quote button stays disabled until the tier query returns
     // and resolveTier produces a usable unit price.
-    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
+    await expect(page.getByText(/From tier \d+/i).first()).toBeVisible({
       timeout: 10_000,
     });
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
@@ -223,12 +223,10 @@ test.describe('Quote edit — reload contract', () => {
       .click();
     // The second order-qty input is the new block's.
     await orderQtyInputs.nth(1).fill('2');
-    // Open custom price for the SECOND block only — both blocks render a
-    // single part-level "Use custom price" button, so the unscoped locator
-    // hits a strict-mode violation. nth(1) targets the new block.
-    await page.getByRole('button', { name: /Use custom price/i }).nth(1).click();
-    // The "Custom unit price" input only exists after override is opened.
-    await page.getByRole('textbox', { name: /^Custom unit price$/i }).fill('25');
+    // Price the new line at a negotiated 25. There is no toggle to open: every
+    // quantity row carries its own always-editable Unit price, pre-filled with
+    // the tier's listed price. nth(1) is the new block's row.
+    await page.getByRole('textbox', { name: /^Unit price$/i }).nth(1).fill('25');
 
     // Wait for the Save button to become enabled before clicking. With
     // qty + override price filled, validation passes; the button enables
@@ -252,6 +250,11 @@ test.describe('Quote edit — reload contract', () => {
     // per line item — we match by part name + the new quantity.
     await expect(page.getByText('E2E-MFG-001').first()).toBeVisible();
     await expect(page.getByText('E2E-RAW-001').first()).toBeVisible();
+    // The negotiated price actually persisted. Asserting only that the part is
+    // present would pass even if the price silently fell back to the tier —
+    // which is exactly what the reconcile gap did to a custom price on an
+    // already-saved line.
+    await expect(page.getByText('$25.00').first()).toBeVisible();
 
     // ── Second edit pass: remove the just-added part. After reload, only
     //    the original line should remain.
@@ -519,7 +522,7 @@ test.describe('Quote edit — reload contract', () => {
       .first()
       .click();
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
-    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/From tier \d+/i).first()).toBeVisible({ timeout: 10_000 });
 
     // Force a past expiration date (the form otherwise defaults to today + 10),
     // so the quote is expired-by-date the moment it's created.

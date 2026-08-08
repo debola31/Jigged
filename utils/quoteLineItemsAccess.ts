@@ -251,6 +251,87 @@ export async function updateLineItemLeadTime(
 }
 
 /**
+ * Set or clear a one-off price on an EXISTING line item.
+ *
+ * `unitPrice` non-null pins that price and flags `is_quote_override`; null
+ * clears the override and returns the line to its frozen tier basis (the price
+ * the snapshot ladder lists at this quantity).
+ *
+ * This exists because `reconcileQuoteLineItems` used to read `block.override`
+ * only on the INSERT paths: on an existing line, setting, changing or clearing a
+ * custom price was accepted by the form and silently dropped on save. The old
+ * part-level toggle made that easy to miss; an always-editable price field would
+ * have made it a lie on every keystroke.
+ *
+ * `markup_percent` is deliberately nulled on override and left null on clear —
+ * the quote form has no markup input, and the row's markup is only meaningful
+ * when the price came off the ladder.
+ */
+export async function updateLineItemOverride(
+  lineItemId: string,
+  unitPrice: number | null,
+): Promise<QuoteLineItem> {
+  const supabase = getSupabase();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('quote_line_items')
+    .select('*')
+    .eq('id', lineItemId)
+    .single();
+  if (fetchError) {
+    console.error('Error loading line item for override update:', fetchError);
+    throw fetchError;
+  }
+  const row = existing as unknown as QuoteLineItem;
+
+  let newUnitPrice: number;
+  let newSourceTierId = row.source_tier_id;
+  let newMarkup: number | null = null;
+
+  if (unitPrice !== null) {
+    newUnitPrice = unitPrice;
+  } else {
+    // Clearing: fall back to the FROZEN ladder, not current tiers — dropping an
+    // override is not an opt-in to a tier change made since the quote was
+    // written. That stays the explicit "Update to current price" action.
+    const snapshot = row.pricing_basis_snapshot;
+    const resolved =
+      snapshot && !row.basis_unknown ? resolveTierFromSnapshot(snapshot, row.quantity) : null;
+    if (!resolved) {
+      // No basis to return to (pre-snapshot row, or a part that had no priced
+      // tier when quoted). Keep the agreed price and just drop the flag rather
+      // than inventing one or refusing the edit.
+      newUnitPrice = row.unit_price;
+    } else {
+      newUnitPrice = resolved.unit_price;
+      newSourceTierId = resolved.source_tier_id;
+      newMarkup =
+        snapshot?.tiers.find((t) => t.id === resolved.source_tier_id)?.markup_percent ?? null;
+    }
+  }
+
+  const newTotal = Math.round(newUnitPrice * row.quantity * 100) / 100;
+
+  const { data, error } = await supabase
+    .from('quote_line_items')
+    .update({
+      unit_price: newUnitPrice,
+      source_tier_id: newSourceTierId,
+      markup_percent: newMarkup,
+      total_price: newTotal,
+      is_quote_override: unitPrice !== null,
+    })
+    .eq('id', lineItemId)
+    .select('*')
+    .single();
+  if (error) {
+    console.error('Error updating line item override:', error);
+    throw toFriendlyError(error, { entity: 'line item' });
+  }
+  return data as unknown as QuoteLineItem;
+}
+
+/**
  * Reprice an existing line item against the part's CURRENT tier table —
  * used when the user clicks "Update to current price" on a drifted line.
  * Refreshes both the resolved price and the frozen snapshot so the row

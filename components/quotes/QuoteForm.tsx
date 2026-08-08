@@ -52,7 +52,7 @@ import {
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
 import { isValidQuantityInput } from '@/lib/quantityInput';
-import { quantityUnitSuffix, unitShortLabel } from '@/lib/standardUnits';
+import { quantityUnitSuffix } from '@/lib/standardUnits';
 import type { ComputedPartPricingTier } from '@/types/partPricing';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import CustomerAddressForm from '@/components/customers/CustomerAddressForm';
@@ -85,14 +85,28 @@ interface CustomerOption {
  * One quoted quantity within a part block. A block with a single row is a firm
  * line; a block with several rows is a price-options menu for that part. Each
  * row carries (on edit) its own line item id + drift state, because each
- * (part, quantity) is an independent quote_line_items row. The custom-price
- * override is part-level (see PartBlockState), not per row.
+ * (part, quantity) is an independent quote_line_items row — and, for the same
+ * reason, its own price.
  */
 interface QtyRowState {
   /** Stable React key for the row (mirrors RoutingOperationsList temp ids). */
   rowKey: string;
   /** Working-copy string so the input can be empty mid-edit. */
   quantity: string;
+  /**
+   * Working-copy unit price. Always editable, seeded from the matched tier's
+   * listed price while untouched — so the common path is "the tier price is
+   * already there" and pricing one break differently is just typing over it.
+   * Empty means "not yet resolved" (no quantity, or the part has no tier).
+   */
+  unit_price: string;
+  /**
+   * True once the user types in the price field. Kept as a flag rather than
+   * inferred by comparing against the tier price, because the two are equal at
+   * the moment of typing an identical number, and because it is what stops the
+   * seed from overwriting a deliberate entry when the quantity changes.
+   */
+  price_touched: boolean;
   /** Set on edit-mode rows; absent on newly-added or create-mode rows. */
   line_item_id?: string;
   /** Pre-snapshot Option C — renders the "basis unknown" chip. */
@@ -103,13 +117,6 @@ interface PartBlockState {
   part: PartSelectOption | null;
   /** One row per quoted quantity; always at least one row. */
   rows: QtyRowState[];
-  /**
-   * Part-level custom price. When open, the typed unit price applies to
-   * EVERY quantity row of this part (bypassing tier resolution) and is
-   * written as an override onto each resulting line item.
-   */
-  override_open: boolean;
-  override_unit_price: string;
   /**
    * Part-level lead time (free text). Applies to every quantity row of this
    * part; on save it's written onto each resulting line item. Blank ⇒ the line
@@ -157,12 +164,24 @@ function formatCurrency(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+/**
+ * Height of one `size="small"` MUI input — the quantity-row baseline.
+ *
+ * The row is top-aligned so the Qty and Unit price boxes stay on one line no
+ * matter how much the price column grows beneath them (caption, custom-price
+ * notice, drift chip). Cells that carry no input use this to re-centre against
+ * that first line instead of riding the top of a tall row.
+ */
+const ROW_CONTROL_HEIGHT = 40;
+
 const newRowKey = () => `temp-qty-${crypto.randomUUID()}`;
 
 function emptyRow(): QtyRowState {
   return {
     rowKey: newRowKey(),
     quantity: '',
+    unit_price: '',
+    price_touched: false,
   };
 }
 
@@ -170,8 +189,6 @@ function emptyBlock(): PartBlockState {
   return {
     part: null,
     rows: [emptyRow()],
-    override_open: false,
-    override_unit_price: '',
     lead_time_text: '',
     tiers: [],
     loading: false,
@@ -183,6 +200,10 @@ function rowFromInitial(p: QuoteFormData['parts'][number]): QtyRowState {
   return {
     rowKey: newRowKey(),
     quantity: String(p.order_quantity),
+    // A saved override is a price someone typed — restore it as touched so the
+    // tier seed can't quietly overwrite it on the way back in.
+    unit_price: p.override ? String(p.override.unit_price) : '',
+    price_touched: !!p.override,
     line_item_id: p.line_item_id,
     basis_unknown: p.basis_unknown,
   };
@@ -194,9 +215,10 @@ function rowFromInitial(p: QuoteFormData['parts'][number]): QtyRowState {
  * part is a stub carrying only the id; loadData replaces it with the hydrated
  * option (the form renders a spinner until then, so the stub is never shown).
  *
- * The custom-price override is part-level: if any entry carries an override,
- * the whole part is treated as overridden at that unit price (on save every
- * entry for the part is written with the same override).
+ * Price is per row: each (part, quantity) is its own `quote_line_items` row with
+ * its own `unit_price` / `is_quote_override`, so quoting 50/100/250 can carry
+ * three different negotiated prices. (It used to be one price per part, which
+ * flattened exactly the quantity curve a price-options quote exists to show.)
  */
 function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
   const blocks: PartBlockState[] = [];
@@ -209,17 +231,11 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
       blocks.push({
         part: { id: p.part_id } as PartSelectOption,
         rows: [],
-        override_open: false,
-        override_unit_price: '',
         lead_time_text: '',
         tiers: [],
         loading: false,
         error: null,
       });
-    }
-    if (p.override && !blocks[idx].override_open) {
-      blocks[idx].override_open = true;
-      blocks[idx].override_unit_price = String(p.override.unit_price);
     }
     // Lead time is per-part; take it from the first entry that carries one
     // (all entries for a part share the same value on save).
@@ -237,6 +253,13 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
   const companyId = params.companyId as string;
 
   const [formData, setFormData] = useState<QuoteFormData>(initialData);
+  // A new quote starts with NO part block — the user clicks "Add part".
+  //
+  // Seeding one looks like a free click saved, and isn't: "Add part" autofocuses
+  // the picker it creates, so a pre-seeded block still needs the same click to
+  // open the selector. What the button does buy is teaching that a quote can
+  // hold several parts, which a form that opens mid-way through its first one
+  // never says. (Tried seeded, reverted — this comment is the reason.)
   const [partBlocks, setPartBlocks] = useState<PartBlockState[]>(() =>
     groupPartsIntoBlocks(initialData.parts),
   );
@@ -851,40 +874,45 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     setCustomerModalOpen(false);
   };
 
-  /** Per-row live preview: blockPreviews[block][row] = { resolved, total }.
-   *  `resolved.unit_price` is the price the matched tier LISTS — the same number
-   *  the part page shows for that break — because the tier ladder is a price
-   *  list and a break's price holds for its whole band. `block.tiers` already
-   *  carries those prices (getTiersWithComputedPrices, fetched when the part is
-   *  picked), so this is synchronous: no per-quantity round trip.
-   *  A part-level custom price (block.override_*) applies to every row. */
+  /** Per-row live preview: blockPreviews[block][row].
+   *
+   *  `resolved` is the matched tier — `resolved.unit_price` is the price that
+   *  tier LISTS, the same number the part page shows, because the tier ladder is
+   *  a price list and a break's price holds for its whole band. `block.tiers`
+   *  already carries those prices (getTiersWithComputedPrices, fetched when the
+   *  part is picked), so this is synchronous: no per-quantity round trip.
+   *
+   *  `effectiveUnitPrice` is what the row will actually be quoted at — the typed
+   *  price once the user has touched the field, otherwise the tier price.
+   *  `isCustom` is the difference between the two, and drives the marker. */
   const blockPreviews = useMemo(() => {
     return partBlocks.map((block) => {
-      const overridePrice =
-        block.override_open && block.override_unit_price.trim() !== ''
-          ? Number(block.override_unit_price)
-          : null;
-      const overrideValid =
-        overridePrice !== null && Number.isFinite(overridePrice) && overridePrice >= 0;
       return block.rows.map((row) => {
         const orderQty = Number(row.quantity);
-        const empty = {
-          resolved: null as ReturnType<typeof resolveTier>,
-          total: null as number | null,
-        };
-        if (!Number.isFinite(orderQty) || orderQty <= 0) return empty;
-        if (overrideValid) {
-          return {
-            resolved: null as ReturnType<typeof resolveTier>,
-            total: Math.round((overridePrice as number) * orderQty * 100) / 100,
-          };
-        }
-        if (!block.part) return empty;
-        const resolved = resolveTier(block.tiers, orderQty);
-        if (!resolved) return empty;
+        const hasQty = Number.isFinite(orderQty) && orderQty > 0;
+        const resolved =
+          hasQty && block.part ? resolveTier(block.tiers, orderQty) : null;
+
+        const typed = row.price_touched && row.unit_price.trim() !== '' ? Number(row.unit_price) : null;
+        const typedValid = typed !== null && Number.isFinite(typed) && typed >= 0;
+
+        const effectiveUnitPrice = typedValid ? typed : resolved?.unit_price ?? null;
+        // Custom means "differs from what the ladder would charge" — typing the
+        // tier price back in is not an override, so it must not be flagged or
+        // written as one. Compared at cent precision, which is the precision
+        // both numbers are stored and displayed at.
+        const isCustom =
+          typedValid &&
+          (resolved === null || Math.round(typed * 100) !== Math.round(resolved.unit_price * 100));
+
         return {
           resolved,
-          total: Math.round(resolved.unit_price * orderQty * 100) / 100,
+          effectiveUnitPrice,
+          isCustom,
+          total:
+            hasQty && effectiveUnitPrice !== null
+              ? Math.round(effectiveUnitPrice * orderQty * 100) / 100
+              : null,
         };
       });
     });
@@ -946,17 +974,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       seenParts.add(block.part.id);
       if (block.loading) return 'Loading pricing tiers…';
       if (block.rows.length === 0) return 'Every part needs at least one quantity.';
-      // Part-level custom price: validate once; when active it covers every row.
-      if (block.override_open) {
-        const overridePrice = Number(block.override_unit_price);
-        if (
-          block.override_unit_price.trim() === '' ||
-          !Number.isFinite(overridePrice) ||
-          overridePrice < 0
-        ) {
-          return 'Custom unit price must be a non-negative number.';
-        }
-      }
       const seenQty = new Set<number>();
       for (const row of block.rows) {
         const orderQty = Number(row.quantity);
@@ -965,11 +982,26 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         }
         if (seenQty.has(orderQty)) return 'Each quantity can appear only once per part.';
         seenQty.add(orderQty);
-        if (!block.override_open) {
-          const resolved = resolveTier(block.tiers, orderQty);
-          if (!resolved) {
-            return 'At least one part has no priced tiers — add tiers on the part page or use a custom price.';
+
+        // Price is per row now. A row is priceable if the user typed a valid
+        // price OR the part's ladder resolves one — only the absence of both
+        // blocks the save.
+        const typedRaw = row.price_touched ? row.unit_price.trim() : '';
+        if (typedRaw !== '') {
+          const typed = Number(typedRaw);
+          if (!Number.isFinite(typed) || typed < 0) {
+            return 'Unit price must be a non-negative number.';
           }
+          continue;
+        }
+        if (row.price_touched) {
+          // Touched then cleared: the row has no price and no seed to fall back
+          // on until Reset restores the tier. Say so rather than silently
+          // quoting the tier price they just deleted.
+          return 'Enter a unit price, or reset the row to its tier price.';
+        }
+        if (!resolveTier(block.tiers, orderQty)) {
+          return 'At least one part has no priced tiers — add tiers on the part page, or type a unit price.';
         }
       }
     }
@@ -982,10 +1014,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
     const payload: QuoteFormData = {
       ...formData,
-      parts: partBlocks.flatMap((b) => {
-        const overrideActive = b.override_open && b.override_unit_price.trim() !== '';
-        const overrideUnitPrice = overrideActive ? Number(b.override_unit_price) : null;
-        return b.rows.map((r) => {
+      parts: partBlocks.flatMap((b, bIdx) =>
+        b.rows.map((r, rIdx) => {
           const orderQty = Number(r.quantity);
           const entry: QuoteFormData['parts'][number] = {
             part_id: b.part?.id ?? '',
@@ -998,17 +1028,21 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           // reconcile reads a missing value as "use the quote default" and
           // clears any lead time the line previously had.
           if (b.lead_time_text.trim() !== '') entry.lead_time_text = b.lead_time_text;
-          if (overrideUnitPrice !== null) {
-            // Part-level custom price → same override on every row of the part.
+          // Override only when the typed price actually DIFFERS from the tier's
+          // listed price — `isCustom` already draws that line. Typing the tier
+          // price back in must stay a normal tier-priced line, or it would be
+          // frozen out of drift detection and repricing for no reason.
+          const preview = blockPreviews[bIdx]?.[rIdx];
+          if (preview?.isCustom && preview.effectiveUnitPrice !== null) {
             entry.override = {
-              unit_price: overrideUnitPrice,
+              unit_price: preview.effectiveUnitPrice,
               // Markup % is no longer a quote-form input — leave it null on overrides.
               markup_percent: null,
             };
           }
           return entry;
-        });
-      }),
+        }),
+      ),
     };
 
     setLoading(true);
@@ -1017,6 +1051,10 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         const { quote } = await createQuote(companyId, payload);
         posthog.capture('quote created', {
           line_item_count: payload.parts.length,
+          // How often the ladder gets overridden is the signal that says whether
+          // shops' tiers are actually carrying their pricing. A count, never a
+          // price — the amount is the customer's business data.
+          custom_priced_line_count: payload.parts.filter((p) => p.override).length,
           customer_id: formData.customer_id,
         });
         onSave?.();
@@ -1324,15 +1362,18 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // fires and the user isn't trapped typing a quantity that
             // can't resolve to a line price.
             const hasUsableTier = block.tiers.some((t) => t.unit_price !== null);
-            // Part-level custom price — when active it overrides every row.
-            const blockOverrideActive =
-              block.override_open && block.override_unit_price.trim() !== '';
             // Unit symbol for the order-qty field (e.g. "in") so a fractional
             // quantity isn't ambiguous. null for count/unitless parts.
             const orderQtyUnitLabel = quantityUnitSuffix(block.part?.primary_unit);
             // Tier caption reads "Tier 0.5 in" / "Tier 1 ea" — always show a
             // unit here (full label, fallback "ea") so counts stay unchanged.
-            const tierUnitLabel = unitShortLabel(block.part?.primary_unit) ?? 'ea';
+            // NOTE: the tier caption deliberately carries NO unit. The Qty box
+            // beside it already shows one wherever a unit is meaningful
+            // (`quantityUnitSuffix` returns null for count units, where a bare
+            // number is the convention), so repeating it was redundant there —
+            // and worse, the old `?? 'ea'` fallback INVENTED one for parts whose
+            // Qty box shows none, which is how "Tier 1 ea" appeared next to a
+            // unitless quantity.
 
             return (
               <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
@@ -1421,8 +1462,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                         const hasOrderQty =
                           row.quantity !== '' && Number.isFinite(orderQtyNum) && orderQtyNum > 0;
                         const matched = preview?.resolved ?? null;
-                        // Override is part-level — it applies to every row.
-                        const isOverride = blockOverrideActive;
+                        const isOverride = preview?.isCustom ?? false;
+                        // The field shows the tier's listed price until the user
+                        // types over it. Derived rather than seeded into state by
+                        // an effect: there is no sync to get wrong, and a
+                        // quantity change re-reads the new tier automatically.
+                        const priceFieldValue = row.price_touched
+                          ? row.unit_price
+                          : matched
+                            ? String(matched.unit_price)
+                            : '';
                         // Drift state for this row, if any. Override lines never
                         // appear here (detectQuoteLineDrift filters them out).
                         const drift = row.line_item_id
@@ -1437,7 +1486,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                             key={row.rowKey}
                             sx={{
                               display: 'flex',
-                              alignItems: 'center',
+                              // Top-aligned, NOT centred. The price column grows
+                              // downward — a tier caption, a custom-price notice,
+                              // a drift chip — and centring re-centres every other
+                              // cell against that growth, so the Qty box visibly
+                              // drifts down the moment a price is edited. Anchoring
+                              // to the top keeps the two inputs on one line
+                              // whatever appears beneath them; the trailing cells
+                              // re-centre themselves against ROW_CONTROL_HEIGHT.
+                              alignItems: 'flex-start',
                               gap: 2,
                               px: 0.5,
                               py: 0.75,
@@ -1473,36 +1530,136 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                             />
 
                             <Box sx={{ flex: 1, minWidth: 120 }}>
-                              {!hasOrderQty ? (
-                                <Typography variant="body2" color="text.secondary">
-                                  —
-                                </Typography>
-                              ) : isOverride ? (
-                                <>
-                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                    {formatCurrency(Number(block.override_unit_price))}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    custom price
-                                  </Typography>
-                                </>
-                              ) : matched ? (
-                                <>
-                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                    {formatCurrency(matched.unit_price)}
-                                  </Typography>
+                              {/* Always an editable field — no toggle to find.
+                                  It holds the tier's listed price by default, so
+                                  the common path reads as a plain number and
+                                  pricing this break differently is just typing
+                                  over it. What was behind "Use custom price" is
+                                  now the absence of a control. */}
+                              <TextField
+                                size="small"
+                                value={priceFieldValue}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (v !== '' && !/^\d*\.?\d*$/.test(v)) return;
+                                  updateRow(idx, rowIdx, {
+                                    unit_price: v,
+                                    price_touched: true,
+                                  });
+                                }}
+                                disabled={!hasOrderQty}
+                                inputProps={{ 'aria-label': 'Unit price', inputMode: 'decimal' }}
+                                InputProps={{
+                                  startAdornment: (
+                                    <InputAdornment position="start">$</InputAdornment>
+                                  ),
+                                }}
+                                sx={{
+                                  width: 130,
+                                  // Subordinate to Qty, but never hidden. Qty is
+                                  // the field you must fill; this one already
+                                  // holds the tier's answer, so it rests at a
+                                  // lighter border weight and comes up to full
+                                  // strength on hover and focus.
+                                  //
+                                  // The tempting move — no border until hover,
+                                  // Notion-style — is the one thing to avoid:
+                                  // that pattern's documented failure is nobody
+                                  // discovering the value is editable, which is
+                                  // exactly the bug the old "Use custom price"
+                                  // toggle had. Quieter, not invisible.
+                                  '& .MuiOutlinedInput-root:not(.Mui-disabled)': {
+                                    '& fieldset': { borderColor: 'divider' },
+                                    '&:hover fieldset': { borderColor: 'text.secondary' },
+                                    '&.Mui-focused fieldset': { borderColor: 'primary.main' },
+                                  },
+                                }}
+                              />
+                              {/* Reset is offered for the whole time the row is
+                                  off its tier price — including when the field
+                                  has been emptied, which is the state that
+                                  blocks the save. Gating it on a *valid* custom
+                                  price instead would take the way back off the
+                                  screen at exactly the moment the user needs it,
+                                  while validation told them to use it. */}
+                              {!hasOrderQty ? null : row.price_touched ? (
+                                <Box
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.5,
+                                    flexWrap: 'wrap',
+                                    mt: 0.25,
+                                  }}
+                                >
+                                  {/* warning.main per the row status ladder —
+                                      "wants your attention, not wrong yet". An
+                                      override is deliberate, so never `error`.
+                                      The auto price stays on screen: the old
+                                      toggle hid it, leaving nothing to compare
+                                      against. */}
                                   <Typography
                                     variant="caption"
-                                    color={matched.below_min ? 'warning.main' : 'text.secondary'}
+                                    color={isOverride || !matched ? 'warning.main' : 'text.secondary'}
                                   >
-                                    {matched.below_min
-                                      ? `Below min · Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`
-                                      : `Tier ${matched.matched_tier_quantity} ${tierUnitLabel}`}
+                                    {!matched
+                                      ? isOverride
+                                        ? 'Custom price'
+                                        : 'Enter a unit price'
+                                      : isOverride
+                                        ? `Custom · tier ${matched.matched_tier_quantity} is ${formatCurrency(matched.unit_price)}`
+                                        : `From tier ${matched.matched_tier_quantity}`}
                                   </Typography>
-                                </>
+                                  {matched && (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      data-testid={`price-reset-${idx}-${rowIdx}`}
+                                      onClick={() =>
+                                        updateRow(idx, rowIdx, {
+                                          unit_price: '',
+                                          price_touched: false,
+                                        })
+                                      }
+                                      sx={{
+                                        minWidth: 'auto',
+                                        px: 0.5,
+                                        py: 0,
+                                        textTransform: 'none',
+                                        // Match the caption's type exactly. A
+                                        // Button's own line-height (1.75) and
+                                        // min-height are taller than the caption
+                                        // beside it, which both inflated this
+                                        // flex row — pushing the caption further
+                                        // below the field than on a plain row —
+                                        // and drew an oversized hover block
+                                        // around a one-word action. Collapsing
+                                        // it to caption type fixes both at once.
+                                        typography: 'caption',
+                                        minHeight: 0,
+                                      }}
+                                    >
+                                      Reset
+                                    </Button>
+                                  )}
+                                </Box>
+                              ) : matched ? (
+                                <Typography
+                                  variant="caption"
+                                  color={matched.below_min ? 'warning.main' : 'text.secondary'}
+                                  sx={{ display: 'block', mt: 0.25 }}
+                                >
+                                  {matched.below_min
+                                    ? `Below min · from tier ${matched.matched_tier_quantity}`
+                                    : `From tier ${matched.matched_tier_quantity}`}
+                                </Typography>
                               ) : (
-                                <Typography variant="caption" color="warning.main">
-                                  No priced tier — add a tier or use a custom price
+                                <Typography
+                                  variant="caption"
+                                  color="warning.main"
+                                  sx={{ display: 'block', mt: 0.25 }}
+                                >
+                                  No priced tier — type a price, or add tiers on the part page
                                 </Typography>
                               )}
                               {row.basis_unknown && (
@@ -1579,45 +1736,58 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                               )}
                             </Box>
 
-                            <Typography
-                              variant="body2"
-                              sx={{ width: 110, textAlign: 'right', fontWeight: 600 }}
+                            {/* Trailing cells centre themselves inside one
+                                input's worth of height, so they read as level
+                                with the Qty and Unit price boxes rather than
+                                floating at the top of a tall row. */}
+                            <Box
+                              sx={{
+                                width: 110,
+                                minHeight: ROW_CONTROL_HEIGHT,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'flex-end',
+                              }}
                             >
-                              {hasOrderQty ? formatCurrency(preview?.total ?? null) : '—'}
-                            </Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {hasOrderQty ? formatCurrency(preview?.total ?? null) : '—'}
+                              </Typography>
+                            </Box>
 
-                            <IconButton
-                              color="error"
-                              size="small"
-                              onClick={() => removeRow(idx, rowIdx)}
-                              aria-label="Remove quantity"
-                              disabled={block.rows.length === 1}
+                            <Box
+                              sx={{
+                                minHeight: ROW_CONTROL_HEIGHT,
+                                display: 'flex',
+                                alignItems: 'center',
+                              }}
                             >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
+                              <IconButton
+                                color="error"
+                                size="small"
+                                onClick={() => removeRow(idx, rowIdx)}
+                                aria-label="Remove quantity"
+                                disabled={block.rows.length === 1}
+                              >
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
                           </Box>
                         );
                       })}
                     </Box>
 
-                    {/* Part-level controls: add a quantity, and one custom-price
-                        toggle for the whole part (not per row). */}
+                    {/* Price now lives in each row's own field, so the only
+                        part-level control left is adding a quantity. The
+                        "estimate" caveat still belongs at the part: it is a
+                        property of the part having no cost basis, not of any one
+                        quantity. */}
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                       <Button size="small" startIcon={<AddIcon />} onClick={() => addRow(idx)}>
                         Add quantity
                       </Button>
                       <Box sx={{ flex: 1 }} />
-                      {blockOverrideActive &&
-                        (hasUsableTier ? (
-                          <Chip
-                            size="small"
-                            label="adjusted for this quote"
-                            color="success"
-                            variant="outlined"
-                            sx={{ height: 20 }}
-                          />
-                        ) : (
-                          // Override on a not-yet-costed part: it's an estimate.
+                      {!hasUsableTier &&
+                        (blockPreviews[idx] ?? []).some((p) => p?.isCustom) && (
                           <Chip
                             size="small"
                             label="estimate — needs cost setup"
@@ -1625,49 +1795,8 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                             variant="outlined"
                             sx={{ height: 20 }}
                           />
-                        ))}
-                      <Button
-                        size="small"
-                        onClick={() =>
-                          updateBlock(idx, (prev) => {
-                            const firstResolved =
-                              (blockPreviews[idx] ?? [])
-                                .map((p) => p?.resolved)
-                                .find(Boolean) ?? null;
-                            return {
-                              override_open: !prev.override_open,
-                              override_unit_price:
-                                !prev.override_open &&
-                                prev.override_unit_price === '' &&
-                                firstResolved
-                                  ? String(firstResolved.unit_price)
-                                  : prev.override_unit_price,
-                            };
-                          })
-                        }
-                      >
-                        {block.override_open ? 'Cancel custom price' : '✏ Use custom price'}
-                      </Button>
+                        )}
                     </Box>
-                    {block.override_open && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                        <TextField
-                          size="small"
-                          label="Custom unit price"
-                          value={block.override_unit_price}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (v !== '' && !/^\d*\.?\d*$/.test(v)) return;
-                            updateBlock(idx, { override_unit_price: v });
-                          }}
-                          sx={{ width: 180 }}
-                          inputMode="decimal"
-                        />
-                        <Typography variant="caption" color="text.secondary">
-                          Applies to every quantity of this part
-                        </Typography>
-                      </Box>
-                    )}
 
                     {/* Per-item lead time (per-part — applies to every quantity
                         of this part). Blank ⇒ the quote-level lead time is used.

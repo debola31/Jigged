@@ -1619,7 +1619,23 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                                           price_touched: false,
                                         })
                                       }
-                                      sx={{ minWidth: 'auto', p: 0, textTransform: 'none' }}
+                                      sx={{
+                                        minWidth: 'auto',
+                                        px: 0.5,
+                                        py: 0,
+                                        textTransform: 'none',
+                                        // Match the caption's type exactly. A
+                                        // Button's own line-height (1.75) and
+                                        // min-height are taller than the caption
+                                        // beside it, which both inflated this
+                                        // flex row — pushing the caption further
+                                        // below the field than on a plain row —
+                                        // and drew an oversized hover block
+                                        // around a one-word action. Collapsing
+                                        // it to caption type fixes both at once.
+                                        typography: 'caption',
+                                        minHeight: 0,
+                                      }}
                                     >
                                       Reset
                                     </Button>

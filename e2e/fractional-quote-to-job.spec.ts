@@ -57,8 +57,9 @@ test.describe('Fractional quote to job workflow', () => {
     // tier is qty 0.5 in, so ordering 0.5 resolves to it deterministically.
     const orderQty = page.getByRole('textbox', { name: /Order quantity/i });
     await orderQty.fill('0.5');
-    // Tier caption carries the part's unit now (not a hardcoded "ea") — "Tier 0.5 in".
-    await expect(page.getByText(/Tier 0\.5 in/i).first()).toBeVisible({
+    // The caption states provenance and carries NO unit — the Qty box beside it
+    // already shows "in". A fractional break still reads exactly: "From tier 0.5".
+    await expect(page.getByText(/From tier 0\.5/i).first()).toBeVisible({
       timeout: 10_000,
     });
 

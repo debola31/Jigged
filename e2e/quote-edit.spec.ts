@@ -183,7 +183,7 @@ test.describe('Quote edit — reload contract', () => {
     // Wait for tier resolution before submitting — see quote-to-job.spec.ts.
     // The Create Quote button stays disabled until the tier query returns
     // and resolveTier produces a usable unit price.
-    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
+    await expect(page.getByText(/From tier \d+/i).first()).toBeVisible({
       timeout: 10_000,
     });
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
@@ -522,7 +522,7 @@ test.describe('Quote edit — reload contract', () => {
       .first()
       .click();
     await page.getByRole('textbox', { name: /Order quantity/i }).fill('1');
-    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/From tier \d+/i).first()).toBeVisible({ timeout: 10_000 });
 
     // Force a past expiration date (the form otherwise defaults to today + 10),
     // so the quote is expired-by-date the moment it's created.

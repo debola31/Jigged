@@ -9,6 +9,7 @@ import {
   isTransientAbortError,
   shouldReportSupabaseError,
   toError,
+  isIndeterminateSingleError,
   toFriendlyError,
 } from '@/lib/supabaseErrors';
 
@@ -44,6 +45,37 @@ const NAMELESS_DENIAL = {
   hint: null,
   message: 'new row violates row-level security policy for table "parts"',
 };
+
+describe('isIndeterminateSingleError — "couldn\'t check" is never "denied"', () => {
+  it('is false with no error: the check completed', () => {
+    // The happy path. `data` decides; there is nothing indeterminate.
+    expect(isIndeterminateSingleError(null)).toBe(false);
+    expect(isIndeterminateSingleError(undefined)).toBe(false);
+  });
+
+  it('is false for PGRST116 — "no rows" is a real answer, not a failure', () => {
+    // A caller SHOULD act on this: the membership row genuinely is not there.
+    expect(isIndeterminateSingleError({ code: 'PGRST116', message: 'no rows' })).toBe(false);
+  });
+
+  it('is true for the failures that used to read as "not a member"', () => {
+    // Every one of these arrived as `data: null` alongside a discarded error, and
+    // the operator layout responded by clearing the station, signing the user out
+    // and bouncing to login. On a phone on shop wifi, the first of these is not
+    // an edge case — it is Tuesday.
+    expect(isIndeterminateSingleError({ message: 'Failed to fetch' })).toBe(true);
+    expect(isIndeterminateSingleError({ code: '500', message: 'server error' })).toBe(true);
+    expect(isIndeterminateSingleError({ code: 'PGRST301', message: 'JWT expired' })).toBe(true);
+    expect(isIndeterminateSingleError({ code: '42501', message: 'permission denied' })).toBe(true);
+  });
+
+  it('treats a near-miss code as indeterminate rather than guessing', () => {
+    // Fails safe: an unrecognised code must not be mistaken for "no rows", because
+    // the negative branch signs people out.
+    expect(isIndeterminateSingleError({ code: 'PGRST117' })).toBe(true);
+    expect(isIndeterminateSingleError({ code: 'pgrst116' })).toBe(true);
+  });
+});
 
 describe('isAuthError', () => {
   it('returns true for PGRST301 (JWT expired)', () => {

@@ -114,6 +114,33 @@ export function isTransientAbortError(error: unknown): boolean {
 const PGRST_NO_ROWS = 'PGRST116';
 
 /**
+ * Did this `.single()` fail to ANSWER, as opposed to answering "no such row"?
+ *
+ * The distinction CLAUDE.md states as **"couldn't check is never denied"**, in the one
+ * shape it actually arrives in. `.single()` collapses two very different outcomes into
+ * `data: null`:
+ *
+ *   PGRST116  → the row is genuinely not there. A definitive answer; act on it.
+ *   anything  → dropped wifi, a 5xx, a token mid-refresh. We learned NOTHING, and
+ *   else        rendering that as a negative asserts something we do not know.
+ *
+ * Named here rather than open-coded because the `error.code !== 'PGRST116'` idiom is
+ * already in six files, and each one has to get an inverted condition right on a path
+ * that only runs when something is already going wrong — the least-exercised, least-
+ * reviewed branch in the file. The operator layout got it wrong by omission: it
+ * discarded the error entirely, so a dropped packet mid-shift cleared the stored
+ * station, signed the operator out, and bounced them to a login screen.
+ *
+ * Use for membership and existence checks whose negative branch DOES something —
+ * denies access, signs out, hides a surface. A read that merely returns `null` to a
+ * caller that treats it as "nothing to show" does not need this.
+ */
+export function isIndeterminateSingleError(error: unknown): boolean {
+  if (!error) return false;
+  return asRecord(error).code !== PGRST_NO_ROWS;
+}
+
+/**
  * `insufficient_privilege` — every RLS denial, and every deliberate raise that borrows the code.
  *
  * Declared up here rather than with the other SQLSTATE constants below because

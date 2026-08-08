@@ -18,6 +18,7 @@ import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
 import { getSupabase } from '@/lib/supabase';
+import { isIndeterminateSingleError } from '@/lib/supabaseErrors';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { getCompany } from '@/utils/companyAccess';
 
@@ -88,6 +89,11 @@ export default function OperatorLoginPage() {
           router.push(postLoginPath());
           return;
         }
+        // Discarding the error is DELIBERATE here, unlike the two other membership
+        // reads on this surface. Falling through only skips the auto-forward and
+        // shows the sign-in form — it asserts nothing about access and destroys
+        // no session, so there is no false "denied" to prevent. Adding a retry
+        // screen in front of a form the operator can simply use would be worse.
       }
 
       setCheckingSession(false);
@@ -139,7 +145,17 @@ export default function OperatorLoginPage() {
         .eq('company_id', companyId)
         .single();
 
-      if (opError || !operatorAccess) {
+      // "COULDN'T CHECK" IS NEVER "DENIED". This branch used to treat both alike,
+      // which produced the worst version of the bug: credentials that had just
+      // succeeded, immediately revoked, under a message telling the operator they
+      // don't work here. Keep the session; let them press sign in again.
+      if (isIndeterminateSingleError(opError)) {
+        throw new Error(
+          "Couldn't check your access just now — this is usually the shop's connection. Please try again.",
+        );
+      }
+
+      if (!operatorAccess) {
         // Local scope — only clear this device's session; don't revoke the
         // user's sessions on other devices. The station goes with it: the
         // session that chose it is over (see AuthProvider.signOut).

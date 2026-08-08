@@ -25,11 +25,15 @@ vi.mock('@/utils/quotesAccess', () => ({
 
 // Parts: hydrating initial part_ids on edit + by-id lookup
 const getPartsForSelectByIds = vi.fn();
+// The form must NOT reach for the cost engine: a row's price is the matched
+// tier's listed price, already carried on the tiers loaded with the part. Kept
+// mocked (rather than deleted) so the guard test below can assert it stays
+// uncalled — costing per order-qty here is what made a quote disagree with the
+// part page it was priced from.
+const getComputedPartCost = vi.fn(async () => 40);
 vi.mock('@/utils/partsAccess', () => ({
   getPartsForSelectByIds: (...args: unknown[]) => getPartsForSelectByIds(...args),
-  // The form prices each row at base(orderQty) × markup; base comes from here.
-  // 40 × 25% markup = $50, matching the resolver stub below.
-  getComputedPartCost: vi.fn(async () => 40),
+  getComputedPartCost: (...args: unknown[]) => getComputedPartCost(...args),
 }));
 
 // Customers: dropdown + defaults. The pick* resolvers are the real ones in
@@ -757,6 +761,27 @@ describe('QuoteForm', () => {
       expect(screen.getByText('Price options quote')).toBeInTheDocument();
     });
     expect(screen.queryByText('Quote total')).not.toBeInTheDocument();
+  });
+
+  it('prices rows off the loaded tiers — never re-costs at the order quantity', async () => {
+    // Regression guard. Pricing a row as base(orderQty) × markup makes the
+    // number slide with quantity (setup amortizes over whatever qty the cost
+    // engine is handed), so a quote silently undercuts the price the shop set
+    // on the part page everywhere except the exact break. A row's price is the
+    // matched tier's LISTED price, so nothing here may call the cost engine.
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    const qtyInput = (await screen.findAllByLabelText('Order quantity'))[0];
+    await user.clear(qtyInput);
+    await user.type(qtyInput, '180');
+
+    await waitFor(() => expect(qtyInput).toHaveValue('180'));
+    expect(getComputedPartCost).not.toHaveBeenCalled();
   });
 
   it('blocks save when the same quantity is entered twice for one part', async () => {

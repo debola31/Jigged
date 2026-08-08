@@ -33,6 +33,18 @@ against tiers of 1/10/20). Each price resolves by **snapping to the highest tier
 breakpoint is ≤ the quantity** ([`resolveTier`](../../utils/quotePricingResolver.ts)); there is
 **no interpolation**.
 
+> **A tier's listed price holds for its whole band, and the quote never recomputes it.** Quoting
+> 180 of a part whose tier-80 break lists $33.40 quotes $33.40 — the same number
+> [`PartPricing`](../../components/parts/PartPricing.tsx) shows. This is load-bearing rather than
+> incidental: base cost is a *function of quantity* (setup amortizes over whatever quantity
+> `compute_part_cost_at_qty` is handed), so pricing as `base(order qty) × the tier's markup`
+> yields a different number at every quantity and quotes the shop's chosen price only at the exact
+> break. That shipped between 2026-07-13 and 2026-08-07 and read as a bug the first time a
+> salesperson compared a quote line against the part page. **The part page decides a price; the
+> quote reads it.** Reaching for `resolveMarkupAtQty` + `unitPriceFromBase` on a quote path
+> reintroduces it — those two are the *costing* pair that builds a tier's listed price, not the
+> quote-time price path.
+
 **Firm vs price-options is implicit — decided by quantity count, with no mode toggle:**
 
 | Shape | Detail view + PDF |
@@ -157,8 +169,10 @@ detail page (`quotes/[quoteId]/page.tsx`), gated on the quote being active and u
 **Parts card** — one block per part, plus **+ Add part**. Each block: a part picker (with **+ New
 Part** inline create), an editable **list of quantity rows** (one per quoted quantity, **Add
 quantity** appends, every row past the first can be deleted), each row showing its resolved
-price inline as `Tier {n} ea · {unit price} / unit` plus Total (firm) or Extended (options). A
+price stacked over a `Tier {n} {unit}` caption, plus Total (firm) or Extended (options). A
 row below the lowest tier shows a "below minimum break" hint and snaps to the lowest tier price.
+Prices resolve synchronously off the tiers already loaded with the part — no per-quantity round
+trip, so typing a quantity updates the row immediately.
 The block warns when the part has no priced tiers, linking to the part page.
 
 There is **no separate "Pricing tiers (reference)" section** — the editable quantity rows
@@ -288,8 +302,10 @@ procurement tiers via `compute_part_cost_at_qty`, so they resolve a real tier pr
 need a manual per-line override.
 
 On the quote, `createQuote` inserts one row per (part, quantity), with `unit_price` from
-`resolveTier`, `base_cost_per_unit` from `getComputedPartCost` (historical record),
-`source_tier_id` as a soft reference, and `pricing_basis_snapshot` as the frozen tier table. A
+`resolveTier`, `base_cost_per_unit` from `getComputedPartCost` **at the matched break's quantity**
+— not the order quantity, so the row's own `unit_price = base_cost_per_unit × (1 + markup/100)`
+still holds — `source_tier_id` as a soft reference, and `pricing_basis_snapshot` as the frozen
+tier table. A
 quantity below the lowest tier snaps to it and is flagged `below_min` in the UI. A typed custom
 price instead sets that row's `unit_price` with `is_quote_override = true`, leaving the tier
 untouched.

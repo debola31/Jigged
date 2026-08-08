@@ -7,7 +7,6 @@ import {
   resolveTier,
   resolveTierFromSnapshot,
   resolveMarkupAtQty,
-  unitPriceFromBase,
   buildPricingBasisSnapshot,
 } from '@/utils/quotePricingResolver';
 import { getComputedPartCost } from '@/utils/partsAccess';
@@ -73,53 +72,50 @@ export async function insertLineItemForPart(
 ): Promise<QuoteLineItem> {
   const supabase = getSupabase();
 
-  // Base cost live at the ACTUAL order quantity, from the one canonical engine.
-  // This is both the frozen `base_cost_per_unit` and the basis for the selling
-  // price below — so `unit_price = base_cost_per_unit × (1 + markup/100)` holds
-  // on the row itself, and the quote form (which prices the same way) shows the
-  // identical number.
+  let unitPrice: number;
+  let markupPercent: number | null;
+  let sourceTierId: string | null;
+  // Quantity the price basis was evaluated at — the matched tier's break, not
+  // the order quantity (see `basisQuantity` below).
+  let basisQuantity: number;
+
+  if (override) {
+    unitPrice = override.unit_price;
+    markupPercent = override.markup_percent;
+    const resolvedMarkup = resolveMarkupAtQty(tiers, orderQuantity);
+    sourceTierId = resolvedMarkup?.source_tier_id ?? null;
+    basisQuantity = resolvedMarkup?.matched_tier_quantity ?? orderQuantity;
+  } else {
+    // The tier ladder is the shop's declared price list: the price listed at a
+    // break holds for that break's whole band. `resolveTier` returns exactly
+    // the number the part page shows for the matched tier, so a quote can never
+    // disagree with the part it was priced from.
+    const resolved = resolveTier(tiers, orderQuantity);
+    if (!resolved) {
+      throw new Error(
+        'Cannot create quote line item: this part has no priced pricing tiers. Add tiers on the part page first.',
+      );
+    }
+    unitPrice = resolved.unit_price;
+    sourceTierId = resolved.source_tier_id;
+    const matchedTier = tiers.find((t) => t.id === resolved.source_tier_id);
+    markupPercent = matchedTier?.markup_percent ?? null;
+    basisQuantity = resolved.matched_tier_quantity ?? orderQuantity;
+  }
+
+  // Base cost at the quantity the PRICE was derived from — the matched tier's
+  // break, not the order quantity. Setup amortization makes the base a function
+  // of quantity, so snapshotting it at the order qty would break the row's own
+  // arithmetic: `unit_price = base_cost_per_unit × (1 + markup/100)` is the
+  // invariant this column exists to record.
   let baseCost: number | null;
   try {
-    baseCost = await getComputedPartCost(partId, orderQuantity);
+    baseCost = await getComputedPartCost(partId, basisQuantity);
   } catch {
     // Cost RAISES on missing labor rates / external pricing / unit
     // conversions. Snapshot a null so the breakdown view can fall through
     // to its computed-live fallback rather than persisting wrong data.
     baseCost = null;
-  }
-
-  let unitPrice: number;
-  let markupPercent: number | null;
-  let sourceTierId: string | null;
-
-  if (override) {
-    unitPrice = override.unit_price;
-    markupPercent = override.markup_percent;
-    sourceTierId = resolveMarkupAtQty(tiers, orderQuantity)?.source_tier_id ?? null;
-  } else {
-    // Resolve the markup that applies at the order qty; price = base(orderQty)
-    // × markup — the single-source computation. Fall back to the tier ladder's
-    // breakpoint price only when the live base can't be computed (so a part
-    // that momentarily can't cost still gets a sensible price rather than
-    // failing the quote).
-    const resolvedMarkup = resolveMarkupAtQty(tiers, orderQuantity);
-    const fromBase = unitPriceFromBase(baseCost, resolvedMarkup?.markup_percent);
-    if (fromBase !== null && resolvedMarkup) {
-      unitPrice = fromBase;
-      markupPercent = resolvedMarkup.markup_percent;
-      sourceTierId = resolvedMarkup.source_tier_id;
-    } else {
-      const resolved = resolveTier(tiers, orderQuantity);
-      if (!resolved) {
-        throw new Error(
-          'Cannot create quote line item: this part has no priced pricing tiers. Add tiers on the part page first.',
-        );
-      }
-      unitPrice = resolved.unit_price;
-      sourceTierId = resolved.source_tier_id;
-      const matchedTier = tiers.find((t) => t.id === resolved.source_tier_id);
-      markupPercent = matchedTier?.markup_percent ?? null;
-    }
   }
 
   const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;
@@ -195,27 +191,15 @@ export async function updateLineItemQuantity(
   if (!row.is_quote_override) {
     const snapshot = row.pricing_basis_snapshot;
     if (snapshot && !row.basis_unknown) {
-      // Markup stays frozen from the snapshot ladder (selling policy); the base
-      // cost is recomputed live at the NEW qty and the price recombined — the
-      // same single-source rule as insert. Falls back to the snapshot's frozen
-      // breakpoint price if the live base can't be computed.
-      const resolvedMarkup = resolveMarkupAtQty(snapshot.tiers, newQuantity);
-      let base: number | null;
-      try {
-        base = await getComputedPartCost(row.part_id, newQuantity);
-      } catch {
-        base = null;
-      }
-      const fromBase = unitPriceFromBase(base, resolvedMarkup?.markup_percent);
-      if (fromBase !== null && resolvedMarkup) {
-        newUnitPrice = fromBase;
-        newSourceTierId = resolvedMarkup.source_tier_id;
-      } else {
-        const resolved = resolveTierFromSnapshot(snapshot, newQuantity);
-        if (resolved) {
-          newUnitPrice = resolved.unit_price;
-          newSourceTierId = resolved.source_tier_id;
-        }
+      // Walk the FROZEN ladder captured at quote time, not the part's current
+      // tiers — moving to another quantity is quantity-curve movement, not a
+      // reprice, so a tier edit since creation must not leak in here. The
+      // snapshot stores each tier's listed price, which is the price the band
+      // carries, so this lands on the same number the part page shows.
+      const resolved = resolveTierFromSnapshot(snapshot, newQuantity);
+      if (resolved) {
+        newUnitPrice = resolved.unit_price;
+        newSourceTierId = resolved.source_tier_id;
       }
     }
     // basis_unknown rows keep the stored unit_price — there's no
@@ -295,30 +279,24 @@ export async function repriceLineItemToCurrent(
     throw new Error('Override line items cannot be repriced — clear the override first.');
   }
 
-  const resolvedMarkup = resolveMarkupAtQty(currentTiers, row.quantity);
-  if (!resolvedMarkup) {
+  // Reprice onto the part's CURRENT ladder — the listed price at the break this
+  // quantity falls in, which is the number the part page shows today.
+  const resolved = resolveTier(currentTiers, row.quantity);
+  if (!resolved) {
     throw new Error('Cannot reprice: this part has no priced tiers in the current tier table.');
   }
-  const newMarkup = resolvedMarkup.markup_percent;
+  const newUnitPrice = resolved.unit_price;
+  const newSourceTierId: string | null = resolved.source_tier_id;
+  const matchedTier = currentTiers.find((t) => t.id === resolved.source_tier_id);
+  const newMarkup = matchedTier?.markup_percent ?? null;
 
-  // Single-source reprice: base cost live at the line's own qty × the current
-  // tier's markup. Falls back to the ladder's breakpoint price if base can't
-  // be computed.
+  // Base at the matched break — the quantity the new price was derived from, so
+  // `unit_price = base_cost_per_unit × (1 + markup/100)` still holds on the row.
   let base: number | null;
   try {
-    base = await getComputedPartCost(row.part_id, row.quantity);
+    base = await getComputedPartCost(row.part_id, resolved.matched_tier_quantity ?? row.quantity);
   } catch {
     base = null;
-  }
-  let newUnitPrice = unitPriceFromBase(base, newMarkup);
-  let newSourceTierId: string | null = resolvedMarkup.source_tier_id;
-  if (newUnitPrice === null) {
-    const resolved = resolveTier(currentTiers, row.quantity);
-    if (!resolved) {
-      throw new Error('Cannot reprice: this part has no priced tiers in the current tier table.');
-    }
-    newUnitPrice = resolved.unit_price;
-    newSourceTierId = resolved.source_tier_id;
   }
 
   const newSnapshot = buildPricingBasisSnapshot(
@@ -334,6 +312,10 @@ export async function repriceLineItemToCurrent(
       unit_price: newUnitPrice,
       source_tier_id: newSourceTierId,
       markup_percent: newMarkup,
+      // Refreshed alongside the price it belongs to — leaving the create-time
+      // base here would leave the row asserting an arithmetic that no longer
+      // holds, and it is what cost-vs-sell reporting reads.
+      base_cost_per_unit: base,
       total_price: newTotal,
       pricing_basis_snapshot: newSnapshot as unknown as Json,
       basis_unknown: false,

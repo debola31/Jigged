@@ -178,10 +178,27 @@ The block warns when the part has no priced tiers, linking to the part page.
 There is **no separate "Pricing tiers (reference)" section** — the editable quantity rows
 replaced it, on the form and on the detail view.
 
-- **Per-part price override:** one **✏ Use custom price** toggle per part (not per quantity)
-  revealing a Custom unit price that applies to **every** quantity of that part. Each row gets
-  `is_quote_override = true`; the part's tier is never touched. Markup % is no longer a
-  quote-form input.
+- **Per-quantity price, always editable.** Each quantity row's **Unit price** is a plain text
+  field carrying the matched tier's listed price. Typing over it prices that break differently;
+  the row then reads `Custom · Tier {n} {unit} is {auto price}` in `warning.main` with a
+  **Reset** beside it, and saves with `is_quote_override = true`. The part's tier is never
+  touched, and markup % is not a quote-form input.
+
+  Three things this shape is deliberate about, all of which the previous
+  **✏ Use custom price** toggle got wrong:
+  - **No control to discover.** The toggle sat at the foot of the part block, away from the price
+    it changed ([NN/g — icon discoverability](https://www.nngroup.com/articles/how-to-test-digital-icons/)).
+    An editable field is its own affordance, and this is the shape already shipped in
+    [`AcceptPurchaseOrderModal`](../../components/jobs/AcceptPurchaseOrderModal.tsx).
+  - **The auto price stays on screen.** The toggle replaced it, so the moment you overrode a
+    price you lost the number you were overriding — and the only way back was to re-click the
+    toggle. Naming the tier price in the caption is what makes **Reset** meaningful.
+  - **Per row, not per part.** Price lives on `quote_line_items` per (part, quantity), so
+    50/100/250 can carry three negotiated prices. One price for the whole part flattened exactly
+    the quantity curve a price-options quote exists to show.
+
+  A typed price equal to the tier's is **not** an override — it saves as a normal tier-priced
+  line, so it stays inside drift detection and repricing.
 - **Per-part lead time:** an optional free-text field so one item can read "2–3 weeks" and
   another "3–4 weeks" **without splitting the quote in two**. When *any* item has its own, the
   detail view and PDF move lead time under each item; when none do, one quote-level line shows.
@@ -207,8 +224,9 @@ added on the part page. **+ Add new address** on the shipping/billing selectors 
 `CustomerAddressForm` inline in a `Collapse` rather than navigating away.
 
 **Guards:** at least one part block, each with a part; a part may appear in only one block; every
-quantity a number > 0 (fractional allowed) and unique within its part; each non-override row must
-resolve to a priced tier or carry a custom price; lead time and payment terms required.
+quantity a number > 0 (fractional allowed) and unique within its part; every row must either
+resolve to a priced tier or carry a typed unit price ≥ 0 — only the absence of *both* blocks the
+save; lead time and payment terms required.
 
 ### Detail — `/dashboard/{companyId}/quotes/{id}`
 

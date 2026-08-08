@@ -43,6 +43,7 @@ vi.mock('@/utils/partsAccess', () => ({ getComputedPartCost: getComputedPartCost
 import {
   insertLineItemForPart,
   updateLineItemQuantity,
+  updateLineItemOverride,
   repriceLineItemToCurrent,
 } from '@/utils/quoteLineItemsAccess';
 
@@ -280,6 +281,70 @@ describe('updateLineItemQuantity — walks the frozen price list', () => {
     expect(getComputedPartCostMock).not.toHaveBeenCalled();
     expect(mockQueryBuilder.update).toHaveBeenCalledWith(
       expect.objectContaining({ quantity: 8, unit_price: 12.5, total_price: 100 }),
+    );
+  });
+});
+
+describe('updateLineItemOverride — set/clear a one-off price on a saved line', () => {
+  const saved = (over: Record<string, unknown> = {}) => ({
+    id: 'li-1',
+    part_id: 'part-1',
+    quantity: 10,
+    unit_price: 45.5,
+    source_tier_id: 't100',
+    markup_percent: 20,
+    is_quote_override: false,
+    basis_unknown: false,
+    pricing_basis_snapshot: SNAPSHOT,
+    ...over,
+  });
+
+  it('pins the typed price and flags the line as an override', async () => {
+    mockQueryBuilder.data = saved();
+
+    await updateLineItemOverride('li-1', 88);
+
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unit_price: 88,
+        total_price: 880,
+        is_quote_override: true,
+        markup_percent: null,
+      }),
+    );
+  });
+
+  it('clearing returns the line to its FROZEN tier basis, not current tiers', async () => {
+    // Dropping an override is not an opt-in to a tier change made since the
+    // quote was written — that stays the explicit "Update to current price".
+    mockQueryBuilder.data = saved({ is_quote_override: true, unit_price: 88 });
+
+    await updateLineItemOverride('li-1', null);
+
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unit_price: 45.5,
+        total_price: 455,
+        source_tier_id: 't100',
+        markup_percent: 20,
+        is_quote_override: false,
+      }),
+    );
+  });
+
+  it('clearing a line with no usable basis keeps the agreed price, just drops the flag', async () => {
+    // Pre-snapshot row: there is no basis to return to, so inventing one would
+    // be worse than keeping the number both parties already agreed on.
+    mockQueryBuilder.data = saved({
+      is_quote_override: true,
+      unit_price: 88,
+      basis_unknown: true,
+    });
+
+    await updateLineItemOverride('li-1', null);
+
+    expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+      expect.objectContaining({ unit_price: 88, total_price: 880, is_quote_override: false }),
     );
   });
 });

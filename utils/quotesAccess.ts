@@ -31,6 +31,7 @@ import {
   getLineItemsForQuote,
   updateLineItemQuantity,
   updateLineItemLeadTime,
+  updateLineItemOverride,
   repriceLineItemToCurrent,
   deleteLineItem,
 } from '@/utils/quoteLineItemsAccess';
@@ -684,6 +685,19 @@ async function reconcileQuoteLineItems(
 
     if (existing.quantity !== block.order_quantity) {
       await updateLineItemQuantity(existing.id, block.order_quantity);
+    }
+
+    // A custom price set, changed or cleared on an ALREADY-SAVED line. This
+    // used to be dropped on the floor — `block.override` was only read on the
+    // insert paths above — so editing a quote's price appeared to work and
+    // silently did nothing. Runs after the quantity update so it wins: an
+    // override is a price the user typed, not one derived from the new qty.
+    const nextOverridePrice = block.override ? block.override.unit_price : null;
+    const overrideChanged = existing.is_quote_override
+      ? nextOverridePrice === null || nextOverridePrice !== existing.unit_price
+      : nextOverridePrice !== null;
+    if (overrideChanged) {
+      await updateLineItemOverride(existing.id, nextOverridePrice);
     }
 
     // Persist a per-item lead-time edit even when the quantity is unchanged

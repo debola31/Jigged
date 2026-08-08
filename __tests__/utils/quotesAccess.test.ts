@@ -87,6 +87,7 @@ const {
   insertLineItemForPartMock,
   updateLineItemQuantityMock,
   updateLineItemLeadTimeMock,
+  updateLineItemOverrideMock,
   repriceLineItemToCurrentMock,
   deleteLineItemMock,
   getTiersWithComputedPricesMock,
@@ -96,6 +97,7 @@ const {
   insertLineItemForPartMock: vi.fn(),
   updateLineItemQuantityMock: vi.fn(),
   updateLineItemLeadTimeMock: vi.fn(),
+  updateLineItemOverrideMock: vi.fn(),
   repriceLineItemToCurrentMock: vi.fn(),
   deleteLineItemMock: vi.fn(),
   getTiersWithComputedPricesMock: vi.fn(),
@@ -107,6 +109,7 @@ vi.mock('@/utils/quoteLineItemsAccess', () => ({
   insertLineItemForPart: insertLineItemForPartMock,
   updateLineItemQuantity: updateLineItemQuantityMock,
   updateLineItemLeadTime: updateLineItemLeadTimeMock,
+  updateLineItemOverride: updateLineItemOverrideMock,
   repriceLineItemToCurrent: repriceLineItemToCurrentMock,
   deleteLineItem: deleteLineItemMock,
   // clearLineItemsForQuote isn't exercised in these tests but the import
@@ -937,6 +940,7 @@ describe('quotesAccess utilities', () => {
       insertLineItemForPartMock.mockReset();
       updateLineItemQuantityMock.mockReset();
       updateLineItemLeadTimeMock.mockReset();
+      updateLineItemOverrideMock.mockReset();
       repriceLineItemToCurrentMock.mockReset();
       deleteLineItemMock.mockReset();
       getTiersWithComputedPricesMock.mockReset();
@@ -944,8 +948,129 @@ describe('quotesAccess utilities', () => {
       insertLineItemForPartMock.mockResolvedValue({});
       updateLineItemQuantityMock.mockResolvedValue({});
       updateLineItemLeadTimeMock.mockResolvedValue(undefined);
+      updateLineItemOverrideMock.mockResolvedValue({});
       repriceLineItemToCurrentMock.mockResolvedValue({});
       deleteLineItemMock.mockResolvedValue(undefined);
+    });
+
+    /**
+     * A custom price on an ALREADY-SAVED line. `reconcileQuoteLineItems` used to
+     * read `block.override` only on the insert paths, so setting, changing or
+     * clearing one on an existing line was accepted by the form and silently
+     * dropped. These lock the write in.
+     */
+    describe('custom price on an existing line', () => {
+      const savedLine = (over: Record<string, unknown> = {}) => ({
+        id: 'li-A',
+        quote_id: 'quote-1',
+        company_id: 'company-1',
+        part_id: 'part-A',
+        source_tier_id: 't1',
+        sequence: 10,
+        quantity: 10,
+        unit_price: 100,
+        total_price: 1000,
+        markup_percent: 50,
+        base_cost_per_unit: 66.67,
+        is_quote_override: false,
+        pricing_basis_snapshot: {
+          tiers: [{ id: 't1', quantity: 1, unit_price: 100, markup_percent: 50 }],
+          resolved_tier_id: 't1',
+          resolved_quantity: 10,
+          captured_at: '',
+        },
+        basis_unknown: false,
+        created_at: '2026-05-01T00:00:00Z',
+        ...over,
+      });
+
+      const editWith = async (part: QuoteFormData['parts'][number]) => {
+        stubUpdateQuoteHappyPath();
+        await updateQuote('quote-1', { ...baseFormData, parts: [part] });
+      };
+
+      it('sets a custom price on a line that had none', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([savedLine()]);
+
+        await editWith({
+          part_id: 'part-A',
+          order_quantity: 10,
+          line_item_id: 'li-A',
+          override: { unit_price: 88, markup_percent: null },
+        });
+
+        expect(updateLineItemOverrideMock).toHaveBeenCalledWith('li-A', 88);
+      });
+
+      it('changes an existing custom price', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([
+          savedLine({ is_quote_override: true, unit_price: 88 }),
+        ]);
+
+        await editWith({
+          part_id: 'part-A',
+          order_quantity: 10,
+          line_item_id: 'li-A',
+          override: { unit_price: 95, markup_percent: null },
+        });
+
+        expect(updateLineItemOverrideMock).toHaveBeenCalledWith('li-A', 95);
+      });
+
+      it('clears a custom price back to the tier basis when the form drops it', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([
+          savedLine({ is_quote_override: true, unit_price: 88 }),
+        ]);
+
+        await editWith({ part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' });
+
+        expect(updateLineItemOverrideMock).toHaveBeenCalledWith('li-A', null);
+      });
+
+      it('writes nothing when the custom price is unchanged', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([
+          savedLine({ is_quote_override: true, unit_price: 88 }),
+        ]);
+
+        await editWith({
+          part_id: 'part-A',
+          order_quantity: 10,
+          line_item_id: 'li-A',
+          override: { unit_price: 88, markup_percent: null },
+        });
+
+        expect(updateLineItemOverrideMock).not.toHaveBeenCalled();
+      });
+
+      it('leaves a plain tier-priced line alone', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([savedLine()]);
+
+        await editWith({ part_id: 'part-A', order_quantity: 10, line_item_id: 'li-A' });
+
+        expect(updateLineItemOverrideMock).not.toHaveBeenCalled();
+      });
+
+      it('applies the override AFTER a quantity change, so the typed price wins', async () => {
+        getLineItemsForQuoteMock.mockResolvedValueOnce([savedLine()]);
+        const order: string[] = [];
+        updateLineItemQuantityMock.mockImplementation(async () => {
+          order.push('qty');
+          return {};
+        });
+        updateLineItemOverrideMock.mockImplementation(async () => {
+          order.push('override');
+          return {};
+        });
+
+        await editWith({
+          part_id: 'part-A',
+          order_quantity: 40,
+          line_item_id: 'li-A',
+          override: { unit_price: 77, markup_percent: null },
+        });
+
+        expect(order).toEqual(['qty', 'override']);
+      });
     });
 
     it('reconciles line items on edit — insert new, update qty, delete removed', async () => {

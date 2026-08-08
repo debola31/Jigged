@@ -322,15 +322,30 @@ interface SelectCandidate {
   text: string;
 }
 
-/** Substitute `${IDENT}` placeholders with their `const IDENT = \`...\``
- *  values from the same file. One pass is enough for the convention in
- *  this codebase (constants don't nest deeply). Unresolved placeholders
- *  remain as `${IDENT}` so the caller can detect and skip. */
+/** Substitute `${IDENT}` placeholders with their `const IDENT = '...'` values
+ *  from the same file. One pass is enough for the convention in this codebase
+ *  (constants don't nest deeply). Unresolved placeholders remain as `${IDENT}`
+ *  so the caller can detect and skip.
+ *
+ *  ALL THREE QUOTE STYLES, and the single quotes are the load-bearing ones.
+ *  This matched only backticks until 2026-08-07, so a select constant written
+ *  with `'…'` never resolved — and because `validateEmbed` bails on an
+ *  unresolved `${…}` BEFORE it reaches the FK-hint check, that silently
+ *  disabled hint validation for the embed it sat in. `parts_bom_child_part_id_fkey`
+ *  and `parts_bom_parent_part_id_fkey` were checked by nothing at all as a
+ *  result: a fabricated hint there produced no violation, and PostgREST 400s on
+ *  one at runtime. Nothing else in the repo checks FK hints — `tsc` does not
+ *  (a bogus hint infers a plausible type, see docs/architecture.md §6.1).
+ *
+ *  Kept as three separate alternatives rather than one character class so an
+ *  apostrophe inside a backtick constant cannot terminate the match early. */
 function resolveInterpolations(text: string, sourceFile: string): string {
   return text.replace(/\$\{(\w+)\}/g, (orig, name) => {
-    const re = new RegExp(`const\\s+${name}\\s*=\\s*\`([^\`]+)\``);
+    const re = new RegExp(
+      `const\\s+${name}\\s*=\\s*(?:\`([^\`]+)\`|'([^']+)'|"([^"]+)")`,
+    );
     const m = re.exec(sourceFile);
-    return m ? m[1] : orig;
+    return m ? (m[1] ?? m[2] ?? m[3]) : orig;
   });
 }
 

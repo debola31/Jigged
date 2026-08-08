@@ -59,6 +59,7 @@ Sentry.init({
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
 
 import posthog from "posthog-js";
+import { withCompany } from "@/lib/analyticsCompany";
 
 // NEXT_PUBLIC_POSTHOG_HOST is deliberately not read: ingestion goes through our
 // own origin via the `next.config.ts` rewrites, so `api_host` is the fixed "/ingest"
@@ -91,5 +92,15 @@ if (posthogToken) {
     // on also makes PostHog source-map upload a hard requirement in CI — this is
     // what removes that work item.
     debug: process.env.NODE_ENV === "development",
+    // Stamps company_id (and company_name when it is known and matches) onto
+    // every event, including $autocapture and $pageview. Derived from the URL
+    // per event rather than registered as a super property, because super
+    // properties persist in localStorage and go stale the moment a user
+    // switches company — see lib/analyticsCompany.ts for the full reasoning.
+    //
+    // NOTE FOR #702: this is the same hook that issue proposes as the single
+    // choke point for stripping customer business data. Extend this function,
+    // do not replace it — both concerns want `before_send`.
+    before_send: withCompany,
   });
 }

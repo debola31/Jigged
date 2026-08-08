@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -19,6 +19,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import { useCompanies } from '@/hooks/useCompanies';
 import { homePathForRole } from '@/utils/companyAccess';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
+import { setAnalyticsCompany } from '@/lib/analyticsCompany';
 import { JiggedLogo } from '@/components/branding';
 
 function getInitials(name: string): string {
@@ -51,6 +52,24 @@ export default function CompanySwitcher() {
   const currentCompany = companies.find(
     (c) => c.company_id === currentCompanyId
   );
+
+  // Hand the resolved name to PostHog so breakdowns read "Contour Tool & Machine"
+  // rather than a UUID. Only the NAME travels this way — `company_id` is derived
+  // from the URL on every event and never depends on this component being
+  // mounted, so operator surfaces stay segmentable without it.
+  //
+  // Deliberately the INTERNAL name (`companies.name`), not the demo-substituted
+  // `companyName` rendered below: in demo mode that swaps in the real company's
+  // name, which would make a seeded sandbox indistinguishable from the live
+  // account in analytics. The "— Demo" suffix is the signal, not noise.
+  const resolvedCompanyName = currentCompany?.companies?.name;
+  useEffect(() => {
+    setAnalyticsCompany(
+      currentCompanyId && resolvedCompanyName
+        ? { id: currentCompanyId, name: resolvedCompanyName }
+        : null,
+    );
+  }, [currentCompanyId, resolvedCompanyName]);
 
   const handleOpen = () => {
     if (hasMultipleCompanies) {

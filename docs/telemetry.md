@@ -158,6 +158,34 @@ contains other tables whose first cells are backticked identifiers.
 `job_operation_id` identifiers ([#702](https://github.com/debola31/Jigged/issues/702)). This table
 records what we send, not what we have decided is right.
 
+### Automatic properties: on every event, and outside the registry
+
+Two properties are attached by `before_send` in
+[`lib/analyticsCompany.ts`](../lib/analyticsCompany.ts) rather than at a call site, so they ride on
+**every** event — `$autocapture` and `$pageview` included, which is the point.
+
+| Property | Source | Present when |
+|---|---|---|
+| `company_id` | Parsed from the URL path on each event | Any company-scoped route |
+| `company_name` | Supplied by the app as it resolves; attached only if its id matches the URL | A company-scoped route where the name has loaded |
+
+**The registry above is exhaustive for call-site properties only, and the checker cannot see
+these.** It reads object literals passed to `posthog.capture()`; a property injected downstream
+appears at no call site. Listing them in the table would fail as `stale-doc-property` on all
+eleven events. This section is the compensating control — if a third automatic property is added
+and not recorded here, nothing catches it.
+
+**Why not `posthog.register()`**, which is the obvious API: super properties persist in
+localStorage, and one user can hold access to several companies. A registered company keeps
+labelling events with whichever was registered last, silently, after a switch. The URL cannot go
+stale that way. **Why not group analytics**, which is the canonical B2B answer: paid add-on,
+unavailable on our plan, and subscribing changes the billing basis to *all* identified events.
+Revisit when we want company-level funnels and retention rather than readable breakdowns.
+
+`before_send` is also what [#702](https://github.com/debola31/Jigged/issues/702) proposes as the
+single choke point for stripping customer business data. **Extend that function, do not replace
+it** — both concerns want the same hook.
+
 ### Known gap: notes and photos are not instrumented
 
 The operator activity feed — the notes-and-photos loop

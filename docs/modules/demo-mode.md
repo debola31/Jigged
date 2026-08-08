@@ -55,8 +55,8 @@ company with the UX of a mode switch.
 ## Behaviour
 
 In the office: entered from Settings or the onboarding card; exited from Settings or the banner
-shown on every page while in demo mode. On the shop floor it is called **practice mode** and has
-its own entry and exit — [see below](#the-operator-surface-calls-it-practice-mode-and-has-its-own-way-in-and-out).
+shown on every page while in demo mode. The shop floor uses the **same name** and has its own
+entry and exit — [see below](#the-operator-surface-has-its-own-way-in-and-out).
 
 - **First entry** creates the hidden demo company, seeds it from the active template, mirrors
   every `user_company_access` row and the source's feature flags, and navigates to it. **Later
@@ -78,7 +78,7 @@ records, real reference real, and the two graphs never connect because they are 
 companies. Demo data must be excluded from *non-data* queries — the company selector, the login
 redirect, and billing — by filtering `companies.is_demo = FALSE`.
 
-### The operator surface calls it **practice mode**, and has its own way in and out
+### The operator surface has its own way in and out
 
 **Corrected 2026-08-08.** This section previously read *"operators already have mirrored access,
 so they enter via Settings like everyone else. There is no separate operator toggle."* **Both
@@ -92,11 +92,23 @@ dashboard rather than out of demo mode.
 
 | | Office | Operator |
 |---|---|---|
-| Name | "Demo mode" | **"Practice mode"** — a demo is something you show a buyer; an operator handed a phone to learn on is practising |
-| Enter | Settings, or the onboarding card | [`OperatorPracticeModeButton`](../../components/operator/OperatorPracticeModeButton.tsx) in the "Me" tab, beside Give feedback and Switch company |
-| Exit | [`DemoModeBanner`](../../components/demo/DemoModeBanner.tsx), or Settings | [`OperatorPracticeBar`](../../components/operator/OperatorPracticeBar.tsx) — a 48px row inside the AppBar, on every screen |
-| Lands on | The same page you were on | **`/jobs`** — where the practice experience begins (station picker, then the dispatch list). A "Me" tab rendered against practice data is just confusing |
+| Name | "Demo mode" | **"Demo mode"** — the same words, deliberately |
+| Enter | Settings, or the onboarding card | [`OperatorDemoModeButton`](../../components/operator/OperatorDemoModeButton.tsx) in the "Me" tab, beside Give feedback and Switch company |
+| Exit | [`DemoModeBanner`](../../components/demo/DemoModeBanner.tsx), or Settings | [`OperatorDemoBar`](../../components/operator/OperatorDemoBar.tsx) — the same `severity="info"` Alert, as a 56px row inside the AppBar, on every screen |
+| Lands on | The same page you were on | **`/jobs`** — where the demo experience begins (station picker, then the dispatch list). A "Me" tab rendered against demo data is just confusing |
 | Reset | Yes | **No.** Reset is destructive and shop-wide; it stays an admin action in the office |
+
+**Withdrawn — a shop-floor-only name.** An earlier revision called this "practice mode" on the
+operator surface, reasoning that a demo is something you show a buyer while an operator handed a
+phone to learn on is practising. It is one company and one feature, and two names for it is a
+support problem the moment an admin tells an operator to "go into demo mode" and the operator
+cannot find those words anywhere on their screen. The bar reuses the office's Alert styling for
+the same reason. **Do not reintroduce a separate operator-side name.**
+
+The wording is trimmed, though, not renamed: the bar says *"You're in demo mode"* where the office
+says *"You're in demo mode. Changes here won't affect your real company."* The second sentence
+does not fit beside a 48px Leave button at 375px, and the reassurance about real data matters most
+to the admin deciding whether to enter — the office's audience — not the operator already in it.
 
 **Operators enter, they never create.** `create_demo_company` raises for non-admins in the
 database, so the button renders **nothing** until an admin has set the demo up — a control whose
@@ -111,16 +123,16 @@ created has no mirrored access row in it and the operator layout's membership ch
 them out on arrival. A failure there is logged and does not block — everyone present when the
 demo was made is already mirrored, and the layout's own check is the real gate.
 
-**Practice work never enters the operator funnel.** `log_operator_event` returns early for a demo
+**Demo activity never enters the operator funnel.** `log_operator_event` returns early for a demo
 company ([`20260808024101`](../../supabase/migrations/20260808024101_log_operator_event_skips_demo.sql)).
 `operator_events` is the pilot's only readable signal and every reading of it is a ratio against
 `app_opened`; a training session fires `app_opened`, `station_selected` and `completion_recorded`
 in bursts, which would be indistinguishable from a good week. Decided at the **write** rather than
 by an `is_demo` filter at read time — a filter someone forgets looks exactly like one that was not
 needed. The PostHog `demo entered` capture is the opposite case and deliberate: we *do* want to
-know whether anyone practises. See [telemetry.md](../telemetry.md).
+know whether anyone uses it. See [telemetry.md](../telemetry.md).
 
-**The operator surface also names its company now**, practice or not — in the AppBar's centre slot
+**The operator surface also names its company now**, demo or not — in the AppBar's centre slot
 while no station is chosen, showing the **real** shop's name rather than the internal
 `X - Demo`. That is a separate fix to the same underlying gap; see
 [operator-view.md](operator-view.md).
@@ -236,7 +248,7 @@ Two guards, and both earn their place:
    Conditioned on `auth.uid() IS NOT NULL` so `service_role` (no JWT, trusted, used by the backend
    and the integration suite) keeps working.
 
-It surfaced while opening practice mode to operators, which widens the caller set from admins to
+It surfaced while opening demo mode to operators, which widens the caller set from admins to
 every member. Covered by `test_sync_rejects_a_company_that_is_not_the_source_demo` — which asserts
 that no membership row was created, not merely that the call raised — plus
 `test_sync_rejects_a_caller_who_is_not_a_member_of_the_source` and
@@ -357,7 +369,7 @@ had **no** coverage at all before 2026-08-05, which is why both failures above s
 | `sync_demo_access` refuses a company that is not the source's own demo, and adds nobody | `test_sync_rejects_a_company_that_is_not_the_source_demo` |
 | `sync_demo_access` refuses a caller who is not a member of the source | `test_sync_rejects_a_caller_who_is_not_a_member_of_the_source` |
 | …and still works for one who is — the call every entry makes | `test_sync_still_works_for_a_member_of_the_source` |
-| Practice activity is not recorded in the operator funnel | `test_operator_events_are_not_recorded_for_a_demo_company` |
+| Demo activity is not recorded in the operator funnel | `test_operator_events_are_not_recorded_for_a_demo_company` |
 | …and real activity still is (the control, without which the above passes when logging is broken) | `test_operator_events_are_still_recorded_for_the_real_company` |
 
 The tests assert **derived** state and **lower-bound** counts, not the template's own numbers —
@@ -375,7 +387,7 @@ Still untested and worth naming: `sync_demo_access`'s *role* mirroring on re-ent
 mirroring and its authorization are covered), and the **office** frontend enter/exit navigation.
 The operator side is covered — `__tests__/app/operator/MyWorkPage.test.tsx` for the entry (absent
 without a demo, absent inside one, syncs before navigating, enters anyway if the sync fails, and
-leaves Log out isolated) and `__tests__/components/operator/OperatorPracticeBar.test.tsx` for the
+leaves Log out isolated) and `__tests__/components/operator/OperatorDemoBar.test.tsx` for the
 exit.
 
 ## Resolved questions

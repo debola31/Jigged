@@ -9,7 +9,7 @@
  * nothing else — so the station picker, which also hides the bottom nav, identified nothing at
  * all. The operator LOGIN page one screen earlier does show the company name; it then vanished at
  * exactly the moment you commit to a working context. A person who works two shops, or who has
- * just stepped into the practice company, had nothing to check against.
+ * just stepped into the demo company, had nothing to check against.
  *
  * ## Why the header rather than the picker card
  *

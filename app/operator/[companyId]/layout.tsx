@@ -33,9 +33,9 @@ import {
   useOperatorCompany,
 } from '@/components/operator/OperatorCompanyContext';
 import OperatorCompanyLabel from '@/components/operator/OperatorCompanyLabel';
-import OperatorPracticeBar, {
-  PRACTICE_BAR_HEIGHT,
-} from '@/components/operator/OperatorPracticeBar';
+import OperatorDemoBar, {
+  DEMO_BAR_HEIGHT,
+} from '@/components/operator/OperatorDemoBar';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
@@ -327,7 +327,7 @@ export default function OperatorLayout({
 
   return (
     // OperatorCompanyProvider wraps the rest so ONE `getCompany` answers three questions —
-    // which shop this is, whether it is a practice one, and the feature flags. It sits below
+    // which shop this is, whether it is a demo one, and the feature flags. It sits below
     // the auth check above (which early-returns) so it never fetches before membership is
     // confirmed, and outside the shell so the shell can consume it rather than running its
     // own copy of the same request.
@@ -392,7 +392,7 @@ function OperatorShell({
   // From the context rather than `useCompanyFeatures()` directly: it is the same
   // `getCompany` row, fetched once for the whole operator tree instead of once per
   // consumer. (The company NAME is read by `OperatorCompanyLabel`, which owns the
-  // header slot; the shell only needs to know whether this is a practice company,
+  // header slot; the shell only needs to know whether this is a demo company,
   // because that changes the content offset below.)
   const { features, isDemo } = useOperatorCompany();
   const pathname = usePathname();
@@ -583,11 +583,11 @@ function OperatorShell({
           */}
         </Toolbar>
 
-        {/* A second row INSIDE the AppBar, so the practice bar is part of the one fixed
+        {/* A second row INSIDE the AppBar, so the demo bar is part of the one fixed
             element rather than a second one to keep in sync. Renders null outside a
-            practice company, which is why the offset below is conditional rather than
+            demo company, which is why the offset below is conditional rather than
             permanently taller. */}
-        <OperatorPracticeBar />
+        <OperatorDemoBar />
 
         {/* Station Selector Menu */}
         <Menu
@@ -642,12 +642,12 @@ function OperatorShell({
           position: 'relative',
           zIndex: 1, // above the fixed ambient backdrop
           flexGrow: 1, // fill the viewport so the background reaches the bottom on short pages
-          /* AppBar height. 48px is the Toolbar; in a practice company the AppBar carries a
-             second row (OperatorPracticeBar) and this has to grow by exactly its height —
+          /* AppBar height. 48px is the Toolbar; in a demo company the AppBar carries a
+             second row (OperatorDemoBar) and this has to grow by exactly its height —
              the bar is `position: fixed` along with the rest of the AppBar, so it covers the
              top of the content rather than pushing it. THE ONE PLACE that knows the bar
              exists; the constant is exported from the bar so the two cannot drift. */
-          mt: isDemo ? `${48 + PRACTICE_BAR_HEIGHT}px` : '48px',
+          mt: isDemo ? `${48 + DEMO_BAR_HEIGHT}px` : '48px',
           // BottomNavigation height plus whatever the device reserves at the bottom (the iOS home
           // indicator). `viewportFit: 'cover'` in the root layout is what makes the inset non-zero.
           mb: navVisible ? 'calc(56px + env(safe-area-inset-bottom))' : 0,

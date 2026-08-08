@@ -86,7 +86,7 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 | Multi-part job navigation | **Built** as the parts hub, with a back-link from the traveler on multi-part jobs only. |
 | Printed traveler as the primary path | **Demoted, deliberately.** It remains a fallback for shops mid-transition or spotty connectivity. |
 | Scrap / defect flagging | **Not built, and not designed.** [Discovery first](#scrap-and-defect-capture-discovery). |
-| Practising on real-looking data before doing real work | **Built** as **practice mode** — the shop's demo company, entered from the "Me" tab and left from a bar carried on every screen. Operators enter but never create: the RPC is admin-only, so the entry renders nothing until an admin sets one up. Practice activity is excluded from `operator_events` at the write, so it cannot inflate the funnel. [demo-mode.md](demo-mode.md) |
+| Exploring real-looking data before doing real work | **Built** — the shop's **demo company**, same name as the office, entered from the "Me" tab and left from a bar carried on every screen. Operators enter but never create: the RPC is admin-only, so the entry renders nothing until an admin sets one up. Demo activity is excluded from `operator_events` at the write, so it cannot inflate the funnel. [demo-mode.md](demo-mode.md) |
 
 ---
 
@@ -119,11 +119,11 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
   That slot used to be empty before a station was picked, and the picker hides the bottom nav
   too — so the one screen where you commit to a working context identified **nothing**, while the
   operator login page one step earlier does show the company name and then loses it. A person who
-  works two shops, or who has just stepped into the practice company, had nothing to check
+  works two shops, or who has just stepped into the demo company, had nothing to check
   against. The name comes from
   [`OperatorCompanyContext`](../../components/operator/OperatorCompanyContext.tsx), resolved once
   for the whole operator tree off the company row the shell already fetches, so it costs no
-  request; inside a practice company it is the **real** shop's name, matching the office.
+  request; inside a demo company it is the **real** shop's name, matching the office.
   - **One place, not two.** The picker card deliberately does not repeat it. An interim version
     showed it in both and rendered the same words twice within ~100px on that screen. The header
     wins the single slot because the card is absent on the other screens reachable without a

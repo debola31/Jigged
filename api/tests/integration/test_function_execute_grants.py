@@ -50,7 +50,7 @@ def shop(supabase_admin):
     # This used to set `is_demo = TRUE`, which company_can_write() also short-circuits on and
     # which needs no extra row. That was a convenience with no connection to what these tests
     # are about, and it stopped being free: log_operator_event now writes nothing for a demo
-    # company, deliberately, so that practice-mode activity cannot enter the capture funnel
+    # company, deliberately, so that demo-mode activity cannot enter the capture funnel
     # every adoption ratio is measured against. The reachability test below then failed for a
     # reason that had nothing to do with EXECUTE grants — exactly the kind of false signal a
     # guard test must not produce.

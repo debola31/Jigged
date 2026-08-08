@@ -35,7 +35,7 @@ import { useLoad } from '@/hooks/useLoad';
  * row — `getCompany` selects both columns already. That is what lets the
  * operator shell know whether it is standing in a demo company, and whether the
  * shop has one to offer, without spending a request on the question. A
- * non-demo operator therefore pays nothing at all for practice mode; see
+ * non-demo operator therefore pays nothing at all for demo mode; see
  * `components/operator/OperatorCompanyContext.tsx`, which is the only place
  * that turns these three fields into a decision.
  *
@@ -97,7 +97,7 @@ const EMPTY_RESULT: CompanyFeaturesResult = {
   features: EMPTY_FEATURES,
   name: null,
   // "We could not read the row" must not read as "this is a demo" — a false
-  // positive here would put the practice bar over a real shop's job list.
+  // positive here would put the demo bar over a real shop's job list.
   isDemo: false,
   demoCompanyId: null,
 };

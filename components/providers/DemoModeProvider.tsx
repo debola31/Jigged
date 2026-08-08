@@ -118,7 +118,7 @@ export default function DemoModeProvider({ children }: { children: ReactNode }) 
     }
 
     // `surface` rather than two event names: the operator surface has its own way in
-    // (components/operator/OperatorPracticeModeButton.tsx) and the two have to be
+    // (components/operator/OperatorDemoModeButton.tsx) and the two have to be
     // totalable. Encoding the surface in the name is what the tracking plan's convention
     // forbids — see docs/telemetry.md.
     posthog.capture('demo entered', { surface: 'office' });

@@ -6,7 +6,7 @@
  * One export, above the operator's own work:
  *
  *   <OperatorIdentityRow />      who you are, the way out, the way to reach us, the way into the
- *                                practice shop, and — only for the rare operator who works for
+ *                                demo company, and — only for the rare operator who works for
  *                                two shops — the way between them
  *   … the operator's notes …     the reason the tab exists
  *
@@ -89,7 +89,7 @@ import { getSupabase } from '@/lib/supabase';
 import { initials } from '@/lib/initials';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
 import OperatorCompanySwitcher from '@/components/operator/OperatorCompanySwitcher';
-import OperatorPracticeModeButton from '@/components/operator/OperatorPracticeModeButton';
+import OperatorDemoModeButton from '@/components/operator/OperatorDemoModeButton';
 
 export interface OperatorIdentity {
   name: string;
@@ -212,9 +212,9 @@ export function OperatorIdentityRow({
       <OperatorCompanySwitcher companyId={companyId} userId={identity?.userId} />
 
       {/*
-        The way into the shop's practice company, and the operator surface's only one — the
+        The way into the shop's demo company, and the operator surface's only one — the
         office toggle lives behind AdminGuard on a route AuthGuard bounces operators off, so
-        until this existed an operator could not reach practice mode at all.
+        until this existed an operator could not reach demo mode at all.
 
         Renders nothing unless an admin has already created the demo (operators cannot create
         one; the RPC raises), and nothing while already inside it, where the bar at the top of
@@ -222,7 +222,7 @@ export function OperatorIdentityRow({
         secondary actions, safe beside each other, and out of the identity row where Log out has
         to remain the only tap target.
       */}
-      <OperatorPracticeModeButton />
+      <OperatorDemoModeButton />
     </Box>
 
     <FeedbackDialog

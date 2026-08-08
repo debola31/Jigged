@@ -51,7 +51,7 @@ vi.mock('@/hooks/useCompanies', () => ({
   useCompanies: () => ({ companies: companiesStub, loading: false, error: null }),
 }));
 
-// The identity row reaches the practice-mode entry, which reads the operator company context.
+// The identity row reaches the demo-mode entry, which reads the operator company context.
 // That context is mounted by the operator LAYOUT, not by this page, and `useOperatorCompany`
 // throws without a provider on purpose (the same contract `useDemoMode` has) — so it is stubbed
 // here rather than the hook made forgiving, which would hide a real mounting bug.
@@ -192,7 +192,7 @@ function stage({
 beforeEach(() => {
   // Single-company by default — which is what nearly every real operator is.
   stageCompanies([{ id: CURRENT_COMPANY_ID, name: 'Vanguard Precision Works', role: 'operator' }]);
-  // No demo set up by default, so the practice entry is absent unless a test asks for it.
+  // No demo set up by default, so the demo entry is absent unless a test asks for it.
   stageDemo();
   routerMocks.push.mockClear();
   mockGetTotals.mockReset();
@@ -810,7 +810,7 @@ describe('My Work — company switching', () => {
 });
 
 /**
- * Practice mode, from the shop floor.
+ * Demo mode, from the shop floor.
  *
  * Demo mode is a second hidden `company_id` you navigate into, and its only control lived on the
  * office Settings page — behind `AdminGuard`, on a route `AuthGuard` bounces operator-role users
@@ -818,7 +818,7 @@ describe('My Work — company switching', () => {
  * the opposite for months. This is the way in, and the constraint on it is that an operator can
  * ENTER a demo but never CREATE one: `create_demo_company` raises for non-admins in the database.
  */
-describe('My Work — practice mode', () => {
+describe('My Work — demo mode', () => {
   it('offers nothing to a shop whose admin has not set up a demo', async () => {
     // An operator cannot create one, so a button here would only ever produce a permission
     // error. No control beats a control that cannot work.
@@ -826,18 +826,18 @@ describe('My Work — practice mode', () => {
     render(<MyWorkPage />);
 
     await screen.findByRole('button', { name: /log out/i });
-    expect(screen.queryByRole('button', { name: /practice mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /demo mode/i })).not.toBeInTheDocument();
   });
 
-  it('lets an operator into the practice shop once one exists', async () => {
+  it('lets an operator into the demo company once one exists', async () => {
     const user = userEvent.setup();
     stageDemo({ hasDemo: true, demoCompanyId: 'demo-1' });
     stage();
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByRole('button', { name: /practice mode/i }));
+    await user.click(await screen.findByRole('button', { name: /demo mode/i }));
 
-    // The jobs list, not this page. Entry lands where the practice experience begins — the
+    // The jobs list, not this page. Entry lands where the demo experience begins — the
     // station picker and the dispatch list — rather than preserving page context the way the
     // office provider does.
     await waitFor(() =>
@@ -853,7 +853,7 @@ describe('My Work — practice mode', () => {
     stage();
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByRole('button', { name: /practice mode/i }));
+    await user.click(await screen.findByRole('button', { name: /demo mode/i }));
 
     await waitFor(() =>
       expect(vi.mocked(syncDemoAccess)).toHaveBeenCalledWith(CURRENT_COMPANY_ID, 'demo-1'),
@@ -863,30 +863,30 @@ describe('My Work — practice mode', () => {
   it('still enters when the membership sync fails', async () => {
     // The sync only ADDS members and converges flags; everyone present when the demo was made
     // is already mirrored, which is the common case. Blocking on it would turn a shop-wifi blip
-    // into "practice mode is broken", and the layout's own membership check is the real gate.
+    // into "demo mode is broken", and the layout's own membership check is the real gate.
     const user = userEvent.setup();
     vi.mocked(syncDemoAccess).mockRejectedValueOnce(new Error('network'));
     stageDemo({ hasDemo: true, demoCompanyId: 'demo-1' });
     stage();
     render(<MyWorkPage />);
 
-    await user.click(await screen.findByRole('button', { name: /practice mode/i }));
+    await user.click(await screen.findByRole('button', { name: /demo mode/i }));
 
     await waitFor(() =>
       expect(routerMocks.push).toHaveBeenCalledWith('/operator/demo-1/jobs'),
     );
   });
 
-  it('offers no way IN while already practising — the bar owns the way out', async () => {
+  it('offers no way IN while already exploring the demo — the bar owns the way out', async () => {
     stageDemo({ isDemo: true, hasDemo: true, demoCompanyId: null, realCompanyId: 'co-real' });
     stage();
     render(<MyWorkPage />);
 
     await screen.findByRole('button', { name: /log out/i });
-    expect(screen.queryByRole('button', { name: /practice mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /demo mode/i })).not.toBeInTheDocument();
   });
 
-  it('keeps Log out isolated with the practice entry on screen', async () => {
+  it('keeps Log out isolated with the demo entry on screen', async () => {
     // Same invariant as the switcher: this button is a SIBLING of the identity row, never a
     // child of it. Log out must have nothing beside it for a habituated thumb to slip from.
     stageDemo({ hasDemo: true, demoCompanyId: 'demo-1' });
@@ -898,6 +898,6 @@ describe('My Work — practice mode', () => {
 
     expect(within(row).getAllByRole('button')).toHaveLength(1);
     expect(within(row).queryAllByRole('link')).toHaveLength(0);
-    expect(screen.getByRole('button', { name: /practice mode/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /demo mode/i })).toBeInTheDocument();
   });
 });

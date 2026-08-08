@@ -15,7 +15,7 @@
  * ## Why a context rather than a hook each caller runs
  *
  * `useCompanyFeatures()` is a `useLoad` wrapper with no shared cache, so every caller is another
- * `getCompany` round trip. The shell already ran one for feature flags; the picker, the practice
+ * `getCompany` round trip. The shell already ran one for feature flags; the header label, the demo
  * bar and the Me tab would each have added their own. This runs it ONCE per mounted company and
  * hands the answer down — `OperatorShell` reads `features` from here instead of calling the hook
  * itself, so the shell gains nothing and the three new consumers cost nothing.
@@ -37,7 +37,7 @@
  * ## `companyName` is the REAL name, always
  *
  * A demo company's own row is named "X - Demo", which is internal bookkeeping. Inside a demo the
- * user sees their own company's name with the practice bar saying it is not real — the same
+ * user sees their own company's name with the demo bar saying it is not real — the same
  * convention the office `CompanySwitcher` follows. Showing "X - Demo" would leak the
  * implementation and, worse, make the picker's company line disagree with the office's.
  */
@@ -100,7 +100,7 @@ export function OperatorCompanyProvider({ children }: { children: ReactNode }) {
   // not evidence of anything. It costs the company NAME on the picker and the Leave
   // button's destination, both of which recover on the next resolve, and it must never be
   // mistaken for "this is not a demo" — `isDemo` comes off the company's own row and is
-  // untouched, so the practice bar stays up and keeps telling the truth.
+  // untouched, so the demo bar stays up and keeps telling the truth.
   const { data: source } = useLoad(
     async () => (isDemo && companyId ? getDemoSourceCompany(companyId) : null),
     [isDemo, companyId],

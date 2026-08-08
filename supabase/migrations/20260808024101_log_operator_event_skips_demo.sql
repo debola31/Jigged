@@ -11,8 +11,8 @@
 --     composer_focused high, note_saved low      -> capture friction
 --
 -- Until now a demo company could not generate these, because the operator surface had no
--- way into demo mode. It does now: an operator can enter the practice shop from the "Me"
--- tab. Practising is exactly the behaviour that fires app_opened, station_selected,
+-- way into demo mode. It does now: an operator can enter the demo company from the "Me"
+-- tab. Exploring the demo is exactly the behaviour that fires app_opened, station_selected,
 -- op_card_opened and completion_recorded in bursts — a new hire being shown the app
 -- produces a textbook funnel that measures nobody's real work. Left alone it would
 -- inflate the denominator of every ratio above and make a good week and a training
@@ -30,8 +30,8 @@
 -- fire-and-forget and has no success signal to branch on either way.
 --
 -- NOT the same question as PostHog. `demo entered` is captured deliberately (see
--- docs/telemetry.md) — we want to know whether anyone practises. What must not happen is
--- practice work being counted as shop-floor work, which is what this prevents.
+-- docs/telemetry.md) — we want to know whether anyone explore the demos. What must not happen is
+-- demo work being counted as shop-floor work, which is what this prevents.
 
 CREATE OR REPLACE FUNCTION public.log_operator_event(
   p_company_id uuid,
@@ -46,7 +46,7 @@ AS $$
 DECLARE
   v_actor_id uuid;
 BEGIN
-  -- Practice data is not shop-floor data. Checked before the membership lookup because
+  -- Demo data is not shop-floor data. Checked before the membership lookup because
   -- it is the cheaper of the two and neither can rescue the other.
   IF EXISTS (SELECT 1 FROM public.companies WHERE id = p_company_id AND is_demo) THEN
     RETURN;
@@ -65,4 +65,4 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.log_operator_event(uuid, text, jsonb) IS
-'Records one operator capture-funnel event. Returns void and never raises: a non-member logs nothing, and so does a demo company — practice work must not enter the funnel that every adoption ratio is measured against. Fire-and-forget by contract; callers must not await it.';
+'Records one operator capture-funnel event. Returns void and never raises: a non-member logs nothing, and so does a demo company — demo work must not enter the funnel that every adoption ratio is measured against. Fire-and-forget by contract; callers must not await it.';

@@ -647,7 +647,7 @@ def test_sync_still_works_for_a_member_of_the_source(supabase_admin, demo):
 #
 # operator_events is the capture funnel and, for the first weeks of the pilot, the
 # only readable signal — every reading in utils/operatorEventsAccess.ts is a ratio
-# against app_opened. Practising is exactly the behaviour that fires app_opened,
+# against app_opened. Exploring the demo is exactly the behaviour that fires app_opened,
 # station_selected and completion_recorded in bursts, so a training session would
 # otherwise be indistinguishable from a good week.
 #
@@ -676,7 +676,7 @@ def test_operator_events_are_not_recorded_for_a_demo_company(supabase_admin, dem
     ).execute()
 
     assert _operator_event_count(supabase_admin, demo["demo_id"]) == before, (
-        "practice-mode activity entered the funnel every adoption ratio is measured against"
+        "demo-mode activity entered the funnel every adoption ratio is measured against"
     )
 
 

@@ -164,6 +164,16 @@ function formatCurrency(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 }
 
+/**
+ * Height of one `size="small"` MUI input — the quantity-row baseline.
+ *
+ * The row is top-aligned so the Qty and Unit price boxes stay on one line no
+ * matter how much the price column grows beneath them (caption, custom-price
+ * notice, drift chip). Cells that carry no input use this to re-centre against
+ * that first line instead of riding the top of a tall row.
+ */
+const ROW_CONTROL_HEIGHT = 40;
+
 const newRowKey = () => `temp-qty-${crypto.randomUUID()}`;
 
 function emptyRow(): QtyRowState {
@@ -1463,7 +1473,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                             key={row.rowKey}
                             sx={{
                               display: 'flex',
-                              alignItems: 'center',
+                              // Top-aligned, NOT centred. The price column grows
+                              // downward — a tier caption, a custom-price notice,
+                              // a drift chip — and centring re-centres every other
+                              // cell against that growth, so the Qty box visibly
+                              // drifts down the moment a price is edited. Anchoring
+                              // to the top keeps the two inputs on one line
+                              // whatever appears beneath them; the trailing cells
+                              // re-centre themselves against ROW_CONTROL_HEIGHT.
+                              alignItems: 'flex-start',
                               gap: 2,
                               px: 0.5,
                               py: 0.75,
@@ -1670,22 +1688,41 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                               )}
                             </Box>
 
-                            <Typography
-                              variant="body2"
-                              sx={{ width: 110, textAlign: 'right', fontWeight: 600 }}
+                            {/* Trailing cells centre themselves inside one
+                                input's worth of height, so they read as level
+                                with the Qty and Unit price boxes rather than
+                                floating at the top of a tall row. */}
+                            <Box
+                              sx={{
+                                width: 110,
+                                minHeight: ROW_CONTROL_HEIGHT,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'flex-end',
+                              }}
                             >
-                              {hasOrderQty ? formatCurrency(preview?.total ?? null) : '—'}
-                            </Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {hasOrderQty ? formatCurrency(preview?.total ?? null) : '—'}
+                              </Typography>
+                            </Box>
 
-                            <IconButton
-                              color="error"
-                              size="small"
-                              onClick={() => removeRow(idx, rowIdx)}
-                              aria-label="Remove quantity"
-                              disabled={block.rows.length === 1}
+                            <Box
+                              sx={{
+                                minHeight: ROW_CONTROL_HEIGHT,
+                                display: 'flex',
+                                alignItems: 'center',
+                              }}
                             >
-                              <DeleteOutlineIcon fontSize="small" />
-                            </IconButton>
+                              <IconButton
+                                color="error"
+                                size="small"
+                                onClick={() => removeRow(idx, rowIdx)}
+                                aria-label="Remove quantity"
+                                disabled={block.rows.length === 1}
+                              >
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
                           </Box>
                         );
                       })}

@@ -5,8 +5,9 @@
  *
  * One export, above the operator's own work:
  *
- *   <OperatorIdentityRow />      who you are, the way out, the way to reach us, and — only for the
- *                                rare operator who works for two shops — the way between them
+ *   <OperatorIdentityRow />      who you are, the way out, the way to reach us, the way into the
+ *                                practice shop, and — only for the rare operator who works for
+ *                                two shops — the way between them
  *   … the operator's notes …     the reason the tab exists
  *
  * It used to be two, sandwiching the work, with Give feedback and then Log out below the
@@ -88,6 +89,7 @@ import { getSupabase } from '@/lib/supabase';
 import { initials } from '@/lib/initials';
 import { clearStoredStation } from '@/components/operator/OperatorStationContext';
 import OperatorCompanySwitcher from '@/components/operator/OperatorCompanySwitcher';
+import OperatorPracticeModeButton from '@/components/operator/OperatorPracticeModeButton';
 
 export interface OperatorIdentity {
   name: string;
@@ -208,6 +210,19 @@ export function OperatorIdentityRow({
         must stay out of the identity row where Log out has to remain the only tap target.
       */}
       <OperatorCompanySwitcher companyId={companyId} userId={identity?.userId} />
+
+      {/*
+        The way into the shop's practice company, and the operator surface's only one — the
+        office toggle lives behind AdminGuard on a route AuthGuard bounces operators off, so
+        until this existed an operator could not reach practice mode at all.
+
+        Renders nothing unless an admin has already created the demo (operators cannot create
+        one; the RPC raises), and nothing while already inside it, where the bar at the top of
+        every screen owns the way out. Same row and same reasoning as its two neighbours: benign
+        secondary actions, safe beside each other, and out of the identity row where Log out has
+        to remain the only tap target.
+      */}
+      <OperatorPracticeModeButton />
     </Box>
 
     <FeedbackDialog

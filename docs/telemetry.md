@@ -147,6 +147,7 @@ fails, and so does a listed property nothing passes.
 | `part created` | A part is created in the parts workspace | `source`, `is_stocked`, `has_reorder_point`, `has_preferred_vendor` | [PartIdentitySection.tsx](../components/parts/workspace/PartIdentitySection.tsx) |
 | `stock updated` | Stock is adjusted. `surface` says which UI; `location_id` is operator-only | `surface`, `action`, `part_id`, `quantity`, `unit`, `location_id` | [PartLocationActionModal.tsx](../components/parts/PartLocationActionModal.tsx) · [OperatorLocationActionModal.tsx](../components/operator/OperatorLocationActionModal.tsx) |
 | `operation completed` | An operator completes an operation. Operator-only, so no `surface` | `job_operation_id`, `quantity_good`, `is_partial` | [operations/page.tsx](../app/operator/[companyId]/jobs/[jobId]/parts/[jobPartId]/operations/[jobOperationId]/page.tsx) |
+| `demo entered` | Someone steps into the demo/practice company. `surface` says from where — the office calls it demo mode, the shop floor calls it practice mode, and they are one company | `surface` | [DemoModeProvider.tsx](../components/providers/DemoModeProvider.tsx) · [OperatorPracticeModeButton.tsx](../components/operator/OperatorPracticeModeButton.tsx) |
 
 <!-- registry:end -->
 

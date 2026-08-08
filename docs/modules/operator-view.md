@@ -86,6 +86,7 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 | Multi-part job navigation | **Built** as the parts hub, with a back-link from the traveler on multi-part jobs only. |
 | Printed traveler as the primary path | **Demoted, deliberately.** It remains a fallback for shops mid-transition or spotty connectivity. |
 | Scrap / defect flagging | **Not built, and not designed.** [Discovery first](#scrap-and-defect-capture-discovery). |
+| Practising on real-looking data before doing real work | **Built** as **practice mode** — the shop's demo company, entered from the "Me" tab and left from a bar carried on every screen. Operators enter but never create: the RPC is admin-only, so the entry renders nothing until an admin sets one up. Practice activity is excluded from `operator_events` at the write, so it cannot inflate the funnel. [demo-mode.md](demo-mode.md) |
 
 ---
 
@@ -113,6 +114,17 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
   roam. The picker shows internal work centres only, and **excludes archived ones**: without that
   filter it offers a machine nobody can be standing at, and selecting one is unrecoverable from
   the floor.
+- **The picker names the company it is picking a station for**, and so does the AppBar's centre
+  slot while no station is chosen (it yields to the station name once one is). Added 2026-08-08:
+  the jobs page hides its toolbar while the picker is up and the layout hides the bottom nav, so
+  this card was the entire screen and it identified **nothing** — while the operator login page
+  one step earlier does show the company name, which then vanished at exactly the moment you
+  commit to a working context. A person who works two shops, or who has just stepped into the
+  practice company, had nothing on screen to check against. Both read
+  `components/operator/OperatorCompanyContext.tsx`, which resolves the name once for the whole
+  operator tree off the company row the shell already fetches — so this costs no request. Set in
+  **sentence case, not `overline`**, for the same reason the "Me" tab's headings are: uppercase is
+  measurably worse for readers over 55, which is this audience.
 - Selection persists in **`localStorage`** (`jigged_operator_station`, via
   `components/operator/OperatorStationContext.tsx`) — *not* `sessionStorage`, so it survives a
   browser restart or a backgrounded-tab eviction. The header dropdown changes it any time; logout

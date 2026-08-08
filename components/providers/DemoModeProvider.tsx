@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useParams, usePathname, useRouter } from 'next/navigation';
+import posthog from 'posthog-js';
 import { useAuth } from '@/components/providers/AuthProvider';
 import {
   getDemoStatus,
@@ -115,6 +116,12 @@ export default function DemoModeProvider({ children }: { children: ReactNode }) 
         console.error('Error syncing demo access:', err);
       }
     }
+
+    // `surface` rather than two event names: the operator surface has its own way in
+    // (components/operator/OperatorPracticeModeButton.tsx) and the two have to be
+    // totalable. Encoding the surface in the name is what the tracking plan's convention
+    // forbids — see docs/telemetry.md.
+    posthog.capture('demo entered', { surface: 'office' });
 
     // Navigate to demo company, preserving current page
     const newPath = pathname.replace(realCompanyId, targetDemoId!);

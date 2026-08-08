@@ -14,7 +14,7 @@ the detail, including the doc-writing standard in [writing-docs.md](writing-docs
 | [architecture.md](architecture.md) | System architecture — the most-linked doc here; §8 (API standard) and §16 (soft-delete) are cited by number |
 | [design-system.md](design-system.md) | The visual spec: canvas, glass cards, buttons, scales, detail-page patterns |
 | [interaction-standards.md](interaction-standards.md) | Normative interaction rules, **machine-enforced** by `scripts/interactionStandardsCheck.ts` |
-| [observability.md](observability.md) | Sentry / PostHog / Vercel — the runbook and the traps |
+| [observability.md](observability.md) | Sentry / PostHog / Vercel — the runbook, the traps, and the **machine-enforced** analytics event registry |
 | [brand-guide.md](brand-guide.md) | Palette, logo, and the only writing-voice guidance in the repo |
 
 ## Modules

@@ -239,7 +239,7 @@ export default function OperatorOperationActionPage() {
       // Analytics fires here, beside the existing operator event and BEFORE the note capture
       // below: the completion is durable at this point, and a slow photo upload must not delay or
       // skip the measurement of the thing that already happened.
-      posthog.capture('operator_operation_completed', {
+      posthog.capture('operation completed', {
         job_operation_id: jobOperationId,
         quantity_good: qty,
         is_partial: qty < remaining,

@@ -624,7 +624,7 @@ export default function ShipmentForm({
 
     try {
       const result = await createShipment(companyId, payload);
-      posthog.capture('shipment_created', {
+      posthog.capture('shipment created', {
         line_item_count: payload.line_items.length,
         shipping_method: payload.shipping_method,
       });

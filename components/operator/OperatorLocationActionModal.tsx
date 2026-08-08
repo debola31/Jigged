@@ -199,7 +199,8 @@ export default function OperatorLocationActionModal({
           photoPath,
         });
       }
-      posthog.capture('operator_inventory_stock_updated', {
+      posthog.capture('stock updated', {
+        surface: 'operator',
         action,
         part_id: partId,
         quantity: qty,

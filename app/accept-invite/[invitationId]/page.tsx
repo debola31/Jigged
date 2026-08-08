@@ -357,7 +357,7 @@ export default function AcceptInvitePage() {
       await setLastCompany(userId, companyId);
 
       posthog.identify(userId, { email: invitation.email });
-      posthog.capture('invitation_accepted', {
+      posthog.capture('invitation accepted', {
         role: invitation.role,
         existing_user: isExistingUser,
       });

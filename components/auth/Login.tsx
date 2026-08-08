@@ -75,7 +75,7 @@ export default function Login({ expired, returnTo }: LoginProps) {
 
       if (data.user) {
         posthog.identify(data.user.id, { email: data.user.email });
-        posthog.capture('user_signed_in');
+        posthog.capture('user signed in');
         // If we have a valid returnTo path (e.g., from session expiry), go there
         if (returnTo && isValidReturnTo(returnTo)) {
           router.push(returnTo);

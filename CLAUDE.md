@@ -75,14 +75,26 @@ the migration finishes, and the read path should have one shape with no "what if
 branch. If a backfill is genuinely impossible, prefer an explicit "no data available" state — it
 surfaces the gap instead of hiding it.
 
-### Observability: Sentry owns errors, and never lies about them
+### Telemetry: Sentry owns errors, PostHog owns behaviour, and neither lies
 
-Full runbook, CLI recipes and traps: **[docs/observability.md](docs/observability.md)** — read it
-before touching Sentry config or triaging. The rules that bind while writing code:
+Full runbook, event registry, CLI recipes and traps: **[docs/telemetry.md](docs/telemetry.md)** —
+read it before touching Sentry config, adding a PostHog event, or triaging. **Telemetry** is the
+umbrella; **observability** (Sentry, Vercel) and **product analytics** (PostHog) stay named apart
+because rules like the first one below need two things to keep separate. The rules that bind while
+writing code:
 
 - **Sentry is the error tracker; PostHog is product analytics.** Never add a second error tracker.
   **Vercel Web Analytics (`<Analytics />`) is kept deliberately** despite overlapping PostHog — do
   not remove either as "redundant".
+- **Every `posthog.capture()` needs a row in the event registry, and CI enforces it both ways.**
+  A capture with no row fails; a row nothing sends fails too. Names are `[object] [verb]`
+  (`quote created`); properties are `snake_case` and describe the *shape* of the interaction —
+  counts, booleans, enums — **never the customer's business data**. A surface belongs in a property,
+  not the event name. Registry and convention:
+  [telemetry.md](docs/telemetry.md), guard: [`scripts/analyticsEventsCheck.ts`](scripts/analyticsEventsCheck.ts).
+- **The check cannot tell you that you forgot to instrument.** It compares code to the registry, so
+  a feature in neither passes green — that is exactly how the operator notes feature shipped
+  unmeasured for months. When a PR adds a user-facing write, it adds a row or says why not.
 - **A failed `.from()` read or write reports itself — don't report it again.** `lib/supabase.ts`
   installs Sentry's Supabase integration, so every `{ error }` is captured with its query
   attached. Adding a `captureException` for one files the same failure as two issues. You still

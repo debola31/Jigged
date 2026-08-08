@@ -1,4 +1,19 @@
-# Observability
+# Telemetry
+
+Everything we collect about the running system, and everything we collect about the people using
+it. **Telemetry is the umbrella; the two halves under it are different disciplines and stay named
+apart.**
+
+- **Observability** — inferring system state from its outputs. Sentry and the Vercel surfaces.
+  Permanent: an error signal matters for as long as the code runs.
+- **Product analytics** — what people did and where they dropped off. PostHog. Question-shaped:
+  an event can be retired once its question is answered ([two lifecycles](#two-lifecycles-one-doc)).
+
+They live in one document because they share tools, config surfaces and failure modes — the
+session-replay setting below reaches into the Web Vitals argument above, and splitting them is how
+you get a PR that changes one without noticing the other. They keep separate names because
+"observability" has a specific meaning (metrics, logs, traces) that product analytics is not, and
+because rules like *"Sentry owns errors, PostHog must not"* need two things to keep apart.
 
 Four surfaces across three vendors. They answer different questions, and the two places
 they *do* overlap are handled deliberately — one avoided, one knowingly accepted.

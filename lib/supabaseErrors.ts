@@ -149,7 +149,7 @@ export function isIndeterminateSingleError(error: unknown): boolean {
  *
  * Excluding these is not about quota, which has ample headroom. It is that an issue queue with
  * predictable non-failures in it is one people stop reading, which is the documented history of
- * this project's queue (docs/observability.md "Why any of this matters").
+ * this project's queue (docs/telemetry.md "Why any of this matters").
  */
 export function shouldReportSupabaseError(error: unknown): boolean {
   if (!error) return false;

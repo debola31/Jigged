@@ -34,7 +34,7 @@ describe('analyticsEventsCheck — doc parsing', () => {
   });
 
   /**
-   * GUARD 1. The registry now lives inside observability.md, which documents
+   * GUARD 1. The registry now lives inside telemetry.md, which documents
    * session-replay settings in a table of its own. Without the marker slice
    * those rows parse as events named `session_recording_opt_in`.
    */
@@ -57,7 +57,7 @@ describe('analyticsEventsCheck — doc parsing', () => {
       registry(
         'A surface is a property — see `stock updated` and `surface` above.\n' +
           '| Doc | What it is |\n' +
-          '| [observability.md](observability.md) | The runbook |\n' +
+          '| [telemetry.md](telemetry.md) | The runbook |\n' +
           '| `session_recording_opt_in` | `true` | a setting, not an event |\n' +
           '| `part created` | A part is created | `source` | [x](../x.ts) |',
       ),
@@ -179,7 +179,7 @@ describe('analyticsEventsCheck — comparison', () => {
 describe('analyticsEventsCheck — the live tree', () => {
   /**
    * The check that actually binds. If this fails, either a capture call was
-   * added without a registry row in docs/observability.md, or a row is
+   * added without a registry row in docs/telemetry.md, or a row is
    * describing an event that no longer exists.
    */
   it('every captured event matches the tracking plan', () => {

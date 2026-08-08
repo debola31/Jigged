@@ -1,7 +1,7 @@
 /**
  * Tracking-plan drift checker.
  *
- * Parses the registry table in `docs/observability.md` to learn the
+ * Parses the registry table in `docs/telemetry.md` to learn the
  * canonical {event → properties} shape, then walks the source tree for
  * `posthog.capture('name', { … })` calls and asserts the two agree in both
  * directions:
@@ -83,7 +83,7 @@ export const REGISTRY_END = '<!-- registry:end -->';
  * Reads the registry table out of the tracking plan.
  *
  * TWO GUARDS, AND BOTH ARE LOAD-BEARING NOW THAT THE REGISTRY LIVES INSIDE THE
- * OBSERVABILITY DOC. That doc contains other tables — notably the session
+ * TELEMETRY DOC. That doc contains other tables — notably the session
  * replay settings, whose first cells are backticked identifiers like
  * `session_recording_opt_in`. Parsing the whole file would silently invent
  * those as events:
@@ -234,7 +234,7 @@ const SCAN_DIRS = ['app', 'components', 'lib', 'utils', 'hooks'];
 const SCAN_EXT = ['.ts', '.tsx'];
 const SKIP_DIRS = new Set(['node_modules', '.next', '__tests__', 'coverage']);
 
-export const DOC_PATH = 'docs/observability.md';
+export const DOC_PATH = 'docs/telemetry.md';
 
 function walk(dir: string, out: string[]): void {
   let entries: string[];

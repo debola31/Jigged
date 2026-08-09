@@ -150,6 +150,29 @@ export function readCompanyDefaultPaymentTerms(
   return raw.trim() || null;
 }
 
+/**
+ * Does the shop's uploaded logo already contain its company name?
+ *
+ * **This is the one thing about a logo that Jigged cannot work out for itself, and it changes what
+ * gets printed.** Most small-shop logos are wordmarks — the mark *is* the name, set in type. Printing
+ * `company.name` beside one states the same fact twice, in two typefaces, at the same weight, which
+ * is what a pilot shop described as the logo and the name "competing". But a logo that is a bare
+ * symbol *must* have the name printed, or the document goes out unnamed.
+ *
+ * No image analysis can answer this reliably and guessing wrong is bad in both directions, so it is
+ * a checkbox on the company profile and this reads it.
+ *
+ * **Defaults to false**, which is the safe direction: an unanswered question prints the name, and a
+ * duplicated name is a cosmetic problem where a missing one is a broken document.
+ *
+ * Lives in `settings` jsonb beside `default_payment_terms` rather than as a column on `companies`,
+ * which is why this feature ships with no migration and no `types/database.ts` change.
+ */
+export function readLogoIncludesName(company: SettingsLike | null | undefined): boolean {
+  const settings = company?.settings as Record<string, unknown> | undefined | null;
+  return settings?.logo_includes_name === true;
+}
+
 /** Upper bound on how many saved custom payment terms a company keeps. */
 export const MAX_CUSTOM_PAYMENT_TERMS = 15;
 

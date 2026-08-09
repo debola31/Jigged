@@ -211,7 +211,8 @@ As-built, verified 2026-08-03. Each row names the file + `describe`/class that e
 | Deleting a job **archives** it and never blocks, even with shipments and an invoice — the records-of-value guards were removed | `__tests__/utils/jobsAccess.test.ts` — `deleteJob` |
 | Slip quantities net out prior shipments, clamp over-shipment, survive `numeric(12,2)` fractions, and hand a voided slip's own quantity back to the backlog; the two conditional columns keep head / body / `columnStyles` aligned in all four permutations | `__tests__/utils/packingSlipPdf.test.ts` — `computePackingSlipQuantities`, `generatePackingSlipPdf — the quantity table` |
 | Prior-shipment lookup skips itself, later slips and same-timestamp-greater-id siblings, and throws rather than reporting zero prior | `__tests__/utils/shipmentsAccess.test.ts` — `compareShipmentOrder`, `getShippedBeforeShipment` |
-| The footer carries `Generated {date} with jigged.app` and no longer restates the company name, and the logo is fitted to its own aspect rather than forced square | `__tests__/utils/packingSlipPdf.test.ts` — `generatePackingSlipPdf — document branding`, `drawCompanyLogo` |
+| The footer carries `Generated {date} with jigged.app` and no longer restates the company name | `__tests__/utils/packingSlipPdf.test.ts` — `generatePackingSlipPdf — document branding` |
+| The shop header stacks logo → name → address, sized to the space the header already occupies so it never pushes content down, and drops the name when the logo already carries it | `__tests__/utils/shopHeaderBlock.test.ts` — `drawShopHeaderBlock` |
 
 **Gaps, automation-pending ([#367](https://github.com/debola31/Jigged/issues/367)):** reload-persistence E2E
 for create and void; `ShipmentsMenu` rendering; the packing-slip PDF rendering Bill To / Ship To / ATTN from

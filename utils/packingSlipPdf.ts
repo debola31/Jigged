@@ -38,6 +38,7 @@ import {
   type ShipmentWithRelations,
 } from '@/types/shipment';
 import { resolveAttentionLine } from '@/utils/shipmentsAccess';
+import { readLogoIncludesName } from '@/lib/companyDefaults';
 
 const MARGIN = 40;
 const ADDRESS_COMBINE_MAX_CHARS = 50;
@@ -257,8 +258,7 @@ export interface LogoDrawTarget {
 }
 
 /**
- * Draw a company logo fitted inside `LOGO_BOX`, and return the width it actually occupied so the
- * caller can place the company name beside it.
+ * Draw a company logo fitted inside `LOGO_BOX`, and return the width it actually occupied.
  *
  * **Aspect is preserved.** Both generators used to pass a 56×56 square regardless of the source,
  * which squashed every wordmark — the common case, since a shop's logo is usually wider than it is
@@ -267,6 +267,9 @@ export interface LogoDrawTarget {
  *
  * Returns 0 and draws nothing on any failure; the caller falls back to the company name in bold,
  * which is the layout that has been shipping all along.
+ *
+ * Kept for callers that want a logo in a fixed box. The document headers use
+ * `drawShopHeaderBlock` instead, which sizes the logo against the space the header already has.
  */
 export function drawCompanyLogo(
   doc: LogoDrawTarget,
@@ -288,6 +291,131 @@ export function drawCompanyLogo(
   } catch {
     return 0;
   }
+}
+
+// ─────────────────────────── The shop header block ───────────────────────────
+
+/** Gap between the logo and the text stacked beneath it. */
+const SHOP_LOGO_GAP = 12;
+
+/**
+ * Ceilings on the drawn logo.
+ *
+ * The height cap matters more than it looks: the budget is whatever the *right* column reaches, and
+ * the traveler's right column can be short. Without a cap, a document with a sparse right column
+ * would print a bigger logo than one with a full one — the same shop's paperwork disagreeing with
+ * itself about how big its own mark is. The width cap keeps a very wide logo out of the right
+ * column on a narrow header.
+ */
+const SHOP_LOGO_MAX_H = 62;
+const SHOP_LOGO_MAX_W = 190;
+
+/** Leading for the address lines under the logo, and for the optional name above them. */
+const SHOP_LINE_H = 12;
+const SHOP_NAME_H = 16;
+
+export interface ShopHeaderOptions {
+  company: Company;
+  /** Already-resolved logo image, or null. */
+  logoDataUrl: string | null;
+  /** From `readLogoIncludesName` — when true the company name is NOT set as text. */
+  logoIncludesName: boolean;
+  x: number;
+  y: number;
+  /**
+   * The y the *right-hand* column of this header reaches.
+   *
+   * This is the whole trick. A document header is as tall as its tallest column, and on all three
+   * documents that is the right one — the meta block, or the traveler's QR. Every point between the
+   * top of the page and that line is vertical space the document is **already paying for**, so a
+   * logo drawn into it is free. Callers must therefore measure their right column *before* calling
+   * this, which is why each generator computes its meta bottom up front.
+   */
+  availableBottom: number;
+  /** Font size for the company name when it is printed. */
+  nameSize?: number;
+}
+
+/**
+ * Draw the shop's identity block — logo, then the company name (unless the logo already says it),
+ * then the address — and return the y it reached.
+ *
+ * ## Why stacked rather than side by side
+ *
+ * A shop owner reviewing this preferred the address beneath the mark to the address beside it. That
+ * is a taste call and it is theirs; both fit the budget. It does cost logo size — the text under the
+ * logo eats budget the logo would otherwise have — which is exactly why the `logoIncludesName`
+ * question earns its keep: answering it "yes" removes a line of text and hands the logo the space
+ * back. On a 1.44:1 wordmark that is 78pt wide against 89pt.
+ *
+ * ## What it will not do
+ *
+ * It will not grow past `SHOP_LOGO_MAX_H`, and it will not return a bottom above `y` — a document
+ * with no logo and no address still reports where the name ended. If the logo fails to draw, the
+ * text renders exactly as it would have without one, which is the layout that shipped for months.
+ */
+export function drawShopHeaderBlock(
+  doc: LogoDrawTarget & {
+    setFont: (f: string, s: string) => void;
+    setFontSize: (n: number) => void;
+    setTextColor: (r: number, g?: number, b?: number) => void;
+    text: (t: string, x: number, y: number) => void;
+  },
+  {
+    company,
+    logoDataUrl,
+    logoIncludesName,
+    x,
+    y,
+    availableBottom,
+    nameSize = 13,
+  }: ShopHeaderOptions,
+): number {
+  const shopLines = buildShopHeaderLines(company);
+  const showName = !logoIncludesName;
+
+  // What the text under the logo will occupy, so the logo can be given the remainder.
+  const textHeight = (showName ? SHOP_NAME_H : 0) + shopLines.length * SHOP_LINE_H;
+
+  let logoBottom = y;
+  if (logoDataUrl) {
+    try {
+      const props = doc.getImageProperties(logoDataUrl);
+      if (props?.width && props?.height) {
+        const budget = availableBottom - y - SHOP_LOGO_GAP - textHeight;
+        const maxH = Math.min(SHOP_LOGO_MAX_H, budget);
+        if (maxH > 0) {
+          const ratio = props.width / props.height;
+          const h = Math.min(maxH, SHOP_LOGO_MAX_W / ratio);
+          const w = h * ratio;
+          doc.addImage(logoDataUrl, props.fileType, x, y, w, h, undefined, 'FAST');
+          logoBottom = y + h + SHOP_LOGO_GAP;
+        }
+      }
+    } catch {
+      // A logo must never break a document. Fall through and print the text where it would have
+      // gone anyway.
+    }
+  }
+
+  let ty = logoBottom;
+  if (showName) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(nameSize);
+    doc.setTextColor(30);
+    ty += nameSize;
+    doc.text(company.name, x, ty);
+    ty += SHOP_NAME_H - nameSize;
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(95);
+  shopLines.forEach((line, i) => {
+    doc.text(line, x, ty + 10 + i * SHOP_LINE_H);
+  });
+
+  return shopLines.length ? ty + 10 + (shopLines.length - 1) * SHOP_LINE_H : ty;
 }
 
 /**
@@ -462,34 +590,35 @@ export async function generatePackingSlipPdf(
 
   // ---------- Header ----------
   const headerTop = MARGIN;
-  let logoBottom = headerTop;
+
+  /**
+   * The RIGHT column is measured first, because it sets the header's height and therefore the
+   * vertical space the logo may occupy for free. Drawing the left column first — which is what this
+   * did for months — means sizing the logo with no idea how much room the header already has, and a
+   * 56pt box was the result.
+   *
+   * Bottom row is the last meta line, which is the Job(s) row when there is one and Ship Date
+   * otherwise.
+   */
+  const jobNumbers = Array.from(
+    new Set(
+      (shipment.shipment_line_items ?? [])
+        .map((li) => li.job_part?.job?.job_number)
+        .filter((n): n is string => Boolean(n)),
+    ),
+  );
+  const metaBlockBottom = headerTop + (jobNumbers.length > 0 ? 68 : 54);
 
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
-  let logoWidth = 0;
-  if (logoDataUrl) {
-    logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
-    if (logoWidth > 0) logoBottom = headerTop + LOGO_BOX;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(30);
-  // Measured from what was actually drawn, not a fixed 70pt: a wide wordmark used to run under the
-  // company name.
-  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
-  doc.text(company.name, shopNameX, headerTop + 14);
-
-  const shopLines = buildShopHeaderLines(company);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(80);
-  shopLines.forEach((line, i) => {
-    doc.text(line, shopNameX, headerTop + 30 + i * 12);
+  const shopBlockBottom = drawShopHeaderBlock(doc, {
+    company,
+    logoDataUrl,
+    logoIncludesName: readLogoIncludesName(company),
+    x: MARGIN,
+    y: headerTop,
+    availableBottom: metaBlockBottom,
+    nameSize: 14,
   });
-  const shopBlockBottom = Math.max(
-    logoBottom,
-    headerTop + 30 + shopLines.length * 12,
-  );
 
   // Top-right title + meta
   doc.setFont('helvetica', 'bold');
@@ -513,15 +642,9 @@ export async function generatePackingSlipPdf(
     { align: 'right' },
   );
 
-  // Surface job # context — packing slip rolls up by job_part, so list
-  // distinct job numbers in the meta block to keep receiving anchored.
-  const jobNumbers = Array.from(
-    new Set(
-      (shipment.shipment_line_items ?? [])
-        .map((li) => li.job_part?.job?.job_number)
-        .filter((n): n is string => Boolean(n)),
-    ),
-  );
+  // Surface job # context — packing slip rolls up by job_part, so list distinct job numbers in the
+  // meta block to keep receiving anchored. The set itself is computed above the header, because its
+  // presence decides the header's height and therefore how much room the logo gets.
   if (jobNumbers.length > 0) {
     doc.text(
       `Job${jobNumbers.length > 1 ? 's' : ''}: ${jobNumbers.join(', ')}`,
@@ -530,7 +653,6 @@ export async function generatePackingSlipPdf(
       { align: 'right' },
     );
   }
-  const metaBlockBottom = headerTop + 68 + (jobNumbers.length > 0 ? 0 : -14);
 
   let cursorY = Math.max(shopBlockBottom, metaBlockBottom) + 18;
 

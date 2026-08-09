@@ -495,10 +495,10 @@ only if post-pilot data shows drift is more frequent than estimated.
 **View PDF** generates a customer-facing PDF in the browser — no server round-trip. Filename
 `Quote-{quote_number}.pdf`.
 
-Contains: company logo and name — **the logo only since August 2026**; this line claimed it for
-months while `generateQuotePdf` drew no logo at all, so a shop that uploaded one saw it on its
-packing slips and travelers but not on the document that goes to a customer who has not decided to
-buy yet. The QUOTE heading with number, date, validity, lead time,
+Contains: the shop's logo above its name and address — **the logo only since August 2026**; this
+line claimed it for months while `generateQuotePdf` drew no logo at all, so a shop that uploaded one
+saw it on its packing slips and travelers but not on the document that goes to a customer who has
+not decided to buy yet. The QUOTE heading with number, date, validity, lead time,
 and payment terms; **Customer · Ship to (only if different) · Customer contact**; the line
 items table ordered by `sequence`, with a grand total **only** on firm quotes; and an acceptance
 block instructing the customer to **reply with a purchase order referencing the quote** — there

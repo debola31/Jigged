@@ -17,7 +17,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import Divider from '@mui/material/Divider';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
@@ -28,10 +30,12 @@ import UploadIcon from '@mui/icons-material/Upload';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import {
   getCompany,
+  setLogoIncludesName,
   updateCompanyLogo,
   updateCompanyProfile,
   type CompanyProfilePatch,
 } from '@/utils/companyAccess';
+import { readLogoIncludesName } from '@/lib/companyDefaults';
 import CountrySelect from '@/components/common/CountrySelect';
 import StateSelect from '@/components/common/StateSelect';
 import { isValidPhone, isValidPostalCode } from '@/lib/validators';
@@ -86,6 +90,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
   const [logoPath, setLogoPath] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [includesName, setIncludesName] = useState(false);
 
   const loadPreview = useCallback(async (path: string | null) => {
     setLogoPath(path);
@@ -124,6 +129,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
           postal_code: company.postal_code ?? '',
           country: company.country ?? '',
         });
+        setIncludesName(readLogoIncludesName(company));
         await loadPreview(company.logo_url ?? null);
       } finally {
         if (!cancelled) setLoading(false);
@@ -191,6 +197,19 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
     } finally {
       setLogoBusy(false);
       if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const handleIncludesName = async (next: boolean) => {
+    // Optimistic: the box moves under the finger and reverts only if the write fails. Waiting on a
+    // round trip to tick a checkbox reads as a broken control.
+    setIncludesName(next);
+    setError(null);
+    try {
+      await setLogoIncludesName(companyId, next);
+    } catch (err) {
+      setIncludesName(!next);
+      setError(err instanceof Error ? err.message : 'Failed to save that setting.');
     }
   };
 
@@ -323,6 +342,36 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                 a transparent background prints cleanest, and it&apos;s worth checking it still
                 reads in black and white, since most shop printers are mono lasers.
               </Typography>
+
+              {/*
+                The one thing we cannot work out from the file itself, and it changes what prints.
+                Most shop logos are wordmarks — the mark IS the name — and printing the name again
+                beside one says it twice in two typefaces. But a logo that is a bare symbol must
+                have the name printed or the document goes out unnamed. Unticked is the safe
+                default: a duplicated name is untidy, a missing one is broken.
+              */}
+              <FormControlLabel
+                sx={{ mt: 1, alignItems: 'flex-start' }}
+                control={
+                  <Checkbox
+                    checked={includesName}
+                    onChange={(e) => void handleIncludesName(e.target.checked)}
+                    disabled={logoBusy}
+                    sx={{ pt: 0.25 }}
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      My logo already includes my company name
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Then we won&apos;t print your name next to it, and the logo gets that space
+                      instead.
+                    </Typography>
+                  </Box>
+                }
+              />
             </Box>
           </Box>
 

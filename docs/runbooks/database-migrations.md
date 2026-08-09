@@ -45,6 +45,54 @@ sees them as pending and tries to re-run them. We hit exactly this when legacy 8
 files (`20260313_…`) accumulated multiple migrations per date. Never use the 8-digit date-only prefix
 for new files; always let the CLI generate the 14-digit `YYYYMMDDHHMMSS`.
 
+## When `main` gains a migration while your PR is open
+
+Long-lived branches make this routine, and there are **two shapes with opposite fixes**. Get the
+direction wrong and the "fix" is worse than the symptom, so establish which one you are in before
+touching anything: ask production what its newest version is (`list_migrations` over the Supabase
+MCP — no file in this repo answers it) and compare.
+
+### Your timestamp is EARLIER than main's newest → renumber it, in the PR
+
+On merge, prod is asked to apply your migration *after* a higher version it already has. The CLI
+refuses rather than doing it:
+
+```
+Found local migration files to be inserted before the last migration on remote database.
+Rerun the command with --include-all flag to apply these migrations: …
+```
+
+**Do not take the `--include-all` suggestion on production.** It applies the straggler out of order
+for real — that is the state you are trying to avoid, and the flag exists to recover a database that
+has *already* diverged, not to wave one through. Instead, renumber: run `supabase migration new`
+with the same slug, move the SQL into the new file, delete the old one. Yours sorts last again and
+prod applies it in order.
+
+**The renumber is safe only because prod has not applied your migration yet, and that precondition
+is the whole rule.** A version prod has already recorded is a version you can never renumber —
+changing it makes the migration pending again and re-runs it against a database that already has it.
+
+### Your timestamp is LATER than main's newest → change nothing
+
+The files are already in order and prod will apply them in order. What you may still see is a
+**local** out-of-order, which looks alarming and is not a repo problem: your own stack (and a preview
+branch provisioned before the other PR merged) applied *yours*, and the earlier one only arrived with
+the merge. `supabase migration list --local` shows the straggler with no remote:
+
+```
+{"local":"20260809001523","remote":""}                  ← file present, never applied
+{"local":"20260809002922","remote":"20260809002922"}    ← applied first
+```
+
+That is an artifact of **when each database was built**, not of the migration files. Fix it with
+`supabase db reset` and leave the files alone. Renumbering here would orphan the version your local
+database has already recorded — a row in `schema_migrations` with no file — which is strictly worse
+than the ordering it was meant to tidy.
+
+Observed on [#743](https://github.com/debola31/Jigged/pull/743): its migration was stamped after
+`20260809001523`, three PRs merged while it was open, and only the local stack was ever out of order.
+Prod, the preview branch and CI were all correct throughout.
+
 ## Why a green PR proves less than it looks like
 
 **Every pre-merge gate in this repo builds its database by replaying the migrations** — `supabase db

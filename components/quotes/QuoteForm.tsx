@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import posthog from 'posthog-js';
 import NextLink from 'next/link';
@@ -47,7 +47,6 @@ import {
   pickShippingAddress,
   pickPrimaryContact,
   pickPaymentTerms,
-  pickFobPoint,
 } from '@/utils/customerAccess';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
 import { resolveTier } from '@/utils/quotePricingResolver';
@@ -123,6 +122,15 @@ interface PartBlockState {
    * falls back to the quote-level lead time.
    */
   lead_time_text: string;
+  /**
+   * Whether the per-part lead-time override is disclosed. A separate flag
+   * rather than `lead_time_text !== ''` because "checked the box, hasn't typed
+   * yet" is a real state that can't be derived from the value — but it is
+   * SEEDED from the value on hydration, so a saved quote that carries a
+   * per-part lead time opens expanded rather than hiding it behind an
+   * unchecked box.
+   */
+  lead_time_open: boolean;
   tiers: ComputedPartPricingTier[];
   loading: boolean;
   error: string | null;
@@ -156,7 +164,7 @@ const ADD_NEW_ADDRESS_ID = '__add_new_address__';
 // part, not the customer, so a standing value was a stale promise waiting to be
 // quoted. The column was dropped; the field stays on the quote, typed when
 // someone can actually see the backlog.
-const STANDING_TERM_FIELDS = ['payment_terms', 'fob_point'] as const;
+const STANDING_TERM_FIELDS = ['payment_terms'] as const;
 type StandingTermField = (typeof STANDING_TERM_FIELDS)[number];
 
 function formatCurrency(value: number | null | undefined): string {
@@ -190,6 +198,7 @@ function emptyBlock(): PartBlockState {
     part: null,
     rows: [emptyRow()],
     lead_time_text: '',
+    lead_time_open: false,
     tiers: [],
     loading: false,
     error: null,
@@ -232,15 +241,19 @@ function groupPartsIntoBlocks(parts: QuoteFormData['parts']): PartBlockState[] {
         part: { id: p.part_id } as PartSelectOption,
         rows: [],
         lead_time_text: '',
+        lead_time_open: false,
         tiers: [],
         loading: false,
         error: null,
       });
     }
     // Lead time is per-part; take it from the first entry that carries one
-    // (all entries for a part share the same value on save).
+    // (all entries for a part share the same value on save). A saved value
+    // opens the disclosure — otherwise editing a quote would hide a lead time
+    // it is still promising the customer.
     if (p.lead_time_text && !blocks[idx].lead_time_text) {
       blocks[idx].lead_time_text = p.lead_time_text;
+      blocks[idx].lead_time_open = true;
     }
     blocks[idx].rows.push(rowFromInitial(p));
   }
@@ -493,8 +506,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * → ON, disclosure hidden. Customers with separate billing/shipping
    * defaults → OFF, shipping disclosure visible.
    *
-   * It also pre-populates the customer's STANDING TERMS — payment_terms and
-   * fob_point.
+   * It also pre-populates the customer's STANDING TERM — payment_terms.
    *
    * OVERWRITE RULE. Unlike the address/contact FKs, which MUST be replaced
    * because they belong to a different customer and the integrity trigger
@@ -540,9 +552,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     // Payment terms have a two-level chain — the customer's own agreement, then
     // the shop-wide default — because a shop typically has one house term with a
     // handful of exceptions, so per-customer-only would mean retyping the house
-    // term onto nearly every customer. Lead time and FOB are customer-only:
-    // both are on the discovery watch list, and building a shop-wide default for
-    // a field we may delete would be spending the effort twice.
+    // term onto nearly every customer. It is the only standing term left: lead
+    // time is judged per quote, and FOB was removed after 96 real quotes left it
+    // blank (see the remove_fob_point migration).
     //
     // `source` is the phrase shown under the field. It names WHICH LEVEL the
     // value came from, and that visibility is the entire difference between this
@@ -552,10 +564,6 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       payment_terms: customerTerms
         ? { value: customerTerms, source: `${customer?.name ?? 'this customer'}’s standing terms` }
         : { value: shopDefaultTerms, source: 'your shop default' },
-      fob_point: {
-        value: pickFobPoint(customer),
-        source: `${customer?.name ?? 'this customer'}’s standing terms`,
-      },
     };
     const nextTerms: Partial<Record<StandingTermField, string>> = {};
     const nextProvenance: Partial<Record<StandingTermField, string>> = {};
@@ -953,8 +961,11 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * Drives the disabled state of the Create/Save button instead of inline error alerts.
    */
   const validationError = useMemo<string | null>(() => {
+    // Checks run in the order the cards appear (Customer → Terms → Parts).
+    // Only the FIRST failure is shown, on the disabled submit button, so an
+    // order that disagrees with the page sends the user to the wrong card —
+    // e.g. "add a part" while the empty field is two cards higher.
     if (!formData.customer_id) return 'Pick a customer.';
-    if (partBlocks.length === 0) return 'Add at least one part to the quote.';
     // Lead time is free text (e.g. "2–3 weeks", "In stock") but required.
     if (formData.lead_time_text.trim() === '') {
       return 'Enter a lead time.';
@@ -964,6 +975,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     if (formData.payment_terms.trim() === '') {
       return 'Enter payment terms.';
     }
+    if (partBlocks.length === 0) return 'Add at least one part to the quote.';
     const seenParts = new Set<string>();
     for (const block of partBlocks) {
       if (!block.part) return 'Every part block must have a part selected.';
@@ -1289,6 +1301,73 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               )}
             </Box>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Terms sits ABOVE Parts, deliberately.
+          The quote-level lead time has to be on screen before the parts that may
+          override it — otherwise each part block's "leave blank to use the
+          quote's lead time" is a forward reference to a field the user hasn't
+          reached yet. Customer → Terms → Parts also puts the standing-terms
+          provenance line next to the customer picker that caused it, instead of
+          a whole card away. */}
+      <Card elevation={2} sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Terms
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              {/* Free-text lead time — the shop types whatever fits
+                  ("2–3 weeks", "In stock", "Call to confirm"). Required
+                  (validationError); stored verbatim and no longer drives the
+                  job due date (entered manually at conversion).
+
+                  No standing-terms prefill: lead time follows current shop load
+                  and the specific part, so it is judged here, per quote, rather
+                  than inherited from the customer. */}
+              <TextField
+                label="Lead time"
+                size="small"
+                fullWidth
+                required
+                value={formData.lead_time_text}
+                onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
+                helperText="e.g. “2–3 weeks” or “In stock”"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              {/* Column is still `expiration_date`; only the label says
+                  "Quote valid until", which is the phrase the PDF already
+                  prints ("Valid Until:"). */}
+              <TextField
+                label="Quote valid until"
+                type="date"
+                size="small"
+                fullWidth
+                value={formData.expiration_date}
+                onChange={(e) => handleFieldChange('expiration_date', e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              {/* One shared control with the customer page — same vocabulary,
+                  same QuickBooks-first ordering. A bare text box on either side
+                  is how "net 45" and "Net 45" become two terms. */}
+              <PaymentTermsPicker
+                companyId={companyId}
+                value={formData.payment_terms}
+                onChange={(next) => handleFieldChange('payment_terms', next)}
+                required
+                helperText={
+                  prefilledFrom.payment_terms
+                    ? standingTermsHelper('payment_terms', '')
+                    : undefined
+                }
+              />
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 
@@ -1801,100 +1880,70 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     {/* Per-item lead time (per-part — applies to every quantity
                         of this part). Blank ⇒ the quote-level lead time is used.
                         Shown under each item on the quote/PDF only when items
-                        differ. */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                      <TextField
-                        size="small"
-                        label="Lead time (optional)"
-                        value={block.lead_time_text}
-                        onChange={(e) => updateBlock(idx, { lead_time_text: e.target.value })}
-                        placeholder={'e.g. “2–3 weeks”'}
-                        sx={{ width: 220 }}
-                        InputLabelProps={{ shrink: true }}
+                        differ.
+
+                        Collapsed behind a checkbox, mirroring "Shipping address
+                        same as billing" above: with Terms now on screen first,
+                        this is an OVERRIDE of a value the user has already set,
+                        and most quotes never need one. Unchecking clears the
+                        text so the line falls back to the quote lead time —
+                        leaving a stale value behind a hidden checkbox is how a
+                        quote ends up promising a date nobody chose. */}
+                    <Box>
+                      <FormControlLabel
+                        sx={{ mb: 0 }}
+                        control={
+                          <Checkbox
+                            size="small"
+                            checked={block.lead_time_open}
+                            onChange={(e) =>
+                              updateBlock(idx, {
+                                lead_time_open: e.target.checked,
+                                // Clearing on close is what keeps the flag and
+                                // the value from disagreeing.
+                                ...(e.target.checked ? {} : { lead_time_text: '' }),
+                              })
+                            }
+                          />
+                        }
+                        label={
+                          <Typography variant="body2" color="text.secondary">
+                            Different lead time for this part
+                          </Typography>
+                        }
                       />
-                      <Typography variant="caption" color="text.secondary">
-                        Leave blank to use the quote’s lead time
-                      </Typography>
+                      <Collapse in={block.lead_time_open} unmountOnExit>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            flexWrap: 'wrap',
+                            mt: 1,
+                          }}
+                        >
+                          <TextField
+                            size="small"
+                            label="Lead time (optional)"
+                            value={block.lead_time_text}
+                            onChange={(e) =>
+                              updateBlock(idx, { lead_time_text: e.target.value })
+                            }
+                            placeholder={'e.g. “2–3 weeks”'}
+                            sx={{ width: 220 }}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                          <Typography variant="caption" color="text.secondary">
+                            Used instead of the quote’s lead time for this part
+                          </Typography>
+                        </Box>
+                      </Collapse>
                     </Box>
                   </Box>
                 )}
               </Box>
             );
           })}
-        </CardContent>
-      </Card>
-
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            Terms
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              {/* Free-text lead time — the shop types whatever fits
-                  ("2–3 weeks", "In stock", "Call to confirm"). Required
-                  (validationError); stored verbatim and no longer drives the
-                  job due date (entered manually at conversion).
-
-                  No standing-terms prefill: lead time follows current shop load
-                  and the specific part, so it is judged here, per quote, rather
-                  than inherited from the customer. */}
-              <TextField
-                label="Lead time"
-                size="small"
-                fullWidth
-                required
-                value={formData.lead_time_text}
-                onChange={(e) => handleFieldChange('lead_time_text', e.target.value)}
-                helperText="e.g. “2–3 weeks” or “In stock”"
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                label="Expiration date"
-                type="date"
-                size="small"
-                fullWidth
-                value={formData.expiration_date}
-                onChange={(e) => handleFieldChange('expiration_date', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              {/* FOB point — WHERE title and risk transfer, as a named place.
-                  Deliberately free text and deliberately NOT an origin/destination
-                  enum, and deliberately separate from who PAYS the freight (that
-                  lives on the job and shipment). Conflating the two is the classic
-                  error in this domain, so they never share a control. Optional:
-                  plenty of shops quote without stating one. */}
-              <TextField
-                label="FOB point"
-                size="small"
-                fullWidth
-                value={formData.fob_point}
-                onChange={(e) => handleFieldChange('fob_point', e.target.value)}
-                helperText={standingTermsHelper('fob_point', 'e.g. “FOB our dock, Cleveland OH”')}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              {/* One shared control with the customer page — same vocabulary,
-                  same QuickBooks-first ordering. A bare text box on either side
-                  is how "net 45" and "Net 45" become two terms. */}
-              <PaymentTermsPicker
-                companyId={companyId}
-                value={formData.payment_terms}
-                onChange={(next) => handleFieldChange('payment_terms', next)}
-                required
-                helperText={
-                  prefilledFrom.payment_terms
-                    ? standingTermsHelper('payment_terms', '')
-                    : undefined
-                }
-              />
-            </Grid>
-          </Grid>
         </CardContent>
       </Card>
 

@@ -31,7 +31,7 @@ export interface Customer {
    * Standing terms — the customer's commercial defaults, copied onto a NEW
    * quote at create time and editable there. They are never read by an
    * existing quote at render time: a quote owns its own payment_terms /
-   * lead_time_text / fob_point from the moment it is created, so editing a
+   * lead_time_text from the moment it is created, so editing a
    * customer here can't rewrite a document already sent. Drift between the
    * two is surfaced as a chip, never applied (mirrors PricingBasisSnapshot).
    *
@@ -39,13 +39,6 @@ export interface Customer {
    * empty rather than guessed.
    */
   default_payment_terms: string | null;
-  /**
-   * Where title and risk transfer, as free text naming a place ("FOB
-   * Cleveland, OH"). Deliberately NOT an origin/destination enum, and
-   * deliberately separate from who *pays* the freight — that axis lives on
-   * jobs/shipments as freight_terms. Keep them apart in the UI too.
-   */
-  default_fob_point: string | null;
   /**
    * Manual credit standing, set by the office when a customer is past due.
    * Never computed, never synced from QuickBooks, never derived from a balance.
@@ -136,7 +129,6 @@ export interface CustomerFormData {
    * default rather than storing '' and prefilling blanks onto every quote.
    */
   default_payment_terms: string;
-  default_fob_point: string;
   credit_status: CustomerCreditStatus;
   /** Empty string means "no reason given"; normalised to NULL on write. */
   credit_hold_note: string;
@@ -210,7 +202,6 @@ export const EMPTY_CUSTOMER_ADDRESS: CustomerAddressFormData = {
 export const EMPTY_CUSTOMER_FORM: CustomerFormData = {
   name: '',
   default_payment_terms: '',
-  default_fob_point: '',
   credit_status: 'open',
   credit_hold_note: '',
 };
@@ -219,7 +210,6 @@ export function customerToFormData(customer: Customer): CustomerFormData {
   return {
     name: customer.name,
     default_payment_terms: customer.default_payment_terms || '',
-    default_fob_point: customer.default_fob_point || '',
     credit_status: customer.credit_status,
     credit_hold_note: customer.credit_hold_note || '',
   };

@@ -258,19 +258,6 @@ export default function CustomerForm({
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
             </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              {/* FOB is about where title and risk transfer — NOT about who pays
-                  the freight. That's a separate axis carried on the job and
-                  shipment; the two must never share a control. */}
-              <TextField
-                fullWidth
-                label="FOB point"
-                value={formData.default_fob_point}
-                onChange={handleChange('default_fob_point')}
-                disabled={loading}
-                helperText="Where title and risk transfer. Who pays the freight is set per order."
-              />
-            </Grid>
           </Grid>
         </CardContent>
       </Card>

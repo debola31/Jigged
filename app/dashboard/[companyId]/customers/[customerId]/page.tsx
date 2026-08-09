@@ -851,12 +851,11 @@ export default function CustomerDetailPage() {
             save it so I don't keep it in my head" the field exists for.
             Values are prose, so body1 rather than the h6 the Related counts use. */}
         <Grid size={{ xs: 12, md: 6 }}>
+          {/* No text-field props: with FOB gone the card holds only the
+              payment-terms picker, which commits on change rather than blur. */}
           <CustomerTermsCard
             companyId={companyId}
             form={form}
-            fieldErrors={fieldErrors}
-            onTextChange={onTextChange}
-            onTextBlur={onTextBlur}
             onSelectChange={onSelectChange}
             readOnly={isArchived}
             saveState={saveState}

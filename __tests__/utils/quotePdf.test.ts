@@ -282,6 +282,20 @@ describe('generateQuotePdf', () => {
     expect(metaTexts.some((t: string) => t === 'Lead Time: 14 days ARO')).toBe(true);
   });
 
+  it('never prints an FOB row — the field was removed in August 2026', async () => {
+    // FOB was the one customer-facing render of a column that 96 real quotes
+    // left blank, and it had zero test coverage the whole time it existed.
+    // Asserting its absence is what stops it drifting back in.
+    await generateQuotePdf(baseQuote, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const metaTexts = docInstance.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+
+    expect(metaTexts.some((t: string) => /^FOB\b/i.test(t))).toBe(false);
+  });
+
   it('omits Valid Until / Lead Time rows when fields are null', async () => {
     const barebonesQuote: QuoteWithRelations = {
       ...baseQuote,

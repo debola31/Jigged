@@ -4,7 +4,6 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 
 import PaymentTermsPicker from '@/components/common/PaymentTermsPicker';
@@ -14,32 +13,35 @@ import type { CustomerFieldEditingProps } from '@/components/customers/customerF
 /**
  * The customer's standing terms, editable in place.
  *
- * Auto-save on blur (interaction-standards §2 mode 1). These are three
- * independent free-text prose fields, and they are non-financial by that
- * section's own test — they seed a NEW quote and nothing else. An existing
- * quote froze its own terms at creation and never reads these again, so a typo
- * here cannot change what any customer is charged. That is what puts them in
- * auto-save rather than behind a staged Save button.
+ * Auto-save (interaction-standards §2 mode 1). Payment terms are non-financial
+ * by that section's own test — they seed a NEW quote and nothing else. An
+ * existing quote froze its own terms at creation and never reads these again,
+ * so a typo here cannot change what any customer is charged. That is what puts
+ * them in auto-save rather than behind a staged Save button.
  *
- * Plain free text on purpose, matching what the old edit form offered: the
- * preset picker lives on the quote form, where the term is actually being
- * committed to a document. Offering presets in two places invites them to drift.
+ * **One field left, and it is a picker.** Both of its former neighbours were
+ * removed on the same reasoning — a standing default is only worth storing if
+ * shops actually set it:
+ *   - Lead time (2026-08-03) — a function of current shop load and the specific
+ *     part, not of the customer, so a standing value was a stale promise waiting
+ *     to be quoted. It lives on the quote now.
+ *   - FOB point (2026-08-08) — 0 of 586 real customers ever set one. See
+ *     docs/modules/customers.md, open question 3.
  *
- * Lead time used to sit here and was removed: it is a function of current shop
- * load and the specific part, not of the customer, so a standing value here was
- * a stale promise waiting to be quoted. It lives on the quote, stated at the
- * moment someone judges the shop's actual backlog.
+ * With FOB gone this card has no free-text input at all, which is why it takes
+ * only `onSelectChange`: the picker commits on change, so there is nothing to
+ * validate on blur.
  */
 export default function CustomerTermsCard({
   companyId,
   form,
-  fieldErrors,
-  onTextChange,
-  onTextBlur,
   onSelectChange,
   readOnly,
   saveState,
-}: CustomerFieldEditingProps & { saveState: SaveState; companyId: string }) {
+}: Omit<CustomerFieldEditingProps, 'fieldErrors' | 'onTextChange' | 'onTextBlur'> & {
+  saveState: SaveState;
+  companyId: string;
+}) {
 
   return (
     <Card elevation={2}>
@@ -63,14 +65,6 @@ export default function CustomerTermsCard({
                 {form.default_payment_terms || '—'}
               </Typography>
             </Box>
-            <Box sx={{ minWidth: 160 }}>
-              <Typography variant="body2" color="text.secondary">
-                FOB point
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                {form.default_fob_point || '—'}
-              </Typography>
-            </Box>
           </Stack>
         ) : (
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
@@ -85,18 +79,6 @@ export default function CustomerTermsCard({
               onChange={(next) => onSelectChange({ default_payment_terms: next })}
               size="medium"
               helperText="Applied to a new quote for this customer."
-            />
-            <TextField
-              label="FOB point"
-              value={form.default_fob_point}
-              onChange={(e) => onTextChange('default_fob_point', e.target.value)}
-              onBlur={onTextBlur}
-              error={!!fieldErrors.default_fob_point}
-              helperText={
-                fieldErrors.default_fob_point ||
-                'Where title and risk transfer. Who pays the freight is set per order.'
-              }
-              fullWidth
             />
           </Stack>
         )}

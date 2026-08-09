@@ -266,7 +266,6 @@ export default function QuoteDetailPage() {
     ? (
         [
           { label: 'Payment terms', onQuote: quote.payment_terms, current: quote.customers.default_payment_terms },
-          { label: 'FOB', onQuote: quote.fob_point, current: quote.customers.default_fob_point },
         ] as const
       )
         .filter((f) => hasTermDrift(f.onQuote, f.current))
@@ -487,11 +486,6 @@ export default function QuoteDetailPage() {
             {quote.payment_terms && (
               <Typography variant="body2" color="text.secondary">
                 Payment terms: {quote.payment_terms}
-              </Typography>
-            )}
-            {quote.fob_point && (
-              <Typography variant="body2" color="text.secondary">
-                FOB: {quote.fob_point}
               </Typography>
             )}
           </Box>

@@ -50,8 +50,6 @@ vi.mock('@/utils/customerAccess', () => ({
     c?.default_payment_terms?.trim() || null,
   pickLeadTimeText: (c: { default_lead_time_text?: string | null } | null | undefined) =>
     c?.default_lead_time_text?.trim() || null,
-  pickFobPoint: (c: { default_fob_point?: string | null } | null | undefined) =>
-    c?.default_fob_point?.trim() || null,
 }));
 
 // Company access — the form loads/persists the company's saved custom payment
@@ -131,7 +129,6 @@ const initialBlank: QuoteFormData = {
   parts: [],
   lead_time_text: '',
   payment_terms: '',
-  fob_point: '',
   expiration_date: '',
 };
 
@@ -143,9 +140,8 @@ const initialPopulated: QuoteFormData = {
   parts: [{ part_id: 'part-1', order_quantity: 5 }],
   lead_time_text: '14 business days',
   // Payment terms are required to submit a quote, so the "populated/complete"
-  // fixture carries one. FOB is optional and stays empty.
+  // fixture carries one.
   payment_terms: 'Net 30',
-  fob_point: '',
   expiration_date: '',
 };
 
@@ -314,7 +310,11 @@ describe('QuoteForm', () => {
     });
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Lead time (optional)'), '2-3 weeks');
+    // The field is collapsed by default — a per-part lead time is an override
+    // of the quote-level one set in Terms above, not something every part needs.
+    expect(screen.queryByLabelText('Lead time (optional)')).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: /different lead time for this part/i }));
+    await user.type(await screen.findByLabelText('Lead time (optional)'), '2-3 weeks');
     await user.click(screen.getByRole('button', { name: /create quote/i }));
 
     await waitFor(() => {
@@ -324,6 +324,56 @@ describe('QuoteForm', () => {
     expect(payload.parts).toEqual([
       { part_id: 'part-1', order_quantity: 5, lead_time_text: '2-3 weeks' },
     ]);
+  });
+
+  it('opens the per-part lead time already expanded when the quote has one saved', async () => {
+    // Hydration seeds the disclosure from the value. Without that, editing a
+    // quote would hide a lead time it is still promising the customer.
+    render(
+      <QuoteForm
+        mode="edit"
+        quoteId="q-1"
+        initialData={{
+          ...initialPopulated,
+          parts: [{ part_id: 'part-1', order_quantity: 5, lead_time_text: '6-8 weeks' }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+    expect(screen.getByLabelText('Lead time (optional)')).toHaveValue('6-8 weeks');
+    expect(
+      screen.getByRole('checkbox', { name: /different lead time for this part/i }),
+    ).toBeChecked();
+  });
+
+  it('clears the per-part lead time when the disclosure is unchecked', async () => {
+    // Leaving a stale value behind a hidden checkbox is how a quote ends up
+    // promising a date nobody chose.
+    render(
+      <QuoteForm
+        mode="edit"
+        quoteId="q-1"
+        initialData={{
+          ...initialPopulated,
+          parts: [{ part_id: 'part-1', order_quantity: 5, lead_time_text: '6-8 weeks' }],
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox', { name: /different lead time for this part/i }));
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(updateQuote).toHaveBeenCalledTimes(1));
+    const [, payload] = updateQuote.mock.calls[0];
+    expect(payload.parts[0]).not.toHaveProperty('lead_time_text');
   });
 
   it('offers the trimmed presets (with Prepay) in the payment-terms combobox', async () => {

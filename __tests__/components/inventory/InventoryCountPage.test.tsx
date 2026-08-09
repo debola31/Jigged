@@ -304,6 +304,57 @@ describe('choosing what to count', () => {
     renderPage();
     expect(await screen.findByText(/nothing to count yet/i)).toBeInTheDocument();
   });
+
+  /**
+   * The company-wide picker filters in memory, and that is the whole point of it.
+   *
+   * `serverSearch` used to be a raw dependency of the loader effect, so a keystroke here re-ran
+   * the entire company-wide load — `loadCountCandidates` + balances + locations — 300ms later, to
+   * arrive at the identical array and replace it. Nothing read the result: `visible` had already
+   * filtered `candidates` synchronously from `search`. Pure waste, and silent, because `paging`
+   * only drives the place-scoped pager so there was no spinner to notice.
+   *
+   * Nothing in this file typed into the company-wide box before, which is how it shipped.
+   *
+   * Clearing the mocks after the mount load is what makes this a ratchet — a call-count assertion
+   * on the raw mock would pass today on the mount load alone. Waiting well past the 300ms debounce
+   * is deliberate: the point is that nothing happens when the timer fires.
+   */
+  it('filters company-wide in the browser, without going back to the server', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    asMock(loadCountCandidates).mockClear();
+    asMock(getLocations).mockClear();
+    asMock(getBalancesForParts).mockClear();
+
+    await user.type(screen.getByPlaceholderText(/search parts/i), '4140');
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(loadCountCandidates).not.toHaveBeenCalled();
+    expect(getLocations).not.toHaveBeenCalled();
+    expect(getBalancesForParts).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The interaction the above buys, pinned so it cannot be traded away by accident.
+   *
+   * There is no `waitFor` and no `findBy` here, and their ABSENCE is the assertion: the list must
+   * narrow in the same tick as the keystroke. Wiring `serverSearch` through to
+   * `loadCountCandidates` — the shape #658 proposed — turns this into a 300ms round trip and this
+   * test goes red, which is the intended alarm rather than an inconvenience.
+   */
+  it('narrows the list as you type, with no wait', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('4140 bar');
+
+    await user.type(screen.getByPlaceholderText(/search parts/i), '4140');
+
+    expect(screen.getByText('4140 bar')).toBeInTheDocument();
+    expect(screen.queryByText('6061 plate')).not.toBeInTheDocument();
+  });
 });
 
 describe('inline feedback', () => {

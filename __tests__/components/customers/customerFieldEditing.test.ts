@@ -34,13 +34,11 @@ describe('normalizeSnapshot — compare what the DB would store', () => {
       form({
         name: '  Acme Corp  ',
         default_payment_terms: ' Net 30 ',
-        default_fob_point: ' FOB our dock ',
         credit_hold_note: ' 60 days ',
       }),
     );
     expect(n.name).toBe('Acme Corp');
     expect(n.default_payment_terms).toBe('Net 30');
-    expect(n.default_fob_point).toBe('FOB our dock');
     expect(n.credit_hold_note).toBe('60 days');
   });
 
@@ -72,13 +70,9 @@ describe('applyCreditStatusChange — lifting a hold clears its reason', () => {
   // The invariant the whole one-snapshot design exists for: a change to credit
   // must not disturb any other column, because updateCustomer writes them all.
   it('touches nothing but the credit fields', () => {
-    const base = form({
-      default_payment_terms: 'Net 45',
-      default_fob_point: 'FOB our dock',
-    });
+    const base = form({ default_payment_terms: 'Net 45' });
     const next = applyCreditStatusChange(base, 'hold');
     expect(next.name).toBe(base.name);
     expect(next.default_payment_terms).toBe(base.default_payment_terms);
-    expect(next.default_fob_point).toBe(base.default_fob_point);
   });
 });

@@ -29,9 +29,13 @@ export const CARRIER_OPTIONS = ['UPS', 'FedEx', 'USPS'] as const;
 
 /**
  * Who pays the freight. A different axis from `shipping_method` (how the goods
- * left) and from the quote's `fob_point` (where title and risk transfer) —
- * conflating any two of the three is the classic error in this domain, so they
- * never share a control.
+ * left) — conflating the two is the classic error in this domain, so they never
+ * share a control.
+ *
+ * The third axis, FOB point (WHERE title and risk transfer), used to live on the
+ * quote and was removed in August 2026 after 96 real quotes left it blank. If it
+ * ever comes back it belongs in shop settings as a printed default, not beside
+ * this field.
  *
  * `prepaid_and_add` is deliberately absent: it promises adding freight to the
  * invoice, and there is no freight amount anywhere to add (weight_lbs was

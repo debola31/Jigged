@@ -18,19 +18,16 @@ That last clause is the whole safety argument, and the reason this is not the `m
 
 ## Data model
 
-### `customers` — 12 columns
+### `customers` — 9 columns
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | `gen_random_uuid()` |
 | `company_id` | uuid NOT NULL | tenant key |
 | `name` | text NOT NULL | **the identity, case- and space-insensitive** — `customers_company_name_ci_unique (company_id, lower(btrim(name)))`. FULL, no `WHERE`, so archived rows collide too: that collision is the signal to revive. The plain `customers_company_name_unique` survives beside it only as the CSV importer's `on_conflict` target |
-| `website` | text | |
 | `created_at` / `updated_at` | timestamptz | `updated_at` maintained by the `customers_updated_at` trigger (no column list — fires on every update) |
 | `deleted_at` | timestamptz | archive marker |
-| `default_payment_terms` | text | standing terms ↓ |
-| `default_lead_time_text` | text | |
-| `default_fob_point` | text | |
+| `default_payment_terms` | text | standing terms ↓ — the only one left |
 | `credit_status` | text NOT NULL DEFAULT `'open'` | `CHECK (credit_status IN ('open','hold'))` |
 | `credit_hold_note` | text | |
 
@@ -85,14 +82,13 @@ Three customer columns seed three quote columns. All optional; a shop that fills
 | Customer column | Quote column | Levels |
 |---|---|---|
 | `default_payment_terms` | `quotes.payment_terms` | **two** — customer, then shop-wide |
-| `default_lead_time_text` | `quotes.lead_time_text` | one (customer only) |
-| `default_fob_point` | `quotes.fob_point` *(new)* | one (customer only) |
 
-**Why payment terms gets a second level and the others don't.** A shop typically has one house term with a handful of exceptions, so customer-only would mean retyping the house term onto nearly every customer. Lead time and FOB are on the discovery watch list — building a shop-wide default for a field we may delete would be spending the effort twice.
+**Payment terms is the only standing term left, and it is the one that earned a second level.** A shop typically has one house term with a handful of exceptions, so customer-only would mean retyping the house term onto nearly every customer.
 
-`default_fob_point` is **free text naming a place** ("FOB Cleveland, OH"), never an origin/destination enum. FOB governs where title and risk transfer; who *pays* is `freight_terms`, a separate axis on the job and shipment. Conflating them is the classic error in this domain, which is why the two never share a control.
+The other two were both on a discovery watch list and both came off it, in the same direction:
 
-`default_lead_time_text` is, by its own migration comment, the weakest of the three: lead time is a function of shop load and the specific part, so a standing value can become a stale promise.
+- `default_lead_time_text` — dropped 2026-08-03. Lead time is a function of shop load and the specific part, so a standing value becomes a stale promise. It is judged per quote.
+- `default_fob_point` (and `quotes.fob_point` with it) — dropped 2026-08-08. See open question 3 below for the numbers.
 
 ### Resolution chain
 
@@ -127,15 +123,15 @@ Inline customer creation from the quote form hands the new row **directly** to `
 
 ### Drift — reported, never applied
 
-Computed **on the quote detail page only** (`QuoteForm`'s drift state is a separate, per-line *price* mechanism). Three pairs, each against the customer's **current** value:
+Computed **on the quote detail page only** (`QuoteForm`'s drift state is a separate, per-line *price* mechanism). **One pair** remains, against the customer's **current** value — the other two chips went when their columns did:
 
 | Chip | Compares |
 |---|---|
 | `Payment terms differs from standing terms` | `quote.payment_terms` vs `customers.default_payment_terms` |
-| `Lead time differs from standing terms` | `quote.lead_time_text` vs `default_lead_time_text` |
-| `FOB differs from standing terms` | `quote.fob_point` vs `default_fob_point` |
 
-`hasTermDrift` compares trimmed and case-insensitively (`net 30` ≡ `Net 30`), returns **false** when the customer has no standing value (nothing to drift from), and returns **true** when the customer has a value and the quote's field is empty.
+`hasTermDrift` compares trimmed and case-insensitively (`net 30` ≡ `Net 30`), and returns **false** in *both* no-value cases — when the customer has no standing value (nothing to drift from) **and when the quote's own field is empty**. A quote that states nothing never promised terms, so there is no disagreement to report; the "Known defects" note below records why that second case was reversed.
+
+> *(Corrected 2026-08-08: this previously said `hasTermDrift` returns **true** when the customer has a value and the quote's field is empty — the opposite of [`utils/customerAccess.ts`](../../utils/customerAccess.ts), and contradicted by this document's own defect note.)*
 
 **A change to the shop-wide default produces no chip anywhere, and must not.** Shop policy moving is not a per-customer promise changing; chipping every open quote the day a shop edits its house term would train people to ignore the chip. The guarantee is structural rather than conditional — `hasTermDrift` takes the customer's standing terms as its second argument and nothing else, so there is no parameter through which a shop default could reach it.
 
@@ -303,11 +299,11 @@ So `discover_po_custom_field` **finds** the shop's field, matching on its **labe
 
 Six columns: **Name** (pinned), **Contact**, **Email**, **Phone** (all three derived from `primary_contact`, em-dash when absent), **Payment terms**, **Location** (derived from the default-billing address, `sortable: false`).
 
-Search is debounced 300 ms and matches **name only** — not website, contact or city. Sorting is server-side (the colId goes straight to `.order()`). Toolbar: Search · Import · New Customer, with Export CSV and Delete (n) appearing on selection. Empty state: *"No customers yet"* → *"Create your first customer or import from CSV."* (or *"No customers match your search."*).
+Search is debounced 300 ms and matches **name only** — not contact or city. Sorting is server-side (the colId goes straight to `.order()`). Toolbar: Search · Import · New Customer, with Export CSV and Delete (n) appearing on selection. Empty state: *"No customers yet"* → *"Create your first customer or import from CSV."* (or *"No customers match your search."*).
 
 ### Detail — `/dashboard/{companyId}/customers/{id}`
 
-Render order: **header** (name, credit chip + note, website, timestamps) → **Contacts** and **Addresses** side by side → **Terms** → **Shipping** → **Related**.
+Render order: **header** (name, credit chip + note, timestamps) → **Contacts** and **Addresses** side by side → **Terms** → **Shipping** → **Related**.
 
 - **Terms** — read-only here (edited on the form). Shows the three values, `—` when unset. Caption: *"Applied to new quotes for this customer. Quotes you've already sent keep the terms they were created with."* It shows only the customer's own values and never mentions the shop default.
 - **Shipping (n)** — carrier accounts. Named *Shipping*, not *Freight*: to a machinist "freight" means all shipping cost. Each row: carrier, bill-to chip, then `Account 4A72W9 · ZIP 97124` or *"No account number (billed on the BOL)"*, notes, Edit / Delete. Empty: *"No carrier accounts. Add one if this customer wants their shipments billed to their own UPS or FedEx account."* Delete **archives**: *"Shipments already billed to this account keep their record. It just stops being offered on new ones."*
@@ -315,7 +311,7 @@ Render order: **header** (name, credit chip + note, website, timestamps) → **C
 
 ### Form — `/customers/new` · `/customers/{id}/edit`
 
-Four sections: **Basic Information** (Company Name, Website) · **Terms & Lead Time** · **Credit** · **Initial Contact** (accordion, create mode only). Addresses and carrier accounts are not editable here.
+Four sections: **Basic Information** (Company Name) · **Terms** · **Credit** · **Initial Contact** (accordion, create mode only). Addresses and carrier accounts are not editable here.
 
 Terms copy: *"Applied to new quotes for this customer. Changing them here never affects quotes you've already sent. Leave blank if you have no standing agreement."* All three are plain free-text fields — the preset picker lives on the quote form, not here.
 
@@ -338,7 +334,7 @@ Delete is **archive**, per [`docs/architecture.md` §16](../architecture.md). `s
 
 **Name is the identity — reuse revives.** The unique constraint is FULL `(company_id, name)`, covering archived rows, so re-creating an archived name raises `23505`; `createCustomer` catches it and revives. A collision with a *live* row re-throws as a genuine duplicate. A partial (`WHERE deleted_at IS NULL`) constraint would break this.
 
-**A revive is not a fresh create wearing the same name.** It writes `name`, `deleted_at = null`, `updated_at`, and *only the non-blank* values of website and the three standing terms. The caller is always the create form, so a blank means "didn't say", never "deliberately cleared" — writing the whole column set would wipe the archived row's terms. It **never** writes `credit_status` or `credit_hold_note`: lifting a hold must be a deliberate act on the customer page, not a side effect of re-typing a name into a quick-create modal.
+**A revive is not a fresh create wearing the same name.** It writes `name`, `deleted_at = null`, `updated_at`, and *only the non-blank* value of the standing payment terms. The caller is always the create form, so a blank means "didn't say", never "deliberately cleared" — writing the whole column set would wipe the archived row's terms. It **never** writes `credit_status` or `credit_hold_note`: lifting a hold must be a deliberate act on the customer page, not a side effect of re-typing a name into a quick-create modal.
 
 Archiving a customer does **not** archive its carrier accounts (a soft delete fires no cascade), so they return intact on revive. An archived carrier account keeps resolving everywhere it matters — shipments and jobs keep the FK (archiving is an UPDATE, so `ON DELETE SET NULL` never fires), the slip prints from the frozen snapshot, and both pickers keep a currently-selected archived row so editing an old document never silently blanks its freight. It loses only its place in the picker for *new* documents.
 
@@ -352,13 +348,13 @@ Archiving a customer does **not** archive its carrier accounts (a soft delete fi
 
 Two live paths, both hitting `/api/customers/import/execute`.
 
-**Mappable fields (14):** `name` (required), `website`, `contact_name`, `contact_phone`, `contact_email`, `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country`, **`default_payment_terms`**, **`default_lead_time_text`**, **`default_fob_point`**.
+**Mappable fields (11):** `name` (required), `contact_name`, `contact_phone`, `contact_email`, `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country`, **`default_payment_terms`**.
 
 **Not mappable:** credit status or note (so an import can never set or lift a hold), and no carrier-account field.
 
 The guided flow (`lib/dataImportSchema.ts`) exposes only `name` and `default_payment_terms` — a UI restriction, not a server limit.
 
-The AI column mapper matches source headers against the schema *descriptions*, which deliberately carry legacy-ERP vocabulary: `default_payment_terms` notes *"Often exported as 'Terms', 'Terms Code' or 'Payment Terms'"*, and `default_fob_point` explicitly says it is **not** the freight payment terms, "which describe who PAYS and are not imported here."
+The AI column mapper matches source headers against the schema *descriptions*, which deliberately carry legacy-ERP vocabulary: `default_payment_terms` notes *"Often exported as 'Terms', 'Terms Code' or 'Payment Terms'"*.
 
 Execute sets `deleted_at = None` on every row before upserting on `(company_id, name)`, so **a re-import revives an archived customer** rather than leaving it hidden. A blank cell omits the key entirely rather than writing null. Contacts and addresses attach only to a **new** customer — re-importing an existing one silently drops any contact/address columns in the CSV.
 
@@ -423,7 +419,7 @@ Filled since: the contact-archive rules and the billing-default clear-then-set a
 
 **Name is the identity, and three layers disagreed about what that means.** The constraint was case-sensitive, the create pre-check was `.ilike`, and the revive lookup was `.eq` — so archiving "Acme Corp" and creating "acme corp" found nothing to revive and inserted a **second row for the same company**. The CSV importer reached the same end from the other side. Both lookups are now case-insensitive, and `customers_company_name_ci_unique` on `(company_id, lower(btrim(name)))` makes the DB the authority. The plain constraint survives beside it only because the importer upserts with `on_conflict="company_id,name"` and PostgREST cannot name an expression index.
 
-**A chip that fires on everything at once is a chip people learn to ignore.** `hasTermDrift` used to report drift when the quote stated nothing and the customer had a value. Because `quotes.fob_point` is newer than the quotes themselves, the first time a shop filled in one customer's FOB point every open quote for that customer chipped. A quote that states nothing never promised terms, so there is nothing to disagree with — drift now needs a value on both sides.
+**A chip that fires on everything at once is a chip people learn to ignore.** `hasTermDrift` used to report drift when the quote stated nothing and the customer had a value. Because a standing-terms column is newer than the quotes themselves, every pre-existing quote carries NULL — so the first time a shop filled one in, every open quote for that customer chipped at once. A quote that states nothing never promised terms, so there is nothing to disagree with — drift now needs a value on both sides.
 
 ---
 
@@ -461,7 +457,33 @@ Both were dropped in favour of fixing [#653](https://github.com/debola31/Jigged/
 
 | # | Question | Decides |
 |---|---|---|
-| 1 | Does any customer have more than one ship-to plant? | Whether address-level freight defaults (`fob_point`, `shipping_instructions`, `print_coc` per address) ever get built |
+| 1 | Does any customer have more than one ship-to plant? | Whether address-level freight defaults (`shipping_instructions`, `print_coc` per address) ever get built |
 | 2 | Do shops routinely carry 2+ carrier accounts? | Whether to add `is_default` — the recorded remedy, as opposed to picking arbitrarily |
-| 3 | Are `default_lead_time_text` and `default_fob_point` used after 60 days? | Both are on the watch list. Johnny on FOB: *"we sort of ignore that."* If both are still empty across every customer, remove the columns and their form fields together in one migration |
+| 3 | ~~Are `default_lead_time_text` and `default_fob_point` used after 60 days?~~ **ANSWERED — both removed.** | `default_lead_time_text` went 2026-08-03. `default_fob_point` and `quotes.fob_point` went 2026-08-08 on the evidence below |
 | 4 | Does the shop charge sales tax on any work? | Moves the `TaxCodeRef` fix between P0 and P3 — the highest-consequence unanswered question here |
+
+### Question 3, answered (2026-08-08)
+
+Measured in production, **real shops only** — the demo companies are excluded because their FOB
+values come from the seed, not from anyone typing:
+
+| Company | Customers with a FOB default | Quotes with a FOB |
+|---|---|---|
+| Contour Tool & Machine | **0 / 584** | **0 / 88** |
+| Jigged Usability Sandbox | **0 / 2** | **0 / 8** |
+| L & L Machine & Tool | 0 / 0 | 0 / 0 |
+
+**Zero of 586 real customers and zero of 96 real quotes**, against payment terms at 113/127 and
+lead time at 127/127 on the same quotes. Every non-null value in the database belonged to a demo
+company, and every one of those was `Origin` or `Destination` — exactly the enum the column's own
+`COMMENT` forbade. When the seed authors cannot hold a doctrine across three files, the doctrine
+is not being used.
+
+**The diagnosis is placement, not presentation.** FOB is boilerplate a shop states once, not a
+per-deal decision — which is why a free-text box on the quote form produced 96 blanks, and why a
+prettier picker would have produced 96 prettier blanks. If a customer ever demands FOB
+Destination, the shape to build is a **shop-level default in settings that prints on every quote**,
+with a per-customer override. Not a quote-form field.
+
+Removing it cost one line on the quote PDF, which those 96 quotes had already been shipping
+without.

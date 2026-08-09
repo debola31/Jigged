@@ -38,12 +38,19 @@
  *  - **Nothing is excluded.** Company-wide, a part split across bins can't be counted item-by-item
  *    (count 38 against 10+20+10 and no bin defensibly absorbs the −2). At one bin that ambiguity
  *    doesn't exist, so the parts the other sheet has to name and skip are countable here.
- *  - **Search runs on the server**, because `Unassigned` holds every part a real shop owns and you
- *    cannot filter 9,428 rows in the browser.
+ *  - **Search runs on the server**, because a bin's contents were never loaded into memory to
+ *    filter, and only the server knows the `total` the pager reports.
  *  - **You can put things away.** Alongside "Count N parts" there's "Move N to…", because the other
  *    thing you do standing at a bin is notice something doesn't belong there. That single addition
  *    is what makes this the put-away tool — at `Unassigned`, this screen *is* how a shop empties
- *    the pile that `trg_auto_track_stocked_part` created.
+ *    the pile that lands there.
+ *
+ * Both of those used to be justified by "`Unassigned` holds every part a real shop owns — 9,428 at
+ * Contour". **That stopped being true in `20260802144310`**, which pruned the zero-balance residue
+ * and added `CHECK (quantity > 0)`, so `trg_auto_track_stocked_part` no longer leaves a row per
+ * stocked part. Contour's `Unassigned` holds **57** rows today, against a `LOCATION_PAGE_SIZE` of
+ * 100 — the pager has never actually rendered in production. Both features stay: they are correct,
+ * cheap and tested, and the bound is still real, just much further away than the prose claimed.
  *
  * The two write paths stay deliberately different. Counting commits line-by-line and reports
  * per-line failures, because line 50 failing must not invalidate lines 1–49. A move is one atomic
@@ -283,7 +290,8 @@ export default function InventoryCountPage() {
    * The search term the server has been asked about.
    *
    * Place-scoped mode filters server-side, so the raw keystrokes are debounced into this before
-   * becoming a request. Company-wide mode filters `countable` in memory and ignores it.
+   * becoming a request. Company-wide mode filters `countable` in memory and ignores it — including
+   * **as a dependency**, which is what `placeSearch` below exists to guarantee.
    */
   const [serverSearch, setServerSearch] = useState('');
 
@@ -364,6 +372,24 @@ export default function InventoryCountPage() {
     };
   }, [companyId]);
 
+  /**
+   * The loader's search and page, gated to the mode that actually has them.
+   *
+   * Only place-scoped mode reads a server-side term or turns pages, but both `serverSearch` and
+   * `page` are shared state, so listing them raw as dependencies made a company-wide keystroke
+   * re-run the loader for nothing: `loadCountCandidates` + `getBalancesForParts` + `getLocations`
+   * fetched the entire stocked catalogue a second time, returned the identical array, and replaced
+   * it — re-rendering every row for a filter `visible` had already applied in the browser 300ms
+   * earlier, with no spinner to show for it (`paging` only drives the place-scoped pager).
+   *
+   * Gating here rather than branching inside the effect keeps the fix provable: company-wide these
+   * are literal constants, so no keystroke CAN produce a new dependency value. The alternative —
+   * a ref remembering the last-loaded key — would put a general-purpose fetch dedupe in place of
+   * one specific fact, and it has to keep enumerating every dependency correctly forever.
+   */
+  const placeSearch = locationMode ? serverSearch : '';
+  const placePage = locationMode ? page : 0;
+
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -372,9 +398,9 @@ export default function InventoryCountPage() {
       // page turn would throw away the toolbar and the pager you just pressed.
       setPaging(true);
       try {
-        // Place-scoped: read one page of THIS bin's contents. `serverSearch` is a dependency, so
-        // typing re-runs this against the server — `Unassigned` holds every part a shop owns and
-        // cannot be filtered in the browser.
+        // Place-scoped: read one page of THIS bin's contents. `placeSearch` is a dependency, so
+        // typing re-runs this against the server — a bin's contents are not in memory to filter,
+        // and only the server knows the `total` the pager reports.
         if (locationId) {
           const locations = await getLocations(companyId);
           if (cancelled) return;
@@ -447,7 +473,11 @@ export default function InventoryCountPage() {
             leaves.length === 1 && leaves[0].id === here.id
               ? [{ id: here.id, name: here.name, path: here.name }]
               : leaves,
-            { search: serverSearch, offset: page * LOCATION_PAGE_SIZE, limit: LOCATION_PAGE_SIZE },
+            {
+              search: placeSearch,
+              offset: placePage * LOCATION_PAGE_SIZE,
+              limit: LOCATION_PAGE_SIZE,
+            },
           );
           if (cancelled) return;
           setCandidates(found);
@@ -498,10 +528,12 @@ export default function InventoryCountPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, locationId, partIdParam, serverSearch, page, reloadKey, rememberOpenedWith]);
+  }, [companyId, locationId, partIdParam, placeSearch, placePage, reloadKey, rememberOpenedWith]);
 
   // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
-  // is unconditional so the two modes don't need different effect shapes.
+  // is unconditional so the two modes don't need different effect shapes. Company-wide that costs
+  // one render whose `visible`/`groups` memos are already cached, and zero requests — `placeSearch`
+  // is what makes the second half of that true.
   useEffect(() => {
     const id = setTimeout(() => {
       const next = search.trim();
@@ -539,6 +571,13 @@ export default function InventoryCountPage() {
    * row per place. Keeping the picker part-grained is deliberate: this list is unbounded,
    * unvirtualised and filtered in the browser, so multiplying it by places-per-part would cost a
    * lot and buy nothing. Nobody picks a *shelf* when deciding which parts to walk.
+   *
+   * Unbounded is measured, not assumed. This filters on `is_stocked`, so the biggest real list is
+   * **722 rows** at Contour — not the 8,451-part catalogue, which is the number
+   * [#658](https://github.com/debola31/Jigged/issues/658) reached for. 722 unvirtualised rows on
+   * the office computer this screen is used from is a dense desktop table, which is fine. Revisit
+   * above ~5k stocked parts; server-side search here would trade an instant filter for a debounced
+   * round trip, and at 722 that is a worse screen, not a better one.
    */
   const groups = useMemo(() => groupByPart(visible), [visible]);
 
@@ -862,7 +901,9 @@ export default function InventoryCountPage() {
       setMoveTo(null);
       const { candidates: found, total } = await loadCountCandidatesForPlaces(
         [{ id: locationId, name: locationName, path: locationName }],
-        { search: serverSearch },
+        // `placeSearch`, not `serverSearch` — one name for one concept. Put-away only runs
+        // place-scoped, where the two are equal by construction.
+        { search: placeSearch },
       );
       setCandidates(found);
       setHereTotal(total);
@@ -896,8 +937,9 @@ export default function InventoryCountPage() {
    * system is wrong about where something lives.
    *
    * Three things it must not do, each of which would lose typed counts:
-   *  - touch the URL, or `serverSearch`: the loader effect depends on both and calls
-   *    `setEntries({})` unconditionally, so either would wipe the sheet.
+   *  - touch the URL, or `serverSearch`: the loader effect depends on both (on `serverSearch` via
+   *    `placeSearch`, i.e. on the `?location&part=` sheet but not the `?part=` one) and its
+   *    part-scoped branches call `setEntries({})`, so either would wipe the sheet.
    *  - add a second row for a place already listed — two entries for one (part, place) commit
    *    twice to the same shelf, last write silently winning. Idempotent instead.
    *  - assume a zero balance. `loadPartAtLocationCandidate` READS it, so confirming an empty
@@ -1197,11 +1239,15 @@ export default function InventoryCountPage() {
                 }}
               />
 
-              {/* A pager, not a notice. Saying "showing 100 of 9,428, search to narrow it down"
-                  was honest and still left `Unassigned` — the bin that most needs emptying,
-                  because the auto-track trigger seeds a row there for every stocked part —
-                  impossible to work through. Ticks survive a page turn: the sheet holds the
-                  chosen rows themselves, not indexes into this list. */}
+              {/* A pager, not a notice. Saying "showing 100 of N, search to narrow it down" was
+                  honest and still left the bin that most needs emptying impossible to work
+                  through. Ticks survive a page turn: the sheet holds the chosen rows themselves,
+                  not indexes into this list.
+
+                  The N that motivated this was 9,428 — `Unassigned` when the auto-track trigger
+                  left a row there for every stocked part. `20260802144310` ended that; the real
+                  figure is 57 at Contour, so this pager has never rendered in production. Kept
+                  anyway: it is the right shape, and it costs nothing until it is needed. */}
               {locationMode && hereTotal > LOCATION_PAGE_SIZE && (
                 <Stack
                   direction="row"

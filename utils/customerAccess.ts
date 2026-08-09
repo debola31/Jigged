@@ -287,7 +287,6 @@ function formDataToColumns(formData: CustomerFormData) {
   return {
     name: formData.name.trim(),
     default_payment_terms: formData.default_payment_terms.trim() || null,
-    default_fob_point: formData.default_fob_point.trim() || null,
     credit_status: formData.credit_status,
     credit_hold_note: formData.credit_hold_note.trim() || null,
   };
@@ -388,7 +387,7 @@ async function reviveArchivedCustomerByName(
   // person can see what happened last time.
   const filled = formDataToColumns(formData);
   const revivePatch: Record<string, string | null> = { name: filled.name };
-  for (const key of ['default_payment_terms', 'default_fob_point'] as const) {
+  for (const key of ['default_payment_terms'] as const) {
     if (filled[key] !== null) revivePatch[key] = filled[key];
   }
 
@@ -538,8 +537,7 @@ export function pickPrimaryContact<T extends { id: string; is_primary: boolean }
 }
 
 /**
- * The customer's STANDING TERMS — payment terms, lead time and FOB point,
- * resolved for a NEW quote.
+ * The customer's STANDING TERMS — payment terms — resolved for a NEW quote.
  *
  * These are siblings of pickBillingAddress / pickShippingAddress /
  * pickPrimaryContact above and are used at exactly the same moment:
@@ -563,12 +561,6 @@ export function pickPaymentTerms(
   return customer?.default_payment_terms?.trim() || null;
 }
 
-export function pickFobPoint(
-  customer: Pick<Customer, 'default_fob_point'> | null | undefined,
-): string | null {
-  return customer?.default_fob_point?.trim() || null;
-}
-
 /**
  * Does this quote's value still match the customer's current standing default?
  *
@@ -589,11 +581,10 @@ export function hasTermDrift(
   // terms, so there is no disagreement between what we offered and what we now
   // say, and the chip has nothing to report.
   //
-  // This used to return true here, and the cost was a chip storm: quotes.fob_point
-  // is newer than the quotes themselves, so every pre-existing quote carries
-  // NULL, and the first time a shop filled in a customer's FOB point every one
-  // of that customer's open quotes grew a "FOB differs" chip at once. Same for
-  // payment terms and lead time the first time a shop fills those in. The
+  // This used to return true here, and the cost was a chip storm: a standing-terms
+  // column is newer than the quotes themselves, so every pre-existing quote
+  // carries NULL, and the first time a shop filled one in every one of that
+  // customer's open quotes grew a "differs" chip at once. The
   // comment on the drift block one level up already names this failure for the
   // shop-default case — "a chip that fires on everything at once is a chip
   // people learn to ignore" — and it applies identically here.

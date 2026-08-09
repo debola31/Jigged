@@ -136,5 +136,4 @@ export const CUSTOMER_FIELDS: { key: string; label: string; required: boolean }[
   // ships — so this arrives populated rather than needing to be typed per
   // customer after the fact.
   { key: 'default_payment_terms', label: 'Payment Terms', required: false },
-  { key: 'default_fob_point', label: 'FOB Point', required: false },
 ];

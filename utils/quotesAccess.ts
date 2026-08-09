@@ -120,16 +120,16 @@ const QUOTE_LIST_SELECT = `
   jobs!left(id, job_number)
 `;
 
-// The customer's standing terms (default_payment_terms /
-// default_fob_point) ride along on the DETAIL select so the page can compare what
-// this quote was issued with against the customer's CURRENT default and surface
+// The customer's standing terms (default_payment_terms) ride along on the DETAIL
+// select so the page can compare what this quote was issued with against the
+// customer's CURRENT default and surface
 // drift as a chip. Comparison only — the quote always RENDERS its own columns.
 // Deliberately absent from QUOTE_LIST_SELECT: the list shows no terms.
 const QUOTE_DETAIL_SELECT = `
   *,
   customers!left(
     id, name,
-    default_payment_terms, default_fob_point,
+    default_payment_terms,
     customer_contacts(id, name, role, email, phone, is_primary, is_billing_default, deleted_at),
     addresses:customer_addresses(
       id,
@@ -421,7 +421,6 @@ export async function createQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: paymentTerms,
-      fob_point: nullIfBlank(formData.fob_point),
       expiration_date: expirationDate,
       status: 'active',
       created_by: user?.id ?? null,
@@ -574,7 +573,6 @@ export async function updateQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: nullIfBlank(formData.payment_terms),
-      fob_point: nullIfBlank(formData.fob_point),
       expiration_date: newExpiration,
       status: nextStatus,
       ...(nextStatus !== existing.status

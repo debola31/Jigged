@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import posthog from 'posthog-js';
 import NextLink from 'next/link';
@@ -286,6 +286,49 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     if (focusBlockIndex !== null) setFocusBlockIndex(null);
   }, [focusBlockIndex]);
 
+  /**
+   * Live DOM node per part block, so a block can be scrolled into view once it
+   * has something to show.
+   */
+  const blockRefs = useRef<Map<number, HTMLElement>>(new Map());
+  /**
+   * Block index awaiting a scroll, set when the user PICKS a part.
+   *
+   * A ref rather than state on purpose: this is a one-shot side effect, and
+   * holding it in state would mean clearing it from an effect — the
+   * set-state-in-effect shape the lint ratchet is walking back.
+   *
+   * The gate matters. Tiers load for every block on an edit-mode open too, and
+   * scrolling on that would yank the page around the moment a quote is opened.
+   * Only a deliberate pick arms it.
+   */
+  const scrollAfterLoadRef = useRef<number | null>(null);
+
+  /**
+   * Reveal a block after its tiers land. Choosing a part makes the block grow —
+   * quantity row, price, lead-time disclosure — and all of that appears BELOW
+   * the picker the user just used, so on a multi-part quote it lands off-screen
+   * and they have to scroll to find what they just created.
+   *
+   * `block: 'nearest'` is the whole trick: it does nothing when the block is
+   * already fully visible, and otherwise scrolls the minimum needed to show it.
+   * No jump on a short quote, no hunting on a long one.
+   */
+  const revealBlockAfterLoad = useCallback((idx: number) => {
+    if (scrollAfterLoadRef.current !== idx) return;
+    scrollAfterLoadRef.current = null;
+    // One frame, so React has committed the rows before we measure them.
+    requestAnimationFrame(() => {
+      const prefersReducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      blockRefs.current.get(idx)?.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'nearest',
+      });
+    });
+  }, []);
+
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   // Full customer rows (with addresses + contacts) keyed by id so the
   // customer-change handler can resolve address/contact defaults without
@@ -448,8 +491,12 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         }
         return next;
       });
+    } finally {
+      // Both paths: the block now shows either its rows or an error, and either
+      // way that is what the user needs to see.
+      revealBlockAfterLoad(idx);
     }
-  }, []);
+  }, [revealBlockAfterLoad]);
 
   // Load tiers for each part block when its part_id changes.
   useEffect(() => {
@@ -788,6 +835,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     // keys off the part-ids string — which doesn't change when the id is the
     // same. Trigger the fetch directly so the block reloads either way.
     if (option) {
+      // Arm the reveal: this is a deliberate pick, so the rows it produces are
+      // worth scrolling to once they exist.
+      scrollAfterLoadRef.current = idx;
       loadTiersForBlock(idx, option.id);
     }
   };
@@ -1458,7 +1508,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // unitless quantity.
 
             return (
-              <Box key={idx} sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}>
+              <Box
+                key={idx}
+                ref={(el: HTMLElement | null) => {
+                  if (el) blockRefs.current.set(idx, el);
+                  else blockRefs.current.delete(idx);
+                }}
+                sx={{ mb: idx === partBlocks.length - 1 ? 0 : 3 }}
+              >
                 {idx > 0 && <Divider sx={{ mb: 3 }} />}
                 <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 2 }}>
                   <Box sx={{ flex: 1 }}>

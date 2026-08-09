@@ -46,12 +46,25 @@ def resolve_sentry_environment() -> str:
 # Initialize Sentry for error monitoring.
 SENTRY_ENVIRONMENT = resolve_sentry_environment()
 
+# Only DEPLOYED environments report, matching the frontend's
+# `enabled: process.env.NODE_ENV === "production"` guard in instrumentation-client.ts.
+#
+# The pytest guard alone was not enough. `load_dotenv` above reads SENTRY_DSN out of
+# .env.local, so a developer running `python api/index.py` reports to the real project —
+# tagged `development`, but sitting in the same queue as production, and indistinguishable
+# from it at a glance. Every deliberately-provoked local failure (a `stripe listen` secret
+# that no longer matches, a QuickBooks sandbox 500) lands there as a real issue, which is
+# one of the explanations for backend issues appearing after the code that filed them was
+# already fixed.
+_REPORTING_ENVIRONMENTS = {"production", "preview"}
+_SENTRY_ENABLED = not _UNDER_PYTEST and SENTRY_ENVIRONMENT in _REPORTING_ENVIRONMENTS
+
 # Disabling needs an EMPTY STRING, not None — there is no `enabled` kwarg, and a None
 # dsn makes the SDK fall back to reading SENTRY_DSN from the environment, which
 # `load_dotenv` above has already populated from .env.local. So `dsn=None` looks like
 # "off" and is actually "on"; only a falsy-but-not-None value truly disables it.
 sentry_sdk.init(
-    dsn="" if _UNDER_PYTEST else os.getenv("SENTRY_DSN"),
+    dsn=os.getenv("SENTRY_DSN") if _SENTRY_ENABLED else "",
     traces_sample_rate=0.1,
     environment=SENTRY_ENVIRONMENT,
     send_default_pii=True,

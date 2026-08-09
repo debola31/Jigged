@@ -18,6 +18,7 @@ import AdminGuard from '@/components/auth/AdminGuard';
 import StatusChip from '@/components/common/StatusChip';
 import SettingsSection from '@/components/settings/SettingsSection';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
+import CompanyLogoCard from '@/components/settings/CompanyLogoCard';
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
 import DefaultPaymentTermsCard from '@/components/settings/DefaultPaymentTermsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
@@ -82,6 +83,10 @@ export default function SettingsPage() {
 
       {/* Shop contact info (header on printed quotes) */}
       <CompanyProfileCard companyId={companyId} />
+
+      {/* The other half of the printed header: the shop's own mark. Next to the profile card
+          because the two are the same job — what a customer sees at the top of your paperwork. */}
+      <CompanyLogoCard companyId={companyId} />
 
       {/* Company-configurable business defaults (quote validity, etc.) */}
       <AppDefaultsCard companyId={companyId} />

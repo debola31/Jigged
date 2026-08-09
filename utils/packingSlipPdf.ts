@@ -200,6 +200,77 @@ export function packingSlipPdfFilename(shipment: Pick<ShipmentWithRelations, 'pa
 }
 
 /**
+ * The one line that says where a document came from, on every document we print.
+ *
+ * Deliberately **unconditional and unconfigurable**. It is metadata at footer weight — same size,
+ * same grey, same slot as the page number — not a badge and never a logo. Keeping it as one
+ * exported constant rather than three copied strings is what stops the three generators drifting
+ * into three slightly different wordings.
+ *
+ * On the packing slip this replaces `Generated {date} · {company}`: the company name is already the
+ * largest thing in the header, so the footer was restating it.
+ */
+export function attributionLine(): string {
+  return `Generated ${formatDate(new Date().toISOString())} with jigged.app`;
+}
+
+/** The box a company logo is fitted into, in points. Square, but the logo need not be. */
+export const LOGO_BOX = 56;
+
+/**
+ * The minimum a jsPDF document must expose to have a logo drawn into it. Keeps this testable
+ * without a real jsPDF, and `compression` mirrors jsPDF's own union so a real document satisfies
+ * this structurally.
+ */
+export interface LogoDrawTarget {
+  getImageProperties: (data: string) => { width: number; height: number; fileType: string };
+  addImage: (
+    data: string,
+    format: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    alias?: string,
+    compression?: 'NONE' | 'FAST' | 'MEDIUM' | 'SLOW',
+  ) => void;
+}
+
+/**
+ * Draw a company logo fitted inside `LOGO_BOX`, and return the width it actually occupied so the
+ * caller can place the company name beside it.
+ *
+ * **Aspect is preserved.** Both generators used to pass a 56×56 square regardless of the source,
+ * which squashed every wordmark — the common case, since a shop's logo is usually wider than it is
+ * tall. `getImageProperties` also supplies the real format, so a JPEG renders instead of being
+ * declared 'PNG' and failing into a silent catch.
+ *
+ * Returns 0 and draws nothing on any failure; the caller falls back to the company name in bold,
+ * which is the layout that has been shipping all along.
+ */
+export function drawCompanyLogo(
+  doc: LogoDrawTarget,
+  dataUrl: string,
+  x: number,
+  y: number,
+  box: number = LOGO_BOX,
+): number {
+  try {
+    const props = doc.getImageProperties(dataUrl);
+    if (!props?.width || !props?.height) return 0;
+    const scale = Math.min(box / props.width, box / props.height);
+    const w = props.width * scale;
+    const h = props.height * scale;
+    // Vertically centred in the box so a wide wordmark sits on the same optical line as the company
+    // name beside it rather than clinging to the top of the header.
+    doc.addImage(dataUrl, props.fileType, x, y + (box - h) / 2, w, h, undefined, 'FAST');
+    return w;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Pull the company logo as a base64 image so jsPDF can embed it. Skips
  * silently on any failure — the layout falls back to the company name
  * in plain bold text (mirrors the quote PDF).
@@ -374,20 +445,18 @@ export async function generatePackingSlipPdf(
   let logoBottom = headerTop;
 
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  let logoWidth = 0;
   if (logoDataUrl) {
-    try {
-      const logoSize = 56;
-      doc.addImage(logoDataUrl, 'PNG', MARGIN, headerTop, logoSize, logoSize, undefined, 'FAST');
-      logoBottom = headerTop + logoSize;
-    } catch {
-      logoBottom = headerTop;
-    }
+    logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
+    if (logoWidth > 0) logoBottom = headerTop + LOGO_BOX;
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(30);
-  const shopNameX = logoDataUrl ? MARGIN + 70 : MARGIN;
+  // Measured from what was actually drawn, not a fixed 70pt: a wide wordmark used to run under the
+  // company name.
+  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
   doc.text(company.name, shopNameX, headerTop + 14);
 
   const shopLines = buildShopHeaderLines(company);
@@ -675,11 +744,7 @@ export async function generatePackingSlipPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
-    doc.text(
-      `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
-      MARGIN,
-      footerY,
-    );
+    doc.text(attributionLine(), MARGIN, footerY);
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

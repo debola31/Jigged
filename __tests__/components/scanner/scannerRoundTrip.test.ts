@@ -1,20 +1,33 @@
 import { describe, it, expect } from 'vitest';
 
-import { locationIdFromScan } from '@/lib/jiggedScan';
+import {
+  buildScanUrl,
+  foreignCompanyRejection,
+  parseJiggedScan,
+  scanDestination,
+  type JiggedScan,
+} from '@/lib/jiggedScan';
+import { TRAVELER_QR_EC } from '@/utils/jobTravelerPdf';
+import { LABEL_QR_EC } from '@/utils/locationLabelPdf';
 
-const UUID = '71000000-0000-0000-0000-000000000002';
+const CO = '71000000-0000-0000-0000-000000000002';
+const OTHER_CO = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const LOC = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
+const PART = '99999999-8888-7777-6666-555555555555';
+const ORIGIN = 'https://www.jigged.app';
 
 /**
- * The round trip: what we print, we can read.
+ * The round trip: what we print, we can read, and it goes to the right place.
  *
- * `LocationScanner.test.tsx` tests the two ends in isolation — `qrcode` writes the label,
- * `zxing-wasm` reads a code, `locationIdFromScan` parses the text. None of that proves the *chain*
- * holds, and the chain is what a scan actually is. If the printed error-correction level, size or
- * payload ever stopped being decodable, every one of those tests would still pass while no label in
- * the shop scanned.
+ * `jiggedScan.test.ts` tests the string handling and `qrVersionCeiling.test.ts` tests the encoding
+ * budget, but neither proves the *chain* — and the chain is what a scan actually is. If the printed
+ * error-correction level, the payload or the charset ever stopped being decodable, both of those
+ * would still pass while no label in the shop scanned. That is not hypothetical: the codes this
+ * replaced encoded fine, parsed fine, and took 30+ seconds to read off fresh paper.
  *
- * Uses the real decoder against the real `.wasm` the app serves, and the same `errorCorrectionLevel`
- * and width `locationLabelPdf` prints at.
+ * So this runs the **real decoder** against the **real `.wasm` the app serves**, on codes generated
+ * at the exact error-correction levels the two PDFs print at, and follows the decoded text all the
+ * way to a route.
  *
  * ## Why this lives in its own file
  *
@@ -36,27 +49,72 @@ const UUID = '71000000-0000-0000-0000-000000000002';
  * postinstall (the file is gitignored). An install with `--ignore-scripts` will fail this with
  * ENOENT — which is the correct failure, since the app would have no decoder either.
  */
-describe('printed label → decoder → location id', () => {
-  it('reads back a label generated exactly as the PDF prints it', async () => {
-    const QRCode = (await import('qrcode')).default;
-    const { readFile } = await import('node:fs/promises');
-    const { prepareZXingModule, readBarcodes } = await import('zxing-wasm/reader');
 
-    // The same file `scripts/copy-scanner-wasm.mjs` puts in public/ and the app loads at runtime.
-    const wasmBinary = await readFile('public/wasm/zxing_reader.wasm');
-    await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
+/** Encode with `qrcode`, decode with `zxing-wasm`, return exactly what the scanner would see. */
+async function printAndScan(payload: string, errorCorrectionLevel: 'M' | 'H'): Promise<string[]> {
+  const QRCode = (await import('qrcode')).default;
+  const { readFile } = await import('node:fs/promises');
+  const { prepareZXingModule, readBarcodes } = await import('zxing-wasm/reader');
 
-    const url = `http://localhost:3000/operator/co1/login?location=${UUID}`;
-    // errorCorrectionLevel 'H' and 320px match utils/locationLabelPdf.ts.
-    const png = await QRCode.toBuffer(url, { errorCorrectionLevel: 'H', width: 320 });
+  // The same file `scripts/copy-scanner-wasm.mjs` puts in public/ and the app loads at runtime.
+  const wasmBinary = await readFile('public/wasm/zxing_reader.wasm');
+  await prepareZXingModule({ overrides: { wasmBinary }, fireImmediately: true });
 
-    // The encoded bytes directly, not a Blob: jsdom's Blob shim has no `arrayBuffer()`, which the
-    // decoder calls. `readBarcodes` accepts a Uint8Array of an encoded image just as happily.
-    const results = await readBarcodes(new Uint8Array(png), { formats: ['QRCode'] });
+  const png = await QRCode.toBuffer(payload, { errorCorrectionLevel, scale: 4, margin: 4 });
 
-    expect(results).toHaveLength(1);
-    expect(results[0].text).toBe(url);
-    // And the parser gets the id back out of what the decoder actually returned.
-    expect(locationIdFromScan(results[0].text)).toBe(UUID);
-  }, 30_000);
+  // The encoded bytes directly, not a Blob: jsdom's Blob shim has no `arrayBuffer()`, which the
+  // decoder calls. `readBarcodes` accepts a Uint8Array of an encoded image just as happily.
+  const results = await readBarcodes(new Uint8Array(png), { formats: ['QRCode'] });
+  return results.map((r) => r.text);
+}
+
+const kinds: Array<{ what: string; scan: JiggedScan; ec: 'M' | 'H'; destination: string }> = [
+  {
+    what: 'location label',
+    scan: { kind: 'location', companyId: CO, locationId: LOC },
+    ec: LABEL_QR_EC,
+    destination: `/operator/${CO}/inventory/locations/${LOC}`,
+  },
+  {
+    what: 'job traveler',
+    scan: { kind: 'traveler', companyId: CO, jobPartId: PART },
+    ec: TRAVELER_QR_EC,
+    destination: `/operator/${CO}/parts/${PART}`,
+  },
+];
+
+describe.each(kinds)('$what: generate → decode → route', ({ scan, ec, destination }) => {
+  it(
+    'reads back and routes a code generated exactly as the PDF prints it',
+    async () => {
+      const payload = buildScanUrl(scan, ORIGIN);
+      const decoded = await printAndScan(payload, ec);
+
+      expect(decoded).toHaveLength(1);
+      // Character-for-character, including the case — the uppercase is not cosmetic.
+      expect(decoded[0]).toBe(payload);
+
+      const parsed = parseJiggedScan(decoded[0]);
+      expect(parsed).toEqual(scan);
+      expect(scanDestination(parsed!)).toBe(destination);
+    },
+    30_000,
+  );
+});
+
+describe('the cross-tenant check survives a real decode', () => {
+  it(
+    'refuses another company’s label off the page, before any navigation',
+    async () => {
+      const foreign: JiggedScan = { kind: 'location', companyId: OTHER_CO, locationId: LOC };
+      const decoded = await printAndScan(buildScanUrl(foreign, ORIGIN), LABEL_QR_EC);
+
+      const parsed = parseJiggedScan(decoded[0]);
+      expect(parsed).not.toBeNull();
+      // It decodes perfectly — that is the whole danger, and why the check is not a decode failure.
+      expect(foreignCompanyRejection(parsed!, CO)).toMatch(/different company/i);
+      expect(foreignCompanyRejection(parsed!, OTHER_CO)).toBeNull();
+    },
+    30_000,
+  );
 });

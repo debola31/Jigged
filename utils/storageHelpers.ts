@@ -56,8 +56,26 @@ export function generateStoragePath(
 }
 
 /**
+ * The bucket company logos live in.
+ *
+ * Not the env-configured attachments bucket: logos get their own so the bucket itself can enforce
+ * PNG/JPEG and a 2 MB cap, which a client-side check cannot. See
+ * `supabase/migrations/20260809002922_logos_storage_bucket.sql`.
+ */
+export const LOGOS_BUCKET = 'logos';
+
+/** What a company logo may be. Enforced here *and* by the bucket — the second one is the real one. */
+export const LOGO_ALLOWED_MIME = ['image/png', 'image/jpeg'] as const;
+
+/** 2 MB, matching the bucket's `file_size_limit` exactly so the two cannot disagree. */
+export const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
  * Generate storage path for a company logo.
  * A fresh uuid each upload gives automatic cache-busting.
+ *
+ * The first segment is the company id because that is what the `logos` bucket's RLS policies gate
+ * on — same convention as `generateStoragePath`.
  */
 export function generateCompanyLogoPath(
   companyId: string,
@@ -129,14 +147,19 @@ async function withDeadline<T>(work: Promise<T>, ms: number, message: string): P
 }
 
 /**
- * Upload file to Supabase Storage
+ * Upload file to Supabase Storage.
+ *
+ * `bucket` defaults to the env-configured attachments bucket, which is what every caller but the
+ * logo upload wants. It is a parameter rather than a second copy of this function because the
+ * deadline logic above is the part worth having in one place.
  */
 export async function uploadFileToStorage(
   path: string,
-  file: File | Blob
+  file: File | Blob,
+  bucketName?: string,
 ): Promise<void> {
   const supabase = getSupabase();
-  const bucket = getStorageBucket();
+  const bucket = bucketName ?? getStorageBucket();
 
   const { error } = await withDeadline(
     supabase.storage
@@ -162,10 +185,11 @@ export async function uploadFileToStorage(
  * Delete file from Supabase Storage
  */
 export async function deleteFileFromStorage(
-  path: string
+  path: string,
+  bucketName?: string,
 ): Promise<void> {
   const supabase = getSupabase();
-  const bucket = getStorageBucket();
+  const bucket = bucketName ?? getStorageBucket();
 
   // Bounded for the same reason as the upload, and it is not hypothetical: the media rollback path
   // awaits this after a failed insert, so a hung remove would hang the composer one branch below
@@ -190,10 +214,11 @@ export async function deleteFileFromStorage(
  */
 export async function getSignedUrl(
   path: string,
-  expiresIn: number = 3600
+  expiresIn: number = 3600,
+  bucketName?: string,
 ): Promise<string> {
   const supabase = getSupabase();
-  const bucket = getStorageBucket();
+  const bucket = bucketName ?? getStorageBucket();
 
   const { data, error } = await supabase.storage
     .from(bucket)

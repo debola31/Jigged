@@ -22,6 +22,7 @@ import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import LocationScanner from '@/components/scanner/LocationScanner';
 import { scanDestination } from '@/lib/jiggedScan';
+import { operatorNavValue } from '@/lib/operatorNav';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -191,16 +192,10 @@ export default function OperatorLayout({
     // is only set on success, so a failed check leaves nothing to skip past.
   }, [companyId, router, isAuthPage, supabase, retryNonce]);
 
-  // Update nav value based on current path.
-  //
-  // `/profile` now redirects to `/my-work` (the "Me" tab), so it needs no branch of its own —
-  // the redirect lands on a path that already matches below. Keeping a `'profile'` branch here
-  // would have set a nav value no tab owns, which reads as "no tab selected".
+  // Update nav value based on current path. The mapping lives in `lib/operatorNav.ts` so it can be
+  // asserted without mounting this layout — see the note there about why Jobs is a fall-through.
   useEffect(() => {
-    if (pathname?.includes('/inventory')) setNavValue('inventory');
-    else if (pathname?.includes('/maintenance')) setNavValue('maintenance');
-    else if (pathname?.includes('/my-work')) setNavValue('my-work');
-    else setNavValue('jobs');
+    setNavValue(operatorNavValue(pathname));
   }, [pathname]);
 
   /** Scan opens over whatever you were doing; every other tab is a route. */
@@ -233,20 +228,12 @@ export default function OperatorLayout({
    */
   const handleScanLocation = (locationId: string) => {
     setScanning(false);
-    router.push(scanDestination(companyId, { kind: 'location', locationId }));
+    router.push(scanDestination({ kind: 'location', companyId, locationId }));
   };
 
-  const handleScanTraveler = ({
-    jobId,
-    jobPartId,
-    operationId,
-  }: {
-    jobId: string;
-    jobPartId: string;
-    operationId?: string;
-  }) => {
+  const handleScanTraveler = ({ jobPartId }: { jobPartId: string }) => {
     setScanning(false);
-    router.push(scanDestination(companyId, { kind: 'traveler', jobId, jobPartId, operationId }));
+    router.push(scanDestination({ kind: 'traveler', companyId, jobPartId }));
   };
 
   // Don't show header/nav on login page — same `isAuthPage` the auth effect keys off.
@@ -363,6 +350,7 @@ export default function OperatorLayout({
                either handler runs. */
             expectedCompanyId={companyId}
             title="Scan a Jigged label"
+            surface="operator_tabbar"
           />
         </OperatorChromeProvider>
       </OperatorStationProvider>

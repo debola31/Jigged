@@ -12,6 +12,7 @@ import type { AddressSnapshot } from '@/types/documentSnapshot';
 import type { Company } from '@/utils/companyAccess';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
+import { attributionLine } from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
 
@@ -419,14 +420,17 @@ export async function generateQuotePdf(
   }
 
   // ---------- Footer (every page) ----------
-  // The company name and quote dates already sit in the header, so the footer
-  // carries the preparer credit (relocated from the old top "CREATED BY"
-  // column) on the left and the page number on the right. The left side is
-  // blank when the quote has no known creator.
+  // The company name and quote dates already sit in the header, so the footer carries where the
+  // document came from on the left and the page number on the right.
+  //
+  // The preparer credit (relocated from the old top "CREATED BY" column) is NOT displaced by the
+  // attribution line — it moves one line up instead. This footer is the only place a quote records
+  // who prepared it, so dropping it to make room would lose a fact the customer may need to call
+  // someone about; the attribution line only ever restates something we already know.
   const preparedName = quote.created_by_member?.name ?? null;
   const preparedEmail = quote.created_by_member?.email ?? null;
   const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
-  const footerLeft = preparedText ? `Prepared by ${preparedText}` : '';
+  const preparedLine = preparedText ? `Prepared by ${preparedText}` : '';
 
   const pageCount = doc.getNumberOfPages();
   for (let p = 1; p <= pageCount; p++) {
@@ -439,9 +443,10 @@ export async function generateQuotePdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
-    if (footerLeft) {
-      doc.text(footerLeft, MARGIN, footerY);
+    if (preparedLine) {
+      doc.text(preparedLine, MARGIN, footerY - 11);
     }
+    doc.text(attributionLine(), MARGIN, footerY);
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

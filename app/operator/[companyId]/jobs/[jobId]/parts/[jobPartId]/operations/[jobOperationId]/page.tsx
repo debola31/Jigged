@@ -78,7 +78,9 @@ export default function OperatorOperationActionPage() {
   const jobPartId = params.jobPartId as string;
   const jobOperationId = params.jobOperationId as string;
 
-  const travelerHref = `/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}`;
+  // The traveler moved off the `/jobs/{jobId}` prefix so its printed QR could drop a UUID; this
+  // route kept it, because it uses `jobId` for more than the path.
+  const travelerHref = `/operator/${companyId}/parts/${jobPartId}`;
 
   const { stationId, stationName, initializing } = useStationContext();
   const nav = useOperatorNav();

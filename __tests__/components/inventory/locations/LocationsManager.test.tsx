@@ -281,19 +281,23 @@ describe('LocationsManager', () => {
   });
 
   /**
-   * `companyName` was accepted but never passed, so the printed label sheet had no heading —
-   * the kind of defect only an end-to-end read of the prop chain finds.
+   * The `Unassigned` system bucket is not a place anyone can stick a label on, so printing one for
+   * it would waste a sticker and put a QR on a shelf that does not exist.
    */
-  it('prints the company name on the label sheet and never labels the system bucket', async () => {
+  it('prints every real place and never labels the system bucket', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" companyName="Vanguard Precision Works" />);
+    render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
     await user.click(screen.getByRole('button', { name: /print all labels/i }));
 
     const arg = vi.mocked(generateLocationLabelSheet).mock.calls[0][0];
-    expect(arg.heading).toBe('Vanguard Precision Works');
     expect(arg.labels.map((l) => l.id).sort()).toEqual(['cab3', 'shelf-a', 'shelf-b', 'yard']);
+    // No heading and no origin. The sheet is die-cut Avery stock, where a page heading prints
+    // across label 1, and the scan origin is pinned so a preview-printed sticker can't outlive its
+    // deployment.
+    expect(arg).not.toHaveProperty('heading');
+    expect(arg.baseUrl).toBeUndefined();
   });
 });
 

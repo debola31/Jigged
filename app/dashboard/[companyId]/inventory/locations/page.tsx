@@ -14,7 +14,7 @@ export default function InventoryLocationsPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const { setTitle } = usePageTitle();
-  const { features, companyName, loading } = useCompanyFeatures();
+  const { features, loading } = useCompanyFeatures();
   const enabled = features.inventory_locations;
 
   useEffect(() => {
@@ -48,9 +48,7 @@ export default function InventoryLocationsPage() {
           there is nothing to go back *to* — and the page it pointed at no longer exists, so it
           would have bounced through a redirect to land on Parts. A back link out of a top-level
           destination is chrome pretending to be navigation. */}
-      {/* `companyName` was never passed before, so the QR label sheet printed with no heading —
-          the prop existed and read `undefined` on every call. */}
-      <LocationsManager companyId={companyId} companyName={companyName ?? undefined} />
+      <LocationsManager companyId={companyId} />
     </Box>
   );
 }

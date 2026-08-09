@@ -72,8 +72,8 @@ export default defineConfig({
         //                            functions 45.95 / lines 51.36
         // 2026-05-28 (3f QuoteForm):   statements 50.37 / branches 45.65 /
         //                              functions 44.77 / lines 51.78
-        // 2026-05-28 (3f StationQRCode): statements 50.83 / branches 45.89 /
-        //                                functions 45.07 / lines 52.26
+        // 2026-05-28 (3f, fourth sub-PR):  statements 50.83 / branches 45.89 /
+        //                                  functions 45.07 / lines 52.26
         // 2026-05-28 (3f import-ui + access files):
         //   statements 50.99 / branches 46.09 / functions 48.91 / lines 52.37
         statements: 50,

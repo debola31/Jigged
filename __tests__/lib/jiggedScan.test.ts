@@ -1,298 +1,238 @@
 import { describe, it, expect } from 'vitest';
 import {
-  companyIdFromScan,
+  base32ToUuid,
+  buildScanUrl,
   foreignCompanyRejection,
-  locationIdFromScan,
+  loginPassthroughUrl,
   parseJiggedScan,
+  safeNextPath,
   scanDestination,
+  uuidToBase32,
+  UUID_B32_LENGTH,
+  type JiggedScan,
 } from '@/lib/jiggedScan';
 
 /**
- * The location half of this parser is covered in depth by
- * `__tests__/components/scanner/LocationScanner.test.tsx`, which exercises
- * `locationIdFromScan` against a printed label, a bare UUID and seven kinds of foreign code.
- * Those tests pass unchanged through the wrapper, which is the point of keeping it.
+ * The scan scheme, end to end but without a camera: encode → decode → route.
  *
- * What's new here is the **traveler** half and the boundary between the two: one scanner now
- * resolves both kinds of Jigged QR, and the ways that can go wrong are all about telling them
- * apart.
+ * The physical half of the chain — that a QR encoded this way actually decodes off a printed page —
+ * lives in `__tests__/components/scanner/scannerRoundTrip.test.ts`, which runs the real `.wasm`.
+ * The version ceiling that keeps it scannable lives in `__tests__/utils/qrVersionCeiling.test.ts`.
+ * This file owns the string handling those two rely on.
  */
 
-const LOC = '11111111-2222-3333-4444-555555555555';
-const JOB = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const PART = '99999999-8888-7777-6666-555555555555';
+const CO = '11111111-2222-3333-4444-555555555555';
+const OTHER_CO = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const LOC = '99999999-8888-7777-6666-555555555555';
+const PART = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
 
-const locationUrl = (id = LOC) => `https://jigged.app/operator/co1/login?location=${id}`;
-const travelerUrl = (job = JOB, part = PART) =>
-  `https://jigged.app/operator/co1/login?job=${job}&part=${part}`;
+const ORIGIN = 'https://www.jigged.app';
+const location: JiggedScan = { kind: 'location', companyId: CO, locationId: LOC };
+const traveler: JiggedScan = { kind: 'traveler', companyId: CO, jobPartId: PART };
 
-describe('parseJiggedScan — location labels', () => {
-  it('reads a printed location label', () => {
-    expect(parseJiggedScan(locationUrl())).toEqual({ kind: 'location', locationId: LOC });
-  });
-
-  it('reads a bare UUID, so a keyboard wedge or a typed code works', () => {
-    expect(parseJiggedScan(LOC)).toEqual({ kind: 'location', locationId: LOC });
-  });
-
-  it('lowercases, so a scanner that upper-cases still matches stored ids', () => {
-    expect(parseJiggedScan(LOC.toUpperCase())).toEqual({ kind: 'location', locationId: LOC });
-    expect(parseJiggedScan(locationUrl(LOC.toUpperCase()))).toEqual({
-      kind: 'location',
-      locationId: LOC,
-    });
-  });
-
-  it('trims surrounding whitespace', () => {
-    expect(parseJiggedScan(`  ${LOC}\n`)).toEqual({ kind: 'location', locationId: LOC });
-  });
-});
-
-describe('parseJiggedScan — job travelers', () => {
-  it('reads a printed traveler sheet', () => {
-    expect(parseJiggedScan(travelerUrl())).toEqual({
-      kind: 'traveler',
-      jobId: JOB,
-      jobPartId: PART,
-    });
-  });
-
-  it('lowercases both ids', () => {
-    expect(parseJiggedScan(travelerUrl(JOB.toUpperCase(), PART.toUpperCase()))).toEqual({
-      kind: 'traveler',
-      jobId: JOB,
-      jobPartId: PART,
-    });
-  });
-
-  /**
-   * The traveler PDF always emits both. One without the other cannot open a traveler page, so
-   * accepting it would navigate somewhere broken — worse than saying "not a Jigged label".
-   */
-  it('refuses a job id with no part id', () => {
-    expect(parseJiggedScan(`https://jigged.app/operator/co1/login?job=${JOB}`)).toBeNull();
-  });
-
-  it('refuses a part id with no job id', () => {
-    expect(parseJiggedScan(`https://jigged.app/operator/co1/login?part=${PART}`)).toBeNull();
-  });
-
-  it('refuses a traveler whose ids are not UUIDs', () => {
-    expect(
-      parseJiggedScan('https://jigged.app/operator/co1/login?job=J-1234&part=17'),
-    ).toBeNull();
-  });
-});
-
-describe('parseJiggedScan — telling them apart', () => {
-  /**
-   * Our labels never emit both params. If something malformed does, location wins — which is
-   * exactly what the location-only parser did before this became a union, so nothing that used
-   * to resolve suddenly starts refusing.
-   */
-  it('prefers location when a malformed code somehow carries both', () => {
-    const both = `https://jigged.app/operator/co1/login?location=${LOC}&job=${JOB}&part=${PART}`;
-    expect(parseJiggedScan(both)).toEqual({ kind: 'location', locationId: LOC });
-  });
-
-  it('a bare UUID is a location, never a traveler — a traveler needs two ids', () => {
-    const scan = parseJiggedScan(JOB);
-    expect(scan).toEqual({ kind: 'location', locationId: JOB });
-  });
-
-  it('refuses codes from anywhere else', () => {
-    for (const foreign of [
-      '',
-      '   ',
-      'https://example.com/?location=not-a-uuid',
-      'https://ups.com/track?tracknum=1Z999',
-      '0123456789012', // an EAN-13 off a vendor box
-      'PART-4140-BAR', // a shop's own part sticker
-      'not a url at all',
-      `${LOC}-extra`, // a UUID with something appended must not match
-      'https://jigged.app/operator/co1/login', // our own login with no payload
-    ]) {
-      expect(parseJiggedScan(foreign), `should refuse: ${foreign}`).toBeNull();
+describe('base32 UUID codec', () => {
+  it('round-trips every UUID through exactly 26 characters', () => {
+    for (const uuid of [CO, OTHER_CO, LOC, PART, '00000000-0000-0000-0000-000000000000']) {
+      const code = uuidToBase32(uuid);
+      expect(code).toHaveLength(UUID_B32_LENGTH);
+      expect(base32ToUuid(code)).toBe(uuid);
     }
   });
-});
 
-describe('locationIdFromScan — the location-only view', () => {
-  it('returns the id for a location scan', () => {
-    expect(locationIdFromScan(locationUrl())).toBe(LOC);
+  it('emits only RFC 4648 base32, which is inside the QR alphanumeric charset', () => {
+    expect(uuidToBase32(PART)).toMatch(/^[A-Z2-7]{26}$/);
   });
 
-  /**
-   * The behaviour that must not drift: surfaces that only handle places (the board, the
-   * operator bin view) get null for a traveler rather than a job id they'd misread as a
-   * location.
-   */
-  it('returns null for a traveler, not the job id', () => {
-    expect(locationIdFromScan(travelerUrl())).toBeNull();
+  it('rejects a code whose padding bits are not zero, so the encoding stays injective', () => {
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const code = uuidToBase32(PART);
+    // The final character carries 3 real bits and 2 pad bits, so four characters share the same
+    // 128-bit prefix and would decode to the same UUID. Only the one with a zero pad is legal;
+    // accepting the other three would give every code four spellings.
+    const legalIndex = ALPHABET.indexOf(code[UUID_B32_LENGTH - 1]);
+    expect(legalIndex % 4).toBe(0);
+
+    for (let pad = 1; pad <= 3; pad++) {
+      const impostor = code.slice(0, -1) + ALPHABET[legalIndex + pad];
+      expect(base32ToUuid(impostor), `pad ${pad} must be refused`).toBeNull();
+    }
   });
 
-  it('returns null for foreign codes', () => {
-    expect(locationIdFromScan('https://ups.com/track?tracknum=1Z999')).toBeNull();
-  });
-});
-
-/**
- * Whose label is it? Separate from "what kind of label is it", because only some callers ask —
- * the operator tab-bar scanner does, to refuse another shop's paper before it becomes a
- * navigation.
- */
-describe('companyIdFromScan', () => {
-  const CO = '0f0f0f0f-1111-2222-3333-444444444444';
-  const OTHER = 'deadbeef-1111-2222-3333-444444444444';
-
-  it('reads the company out of a location label', () => {
-    expect(companyIdFromScan(`https://jigged.app/operator/${CO}/login?location=${LOC}`)).toBe(CO);
+  it('refuses the wrong length and characters outside the alphabet', () => {
+    expect(base32ToUuid('TOOSHORT')).toBeNull();
+    expect(base32ToUuid('0'.repeat(26))).toBeNull(); // 0 and 1 are not in the alphabet
+    expect(base32ToUuid('a'.repeat(26))).toBeNull(); // lowercase is normalised before this point
   });
 
-  it('reads the company out of a traveler', () => {
-    expect(companyIdFromScan(`https://jigged.app/operator/${CO}/login?job=${JOB}&part=${PART}`)).toBe(
-      CO,
-    );
-  });
-
-  it('distinguishes one company from another', () => {
-    expect(companyIdFromScan(`https://jigged.app/operator/${OTHER}/login?location=${LOC}`)).not.toBe(
-      CO,
-    );
-  });
-
-  it('lowercases, so a comparison never fails on case alone', () => {
-    expect(
-      companyIdFromScan(`https://jigged.app/operator/${CO.toUpperCase()}/login?location=${LOC}`),
-    ).toBe(CO);
-  });
-
-  /**
-   * Null is "can't tell", never "yours". A bare typed UUID has no company in it at all, and a
-   * caller must treat that as unverified rather than as a pass — which is why the scanner only
-   * refuses on a *mismatch*, not on an absence.
-   */
-  it('returns null for a bare UUID, which carries no company', () => {
-    expect(companyIdFromScan(LOC)).toBeNull();
-  });
-
-  it('returns null for a non-UUID path segment rather than guessing', () => {
-    // The other fixtures in this file use `co1`; that is not an id we would ever print.
-    expect(companyIdFromScan(locationUrl())).toBeNull();
-  });
-
-  it('returns null for a foreign URL', () => {
-    expect(companyIdFromScan('https://ups.com/track?tracknum=1Z999')).toBeNull();
-  });
-
-  it('returns null for a Jigged URL that is not the login passthrough', () => {
-    expect(companyIdFromScan(`https://jigged.app/dashboard/${CO}/parts`)).toBeNull();
-  });
-
-  it('returns null for junk', () => {
-    expect(companyIdFromScan('not a url')).toBeNull();
+  it('throws on a non-UUID rather than encoding nonsense', () => {
+    expect(() => uuidToBase32('not-a-uuid')).toThrow();
   });
 });
 
-/**
- * Where a scan lands. These assertions exist because the in-app mapping used to be inline in
- * `app/operator/[companyId]/layout.tsx` with no test anywhere — so the single most load-bearing
- * behaviour in the feature, routing an OLD traveller sheet to its step, was unverified.
- *
- * The expected paths below are copied from `postLoginPath` in
- * `app/operator/[companyId]/login/page.tsx`, which is where the same piece of paper goes when it
- * is scanned with the phone's camera app instead. If someone changes one, this should fail.
- */
-describe('scanDestination', () => {
-  const CO = 'co-1';
+describe('buildScanUrl', () => {
+  it('writes an all-uppercase URL — the thing that buys the QR version', () => {
+    const url = buildScanUrl(location, ORIGIN);
+    expect(url).toBe(url.toUpperCase());
+    // Every character inside the QR alphanumeric charset.
+    expect(url).toMatch(/^[0-9A-Z $%*+\-./:]+$/);
+  });
 
+  it('is 77 characters against the canonical origin', () => {
+    expect(buildScanUrl(location, ORIGIN)).toHaveLength(77);
+    expect(buildScanUrl(traveler, ORIGIN)).toHaveLength(77);
+  });
+
+  it('distinguishes the two kinds by path segment only', () => {
+    expect(buildScanUrl(location, ORIGIN)).toContain('/L/');
+    expect(buildScanUrl(traveler, ORIGIN)).toContain('/T/');
+  });
+
+  it('tolerates a trailing slash on the origin', () => {
+    expect(buildScanUrl(location, 'https://www.jigged.app/')).toBe(buildScanUrl(location, ORIGIN));
+  });
+});
+
+describe('parseJiggedScan — what we print, we can read', () => {
+  it('reads back a printed location label', () => {
+    expect(parseJiggedScan(buildScanUrl(location, ORIGIN))).toEqual(location);
+  });
+
+  it('reads back a printed traveler', () => {
+    expect(parseJiggedScan(buildScanUrl(traveler, ORIGIN))).toEqual(traveler);
+  });
+
+  it('reads a bare code, so a wedge scanner or a retyped label still works', () => {
+    const bare = `L${uuidToBase32(CO)}${uuidToBase32(LOC)}`;
+    expect(parseJiggedScan(bare)).toEqual(location);
+  });
+
+  it('keeps the company on a bare code, which the old bare-UUID form could not', () => {
+    const bare = `T${uuidToBase32(CO)}${uuidToBase32(PART)}`;
+    expect(parseJiggedScan(bare)?.companyId).toBe(CO);
+  });
+
+  it('is case-insensitive, in case a handler normalises the path', () => {
+    expect(parseJiggedScan(buildScanUrl(traveler, ORIGIN).toLowerCase())).toEqual(traveler);
+  });
+
+  it('tolerates surrounding whitespace and a trailing slash', () => {
+    expect(parseJiggedScan(`  ${buildScanUrl(location, ORIGIN)}/\n`)).toEqual(location);
+  });
+
+  it('works against any origin, because the label may predate a domain change', () => {
+    expect(parseJiggedScan(buildScanUrl(location, 'http://localhost:3000'))).toEqual(location);
+  });
+});
+
+describe('parseJiggedScan — what it refuses', () => {
+  const foreign = [
+    'https://ups.com/track?tracknum=1Z999AA10123456784',
+    'https://jigged.app/dashboard/co/parts',
+    'WIFI:S:ShopFloor;T:WPA;P:hunter2;;',
+    'not a url at all',
+    '',
+    '   ',
+    // The retired scheme. Nothing printed it that anyone kept, and accepting it would resurrect the
+    // `operation=` routing this redesign deleted.
+    `https://jigged.app/operator/${CO}/login?location=${LOC}`,
+    `https://jigged.app/operator/${CO}/login?job=${OTHER_CO}&part=${PART}`,
+    // A bare UUID was a location under the old scheme. It carries no company, so it cannot be.
+    LOC,
+  ];
+
+  it.each(foreign)('refuses %j', (text) => {
+    expect(parseJiggedScan(text)).toBeNull();
+  });
+
+  it('refuses an unknown kind letter', () => {
+    expect(parseJiggedScan(`${ORIGIN}/X/${uuidToBase32(CO)}${uuidToBase32(LOC)}`)).toBeNull();
+  });
+
+  it('refuses a code of the wrong length', () => {
+    expect(parseJiggedScan(`${ORIGIN}/L/${uuidToBase32(CO)}`)).toBeNull();
+  });
+
+  it('refuses a code with a corrupt pad, rather than inventing a UUID', () => {
+    const bad = uuidToBase32(CO) + uuidToBase32(LOC).slice(0, -1) + 'B';
+    expect(parseJiggedScan(`${ORIGIN}/L/${bad}`)).toBeNull();
+  });
+});
+
+describe('scanDestination — the only copy of this mapping', () => {
   it('sends a location label to that bin', () => {
-    expect(scanDestination(CO, { kind: 'location', locationId: LOC })).toBe(
+    expect(scanDestination(location)).toBe(`/operator/${CO}/inventory/locations/${LOC}`);
+  });
+
+  it('sends a traveler to the part, with no job id in the path', () => {
+    expect(scanDestination(traveler)).toBe(`/operator/${CO}/parts/${PART}`);
+  });
+
+  it('agrees with what the camera-app passthrough will replay', () => {
+    const url = loginPassthroughUrl(traveler);
+    const next = new URLSearchParams(url.split('?')[1]).get('next');
+    expect(next).toBe(scanDestination(traveler));
+    expect(safeNextPath(next, CO)).toBe(scanDestination(traveler));
+  });
+
+  it('routes a scan end to end: print, decode, land', () => {
+    const scan = parseJiggedScan(buildScanUrl(traveler, ORIGIN));
+    expect(scan).not.toBeNull();
+    expect(scanDestination(scan!)).toBe(`/operator/${CO}/parts/${PART}`);
+  });
+});
+
+describe('safeNextPath', () => {
+  it('accepts this company’s own operator destinations', () => {
+    expect(safeNextPath(`/operator/${CO}/parts/${PART}`, CO)).toBe(`/operator/${CO}/parts/${PART}`);
+    expect(safeNextPath(`/operator/${CO}/inventory/locations/${LOC}`, CO)).toBe(
       `/operator/${CO}/inventory/locations/${LOC}`,
     );
   });
 
-  it('sends a current traveller to the job part, where the operator picks the step', () => {
-    expect(scanDestination(CO, { kind: 'traveler', jobId: JOB, jobPartId: PART })).toBe(
-      `/operator/${CO}/jobs/${JOB}/parts/${PART}`,
-    );
+  const rejected: Array<[string, string]> = [
+    ['an absolute URL elsewhere', 'https://evil.example/steal'],
+    ['a protocol-relative URL', `//evil.example/operator/${CO}/parts/x`],
+    ['a backslash-smuggled host', `\\\\evil.example/operator/${CO}/parts/x`],
+    ['another tenant', `/operator/${OTHER_CO}/parts/${PART}`],
+    ['the office surface', `/dashboard/${CO}/parts`],
+    ['a traversal', `/operator/${CO}/../../admin`],
+    ['a percent escape', `/operator/${CO}/%2e%2e/admin`],
+    ['a smuggled query', `/operator/${CO}/parts/x?next=https://evil.example`],
+    ['a fragment', `/operator/${CO}/parts/x#@evil.example`],
+  ];
+
+  it.each(rejected)('rejects %s', (_label, next) => {
+    expect(safeNextPath(next, CO)).toBeNull();
   });
 
-  /**
-   * The one that matters. Sheets printed before travellers stopped encoding a step are still on
-   * the shop floor, and they jump straight to that step. Dropping the operation would silently
-   * downgrade an old sheet to the traveller index — worse than the camera-app path it was
-   * printed for.
-   */
-  it('sends an OLD traveller straight to the step it encodes', () => {
-    const OP = '12121212-3434-5656-7878-909090909090';
-    expect(
-      scanDestination(CO, { kind: 'traveler', jobId: JOB, jobPartId: PART, operationId: OP }),
-    ).toBe(`/operator/${CO}/jobs/${JOB}/parts/${PART}/operations/${OP}`);
-  });
-
-  it('treats an absent operationId the same as one that was never there', () => {
-    expect(
-      scanDestination(CO, { kind: 'traveler', jobId: JOB, jobPartId: PART, operationId: undefined }),
-    ).toBe(`/operator/${CO}/jobs/${JOB}/parts/${PART}`);
-  });
-
-  /** End to end: the printed string a scanner reads, through to the path it opens. */
-  it('routes a real printed traveller URL end to end', () => {
-    const scan = parseJiggedScan(travelerUrl());
-    expect(scan).not.toBeNull();
-    expect(scanDestination(CO, scan!)).toBe(`/operator/${CO}/jobs/${JOB}/parts/${PART}`);
+  it('rejects an absent next and a non-UUID company', () => {
+    expect(safeNextPath(null, CO)).toBeNull();
+    expect(safeNextPath('', CO)).toBeNull();
+    expect(safeNextPath(`/operator/co1/parts/${PART}`, 'co1')).toBeNull();
   });
 });
 
-/**
- * The tenant boundary on a scan. A traveller QR printed by another shop decodes perfectly well;
- * before this existed the operator layout pushed the route anyway and let the destination page's
- * RLS fail, so the operator got an error screen after a navigation instead of "that isn't yours".
- */
 describe('foreignCompanyRejection', () => {
-  const MINE = '0f0f0f0f-1111-2222-3333-444444444444';
-  const THEIRS = 'deadbeef-1111-2222-3333-444444444444';
-  const url = (co: string, qs: string) => `https://jigged.app/operator/${co}/login?${qs}`;
-  const loc = (co: string) => url(co, `location=${LOC}`);
-  const trav = (co: string) => url(co, `job=${JOB}&part=${PART}`);
-
-  it('accepts one of your own labels', () => {
-    const text = loc(MINE);
-    expect(foreignCompanyRejection(text, parseJiggedScan(text)!, MINE)).toBeNull();
+  it('accepts a code from the expected company', () => {
+    expect(foreignCompanyRejection(location, CO)).toBeNull();
   });
 
-  it('refuses another company’s shelf label', () => {
-    const text = loc(THEIRS);
-    expect(foreignCompanyRejection(text, parseJiggedScan(text)!, MINE)).toMatch(
-      /label belongs to a different company/i,
-    );
+  it('is case-insensitive about the expected company', () => {
+    expect(foreignCompanyRejection(location, CO.toUpperCase())).toBeNull();
   });
 
-  /** Different paper, different sentence — an operator holding a traveller needs to be told so. */
-  it('refuses another company’s traveller, and says traveller', () => {
-    const text = trav(THEIRS);
-    expect(foreignCompanyRejection(text, parseJiggedScan(text)!, MINE)).toMatch(
-      /traveler belongs to a different company/i,
-    );
+  it('names a traveler and a label differently, because the operator is holding different paper', () => {
+    expect(foreignCompanyRejection(traveler, OTHER_CO)).toMatch(/traveler belongs to a different/i);
+    expect(foreignCompanyRejection(location, OTHER_CO)).toMatch(/label belongs to a different/i);
   });
 
-  it('ignores case, so a comparison never fails on that alone', () => {
-    const text = loc(MINE.toUpperCase());
-    expect(foreignCompanyRejection(text, parseJiggedScan(text)!, MINE)).toBeNull();
+  it('accepts anything when no company is expected — the caller opted out of the check', () => {
+    expect(foreignCompanyRejection(location, undefined)).toBeNull();
   });
 
-  /**
-   * Absence is not a mismatch. A bare typed UUID carries no company at all, and refusing it would
-   * break the keyboard-wedge and hand-typed paths for no security gain — the caller's own data
-   * validation is the backstop there.
-   */
-  it('lets an unverifiable payload through rather than refusing it', () => {
-    expect(foreignCompanyRejection(LOC, parseJiggedScan(LOC)!, MINE)).toBeNull();
-  });
-
-  it('does nothing when the caller names no company', () => {
-    const text = loc(THEIRS);
-    expect(foreignCompanyRejection(text, parseJiggedScan(text)!, undefined)).toBeNull();
+  it('refuses a foreign code before it can become a navigation', () => {
+    const foreignUrl = buildScanUrl({ ...location, companyId: OTHER_CO }, ORIGIN);
+    const scan = parseJiggedScan(foreignUrl)!;
+    expect(foreignCompanyRejection(scan, CO)).not.toBeNull();
   });
 });

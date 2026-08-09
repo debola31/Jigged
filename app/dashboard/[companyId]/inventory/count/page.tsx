@@ -1186,6 +1186,7 @@ export default function InventoryCountPage() {
                    but it can't tell that apart from "you scanned the bin you're standing at", and
                    naming the actual cause is the difference between a useful message and a shrug. */
                 expectedCompanyId={companyId}
+                surface="inventory_count"
                 onScan={(scannedId) => {
                   const dest = destinationOptions.find((o) => o.id === scannedId);
                   // Not one of ours, or it's the bin we're standing at — either way, keep scanning

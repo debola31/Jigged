@@ -148,6 +148,10 @@ fails, and so does a listed property nothing passes.
 | `stock updated` | Stock is adjusted. `surface` says which UI; `location_id` is operator-only | `surface`, `action`, `part_id`, `quantity`, `unit`, `location_id` | [PartLocationActionModal.tsx](../components/parts/PartLocationActionModal.tsx) · [OperatorLocationActionModal.tsx](../components/operator/OperatorLocationActionModal.tsx) |
 | `operation completed` | An operator completes an operation. Operator-only, so no `surface` | `job_operation_id`, `quantity_good`, `is_partial` | [operations/page.tsx](../app/operator/[companyId]/jobs/[jobId]/parts/[jobPartId]/operations/[jobOperationId]/page.tsx) |
 | `demo entered` | Someone steps into the demo/demo company. `surface` says from where — the office calls it demo mode, the shop floor calls it demo mode, and they are one company | `surface` | [DemoModeProvider.tsx](../components/providers/DemoModeProvider.tsx) · [OperatorDemoModeButton.tsx](../components/operator/OperatorDemoModeButton.tsx) |
+| `scanner opened` | The in-app scanner dialog opens. The denominator for everything below | `surface` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
+| `label scanned` | A decoded code was accepted by the caller. `ms_to_decode` is measured from the dialog opening and `scan_index` counts within that session, so `scan_index = 1` is time-to-first-scan and the rest is continuous-scan cadence | `surface`, `kind`, `ms_to_decode`, `scan_index`, `torch_used` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
+| `label scan rejected` | A code decoded but was refused. `reason` is one of `not_jigged`, `foreign_company`, `traveler_unsupported`, `caller_rejected` | `surface`, `reason` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
+| `scan link opened` | A printed code scanned with the phone's **camera app** lands on the operator login passthrough. `had_session` false means the scan cost an extra screen | `kind`, `had_session` | [login/page.tsx](../app/operator/[companyId]/login/page.tsx) |
 
 <!-- registry:end -->
 

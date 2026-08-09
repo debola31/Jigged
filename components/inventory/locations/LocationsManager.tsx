@@ -106,10 +106,9 @@ const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
 
 interface LocationsManagerProps {
   companyId: string;
-  companyName?: string;
 }
 
-export default function LocationsManager({ companyId, companyName }: LocationsManagerProps) {
+export default function LocationsManager({ companyId }: LocationsManagerProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -363,12 +362,11 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       setToast('No locations to print yet.');
       return;
     }
-    const doc = await generateLocationLabelSheet({
-      companyId,
-      baseUrl: window.location.origin,
-      labels,
-      heading: companyName,
-    });
+    // No `baseUrl` and no `heading`. The origin now comes from the pinned production constant, so a
+    // sheet printed from a preview deployment can't encode a hostname that outlives it; and the
+    // company-name heading used to print at the top of page 1, which on die-cut Avery stock lands
+    // across the middle of label 1.
+    const doc = await generateLocationLabelSheet({ companyId, labels });
     doc.save(filename);
   };
 
@@ -526,7 +524,6 @@ export default function LocationsManager({ companyId, companyName }: LocationsMa
       <LocationQRModal
         open={qrState.open}
         companyId={companyId}
-        companyName={companyName}
         node={qrState.node}
         path={qrState.path}
         labels={qrState.labels}

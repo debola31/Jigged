@@ -424,7 +424,14 @@ payment terms and FOB; **Customer · Ship to (only if different) · Customer con
 items table ordered by `sequence`, with a grand total **only** on firm quotes; and an acceptance
 block instructing the customer to **reply with a purchase order referencing the quote** — there
 is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared by {name} ·
-{email}" line sits below it.
+{email}" line sits below it, with `Generated {date} with jigged.app` on the line beneath that.
+
+**The attribution line is unconditional, on every printed document** — quote, packing slip and job
+traveler ([`attributionLine`](../../utils/packingSlipPdf.ts)). It is metadata at footer weight: the
+same 9pt grey as the page number, never a badge and never a logo. There is no setting, deliberately;
+one constant and one renderer means nothing to read at print time and no state that can disagree
+with itself. The quote is included **because** it is the document that reaches a prospect — the
+highest-value surface for it, and the one it would have been strangest to leave silent.
 
 **Deliberately excluded from the customer's view:** routing and operations, run times, labor and
 material cost snapshots, markup percentage, base cost.

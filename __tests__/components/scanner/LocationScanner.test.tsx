@@ -1,62 +1,35 @@
 /**
- * The in-app location scanner.
+ * The in-app scanner's camera plumbing.
  *
- * The parser is the part worth pinning hardest. A shop floor is full of barcodes that are not ours —
- * shipping labels, vendor part codes, another system's QR — and every one of them decodes perfectly
- * well. Treating a foreign code as a location id would route someone to a bin that doesn't exist and
- * blame them for it.
+ * The parser used to be tested here too. It moved to `__tests__/lib/jiggedScan.test.ts` when the
+ * component stopped re-exporting it — one module owns writing, reading and routing a scan now, and
+ * its tests belong with it.
+ *
+ * jsdom has no `getUserMedia` and no WASM, so the decode loop itself cannot run here — the browser
+ * is the only place that gets tested. What these cover is everything around it that fails in the
+ * real world for boring reasons: permission, camera release, and the request we make of the camera
+ * in the first place, which is what a Contour operator's failed scan turned out to hinge on.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '../../test-utils';
 
-import LocationScanner, {
-  locationIdFromScan,
-} from '@/components/scanner/LocationScanner';
+import LocationScanner from '@/components/scanner/LocationScanner';
 
-const UUID = '71000000-0000-0000-0000-000000000002';
+const capture = vi.hoisted(() => vi.fn());
+vi.mock('posthog-js', () => ({ default: { capture } }));
 
-describe('locationIdFromScan', () => {
-  it('reads the id out of a printed label URL', () => {
-    expect(
-      locationIdFromScan(`https://jigged.app/operator/co1/login?location=${UUID}`),
-    ).toBe(UUID);
-  });
-
-  it('accepts a bare uuid, so a keyboard-wedge scanner or typing also works', () => {
-    expect(locationIdFromScan(UUID)).toBe(UUID);
-  });
-
-  it('tolerates surrounding whitespace and upper case', () => {
-    expect(locationIdFromScan(`  ${UUID.toUpperCase()}  `)).toBe(UUID);
-  });
-
-  it('reads a localhost URL, so a dev-printed label works too', () => {
-    expect(locationIdFromScan(`http://localhost:3000/operator/co1/login?location=${UUID}`)).toBe(UUID);
-  });
-
-  // Everything below is the "not ours" set — each must be rejected, not guessed at.
-  it.each([
-    ['a plain shipping barcode', '1Z999AA10123456784'],
-    ['a vendor part code', 'MCM-91290A115'],
-    ['a URL with no location param', 'https://jigged.app/operator/co1/login'],
-    ['a URL whose location is not a uuid', 'https://jigged.app/x?location=CAB3-A'],
-    ['another system’s QR', 'https://some-erp.example/bin/17'],
-    ['a job traveler QR', 'https://jigged.app/operator/co1/login?job=j1&part=p1'],
-    ['empty text', '   '],
-  ])('rejects %s', (_label, text) => {
-    expect(locationIdFromScan(text)).toBeNull();
-  });
-});
-
-/**
- * Camera plumbing.
- *
- * jsdom has no `getUserMedia` and no WASM, so the decode loop itself can't run here — the browser is
- * the only place that gets tested. What these cover is the part that fails in the real world for
- * boring reasons: permission being denied, and the camera being released on close.
- */
 describe('LocationScanner — camera', () => {
-  const track = () => ({ stop: vi.fn() });
+  const track = (capabilities?: Record<string, unknown>) => ({
+    stop: vi.fn(),
+    getCapabilities: capabilities ? () => capabilities : undefined,
+    applyConstraints: vi.fn(async () => {}),
+  });
+
+  const streamOf = (tracks: ReturnType<typeof track>[]) =>
+    ({
+      getTracks: () => tracks,
+      getVideoTracks: () => tracks,
+    }) as unknown as MediaStream;
 
   beforeEach(() => {
     vi.stubGlobal('navigator', {
@@ -74,7 +47,7 @@ describe('LocationScanner — camera', () => {
     vi.unstubAllGlobals();
     // `doUnmock` alone only affects FUTURE imports — it does not evict a module already in the
     // registry, and the component imports `zxing-wasm/reader` dynamically while these tests run.
-    // The real protection is that the round trip now lives in its own file (vitest isolates the
+    // The real protection is that the round trip lives in its own file (vitest isolates the
     // registry per file); this reset is belt-and-braces for anything added to this one later.
     vi.doUnmock('zxing-wasm/reader');
     vi.resetModules();
@@ -89,7 +62,7 @@ describe('LocationScanner — camera', () => {
       new DOMException('Permission denied', 'NotAllowedError'),
     );
 
-    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} />);
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
 
     expect(
       await screen.findByText(/camera access was blocked.*browser settings/i),
@@ -101,18 +74,18 @@ describe('LocationScanner — camera', () => {
       new Error('Requested device not found'),
     );
 
-    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} />);
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
     expect(await screen.findByText(/requested device not found/i)).toBeInTheDocument();
   });
 
   /** A camera left running after the dialog closes reads as the app watching you. */
   it('releases every track when it unmounts', async () => {
     const tracks = [track(), track()];
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
-      getTracks: () => tracks,
-    } as unknown as MediaStream);
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf(tracks));
 
-    const { unmount } = render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} />);
+    const { unmount } = render(
+      <LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />,
+    );
     await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
 
     unmount();
@@ -129,25 +102,32 @@ describe('LocationScanner — camera', () => {
    * any such render tore the effect down and back up: `stop()` released every track, then
    * `getUserMedia` ran again. On a phone that is a visible black flash and a lost half-second of
    * aiming, in the middle of a scan.
-   *
-   * Re-rendering with fresh inline handlers is exactly what the layout does, so this asserts the
-   * camera is acquired once and the tracks are never stopped.
    */
   it('does not restart the camera when the parent re-renders', async () => {
     const tracks = [track()];
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
-      getTracks: () => tracks,
-    } as unknown as MediaStream);
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf(tracks));
 
     const { rerender } = render(
-      <LocationScanner open onClose={() => {}} onScan={() => {}} onScanTraveler={() => {}} />,
+      <LocationScanner
+        open
+        onClose={() => {}}
+        onScan={() => {}}
+        onScanTraveler={() => {}}
+        surface="operator_tabbar"
+      />,
     );
     await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
 
     // Three more renders, each with brand-new function identities.
     for (let i = 0; i < 3; i++) {
       rerender(
-        <LocationScanner open onClose={() => {}} onScan={() => {}} onScanTraveler={() => {}} />,
+        <LocationScanner
+          open
+          onClose={() => {}}
+          onScan={() => {}}
+          onScanTraveler={() => {}}
+          surface="operator_tabbar"
+        />,
       );
     }
 
@@ -155,34 +135,109 @@ describe('LocationScanner — camera', () => {
     expect(tracks[0].stop).not.toHaveBeenCalled();
   });
 
-  it('asks for the rear camera, which is the one pointed at a shelf', async () => {
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
-      getTracks: () => [],
-    } as unknown as MediaStream);
+  /**
+   * **The regression that started all of this.**
+   *
+   * The scanner asked for no resolution at all, so browsers handed it their default — typically
+   * 640×480, which is a handful of pixels per QR module at arm's length. `ideal` rather than
+   * `exact` on purpose: a handset that cannot do 1080p must fall back, not throw
+   * OverconstrainedError and leave the operator with no scanner at all.
+   */
+  it('asks for the rear camera at a resolution a QR can actually be read from', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([]));
 
-    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} />);
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
 
     await waitFor(() =>
       expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith(
-        expect.objectContaining({ video: { facingMode: 'environment' } }),
+        expect.objectContaining({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        }),
       ),
     );
   });
 
   it('does not touch the camera while closed', () => {
-    render(<LocationScanner open={false} onClose={vi.fn()} onScan={vi.fn()} />);
+    render(
+      <LocationScanner open={false} onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />,
+    );
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
   });
 
-  it('says what to do, and that it keeps scanning', async () => {
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
-      getTracks: () => [],
-    } as unknown as MediaStream);
+  it('tells the operator to use the reticle, and that it keeps scanning', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([]));
 
-    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} />);
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
     expect(
-      await screen.findByText(/point the camera at the qr code.*keep going/i),
+      await screen.findByText(/hold the qr code inside the square.*keep going/i),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * Torch and focus must degrade **silently**.
+   *
+   * WebKit implements neither, so on every iPhone in the shop these capabilities are absent. A
+   * torch button that does nothing is worse than no button: an operator in a dark aisle taps it and
+   * concludes the app is broken.
+   */
+  it('hides the torch button on a device that has no torch', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([track({})]));
+
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+
+    expect(screen.queryByRole('button', { name: /light/i })).not.toBeInTheDocument();
+  });
+
+  it('offers the torch, and applies it, where the device advertises one', async () => {
+    const t = track({ torch: true });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([t]));
+
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
+
+    const button = await screen.findByRole('button', { name: /turn the light on/i });
+    button.click();
+
+    await waitFor(() =>
+      expect(t.applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] }),
+    );
+  });
+
+  it('asks for continuous autofocus where the device advertises it', async () => {
+    const t = track({ focusMode: ['manual', 'continuous'] });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([t]));
+
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
+
+    await waitFor(() =>
+      expect(t.applyConstraints).toHaveBeenCalledWith({
+        advanced: [{ focusMode: 'continuous' }],
+      }),
+    );
+  });
+
+  it('does not ask for autofocus a device never claimed to support', async () => {
+    const t = track({ focusMode: ['manual'] });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([t]));
+
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="operator_tabbar" />);
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+
+    expect(t.applyConstraints).not.toHaveBeenCalled();
+  });
+
+  it('reports the scanner opening, tagged with the surface that opened it', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(streamOf([]));
+
+    render(<LocationScanner open onClose={vi.fn()} onScan={vi.fn()} surface="inventory_count" />);
+
+    await waitFor(() =>
+      expect(capture).toHaveBeenCalledWith('scanner opened', { surface: 'inventory_count' }),
+    );
   });
 });
 

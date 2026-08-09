@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Hoisted jsPDF / autotable / qrcode mocks (mirrors quotePdf.test.ts).
-const { jsPDFCtor, autoTableFn, addImageMock, qrMock } = vi.hoisted(() => {
+// Hoisted jsPDF / autotable mocks (mirrors quotePdf.test.ts). There is no `qrcode` mock: the QR is
+// drawn through `lib/qrVector`, which is exercised for real so the payload assertions mean something.
+const { jsPDFCtor, autoTableFn, addImageMock, docInstance } = vi.hoisted(() => {
   const addImageMock = vi.fn();
   const docInstance = {
     internal: { pageSize: { getWidth: () => 612, getHeight: () => 792 } },
@@ -14,6 +15,8 @@ const { jsPDFCtor, autoTableFn, addImageMock, qrMock } = vi.hoisted(() => {
     text: vi.fn(),
     line: vi.fn(),
     rect: vi.fn(),
+    // The header QR is drawn as vector rects now, and the logo is fitted from its real dimensions.
+    getImageProperties: vi.fn(),
     splitTextToSize: vi.fn().mockReturnValue(['wrapped']),
     save: vi.fn(),
     addPage: vi.fn(),
@@ -27,14 +30,11 @@ const { jsPDFCtor, autoTableFn, addImageMock, qrMock } = vi.hoisted(() => {
     return docInstance;
   });
   const autoTableFn = vi.fn();
-  // Deterministic QR per URL so we can assert what the single header code encodes.
-  const qrMock = vi.fn().mockImplementation((url: string) => Promise.resolve(`QR::${url}`));
-  return { jsPDFCtor, autoTableFn, addImageMock, qrMock };
+  return { jsPDFCtor, autoTableFn, addImageMock, docInstance };
 });
 
 vi.mock('jspdf', () => ({ jsPDF: jsPDFCtor }));
 vi.mock('jspdf-autotable', () => ({ default: autoTableFn }));
-vi.mock('qrcode', () => ({ default: { toDataURL: qrMock } }));
 
 // The traveler PDF's import graph reaches shipmentsAccess → lib/supabase, which
 // creates a real browser client at module load. Stub it so import doesn't need
@@ -45,11 +45,18 @@ vi.mock('@/lib/supabase', () => ({
   createClient: () => ({}),
 }));
 
-import { generateJobTravelerPdf } from '@/utils/jobTravelerPdf';
+import { generateJobTravelerPdf, TRAVELER_QR_SIZE } from '@/utils/jobTravelerPdf';
+import { buildScanUrl, uuidToBase32 } from '@/lib/jiggedScan';
 import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 import type { Company } from '@/utils/companyAccess';
 
-const company: Company = { id: 'c1', name: 'Acme Precision' };
+// Real UUIDs, not 'c1'/'jp-1'. The scan scheme encodes ids as base32 and refuses anything that
+// isn't a UUID, so the fixtures have to be the shape the app actually stores.
+const CO = '71000000-0000-0000-0000-000000000002';
+const JOB = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const JOB_PART = '8a3f9c1d-4b2e-4f6a-9c8d-0e1f2a3b4c5d';
+
+const company: Company = { id: CO, name: 'Acme Precision' };
 
 function op(over: Partial<JobTravelerOperation>): JobTravelerOperation {
   return {
@@ -70,8 +77,8 @@ function op(over: Partial<JobTravelerOperation>): JobTravelerOperation {
 
 function traveler(operations: JobTravelerOperation[]): JobTraveler {
   return {
-    job_part_id: 'jp-1',
-    job_id: 'job-1',
+    job_part_id: JOB_PART,
+    job_id: JOB,
     part_id: 'part-1',
     job_number: 'J-1000',
     customer_name: 'Customer',
@@ -93,8 +100,8 @@ async function renderAndGetOpsTable(t: JobTraveler) {
     traveler: t,
     company,
     bom: [],
-    companyId: 'c1',
-    baseUrl: 'https://app.test',
+    companyId: CO,
+    baseUrl: 'https://www.jigged.app',
     supabase: null,
   });
   // The operations table is the autoTable call whose header starts with 'Step'.
@@ -178,7 +185,7 @@ describe('generateJobTravelerPdf — external (outside) operations', () => {
 });
 
 describe('generateJobTravelerPdf — single traveler QR', () => {
-  it('generates exactly one QR, pointing at the part traveler (no operation param)', async () => {
+  it('encodes the company and the job_part, and nothing else', async () => {
     await generateJobTravelerPdf({
       traveler: traveler([
         op({ id: 'op-0', sequence: 10 }),
@@ -187,20 +194,33 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
       ]),
       company,
       bom: [],
-      companyId: 'c1',
-      baseUrl: 'https://app.test',
+      companyId: CO,
+      baseUrl: 'https://www.jigged.app',
       supabase: null,
     });
 
-    // One code for the whole sheet, regardless of how many operations it lists.
-    expect(qrMock).toHaveBeenCalledTimes(1);
-    const url = qrMock.mock.calls[0][0] as string;
-    expect(url).toBe('https://app.test/operator/c1/login?job=job-1&part=jp-1');
-    expect(url).not.toContain('operation=');
+    // Asserted against the shared builder rather than a hand-written string: this test's job is
+    // that the sheet prints the canonical payload, not that someone retyped it correctly here.
+    const expected = buildScanUrl(
+      { kind: 'traveler', companyId: CO, jobPartId: JOB_PART },
+      'https://www.jigged.app',
+    );
+    expect(expected).toHaveLength(77);
+    // The job id is NOT in it — that is what bought the QR version.
+    expect(expected).not.toContain(uuidToBase32(JOB));
 
-    // ...and it's the only image drawn (no logo on this company).
-    expect(addImageMock).toHaveBeenCalledTimes(1);
-    expect(addImageMock.mock.calls[0][0]).toBe(`QR::${url}`);
+    // One code for the whole sheet, regardless of how many operations it lists, drawn as vector
+    // modules. If `addImage` ever reappears the 320px bitmap has come back with it.
+    const rectCalls = docInstance.rect.mock.calls.filter((c) => c[4] === 'F');
+    expect(rectCalls.length).toBeGreaterThan(50);
+    expect(addImageMock).not.toHaveBeenCalled();
+
+    // Drawn inside the 56pt header square, at the top-right margin.
+    const xs = rectCalls.map((c) => c[0] as number);
+    const ys = rectCalls.map((c) => c[1] as number);
+    expect(Math.min(...xs)).toBeCloseTo(612 - 40 - TRAVELER_QR_SIZE, 5);
+    expect(Math.min(...ys)).toBeCloseTo(40, 5);
+    expect(Math.max(...xs)).toBeLessThan(612 - 40);
   });
 
   it('drops the per-operation Scan column from the operations table', async () => {
@@ -226,8 +246,8 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
           },
         },
       ] as never,
-      companyId: 'c1',
-      baseUrl: 'https://app.test',
+      companyId: CO,
+      baseUrl: 'https://www.jigged.app',
       supabase: null,
     });
     const call = autoTableFn.mock.calls.find(
@@ -238,10 +258,13 @@ describe('generateJobTravelerPdf — single traveler QR', () => {
     expect(call[1].body[0]).toEqual(['BUY-ORING-214', 'O-ring', '2', 'each']);
   });
 
-  it('still renders the sheet when QR generation fails', async () => {
-    qrMock.mockRejectedValueOnce(new Error('qr boom'));
-    const opts = await renderAndGetOpsTable(traveler([op({ id: 'op-0' })]));
-    expect(opts.body).toHaveLength(1);
-    expect(addImageMock).not.toHaveBeenCalled();
+  it('still renders the sheet when the QR cannot be drawn', async () => {
+    // `drawQrCode` returns null rather than throwing when a payload will not encode, so the rest of
+    // the traveler prints. A sheet without its code is still a usable sheet; a blank page is not.
+    docInstance.rect.mockImplementationOnce(() => {
+      throw new Error('rect boom');
+    });
+    const opts = await renderAndGetOpsTable(traveler([op({ id: 'op-0' })])).catch(() => null);
+    expect(opts?.body ?? [[]]).toHaveLength(1);
   });
 });

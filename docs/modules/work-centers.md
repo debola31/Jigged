@@ -7,7 +7,7 @@
 > page reproduces; AC bullets that only re-described the test they cited; maintenance rationale owned by
 > [machine-maintenance.md](machine-maintenance.md). **Kept**, because other docs rely on this doc for them:
 > work centre = station, the `operation_types` history, why external work has no setup cost, the kind-toggle
-> lock, the station-QR removal.
+> lock, how an operator reaches their station.
 >
 > **Six corrections, marked ⚠ where they apply.** *Missing:* the five machine columns, their CHECK, and both
 > flag-gated maintenance cards — all shipped. *Wrong:* a migration filename that no longer exists;
@@ -92,9 +92,9 @@ Header card (name, kind chip, "via {vendor}" for external); Details card (labor 
 `MachineManualsManager` above a **read-only** `MachineLogPanel`. Read-only because the pilot's bar counts
 *non-founder* authors: manuals and machine details are the office's job, the log is the floor's.
 
-**There is no station-QR card.** Per-work-centre placards and the bulk **Print Placards** action were removed
-in July 2026 — never deployed to a shop floor, and operators reach their station by signing into the operator
-view and picking it.
+**Nothing about a work centre is printed or posted at the machine.** An operator reaches their station by
+signing into the operator view on their own phone and picking it from the list — see FR-5 in
+[prd.md](../prd.md) and [operator-view.md](operator-view.md).
 
 Delete archives (`deleted_at`) and **never blocks**, even at `routing_operations_count > 0` — universal policy
 in [architecture.md §16](../architecture.md). That count still drives the kind-toggle lock; it no longer gates

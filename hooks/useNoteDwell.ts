@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
+import { shouldReportSupabaseError, toError } from '@/lib/supabaseErrors';
 
 /**
  * Logs that a note was actually READ.
@@ -80,8 +81,11 @@ export function useNoteDwell(
         p_job_id: jobId ?? undefined,
       })
       .then(({ error }) => {
-        if (error) {
-          Sentry.captureException(error, {
+        // Same reasoning as `logOperatorEvent`: rpc is outside the net, so this site owns both
+        // the reporting and the expected-negative filtering, and `toError` is what makes the
+        // issue readable. A phone losing signal mid-flush is not a defect.
+        if (error && shouldReportSupabaseError(error)) {
+          Sentry.captureException(toError(error, 'Failed to log note views'), {
             level: 'warning',
             tags: { area: 'note_views' },
           });

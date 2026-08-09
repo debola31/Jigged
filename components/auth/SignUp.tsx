@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from "@sentry/nextjs";
 import { useState } from 'react';
 import Link from 'next/link';
 import Card from '@mui/material/Card';
@@ -85,8 +84,10 @@ export default function SignUp() {
 
       setSuccess(true);
     } catch (err) {
+      // No `Sentry.captureException`: `signUp` is instrumented by the Supabase integration, which
+      // files this as `auto.db.supabase.auth`. See the note in Login.tsx — the sibling auth
+      // screens call operations that are NOT instrumented and keep their captures.
       console.error('Sign up error:', err);
-      Sentry.captureException(err);
       setError(err instanceof Error ? err.message : 'An error occurred during sign up');
     } finally {
       setLoading(false);

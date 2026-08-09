@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
+import { shouldReportSupabaseError, toError } from '@/lib/supabaseErrors';
 
 /**
  * Capture-funnel instrumentation.
@@ -80,8 +81,20 @@ export function logOperatorEvent(
         p_context: context,
       })
       .then(({ error }) => {
-        if (error) {
-          Sentry.captureException(error, {
+        /**
+         * `.rpc()` is excluded from the Supabase integration's net, so this call site is the
+         * only reporter — which also means the expected negatives it drops in `beforeSend` have
+         * to be dropped here by hand. `shouldReportSupabaseError` is that same judgement.
+         *
+         * It matters most on this surface: operators are on personal phones on cellular, and a
+         * lost signal while a funnel event is in flight is not a defect worth an issue.
+         *
+         * `toError` because Supabase rejects with a plain object, and Sentry cannot fingerprint
+         * one — it files as "Object captured as exception with keys: code, details, hint,
+         * message" with the real text buried in an extra.
+         */
+        if (error && shouldReportSupabaseError(error)) {
+          Sentry.captureException(toError(error, 'Failed to log operator event'), {
             level: 'warning',
             tags: { area: 'operator_events', kind },
           });

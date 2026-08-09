@@ -43,8 +43,6 @@ export function createClient() {
   const client = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
     global: {
       fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-        const response = await fetch(input, init);
-
         // Extract URL for endpoint detection
         const url = typeof input === 'string'
           ? input
@@ -62,10 +60,17 @@ export function createClient() {
          * `db.table`, which for an rpc holds the *function* name and is otherwise
          * indistinguishable from a table name. The integration starts its span around the whole
          * request, so the span is still active here.
+         *
+         * STAMPED BEFORE THE FETCH, and the order is load-bearing: when the network fails the
+         * `await` below throws, so anything after it never runs. Stamping afterwards left exactly
+         * the network-failure case unmarked, `beforeSend` unable to recognise the rpc, and the
+         * one failure filed twice — once by the net, once by the access layer's own capture.
          */
         if (url.includes('/rest/v1/rpc/')) {
           Sentry.getActiveSpan()?.setAttribute(RPC_SPAN_ATTRIBUTE, true);
         }
+
+        const response = await fetch(input, init);
 
         // Check if this is already a retry to prevent infinite loops
         const headers = new Headers(init?.headers);

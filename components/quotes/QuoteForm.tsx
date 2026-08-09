@@ -310,9 +310,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
    * the picker the user just used, so on a multi-part quote it lands off-screen
    * and they have to scroll to find what they just created.
    *
-   * `block: 'nearest'` is the whole trick: it does nothing when the block is
-   * already fully visible, and otherwise scrolls the minimum needed to show it.
-   * No jump on a short quote, no hunting on a long one.
+   * `block: 'center'`, NOT `'nearest'`. Nearest scrolls the minimum needed,
+   * which parks the block hard against the bottom edge — technically visible,
+   * but with nothing beneath it, so **+ Add part** and the footer stay off
+   * screen and the user scrolls again anyway. Centring leaves half a viewport
+   * below the block, which is where the next thing they'll reach for lives.
+   *
+   * It also means every pick lands the block in the same place, rather than
+   * moving sometimes and not others.
    */
   const revealBlockAfterLoad = useCallback((idx: number) => {
     if (scrollAfterLoadRef.current !== idx) return;
@@ -324,7 +329,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
         window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       blockRefs.current.get(idx)?.scrollIntoView({
         behavior: prefersReducedMotion ? 'auto' : 'smooth',
-        block: 'nearest',
+        block: 'center',
       });
     });
   }, []);

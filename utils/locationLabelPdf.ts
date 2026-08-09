@@ -31,8 +31,13 @@
  *
  * The QR encodes ids (`buildScanUrl`), so renaming a place never breaks a printed label. Beside it,
  * the **name** is the primary line because that is what someone standing at the shelf reads, with
- * the parent path under it in smaller grey for when two shelves share a name. A `jigged.app`
- * micro-line sits at the foot at footer weight.
+ * the parent path under it in smaller grey for when two shelves share a name.
+ *
+ * **Nothing identifies Jigged on a label, deliberately.** A `jigged.app` micro-line was drawn here
+ * briefly and removed: a sticker on a shop's own shelf is the shop's, and the one place a printed
+ * artifact says where it came from is the footer of a *document* — a quote, a packing slip, a job
+ * traveler — where it is metadata a reader might act on. On a bin label it is just ink on someone
+ * else's property.
  *
  * There is no company-name heading. It used to print at the top of page 1, which on die-cut stock
  * lands in the middle of label 1.
@@ -129,7 +134,6 @@ export async function generateLocationLabelSheet(
 
     const { x, y } = labelOrigin(onPage);
     const contentTop = y + LABEL_CONTENT_INSET;
-    const contentBottom = y + LABEL_H - LABEL_CONTENT_INSET;
 
     drawQrCode(
       doc,
@@ -181,13 +185,6 @@ export async function generateLocationLabelSheet(
         ty += pathLeading;
       });
     }
-
-    // Footer weight, pinned to the foot of the label rather than following the text block, so it
-    // sits on the same line across every label on the sheet.
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor(150);
-    doc.text('jigged.app', textX, contentBottom);
   });
 
   return doc;

@@ -105,7 +105,7 @@ describe('generateLocationLabelSheet', () => {
     expect(pdf.rect.mock.calls.every((c) => c[4] === 'F')).toBe(true);
   });
 
-  it('prints the name, the path beneath it, and the jigged.app micro-line', async () => {
+  it('prints the name and the path beneath it', async () => {
     await generateLocationLabelSheet({
       companyId: CO,
       labels: [label(uuid(1), ['Cabinet 1', 'Row 3', 'Left'])],
@@ -113,12 +113,14 @@ describe('generateLocationLabelSheet', () => {
     const drawn = pdf.text.mock.calls.map((c) => c[0]);
     expect(drawn).toContain('Left');
     expect(drawn).toContain('Cabinet 1  ›  Row 3');
-    expect(drawn).toContain('jigged.app');
   });
 
-  it('prints no company-name heading — on die-cut stock it lands across label 1', async () => {
+  it('prints the place and nothing else — no heading, no jigged.app, no branding', async () => {
     await generateLocationLabelSheet({ companyId: CO, labels: [label(uuid(1), ['Bin 1'])] });
-    expect(pdf.text.mock.calls.map((c) => c[0])).toEqual(['Bin 1', 'jigged.app']);
+    // A company-name heading lands across label 1 on die-cut stock. A `jigged.app` micro-line was
+    // drawn here briefly and removed: a sticker on a shop's shelf is the shop's, and attribution
+    // belongs on a document someone reads, not on a bin.
+    expect(pdf.text.mock.calls.map((c) => c[0])).toEqual(['Bin 1']);
   });
 
   it('paginates at ten labels per page', async () => {
@@ -137,7 +139,7 @@ describe('generateLocationLabelSheet', () => {
       labels: [label(uuid(1), ['A', 'B', 'C', 'D', 'E'])],
     });
     const drawn = pdf.text.mock.calls.map((c) => c[0]);
-    expect(drawn).toEqual(['E', 'one', 'two…', 'jigged.app']);
+    expect(drawn).toEqual(['E', 'one', 'two…']);
   });
 
   it('keeps every label on the sheet when one code cannot be encoded', async () => {

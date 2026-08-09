@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Card from '@mui/material/Card';
@@ -17,13 +17,28 @@ import IconButton from '@mui/material/IconButton';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import posthog from 'posthog-js';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import { getPostLoginRoute } from '@/utils/companyAccess';
 import { isValidEmail } from '@/lib/validators';
 
 interface LoginProps {
   expired?: boolean;
   returnTo?: string | null;
+  /** Why /auth/confirm sent them here, when it did. See app/auth/confirm/route.ts. */
+  reason?: string | null;
+}
+
+/**
+ * Pull the invitation id out of a `/accept-invite/<uuid>` returnTo, so an invitee holding a dead
+ * link can be offered a live one. Returns null for every other destination — this must never widen
+ * into "any path shaped roughly like an invite".
+ */
+function invitationIdFromReturnTo(returnTo: string | null | undefined): string | null {
+  if (!returnTo) return null;
+  const match = /^\/accept-invite\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(
+    returnTo
+  );
+  return match ? match[1] : null;
 }
 
 /**
@@ -44,13 +59,61 @@ function isValidReturnTo(path: string): boolean {
   }
 }
 
-export default function Login({ expired, returnTo }: LoginProps) {
+export default function Login({ expired, returnTo, reason }: LoginProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [resendError, setResendError] = useState<string | null>(null);
+
+  const inviteLinkExpired = reason === 'invite-link-expired';
+  const resetLinkExpired = reason === 'reset-link-expired';
+  const invitationId = invitationIdFromReturnTo(returnTo);
+
+  useEffect(() => {
+    if (inviteLinkExpired) {
+      posthog.capture('invitation link expired', { can_self_resend: invitationId !== null });
+    }
+  }, [inviteLinkExpired, invitationId]);
+
+  /**
+   * Ask for a fresh invitation link. Unauthenticated by necessity — the whole point is that this
+   * person has no account they can reach yet — so the anon key is the only credential we can send,
+   * and the endpoint mails only the address already on the invitation row.
+   */
+  const handleResendRequest = async () => {
+    if (!invitationId) return;
+    setResendState('sending');
+    setResendError(null);
+
+    try {
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const response = await fetch(
+        `${getEdgeFunctionUrl('team-invites')}/${invitationId}/request-resend`,
+        {
+          method: 'POST',
+          headers: anonKey ? { apikey: anonKey, Authorization: `Bearer ${anonKey}` } : {},
+        }
+      );
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || 'Could not send a new link. Please try again in a moment.');
+      }
+
+      setResendState('sent');
+      posthog.capture('invitation link resend requested');
+    } catch (err) {
+      console.error('Invitation resend request failed:', err);
+      setResendState('idle');
+      setResendError(
+        err instanceof Error ? err.message : 'Could not send a new link. Please try again in a moment.'
+      );
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,6 +180,63 @@ export default function Login({ expired, returnTo }: LoginProps) {
         {expired && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Your session expired. Please sign in again.
+          </Alert>
+        )}
+
+        {/*
+          An expired invite link used to land here with no explanation at all, so the invitee did
+          the only thing the page offered — typed a password for an account that had never been
+          given one — and got "Invalid login credentials" (#722). Say what happened, and hand them
+          the one action that actually resolves it.
+        */}
+        {inviteLinkExpired && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {/*
+              Hedged on purpose. An invitee joining a SECOND company already has a password and
+              could sign in below; a first-time invitee has none and cannot. This page can't tell
+              them apart — no session, and probing for one would leak which addresses have accounts
+              — so the sentence has to be true of both.
+            */}
+            <Typography variant="body2" sx={{ mb: invitationId ? 1.5 : 0 }}>
+              That invitation link has expired — they&apos;re good for 24 hours. If this is your
+              first Jigged invitation you don&apos;t have a password yet, so signing in below
+              won&apos;t work until you&apos;ve opened a live link.
+            </Typography>
+            {invitationId && resendState !== 'sent' && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleResendRequest}
+                disabled={resendState === 'sending'}
+              >
+                {resendState === 'sending' ? 'Sending…' : 'Send me a new link'}
+              </Button>
+            )}
+            {invitationId && resendState === 'sent' && (
+              <Typography variant="body2">
+                A new link is on its way. Check your inbox — and your spam folder.
+              </Typography>
+            )}
+            {!invitationId && (
+              <Typography variant="body2">
+                Ask your administrator to resend the invitation.
+              </Typography>
+            )}
+            {resendError && (
+              <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                {resendError}
+              </Typography>
+            )}
+          </Alert>
+        )}
+
+        {resetLinkExpired && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            That password reset link has expired.{' '}
+            <MuiLink component={Link} href="/forgot-password" underline="hover">
+              Request a new one
+            </MuiLink>
+            .
           </Alert>
         )}
 

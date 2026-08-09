@@ -14,6 +14,7 @@ import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import posthog from 'posthog-js';
 import { getSupabase, getEdgeFunctionUrl } from '@/lib/supabase';
 import type { InviteResponse } from '@/types/team';
 
@@ -95,6 +96,11 @@ export default function InviteTeamMemberPage() {
       if (!data.success) {
         throw new Error(data.message || 'Failed to send invitation');
       }
+
+      // Top of the funnel. Captured for both outcomes, with `email_sent` telling them apart —
+      // an invite that was created but never delivered is the drop-off we most need to see,
+      // and counting only the happy path would hide it.
+      posthog.capture('invitation sent', { role, email_sent: data.email_sent !== false });
 
       // The invitation row can be created even when the email fails to send.
       // Don't show a green "sent" confirmation in that case — surface a warning

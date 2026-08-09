@@ -14,6 +14,7 @@ function LoginPageContent() {
 
   const expired = searchParams.get('expired') === 'true';
   const returnTo = searchParams.get('returnTo');
+  const reason = searchParams.get('reason');
 
   useEffect(() => {
     if (!loading && user) {
@@ -45,7 +46,7 @@ function LoginPageContent() {
 
   return (
     <AuthLayout>
-      <LoginComponent expired={expired} returnTo={returnTo} />
+      <LoginComponent expired={expired} returnTo={returnTo} reason={reason} />
     </AuthLayout>
   );
 }

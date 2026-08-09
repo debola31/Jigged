@@ -138,6 +138,9 @@ fails, and so does a listed property nothing passes.
 |---|---|---|---|
 | `user signed in` | The login form is submitted successfully | — | [Login.tsx](../components/auth/Login.tsx) |
 | `user signed out` | Supabase emits `SIGNED_OUT` | — | [AuthProvider.tsx](../components/providers/AuthProvider.tsx) |
+| `invitation sent` | An admin submits the invite form and the edge function answers | `role`, `email_sent` | [members/new/page.tsx](../app/dashboard/[companyId]/team/members/new/page.tsx) |
+| `invitation link expired` | An invitee lands on /login because their link no longer verified | `can_self_resend` | [Login.tsx](../components/auth/Login.tsx) |
+| `invitation link resend requested` | An invitee asks for a fresh link from that screen | — | [Login.tsx](../components/auth/Login.tsx) |
 | `invitation accepted` | An invitee completes acceptance | `role`, `existing_user` | [accept-invite/page.tsx](../app/accept-invite/[invitationId]/page.tsx) |
 | `quote created` | A new quote is saved | `line_item_count`, `custom_priced_line_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
 | `quote converted to job` | A quote is accepted and becomes a job | `quote_id`, `part_count`, `is_hot` | [ConvertToJobModal.tsx](../components/quotes/ConvertToJobModal.tsx) |

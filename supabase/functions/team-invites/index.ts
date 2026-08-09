@@ -18,6 +18,34 @@ import { getEmailBaseUrl, getEmailFrom } from '../_shared/email.ts';
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
 /**
+ * How long an invitation is good for.
+ *
+ * This number is not ours to choose freely. The link carries a GoTrue one-time token minted by
+ * `generateLink`, and that token's lifetime is the project's Email OTP Expiration — which Supabase
+ * caps at 24 hours. `invitations.expires_at` used to say 7 days, so the team page promised a week
+ * for a link that was already dead. That gap is what stranded L&L's first invites: sent 7pm,
+ * clicked the next morning, refused (#722). Keep the two in step — if the project setting ever
+ * changes, change this with it.
+ */
+const INVITE_TTL_HOURS = 24;
+const INVITE_TTL_MS = INVITE_TTL_HOURS * 60 * 60 * 1000;
+
+/** Expiry for a freshly sent or resent invitation, as an ISO timestamp. */
+function inviteExpiresAt(): string {
+  return new Date(Date.now() + INVITE_TTL_MS).toISOString();
+}
+
+/**
+ * Which invitations a resend may revive.
+ *
+ * `expired` belongs here and used to be refused. The list endpoint lazily flips a past-due
+ * invitation to `expired`, so simply opening the team page disarmed the Resend button for the very
+ * invitation whose holder was stuck — the admin-side half of the same dead-end. `accepted` and
+ * `revoked` stay refused: those are decisions, not timeouts.
+ */
+const RESENDABLE_STATUSES = ['pending', 'expired'];
+
+/**
  * Verify the caller is an admin of the specified company.
  * Uses an anon client with the user's JWT to extract user identity,
  * then uses the service role client for admin queries.
@@ -137,6 +165,10 @@ function buildInviteEmailHtml(companyName: string, actionLink: string): string {
             Accept Invitation
           </a>
         </td></tr>
+        <tr><td align="center" style="color:#B0B3B8; font-size:12px; padding-bottom:12px;">
+          This link works for ${INVITE_TTL_HOURS} hours. If it has expired, the page it opens will
+          offer to send you a new one.
+        </td></tr>
         <tr><td align="center" style="color:#B0B3B8; font-size:12px;">
           If you weren't expecting this invitation, you can safely ignore this email.
         </td></tr>
@@ -145,6 +177,37 @@ function buildInviteEmailHtml(companyName: string, actionLink: string): string {
   </table>
 </body>
 </html>`;
+}
+
+/**
+ * Mint a fresh one-time link for an invitation and email it to the invitee.
+ *
+ * Shared by all three send paths — first send, admin resend, invitee-requested resend — so the
+ * link shape, the metadata and the email body cannot drift apart between them.
+ *
+ * `redirectTo` is vestigial (Supabase no longer performs the redirect — our /auth/confirm route
+ * does), but it is still passed so `generateLink`'s allow-list validation and the auth-callback
+ * metadata fallback are unaffected.
+ */
+async function mintAndSendInvite(
+  supabase: ReturnType<typeof getServiceRoleClient>,
+  resendApiKey: string,
+  invitation: { id: string; email: string; role: string },
+  companyName: string,
+  siteUrl: string,
+): Promise<void> {
+  const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
+
+  const { hashedToken, type } = await generateInviteLink(supabase, invitation.email, redirectTo, {
+    invitation_id: invitation.id,
+    company_name: companyName,
+    invited_role: invitation.role,
+  });
+
+  const next = `/accept-invite/${invitation.id}`;
+  const actionLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
+
+  await sendInviteEmail(resendApiKey, invitation.email, companyName, actionLink);
 }
 
 /**
@@ -274,9 +337,6 @@ Deno.serve(async (req) => {
       const companyName = companyData?.name || '';
 
       // Create invitation record
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-
       const { data: invitation, error: insertError } = await supabase
         .from('invitations')
         .insert({
@@ -284,7 +344,7 @@ Deno.serve(async (req) => {
           email: email.toLowerCase(),
           role,
           invited_by: userId,
-          expires_at: expiresAt.toISOString(),
+          expires_at: inviteExpiresAt(),
         })
         .select()
         .single();
@@ -295,23 +355,14 @@ Deno.serve(async (req) => {
       }
 
       // Generate the one-time token and send a first-party email via Resend.
-      // redirectTo is now vestigial (Supabase no longer does the redirect — our
-      // /auth/confirm route does), but we keep it so generateLink's allow-list
-      // validation and the auth-callback metadata fallback are unaffected.
-      const siteUrl = getOriginUrl(req);
-      const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
-
       try {
-        const { hashedToken, type } = await generateInviteLink(supabase, email.toLowerCase(), redirectTo, {
-          invitation_id: invitation.id,
-          company_name: companyName,
-          invited_role: role,
-        });
-
-        const next = `/accept-invite/${invitation.id}`;
-        const actionLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
-
-        await sendInviteEmail(resendApiKey, email.toLowerCase(), companyName, actionLink);
+        await mintAndSendInvite(
+          supabase,
+          resendApiKey,
+          { id: invitation.id, email: email.toLowerCase(), role },
+          companyName,
+          getOriginUrl(req),
+        );
       } catch (emailErr) {
         console.error('Email sending error:', emailErr);
         // The invitation row exists, but the email never went out. Report this
@@ -443,8 +494,8 @@ Deno.serve(async (req) => {
 
       await verifyAdmin(supabase, authHeader, invitation.company_id);
 
-      if (invitation.status !== 'pending') {
-        return errorResponse('Only pending invitations can be resent', 400);
+      if (!RESENDABLE_STATUSES.includes(invitation.status ?? '')) {
+        return errorResponse(`An invitation that has been ${invitation.status} cannot be resent`, 400);
       }
 
       // Look up company name
@@ -456,30 +507,14 @@ Deno.serve(async (req) => {
 
       const companyName = companyData?.name || '';
 
-      // Reset expiry
-      const newExpiresAt = new Date();
-      newExpiresAt.setDate(newExpiresAt.getDate() + 7);
-
+      // Reset expiry, and revive an invitation the lazy sweep had marked expired.
       await supabase
         .from('invitations')
-        .update({ expires_at: newExpiresAt.toISOString() })
+        .update({ expires_at: inviteExpiresAt(), status: 'pending' })
         .eq('id', invitationId);
 
-      // Generate the one-time token and resend a first-party email via Resend.
-      const siteUrl = getOriginUrl(req);
-      const redirectTo = `${siteUrl}/accept-invite/${invitation.id}`;
-
       try {
-        const { hashedToken, type } = await generateInviteLink(supabase, invitation.email, redirectTo, {
-          invitation_id: invitation.id,
-          company_name: companyName,
-          invited_role: invitation.role,
-        });
-
-        const next = `/accept-invite/${invitation.id}`;
-        const actionLink = `${getEmailBaseUrl()}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}&type=${type}&next=${encodeURIComponent(next)}`;
-
-        await sendInviteEmail(resendApiKey, invitation.email, companyName, actionLink);
+        await mintAndSendInvite(supabase, resendApiKey, invitation, companyName, getOriginUrl(req));
       } catch (emailErr) {
         console.error('Resend error:', emailErr);
         return errorResponse('Failed to resend invitation email', 500);
@@ -488,6 +523,82 @@ Deno.serve(async (req) => {
       return jsonResponse({
         success: true,
         message: `Invitation resent to ${invitation.email}`,
+      });
+    }
+
+    // POST /team-invites/:id/request-resend — invitee asks for a fresh link.
+    //
+    // Deliberately unauthenticated: the person who needs this is holding a dead link and has no
+    // session — that is the whole failure being fixed (#722). Requiring auth would mean requiring
+    // exactly the account they cannot yet reach, and routing them back through their admin.
+    //
+    // Safe without a caller identity because the caller supplies nothing that steers the email:
+    // the destination is read from the invitation row, never from the request, so the only thing a
+    // stranger with a stolen invitation UUID can do is mail the person who was already invited.
+    // The 60-second guard below bounds how often.
+    if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'request-resend') {
+      const invitationId = pathParts[1];
+
+      const { data: invitation } = await supabase
+        .from('invitations')
+        .select('id, company_id, email, role, status, expires_at')
+        .eq('id', invitationId)
+        .single();
+
+      if (!invitation) {
+        return errorResponse('Invitation not found', 404);
+      }
+
+      if (invitation.status === 'accepted') {
+        return errorResponse('This invitation was already accepted — sign in instead.', 400);
+      }
+
+      if (!RESENDABLE_STATUSES.includes(invitation.status ?? '')) {
+        return errorResponse(
+          'This invitation is no longer valid. Ask your administrator to send a new one.',
+          400,
+        );
+      }
+
+      // Rate limit with the data we already have rather than a new column: every send pushes
+      // expires_at to now + TTL, so an expiry still within a minute of its ceiling means a link
+      // went out moments ago. Bounds this to one email a minute per invitation.
+      const sentJustNow =
+        new Date(invitation.expires_at).getTime() > Date.now() + INVITE_TTL_MS - 60_000;
+      if (sentJustNow) {
+        return errorResponse(
+          'A new link was just sent. Check your inbox — and your spam folder.',
+          429,
+        );
+      }
+
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('name')
+        .eq('id', invitation.company_id)
+        .single();
+
+      await supabase
+        .from('invitations')
+        .update({ expires_at: inviteExpiresAt(), status: 'pending' })
+        .eq('id', invitationId);
+
+      try {
+        await mintAndSendInvite(
+          supabase,
+          resendApiKey,
+          invitation,
+          companyData?.name || '',
+          getOriginUrl(req),
+        );
+      } catch (emailErr) {
+        console.error('Requested resend error:', emailErr);
+        return errorResponse('Could not send a new link. Please try again in a moment.', 500);
+      }
+
+      return jsonResponse({
+        success: true,
+        message: `A new link is on its way to ${invitation.email}.`,
       });
     }
 

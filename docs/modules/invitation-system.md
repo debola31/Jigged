@@ -104,8 +104,24 @@ and `CREATE INDEX idx_invitations_token`; neither has ever existed in the schema
 | `invitations_status_check` | `pending` \| `accepted` \| `expired` \| `revoked` |
 | `idx_invitations_pending_email_company` | UNIQUE on `(email, company_id) WHERE status = 'pending'` — one pending invite per email per company |
 | `idx_invitations_company_id`, `idx_invitations_email` | plain btree |
-| Expiry | `expires_at = now + 7 days`, set on create and reset on resend |
+| Expiry | `expires_at = now + 24 hours`, set on create and reset on every (re)send — see §3.1 |
 | FKs | `company_id → companies ON DELETE CASCADE`; `invited_by`, `accepted_by → auth.users` |
+
+### 3.1 Why 24 hours, and why it is not ours to pick
+
+`expires_at` is **not** the thing that decides whether a link works. The link carries a GoTrue
+one-time token minted by `generateLink`, and that token's lifetime is the project's **Email OTP
+Expiration** — capped by Supabase at 24 hours (*"An expiry duration of more than 86400 seconds is
+disallowed"*). `expires_at` is our own bookkeeping on top, and it must not promise more than the
+token can deliver.
+
+It did, for a long time: the row said **7 days** while the setting said **1 hour**. So the team page
+showed a week-long invitation for a link that was dead before the end of the working day. That is
+the whole of [#722](https://github.com/debola31/Jigged/issues/722) — three invites to one shop went
+out at 7pm, were opened the next morning, and were refused; re-sent live on a call, two of the three
+were accepted inside two minutes. The number now lives in one place per side —
+`INVITE_TTL_HOURS` in `supabase/functions/team-invites/index.ts`, `otp_expiry` in
+`supabase/config.toml`, and the dashboard setting — and the three must move together.
 
 Two RLS policies, both in `supabase/migrations/20260527151536_baseline.sql`:
 `Admins can manage invitations` (ALL, `is_company_admin(company_id)`) and
@@ -154,6 +170,14 @@ The handler validates `type` against `['invite','magiclink','recovery','email','
 honours `next` only if it is relative and neither `//` nor `/\` (open-redirect guard), exchanges
 the single-use `token_hash` via `verifyOtp` (setting the cookies the browser client reads), and
 **fails closed to `/login`** on anything missing, invalid, or already consumed.
+
+It fails closed **with an explanation**: `?reason=invite-link-expired` (or `reset-link-expired` for
+`type=recovery`), plus `returnTo=<the sanitised next>`. `Login.tsx` reads both — it says the link
+aged out, warns that signing in will not work because no password exists yet, and offers **Send me
+a new link**, which pulls the invitation id out of `returnTo` and calls `request-resend` (§7).
+Before this, an expired link produced a bare sign-in form; the invitee typed credentials for a
+password-less account and was told "Invalid login credentials", which was true, useless, and named
+the wrong problem.
 
 **Page state machine** (`app/accept-invite/[invitationId]/page.tsx`):
 `loading → { no-session | confirm-join | name-prompt | accepting | error }`.
@@ -244,11 +268,12 @@ auth check, so every route's authorization is whatever the function does itself.
 
 | Method / path | Auth | Behaviour |
 |---|---|---|
-| `POST /team-invites` | `verifyAdmin` | Validate role + email shape (400s), reject demo companies (400, "…Invite users to the main company instead — they will automatically get demo access"), reject an email that **already has access** to the company (400), revoke any prior pending invite, insert with `expires_at = now + 7d`, mint a one-time link, send via Resend. Returns `email_sent`. |
+| `POST /team-invites` | `verifyAdmin` | Validate role + email shape (400s), reject demo companies (400, "…Invite users to the main company instead — they will automatically get demo access"), reject an email that **already has access** to the company (400), revoke any prior pending invite, insert with `expires_at = now + 24h`, mint a one-time link, send via Resend. Returns `email_sent`. |
 | `GET /team-invites?company_id=X` | `verifyAdmin` | Lazily flip `pending` rows past `expires_at` to `expired`, then list newest-first. |
 | `GET /team-invites/{id}` | **none** | Returns the invitation + `company_name`. No `verifyAdmin`, no `getUser`, and `verify_jwt=false` — so this route is **unauthenticated**; the unguessable invitation uuid is the only capability. *(This doc previously listed its auth as "Session (no admin check)".)* See the open question below. |
 | `DELETE /team-invites/{id}` | `verifyAdmin` | Only a `pending` invitation is revocable → `status='revoked'`; otherwise 400. |
-| `POST /team-invites/{id}/resend` | `verifyAdmin` | Only `pending`; resets `expires_at` to now + 7d and re-sends; otherwise 400. Email failure here returns **500**, not `email_sent:false`. |
+| `POST /team-invites/{id}/resend` | `verifyAdmin` | `pending` **or `expired`** (`RESENDABLE_STATUSES`); resets `expires_at` to now + 24h, sets `status='pending'`, re-sends. Email failure here returns **500**, not `email_sent:false`. |
+| `POST /team-invites/{id}/request-resend` | **none** | The invitee's own escape hatch from an expired link. Same effect as `resend`, minus `verifyAdmin` — deliberately, since the caller by definition has no account to authenticate with. Refuses `accepted` / `revoked`, and 429s if `expires_at` is still within 60 s of its ceiling (a send just happened). |
 
 No `validate` route, no `accept` route, no referral routes.
 
@@ -263,6 +288,14 @@ and after expiry too, since neither status short-circuits the read. `DELETE` and
 existence the same way, 404-ing before `verifyAdmin` runs. Either add a `getUser()` (any session,
 no role check — it costs nothing and the caller always has one) or write the capability-URL
 choice down in the function. Until then treat this as unruled, not as a design decision.
+
+**`request-resend` is the one place that choice IS written down.** It is unauthenticated on
+purpose, and the reasoning is narrower than "the uuid is a capability": the request carries no
+destination. The address comes off the row, so the whole power of a leaked invitation uuid is to
+send mail to the person who was already invited — bounded to once a minute by the `expires_at`
+guard. If the `GET` question above is ever settled by adding a session requirement, this route must
+be excluded from that change; requiring a session here would re-create the dead-end it exists to
+remove.
 
 `verifyAdmin(supabase, authHeader, companyId)` extracts the user from the JWT via the anon
 client, then checks `user_company_access.role IN ('admin')` for that company via the service
@@ -333,6 +366,8 @@ DMARC records, plus `RESEND_API_KEY` set as an Edge Function secret.
 | `invitations` is **exempt** from the billing write-gate | The identity/bootstrap exempt list in `tenant_tables_missing_write_gate()`, asserted by `api/tests/integration/test_billing_enforcement.py::test_no_tenant_table_left_ungated` | Gating it would block team onboarding for a shop whose subscription lapsed. Deliberate — do not "fix" it by adding the gate. |
 | One pending invite per (email, company) | `idx_invitations_pending_email_company` **and** the POST handler revoking the prior row first | A partial-unique index alone would make the second invite a 23505 error instead of a re-send. |
 | `/auth/confirm` fails closed | `app/auth/confirm/route.ts` — type allow-list, relative-`next` check, redirect to `/login` on any error | Open redirect; a consumed token rendering a half-authenticated page. |
+| …and fails closed *legibly* | `__tests__/app/auth/confirmRoute.test.ts` — asserts `reason` + `returnTo` travel with the failure, and that a hostile `next` is dropped from both the success and failure redirects | The silent login wall of #722: an unexplained sign-in form that answers a password-less account with "Invalid login credentials". |
+| `expires_at` never outlives the token in the link | `INVITE_TTL_HOURS` (edge function) = `otp_expiry` (config.toml) = Email OTP Expiration (dashboard), §3.1 | A team page that shows a live invitation whose link stopped working hours ago. **Nothing enforces this** — the three values are in three systems. |
 | Concurrent acceptance is safe | `SELECT … FOR UPDATE` in `accept_invitation()` + the `WHERE NOT EXISTS` guard on the access insert | Duplicate `user_company_access` rows from a double-clicked link. |
 
 **Standing gap — still largely uncovered, but no longer zero.** The accept page now has
@@ -351,8 +386,8 @@ in priority order:
 | Layer | Target |
 |---|---|
 | DB | `accept_invitation()` — new user, user already in company, expired row, concurrent acceptance |
-| Edge Function | `verifyAdmin` (admin allowed; user/operator/no-access → 401/403); POST valid + invalid-role + demo-company + already-has-access + prior-pending-revoked; GET list lazy-expire; DELETE and resend pending-only |
-| Frontend | Accept page: expired/revoked/accepted branches, email mismatch. `/auth/confirm`: valid redirect, open-redirect rejection, fail-closed. Team page: merge, search, demo-mode button hiding |
+| Edge Function | `verifyAdmin` (admin allowed; user/operator/no-access → 401/403); POST valid + invalid-role + demo-company + already-has-access + prior-pending-revoked; GET list lazy-expire; DELETE pending-only; resend accepting `expired`; `request-resend` refusing `accepted`/`revoked`, honouring the 60 s guard, and mailing only the row's own address |
+| Frontend | Accept page: expired/revoked/accepted branches, email mismatch. Team page: merge, search, demo-mode button hiding. **Done:** `/auth/confirm` (`__tests__/app/auth/confirmRoute.test.ts`) and the expired-invite login screen (`__tests__/components/auth/LoginExpiredInvite.test.tsx`) |
 | E2E | New-hire invite → email → `/auth/confirm` → accept → `user_company_access` created → home surface; revoke-then-open-link |
 
 ---

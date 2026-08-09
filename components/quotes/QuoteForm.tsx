@@ -1374,12 +1374,15 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
       {/* Parts */}
       <Card elevation={2} sx={{ mb: 3 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">Parts</Typography>
-            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addPartBlock}>
-              Add part
-            </Button>
-          </Box>
+          {/* "Add part" lives at the BOTTOM of this card, not up here beside the
+              heading. A part block is tall — picker, quantity rows, price
+              captions, lead-time disclosure — so on a multi-part quote a header
+              button means scrolling back up past everything you just filled in
+              to add the next one. Putting it after the list keeps it where the
+              user's attention already is when they finish a part. */}
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Parts
+          </Typography>
 
           {/* Drift summary: a non-blocking notice above the list when any
               current block correlates to a drifted line. Untouched
@@ -1944,6 +1947,16 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
               </Box>
             );
           })}
+
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<AddIcon />}
+            onClick={addPartBlock}
+            sx={{ mt: partBlocks.length > 0 ? 3 : 0 }}
+          >
+            Add part
+          </Button>
         </CardContent>
       </Card>
 

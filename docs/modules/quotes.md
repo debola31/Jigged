@@ -167,7 +167,10 @@ a per-row total misleads. Totals live on the detail page and PDF, for firm quote
 detail page (`quotes/[quoteId]/page.tsx`), gated on the quote being active and unconverted.
 *(This doc described an `/quotes/{id}/edit` route that never existed.)*
 
-**Parts card** — one block per part, plus **+ Add part**. Each block: a part picker (with **+ New
+**Parts card** — one block per part, plus **+ Add part** at the **bottom** of the card, below the
+list rather than beside the heading: a part block is tall (picker, quantity rows, price captions,
+lead-time disclosure), so a header button makes a multi-part quote scroll back up past everything
+just filled in. Each block: a part picker (with **+ New
 Part** inline create), an editable **list of quantity rows** (one per quoted quantity, **Add
 quantity** appends, every row past the first can be deleted), each row showing its resolved price
 stacked over a `From tier {n}` caption, plus Total (firm) or Extended (options). A row below the
@@ -333,11 +336,13 @@ effective value (`lead_time_text ?? quote.lead_time_text`). The modal was the on
 never got this — it read `quote.lead_time_text` alone, so a quote with three per-part lead times
 displayed one, silently.
 
-Because **a job carries one `due_date`**, the modal also warns when the parts *checked for this
-job* were quoted with differing lead times, naming them, and points at the existing escape hatch:
-convert in several passes, one job per PO. Lead time is **not** persisted onto the job — `jobs`
-has no lead-time column (`jobs.lead_time_days` was dropped in `20260713060545`) and free-text lead
-time no longer implies a date.
+A job carries one `due_date`, and the modal says nothing about that — **the per-part lead times
+listed above the field are the disclosure**. A tried-and-removed paragraph explained that differing
+lead times mean one date and offered converting in several passes; it was noise on the screen where
+the user is trying to pick a date, explaining how jobs work rather than telling them anything they
+could act on. Lead time is also **not** persisted onto the job — `jobs` has no lead-time column
+(`jobs.lead_time_days` was dropped in `20260713060545`) and free-text lead time no longer implies a
+date.
 
 Also captured: a **required Due date** (not-in-the-past, starts **empty** — no prefill, and no
 longer derived from lead time), a **required Customer PO #** (the authorization, so no job

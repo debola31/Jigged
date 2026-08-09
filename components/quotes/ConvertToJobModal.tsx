@@ -219,12 +219,6 @@ export default function ConvertToJobModal({
   const [useTierByPart, setUseTierByPart] = useState<Record<string, boolean>>({});
   const includedGroups = partGroups.filter((g) => includedByPart[g.part_id]);
   const anyIncluded = includedGroups.length > 0;
-  // Distinct lead times across the parts going onto THIS job — the ones the
-  // single due date below has to satisfy. Excluded parts don't count: they stay
-  // on the quote for a later job with its own date.
-  const distinctIncludedLeadTimes = Array.from(
-    new Set(includedGroups.map((g) => g.lead_time).filter((t) => t !== '')),
-  );
   // Every INCLUDED part must have a valid (>0) ordered quantity.
   const allQtysValid = includedGroups.every((g) => parseQty(qtyByPart[g.part_id]) !== null);
 
@@ -606,36 +600,25 @@ export default function ConvertToJobModal({
                 </Typography>
               </Box>
             )}
-            <Box>
-              <TextField
-                label="Due date"
-                type="date"
-                size="small"
-                fullWidth
-                required
-                value={dueDateInput}
-                onChange={(e) => setDueDateInput(e.target.value)}
-                disabled={loading}
-                error={dueDateShowError}
-                helperText={dueDateHelper}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  htmlInput: { min: today },
-                }}
-              />
-              {/* A job carries ONE due date. When the parts going onto it were
-                  quoted with different lead times, this is the moment that
-                  matters — say so here rather than letting the user pick a date
-                  that silently contradicts half the quote. (Splitting them is
-                  already possible: convert in several passes, one job per PO.) */}
-              {distinctIncludedLeadTimes.length > 1 && (
-                <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
-                  These parts were quoted with different lead times (
-                  {distinctIncludedLeadTimes.join(', ')}). One job carries one due date — convert
-                  them separately if they need different dates.
-                </Typography>
-              )}
-            </Box>
+            {/* Per-part lead times are shown against each part above; the user
+                can read them and pick a date. No warning here about a job
+                carrying one due date — that is how jobs work, not news. */}
+            <TextField
+              label="Due date"
+              type="date"
+              size="small"
+              fullWidth
+              required
+              value={dueDateInput}
+              onChange={(e) => setDueDateInput(e.target.value)}
+              disabled={loading}
+              error={dueDateShowError}
+              helperText={dueDateHelper}
+              slotProps={{
+                inputLabel: { shrink: true },
+                htmlInput: { min: today },
+              }}
+            />
             <TextField
               label="Customer PO #"
               size="small"

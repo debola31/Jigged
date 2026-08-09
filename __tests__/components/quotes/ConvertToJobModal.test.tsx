@@ -375,28 +375,14 @@ describe('ConvertToJobModal — per-part lead times', () => {
     expect(screen.getByText(/Lead time: 4 weeks ARO/)).toBeInTheDocument();
   });
 
-  it('warns that one job carries one due date when the included parts differ', async () => {
+  it('says nothing extra when the included parts were quoted differently', async () => {
+    // The per-part lead times above are the disclosure. A job carrying one due
+    // date is how jobs work, not news, and a paragraph explaining it is noise
+    // on the screen where the user is trying to pick a date.
     open(twoParts('2–3 weeks', '6–8 weeks', '4 weeks ARO'));
 
-    await waitFor(() =>
-      expect(screen.getByText(/quoted with different lead times/i)).toBeInTheDocument(),
-    );
-    expect(screen.getByText(/2–3 weeks, 6–8 weeks/)).toBeInTheDocument();
-  });
-
-  it('drops the warning once the differing part is excluded from this job', async () => {
-    open(twoParts('2–3 weeks', '6–8 weeks', '4 weeks ARO'));
-
-    await waitFor(() =>
-      expect(screen.getByText(/quoted with different lead times/i)).toBeInTheDocument(),
-    );
-
-    // Unchecking Housing leaves one lead time on this job, so the caveat about
-    // a single due date no longer applies.
-    await userEvent.click(screen.getByRole('checkbox', { name: /include housing/i }));
-
-    await waitFor(() =>
-      expect(screen.queryByText(/quoted with different lead times/i)).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText(/Lead time: 2–3 weeks/)).toBeInTheDocument());
+    expect(screen.queryByText(/one due date/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/convert them separately/i)).not.toBeInTheDocument();
   });
 });

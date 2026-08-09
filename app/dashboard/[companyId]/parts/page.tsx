@@ -1,6 +1,8 @@
 'use client';
 
 import ImportAllDataLink from '@/components/import/ImportAllDataLink';
+import LoadFailedState from '@/components/common/LoadFailedState';
+import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -156,6 +158,10 @@ export default function PartsPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Whether rows are already on screen, for the reload-vs-first-load split in `onError` below.
+  // Written from an effect, never in the render body (the react-hooks/refs rule).
+  const hasRowsRef = useRef(false);
+
   // Pull every part the company owns (made + bought, stocked or not). The
   // source filter narrows this client-side; the inventory page handles the
   // stocked-only view. The priceable-id set is fetched in parallel — an
@@ -165,6 +171,7 @@ export default function PartsPage() {
   const {
     data: partsData,
     loading,
+    error: loadError,
     reload: fetchParts,
   } = useLoad(
     () =>
@@ -179,17 +186,29 @@ export default function PartsPage() {
     // useLoad wants primitive deps (see the warning in hooks/useLoad.ts).
     [companyId, searchDebounced, sortModel.field, sortModel.sort],
     {
+      /**
+       * The snackbar is for a RELOAD that failed — a search or sort change whose result never
+       * arrived, where `useLoad` keeps the previous rows so the grid still shows stale data and
+       * nothing else would say so.
+       *
+       * A FIRST load that fails has no rows to keep, and `LoadFailedState` takes over the whole
+       * card below. Firing here too would say the same thing twice.
+       */
       onError: (error) => {
         console.error('Error fetching parts:', error);
+        if (!hasRowsRef.current) return;
         setSnackbar({
           open: true,
-          message: error instanceof Error ? error.message : 'Failed to load parts',
+          message: friendlyErrorMessage(error, { fallback: 'Failed to load parts' }),
           severity: 'error',
         });
       },
     },
   );
   const rows = partsData?.[0] ?? EMPTY_PARTS;
+  useEffect(() => {
+    hasRowsRef.current = rows.length > 0;
+  });
   // Set of part ids the quote form accepts without warning (≥1 tier with a
   // non-null computed cost) — single source of truth (get_priceable_part_ids
   // RPC), matching QuoteForm.hasUsableTier so the Pricing column and the quote
@@ -682,8 +701,19 @@ export default function PartsPage() {
       {!loading && filteredRows.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
-            <CategoryIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            {renderEmptyState()}
+            {/*
+              Nothing to show has two causes, and they are opposite: the shop genuinely has no
+              parts, or the load failed and we do not know what it has. Rendering "No parts yet.
+              Add your first part" for the second is the bug this branch exists to prevent.
+            */}
+            {loadError ? (
+              <LoadFailedState error={loadError} entity="parts" onRetry={fetchParts} />
+            ) : (
+              <>
+                <CategoryIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                {renderEmptyState()}
+              </>
+            )}
           </CardContent>
         </Card>
       ) : (

@@ -234,10 +234,17 @@ sentry issue plan JAVASCRIPT-NEXTJS-9          # Seer AI fix plan
 sentry issue archive JAVASCRIPT-NEXTJS-9 --until auto
 ```
 
-An MCP server also exists — `https://mcp.sentry.dev/mcp/jigged/javascript-nextjs`, wired in
-the gitignored `.mcp.json`. Its entry **needs `"type": "http"`** or Claude Code silently
-skips it. Authorise via `/mcp` in an interactive session. The CLI does everything the MCP
-does, so this is convenience, not a prerequisite.
+An MCP server also exists — `https://mcp.sentry.dev/mcp/jigged`, wired in the gitignored
+`.mcp.json`. Its entry **needs `"type": "http"`** or Claude Code silently skips it. Authorise
+via `/mcp` in an interactive session. The CLI does everything the MCP does, so this is
+convenience, not a prerequisite.
+
+**Scope it to the org, not a project.** The URL takes an optional trailing project
+(`…/mcp/jigged/javascript-nextjs`), and a session opened that way can read *only* that project —
+`python-fastapi` issues come back as "outside the active project constraint", which reads like a
+permissions error rather than a scoping one. Two consequences worth knowing: half a triage can be
+silently invisible, and **the constraint is fixed when the connection is established**, so
+widening the URL takes a `/mcp reconnect` (or a new session) before it takes effect.
 
 ### Environments, and how to filter by them
 
@@ -495,6 +502,7 @@ a table name; the list needed to tell them apart is not available at runtime, si
 |---|---|
 | `PGRST116` | A `.single()` that matched nothing. The caller asked "is there one?" and got "no" |
 | Transient aborts | Superseded, not failed. **Load-bearing:** postgrest-js does not reject on a cancelled request, it resolves `{ error }` with `hint: 'Request was aborted…'`, so without this every navigation-away becomes an issue |
+| Network failures | The browser never reached Supabase — offline, DNS, a dropped connection. Same resolved-`{ error }` mechanism as an abort, but with no hint: postgrest-js only fills `hint` for `AbortError`, so Safari's `TypeError: Load failed` and Chrome's `Failed to fetch` used to slip through and page somebody. **Matched on the message AND an empty `code`** — a SQLSTATE means PostgREST answered, so a `P0001` raised for the user can never be dropped by a coincidental word match. Operators are on personal phones on cellular, so this class scales with adoption. The user still sees it: the read path renders `LoadFailedState` |
 | Auth errors | Session expiry is already handled by the refresh-and-retry in `lib/supabase.ts` |
 
 Add to this list only with a recorded reason, exactly as with `ignoreErrors` below.

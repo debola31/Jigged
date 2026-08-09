@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import LoadFailedState from '@/components/common/LoadFailedState';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -139,6 +140,7 @@ export default function CustomerDetailPage() {
   const {
     data,
     loading,
+    error: loadError,
     reload: fetchAll,
   } = useLoad(
     async () => {
@@ -384,6 +386,17 @@ export default function CustomerDetailPage() {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  // A failed load also leaves `customer` null, and "Customer not found" would then assert the
+  // record is gone when we simply never heard back. Tested first, so only a load that SUCCEEDED
+  // and returned nothing reaches the not-found branch.
+  if (loadError) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6 }}>
+        <LoadFailedState error={loadError} entity="this customer" onRetry={fetchAll} />
       </Box>
     );
   }

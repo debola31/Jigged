@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from "@sentry/nextjs";
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -87,8 +86,18 @@ export default function Login({ expired, returnTo }: LoginProps) {
         router.push(redirectRoute);
       }
     } catch (err) {
+      /**
+       * No `Sentry.captureException` here: `signInWithPassword` is in the Supabase integration's
+       * `AUTH_OPERATIONS_TO_INSTRUMENT`, so since the net went in (#708) it files this itself, as
+       * `auto.db.supabase.auth`. Capturing again filed every sign-in failure twice under two
+       * fingerprints.
+       *
+       * This is NOT true of every auth call — `updateUser`, `resetPasswordForEmail` and
+       * `getSession` are absent from that list, so ForgotPassword, ResetPassword, ChangePassword
+       * and AuthProvider keep their manual captures, which are their only reporter. Check the
+       * list before removing another one.
+       */
       console.error('Login error:', err);
-      Sentry.captureException(err);
       setError(err instanceof Error ? err.message : 'An error occurred during sign in');
     } finally {
       setLoading(false);

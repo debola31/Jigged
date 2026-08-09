@@ -108,6 +108,46 @@ export function isTransientAbortError(error: unknown): boolean {
 }
 
 /**
+ * The browser's fetch itself failed — offline, DNS, a dropped connection, or the tab navigating
+ * away mid-request. Not the same thing as an abort, and deliberately a separate predicate.
+ *
+ * `postgrest-js` does not reject on a failed fetch; it resolves `{ error }` built in
+ * `PostgrestBuilder`'s `res.catch` as `` { message: `${name}: ${message}`, details: <stack>,
+ * hint: '', code: '' } ``. The `hint` is only filled in for `AbortError` and undici's header
+ * overflow, so a plain network failure carries none of the text `isTransientAbortError` looks
+ * for — which is exactly how Safari's `TypeError: Load failed` became a paging alert.
+ *
+ * WHY `code` IS CHECKED, and it is not belt-and-braces: the message is the browser's, so a
+ * Postgres error raised deliberately FOR the user (`P0001`, "Could not fetch…") could contain
+ * one of these substrings by coincidence, and dropping that would hide a real failure silently —
+ * the worst outcome this module can produce. postgrest-js hard-codes `code = ''` on every
+ * client-side network path, and says why: "We don't populate code/hint for client-side network
+ * errors since those fields are meant for upstream service errors (PostgREST/PostgreSQL)." So an
+ * empty `code` means the request never reached Postgres, and anything with a SQLSTATE is
+ * upstream and reports normally.
+ *
+ * NOT keyed on `status: 0`, which the same `res.catch` also sets: that lives on the *response*
+ * object, a sibling of `error`, and never reaches the error value handed to `beforeSend`.
+ */
+export function isNetworkFailureError(error: unknown): boolean {
+  if (!error) return false;
+
+  const err = asRecord(error);
+
+  // A SQLSTATE or PGRST code means PostgREST answered. Only a client-side failure has none.
+  if (err.code !== '' && err.code !== undefined && err.code !== null) return false;
+
+  const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+
+  return (
+    message.includes('load failed') || // Safari
+    message.includes('failed to fetch') || // Chrome, Edge
+    message.includes('networkerror') || // Firefox: "NetworkError when attempting to fetch resource"
+    message.includes('network request failed')
+  );
+}
+
+/**
  * `PGRST116` — PostgREST's "no rows returned" from `.single()`. A definitive answer, not a
  * failure: the row genuinely is not there. Callers branch on it deliberately.
  */
@@ -229,6 +269,22 @@ export function shouldReportSupabaseError(error: unknown): boolean {
    * coincidence rather than a designed contract, which is why the test pins it.
    */
   if (isTransientAbortError(error)) return false;
+
+  /**
+   * The browser could not reach Supabase at all — offline, a dropped connection, a tab navigating
+   * away mid-request. Indistinguishable from each other from here, and none of them a defect in
+   * this application.
+   *
+   * The cost of keeping them is not quota, it is that operators work from personal phones on
+   * cellular (see CLAUDE.md's device model), so this class scales with adoption rather than down.
+   * One issue per flaky-signal moment is how a queue becomes one nobody reads.
+   *
+   * WHAT THIS GIVES UP, deliberately: per-event visibility of a genuine Supabase outage. That is
+   * the right trade — an outage announces itself through every other error class at once, and the
+   * uptime monitors are the thing built to notice it. The user is still told: the read path
+   * renders a retry state (`LoadFailedState`), so a dropped report is never a silent failure.
+   */
+  if (isNetworkFailureError(error)) return false;
 
   // Session expiry is not a bug and is already handled: the custom fetch in lib/supabase.ts
   // refreshes and retries, and `redirectToSessionExpiry` covers the rest.

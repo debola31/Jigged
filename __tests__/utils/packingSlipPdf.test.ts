@@ -46,7 +46,9 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import {
+  attributionLine,
   computePackingSlipQuantities,
+  drawCompanyLogo,
   generatePackingSlipPdf,
   type PackingSlipQtyLine,
 } from '@/utils/packingSlipPdf';
@@ -356,5 +358,101 @@ describe('generatePackingSlipPdf — the quantity table', () => {
     ).toBe(true);
     // Voided: its own 10 are owed again, so Qty Remaining comes back.
     expect(tableConfig().headers).toContain('Qty Remaining');
+  });
+});
+
+/**
+ * The footer, and the logo above it.
+ *
+ * Both are the "document branding" half of this batch. The footer strings are asserted **exactly**,
+ * including the string each replaced, because a half-applied change prints both lines and looks
+ * fine to anyone who was not looking for it.
+ */
+describe('generatePackingSlipPdf — document branding', () => {
+  // Scoped, because the `beforeEach` above belongs to another describe and `textMock` is shared —
+  // without this, the "exactly one" assertion counts every earlier render's footer too.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const drawn = () =>
+    textMock.mock.calls.map((c: unknown[]) => c[0]).filter((t): t is string => typeof t === 'string');
+
+  it('says where the document came from, and stops restating the company name', async () => {
+    await generatePackingSlipPdf({
+      shipment: shipment(),
+      company,
+      shippedBeforeByJobPart: new Map(),
+      supabase: null,
+    });
+
+    expect(drawn()).toContain(attributionLine());
+    // The header already carries the company name in 14pt bold; the footer was restating it.
+    expect(drawn().some((t) => t.includes(`· ${company.name}`))).toBe(false);
+  });
+
+  it('carries the line unconditionally — there is no setting to turn it off', async () => {
+    await generatePackingSlipPdf({
+      shipment: shipment(),
+      company: { ...company, name: 'Another Shop' },
+      shippedBeforeByJobPart: new Map(),
+      supabase: null,
+    });
+    expect(drawn().filter((t) => t.startsWith('Generated'))).toHaveLength(1);
+  });
+});
+
+describe('drawCompanyLogo', () => {
+  const target = (width: number, height: number, fileType: string) => {
+    const addImage = vi.fn();
+    return {
+      addImage,
+      doc: { getImageProperties: () => ({ width, height, fileType }), addImage },
+    };
+  };
+
+  it('fits a wide wordmark inside the box without squashing it', () => {
+    const { doc, addImage } = target(200, 50, 'PNG');
+    const usedWidth = drawCompanyLogo(doc, 'data:image/png;base64,x', 40, 40);
+
+    const [, , x, y, w, h] = addImage.mock.calls[0];
+    // 200×50 into a 56pt box → 56×14, aspect intact. The old code forced 56×56 and squashed every
+    // logo that wasn't square, which is most of them.
+    expect(w).toBeCloseTo(56, 5);
+    expect(h).toBeCloseTo(14, 5);
+    expect(w / h).toBeCloseTo(200 / 50, 5);
+    expect(usedWidth).toBeCloseTo(56, 5);
+    // Vertically centred in the box, so it sits on the same optical line as the company name.
+    expect(x).toBe(40);
+    expect(y).toBeCloseTo(40 + (56 - 14) / 2, 5);
+  });
+
+  it('fits a tall logo the other way', () => {
+    const { doc, addImage } = target(50, 200, 'PNG');
+    const usedWidth = drawCompanyLogo(doc, 'data:image/png;base64,x', 40, 40);
+    const [, , , , w, h] = addImage.mock.calls[0];
+    expect(w).toBeCloseTo(14, 5);
+    expect(h).toBeCloseTo(56, 5);
+    expect(usedWidth).toBeCloseTo(14, 5);
+  });
+
+  it('declares a JPEG as a JPEG', () => {
+    const { doc, addImage } = target(100, 100, 'JPEG');
+    drawCompanyLogo(doc, 'data:image/jpeg;base64,x', 40, 40);
+    // The format argument was hardcoded 'PNG', so a JPEG logo failed into a silent catch and the
+    // shop simply never saw it.
+    expect(addImage.mock.calls[0][1]).toBe('JPEG');
+  });
+
+  it('draws nothing and claims no width when the image cannot be read', () => {
+    const addImage = vi.fn();
+    const doc = {
+      getImageProperties: () => {
+        throw new Error('unreadable');
+      },
+      addImage,
+    };
+    expect(drawCompanyLogo(doc, 'data:image/png;base64,x', 40, 40)).toBe(0);
+    expect(addImage).not.toHaveBeenCalled();
   });
 });

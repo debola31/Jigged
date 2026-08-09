@@ -200,6 +200,97 @@ export function packingSlipPdfFilename(shipment: Pick<ShipmentWithRelations, 'pa
 }
 
 /**
+ * Where a document came from, in the two forms our three documents need.
+ *
+ * Both are built from `ATTRIBUTION_SUFFIX` so the words "jigged.app" exist once. Three generators
+ * printing three hand-copied strings is how you end up with "with jigged.app", "via jigged.app" and
+ * "by Jigged" on three pieces of paper from the same shop.
+ *
+ * It is metadata at footer weight — same size, same grey, same row as the page number — never a
+ * badge and never a logo. Unconditional and unconfigurable: there is no setting, so there is no
+ * state to read at print time and nothing that can disagree with itself.
+ */
+const ATTRIBUTION_SUFFIX = 'with jigged.app';
+
+/**
+ * The dated form, for a document whose footer has a **left slot of its own** — the packing slip and
+ * the job traveler. On the slip it replaced `Generated {date} · {company}`: the company name is
+ * already the largest thing in the header, so the footer was restating it, and the date was the
+ * half worth keeping.
+ */
+export function attributionLine(): string {
+  return `Generated ${formatDate(new Date().toISOString())} ${ATTRIBUTION_SUFFIX}`;
+}
+
+/**
+ * The undated form, for a footer that is **already carrying something** — the quote, whose left
+ * slot holds the preparer credit, so this rides on the right ahead of the page number.
+ *
+ * **No date, and that is not just to save width.** A quote already prints `Date:` in its header
+ * meta block, a few inches above; a second date in the footer is the same fact stated twice, and
+ * the two are not even the same fact — the header date is when the quote was *issued*, this one is
+ * when the PDF was *rendered*. On a re-download months later they disagree, and a customer reading
+ * two different dates on one page has no way to know which one their price is good from.
+ */
+export const ATTRIBUTION_MARK = `Generated ${ATTRIBUTION_SUFFIX}`;
+
+/** The box a company logo is fitted into, in points. Square, but the logo need not be. */
+export const LOGO_BOX = 56;
+
+/**
+ * The minimum a jsPDF document must expose to have a logo drawn into it. Keeps this testable
+ * without a real jsPDF, and `compression` mirrors jsPDF's own union so a real document satisfies
+ * this structurally.
+ */
+export interface LogoDrawTarget {
+  getImageProperties: (data: string) => { width: number; height: number; fileType: string };
+  addImage: (
+    data: string,
+    format: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    alias?: string,
+    compression?: 'NONE' | 'FAST' | 'MEDIUM' | 'SLOW',
+  ) => void;
+}
+
+/**
+ * Draw a company logo fitted inside `LOGO_BOX`, and return the width it actually occupied so the
+ * caller can place the company name beside it.
+ *
+ * **Aspect is preserved.** Both generators used to pass a 56×56 square regardless of the source,
+ * which squashed every wordmark — the common case, since a shop's logo is usually wider than it is
+ * tall. `getImageProperties` also supplies the real format, so a JPEG renders instead of being
+ * declared 'PNG' and failing into a silent catch.
+ *
+ * Returns 0 and draws nothing on any failure; the caller falls back to the company name in bold,
+ * which is the layout that has been shipping all along.
+ */
+export function drawCompanyLogo(
+  doc: LogoDrawTarget,
+  dataUrl: string,
+  x: number,
+  y: number,
+  box: number = LOGO_BOX,
+): number {
+  try {
+    const props = doc.getImageProperties(dataUrl);
+    if (!props?.width || !props?.height) return 0;
+    const scale = Math.min(box / props.width, box / props.height);
+    const w = props.width * scale;
+    const h = props.height * scale;
+    // Vertically centred in the box so a wide wordmark sits on the same optical line as the company
+    // name beside it rather than clinging to the top of the header.
+    doc.addImage(dataUrl, props.fileType, x, y + (box - h) / 2, w, h, undefined, 'FAST');
+    return w;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Pull the company logo as a base64 image so jsPDF can embed it. Skips
  * silently on any failure — the layout falls back to the company name
  * in plain bold text (mirrors the quote PDF).
@@ -374,20 +465,18 @@ export async function generatePackingSlipPdf(
   let logoBottom = headerTop;
 
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  let logoWidth = 0;
   if (logoDataUrl) {
-    try {
-      const logoSize = 56;
-      doc.addImage(logoDataUrl, 'PNG', MARGIN, headerTop, logoSize, logoSize, undefined, 'FAST');
-      logoBottom = headerTop + logoSize;
-    } catch {
-      logoBottom = headerTop;
-    }
+    logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
+    if (logoWidth > 0) logoBottom = headerTop + LOGO_BOX;
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(30);
-  const shopNameX = logoDataUrl ? MARGIN + 70 : MARGIN;
+  // Measured from what was actually drawn, not a fixed 70pt: a wide wordmark used to run under the
+  // company name.
+  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
   doc.text(company.name, shopNameX, headerTop + 14);
 
   const shopLines = buildShopHeaderLines(company);
@@ -675,11 +764,7 @@ export async function generatePackingSlipPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
-    doc.text(
-      `Generated ${formatDate(new Date().toISOString())} · ${company.name}`,
-      MARGIN,
-      footerY,
-    );
+    doc.text(attributionLine(), MARGIN, footerY);
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

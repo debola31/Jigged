@@ -81,7 +81,7 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 
 | Journey | Status |
 |---|---|
-| Station entry by tap-select | **Built.** An earlier revision split this into scan-a-placard and tap-select-as-fallback. The placard was removed (below), so tap-select *is* the entry path. |
+| Station entry by tap-select | **Built**, and it is the only entry path — see [Stations](#stations-work-centers). |
 | Whole-plant "sign into the plant" view | **Built** as the All Stations lens — the **Andon / visibility pattern**: answer "where is job #123?" and "my station is idle, what else is ready?" without walking the floor. It was the one genuinely missing capability; it is not missing any more, and three sections of the old journey doc never caught up. |
 | Multi-part job navigation | **Built** as the parts hub, with a back-link from the traveler on multi-part jobs only. |
 | Printed traveler as the primary path | **Demoted, deliberately.** It remains a fallback for shops mid-transition or spotty connectivity. |
@@ -137,12 +137,13 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
   `components/operator/OperatorStationContext.tsx`) — *not* `sessionStorage`, so it survives a
   browser restart or a backgrounded-tab eviction. The header dropdown changes it any time; logout
   clears it (`clearStoredStation`).
-- **There is no station QR.** Per-work-centre placards — a per-page download plus a bulk **Print
-  Placards** action encoding `…/login?station={workCenterId}` — were removed in July 2026.
-  **Withdrawn:** the original plan treated bulk placard printing as the keystone of adoption. The
-  print-all action shipped and **placards still never went up on a floor**, so the bottleneck was
-  adoption, not the absence of a print button. Tap-select plus **Shop floor view** on the dashboard
-  jobs list reach the same place, and the login page no longer reads `?station=`.
+- **An operator picks their station in the app, and there is nothing to scan to do it.** Tap-select
+  plus **Shop floor view** on the dashboard jobs list reach everything the station needs to be.
+  **Withdrawn:** an earlier plan treated printing something for every machine as the keystone of
+  adoption. It was built, nothing was ever posted on a floor, and the bottleneck turned out to be
+  adoption rather than the absence of a print button — which is the lesson worth carrying, not the
+  artifact. The two printed things Jigged has are the **job traveler** and the **location label**,
+  both covered by [QR codes and scanning](#qr-codes-and-scanning).
 
 ---
 
@@ -701,23 +702,62 @@ empty "No jobs" list. That is the shape of the May 2026 `jobs.status` regression
 
 ## QR codes and scanning
 
-There are **two** codes, and **no station QR** (see [Stations](#stations-work-centers)).
+There are **two** codes, and nothing else in Jigged is scannable — parts carry no barcode at all
+(see [Stations](#stations-work-centers)).
 
+```
+Traveler   HTTPS://WWW.JIGGED.APP/T/{company32}{jobPart32}     77 chars → QR version 4 @ EC-M
+Location   HTTPS://WWW.JIGGED.APP/L/{company32}{location32}    77 chars → QR version 6 @ EC-H
+```
+
+**Redesigned August 2026, because the old codes did not scan.** A Contour operator spent 30+
+seconds failing to read a traveler off *fresh* paper. The scheme it replaced was a login deep link
+carrying two full UUIDs — 157 characters, QR **version 8**, 0.37 mm per module inside a 56pt square.
+`jobTravelerPdf`'s own `QR_SIZE` comment had predicted this and prescribed the fix: shorten the
+payload, do not enlarge the code. The location label was worse and unmeasured, at **version 10**.
+
+Three things buy the new versions, and all three are load-bearing:
+
+1. **Every character is in the QR alphanumeric charset**, which packs 2 characters into 11 bits
+   where byte mode spends 8 bits each. That is why the URL is uppercase. A lowercase character does
+   not break anything visibly — it just quietly costs a version.
+2. **UUIDs are RFC 4648 base32**, 26 characters instead of 36.
+3. **The traveler carries `job_part_id` only.** A third UUID would be version 5. This is why the
+   traveler page moved to `/operator/{co}/parts/{jobPartId}` — `getJobPartTraveler` never needed the
+   job id, so the `/jobs/{jobId}` segment was decoration the printed code was paying for.
+
+The result is **0.60 mm per module** on the traveler and **1.00 mm** on the label — 61% and 79%
+larger than what failed. [`__tests__/utils/qrVersionCeiling.test.ts`](../../__tests__/utils/qrVersionCeiling.test.ts)
+holds the ceiling, asserting charset, version and printed mm-per-module, so the next payload change
+fails in CI rather than on a shop floor. **When it fails, shorten the payload — do not raise the
+numbers.**
+
+- **The company id stays in the payload**, which is what the obvious shortening (`/t/{jobPartId}`)
+  would have dropped. It is what lets `foreignCompanyRejection` refuse another shop's code **by
+  name, offline, before any navigation**. Base32 buys the version *and* keeps it.
+- **QRs are drawn as vector modules** ([`lib/qrVector.ts`](../../lib/qrVector.ts)), not embedded
+  PNGs — the old 320px bitmap was ~239 dpi on a 34 mm label. Same ink, no resolution. The matrix
+  carries no margin, so the **quiet zone is the layout's job**; both callers assert they leave 4
+  modules.
+- **One mapping, one place.** `parseJiggedScan` → `scanDestination` serves both the in-app scanner
+  and the camera-app path: `/T/{code}` decodes and hands the destination to the operator login as a
+  validated `?next=`. The login page used to re-derive it from `?job=&part=&operation=&location=` —
+  a second hand-maintained copy, with a comment admitting nothing checked that the two agreed.
+  `safeNextPath` re-validates on arrival, because a query parameter is attacker-controlled even
+  when we wrote it.
 - **Traveler QR** (`utils/jobTravelerPdf.ts`): **exactly one per traveler sheet**, in the header
   beside the Job #, opening that part's step list where the operator taps the step they are
   working. It carries **no caption** — a QR already reads as "scan me", and the old line cost a row
   of paper. An **optional accelerator** for shops mid-transition, not required.
   **Withdrawn:** a previous revision printed a QR on every operation row; operators couldn't tell
-  which code they were pointing the phone at. The `?job=&part=&operation=` deep link still resolves
-  for sheets printed under that revision.
+  which code they were pointing the phone at.
 - **Inventory location label** (`utils/locationLabelPdf.ts`,
-  `components/inventory/locations/LocationQRModal.tsx`): printed on a bin, encodes `?location={id}`
-  and opens that bin. Feature-gated with the rest of inventory locations — see
-  [inventory.md](inventory.md).
-- **The Scan tab** reads both without a login round-trip. `lib/jiggedScan.ts` owns one parser
-  (`parseJiggedScan` → `scanDestination`), so a location label and a job traveler resolve through
-  the same path; `companyIdFromScan` + `foreignCompanyRejection` refuse a code belonging to another
-  company **by name** rather than failing opaquely. Parts carry no barcode at all.
+  `components/inventory/locations/LocationQRModal.tsx`): **Avery 5163 adhesive stock**, ten to a
+  Letter page, so a shop peels and sticks instead of cutting. Feature-gated with the rest of
+  inventory locations — see [inventory.md](inventory.md).
+- **No backward compatibility, deliberately.** Nobody had printed a code that anyone kept, so the
+  old payload shapes, the `operation=` deep link and their parser branches were deleted outright
+  rather than carried. Anything printed before this ships is dead format — reprint it.
 - The printed traveler's other shop-floor conventions: **outside steps are flagged with a heavy
   black outline + bold text (border only, no fill)** — unmistakable and grayscale-safe, but
   essentially no extra toner. **Withdrawn:** earlier gray and solid fills drew a shop-owner ink
@@ -788,9 +828,9 @@ win over paper:
 - **Parallel run, then retire paper.** Run paper and digital together for a few weeks; once the
   queue path sticks, stop printing travelers by default.
 
-**Withdrawn:** the original keystone here was *bulk placard deployment* — add a print-all action so
-a shop could post the whole floor in one pass. That action was built and the placards still never
-went up. **The bottleneck was adoption, not the absence of a print button.**
+**Withdrawn:** the original keystone here was printing something for every machine so a shop could
+post the whole floor in one pass. It was built and nothing ever went up. **The bottleneck was
+adoption, not the absence of a print button.**
 
 ---
 

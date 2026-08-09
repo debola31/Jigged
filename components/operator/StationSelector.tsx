@@ -14,8 +14,10 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
  * Shown when no station is selected. Displays available stations
  * as large tappable buttons so the operator can pick one.
  *
- * When `filteredStations` is provided (e.g. from a job QR scan),
- * only those stations are shown instead of all company stations.
+ * It shows every station in the company, deliberately. There was a `filteredStations` prop that
+ * narrowed the list, left over from a scan flow that no longer exists — no caller ever passed it,
+ * so every render already showed the full list and the prop was a description of behaviour the
+ * component did not have.
  *
  * ## It does NOT name the company, and that is the second answer to the same problem
  *
@@ -31,15 +33,11 @@ import { useStationContext } from '@/components/operator/OperatorStationContext'
  * place: the header owns company identity, this card owns the task.
  */
 export default function StationSelector({
-  filteredStations,
   subtitle,
 }: {
-  filteredStations?: Array<{ id: string; name: string }>;
   subtitle?: string;
 } = {}) {
   const { stations, setStation, loading } = useStationContext();
-
-  const displayStations = filteredStations || stations;
 
   if (loading) {
     return (
@@ -73,7 +71,7 @@ export default function StationSelector({
             {subtitle || 'Choose the station you are working at to continue.'}
           </Typography>
 
-          {displayStations.length === 0 ? (
+          {stations.length === 0 ? (
             <Typography variant="body1" color="text.secondary">
               No stations available. Please contact your supervisor.
             </Typography>
@@ -87,7 +85,7 @@ export default function StationSelector({
                 mx: 'auto',
               }}
             >
-              {displayStations.map((station) => (
+              {stations.map((station) => (
                 <Button
                   key={station.id}
                   variant="outlined"

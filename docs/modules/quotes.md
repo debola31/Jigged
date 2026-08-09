@@ -495,12 +495,31 @@ only if post-pilot data shows drift is more frequent than estimated.
 **View PDF** generates a customer-facing PDF in the browser — no server round-trip. Filename
 `Quote-{quote_number}.pdf`.
 
-Contains: company logo and name; the QUOTE heading with number, date, validity, lead time,
+Contains: company logo and name — **the logo only since August 2026**; this line claimed it for
+months while `generateQuotePdf` drew no logo at all, so a shop that uploaded one saw it on its
+packing slips and travelers but not on the document that goes to a customer who has not decided to
+buy yet. The QUOTE heading with number, date, validity, lead time,
 and payment terms; **Customer · Ship to (only if different) · Customer contact**; the line
 items table ordered by `sequence`, with a grand total **only** on firm quotes; and an acceptance
 block instructing the customer to **reply with a purchase order referencing the quote** — there
 is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared by {name} ·
 {email}" line sits below it.
+
+**The footer differs from the packing slip's and the traveler's**, because a quote is the only one
+of the three whose left slot is already occupied:
+
+```
+Prepared by Dev Seed User · dev@jigged.test        Generated with jigged.app · Page 1 of 1
+```
+
+The preparer credit keeps the left — it is the only place a quote records who to ring about the
+price — so the attribution shares the right slot with the page number, using the **undated**
+`ATTRIBUTION_MARK` rather than the dated `attributionLine()` the other two print
+([packingSlipPdf.ts](../../utils/packingSlipPdf.ts)). **Undated on purpose:** the header already
+prints `Date:` a few inches above, and a footer date would be the *render* date rather than the
+*issue* date — on a re-download months later the two disagree, and a customer reading two dates on
+one page cannot tell which one their price is good from. Both forms are built from one suffix
+constant so three documents cannot drift into three wordings.
 
 **Deliberately excluded from the customer's view:** routing and operations, run times, labor and
 material cost snapshots, markup percentage, base cost.

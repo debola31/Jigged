@@ -146,9 +146,9 @@ describe('buildLocationTree (pure)', () => {
   });
 });
 
-// `buildLocationUrl` was deleted: it duplicated `locationLabelPdf`'s `buildLocationScanUrl`
-// (which is what actually encodes the printed QR) and had no caller. That function's own test
-// covers the route shape.
+// `buildLocationUrl` was deleted: it duplicated the printed QR's own URL builder and had no
+// caller. That builder is now `buildScanUrl` in `lib/jiggedScan.ts`, which owns writing, reading
+// and routing a scan in one place; `__tests__/lib/jiggedScan.test.ts` covers the shape.
 
 // ---------------------------------------------------------------------------
 describe('createLocation', () => {

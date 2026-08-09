@@ -62,7 +62,7 @@ export default function OperatorJobPartsHubPage() {
         // Single-part job: the hub adds nothing — go straight to the traveler.
         if (data.parts.length === 1) {
           redirecting = true;
-          router.replace(`/operator/${companyId}/jobs/${jobId}/parts/${data.parts[0].job_part_id}`);
+          router.replace(`/operator/${companyId}/parts/${data.parts[0].job_part_id}`);
           return;
         }
         setOverview(data);
@@ -78,7 +78,7 @@ export default function OperatorJobPartsHubPage() {
   }, [companyId, jobId, router]);
 
   const openPart = (part: JobPartSummary) => {
-    nav.push(`/operator/${companyId}/jobs/${jobId}/parts/${part.job_part_id}`);
+    nav.push(`/operator/${companyId}/parts/${part.job_part_id}`);
   };
 
   if (loading) {

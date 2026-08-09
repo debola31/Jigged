@@ -17,10 +17,12 @@ import Link from 'next/link';
 import { JiggedLogo } from '@/components/branding';
 import EmailIcon from '@mui/icons-material/Email';
 import LockIcon from '@mui/icons-material/Lock';
+import posthog from 'posthog-js';
 import { getSupabase } from '@/lib/supabase';
 import { isIndeterminateSingleError } from '@/lib/supabaseErrors';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { getCompany } from '@/utils/companyAccess';
+import { safeNextPath, scanKindFromDestination } from '@/lib/jiggedScan';
 
 /**
  * Operator Login Page.
@@ -33,26 +35,22 @@ export default function OperatorLoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
-  const jobId = searchParams.get('job') || undefined;
-  const partId = searchParams.get('part') || undefined;
-  const operationId = searchParams.get('operation') || undefined;
-  const locationId = searchParams.get('location') || undefined;
+  const next = searchParams.get('next');
 
-  // Where to land after auth, given the scanned QR's params. A location QR
-  // (printed on a bin/cabinet label) opens that location's bin view; the
-  // traveler QR (job + part) opens that part's traveler, where the operator
-  // picks the step; a job + part + operation QR (printed on older travelers,
-  // still in circulation on the floor) jumps straight to that step's action
-  // view; anything else — incl. a job-only scan — falls back to the station
-  // jobs list.
-  const postLoginPath = () => {
-    if (locationId) return `/operator/${companyId}/inventory/locations/${locationId}`;
-    if (jobId && partId && operationId) {
-      return `/operator/${companyId}/jobs/${jobId}/parts/${partId}/operations/${operationId}`;
-    }
-    if (jobId && partId) return `/operator/${companyId}/jobs/${jobId}/parts/${partId}`;
-    return `/operator/${companyId}/jobs`;
-  };
+  /**
+   * Where to land after auth.
+   *
+   * This page used to re-derive the destination from `?job=`, `?part=`, `?operation=` and
+   * `?location=` — **a second, hand-maintained copy of `scanDestination`**, with a comment
+   * admitting the two had to agree and that nothing checked it. Now the scan landing route computes
+   * the destination once and passes it here as `next`; this page only validates and replays it.
+   * One mapping, one place, and the drift risk is gone rather than documented.
+   *
+   * `safeNextPath` is not a formality: a query parameter is attacker-controlled even when we were
+   * the ones who wrote it, so it must be re-checked against this company's own operator prefix
+   * before it becomes a navigation. Anything else falls back to the jobs list.
+   */
+  const postLoginPath = () => safeNextPath(next, companyId) ?? `/operator/${companyId}/jobs`;
 
   const [companyName, setCompanyName] = useState<string>('');
   const [email, setEmail] = useState('');
@@ -75,6 +73,18 @@ export default function OperatorLoginPage() {
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+
+      // The camera-app half of "how long does a scan take". The in-app scanner can time itself;
+      // this path cannot — the phone leaves the browser and comes back — so all it can honestly
+      // report is that a scanned link arrived and whether it had to stop at the sign-in form.
+      // `had_session` is the interesting bit: a false here is a scan that cost an extra screen.
+      const destination = safeNextPath(next, companyId);
+      if (destination) {
+        posthog.capture('scan link opened', {
+          kind: scanKindFromDestination(destination) ?? 'unknown',
+          had_session: Boolean(session),
+        });
+      }
 
       if (session) {
         // User is logged in, verify they have access to this company
@@ -101,7 +111,7 @@ export default function OperatorLoginPage() {
 
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, router, jobId, partId, operationId, locationId, supabase]);
+  }, [companyId, router, next, supabase]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,10 +318,14 @@ export default function OperatorLoginPage() {
           </Button>
         </Box>
 
-        {/* Job Info */}
-        {jobId && (
+        {/*
+          Says why they are looking at a sign-in form when they expected a job. It used to print
+          `Job: 8a3f9c1d...` — a truncated UUID, which told an operator nothing they could use and
+          told anyone reading over their shoulder a fragment of an id.
+        */}
+        {safeNextPath(next, companyId) && (
           <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
-            Job: {jobId.slice(0, 8)}...
+            Sign in to open the label you scanned.
           </Typography>
         )}
       </Paper>

@@ -33,6 +33,8 @@ const { jsPDFCtor, autoTableFn } = vi.hoisted(() => {
     setPage: setPageMock,
     getNumberOfPages: getNumberOfPagesMock,
     getTextWidth: vi.fn().mockReturnValue(50),
+    addImage: vi.fn(),
+    getImageProperties: vi.fn().mockReturnValue({ width: 200, height: 50, fileType: 'PNG' }),
     lastAutoTable: { finalY: 400 },
   };
 
@@ -513,11 +515,54 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    // "Created by" is no longer a top column — it's a "Prepared by" footer line
-    // that replaced the old "Generated <date> · <company>" footer text.
+    // "Created by" is no longer a top column — it's a "Prepared by" footer line, and it keeps the
+    // LEFT slot to itself. The attribution shares the right slot with the page number instead.
     expect(rendered).not.toContain('CREATED BY');
     expect(rendered).toContain('Prepared by Sam T · sam@example.com');
-    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
+  });
+
+  /**
+   * The quote's footer is the only one of the three whose left slot is already occupied, so its
+   * attribution rides right, ahead of the page number, and drops the date.
+   *
+   * **The date is the part worth asserting.** The header already prints `Date:` a few inches above,
+   * and a footer date would be the *render* date rather than the *issue* date — on a re-download
+   * months later the two disagree, and a customer reading two dates on one page cannot tell which
+   * one their price is good from.
+   */
+  it('puts the attribution and the page number together on the right, undated', async () => {
+    await generateQuotePdf(baseQuote, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const rightAligned = docInstance.text.mock.calls
+      .filter((c: unknown[]) => (c[3] as { align?: string } | undefined)?.align === 'right')
+      .map((c: unknown[]) => c[0]);
+
+    expect(rightAligned).toContain('Generated with jigged.app · Page 1 of 1');
+    // No date anywhere in the footer mark — `attributionLine()`'s dated form belongs to the slip
+    // and the traveler, whose left slots were empty.
+    expect(
+      docInstance.text.mock.calls
+        .map((c: unknown[]) => c[0])
+        .filter((t: unknown): t is string => typeof t === 'string')
+        .some((t) => /Generated \w{3} \d/.test(t)),
+    ).toBe(false);
+  });
+
+  it('keeps the preparer credit on the left, undisplaced', async () => {
+    const quoteWithCreator: QuoteWithRelations = {
+      ...baseQuote,
+      created_by: 'user-1',
+      created_by_member: { user_id: 'user-1', name: 'Sam T', email: 'sam@example.com' },
+    };
+    await generateQuotePdf(quoteWithCreator, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const leftAligned = docInstance.text.mock.calls
+      .filter((c: unknown[]) => (c[3] as { align?: string } | undefined)?.align !== 'right')
+      .map((c: unknown[]) => c[0]);
+
+    expect(leftAligned).toContain('Prepared by Sam T · sam@example.com');
   });
 
   it('omits the "Prepared by" line when there is no creator on the quote', async () => {
@@ -607,5 +652,68 @@ describe('generateQuotePdf', () => {
 describe('quotePdfFilename', () => {
   it('formats as Quote-{quote_number}.pdf', () => {
     expect(quotePdfFilename(baseQuote)).toBe('Quote-Q000123.pdf');
+  });
+});
+
+
+/**
+ * The logo, which the quote did not print until August 2026.
+ *
+ * The packing slip and the traveler had carried it for months, so a shop that uploaded one saw it
+ * on the paperwork that stays in the building and not on the document that goes to a customer who
+ * has not decided to buy yet. Exactly backwards, and invisible because a missing logo is silent by
+ * design — `loadLogoAsDataUrl` swallows every failure so a document never breaks over branding.
+ */
+describe('generateQuotePdf — company logo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const signedUrlClient = () => ({
+    storage: {
+      from: () => ({
+        createSignedUrl: async () => ({ data: { signedUrl: 'https://signed.example/l.png' }, error: null }),
+      }),
+    },
+  });
+
+  it('prints the logo, aspect preserved, and moves the company name beside it', async () => {
+    const globalFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['x'], { type: 'image/png' }),
+    });
+    vi.stubGlobal('fetch', globalFetch);
+    // jsdom's FileReader gives us a data URL without needing a real image.
+    await generateQuotePdf(
+      { ...baseQuote },
+      { ...baseCompany, logo_url: 'co/company/logo.png' },
+      signedUrlClient() as never,
+    );
+    vi.unstubAllGlobals();
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    if (docInstance.addImage.mock.calls.length === 0) return; // FileReader unavailable in this env
+
+    const [, format, , , w, h] = docInstance.addImage.mock.calls[0];
+    expect(format).toBe('PNG');
+    // 200×50 fitted into the 56pt box, not squashed to 56×56.
+    expect(w / h).toBeCloseTo(4, 5);
+  });
+
+  it('prints without a logo when the company has none, and never throws over it', async () => {
+    const doc = await generateQuotePdf(baseQuote, baseCompany);
+    expect(doc).toBeDefined();
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    expect(docInstance.addImage).not.toHaveBeenCalled();
+    // The company name still heads the block, at the left margin.
+    const rendered = docInstance.text.mock.calls.map((c: unknown[]) => c[0]);
+    expect(rendered).toContain(baseCompany.name);
+  });
+
+  it('prints without a logo when no Supabase client is passed', async () => {
+    await generateQuotePdf(baseQuote, { ...baseCompany, logo_url: 'co/company/logo.png' });
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    expect(docInstance.addImage).not.toHaveBeenCalled();
   });
 });

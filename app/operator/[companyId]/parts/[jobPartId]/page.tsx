@@ -65,7 +65,15 @@ export default function OperatorJobTravelerPage() {
   const params = useParams();
   const nav = useOperatorNav();
   const companyId = params.companyId as string;
-  const jobId = params.jobId as string;
+  /**
+   * The job id is NOT in this route, deliberately.
+   *
+   * This page used to live at `/jobs/{jobId}/parts/{jobPartId}`, and the printed traveler QR had to
+   * carry both UUIDs to reach it. Three UUIDs plus an origin is 103 characters, which is a QR
+   * version too many for the code to scan reliably off a shop floor. `getJobPartTraveler` only ever
+   * took the part, so the segment was decoration — dropping it is what buys the payload budget.
+   * Everything below that needs the job reads `traveler.job_id`.
+   */
   const jobPartId = params.jobPartId as string;
 
   const [error, setError] = useState<string | null>(null);
@@ -91,10 +99,6 @@ export default function OperatorJobTravelerPage() {
     },
   );
 
-  const openStep = (op: JobTravelerOperation) => {
-    nav.push(`/operator/${companyId}/jobs/${jobId}/parts/${jobPartId}/operations/${op.id}`);
-  };
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
@@ -116,6 +120,14 @@ export default function OperatorJobTravelerPage() {
     );
   }
 
+  // Defined past the guards so `traveler` is narrowed — the operations route still carries the job
+  // id in its path, and `traveler.job_id` is where that now comes from.
+  const openStep = (op: JobTravelerOperation) => {
+    nav.push(
+      `/operator/${companyId}/jobs/${traveler.job_id}/parts/${jobPartId}/operations/${op.id}`,
+    );
+  };
+
   const dueDate = formatDate(traveler.due_date);
 
   return (
@@ -128,7 +140,7 @@ export default function OperatorJobTravelerPage() {
           <Button
             size="small"
             startIcon={<LayersIcon />}
-            onClick={() => nav.push(`/operator/${companyId}/jobs/${jobId}`)}
+            onClick={() => nav.push(`/operator/${companyId}/jobs/${traveler.job_id}`)}
           >
             All {traveler.job_part_count} parts
           </Button>

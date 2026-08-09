@@ -4,6 +4,13 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
+      // Printed QR codes encode an all-uppercase URL — that is what keeps the payload in QR
+      // alphanumeric mode and the code at version 4 (see lib/jiggedScan.ts). Next matches path
+      // segments case-sensitively, so the real routes are `app/T` and `app/L`. These two rewrites
+      // are insurance: if any OS link handler or scanner ever normalises a path to lowercase, the
+      // sticker on the shelf still resolves instead of 404ing years after it was printed.
+      { source: "/t/:code", destination: "/T/:code" },
+      { source: "/l/:code", destination: "/L/:code" },
       {
         source: "/api/:path*",
         destination:

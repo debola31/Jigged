@@ -12,6 +12,13 @@ import type { AddressSnapshot } from '@/types/documentSnapshot';
 import type { Company } from '@/utils/companyAccess';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
+import {
+  ATTRIBUTION_MARK,
+  drawCompanyLogo,
+  loadLogoAsDataUrl,
+  LOGO_BOX,
+  type SupabaseLike,
+} from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
 
@@ -130,6 +137,12 @@ export function quotePdfFilename(quote: QuoteWithRelations): string {
 export async function generateQuotePdf(
   quote: QuoteWithRelations,
   company: Company,
+  /**
+   * Optional Supabase client, used only to resolve the logo's signed URL. Optional so every
+   * existing caller and test keeps working and simply prints without a logo — the same contract
+   * the packing slip and traveler use.
+   */
+  supabase?: SupabaseLike | null,
 ): Promise<jsPDF> {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -141,20 +154,31 @@ export async function generateQuotePdf(
   // ---------- Header: company block (top-left) + QUOTE + meta (top-right) ----------
   const headerTop = MARGIN;
 
-  // Top-left: company name (bold) then address / contact lines.
+  // The shop's logo, if it has one. The packing slip and the traveler have carried it for a long
+  // time and the quote never did — which had it exactly backwards, since the quote is the one
+  // document that goes to a customer who has not decided to buy yet.
+  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, supabase ?? null);
+  let logoWidth = 0;
+  if (logoDataUrl) logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
+
+  // Top-left: company name (bold) then address / contact lines, beside the logo when there is one.
+  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(30);
-  doc.text(company.name, MARGIN, headerTop + 12);
+  doc.text(company.name, shopNameX, headerTop + 12);
 
   const shopLines = buildShopHeaderLines(company);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(80);
   shopLines.forEach((line, i) => {
-    doc.text(line, MARGIN, headerTop + 28 + i * 12);
+    doc.text(line, shopNameX, headerTop + 28 + i * 12);
   });
-  const shopBlockBottom = headerTop + 28 + shopLines.length * 12;
+  const shopBlockBottom = Math.max(
+    headerTop + 28 + shopLines.length * 12,
+    logoWidth > 0 ? headerTop + LOGO_BOX : headerTop,
+  );
 
   // Top-right: QUOTE title + stacked meta (no box, right-aligned).
   doc.setFont('helvetica', 'bold');
@@ -412,10 +436,17 @@ export async function generateQuotePdf(
   }
 
   // ---------- Footer (every page) ----------
-  // The company name and quote dates already sit in the header, so the footer
-  // carries the preparer credit (relocated from the old top "CREATED BY"
-  // column) on the left and the page number on the right. The left side is
-  // blank when the quote has no known creator.
+  // The company name and quote dates already sit in the header, so the footer carries the preparer
+  // credit (relocated from the old top "CREATED BY" column) on the left and, on the right, the
+  // attribution and the page number sharing one row.
+  //
+  // **The quote's footer differs from the packing slip's and the traveler's, because it is the only
+  // one whose left slot is already occupied.** Those two put `attributionLine()` on the left in a
+  // slot that was otherwise empty. Here the preparer credit owns the left — it is the only place a
+  // quote records who to ring about the price, and a customer needs it more than we need the
+  // margin — so the attribution rides right, ahead of the page number, using the undated
+  // `ATTRIBUTION_MARK`: the header already prints `Date:`, and a second date in the footer would be
+  // the render date rather than the issue date, disagreeing with it on any later re-download.
   const preparedName = quote.created_by_member?.name ?? null;
   const preparedEmail = quote.created_by_member?.email ?? null;
   const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
@@ -435,7 +466,12 @@ export async function generateQuotePdf(
     if (footerLeft) {
       doc.text(footerLeft, MARGIN, footerY);
     }
-    doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
+    doc.text(
+      `${ATTRIBUTION_MARK} · Page ${p} of ${pageCount}`,
+      pageWidth - MARGIN,
+      footerY,
+      { align: 'right' },
+    );
   }
 
   return doc;

@@ -14,16 +14,19 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { QRCodeCanvas } from 'qrcode.react';
 
 import type { InventoryLocation } from '@/types/inventoryLocations';
-import {
-  generateLocationLabelSheet,
-  buildLocationScanUrl,
-  type LocationLabel,
-} from '@/utils/locationLabelPdf';
+import { buildScanUrl } from '@/lib/jiggedScan';
+import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 
+/**
+ * `companyName` is gone from this chain, all the way up to the page.
+ *
+ * Its only consumer was the label sheet's page heading, which had to go when the sheet moved to
+ * die-cut Avery stock — a heading at the top of page 1 prints across the middle of label 1. Nothing
+ * on a label identifies the shop now, and nothing needs to: the sticker is on that shop's shelf.
+ */
 interface LocationQRModalProps {
   open: boolean;
   companyId: string;
-  companyName?: string;
   node: InventoryLocation | null;
   /** Full path of `node`, root → node. */
   path: string[];
@@ -35,7 +38,6 @@ interface LocationQRModalProps {
 export default function LocationQRModal({
   open,
   companyId,
-  companyName,
   node,
   path,
   labels,
@@ -44,19 +46,15 @@ export default function LocationQRModal({
   const [busy, setBusy] = useState(false);
   if (!node) return null;
 
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const url = buildLocationScanUrl(baseUrl, companyId, node.id);
+  // The on-screen preview shows exactly what the sheet prints, so it uses the same builder and the
+  // same pinned origin — a preview that differed from the paper would be worse than none.
+  const url = buildScanUrl({ kind: 'location', companyId, locationId: node.id });
   const fileStem = node.name.replace(/\s+/g, '-');
 
   const download = async (labels: LocationLabel[], stem: string) => {
     setBusy(true);
     try {
-      const doc = await generateLocationLabelSheet({
-        companyId,
-        baseUrl,
-        labels,
-        heading: companyName,
-      });
+      const doc = await generateLocationLabelSheet({ companyId, labels });
       doc.save(`${stem}.pdf`);
     } finally {
       setBusy(false);

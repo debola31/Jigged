@@ -28,38 +28,51 @@
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
 import type { Company } from '@/utils/companyAccess';
 import type { JobTraveler, JobTravelerOperation } from '@/types/operator';
 import type { BomLineWithChildPart } from '@/types/bom';
+import { buildScanUrl, scanOrigin } from '@/lib/jiggedScan';
+import { drawQrCode, QR_QUIET_MODULES, type QrErrorCorrection } from '@/lib/qrVector';
 import {
+  attributionLine,
   buildShopHeaderLines,
+  drawCompanyLogo,
   formatDate,
   loadLogoAsDataUrl,
+  LOGO_BOX,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
 
 const MARGIN = 40;
+
 /**
- * Side of the single header QR (points).
+ * Side of the single header QR (points). **Unchanged at 56pt — the fix was the payload, not the
+ * size**, which is what the comment this replaced predicted.
  *
- * The scan URL is ~156 chars (origin + two UUIDs), which lands the code at
- * version 8 — 49x49 modules, plus a 2-module quiet zone a side = 53 across. At
- * 56pt (19.8mm) that works out to ~0.37mm per module.
+ * That comment recorded the old scan URL at ~156 characters and version 8: 49×49 modules in this
+ * same square, about 0.37 mm per module. It said that if a scan ever failed, the answer was to
+ * shorten the URL rather than enlarge the code, and that a ~60-character payload would reach
+ * version 4 and roughly 0.53 mm. A Contour operator then spent 30+ seconds failing to scan one off
+ * *fresh* paper, so the branch triggered.
  *
- * That number is set by precedent, not by a generic spec: the per-operation QRs
- * this sheet used to print were also 56pt but carried a THIRD uuid (203 chars,
- * version 9, 53x53) for ~0.35mm per module. This code is strictly less dense
- * than what the traveler already shipped, at the same physical size. Caveat
- * worth keeping in mind — the paperless operator flow was built but paper won by
- * habit, so 0.35mm is an accepted precedent rather than a proven field result.
+ * The scheme in `lib/jiggedScan.ts` gets there — 77 characters, version 4, 33×33, **0.60 mm per
+ * module** — and does it while keeping the company id in the payload, which the comment's own
+ * `/t/{jobPartId}` suggestion would have dropped along with the offline cross-tenant check. It is
+ * better than the prediction because the quiet zone moved out of the image and into the layout.
  *
- * If a shop ever reports a scan failing off a greasy or smudged sheet, do NOT
- * just enlarge this. Shorten the URL instead: a `/t/{jobPartId}` redirect route
- * (~60 chars) drops the code to version 4 / 33x33, which at this same 56pt is
- * ~0.53mm per module — nearly half again more robust, with no layout change.
+ * `__tests__/utils/qrVersionCeiling.test.ts` now holds the ceiling, so the next payload change
+ * fails in CI rather than on a shop floor. Do not raise the numbers to make it pass.
  */
-const QR_SIZE = 56;
+export const TRAVELER_QR_SIZE = 56;
+
+/**
+ * Level M (~15% recoverable), where a shelf label uses H.
+ *
+ * A traveler is a single-use sheet that travels with the job for days and is then filed; a shelf
+ * label is stuck to steel for years. Buying the label's damage tolerance here would cost two
+ * versions and a third of the module size on the sheet an operator actually complained about.
+ */
+export const TRAVELER_QR_EC: QrErrorCorrection = 'M';
 
 function formatMinutes(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -92,8 +105,11 @@ export interface JobTravelerPdfContext {
   bom: BomLineWithChildPart[];
   /** Company id — used to build the traveler's deep-link QR URL. */
   companyId: string;
-  /** Absolute origin (e.g. window.location.origin) the scan URL resolves against. */
-  baseUrl: string;
+  /**
+   * Absolute origin the scan URL resolves against. Defaults to the pinned production origin — a
+   * sheet printed from a preview deployment would otherwise encode that preview's hostname.
+   */
+  baseUrl?: string;
   /** Optional Supabase client to resolve the logo signed URL. */
   supabase?: SupabaseLike | null;
 }
@@ -101,24 +117,17 @@ export interface JobTravelerPdfContext {
 export async function generateJobTravelerPdf(
   ctx: JobTravelerPdfContext,
 ): Promise<jsPDF> {
-  const { traveler, company, bom, companyId, baseUrl } = ctx;
+  const { traveler, company, bom, companyId } = ctx;
+  const baseUrl = ctx.baseUrl ?? scanOrigin();
 
-  // The one QR on the sheet: it opens this job_part's traveler page (via the
-  // operator login passthrough), which lists every step for the operator to
-  // pick from. No `operation=` param — the sheet no longer targets a step.
-  const travelerUrl =
-    `${baseUrl}/operator/${companyId}/login` +
-    `?job=${traveler.job_id}&part=${traveler.job_part_id}`;
-  let travelerQrDataUrl: string | null = null;
-  try {
-    travelerQrDataUrl = await QRCode.toDataURL(travelerUrl, {
-      margin: 2,
-      width: 320,
-      errorCorrectionLevel: 'M',
-    });
-  } catch {
-    // Skip the QR; the printed traveler is still useful without it.
-  }
+  // The one QR on the sheet: it opens this job_part's traveler page, which lists every step for the
+  // operator to pick from. It carries the company and the job_part and nothing else — no job id
+  // (the page resolves it) and no operation (the sheet has not targeted a step since the traveler
+  // went to one code); both were dropped because a third UUID costs a QR version.
+  const travelerUrl = buildScanUrl(
+    { kind: 'traveler', companyId, jobPartId: traveler.job_part_id },
+    baseUrl,
+  );
 
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -129,20 +138,17 @@ export async function generateJobTravelerPdf(
   let logoBottom = headerTop;
 
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  let logoWidth = 0;
   if (logoDataUrl) {
-    try {
-      const logoSize = 56;
-      doc.addImage(logoDataUrl, 'PNG', MARGIN, headerTop, logoSize, logoSize, undefined, 'FAST');
-      logoBottom = headerTop + logoSize;
-    } catch {
-      logoBottom = headerTop;
-    }
+    logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
+    if (logoWidth > 0) logoBottom = headerTop + LOGO_BOX;
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(30);
-  const shopNameX = logoDataUrl ? MARGIN + 70 : MARGIN;
+  // Measured from what was drawn rather than a fixed 70pt — see drawCompanyLogo.
+  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
   doc.text(company.name, shopNameX, headerTop + 14);
 
   const shopLines = buildShopHeaderLines(company);
@@ -161,21 +167,26 @@ export async function generateJobTravelerPdf(
   // The QR sits BESIDE the title, not under it, so header height is one element
   // tall rather than title + QR + caption stacked to ~165pt. No caption — a QR
   // already reads as "scan me", and the old line just cost a row of paper.
-  const qrX = pageWidth - MARGIN - QR_SIZE;
+  const qrX = pageWidth - MARGIN - TRAVELER_QR_SIZE;
   const qrY = headerTop;
   let qrBlockBottom = headerTop;
-  if (travelerQrDataUrl) {
-    try {
-      doc.addImage(travelerQrDataUrl, 'PNG', qrX, qrY, QR_SIZE, QR_SIZE);
-      qrBlockBottom = qrY + QR_SIZE;
-    } catch {
-      // Skip silently — the rest of the traveler is still useful.
-    }
-  }
+  // Vector modules, not an embedded PNG: the old 320px bitmap was ~239dpi at this size. Returns
+  // null if the payload cannot be encoded, in which case the sheet prints without it — still a
+  // usable traveler.
+  const qr = drawQrCode(doc, travelerUrl, {
+    x: qrX,
+    y: qrY,
+    size: TRAVELER_QR_SIZE,
+    errorCorrectionLevel: TRAVELER_QR_EC,
+  });
+  if (qr) qrBlockBottom = qrY + TRAVELER_QR_SIZE;
 
   // ---------- Header: title + Job # (right, left of the QR) ----------
-  // Right-aligned to the QR's left edge so the two never collide.
-  const titleRight = qrX - 16;
+  // Right-aligned to the QR's left edge so the two never collide. The gap is also the QR's quiet
+  // zone on that side — `drawQrCode` renders no margin of its own, so the layout owes it 4 modules,
+  // which at 56pt/33 modules is 6.8pt. 16pt clears it comfortably; above and right, the page margin
+  // supplies far more.
+  const titleRight = qrX - Math.max(16, QR_QUIET_MODULES * (TRAVELER_QR_SIZE / (qr?.size ?? 33)));
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(21);
   doc.setTextColor(30);
@@ -460,11 +471,12 @@ export async function generateJobTravelerPdf(
     doc.setLineWidth(0.5);
     doc.line(MARGIN, footerY - 14, pageWidth - MARGIN, footerY - 14);
 
-    // Page numbers only. The company name + Job # already head the document, so
-    // repeating them here was redundant.
+    // Left: where the sheet came from. Right: the page number. The company name + Job # already
+    // head the document, so the left slot stayed empty until the attribution line earned it.
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(130);
+    doc.text(attributionLine(), MARGIN, footerY);
     doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
   }
 

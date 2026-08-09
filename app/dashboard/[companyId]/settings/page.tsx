@@ -19,7 +19,6 @@ import StatusChip from '@/components/common/StatusChip';
 import SettingsSection from '@/components/settings/SettingsSection';
 import CompanyProfileCard from '@/components/settings/CompanyProfileCard';
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
-import DefaultPaymentTermsCard from '@/components/settings/DefaultPaymentTermsCard';
 import QuickBooksIntegrationCard from '@/components/settings/QuickBooksIntegrationCard';
 import BillingCard from '@/components/settings/BillingCard';
 
@@ -80,15 +79,11 @@ export default function SettingsPage() {
         </Alert>
       )}
 
-      {/* Shop contact info (header on printed quotes) */}
+      {/* Logo + return address — everything printed at the top of a document. */}
       <CompanyProfileCard companyId={companyId} />
 
-      {/* Company-configurable business defaults (quote validity, etc.) */}
+      {/* What a new record starts with: quote validity and the shop's default payment terms. */}
       <AppDefaultsCard companyId={companyId} />
-
-      {/* Shop-wide default payment terms. Separate from AppDefaultsCard because
-          that card's registry is numeric end-to-end — see the card's docstring. */}
-      <DefaultPaymentTermsCard companyId={companyId} />
 
       {/* Subscription status + Subscribe / Manage billing (hidden in demo mode) */}
       <BillingCard />

@@ -33,11 +33,18 @@ export interface Company {
   settings?: Record<string, unknown> | null;
 }
 
+/**
+ * The shop-contact fields the settings form writes.
+ *
+ * **`email` and `website` are deliberately absent.** Both columns exist and both were editable for
+ * months, and nothing has ever read them — not the quote header, not the packing slip, not the
+ * traveler. They were a form writing to itself. The columns are left in place rather than dropped,
+ * so the data survives if a document ever wants them; what is removed is the pretence that filling
+ * them in does something.
+ */
 export type CompanyProfilePatch = Pick<
   Company,
   | 'phone'
-  | 'email'
-  | 'website'
   | 'address_line1'
   | 'address_line2'
   | 'city'

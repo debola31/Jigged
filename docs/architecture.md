@@ -431,7 +431,15 @@ NEXT_PUBLIC_SUPABASE_URL=<url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key>
 NEXT_PUBLIC_SUPABASE_S3_BUCKET=<bucket>        # file attachments
 NEXT_PUBLIC_API_URL=http://localhost:8000      # local dev only; unset in prod (same domain, §1)
+NEXT_PUBLIC_SCAN_ORIGIN=https://www.jigged.app # PRODUCTION ONLY — see below; unset everywhere else
 ```
+
+**`NEXT_PUBLIC_SCAN_ORIGIN` is the origin baked into every printed QR code**
+([`lib/jiggedScan.ts`](../lib/jiggedScan.ts)). It falls back to `window.location.origin`, which is
+right for local dev and for preview branches — but wrong for production, because a label printed
+from a preview deployment would encode *that deployment's* hostname onto a sticker that outlives it
+by years. Set it in the Vercel **Production** environment only, and note the heading above: it is
+inlined at build time, so **setting the variable is not enough — a redeploy has to follow it.**
 
 Both `NEXT_PUBLIC_SUPABASE_*` are **required, with no fallback**:
 [`lib/supabase.ts`](../lib/supabase.ts) creates the client at module scope, so a

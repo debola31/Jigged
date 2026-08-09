@@ -116,11 +116,14 @@ function OperatorJobsPageContent() {
   // there. nav.push records the hop so the header back retraces it (see
   // OperatorChromeContext); no return URL is threaded.
   const handlePartClick = (row: OperatorJob) => {
-    const base = `/operator/${companyId}/jobs/${row.job_id}/parts/${row.id}`;
     if (completed || scope === 'plant' || !row.operation_id) {
-      nav.push(base);
+      // The traveler lives at `/parts/{jobPartId}` — no job id, so its printed QR fits a smaller
+      // code. The operation page still carries one.
+      nav.push(`/operator/${companyId}/parts/${row.id}`);
     } else {
-      nav.push(`${base}/operations/${row.operation_id}`);
+      nav.push(
+        `/operator/${companyId}/jobs/${row.job_id}/parts/${row.id}/operations/${row.operation_id}`,
+      );
     }
   };
 

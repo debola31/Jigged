@@ -2,6 +2,7 @@
 
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
+import { isUuid } from '@/lib/validators';
 import Box from '@mui/material/Box';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
@@ -74,6 +75,9 @@ export default function OperatorLayout({
    * PGRST116 branch in checkAuth.
    */
   const [accessCheckFailed, setAccessCheckFailed] = useState(false);
+  // The URL's companyId isn't a UUID, so no company can match it. Terminal: no retry, no
+  // sign-out — see the guard in checkAuth.
+  const [invalidCompany, setInvalidCompany] = useState(false);
   /** Bumped by the retry button to re-run checkAuth. */
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -115,6 +119,22 @@ export default function OperatorLayout({
       }
 
       if (validatedFor.current === companyId) return;
+
+      /**
+       * A URL segment that cannot be a company id, answered before anything else.
+       *
+       * `company_id` is a `uuid` column, so a string like "admin" makes Postgres raise `22P02`.
+       * That is not `PGRST116`, so `isIndeterminateSingleError` below reads it as "couldn't
+       * check" and shows the Retry screen — whose Retry re-runs the same impossible query,
+       * forever. Bouncing to login instead would be worse: the redirect carries the same bad id,
+       * so it loops, and signing an operator out mid-shift over a mistyped URL is the most
+       * destructive thing this layout can do.
+       */
+      if (!isUuid(companyId)) {
+        setInvalidCompany(true);
+        setIsLoading(false);
+        return;
+      }
 
       // 1. Get Supabase session
       const { data: { session } } = await supabase.auth.getSession();
@@ -261,6 +281,36 @@ export default function OperatorLayout({
         }}
       >
         {children}
+      </Box>
+    );
+  }
+
+  // The link itself is wrong, and no amount of retrying changes that — so this screen has no
+  // Retry. Checked BEFORE `accessCheckFailed` so a malformed id can never present as a connection
+  // problem the operator will stand there re-tapping. Phrased for someone holding a paper
+  // traveler: the fix is the QR code or the office, not this phone.
+  if (invalidCompany) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 3,
+          px: 4,
+          textAlign: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          That isn&apos;t a valid shop link
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Scan the QR code on your traveler again, or ask the office for the right link.
+          You&apos;re still signed in.
+        </Typography>
       </Box>
     );
   }

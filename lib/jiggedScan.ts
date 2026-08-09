@@ -32,8 +32,7 @@
  * generators write. See `companyIdFromScan`.
  */
 
-/** Canonical v4-ish UUID shape. Anchored: a UUID embedded in a longer string is not a match. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from './validators';
 
 export type JiggedScan =
   /** A printed location label, or a bare location UUID typed/wedged in. */
@@ -53,7 +52,7 @@ export type JiggedScan =
 /** A UUID query param, lowercased, or null if absent or malformed. */
 function uuidParam(params: URLSearchParams, key: string): string | null {
   const raw = params.get(key);
-  return raw && UUID_RE.test(raw) ? raw.toLowerCase() : null;
+  return raw && isUuid(raw) ? raw.toLowerCase() : null;
 }
 
 /**
@@ -67,7 +66,7 @@ export function parseJiggedScan(text: string): JiggedScan | null {
 
   // A bare UUID is only ever a location: a traveler needs two ids, so it can't be expressed
   // this way, and guessing between them would be a coin flip.
-  if (UUID_RE.test(trimmed)) {
+  if (isUuid(trimmed)) {
     return { kind: 'location', locationId: trimmed.toLowerCase() };
   }
 
@@ -150,7 +149,7 @@ export function companyIdFromScan(text: string): string | null {
   // emit. Anything else is not one of our labels.
   const m = /^\/operator\/([^/]+)\/login\/?$/.exec(path);
   const candidate = m?.[1];
-  return candidate && UUID_RE.test(candidate) ? candidate.toLowerCase() : null;
+  return candidate && isUuid(candidate) ? candidate.toLowerCase() : null;
 }
 
 /**

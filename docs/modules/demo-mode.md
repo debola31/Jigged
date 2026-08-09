@@ -263,7 +263,7 @@ can reach the RPC can reset their company's demo. The UI is admin-only; the RPC 
 **A demo company shows the same product surface as the company it stands in for**, copied from
 `settings.features` at creation, on every entry, and on reset.
 
-It has to come from somewhere, because it cannot be set: the flag editor is `/admin/companies`,
+It has to come from somewhere, because it cannot be set: the flag editor is `/admin`,
 and [`admin_routes.py`](../../api/routes/admin_routes.py) lists companies with
 `.eq("is_demo", False)` — demo companies are invisible there, as they are to the company switcher
 and the login redirect. Before mirroring, every demo sat at `settings = '{}'`, so **every opt-in

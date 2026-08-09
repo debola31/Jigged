@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isUuid,
   isValidEmail,
   isValidPhone,
   normalizePhone,
@@ -8,6 +9,43 @@ import {
   parseOptionalInteger,
   numberToInputString,
 } from '@/lib/validators';
+
+describe('isUuid', () => {
+  it('accepts a Postgres uuid in either case', () => {
+    expect(isUuid('752325ba-2159-41a7-9cd2-716faf5a596b')).toBe(true);
+    expect(isUuid('752325BA-2159-41A7-9CD2-716FAF5A596B')).toBe(true);
+    expect(isUuid('22222222-2222-2222-2222-222222222222')).toBe(true);
+  });
+
+  /**
+   * The route-segment cases, which are the reason this is shared rather than private.
+   * `/dashboard/admin` sent "admin" to a `uuid` column and raised 22P02 in production.
+   */
+  it('rejects the things a URL segment actually contains', () => {
+    expect(isUuid('admin')).toBe(false);
+    expect(isUuid('')).toBe(false);
+    expect(isUuid('undefined')).toBe(false);
+    expect(isUuid('null')).toBe(false);
+    expect(isUuid('752325ba-2159-41a7-9cd2')).toBe(false); // truncated
+    expect(isUuid('752325ba215941a79cd2716faf5a596b')).toBe(false); // unhyphenated
+    expect(isUuid('752325bg-2159-41a7-9cd2-716faf5a596b')).toBe(false); // 'g' is not hex
+  });
+
+  // Anchored, so an id embedded in a longer string is not a match — `jiggedScan` depends on
+  // this to refuse a foreign QR code that merely contains a uuid.
+  it('is anchored', () => {
+    expect(isUuid(' 752325ba-2159-41a7-9cd2-716faf5a596b')).toBe(false);
+    expect(isUuid('/dashboard/752325ba-2159-41a7-9cd2-716faf5a596b')).toBe(false);
+    expect(isUuid('752325ba-2159-41a7-9cd2-716faf5a596b/parts')).toBe(false);
+  });
+
+  it('rejects non-strings rather than throwing', () => {
+    expect(isUuid(null)).toBe(false);
+    expect(isUuid(undefined)).toBe(false);
+    expect(isUuid(42)).toBe(false);
+    expect(isUuid({})).toBe(false);
+  });
+});
 
 describe('isValidEmail', () => {
   it('accepts well-formed addresses', () => {

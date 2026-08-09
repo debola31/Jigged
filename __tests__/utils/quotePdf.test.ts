@@ -501,30 +501,54 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    // "Created by" is no longer a top column — it's a "Prepared by" footer line
-    // that replaced the old "Generated <date> · <company>" footer text.
+    // "Created by" is no longer a top column — it's a "Prepared by" footer line, and it keeps the
+    // LEFT slot to itself. The attribution shares the right slot with the page number instead.
     expect(rendered).not.toContain('CREATED BY');
     expect(rendered).toContain('Prepared by Sam T · sam@example.com');
-    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
   });
 
   /**
-   * **A quote carries no `Generated … with jigged.app` line, unlike the packing slip and the job
-   * traveler.** Those two are internal-to-the-transaction paperwork; a quote is a commercial offer
-   * the shop puts its own name to, and the tool it was drafted in is not a party to it. Asserted
-   * rather than assumed, because the natural way to add attribution "everywhere" is a loop over the
-   * generators, and this is the one that must stay out.
+   * The quote's footer is the only one of the three whose left slot is already occupied, so its
+   * attribution rides right, ahead of the page number, and drops the date.
+   *
+   * **The date is the part worth asserting.** The header already prints `Date:` a few inches above,
+   * and a footer date would be the *render* date rather than the *issue* date — on a re-download
+   * months later the two disagree, and a customer reading two dates on one page cannot tell which
+   * one their price is good from.
    */
-  it('never names the tool it was drafted in', async () => {
+  it('puts the attribution and the page number together on the right, undated', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
-    const rendered = docInstance.text.mock.calls
-      .map((c: unknown[]) => c[0])
-      .filter((t: unknown): t is string => typeof t === 'string');
+    const rightAligned = docInstance.text.mock.calls
+      .filter((c: unknown[]) => (c[3] as { align?: string } | undefined)?.align === 'right')
+      .map((c: unknown[]) => c[0]);
 
-    expect(rendered.some((t) => t.includes('jigged.app'))).toBe(false);
-    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
+    expect(rightAligned).toContain('Generated with jigged.app · Page 1 of 1');
+    // No date anywhere in the footer mark — `attributionLine()`'s dated form belongs to the slip
+    // and the traveler, whose left slots were empty.
+    expect(
+      docInstance.text.mock.calls
+        .map((c: unknown[]) => c[0])
+        .filter((t: unknown): t is string => typeof t === 'string')
+        .some((t) => /Generated \w{3} \d/.test(t)),
+    ).toBe(false);
+  });
+
+  it('keeps the preparer credit on the left, undisplaced', async () => {
+    const quoteWithCreator: QuoteWithRelations = {
+      ...baseQuote,
+      created_by: 'user-1',
+      created_by_member: { user_id: 'user-1', name: 'Sam T', email: 'sam@example.com' },
+    };
+    await generateQuotePdf(quoteWithCreator, baseCompany);
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    const leftAligned = docInstance.text.mock.calls
+      .filter((c: unknown[]) => (c[3] as { align?: string } | undefined)?.align !== 'right')
+      .map((c: unknown[]) => c[0]);
+
+    expect(leftAligned).toContain('Prepared by Sam T · sam@example.com');
   });
 
   it('omits the "Prepared by" line when there is no creator on the quote', async () => {

@@ -13,6 +13,7 @@ import type { Company } from '@/utils/companyAccess';
 import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import {
+  ATTRIBUTION_MARK,
   drawCompanyLogo,
   loadLogoAsDataUrl,
   LOGO_BOX,
@@ -442,17 +443,17 @@ export async function generateQuotePdf(
   }
 
   // ---------- Footer (every page) ----------
-  // The company name and quote dates already sit in the header, so the footer
-  // carries the preparer credit (relocated from the old top "CREATED BY"
-  // column) on the left and the page number on the right. The left side is
-  // blank when the quote has no known creator.
+  // The company name and quote dates already sit in the header, so the footer carries the preparer
+  // credit (relocated from the old top "CREATED BY" column) on the left and, on the right, the
+  // attribution and the page number sharing one row.
   //
-  // **No `attributionLine()` here, unlike the packing slip and the traveler.**
-  // Those two are internal-to-the-transaction paperwork — a slip rides in the box to a receiving
-  // dock, a traveler stays on the shop floor — where a line saying which system produced them is
-  // harmless metadata. A quote is a *commercial offer* the shop puts its own name to, and the tool
-  // it was drafted in is not a party to it. The credit that belongs in this slot is the person a
-  // customer would ring about the price.
+  // **The quote's footer differs from the packing slip's and the traveler's, because it is the only
+  // one whose left slot is already occupied.** Those two put `attributionLine()` on the left in a
+  // slot that was otherwise empty. Here the preparer credit owns the left — it is the only place a
+  // quote records who to ring about the price, and a customer needs it more than we need the
+  // margin — so the attribution rides right, ahead of the page number, using the undated
+  // `ATTRIBUTION_MARK`: the header already prints `Date:`, and a second date in the footer would be
+  // the render date rather than the issue date, disagreeing with it on any later re-download.
   const preparedName = quote.created_by_member?.name ?? null;
   const preparedEmail = quote.created_by_member?.email ?? null;
   const preparedText = [preparedName, preparedEmail].filter(Boolean).join(' · ');
@@ -472,7 +473,12 @@ export async function generateQuotePdf(
     if (footerLeft) {
       doc.text(footerLeft, MARGIN, footerY);
     }
-    doc.text(`Page ${p} of ${pageCount}`, pageWidth - MARGIN, footerY, { align: 'right' });
+    doc.text(
+      `${ATTRIBUTION_MARK} · Page ${p} of ${pageCount}`,
+      pageWidth - MARGIN,
+      footerY,
+      { align: 'right' },
+    );
   }
 
   return doc;

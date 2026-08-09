@@ -471,14 +471,21 @@ block instructing the customer to **reply with a purchase order referencing the 
 is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared by {name} ·
 {email}" line sits below it.
 
-**A quote carries no `Generated … with jigged.app` line**, unlike the packing slip and the job
-traveler ([`attributionLine`](../../utils/packingSlipPdf.ts)). Those two are internal to the
-transaction — a slip rides in the box to a receiving dock, a traveler stays on the shop floor — so a
-line naming the system that produced them is harmless metadata. **A quote is a commercial offer the
-shop puts its own name to, and the tool it was drafted in is not a party to it.** The credit that
-belongs in that slot is the person a customer would ring about the price. Asserted in
-`__tests__/utils/quotePdf.test.ts`, because the natural way to add attribution "everywhere" is a
-loop over the generators and this is the one that has to stay out.
+**The footer differs from the packing slip's and the traveler's**, because a quote is the only one
+of the three whose left slot is already occupied:
+
+```
+Prepared by Dev Seed User · dev@jigged.test        Generated with jigged.app · Page 1 of 1
+```
+
+The preparer credit keeps the left — it is the only place a quote records who to ring about the
+price — so the attribution shares the right slot with the page number, using the **undated**
+`ATTRIBUTION_MARK` rather than the dated `attributionLine()` the other two print
+([packingSlipPdf.ts](../../utils/packingSlipPdf.ts)). **Undated on purpose:** the header already
+prints `Date:` a few inches above, and a footer date would be the *render* date rather than the
+*issue* date — on a re-download months later the two disagree, and a customer reading two dates on
+one page cannot tell which one their price is good from. Both forms are built from one suffix
+constant so three documents cannot drift into three wordings.
 
 **Deliberately excluded from the customer's view:** routing and operations, run times, labor and
 material cost snapshots, markup percentage, base cost.

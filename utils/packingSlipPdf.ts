@@ -200,19 +200,39 @@ export function packingSlipPdfFilename(shipment: Pick<ShipmentWithRelations, 'pa
 }
 
 /**
- * The one line that says where a document came from, on every document we print.
+ * Where a document came from, in the two forms our three documents need.
  *
- * Deliberately **unconditional and unconfigurable**. It is metadata at footer weight — same size,
- * same grey, same slot as the page number — not a badge and never a logo. Keeping it as one
- * exported constant rather than three copied strings is what stops the three generators drifting
- * into three slightly different wordings.
+ * Both are built from `ATTRIBUTION_SUFFIX` so the words "jigged.app" exist once. Three generators
+ * printing three hand-copied strings is how you end up with "with jigged.app", "via jigged.app" and
+ * "by Jigged" on three pieces of paper from the same shop.
  *
- * On the packing slip this replaces `Generated {date} · {company}`: the company name is already the
- * largest thing in the header, so the footer was restating it.
+ * It is metadata at footer weight — same size, same grey, same row as the page number — never a
+ * badge and never a logo. Unconditional and unconfigurable: there is no setting, so there is no
+ * state to read at print time and nothing that can disagree with itself.
+ */
+const ATTRIBUTION_SUFFIX = 'with jigged.app';
+
+/**
+ * The dated form, for a document whose footer has a **left slot of its own** — the packing slip and
+ * the job traveler. On the slip it replaced `Generated {date} · {company}`: the company name is
+ * already the largest thing in the header, so the footer was restating it, and the date was the
+ * half worth keeping.
  */
 export function attributionLine(): string {
-  return `Generated ${formatDate(new Date().toISOString())} with jigged.app`;
+  return `Generated ${formatDate(new Date().toISOString())} ${ATTRIBUTION_SUFFIX}`;
 }
+
+/**
+ * The undated form, for a footer that is **already carrying something** — the quote, whose left
+ * slot holds the preparer credit, so this rides on the right ahead of the page number.
+ *
+ * **No date, and that is not just to save width.** A quote already prints `Date:` in its header
+ * meta block, a few inches above; a second date in the footer is the same fact stated twice, and
+ * the two are not even the same fact — the header date is when the quote was *issued*, this one is
+ * when the PDF was *rendered*. On a re-download months later they disagree, and a customer reading
+ * two different dates on one page has no way to know which one their price is good from.
+ */
+export const ATTRIBUTION_MARK = `Generated ${ATTRIBUTION_SUFFIX}`;
 
 /** The box a company logo is fitted into, in points. Square, but the logo need not be. */
 export const LOGO_BOX = 56;

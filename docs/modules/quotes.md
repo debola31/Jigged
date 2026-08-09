@@ -466,14 +466,16 @@ payment terms and FOB; **Customer · Ship to (only if different) · Customer con
 items table ordered by `sequence`, with a grand total **only** on firm quotes; and an acceptance
 block instructing the customer to **reply with a purchase order referencing the quote** — there
 is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared by {name} ·
-{email}" line sits below it, with `Generated {date} with jigged.app` on the line beneath that.
+{email}" line sits below it.
 
-**The attribution line is unconditional, on every printed document** — quote, packing slip and job
-traveler ([`attributionLine`](../../utils/packingSlipPdf.ts)). It is metadata at footer weight: the
-same 9pt grey as the page number, never a badge and never a logo. There is no setting, deliberately;
-one constant and one renderer means nothing to read at print time and no state that can disagree
-with itself. The quote is included **because** it is the document that reaches a prospect — the
-highest-value surface for it, and the one it would have been strangest to leave silent.
+**A quote carries no `Generated … with jigged.app` line**, unlike the packing slip and the job
+traveler ([`attributionLine`](../../utils/packingSlipPdf.ts)). Those two are internal to the
+transaction — a slip rides in the box to a receiving dock, a traveler stays on the shop floor — so a
+line naming the system that produced them is harmless metadata. **A quote is a commercial offer the
+shop puts its own name to, and the tool it was drafted in is not a party to it.** The credit that
+belongs in that slot is the person a customer would ring about the price. Asserted in
+`__tests__/utils/quotePdf.test.ts`, because the natural way to add attribution "everywhere" is a
+loop over the generators and this is the one that has to stay out.
 
 **Deliberately excluded from the customer's view:** routing and operations, run times, labor and
 material cost snapshots, markup percentage, base cost.

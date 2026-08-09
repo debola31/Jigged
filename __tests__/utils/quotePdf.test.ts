@@ -58,7 +58,6 @@ vi.mock('@/utils/partPricingTiersAccess', () => ({
 }));
 
 import { generateQuotePdf, quotePdfFilename } from '@/utils/quotePdf';
-import { attributionLine } from '@/utils/packingSlipPdf';
 import type { QuoteWithRelations } from '@/types/quote';
 import type { Company } from '@/utils/companyAccess';
 
@@ -500,18 +499,21 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    // "Created by" is no longer a top column — it's a "Prepared by" footer line.
+    // "Created by" is no longer a top column — it's a "Prepared by" footer line
+    // that replaced the old "Generated <date> · <company>" footer text.
     expect(rendered).not.toContain('CREATED BY');
     expect(rendered).toContain('Prepared by Sam T · sam@example.com');
-
-    // The attribution line takes the footer slot and "Prepared by" moves one line UP rather than
-    // being displaced. This footer is the only place a quote records who prepared it, and a quote
-    // is the document that actually reaches a customer — losing that to make room would be the
-    // wrong trade.
-    expect(rendered).toContain(attributionLine());
+    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
   });
 
-  it('carries the attribution line on a quote with no named preparer', async () => {
+  /**
+   * **A quote carries no `Generated … with jigged.app` line, unlike the packing slip and the job
+   * traveler.** Those two are internal-to-the-transaction paperwork; a quote is a commercial offer
+   * the shop puts its own name to, and the tool it was drafted in is not a party to it. Asserted
+   * rather than assumed, because the natural way to add attribution "everywhere" is a loop over the
+   * generators, and this is the one that must stay out.
+   */
+  it('never names the tool it was drafted in', async () => {
     await generateQuotePdf(baseQuote, baseCompany);
 
     const docInstance = jsPDFCtor.mock.results[0].value;
@@ -519,9 +521,8 @@ describe('generateQuotePdf', () => {
       .map((c: unknown[]) => c[0])
       .filter((t: unknown): t is string => typeof t === 'string');
 
-    expect(rendered).toContain(attributionLine());
-    // Unconditional: there is no setting, so no company can be missing one.
-    expect(rendered.filter((t) => t.startsWith('Generated'))).toHaveLength(1);
+    expect(rendered.some((t) => t.includes('jigged.app'))).toBe(false);
+    expect(rendered.some((t) => t.startsWith('Generated'))).toBe(false);
   });
 
   it('omits the "Prepared by" line when there is no creator on the quote', async () => {

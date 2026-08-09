@@ -13,7 +13,6 @@ import {
  */
 const NO_STANDING_TERMS = {
   default_payment_terms: null,
-  default_fob_point: null,
   credit_status: 'open',
   credit_hold_note: null,
   // Live, not archived. Note tsconfig excludes __tests__, so a fixture that
@@ -79,7 +78,6 @@ import {
   pickBillingAddress,
   pickShippingAddress,
   pickPaymentTerms,
-  pickFobPoint,
   hasTermDrift,
 } from '@/utils/customerAccess';
 import type { CustomerAddress } from '@/types/customer';
@@ -365,7 +363,6 @@ describe('customerAccess utilities', () => {
 
         const patch = revivePatch();
         expect(patch).not.toHaveProperty('default_payment_terms');
-        expect(patch).not.toHaveProperty('default_fob_point');
       });
 
       // #653 P1. This is the defect that produced two rows for one company:
@@ -398,7 +395,6 @@ describe('customerAccess utilities', () => {
         const patch = revivePatch();
         expect(patch.default_payment_terms).toBe('Net 45');
         expect(patch.name).toBe('Acme Industrial');
-        expect(patch).not.toHaveProperty('default_fob_point');
       });
     });
   });
@@ -500,12 +496,8 @@ describe('address pickers', () => {
 
 describe('standing terms — resolution for a NEW quote', () => {
   it('returns the customer value for each standing term', () => {
-    const customer = {
-      default_payment_terms: 'Net 45',
-      default_fob_point: 'FOB Cleveland, OH',
-    };
+    const customer = { default_payment_terms: 'Net 45' };
     expect(pickPaymentTerms(customer)).toBe('Net 45');
-    expect(pickFobPoint(customer)).toBe('FOB Cleveland, OH');
   });
 
   it('treats unset, blank and whitespace-only as "no standing agreement"', () => {
@@ -514,8 +506,8 @@ describe('standing terms — resolution for a NEW quote', () => {
     expect(pickPaymentTerms({ default_payment_terms: null })).toBeNull();
     expect(pickPaymentTerms({ default_payment_terms: '' })).toBeNull();
     expect(pickPaymentTerms({ default_payment_terms: '   ' })).toBeNull();
-    expect(pickFobPoint(null)).toBeNull();
-    expect(pickFobPoint(undefined)).toBeNull();
+    expect(pickPaymentTerms(null)).toBeNull();
+    expect(pickPaymentTerms(undefined)).toBeNull();
   });
 
   it('trims a stored value so a stray space never reads as drift later', () => {
@@ -551,10 +543,10 @@ describe('standing terms — drift is reported, never applied', () => {
 
   // REVERSED from the original decision, deliberately. This used to assert
   // true — "worth surfacing: an older quote written before the standing terms
-  // existed". In practice it is a chip storm: quotes.fob_point is newer than
-  // the quotes themselves, so every pre-existing quote holds NULL, and the
-  // first time a shop fills in one customer's FOB point every open quote for
-  // that customer chips at once. A quote that states nothing never promised
+  // existed". In practice it is a chip storm: a standing-terms column is newer
+  // than the quotes themselves, so every pre-existing quote holds NULL, and the
+  // first time a shop fills one in every open quote for that customer chips at
+  // once. A quote that states nothing never promised
   // terms, so there is no disagreement to report.
   it('reports no drift when the quote states nothing — silence is not a promise', () => {
     expect(hasTermDrift(null, 'Net 30')).toBe(false);

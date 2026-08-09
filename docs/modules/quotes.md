@@ -12,8 +12,9 @@
 >
 > **Corrected against the code:** the `/quotes/{id}/edit` route does not exist, and the
 > radio-per-quantity convert mechanic was replaced by quick-pick chips — the doc described the
-> replacement 20 lines above the superseded version and kept both. `fob_point` was missing from
-> the field list entirely.
+> replacement 20 lines above the superseded version and kept both. *(`fob_point` was added to the
+> field list by that pass and removed from the product entirely on 2026-08-08 — see
+> [customers.md](customers.md), open question 3.)*
 
 ---
 
@@ -100,16 +101,16 @@ A thin header — per-part, per-quantity pricing lives on the line items.
 | `customer_id` | Required |
 | `lead_time_text` | Free text as stated ("2–3 weeks", "In stock"). **Quote-level default**; a line item can override per part. Does **not** drive the job due date |
 | `payment_terms` | Required. A single free-text string, no enum |
-| `fob_point` | Free text naming a place ("FOB Cleveland, OH"), never an origin/destination enum |
-| `expiration_date` | Defaults to `created_at + 10 days` |
+| `expiration_date` | Defaults to `created_at + 10 days`. Labelled **"Quote valid until"** on the form and `Valid Until:` on the PDF; the column keeps its original name |
 | `status`, `status_changed_at` | `active` \| `expired` |
 | `converted_at` | First conversion only |
 
-**Terms prefill from the customer's standing commercial contract** — `default_payment_terms`,
-`default_lead_time_text`, `default_fob_point` ride along on the detail select so the page can
-compare what was used against what the customer normally gets. [customers.md](customers.md) owns
-that mapping, including why FOB (where title and risk transfer) and `freight_terms` (who pays)
-are deliberately never the same control.
+**Payment terms prefill from the customer's standing commercial contract.**
+`default_payment_terms` rides along on the detail select so the page can compare what was used
+against what the customer normally gets. It is the **only** standing term left —
+`default_lead_time_text` was dropped 2026-08-03 (lead time is judged per quote, against current
+shop load) and `default_fob_point` on 2026-08-08. [customers.md](customers.md) owns that mapping
+and records the evidence for both removals.
 
 **Removed April 2026, replaced by line items:** `part_id`, `quantity`, `base_cost`,
 `markup_percent`, `estimated_labor_cost`, `estimated_material_cost`, `unit_price`,
@@ -166,7 +167,10 @@ a per-row total misleads. Totals live on the detail page and PDF, for firm quote
 detail page (`quotes/[quoteId]/page.tsx`), gated on the quote being active and unconverted.
 *(This doc described an `/quotes/{id}/edit` route that never existed.)*
 
-**Parts card** — one block per part, plus **+ Add part**. Each block: a part picker (with **+ New
+**Parts card** — one block per part, plus **+ Add part** at the **bottom** of the card, below the
+list rather than beside the heading: a part block is tall (picker, quantity rows, price captions,
+lead-time disclosure), so a header button makes a multi-part quote scroll back up past everything
+just filled in. Each block: a part picker (with **+ New
 Part** inline create), an editable **list of quantity rows** (one per quoted quantity, **Add
 quantity** appends, every row past the first can be deleted), each row showing its resolved price
 stacked over a `From tier {n}` caption, plus Total (firm) or Extended (options). A row below the
@@ -223,13 +227,29 @@ replaced it, on the form and on the detail view.
 
   A typed price equal to the tier's is **not** an override — it saves as a normal tier-priced
   line, so it stays inside drift detection and repricing.
-- **Per-part lead time:** an optional free-text field so one item can read "2–3 weeks" and
-  another "3–4 weeks" **without splitting the quote in two**. When *any* item has its own, the
-  detail view and PDF move lead time under each item; when none do, one quote-level line shows.
+- **Per-part lead time:** behind a **"Different lead time for this part"** checkbox, collapsed by
+  default — it is an *override* of the quote-level lead time set in Terms above, and most quotes
+  never need one. Mirrors "Shipping address same as billing" in the Customer card. One item can
+  then read "2–3 weeks" and another "3–4 weeks" **without splitting the quote in two**. When *any*
+  item has its own, the detail view and PDF move lead time under each item; when none do, one
+  quote-level line shows.
+
+  Two details that keep the checkbox and the value from disagreeing: hydrating a saved quote
+  **seeds the checkbox from the value**, so a quote already promising a per-part lead time opens
+  expanded rather than hiding it; and unchecking **clears the text**, so the line genuinely falls
+  back to the quote lead time rather than leaving a stale promise behind a hidden control.
 - **Order matters** — part-block order, then row order within a block, drives `sequence`.
 
-**Terms card** — lead time (required free text), expiration (defaults +10 days), and payment
-terms as a **pick-only** combobox: the shop's saved custom terms first (each removable via ✕),
+**Terms card — and it sits ABOVE Parts, deliberately.** The quote-level lead time has to be on
+screen before the parts that may override it; otherwise each part block's *"Different lead time
+for this part"* is an override of a value the user has not reached yet. Customer → Terms → Parts
+also puts the standing-terms provenance line beside the customer picker that caused it instead of
+a card away. `validationError` reports the first failure in that same order, so the message on the
+disabled submit button always points at the card the user should look at.
+
+It holds: lead time (required free text), **Quote valid until** (defaults +10 days; the column is
+still `expiration_date`, and the label matches the `Valid Until:` the PDF already printed), and
+payment terms as a **pick-only** combobox: the shop's saved custom terms first (each removable via ✕),
 then the presets (Due on Receipt · Net 15 · Net 30 · Net 60 · 2/10 Net 30 · 50% Deposit /
 Balance Net 30 · Prepay · Cash on Delivery — QuickBooks' built-ins plus the deposit / prepay /
 COD / early-pay terms shops use). Presets are **not** removable. Saved terms live in
@@ -309,6 +329,20 @@ part's kind:
 
 *(An earlier revision started multi-quantity parts with **no radio selected**, requiring a
 deliberate pick. Radios are gone — `ConvertToJobModal` has none.)*
+
+**Lead time follows the same all-or-nothing rule as the detail view and the PDF:** when any line
+carries its own, the single *Quoted lead time* block is suppressed and each part shows its
+effective value (`lead_time_text ?? quote.lead_time_text`). The modal was the one surface that
+never got this — it read `quote.lead_time_text` alone, so a quote with three per-part lead times
+displayed one, silently.
+
+A job carries one `due_date`, and the modal says nothing about that — **the per-part lead times
+listed above the field are the disclosure**. A tried-and-removed paragraph explained that differing
+lead times mean one date and offered converting in several passes; it was noise on the screen where
+the user is trying to pick a date, explaining how jobs work rather than telling them anything they
+could act on. Lead time is also **not** persisted onto the job — `jobs` has no lead-time column
+(`jobs.lead_time_days` was dropped in `20260713060545`) and free-text lead time no longer implies a
+date.
 
 Also captured: a **required Due date** (not-in-the-past, starts **empty** — no prefill, and no
 longer derived from lead time), a **required Customer PO #** (the authorization, so no job
@@ -462,7 +496,7 @@ only if post-pilot data shows drift is more frequent than estimated.
 `Quote-{quote_number}.pdf`.
 
 Contains: company logo and name; the QUOTE heading with number, date, validity, lead time,
-payment terms and FOB; **Customer · Ship to (only if different) · Customer contact**; the line
+and payment terms; **Customer · Ship to (only if different) · Customer contact**; the line
 items table ordered by `sequence`, with a grand total **only** on firm quotes; and an acceptance
 block instructing the customer to **reply with a purchase order referencing the quote** — there
 is **no signature/date/PO ruled line**, because acceptance is by PO. A "Prepared by {name} ·

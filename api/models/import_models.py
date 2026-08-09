@@ -164,14 +164,4 @@ CUSTOMER_SCHEMA = {
             "'Terms', 'Terms Code' or 'Payment Terms'."
         ),
     },
-    "default_fob_point": {
-        "type": "string",
-        "required": False,
-        "description": (
-            "FOB point — WHERE title and risk transfer, as a named place "
-            "(e.g. 'FOB Cleveland, OH', 'FOB Origin'). Often exported as 'FOB'. "
-            "Not the freight payment terms (prepaid / collect / third party), "
-            "which describe who PAYS and are not imported here."
-        ),
-    },
 }

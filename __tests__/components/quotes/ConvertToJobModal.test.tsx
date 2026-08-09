@@ -302,3 +302,87 @@ describe('ConvertToJobModal — no premature error on the empty due date', () =>
     expect(screen.getByRole('button', { name: /create j-100/i })).toBeDisabled();
   });
 });
+
+/**
+ * Lead time follows the same all-or-nothing rule as the PDF and the quote
+ * detail page: if ANY line carries its own, the single quote-level value is
+ * suppressed and each part shows its effective one. This modal was the only
+ * one of the three that never got it — it read `quote.lead_time_text` and
+ * nothing else, so a quote with three per-part lead times showed one.
+ * Mirrors `__tests__/utils/quotePdf.test.ts` > per-item lead times.
+ */
+describe('ConvertToJobModal — per-part lead times', () => {
+  const twoParts = (
+    leadA: string | null,
+    leadB: string | null,
+    quoteLead: string | null,
+  ): QuoteWithRelations =>
+    ({
+      id: 'q1',
+      company_id: 'co1',
+      quote_number: 'Q-100',
+      lead_time_text: quoteLead,
+      expiration_date: null,
+      customers: { name: 'Customer Co' },
+      line_items: [
+        {
+          id: 'li1',
+          sequence: 1,
+          part_id: 'p1',
+          quantity: 10,
+          unit_price: 5,
+          total_price: 50,
+          lead_time_text: leadA,
+          parts: { part_name: 'Bracket', primary_unit: null },
+        },
+        {
+          id: 'li2',
+          sequence: 2,
+          part_id: 'p2',
+          quantity: 4,
+          unit_price: 9,
+          total_price: 36,
+          lead_time_text: leadB,
+          parts: { part_name: 'Housing', primary_unit: null },
+        },
+      ],
+    }) as unknown as QuoteWithRelations;
+
+  const open = (q: QuoteWithRelations) =>
+    render(wrap(<ConvertToJobModal open onClose={vi.fn()} onConverted={vi.fn()} quote={q} />));
+
+  it('shows one quote-level lead time when no line carries its own', async () => {
+    open(twoParts(null, null, '4 weeks ARO'));
+
+    await waitFor(() => expect(screen.getByText(/quoted lead time/i)).toBeInTheDocument());
+    expect(screen.getByText('4 weeks ARO')).toBeInTheDocument();
+    expect(screen.queryByText(/^Lead time:/)).not.toBeInTheDocument();
+  });
+
+  it('suppresses the single value and shows each part’s own when they differ', async () => {
+    open(twoParts('2–3 weeks', '6–8 weeks', '4 weeks ARO'));
+
+    await waitFor(() => expect(screen.getByText(/Lead time: 2–3 weeks/)).toBeInTheDocument());
+    expect(screen.getByText(/Lead time: 6–8 weeks/)).toBeInTheDocument();
+    // The header value would contradict the per-part rows, so it goes.
+    expect(screen.queryByText(/quoted lead time/i)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the quote-level value for a part that has none of its own', async () => {
+    open(twoParts('2–3 weeks', null, '4 weeks ARO'));
+
+    await waitFor(() => expect(screen.getByText(/Lead time: 2–3 weeks/)).toBeInTheDocument());
+    expect(screen.getByText(/Lead time: 4 weeks ARO/)).toBeInTheDocument();
+  });
+
+  it('says nothing extra when the included parts were quoted differently', async () => {
+    // The per-part lead times above are the disclosure. A job carrying one due
+    // date is how jobs work, not news, and a paragraph explaining it is noise
+    // on the screen where the user is trying to pick a date.
+    open(twoParts('2–3 weeks', '6–8 weeks', '4 weeks ARO'));
+
+    await waitFor(() => expect(screen.getByText(/Lead time: 2–3 weeks/)).toBeInTheDocument());
+    expect(screen.queryByText(/one due date/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/convert them separately/i)).not.toBeInTheDocument();
+  });
+});

@@ -526,7 +526,7 @@ test.describe('Quote edit — reload contract', () => {
 
     // Force a past expiration date (the form otherwise defaults to today + 10),
     // so the quote is expired-by-date the moment it's created.
-    await page.getByLabel(/Expiration date/i).fill('2020-01-01');
+    await page.getByLabel(/Quote valid until/i).fill('2020-01-01');
 
     await page.getByRole('textbox', { name: 'Lead time', exact: true }).fill('2 weeks');
     await page.getByRole('combobox', { name: /Payment terms/i }).fill('Net 30');
@@ -556,7 +556,7 @@ test.describe('Quote edit — reload contract', () => {
 
     // Reactivation banner + a pre-filled future expiration date.
     await expect(page.getByText(/This quote is expired/i)).toBeVisible();
-    const prefilled = await page.getByLabel(/Expiration date/i).inputValue();
+    const prefilled = await page.getByLabel(/Quote valid until/i).inputValue();
     const today = new Date().toISOString().slice(0, 10);
     // ISO dates compare correctly as strings.
     expect(prefilled >= today, `expected a future pre-fill, got ${prefilled}`).toBeTruthy();

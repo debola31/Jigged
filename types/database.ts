@@ -535,7 +535,6 @@ export type Database = {
           created_at: string | null
           credit_hold_note: string | null
           credit_status: string
-          default_fob_point: string | null
           default_payment_terms: string | null
           deleted_at: string | null
           id: string
@@ -547,7 +546,6 @@ export type Database = {
           created_at?: string | null
           credit_hold_note?: string | null
           credit_status?: string
-          default_fob_point?: string | null
           default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
@@ -559,7 +557,6 @@ export type Database = {
           created_at?: string | null
           credit_hold_note?: string | null
           credit_status?: string
-          default_fob_point?: string | null
           default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
@@ -2715,7 +2712,6 @@ export type Database = {
           customer_name: string | null
           deleted_at: string | null
           expiration_date: string | null
-          fob_point: string | null
           id: string
           lead_time_text: string | null
           payment_terms: string | null
@@ -2739,7 +2735,6 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
-          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null
@@ -2763,7 +2758,6 @@ export type Database = {
           customer_name?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
-          fob_point?: string | null
           id?: string
           lead_time_text?: string | null
           payment_terms?: string | null

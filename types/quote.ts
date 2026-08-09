@@ -62,11 +62,6 @@ export interface Quote {
   // that's entered manually at conversion.
   lead_time_text: string | null;
   payment_terms: string | null;
-  // Where title and risk transfer, as free text naming a place ("FOB
-  // Cleveland, OH"). Resolved from the customer's default at create time and
-  // then owned by this quote. Distinct from freight payment terms (who pays),
-  // which live on the job and shipment — never collapse the two into one field.
-  fob_point: string | null;
   expiration_date: string | null;
   status: QuoteStatus;
   status_changed_at: string | null;
@@ -202,7 +197,6 @@ export interface QuoteWithRelations extends Quote {
      */
     default_payment_terms?: string | null;
     default_lead_time_text?: string | null;
-    default_fob_point?: string | null;
     customer_contacts?: Array<{
       id: string;
       name: string;
@@ -303,10 +297,6 @@ export interface QuoteFormData {
   lead_time_text: string;
   // Payment terms shown on the quote (preset or custom free text). '' = unset.
   payment_terms: string;
-  // FOB point — a named place ("FOB Cleveland, OH"). '' = unset. Optional at
-  // the form level (unlike terms and lead time, which are required), because
-  // plenty of shops quote without stating one.
-  fob_point: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
   status?: QuoteStatus;
 }
@@ -359,7 +349,6 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   parts: [],
   lead_time_text: '',
   payment_terms: '',
-  fob_point: '',
   expiration_date: defaultExpirationDate(),
 };
 
@@ -399,7 +388,6 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
       })),
     lead_time_text: quote.lead_time_text ?? '',
     payment_terms: quote.payment_terms ?? '',
-    fob_point: quote.fob_point ?? '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,
   };

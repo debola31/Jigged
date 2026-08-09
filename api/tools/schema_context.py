@@ -27,9 +27,9 @@ SCHEMA_CONTEXT = """
 - website: TEXT
 - deleted_at: TIMESTAMPTZ (archived when set — filter `deleted_at IS NULL` for
   any list, count or ranking; a by-id lookup deliberately does not)
-- default_payment_terms: TEXT, default_fob_point: TEXT
-  -- the customer's STANDING terms, applied to NEW quotes only. A quote's own
-  payment_terms / lead_time_text / fob_point are what that quote was issued
+- default_payment_terms: TEXT
+  -- the customer's STANDING term, applied to NEW quotes only. A quote's own
+  payment_terms / lead_time_text are what that quote was issued
   with; never answer "what terms is quote X on?" from these columns.
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: There are no contact_name/contact_phone/contact_email columns. Contacts
@@ -124,7 +124,6 @@ SCHEMA_CONTEXT = """
 - converted_at: TIMESTAMPTZ (when accepted/converted to a job)
 - lead_time_text: TEXT (free-text lead time as stated, e.g. "2–3 weeks", "In stock"; does not drive the job due date)
 - payment_terms: TEXT (e.g. 'Net 30', '2/10 Net 30'), expiration_date: DATE
-- fob_point: TEXT (where title/risk transfer, e.g. 'FOB Cleveland, OH'; NOT who pays freight)
 - created_by: UUID, created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: revenue is NOT on quotes anymore. Sum quote_line_items.total_price
   for per-quote revenue.

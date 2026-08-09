@@ -257,7 +257,7 @@ Post-#625 the environment tags are trustworthy:
 | Frontend, local dev / CI E2E | **nothing — the SDK is disabled** |
 | Backend, production | `production` |
 | Backend, preview | `preview` |
-| Backend, local | `development` |
+| Backend, local / pytest | **nothing — the SDK is disabled** |
 
 Note the asymmetry: the frontend's tags come from Vercel's Sentry integration
 (`vercel-` prefixed), the backend's from `resolve_sentry_environment()` in

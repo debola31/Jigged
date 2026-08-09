@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sentry_sdk
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -601,7 +602,12 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         raise
     except Exception as exc:  # noqa: BLE001
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
-        logger.exception("QuickBooks push failed for job %s", job_id)
+        # WARNING, not exception: `LoggingIntegration` files an ERROR-level record as its own
+        # Sentry event, and `_map_qb_error` raises an HTTPException the Starlette integration
+        # already captures for any 5xx (its default `failed_request_status_codes` is 500-599).
+        # Two captures for one failure, fingerprinted differently — the trap in telemetry.md.
+        # `exc_info` keeps the traceback in the log, where it costs nothing.
+        logger.warning("QuickBooks push failed for job %s", job_id, exc_info=True)
         raise _map_qb_error(exc)
 
     # Success: flip the link to created. This fires the invoicing_status recompute
@@ -640,8 +646,19 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         db.table("quickbooks_invoice_links").update(
             {"status": "error", "qb_invoice_id": result["id"], "qb_invoice_url": invoice_url}
         ).eq("id", link_id).execute()
-        logger.exception(
-            "Invoice %s created in QBO but recording its lines failed (link %s)", result["id"], link_id
+        # Same double-capture reasoning as the push failure above — but this is the path with
+        # real data consequences (money exists in QBO that Jigged has not recorded), so the ids
+        # go into Sentry's context rather than being lost with the duplicate event. The 500
+        # below is what files the issue; this is what makes it actionable.
+        sentry_sdk.set_context(
+            "quickbooks_invoice",
+            {"qb_invoice_id": result["id"], "link_id": link_id, "job_id": job_id},
+        )
+        logger.warning(
+            "Invoice %s created in QBO but recording its lines failed (link %s)",
+            result["id"],
+            link_id,
+            exc_info=True,
         )
         raise HTTPException(
             status_code=500,

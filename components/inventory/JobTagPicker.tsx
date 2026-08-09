@@ -34,10 +34,15 @@ export const jobPartsLabel = (j: JobWithRelations): string =>
     .filter((n): n is string => Boolean(n))
     .join(', ');
 
-/** Active jobs for the picker. Never throws — the tag is optional. */
+/**
+ * Active jobs for the picker. Never throws — the tag is optional.
+ *
+ * Takes just the rows off the page envelope: this never searches, so nothing
+ * is capped and there is no truncation for the caller to report.
+ */
 export async function loadTaggableJobs(companyId: string): Promise<JobWithRelations[]> {
   try {
-    return await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES });
+    return (await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES })).jobs;
   } catch {
     return [];
   }

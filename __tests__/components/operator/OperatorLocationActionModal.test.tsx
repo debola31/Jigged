@@ -70,10 +70,14 @@ const renderModal = (props: Partial<React.ComponentProps<typeof OperatorLocation
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (getAllJobs as ReturnType<typeof vi.fn>).mockResolvedValue([
-    job({ id: 'j1', job_number: 'JOB-001', parts: ['Bracket', 'Pin'] }),
-    job({ id: 'j2', job_number: 'JOB-002', parts: ['Flange'] }),
-  ]);
+  (getAllJobs as ReturnType<typeof vi.fn>).mockResolvedValue({
+    jobs: [
+      job({ id: 'j1', job_number: 'JOB-001', parts: ['Bracket', 'Pin'] }),
+      job({ id: 'j2', job_number: 'JOB-002', parts: ['Flange'] }),
+    ],
+    total: 2,
+    truncated: false,
+  });
   (depleteStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ location_balance: 7, part_quantity: 7 });
 });
 

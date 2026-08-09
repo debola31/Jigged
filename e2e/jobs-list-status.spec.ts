@@ -45,12 +45,13 @@ test.describe('Jobs list — combined status filter', () => {
 
     // Customer is back, and this assertion is INVERTED from what it used to be.
     // It was removed as "redundant — search already matches customer name",
-    // which is true of the manual case and false of the two that matter:
-    // search_jobs_by_identifier is capped at LIMIT 100 (and jobsAccess applies
-    // the status filters AFTER that cap), so a busy customer's list silently
-    // truncates in UUID order; and a substring can never express "exactly this
-    // customer", which the customer page's Quotes/Jobs count links require.
-    // The dropdown filters on customer_id, so it is exact by construction.
+    // which is true of the manual case and false of the one that matters: a
+    // substring can never express "exactly this customer", which the customer
+    // page's Quotes/Jobs count links require. The dropdown filters on
+    // customer_id, so it is exact by construction.
+    // (It had a second justification until #688 — the search RPC capped at 100
+    // rows in UUID order before the status filters ran. Fixed: the cap now
+    // applies after every filter, keeps the newest rows, and the list says so.)
     await expect(page.getByRole('combobox', { name: /^Customer$/i })).toBeVisible();
 
     // Isolate the seeded jobs by their shared job-number prefix.

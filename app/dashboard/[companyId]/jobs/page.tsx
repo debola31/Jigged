@@ -91,6 +91,9 @@ function matchSourceLabel(source: string): string {
   }
 }
 
+/** Thousands separators, so "1,842 matches" doesn't read as 1842 at a glance. */
+const formatCount = (n: number) => n.toLocaleString();
+
 // The default Status selection: every open (non-closed) stage. Completed and
 // cancelled jobs are hidden until the user explicitly picks them — this replaces
 // the old "Show completed & cancelled" checkbox.
@@ -163,14 +166,17 @@ export default function JobsPage() {
   // and bound to the visible Customer dropdown below.
   //
   // That dropdown was once removed as "redundant, search already matches
-  // customer name". True of the manual case, false of the two that matter:
-  // search_jobs_by_identifier is capped at LIMIT 100 and getAllJobs applies the
-  // status filters AFTER that cap, so a busy customer's search silently
-  // truncates in job-id order with nothing saying rows were dropped; and a
-  // substring cannot express "exactly this customer", which the count link
-  // requires. This filter is .eq('customer_id', …) on the main query, never the
-  // RPC, so it is exact by construction — and it doubles as the on-screen
-  // explanation for an arriving deep link, which previously had none.
+  // customer name". It isn't: a substring cannot express "exactly this
+  // customer", which is precisely what the count deep-link means. Searching
+  // "Apex" also matches "Apex Aerospace" and "Apex Medical"; this filter is an
+  // id equality, so it can't. It also doubles as the on-screen explanation for
+  // an arriving deep link, which previously had none.
+  //
+  // (It used to carry a second justification — that the search RPC capped at
+  // 100 rows before the status filters ran, so a busy customer's search was
+  // silently, arbitrarily wrong. That is fixed: the cap now applies after every
+  // filter, keeps the newest rows rather than a UUID-ordered slice, and the
+  // list says so on screen when it bites. See #688 and JOB_SEARCH_LIMIT.)
   const [customerId, setCustomerId] = useState<string>(
     () => searchParams.get('customer') ?? '',
   );
@@ -226,6 +232,7 @@ export default function JobsPage() {
   const {
     data: jobsData,
     loading,
+    error: jobsError,
     reload: fetchJobs,
   } = useLoad(
     () => {
@@ -239,6 +246,11 @@ export default function JobsPage() {
         // Hide closed jobs unless a closed stage is explicitly selected. (An
         // empty selection shows no rows anyway — see visibleJobs.)
         excludeClosed: !includesClosed,
+        // The exact stages, for the search path only. Off it this is ignored
+        // and visibleJobs does the narrowing client-side; on it the search RPC
+        // needs them, because its row cap has to apply to the set the user
+        // actually ends up looking at rather than to a superset of it.
+        stages: statusFilter,
       };
       return getAllJobs(companyId, filters, sortModel.field, sortModel.sort);
     },
@@ -260,7 +272,12 @@ export default function JobsPage() {
       },
     },
   );
-  const jobs = jobsData ?? EMPTY_JOBS;
+  const jobs = jobsData?.jobs ?? EMPTY_JOBS;
+  // How many jobs matched before the search cap, and whether it cut anything.
+  // Both are only ever meaningful on the search path — off it getAllJobs
+  // returns everything and reports truncated: false.
+  const matchTotal = jobsData?.total ?? 0;
+  const truncated = jobsData?.truncated ?? false;
 
   // Jobs whose only live work is out at a vendor read as stalled in the normal
   // list (the "current op" is a sent external op, which counts as incomplete but
@@ -762,10 +779,30 @@ export default function JobsPage() {
         </Button>
       </Box>
 
+      {/* A failed load used to fall through to the "No jobs found" card below,
+          which reads as a definitive answer when we don't actually have one.
+          Say we couldn't check instead. */}
+      {jobsError != null && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Couldn&apos;t load jobs. Check your connection and try again.
+        </Alert>
+      )}
+
+      {/* Search matched more jobs than one screenful can carry back, so say so
+          rather than showing an arbitrary slice as if it were everything (#688).
+          The count is exact and reflects every filter above, so "of {matchTotal}"
+          is the number of jobs the user would see if the cap were lifted. */}
+      {truncated && jobsError == null && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Showing the {jobs.length} newest matches out of {formatCount(matchTotal)}. Type
+          more of the job number, or pick a customer or a status, to narrow this down.
+        </Alert>
+      )}
+
       {/* Data Grid or Empty State. Jobs come from converting an accepted quote
           (utils/quotesAccess#convertQuoteToJob) or directly from a customer PO
           (New Job from PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
-      {!loading && visibleJobs.length === 0 ? (
+      {!loading && jobsError == null && visibleJobs.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
             <WorkIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />

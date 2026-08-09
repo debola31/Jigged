@@ -18,3 +18,27 @@
  * `location_id` term some callers add) rather than sitting just under the cliff.
  */
 export const ID_CHUNK = 120;
+
+/**
+ * How many jobs the jobs-list search may return.
+ *
+ * `search_jobs_by_identifier` resolves the matching ids, and `getAllJobs` then sends them
+ * back as one un-chunked `.in('id', …)` — so this is a URL budget, not a product decision.
+ *
+ * **Measured, not guessed** — against the local gateway on 2026-08-08, with the real
+ * `getAllJobs` select string (the `customers` / `quotes` / `job_parts` / `parts` embed block,
+ * ~250 chars before any ids) and real UUIDs: 200 ids → **200 OK** at 7,791 bytes of URL,
+ * 220 ids → **414 URI Too Long** at 8,531. The gateway's ceiling is 8 KB, and it does not
+ * care that this query is longer than the ones `ID_CHUNK` was measured against — the cliff
+ * lands in the same place.
+ *
+ * 120 (4,831 bytes) keeps the same headroom `ID_CHUNK` does, which the jobs query needs:
+ * status, customer and overdue filters all add terms to the same URL.
+ *
+ * **Raising this is not free.** Past the ceiling the failure mode changes from a truncated
+ * list — which the UI now admits to, see JobsPage.total — to a hard 414 that reads as
+ * "no jobs". If the cap ever genuinely constrains a shop, the answer is a pager, not a
+ * bigger number: `app/dashboard/[companyId]/inventory/count/page.tsx` documents that
+ * escalation and the debounce/page-reset guard it needs.
+ */
+export const JOB_SEARCH_LIMIT = ID_CHUNK;

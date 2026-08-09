@@ -363,8 +363,20 @@ export interface JobFilters {
    * search_jobs_by_identifier RPC (job_number, customer_po, customer
    * name, part number, packing slip number) and surfaces the match_source
    * on the returned rows.
+   *
+   * The RPC caps its result at JOB_SEARCH_LIMIT rows — the ids round-trip
+   * back through a PostgREST `.in()` URL, which has a hard ceiling. Every
+   * other filter here is forwarded to the RPC so the cap applies to the
+   * final set, and JobsPage.total reports how many matched before it.
    */
   search?: string;
+  /**
+   * Selected lifecycle stages. Forwarded to the search RPC as exact
+   * status pairs (see stagesToStatusPairs) so the search cap can't cut into
+   * a set the caller is about to narrow further. Ignored off the search
+   * path, where the jobs list does this narrowing client-side.
+   */
+  stages?: JobLifecycleStage[];
   overdue?: boolean;
   /** When true (default), hide "closed" jobs — the FR-18 done predicate OR
    *  cancelled (see isJobClosed). The jobs list turns this off when the user
@@ -444,6 +456,39 @@ export const STAGE_TO_JOB_FILTERS: Record<
   },
   cancelled: { productionStatus: ['cancelled'], showClosed: true },
 };
+
+/**
+ * The other inverse of getJobLifecycleStage: the EXACT
+ * `production_status:fulfillment_status` pairs covered by a set of stages,
+ * for `search_jobs_by_identifier`'s `p_stage_pairs`.
+ *
+ * Why this exists alongside STAGE_TO_JOB_FILTERS rather than reusing it: that
+ * one is two `.in()` lists ANDed together, which is exact for ONE stage and a
+ * superset for a multi-select. Ticking {not_started, partially_shipped} unions
+ * to production ∈ {not_started, …} AND fulfillment ∈ {unshipped,
+ * partially_shipped}, which also admits `in_progress + unshipped` — a stage the
+ * user did not tick. Harmless when it only widens a pre-filter, fatal here: the
+ * RPC counts what it matches, and an over-count makes the jobs list's
+ * "showing 120 of N" claim a lie (#688).
+ *
+ * Derived by enumerating all production × fulfillment combinations through
+ * getJobLifecycleStage itself, so it cannot drift from the forward mapping the
+ * way a hand-maintained table can.
+ */
+export function stagesToStatusPairs(stages: JobLifecycleStage[]): string[] {
+  const productions = Object.keys(PRODUCTION_STATUS_CONFIG) as ProductionStatus[];
+  const fulfillments = Object.keys(FULFILLMENT_STATUS_CONFIG) as FulfillmentStatus[];
+  const wanted = new Set(stages);
+  const pairs: string[] = [];
+  for (const production_status of productions) {
+    for (const fulfillment_status of fulfillments) {
+      if (wanted.has(getJobLifecycleStage({ production_status, fulfillment_status }))) {
+        pairs.push(`${production_status}:${fulfillment_status}`);
+      }
+    }
+  }
+  return pairs;
+}
 
 // ============== Operation Types ==============
 

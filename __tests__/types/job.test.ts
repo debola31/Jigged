@@ -6,6 +6,7 @@ import {
   isJobOverdue,
   JOB_LIFECYCLE_STAGE_CONFIG,
   STAGE_TO_JOB_FILTERS,
+  stagesToStatusPairs,
   type JobLifecycleStage,
   type ProductionStatus,
   type FulfillmentStatus,
@@ -196,5 +197,52 @@ describe('isJobOverdue', () => {
     expect(
       isJobOverdue({ due_date: null, production_status: 'in_progress', fulfillment_status: 'unshipped' }),
     ).toBe(false);
+  });
+});
+
+// The structural guarantee behind the jobs list's "showing 120 of 843" banner:
+// if these pairs were ever a SUPERSET of the ticked stages, the search RPC would
+// count rows the user can't see and the banner would overstate (#688).
+describe('stagesToStatusPairs', () => {
+  const pairOf = (c: (typeof CASES)[number]) => `${c.production}:${c.fulfillment}`;
+
+  it.each(Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[])(
+    'returns exactly the combinations getJobLifecycleStage maps to %s',
+    (stage) => {
+      expect(stagesToStatusPairs([stage]).sort()).toEqual(
+        CASES.filter((c) => c.stage === stage).map(pairOf).sort(),
+      );
+    },
+  );
+
+  it('is total — the union over every stage is all 12 combinations', () => {
+    const all = stagesToStatusPairs(
+      Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[],
+    );
+    expect(all.sort()).toEqual(CASES.map(pairOf).sort());
+    expect(all).toHaveLength(12);
+  });
+
+  it('is disjoint — no combination belongs to two stages', () => {
+    const seen = new Set<string>();
+    for (const stage of Object.keys(JOB_LIFECYCLE_STAGE_CONFIG) as JobLifecycleStage[]) {
+      for (const pair of stagesToStatusPairs([stage])) {
+        expect(seen.has(pair)).toBe(false);
+        seen.add(pair);
+      }
+    }
+  });
+
+  it('maps a multi-select to the union, and never widens past it', () => {
+    // The case STAGE_TO_JOB_FILTERS gets wrong: ANDing its two .in() lists would
+    // also admit in_progress:unshipped, which the user did not tick.
+    const pairs = stagesToStatusPairs(['not_started', 'partially_shipped']);
+    expect(pairs).toContain('not_started:unshipped');
+    expect(pairs).toContain('in_progress:partially_shipped');
+    expect(pairs).not.toContain('in_progress:unshipped');
+  });
+
+  it('returns nothing for an empty selection — "None" matches no jobs', () => {
+    expect(stagesToStatusPairs([])).toEqual([]);
   });
 });

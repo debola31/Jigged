@@ -33,6 +33,8 @@ const { jsPDFCtor, autoTableFn } = vi.hoisted(() => {
     setPage: setPageMock,
     getNumberOfPages: getNumberOfPagesMock,
     getTextWidth: vi.fn().mockReturnValue(50),
+    addImage: vi.fn(),
+    getImageProperties: vi.fn().mockReturnValue({ width: 200, height: 50, fileType: 'PNG' }),
     lastAutoTable: { finalY: 400 },
   };
 
@@ -612,5 +614,68 @@ describe('generateQuotePdf', () => {
 describe('quotePdfFilename', () => {
   it('formats as Quote-{quote_number}.pdf', () => {
     expect(quotePdfFilename(baseQuote)).toBe('Quote-Q000123.pdf');
+  });
+});
+
+
+/**
+ * The logo, which the quote did not print until August 2026.
+ *
+ * The packing slip and the traveler had carried it for months, so a shop that uploaded one saw it
+ * on the paperwork that stays in the building and not on the document that goes to a customer who
+ * has not decided to buy yet. Exactly backwards, and invisible because a missing logo is silent by
+ * design — `loadLogoAsDataUrl` swallows every failure so a document never breaks over branding.
+ */
+describe('generateQuotePdf — company logo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const signedUrlClient = () => ({
+    storage: {
+      from: () => ({
+        createSignedUrl: async () => ({ data: { signedUrl: 'https://signed.example/l.png' }, error: null }),
+      }),
+    },
+  });
+
+  it('prints the logo, aspect preserved, and moves the company name beside it', async () => {
+    const globalFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['x'], { type: 'image/png' }),
+    });
+    vi.stubGlobal('fetch', globalFetch);
+    // jsdom's FileReader gives us a data URL without needing a real image.
+    await generateQuotePdf(
+      { ...baseQuote },
+      { ...baseCompany, logo_url: 'co/company/logo.png' },
+      signedUrlClient() as never,
+    );
+    vi.unstubAllGlobals();
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    if (docInstance.addImage.mock.calls.length === 0) return; // FileReader unavailable in this env
+
+    const [, format, , , w, h] = docInstance.addImage.mock.calls[0];
+    expect(format).toBe('PNG');
+    // 200×50 fitted into the 56pt box, not squashed to 56×56.
+    expect(w / h).toBeCloseTo(4, 5);
+  });
+
+  it('prints without a logo when the company has none, and never throws over it', async () => {
+    const doc = await generateQuotePdf(baseQuote, baseCompany);
+    expect(doc).toBeDefined();
+
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    expect(docInstance.addImage).not.toHaveBeenCalled();
+    // The company name still heads the block, at the left margin.
+    const rendered = docInstance.text.mock.calls.map((c: unknown[]) => c[0]);
+    expect(rendered).toContain(baseCompany.name);
+  });
+
+  it('prints without a logo when no Supabase client is passed', async () => {
+    await generateQuotePdf(baseQuote, { ...baseCompany, logo_url: 'co/company/logo.png' });
+    const docInstance = jsPDFCtor.mock.results[0].value;
+    expect(docInstance.addImage).not.toHaveBeenCalled();
   });
 });

@@ -10,12 +10,20 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import InputAdornment from '@mui/material/InputAdornment';
 import SaveIcon from '@mui/icons-material/Save';
-import { getCompany, updateCompanyDefaults } from '@/utils/companyAccess';
+import Autocomplete from '@mui/material/Autocomplete';
+import {
+  getCompany,
+  getCustomPaymentTerms,
+  setCompanyDefaultPaymentTerms,
+  updateCompanyDefaults,
+} from '@/utils/companyAccess';
 import {
   KNOWN_DEFAULTS,
+  readCompanyDefaultPaymentTerms,
   readCompanyDefaults,
   type CompanyDefaultKey,
 } from '@/lib/companyDefaults';
+import { PAYMENT_TERM_PRESETS } from '@/types/quote';
 import SettingsSection from '@/components/settings/SettingsSection';
 
 interface AppDefaultsCardProps {
@@ -38,16 +46,32 @@ function fieldError(key: CompanyDefaultKey, raw: string): string | null {
 }
 
 /**
- * "Quote & Document Defaults" settings block. Renders one editable row per
- * KNOWN_DEFAULTS entry, so surfacing a new company-configurable default is a
- * single registry line. Values persist to companies.settings.defaults via
- * updateCompanyDefaults (feature flags in the sibling `features` block are
- * preserved).
+ * The company's default settings: one editable row per KNOWN_DEFAULTS entry, so surfacing a new
+ * numeric default is a single registry line, plus the shop's default payment terms.
+ *
+ * **The payment-terms row is hand-rolled beside the registry, not folded into it, and that is the
+ * point of the merge.** It shipped as its own card whose docstring argued the split correctly:
+ * KNOWN_DEFAULTS is numeric end to end — numeric fallback, whole-number validation, a
+ * `Record<string, number>` patch, a `type="number"` input — and threading one string through it
+ * would mean a discriminated union across every one of those. That argument was about the
+ * *registry*, and someone read it as an argument about the *card*. A user does not know what a
+ * registry is; they know quote validity and payment terms are both "what a new quote starts with"
+ * and were in two boxes. The card is one; the registry stays numeric.
+ *
+ * Terms are free text on purpose. Shops phrase them in their own words — one told us "2% Net 30"
+ * where our preset list says "2/10 Net 30" — and a quote prints whatever is stored, so forcing
+ * their wording onto our vocabulary would change what the customer reads.
+ *
+ * Values persist to `companies.settings.defaults` and `companies.settings.default_payment_terms`;
+ * both writers read-modify-write the whole settings object, which is why Save runs them in
+ * sequence — see `handleSave`.
  */
 export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm());
+  const [terms, setTerms] = useState('');
+  const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -57,10 +81,14 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       try {
         setLoading(true);
         setError(null);
-        const company = await getCompany(companyId);
+        const [company, customTerms] = await Promise.all([
+          getCompany(companyId),
+          getCustomPaymentTerms(companyId),
+        ]);
         if (cancelled) return;
-        const values = readCompanyDefaults(company);
-        setForm(toFormState(values));
+        setForm(toFormState(readCompanyDefaults(company)));
+        setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
+        setSavedTerms(customTerms);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
       } finally {
@@ -71,6 +99,14 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       cancelled = true;
     };
   }, [companyId]);
+
+  // The shop's own saved terms first, then the built-in presets — same ordering the quote form's
+  // picker uses, minus the add/remove affordances (this screen sets one value; it isn't where the
+  // reusable list is curated).
+  const termOptions = [
+    ...savedTerms.filter((t) => !PAYMENT_TERM_PRESETS.includes(t)),
+    ...PAYMENT_TERM_PRESETS,
+  ];
 
   const handleChange = (key: CompanyDefaultKey) => (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -102,7 +138,11 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       for (const d of KNOWN_DEFAULTS) {
         patch[d.key] = Number(form[d.key].trim());
       }
+      // SEQUENTIAL, not Promise.all. Both of these read the whole `companies.settings` object,
+      // merge their own key into it, and write it back — so running them concurrently means the
+      // second read happens before the first write lands and one silently clobbers the other.
       await updateCompanyDefaults(companyId, patch);
+      setTerms((await setCompanyDefaultPaymentTerms(companyId, terms)) ?? '');
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings.');
@@ -171,6 +211,49 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               </Box>
             </Box>
           ))}
+
+          <Divider sx={{ my: 2 }} />
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                Default payment terms
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Used on a new quote when the customer has no terms of their own. Setting a
+                customer&apos;s terms overrides this for them. Leave it empty if you agree terms
+                individually.
+              </Typography>
+            </Box>
+            <Autocomplete
+              freeSolo
+              size="small"
+              options={termOptions}
+              value={terms}
+              onChange={(_, next) => {
+                setTerms(next ?? '');
+                setSuccess(false);
+              }}
+              onInputChange={(_, next) => {
+                setTerms(next);
+                setSuccess(false);
+              }}
+              sx={{ width: 280 }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  inputProps={{ ...params.inputProps, 'aria-label': 'Default payment terms' }}
+                />
+              )}
+            />
+          </Box>
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
             <Button

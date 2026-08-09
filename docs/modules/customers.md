@@ -405,7 +405,7 @@ Each bullet cites a real test. Gaps are named as gaps rather than implied to be 
 | Gap | Consequence |
 |---|---|
 | **No render test for `ShipmentForm`** | The freight controls, the seeded carrier default and the mismatch alert have no component-level coverage. This is why `carrierAccountMismatch` was extracted to `shipmentMath.ts`. |
-| **No test for the carrier-account authoring surface** | `CarrierAccountModal`, `DefaultPaymentTermsCard`, and the four Supabase-touching functions in `customerCarrierAccountsAccess.ts` are untested; only the pure `pickCarrierAccount` is. |
+| **No test for the carrier-account authoring surface** | `CarrierAccountModal` and the four Supabase-touching functions in `customerCarrierAccountsAccess.ts` are untested; only the pure `pickCarrierAccount` is. *(`DefaultPaymentTermsCard` was folded into `AppDefaultsCard` in August 2026 and is covered by `__tests__/components/settings/AppDefaultsCard.test.tsx`.)* |
 | **`CustomerForm.test.tsx` was not extended** | Its four tests predate the Terms and Credit sections the form now renders. |
 | **No page-level test** for the customer list or detail page. |
 | **No E2E spec touches the customer CRM.** `quote-detail-drift.spec.ts` covers *price* drift only. |

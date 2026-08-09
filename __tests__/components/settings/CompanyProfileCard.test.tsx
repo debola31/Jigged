@@ -14,11 +14,12 @@ import userEvent from '@testing-library/user-event';
 
 const getCompany = vi.hoisted(() => vi.fn());
 const updateCompanyLogo = vi.hoisted(() => vi.fn());
+const updateCompanyProfile = vi.hoisted(() => vi.fn());
 const uploadFileToStorage = vi.hoisted(() => vi.fn());
 const deleteFileFromStorage = vi.hoisted(() => vi.fn());
 const getSignedUrl = vi.hoisted(() => vi.fn());
 
-vi.mock('@/utils/companyAccess', () => ({ getCompany, updateCompanyLogo }));
+vi.mock('@/utils/companyAccess', () => ({ getCompany, updateCompanyLogo, updateCompanyProfile }));
 vi.mock('@/utils/storageHelpers', async () => {
   const actual = await vi.importActual<typeof import('@/utils/storageHelpers')>(
     '@/utils/storageHelpers',
@@ -32,7 +33,7 @@ vi.mock('@/utils/storageHelpers', async () => {
   };
 });
 
-import CompanyLogoCard, { rejectLogoFile } from '@/components/settings/CompanyLogoCard';
+import CompanyProfileCard, { rejectLogoFile } from '@/components/settings/CompanyProfileCard';
 import { LOGOS_BUCKET } from '@/utils/storageHelpers';
 
 const CO = '71000000-0000-0000-0000-000000000002';
@@ -43,6 +44,7 @@ const png = (name = 'mark.png', size = 1000) =>
 beforeEach(() => {
   vi.clearAllMocks();
   getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: null });
+  updateCompanyProfile.mockResolvedValue(undefined);
   getSignedUrl.mockResolvedValue('https://signed.example/logo.png');
   uploadFileToStorage.mockResolvedValue(undefined);
   updateCompanyLogo.mockResolvedValue(undefined);
@@ -68,9 +70,9 @@ describe('rejectLogoFile', () => {
   });
 });
 
-describe('CompanyLogoCard', () => {
+describe('CompanyProfileCard — logo', () => {
   it('says there is no logo rather than showing a broken frame', async () => {
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     expect(await screen.findByText('No logo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /upload logo/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
@@ -78,7 +80,7 @@ describe('CompanyLogoCard', () => {
 
   it('previews an existing logo from a signed URL against the private bucket', async () => {
     getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: `${CO}/company/logo_x.png` });
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
 
     const img = await screen.findByAltText('Company logo');
     expect(img).toHaveAttribute('src', 'https://signed.example/logo.png');
@@ -86,7 +88,7 @@ describe('CompanyLogoCard', () => {
   });
 
   it('refuses a bad file before it reaches the network', async () => {
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     await screen.findByText('No logo');
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -103,7 +105,7 @@ describe('CompanyLogoCard', () => {
   });
 
   it('uploads to the logos bucket and records the path on the company', async () => {
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     await screen.findByText('No logo');
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -121,7 +123,7 @@ describe('CompanyLogoCard', () => {
 
   it('replaces by writing the new file first, then dropping the old one', async () => {
     getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: `${CO}/company/old.png` });
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     await screen.findByAltText('Company logo');
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -142,7 +144,7 @@ describe('CompanyLogoCard', () => {
   it('keeps the new logo even when the old file cannot be removed', async () => {
     getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: `${CO}/company/old.png` });
     deleteFileFromStorage.mockRejectedValue(new Error('gone'));
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     await screen.findByAltText('Company logo');
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -156,7 +158,7 @@ describe('CompanyLogoCard', () => {
 
   it('clears the row before deleting the file, so no document points at a missing object', async () => {
     getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: `${CO}/company/old.png` });
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
     await screen.findByAltText('Company logo');
 
     await userEvent.click(screen.getByRole('button', { name: /remove/i }));
@@ -171,7 +173,7 @@ describe('CompanyLogoCard', () => {
   it('admits a logo it cannot load instead of claiming there is none', async () => {
     getCompany.mockResolvedValue({ id: CO, name: 'Acme', logo_url: `${CO}/company/old.png` });
     getSignedUrl.mockRejectedValue(new Error('denied'));
-    render(<CompanyLogoCard companyId={CO} />);
+    render(<CompanyProfileCard companyId={CO} />);
 
     // "No logo" here would hide a real inconsistency between the row and the bucket.
     expect(await screen.findByText(/on file but couldn't be loaded/i)).toBeInTheDocument();

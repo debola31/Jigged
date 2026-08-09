@@ -15,6 +15,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 
 import type { jsPDF } from 'jspdf';
 import type { QuoteWithRelations } from '@/types/quote';
+import { getSupabase } from '@/lib/supabase';
 import type { Company } from '@/utils/companyAccess';
 import { generateQuotePdf, quotePdfFilename } from '@/utils/quotePdf';
 
@@ -43,7 +44,9 @@ export default function QuotePdfPreviewDialog({
       setError(null);
       setPdfUrl(null);
       try {
-        const doc = await generateQuotePdf(quote, company);
+        // The client is passed only so the logo's signed URL can be resolved; without it the
+        // quote prints exactly as before, minus the logo.
+        const doc = await generateQuotePdf(quote, company, getSupabase());
         if (cancelled) return;
         docRef.current = doc;
         const url = doc.output('bloburl') as unknown as string;

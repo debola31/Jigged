@@ -10,6 +10,32 @@
 import { resolveCountryCode } from './geo';
 
 // ---------------------------------------------------------------------------
+// UUID
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of a UUID as Postgres stores and renders one.
+ *
+ * Deliberately a shape check, not a version check: these ids come back from the database, and the
+ * question being asked is always "could this string be one of ours?" — not "which RFC 4122 variant
+ * is it?".
+ */
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True when `value` could be a Postgres `uuid`.
+ *
+ * WHY THIS MATTERS BEYOND FORM VALIDATION. Every app route is `/dashboard/{companyId}/…`, and a
+ * Next.js dynamic segment matches any string — so `/dashboard/admin` resolves and hands `"admin"`
+ * to a `uuid` column, which Postgres rejects with SQLSTATE `22P02`. Checking here means the code
+ * that would ask the database can answer without it: a string that cannot be a uuid cannot name a
+ * row, and that is a definitive negative rather than a failed lookup.
+ */
+export function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_REGEX.test(value);
+}
+
+// ---------------------------------------------------------------------------
 // Email
 // ---------------------------------------------------------------------------
 

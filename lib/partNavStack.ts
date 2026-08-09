@@ -12,14 +12,15 @@
  * component, server-side helper).
  */
 
+import { isUuid } from './validators';
+
 export const MAX_PART_NAV_DEPTH = 5;
 
 const BACK_PARAM = 'back';
 
-// Loose UUID v4-ish guard — we're not validating cryptographically, just
-// rejecting obvious garbage from a user-edited URL so we don't push it
-// into the chain or try to look it up. Lowercase 8-4-4-4-12 hex.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Rejecting obvious garbage from a user-edited URL, so we don't push it into the chain or try to
+// look it up. `isUuid` (lib/validators.ts) is the shared shape check — this file used to carry its
+// own copy of the regex.
 
 /** Subset of URLSearchParams we actually use — accepts both browser and Next's ReadonlyURLSearchParams. */
 interface SearchParamsLike {
@@ -37,7 +38,7 @@ export function parseBackChain(searchParams: SearchParamsLike | null | undefined
   const out: string[] = [];
   for (const part of raw.split(',')) {
     const trimmed = part.trim();
-    if (!trimmed || !UUID_RE.test(trimmed)) continue;
+    if (!trimmed || !isUuid(trimmed)) continue;
     if (out.length > 0 && out[out.length - 1] === trimmed) continue;
     out.push(trimmed);
   }

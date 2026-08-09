@@ -50,7 +50,7 @@ vi.mock('@/utils/storageHelpers', () => ({
 }));
 
 vi.mock('@/utils/jobsAccess', () => ({
-  getAllJobs: vi.fn().mockResolvedValue([]),
+  getAllJobs: vi.fn().mockResolvedValue({ jobs: [], total: 0, truncated: false }),
 }));
 
 const loc = (over: { id: string; name: string; code?: string | null; parent_id?: string | null }) => ({

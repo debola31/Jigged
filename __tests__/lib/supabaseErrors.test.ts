@@ -7,6 +7,7 @@ import {
   isBillingWriteBlocked,
   isFriendlyError,
   isTransientAbortError,
+  isNetworkFailureError,
   shouldReportSupabaseError,
   toError,
   isIndeterminateSingleError,
@@ -372,6 +373,95 @@ describe('isTransientAbortError', () => {
     expect(isTransientAbortError(null)).toBe(false);
     expect(isTransientAbortError(undefined)).toBe(false);
     expect(isTransientAbortError('a string')).toBe(false);
+  });
+
+  /**
+   * Pins the branch that survives a dependency bump.
+   *
+   * Today an abort is recognised by postgrest-js's `hint: 'Request was aborted…'`, which
+   * `PostgrestBuilder` sets only for `AbortError`. That hint is a convenience of the current
+   * version, not a contract — but the `message` is, because the same `catch` always builds it as
+   * `` `${fetchError.name}: ${fetchError.message}` ``. So the name is in the message regardless,
+   * and the `aborterror` branch keeps working with no hint at all.
+   */
+  it('still recognises an abort when the hint is gone', () => {
+    expect(
+      isTransientAbortError({
+        code: '',
+        details: '',
+        hint: '',
+        message: 'AbortError: The user aborted a request.',
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('isNetworkFailureError', () => {
+  /**
+   * The exact shapes postgrest-js resolves with when the browser's fetch rejects — it does not
+   * reject the promise, it converts the failure into an ordinary `{ error }` response. Recovered
+   * from Sentry JAVASCRIPT-NEXTJS-2R (Safari) and the operator note-save issue (Chrome).
+   */
+  const safari = {
+    code: '',
+    details: 'TypeError: Load failed\n    at ...',
+    hint: '',
+    message: 'TypeError: Load failed (fgwwlinwvsfcdizkqfau.supabase.co)',
+  };
+  const chrome = {
+    code: '',
+    details: 'TypeError: Failed to fetch\n    at ...',
+    hint: '',
+    message: 'TypeError: Failed to fetch (umurkvuxkikfrjojkadv.supabase.co)',
+  };
+  const firefox = {
+    code: '',
+    details: '',
+    hint: '',
+    message: 'TypeError: NetworkError when attempting to fetch resource.',
+  };
+
+  it('recognises the browsers that matter', () => {
+    expect(isNetworkFailureError(safari)).toBe(true);
+    expect(isNetworkFailureError(chrome)).toBe(true);
+    expect(isNetworkFailureError(firefox)).toBe(true);
+  });
+
+  /**
+   * THE DANGEROUS DIRECTION, and the reason `code` is checked at all.
+   *
+   * The message on the network path is the browser's, so nothing stops a Postgres error raised
+   * FOR the user from containing the same words. Classifying one of those as transient would drop
+   * a real failure with no trace anywhere — the worst outcome this module can produce. A SQLSTATE
+   * means PostgREST answered, and postgrest-js never sets one on a client-side failure.
+   */
+  it('does NOT drop a Postgres error whose message merely contains the words', () => {
+    expect(
+      isNetworkFailureError({
+        code: 'P0001',
+        details: '',
+        hint: '',
+        message: 'Failed to fetch the latest cost for this part',
+      }),
+    ).toBe(false);
+    expect(
+      isNetworkFailureError({ code: '42501', message: 'permission denied for table parts' }),
+    ).toBe(false);
+    expect(isNetworkFailureError({ code: 'PGRST116', message: 'no rows' })).toBe(false);
+  });
+
+  it('is not fooled by an unrelated failure with no code', () => {
+    expect(isNetworkFailureError({ code: '', message: 'Something else went wrong' })).toBe(false);
+    expect(isNetworkFailureError(null)).toBe(false);
+    expect(isNetworkFailureError(undefined)).toBe(false);
+    expect(isNetworkFailureError('a string')).toBe(false);
+  });
+
+  it('keeps these out of the issue queue', () => {
+    // The whole point: JAVASCRIPT-NEXTJS-2R paged the founder for one Safari network blip.
+    expect(shouldReportSupabaseError(safari)).toBe(false);
+    expect(shouldReportSupabaseError(chrome)).toBe(false);
+    expect(shouldReportSupabaseError(firefox)).toBe(false);
   });
 });
 

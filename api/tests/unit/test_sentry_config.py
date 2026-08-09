@@ -78,3 +78,31 @@ class TestEnvironmentResolution:
         monkeypatch.setenv("VERCEL_ENV", "")
         monkeypatch.setenv("ENVIRONMENT", "")
         assert index.resolve_sentry_environment() == "development"
+
+
+class TestOnlyDeployedEnvironmentsReport:
+    """A locally-run backend must not file into the same queue as production.
+
+    The pytest guard covers CI. It does not cover `python api/index.py`, which is how the
+    backend is run in development — and `load_dotenv` reads SENTRY_DSN out of `.env.local`,
+    so that process reports for real. The events land tagged `development`, in the same
+    project as production, and are indistinguishable at a glance from something a user hit.
+    That is one explanation for a backend issue appearing days after the code that filed it
+    was fixed.
+
+    The frontend has always had this guard (`enabled: NODE_ENV === "production"`); the
+    backend did not.
+    """
+
+    def test_development_does_not_report(self):
+        assert "development" not in index._REPORTING_ENVIRONMENTS
+
+    def test_deployed_environments_do_report(self):
+        # Preview is deliberately included: a preview deployment IS running our code for
+        # real, and #625 exists precisely so its failures are visible and separable.
+        assert index._REPORTING_ENVIRONMENTS == {"production", "preview"}
+
+    def test_pytest_still_wins_over_a_deployed_environment_name(self):
+        # Belt and braces: CI sets VERCEL_ENV on some runners, and a test run must stay
+        # silent regardless of what the environment claims to be.
+        assert index._SENTRY_ENABLED is False

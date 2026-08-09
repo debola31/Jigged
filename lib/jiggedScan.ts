@@ -58,8 +58,7 @@
  * we don't control — a receiving concern (J6, Phase 3), not this.
  */
 
-/** Canonical UUID shape. Anchored: a UUID embedded in a longer string is not a match. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from './validators';
 
 /**
  * RFC 4648 base32. Uppercase A–Z and 2–7, every one of which is in the QR alphanumeric charset.
@@ -84,8 +83,11 @@ export const UUID_B32_LENGTH = 26;
  * the whole scheme work.
  */
 export function uuidToBase32(uuid: string): string {
+  // `isUuid` is the shared validator from `lib/validators` rather than a regex of our own. This
+  // file had a private copy until they collided in review; one definition of "is this a UUID" is
+  // worth more than a local one, and the fix that introduced it landed for exactly this reason.
+  if (!isUuid(uuid)) throw new Error(`Not a UUID: ${uuid}`);
   const hex = uuid.replace(/-/g, '');
-  if (!UUID_RE.test(uuid)) throw new Error(`Not a UUID: ${uuid}`);
 
   let bits = '';
   for (let i = 0; i < 32; i += 2) bits += parseInt(hex.slice(i, i + 2), 16).toString(2).padStart(8, '0');
@@ -277,7 +279,7 @@ export function safeNextPath(
   companyId: string,
 ): string | null {
   if (!next) return null;
-  if (!UUID_RE.test(companyId)) return null;
+  if (!isUuid(companyId)) return null;
   const prefix = `/operator/${companyId.toLowerCase()}/`;
   const candidate = next.trim();
   if (!candidate.toLowerCase().startsWith(prefix)) return null;

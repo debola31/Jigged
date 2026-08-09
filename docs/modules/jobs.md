@@ -238,6 +238,24 @@ Toolbar: search (job number, customer name, customer PO, part number, packing-sl
 overdue-only toggle, a customer filter, and **New Job from PO**. The Status selection is persisted
 **per company, device-locally**; the default selection is every open stage, which counts as
 "unfiltered" for the empty state. Empty selection legitimately shows no rows.
+
+**Search is capped, and the cap announces itself.** `search_jobs_by_identifier` returns at most
+[`JOB_SEARCH_LIMIT`](../../lib/queryLimits.ts) rows because `getAllJobs` sends the matching ids
+back through a PostgREST `.in()` URL, which has a measured ~8 KB ceiling — a bigger number would
+turn a truncated list into a hard 414. Three properties make that cap honest, and all three were
+added in #688:
+
+- **Every filter goes into the RPC** (stage pairs via `stagesToStatusPairs`, customer, overdue),
+  so the cap applies to the set the user actually ends up looking at. They used to be applied by
+  the caller *after* the cap, which meant they cut into an already-arbitrary subset.
+- **The retained rows are hot first, then newest** — not `ORDER BY job_id`, which existed only to
+  serve `DISTINCT ON` and made the survivors a UUID lottery.
+- **Archived jobs are excluded** rather than consuming cap slots and being discarded downstream,
+  and the RPC returns an exact `total_matches` counted *before* the cap. When it cuts, the list
+  says so: *"Showing the 120 newest matches out of 843."*
+
+If the cap ever genuinely constrains a shop, the escalation is a pager, not a bigger number — see
+the inventory count page for that pattern.
 *(This doc previously described a single-choice dropdown reading "All Jobs / Not Started / In
 Progress / Completed / Shipped / Cancelled", six colour-coded pills, and the empty-state string
 "No jobs yet. Create a job or convert a quote to get started." All three were replaced by the
@@ -453,8 +471,11 @@ unless stated.
 
 | Behaviour | Verification |
 |---|---|
-| Search over job number, customer, customer PO, part number, packing slip; blank is a no-op | `describe('searchJobsByIdentifier')` — 3 it |
-| Closed stages hidden by default; stage filters applied server-side via `.in()` | `describe('getAllJobs')` — 4 it; [`e2e/jobs-list-status.spec.ts`](../../e2e/jobs-list-status.spec.ts) `test.describe('Jobs list — combined status filter')` — 2 tests |
+| Search over job number, customer, customer PO, part number, packing slip; blank is a no-op; filters + `JOB_SEARCH_LIMIT` forwarded to the RPC | `describe('searchJobsByIdentifier')` — 7 it |
+| Search restricts the main query by id, mixes in `match_source`, reports `total`/`truncated`, and drops nothing client-side | `describe('getAllJobs — search path')` — 6 it |
+| The cap applies after every filter, keeps the newest (hot first), excludes archived jobs, clamps `p_limit`, and stays SECURITY INVOKER | [`api/tests/integration/test_jobs_search_cap.py`](../../api/tests/integration/test_jobs_search_cap.py) — 18 tests. Needs >`JOB_SEARCH_LIMIT` jobs, which `seed.sql` deliberately does not have |
+| Stage → status-pair mapping is exact, total and disjoint (the banner's count depends on it) | [`__tests__/types/job.test.ts`](../../__tests__/types/job.test.ts) `describe('stagesToStatusPairs')` — 9 it |
+| Closed stages hidden by default; stage filters applied server-side via `.in()` | `describe('getAllJobs')` — 5 it; [`e2e/jobs-list-status.spec.ts`](../../e2e/jobs-list-status.spec.ts) `test.describe('Jobs list — combined status filter')` — 2 tests |
 | Overdue uses one canonical clause set on the same builder | `describe('applyOverdueJobsFilter')` — 1 it |
 | Quote → job: one `job_part` per (part, qty) with cloned ops; fractional qty survives | [`e2e/quote-to-job.spec.ts`](../../e2e/quote-to-job.spec.ts) `test.describe('Quote to Job workflow')` — 1 test; [`e2e/fractional-quote-to-job.spec.ts`](../../e2e/fractional-quote-to-job.spec.ts) `test.describe('Fractional quote to job workflow')` — 1 test |
 | PO path validates everything before any write, and fails fast on a made part with no routing | `describe('createJobFromPurchaseOrder')` — 7 it |

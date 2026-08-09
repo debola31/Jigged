@@ -30,7 +30,9 @@ vi.mock('@/utils/operatorAccess', () => ({
 
 // The Remove action embeds JobTagPicker, which imports jobsAccess -> lib/supabase. Stubbed so
 // the module graph never evaluates a real Supabase client.
-vi.mock('@/utils/jobsAccess', () => ({ getAllJobs: vi.fn(async () => []) }));
+vi.mock('@/utils/jobsAccess', () => ({
+  getAllJobs: vi.fn(async () => ({ jobs: [], total: 0, truncated: false })),
+}));
 
 const ALL: LocationOption[] = [
   { id: 'l1', label: 'Left' },

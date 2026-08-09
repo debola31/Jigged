@@ -503,15 +503,19 @@ describe('companyAccess utilities', () => {
   // ============== verifyCompanyAccess Tests ==============
 
   describe('verifyCompanyAccess', () => {
+    // A real UUID, because the function now checks the shape before querying. The old
+    // 'company-1' placeholder could never have reached Postgres without raising 22P02.
+    const COMPANY = '752325ba-2159-41a7-9cd2-716faf5a596b';
+
     it('returns true when user has access', async () => {
       mockQueryBuilder.data = { id: 'access-record-1' };
       mockQueryBuilder.error = null;
 
-      const result = await verifyCompanyAccess('user-1', 'company-1');
+      const result = await verifyCompanyAccess('user-1', COMPANY);
 
       expect(mockSupabase.from).toHaveBeenCalledWith('user_company_access');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('user_id', 'user-1');
-      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'company-1');
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', COMPANY);
       expect(result).toBe(true);
     });
 
@@ -519,9 +523,33 @@ describe('companyAccess utilities', () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { code: 'PGRST116', message: 'No rows found' };
 
-      const result = await verifyCompanyAccess('user-1', 'company-1');
+      const result = await verifyCompanyAccess('user-1', COMPANY);
 
       expect(result).toBe(false);
+    });
+
+    /**
+     * `/dashboard/admin` — a URL segment that cannot be a company id.
+     *
+     * The route matched, `"admin"` reached a `uuid` column, and Postgres raised 22P02. Since
+     * that isn't PGRST116 it took the throw below, and AuthGuard rendered "Couldn't check your
+     * access just now." with a Try Again that re-ran the same impossible query and filed a
+     * Sentry event each press (JAVASCRIPT-NEXTJS-2N, twice in production).
+     *
+     * Answered without a round trip, and `false` rather than a throw: this is a KNOWN negative,
+     * not an indeterminate one, so it does not conflict with "couldn't check is never denied".
+     */
+    it('returns false for a companyId that cannot be a uuid, without querying', async () => {
+      mockQueryBuilder.data = { id: 'should-not-be-read' };
+      mockQueryBuilder.error = null;
+      mockSupabase.from.mockClear();
+
+      expect(await verifyCompanyAccess('user-1', 'admin')).toBe(false);
+      expect(await verifyCompanyAccess('user-1', '')).toBe(false);
+      expect(await verifyCompanyAccess('user-1', 'undefined')).toBe(false);
+      expect(await verifyCompanyAccess('user-1', '752325ba-2159-41a7-9cd2')).toBe(false);
+
+      expect(mockSupabase.from).not.toHaveBeenCalled();
     });
 
     // Previously asserted `false` on a database error and called it a "graceful
@@ -533,7 +561,7 @@ describe('companyAccess utilities', () => {
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { code: '500', message: 'Server error' };
 
-      await expect(verifyCompanyAccess('user-1', 'company-1')).rejects.toThrow('Server error');
+      await expect(verifyCompanyAccess('user-1', COMPANY)).rejects.toThrow('Server error');
     });
 
     it('throws a real Error carrying the Postgres code, not a raw object', async () => {
@@ -543,7 +571,7 @@ describe('companyAccess utilities', () => {
         message: 'permission denied for table user_company_access',
       };
 
-      await expect(verifyCompanyAccess('user-1', 'company-1')).rejects.toMatchObject({
+      await expect(verifyCompanyAccess('user-1', COMPANY)).rejects.toMatchObject({
         message: 'permission denied for table user_company_access',
         code: '42501',
       });

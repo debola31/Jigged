@@ -26,12 +26,12 @@ import type {
   OperationUpdateResult,
   CurrentOperationInfo,
 } from '@/types/job';
-import { isJobClosed } from '@/types/job';
+import { isJobClosed, stagesToStatusPairs } from '@/types/job';
+import { JOB_SEARCH_LIMIT } from '@/lib/queryLimits';
 import type { PricingBasisSnapshot } from '@/types/quote';
 import type { FreightTerms } from '@/types/shipment';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
-import { orIlikeValue } from '@/utils/searchFilter';
 import { getJobPartInvoiceSummaries } from '@/utils/quickbooksAccess';
 import {
   createOperationCompletion,
@@ -105,16 +105,36 @@ export function applyOverdueJobsFilter<
 // ============== Read Queries ==============
 
 /**
+ * A page of jobs, plus the count the display cap hid.
+ *
+ * Mirrors LocationContentsPage in inventoryLocationsAccess: an explicit cap
+ * paired with an exact total lets the UI say "showing 120 of 843" instead of
+ * quietly lying. Off the search path there is no cap, so `total` is just
+ * `jobs.length` and `truncated` is false.
+ */
+export interface JobsPage {
+  jobs: JobWithRelations[];
+  /** Jobs matching every filter, ignoring the search cap. */
+  total: number;
+  /** Whether the cap actually cut anything — the UI's cue to say so. */
+  truncated: boolean;
+}
+
+/**
  * Get all jobs for a company (batch fetch for AG Grid). Pulls each job's
  * job_parts list with the linked part name + qty so the dashboard list can
  * show "ADP-001, ADP-002" style summaries without extra round-trips.
+ *
+ * On the search path the returned rows are capped at JOB_SEARCH_LIMIT, and
+ * `total` says how many matched — see the RPC call below for why the cap has
+ * to exist and why every filter is forwarded into it.
  */
 export async function getAllJobs(
   companyId: string,
   filters: JobFilters = {},
   sortField: string = 'created_at',
   sortDirection: 'asc' | 'desc' = 'desc',
-): Promise<JobWithRelations[]> {
+): Promise<JobsPage> {
   const supabase = getSupabase();
   const BATCH_SIZE = 1000;
   let allData: JobWithRelations[] = [];
@@ -125,10 +145,23 @@ export async function getAllJobs(
   // match_source up-front via the extended search RPC. The main query
   // restricts to those ids; the result rows get match_source mixed in
   // so the cell renderer can show "matched packing slip" sub-text.
+  //
+  // Every other filter goes INTO that call rather than being applied here
+  // afterwards. The RPC caps its output (the ids come back through a URL —
+  // see JOB_SEARCH_LIMIT), and a cap applied before the filters cuts into a
+  // set the caller is about to shrink further: search a customer with 300
+  // jobs and the open ones you saw were whichever open ones survived an
+  // arbitrary cut. That was #688.
   let matchSourceByJobId: Map<string, string> | null = null;
+  let searchTotal = 0;
   if (filters.search?.trim()) {
-    const matches = await searchJobsByIdentifier(companyId, filters.search.trim());
+    const { matches, total } = await searchJobsByIdentifier(companyId, filters.search.trim(), {
+      stages: filters.stages,
+      customerId: filters.customerId,
+      overdue: filters.overdue,
+    });
     matchSourceByJobId = new Map(matches.map((m) => [m.job_id, m.match_source]));
+    searchTotal = total;
   }
 
   while (hasMore) {
@@ -165,15 +198,14 @@ export async function getAllJobs(
     if (matchSourceByJobId !== null) {
       // search_jobs_by_identifier has already resolved the matching set
       // (see top of getAllJobs). Restrict the main query to those ids;
-      // an empty set short-circuits to no rows.
+      // an empty set short-circuits to no rows. The list is bounded by
+      // JOB_SEARCH_LIMIT, which is sized to fit in this URL.
       const ids = Array.from(matchSourceByJobId.keys());
       if (ids.length === 0) {
         hasMore = false;
         break;
       }
       query = query.in('id', ids);
-    } else if (filters.search?.trim()) {
-      query = query.or(`job_number.ilike.${orIlikeValue(filters.search.trim())}`);
     }
     if (filters.overdue) {
       // Single source of truth for the overdue predicate — see
@@ -210,29 +242,61 @@ export async function getAllJobs(
     }));
   }
 
-  return allData;
+  // Off the search path nothing is capped, so the rows ARE the total. On it,
+  // compare against what we actually returned rather than against the cap: a
+  // job archived between the RPC and the main query drops a row without
+  // changing the total, and the UI should still be able to say so.
+  const total = matchSourceByJobId === null ? allData.length : searchTotal;
+  return { jobs: allData, total, truncated: total > allData.length };
 }
 
 /**
  * Resolve the matching job-ids + per-row match_source for an extended
  * search query (job_number, customer_po, customer name, part number,
- * packing slip number). Capped server-side at 100 rows by the RPC.
+ * packing slip number), along with the exact number of matches.
+ *
+ * The RPC caps its rows at JOB_SEARCH_LIMIT because getAllJobs sends the ids
+ * back through a PostgREST `.in()` URL. `total` is counted *before* that cap
+ * and *after* every filter passed here, which is what lets the jobs list say
+ * "showing 120 of 843" and be telling the truth (#688).
  */
 export async function searchJobsByIdentifier(
   companyId: string,
   query: string,
-): Promise<Array<{ job_id: string; match_source: string }>> {
-  if (!query.trim()) return [];
+  filters: Pick<JobFilters, 'stages' | 'customerId' | 'overdue'> = {},
+): Promise<{ matches: Array<{ job_id: string; match_source: string }>; total: number }> {
+  if (!query.trim()) return { matches: [], total: 0 };
   const supabase = getSupabase();
   const { data, error } = await supabase.rpc('search_jobs_by_identifier', {
     p_company_id: companyId,
     p_query: query.trim(),
+    // Omitted (undefined) means "no stage narrowing" — the SQL default is NULL.
+    // An empty selection is a real answer (the user ticked nothing), so it must
+    // stay an empty array and match nothing.
+    p_stage_pairs: filters.stages && stagesToStatusPairs(filters.stages),
+    p_customer_id: filters.customerId,
+    p_overdue: filters.overdue ?? false,
+    // The overdue day boundary is the shop's local midnight — same source as
+    // applyOverdueJobsFilter, so the two can't disagree about what "today" is.
+    p_today: todayLocalISODate(),
+    p_limit: JOB_SEARCH_LIMIT,
   });
   if (error) {
+    // .rpc() is deliberately outside the Supabase Sentry integration's coverage,
+    // so this one reports itself by throwing to the caller's error state.
     console.error('search_jobs_by_identifier failed:', error);
     throw new Error(`Search failed: ${error.message}`);
   }
-  return (data ?? []) as Array<{ job_id: string; match_source: string }>;
+  const rows = (data ?? []) as Array<{
+    job_id: string;
+    match_source: string;
+    total_matches: number;
+  }>;
+  return {
+    matches: rows.map(({ job_id, match_source }) => ({ job_id, match_source })),
+    // Constant across rows; no rows means no matches.
+    total: rows[0]?.total_matches ?? 0,
+  };
 }
 
 /**

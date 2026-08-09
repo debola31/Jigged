@@ -60,6 +60,30 @@ function failingClient(body: Record<string, unknown>) {
   });
 }
 
+/**
+ * A client whose fetch REJECTS, the way a browser reports an offline or dropped connection.
+ *
+ * Wired like `lib/supabase.ts` in the one respect this exercises: the rpc span attribute is
+ * stamped BEFORE the request is awaited. Stamping it afterwards — which is what the real client
+ * did until this change — leaves the marker unset on exactly this path, because the throw skips
+ * everything below it.
+ */
+function rejectingClient(message: string) {
+  return createClient('https://example.supabase.co', 'anon-key', {
+    global: {
+      fetch: async (input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/rest/v1/rpc/')) {
+          Sentry.getActiveSpan()?.setAttribute(RPC_SPAN_ATTRIBUTE, true);
+        }
+        const err = new TypeError(message);
+        throw err;
+      },
+    },
+  });
+}
+
 const PG_RAISED = { code: 'P0001', message: 'work center 853e is not in company 7523' };
 
 beforeAll(() => {
@@ -112,6 +136,43 @@ describe('the net: what the Supabase integration captures on its own', () => {
     expect(captured[0].dbTable).toBe('transfer_stock');
     expect(captured[0].isRpc).toBe(true);
   });
+
+  /**
+   * postgrest-js does NOT reject when the browser's fetch does — it converts the failure into an
+   * ordinary resolved `{ error }`, so the net captures it like any database error. This is why a
+   * Safari network blip became Sentry issue JAVASCRIPT-NEXTJS-2R.
+   */
+  it('captures a network failure, because postgrest resolves it rather than rejecting', async () => {
+    const client = rejectingClient('Load failed');
+    Sentry.instrumentSupabaseClient(client);
+
+    await client.from('parts').select('id');
+    await Sentry.flush(200);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].message).toContain('Load failed');
+  });
+
+  /**
+   * The ordering regression. If the rpc marker is stamped after the await, the throw skips it and
+   * `beforeSend` cannot tell this is an rpc — so the failure files twice, once from the net and
+   * once from the access layer that owns rpc reporting.
+   */
+  it('still marks an .rpc() as rpc when the network fails', async () => {
+    const client = rejectingClient('Failed to fetch');
+    Sentry.instrumentSupabaseClient(client);
+
+    // Warm the lazy prototype patch, the way any real page load does.
+    await client.from('parts').select('id');
+    await Sentry.flush(200);
+    captured.length = 0;
+
+    await client.rpc('log_operator_event', { p_kind: 'app_opened' });
+    await Sentry.flush(200);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].isRpc).toBe(true);
+  });
 });
 
 describe('the policy: what survives beforeSend', () => {
@@ -158,6 +219,10 @@ describe('the policy: what survives beforeSend', () => {
     ['a .single() that matched nothing', { code: 'PGRST116', message: 'no rows' }],
     ['a cancelled request', { message: 'FetchError', hint: 'Request was aborted (timeout or manual cancellation)' }],
     ['an expired session', { code: 'PGRST301', message: 'JWT expired' }],
+    [
+      'a browser that could not reach Supabase',
+      { code: '', hint: '', details: '', message: 'TypeError: Load failed (abc.supabase.co)' },
+    ],
   ])('drops %s', (_label, originalException) => {
     const event = {
       exception: {

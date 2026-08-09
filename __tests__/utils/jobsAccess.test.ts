@@ -52,6 +52,7 @@ import {
   updateJobPartPrice,
   updateJobPartQuantity,
 } from '@/utils/jobsAccess';
+import { JOB_SEARCH_LIMIT } from '@/lib/queryLimits';
 import { getJobPartShipmentSummaries, countShipmentsForJob } from '@/utils/shipmentsAccess';
 import {
   getQuickBooksInvoiceLinkForJob,
@@ -295,21 +296,74 @@ describe('jobsAccess', () => {
   describe('searchJobsByIdentifier', () => {
     it('short-circuits on empty/whitespace queries', async () => {
       const result = await searchJobsByIdentifier('co-1', '   ');
-      expect(result).toEqual([]);
+      expect(result).toEqual({ matches: [], total: 0 });
       expect(mockSupabase.rpc).not.toHaveBeenCalled();
     });
 
     it('passes the trimmed query to the RPC and returns its rows', async () => {
       (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({
-        data: [{ job_id: 'j1', match_source: 'job_number' }],
+        data: [{ job_id: 'j1', match_source: 'job_number', total_matches: 1 }],
         error: null,
       });
       const result = await searchJobsByIdentifier('co-1', '  ADP-001  ');
-      expect(mockSupabase.rpc).toHaveBeenCalledWith('search_jobs_by_identifier', {
-        p_company_id: 'co-1',
-        p_query: 'ADP-001',
+      expect(mockSupabase.rpc).toHaveBeenCalledWith(
+        'search_jobs_by_identifier',
+        expect.objectContaining({ p_company_id: 'co-1', p_query: 'ADP-001' }),
+      );
+      expect(result.matches).toEqual([{ job_id: 'j1', match_source: 'job_number' }]);
+    });
+
+    it('caps the RPC at JOB_SEARCH_LIMIT — the ids ride back in a .in() URL', async () => {
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], error: null });
+      await searchJobsByIdentifier('co-1', 'x');
+      const args = (mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(args.p_limit).toBe(JOB_SEARCH_LIMIT);
+    });
+
+    it('forwards the filters so the cap applies AFTER them, not before (#688)', async () => {
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], error: null });
+      await searchJobsByIdentifier('co-1', 'apex', {
+        stages: ['not_started'],
+        customerId: 'cust-9',
+        overdue: true,
       });
-      expect(result).toEqual([{ job_id: 'j1', match_source: 'job_number' }]);
+      const args = (mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      // Exact pairs, not the AND-of-two-.in() superset STAGE_TO_JOB_FILTERS would give.
+      expect(args.p_stage_pairs).toEqual(['not_started:unshipped']);
+      expect(args.p_customer_id).toBe('cust-9');
+      expect(args.p_overdue).toBe(true);
+      // Local date, so the overdue boundary matches applyOverdueJobsFilter's.
+      expect(args.p_today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('omits p_stage_pairs when no stages are given, but sends [] for an empty selection', async () => {
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], error: null });
+      await searchJobsByIdentifier('co-1', 'x');
+      expect(
+        (mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls[0][1].p_stage_pairs,
+      ).toBeUndefined();
+
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockClear();
+      await searchJobsByIdentifier('co-1', 'x', { stages: [] });
+      // "The user ticked nothing" is a real answer that matches nothing — it must
+      // not collapse into "no stage narrowing".
+      expect((mockSupabase.rpc as ReturnType<typeof vi.fn>).mock.calls[0][1].p_stage_pairs).toEqual(
+        [],
+      );
+    });
+
+    it('reads total_matches off the first row, and 0 when there are none', async () => {
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({
+        data: [
+          { job_id: 'j1', match_source: 'job_number', total_matches: 843 },
+          { job_id: 'j2', match_source: 'customer', total_matches: 843 },
+        ],
+        error: null,
+      });
+      expect((await searchJobsByIdentifier('co-1', 'x')).total).toBe(843);
+
+      (mockSupabase.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [], error: null });
+      expect((await searchJobsByIdentifier('co-1', 'x')).total).toBe(0);
     });
 
     it('throws when the RPC returns an error', async () => {
@@ -844,7 +898,7 @@ describe('jobsAccess', () => {
     it('hides closed jobs (done + cancelled) by default', async () => {
       mockQueryBuilder.data = rows;
       const result = await getAllJobs('co-1');
-      const ids = result.map((j) => j.id);
+      const ids = result.jobs.map((j) => j.id);
       expect(ids).toEqual(['active-ns', 'active-ip', 'ready']);
       // Behavior change: the cancelled-but-unshipped job is now hidden too,
       // alongside the fully-shipped done job.
@@ -855,7 +909,14 @@ describe('jobsAccess', () => {
     it('keeps closed jobs when excludeClosed is false (Show completed & cancelled)', async () => {
       mockQueryBuilder.data = rows;
       const result = await getAllJobs('co-1', { excludeClosed: false });
-      expect(result.map((j) => j.id)).toEqual(rows.map((r) => r.id));
+      expect(result.jobs.map((j) => j.id)).toEqual(rows.map((r) => r.id));
+    });
+
+    it('reports no truncation off the search path — nothing is capped there', async () => {
+      mockQueryBuilder.data = rows;
+      const result = await getAllJobs('co-1', { excludeClosed: false });
+      expect(result.total).toBe(rows.length);
+      expect(result.truncated).toBe(false);
     });
 
     it('applies production/fulfillment status filters server-side via .in()', async () => {
@@ -877,6 +938,102 @@ describe('jobsAccess', () => {
       // rows float to the top with the sort applied within each tier.
       expect(orderCalls[0]).toEqual(['is_hot', { ascending: false }]);
       expect(orderCalls[1]).toEqual(['created_at', { ascending: false }]);
+    });
+  });
+
+  // The search path had no coverage at all before #688 — which is how a cap that
+  // silently dropped rows, in job-id order, ahead of the filters survived.
+  describe('getAllJobs — search path', () => {
+    const rpc = () => mockSupabase.rpc as ReturnType<typeof vi.fn>;
+
+    /** RPC rows all carry the same total_matches, the way the SQL emits them. */
+    const rpcRows = (
+      matches: Array<{ job_id: string; match_source: string }>,
+      total = matches.length,
+    ) => ({
+      data: matches.map((m) => ({ ...m, total_matches: total })),
+      error: null,
+    });
+
+    it('resolves the RPC first, then restricts the main query to those ids', async () => {
+      rpc().mockResolvedValue(rpcRows([
+        { job_id: 'j1', match_source: 'job_number' },
+        { job_id: 'j2', match_source: 'customer' },
+      ]));
+      mockQueryBuilder.data = [
+        { id: 'j1', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+        { id: 'j2', production_status: 'not_started', fulfillment_status: 'unshipped' },
+      ];
+      await getAllJobs('co-1', { search: 'apex' });
+      expect(mockQueryBuilder.in).toHaveBeenCalledWith('id', ['j1', 'j2']);
+    });
+
+    it('short-circuits to an empty page when nothing matches', async () => {
+      rpc().mockResolvedValue(rpcRows([]));
+      mockQueryBuilder.data = [{ id: 'should-not-be-read' }];
+      const result = await getAllJobs('co-1', { search: 'nothing-matches-this' });
+      expect(result).toEqual({ jobs: [], total: 0, truncated: false });
+      // No point asking PostgREST for `id IN ()`.
+      expect(mockQueryBuilder.in).not.toHaveBeenCalledWith('id', []);
+    });
+
+    it('mixes match_source onto the rows for the "matched packing slip" sub-line', async () => {
+      rpc().mockResolvedValue(rpcRows([{ job_id: 'j1', match_source: 'packing_slip' }]));
+      mockQueryBuilder.data = [
+        { id: 'j1', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+      ];
+      const result = await getAllJobs('co-1', { search: 'PS-1001' });
+      expect(result.jobs[0].match_source).toBe('packing_slip');
+    });
+
+    it('no longer falls back to a job_number-only .or() — that branch was unreachable', async () => {
+      rpc().mockResolvedValue(rpcRows([{ job_id: 'j1', match_source: 'job_number' }]));
+      mockQueryBuilder.data = [
+        { id: 'j1', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+      ];
+      await getAllJobs('co-1', { search: 'J-0001' });
+      expect(mockQueryBuilder.or).not.toHaveBeenCalled();
+    });
+
+    it('reports the cap honestly: total is what matched, truncated says it cut', async () => {
+      rpc().mockResolvedValue(rpcRows([{ job_id: 'j1', match_source: 'customer' }], 843));
+      mockQueryBuilder.data = [
+        { id: 'j1', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+      ];
+      const result = await getAllJobs('co-1', { search: 'apex' });
+      expect(result.total).toBe(843);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('is not truncated when the total equals what came back', async () => {
+      rpc().mockResolvedValue(rpcRows([{ job_id: 'j1', match_source: 'customer' }], 1));
+      mockQueryBuilder.data = [
+        { id: 'j1', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+      ];
+      expect((await getAllJobs('co-1', { search: 'apex' })).truncated).toBe(false);
+    });
+
+    // This is the assertion that keeps the on-screen "showing N of M" honest. The
+    // stages went into the RPC, so the client-side closed-job filter has nothing
+    // left to remove — if that ever stops being true, the banner starts lying and
+    // this test is what catches it.
+    it('drops nothing client-side once the stages went into the RPC', async () => {
+      rpc().mockResolvedValue(rpcRows([
+        { job_id: 'open', match_source: 'customer' },
+        { job_id: 'done', match_source: 'customer' },
+      ]));
+      mockQueryBuilder.data = [
+        { id: 'open', production_status: 'in_progress', fulfillment_status: 'unshipped' },
+        { id: 'done', production_status: 'completed', fulfillment_status: 'fully_shipped' },
+      ];
+      const result = await getAllJobs('co-1', {
+        search: 'apex',
+        stages: ['in_progress', 'completed'],
+        // What the jobs page sends when a closed stage is ticked.
+        excludeClosed: false,
+      });
+      expect(result.jobs.map((j) => j.id)).toEqual(['open', 'done']);
+      expect(result.truncated).toBe(false);
     });
   });
 });

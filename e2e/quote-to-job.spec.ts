@@ -76,10 +76,10 @@ test.describe('Quote to Job workflow', () => {
     // tier deterministically.
     const orderQty = page.getByRole('textbox', { name: /Order quantity/i });
     await orderQty.fill('1');
-    // Confirm the tier resolved — the form renders a "Tier N ea" caption
+    // Confirm the tier resolved — the form renders a "From tier N" caption
     // under the unit price when the match succeeds. If this assertion fails,
     // the seeded part is missing pricing tiers (check e2e/global-setup.ts).
-    await expect(page.getByText(/Tier \d+ ea/i).first()).toBeVisible({
+    await expect(page.getByText(/From tier \d+/i).first()).toBeVisible({
       timeout: 10_000,
     });
 

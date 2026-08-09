@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
+import LoadFailedState from '@/components/common/LoadFailedState';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -97,6 +98,7 @@ export default function VendorDetailPage() {
   const {
     data,
     loading,
+    error: loadError,
     reload: fetchAll,
   } = useLoad(
     async () => {
@@ -196,6 +198,17 @@ export default function VendorDetailPage() {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  // A failed load also leaves `vendor` null, and "Vendor not found" would then assert the record
+  // is gone when we simply never heard back. Tested first, so only a load that SUCCEEDED and
+  // returned nothing reaches the not-found branch.
+  if (loadError) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 6 }}>
+        <LoadFailedState error={loadError} entity="this vendor" onRetry={fetchAll} />
       </Box>
     );
   }

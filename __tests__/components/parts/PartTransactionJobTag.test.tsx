@@ -51,7 +51,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 beforeEach(() => {
   vi.clearAllMocks();
-  asMock(getAllJobs).mockResolvedValue(JOBS);
+  asMock(getAllJobs).mockResolvedValue({ jobs: JOBS, total: JOBS.length, truncated: false });
   asMock(depleteStockAtLocation).mockResolvedValue({});
 });
 

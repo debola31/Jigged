@@ -224,6 +224,18 @@ describe('QuoteForm', () => {
     });
   });
 
+  it('starts a new quote with no part block — Add part is the way in', async () => {
+    // Deliberate: seeding a block saves no click (Add part autofocuses the
+    // picker it creates) and costs the signal that a quote can hold several
+    // parts. Guards the revert so nobody re-adds the seed as an "improvement".
+    render(<QuoteForm mode="create" initialData={initialBlank} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/add at least one part to quote/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /remove part/i })).toBeNull();
+  });
+
   it('enables submit when initial data is fully valid (populated edit mode)', async () => {
     render(
       <QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />,
@@ -804,25 +816,117 @@ describe('QuoteForm', () => {
     });
   });
 
-  it('shows a single part-level "Use custom price" control regardless of how many quantities', async () => {
+  it('gives every quantity its own editable price, seeded from its tier', async () => {
+    // There is no "Use custom price" toggle to discover any more: the price is
+    // just an editable field carrying the tier's listed price. One per row,
+    // because each (part, quantity) is its own line with its own price.
     render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
     });
 
-    // One quantity row → exactly one custom-price toggle.
-    expect(screen.getAllByRole('button', { name: /use custom price/i })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /use custom price/i })).toBeNull();
+    expect(screen.getAllByLabelText('Unit price')).toHaveLength(1);
+    expect(screen.getAllByLabelText('Unit price')[0]).toHaveValue('50');
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /add quantity/i }));
     await user.click(screen.getByRole('button', { name: /add quantity/i }));
 
-    // Three quantity rows → STILL exactly one custom-price toggle (per part).
     await waitFor(() => {
       expect(screen.getAllByLabelText('Order quantity')).toHaveLength(3);
     });
-    expect(screen.getAllByRole('button', { name: /use custom price/i })).toHaveLength(1);
+    expect(screen.getAllByLabelText('Unit price')).toHaveLength(3);
+  });
+
+  it('flags a typed price as custom, keeps the tier price visible, and resets back to it', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    const priceInput = screen.getAllByLabelText('Unit price')[0];
+    await user.clear(priceInput);
+    await user.type(priceInput, '42');
+
+    // The auto price stays on screen — the old toggle hid it, leaving the user
+    // nothing to compare their number against.
+    await waitFor(() => {
+      // No unit in the caption: the Qty box beside it already carries one
+      // wherever a unit is meaningful, and the old `?? 'ea'` fallback invented
+      // one for parts whose Qty box shows none.
+      expect(screen.getByText(/Custom · tier 1 is \$50\.00/)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId('price-reset-0-0'));
+
+    await waitFor(() => expect(priceInput).toHaveValue('50'));
+    expect(screen.queryByText(/Custom · tier/)).toBeNull();
+  });
+
+  it('keeps Reset reachable when the price field is emptied — the state that blocks save', async () => {
+    // Clearing the field blocks the save with "reset the row to its tier price".
+    // If Reset were gated on a *valid* custom price it would disappear at
+    // exactly the moment that message points at it, stranding the user.
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.clear(screen.getAllByLabelText('Unit price')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    });
+    expect(screen.getByTestId('price-reset-0-0')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('price-reset-0-0'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+    expect(screen.getAllByLabelText('Unit price')[0]).toHaveValue('50');
+  });
+
+  it('sends one override per row — and none for a row typed back to its tier price', async () => {
+    render(<QuoteForm mode="edit" quoteId="q-1" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /add quantity/i }));
+    await waitFor(() => expect(screen.getAllByLabelText('Order quantity')).toHaveLength(2));
+
+    // Second row: qty 100 at a negotiated 42. First row: retype the tier's own
+    // price, which must NOT become an override — that would freeze the line out
+    // of drift detection and repricing for no reason.
+    await user.type(screen.getAllByLabelText('Order quantity')[1], '100');
+    const prices = screen.getAllByLabelText('Unit price');
+    await user.clear(prices[1]);
+    await user.type(prices[1], '42');
+    await user.clear(prices[0]);
+    await user.type(prices[0], '50');
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(updateQuote).toHaveBeenCalled());
+    const payload = updateQuote.mock.calls[0][1] as QuoteFormData;
+    expect(payload.parts).toHaveLength(2);
+    expect(payload.parts[0].override).toBeUndefined();
+    expect(payload.parts[1]).toMatchObject({
+      order_quantity: 100,
+      override: { unit_price: 42, markup_percent: null },
+    });
   });
 });
 

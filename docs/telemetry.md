@@ -139,7 +139,7 @@ fails, and so does a listed property nothing passes.
 | `user signed in` | The login form is submitted successfully | — | [Login.tsx](../components/auth/Login.tsx) |
 | `user signed out` | Supabase emits `SIGNED_OUT` | — | [AuthProvider.tsx](../components/providers/AuthProvider.tsx) |
 | `invitation accepted` | An invitee completes acceptance | `role`, `existing_user` | [accept-invite/page.tsx](../app/accept-invite/[invitationId]/page.tsx) |
-| `quote created` | A new quote is saved | `line_item_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
+| `quote created` | A new quote is saved | `line_item_count`, `custom_priced_line_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
 | `quote converted to job` | A quote is accepted and becomes a job | `quote_id`, `part_count`, `is_hot` | [ConvertToJobModal.tsx](../components/quotes/ConvertToJobModal.tsx) |
 | `job created from purchase order` | A job is created directly from a PO | `part_count`, `total_value`, `is_hot` | [AcceptPurchaseOrderModal.tsx](../components/jobs/AcceptPurchaseOrderModal.tsx) |
 | `jobs bulk cancelled` | Several jobs are cancelled in one action | `count` | [jobs/page.tsx](../app/dashboard/[companyId]/jobs/page.tsx) |
@@ -238,10 +238,17 @@ sentry issue plan JAVASCRIPT-NEXTJS-9          # Seer AI fix plan
 sentry issue archive JAVASCRIPT-NEXTJS-9 --until auto
 ```
 
-An MCP server also exists — `https://mcp.sentry.dev/mcp/jigged/javascript-nextjs`, wired in
-the gitignored `.mcp.json`. Its entry **needs `"type": "http"`** or Claude Code silently
-skips it. Authorise via `/mcp` in an interactive session. The CLI does everything the MCP
-does, so this is convenience, not a prerequisite.
+An MCP server also exists — `https://mcp.sentry.dev/mcp/jigged`, wired in the gitignored
+`.mcp.json`. Its entry **needs `"type": "http"`** or Claude Code silently skips it. Authorise
+via `/mcp` in an interactive session. The CLI does everything the MCP does, so this is
+convenience, not a prerequisite.
+
+**Scope it to the org, not a project.** The URL takes an optional trailing project
+(`…/mcp/jigged/javascript-nextjs`), and a session opened that way can read *only* that project —
+`python-fastapi` issues come back as "outside the active project constraint", which reads like a
+permissions error rather than a scoping one. Two consequences worth knowing: half a triage can be
+silently invisible, and **the constraint is fixed when the connection is established**, so
+widening the URL takes a `/mcp reconnect` (or a new session) before it takes effect.
 
 ### Environments, and how to filter by them
 
@@ -254,7 +261,7 @@ Post-#625 the environment tags are trustworthy:
 | Frontend, local dev / CI E2E | **nothing — the SDK is disabled** |
 | Backend, production | `production` |
 | Backend, preview | `preview` |
-| Backend, local | `development` |
+| Backend, local / pytest | **nothing — the SDK is disabled** |
 
 Note the asymmetry: the frontend's tags come from Vercel's Sentry integration
 (`vercel-` prefixed), the backend's from `resolve_sentry_environment()` in
@@ -499,6 +506,7 @@ a table name; the list needed to tell them apart is not available at runtime, si
 |---|---|
 | `PGRST116` | A `.single()` that matched nothing. The caller asked "is there one?" and got "no" |
 | Transient aborts | Superseded, not failed. **Load-bearing:** postgrest-js does not reject on a cancelled request, it resolves `{ error }` with `hint: 'Request was aborted…'`, so without this every navigation-away becomes an issue |
+| Network failures | The browser never reached Supabase — offline, DNS, a dropped connection. Same resolved-`{ error }` mechanism as an abort, but with no hint: postgrest-js only fills `hint` for `AbortError`, so Safari's `TypeError: Load failed` and Chrome's `Failed to fetch` used to slip through and page somebody. **Matched on the message AND an empty `code`** — a SQLSTATE means PostgREST answered, so a `P0001` raised for the user can never be dropped by a coincidental word match. Operators are on personal phones on cellular, so this class scales with adoption. The user still sees it: the read path renders `LoadFailedState` |
 | Auth errors | Session expiry is already handled by the refresh-and-retry in `lib/supabase.ts` |
 
 Add to this list only with a recorded reason, exactly as with `ignoreErrors` below.

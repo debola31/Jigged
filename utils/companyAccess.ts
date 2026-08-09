@@ -9,6 +9,7 @@ import {
   MAX_CUSTOM_PAYMENT_TERMS,
 } from '@/lib/companyDefaults';
 import { toError, toFriendlyError } from '@/lib/supabaseErrors';
+import { isUuid } from '@/lib/validators';
 
 export interface Company {
   id: string;
@@ -228,8 +229,21 @@ export async function getPostLoginRoute(userId: string): Promise<string> {
  *
  * PGRST116 is PostgREST's "no rows returned" from `.single()`, which genuinely means
  * no membership — that one is a real negative, not an error.
+ *
+ * A companyId that isn't a UUID is the OTHER real negative, and it is answered here without
+ * asking the database. `company_id` is a `uuid` column, so Postgres rejects the comparison with
+ * SQLSTATE `22P02` — which is not `PGRST116`, so it took the throw above and AuthGuard rendered
+ * "Couldn't check your access just now." with a Try Again that re-ran the identical impossible
+ * query, filing a Sentry event every press. `/dashboard/admin` did this twice in production.
+ *
+ * Returning `false` for it does NOT weaken the "couldn't check is never denied" rule. That rule
+ * is about *indeterminacy* — a network blip leaves the answer unknown, so claiming denial is a
+ * guess. This is the opposite: a string that cannot be a UUID cannot name a company row, so the
+ * answer is known, and known negatives are exactly what `false` is for.
  */
 export async function verifyCompanyAccess(userId: string, companyId: string): Promise<boolean> {
+  if (!isUuid(companyId)) return false;
+
   const supabase = getSupabase();
 
   const { data, error } = await supabase

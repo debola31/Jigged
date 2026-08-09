@@ -3833,10 +3833,19 @@ export type Database = {
         Returns: undefined
       }
       search_jobs_by_identifier: {
-        Args: { p_company_id: string; p_query: string }
+        Args: {
+          p_company_id: string
+          p_customer_id?: string
+          p_limit?: number
+          p_overdue?: boolean
+          p_query: string
+          p_stage_pairs?: string[]
+          p_today?: string
+        }
         Returns: {
           job_id: string
           match_source: string
+          total_matches: number
         }[]
       }
       seed_demo_data: {

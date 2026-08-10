@@ -335,8 +335,35 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   procurement to deterministic part-level tiers, which makes the unit-price-after-markup
   well-defined. Bought base cost comes from the part's procurement tiers via `getComputedPartCost`,
   the same engine made parts use.
-- A **new part opens with one unfilled row** (Min qty 1, Markup blank). Nothing is auto-applied on
-  create; the part stays not-priceable until a tier carries a markup %.
+- A **new part opens with one unfilled row** (Min qty 1, Markup blank) and stays not-priceable —
+  **until it has a cost.** The moment the part's first priced operation or material lands, the card
+  writes that row for itself at **0% markup**, and the part becomes quotable with nobody having
+  typed anything.
+
+  **Why 0 and not a prompt.** `get_priceable_part_ids` needs a tier carrying a non-null markup, so
+  before this the answer to "why can't I quote this part I just set up?" was a blank box on a card
+  the user had no reason to open. The step taught nothing: the answer is always *some* markup. 0%
+  is the honest placeholder because it claims no margin the shop hasn't chosen — price = cost, and
+  the tier table says so on its face.
+
+  **This is the only auto-save on a card whose whole standard is explicit Save**
+  ([interaction-standards §2](../interaction-standards.md#2-saving)), and the exception is drawn
+  narrow so it can never overwrite a decision: it fires only when the part has **no persisted tiers
+  at all**, only when a cost exists to mark up, never while edits are staged, and at most once per
+  part. It creates the row the card was already displaying rather than changing a number anyone set,
+  and it logs a `pricing` note saying the app wrote it.
+
+  **The gate is "is there a cost", not "is there a routing".** A made part whose operations were all
+  deleted still has a routing row and rolls up to $0; seeding a markup there would make it quotable
+  **for nothing** — worse than not being quotable at all. So the trigger is a priced labor or
+  material item in the breakdown (bought parts: a resolved procurement cost at qty 1).
+
+  While that starter tier is still the only tier and still 0%, a caption under the table reads
+  *"Ready to quote at 0% markup — this part currently sells for what it costs."* It disappears the
+  moment a markup is typed, so a shop that genuinely sells at cost is not nagged twice.
+
+  ⚠ *This doc previously said "Nothing is auto-applied on create" — still true of **create**; the
+  starter tier is written on first **cost**, not on create.*
 
 **Editing model** — markup % is the source of truth. Editing **quantity** recomputes the displayed
 base cost (setup amortization moves) and unit price follows the current markup; editing
@@ -526,6 +553,7 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | Unit-price → markup back-calculation (incl. negative markup, zero base, NaN) | `__tests__/types/quote.test.ts` → `calculateMarkupFromUnitPrice` |
 | Create-mode validation (empty name, duplicate name, success) and existing-mode blur auto-save | `__tests__/components/parts/PartIdentitySection.test.tsx` → `PartIdentitySection` |
 | Staged tier edits surviving a `refreshKey` bump from a sibling save | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — staged tier edits survive sibling saves` (13 its) |
+| Starter 0% tier: written once on first cost; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the sells-at-cost caption clearing on a typed markup | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — starter tier at 0% markup` (10 its) |
 | Part-level procurement tiers, explicit Save, red no-cost starter row, vendor pick not discarding staged edits | `__tests__/components/parts/PartProcurementPricingPanel.test.tsx` → `PartProcurementPricingPanel — part-level tiers, explicit save` (3 its) |
 | Priceability / completeness derivation | `__tests__/components/parts/partSetupStatus.test.ts` → `getPartSetupStatus` (5 its) |
 | Completeness banner render | `__tests__/components/parts/workspace/tabs/WorkspaceTab.test.tsx` → `WorkspaceTab completeness banner` (4 its) |

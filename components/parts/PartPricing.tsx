@@ -238,6 +238,10 @@ export default function PartPricing({
   // even if the previous part left staged edits behind; a sibling-panel refresh
   // on the SAME part must not.
   const loadedPartIdRef = useRef<string | null>(null);
+  // Parts this session has already tried to seed a starter tier for. Keyed by
+  // id so the attempt happens at most once per part — a failure must not retry
+  // on every render, and a success must not race the reload that follows it.
+  const starterTierAttemptedRef = useRef<Set<string>>(new Set());
   const saving = saveState === 'saving';
 
   const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
@@ -451,6 +455,93 @@ export default function PartPricing({
     setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
   }, [tierBaseCosts]);
 
+  /**
+   * Does this part have something to price yet?
+   *
+   * Deliberately "is there a cost", not "is there a routing row". A made part
+   * whose operations were all deleted still HAS a routing row, and its cost
+   * rolls up to $0 — seeding a markup there would make it quotable for nothing,
+   * which is the one outcome worse than not being quotable at all. Labor and
+   * material items only appear once they actually price, so this waits for a
+   * real number. Bought parts have no breakdown; their cost is the procurement
+   * tier the base-cost effect already resolved at qty 1.
+   */
+  const hasCostBasis = isBought
+    ? (tierBaseCosts.get(1) ?? null) !== null
+    : breakdown !== null &&
+      (breakdown.labor_items.length > 0 || breakdown.material_items.length > 0);
+
+  /**
+   * A brand-new part gets its first tier at 0% markup, written for it.
+   *
+   * Until this existed, adding the first operation or material left the part
+   * costed but NOT quotable: `get_priceable_part_ids` requires a tier carrying a
+   * non-null markup, so the card showed an empty starter row and someone had to
+   * type a number and press Save before the part could go on a quote. That step
+   * taught nothing and blocked everything — the answer is always "some markup",
+   * and 0% is the honest placeholder because it asserts no margin the shop
+   * hasn't chosen: price = cost, visibly.
+   *
+   * **This is the one auto-save on a card whose whole standard is explicit Save**
+   * (interaction-standards §2, and the docstring above). The exception is narrow
+   * on purpose: it fires only when the part has NO persisted tiers at all, so it
+   * can never overwrite a decision; only when a cost exists to mark up; never
+   * while edits are staged; and at most once per part per session. It creates the
+   * row the card was already showing rather than changing a number anyone set.
+   */
+  useEffect(() => {
+    if (loading || saving || dirty || !hasCostBasis) return;
+    // Exactly the untouched starter row — one row, never persisted, no markup.
+    const isUnpricedStarter =
+      rows.length === 1 && rows[0].id === undefined && rows[0].markupPercent === '';
+    if (!isUnpricedStarter) return;
+    if (starterTierAttemptedRef.current.has(partId)) return;
+    starterTierAttemptedRef.current.add(partId);
+
+    const forPartId = partId;
+    void (async () => {
+      try {
+        await replaceTiersForPart(companyId, forPartId, [
+          { sequence: 10, quantity: 1, markup_percent: 0 },
+        ]);
+        // Audit trail. A pricing row that appears with no trace is exactly what
+        // the notes feed exists to prevent, so the note says plainly that the
+        // app wrote it and what to do about it.
+        try {
+          const operator = await getCurrentMember(companyId);
+          if (operator) {
+            await addPartPricingNote(
+              forPartId,
+              companyId,
+              operator.id,
+              'Pricing started automatically at 0% markup (price = cost) so this part can be quoted. Set your markup when you know it.',
+            );
+          }
+        } catch (noteErr) {
+          console.error('Failed to log starter pricing note:', noteErr);
+        }
+        if (forPartId !== partIdRef.current) return;
+        await loadAll({ showSpinner: false });
+        onPricingChanged?.();
+      } catch (err) {
+        // Non-fatal and non-retrying: the card still works, the user types a
+        // markup as before. Surfacing an error banner for a convenience the
+        // user never asked for would be worse than the missing row.
+        console.error('Failed to create the starter pricing tier:', err);
+      }
+    })();
+  }, [
+    loading,
+    saving,
+    dirty,
+    hasCostBasis,
+    rows,
+    partId,
+    companyId,
+    loadAll,
+    onPricingChanged,
+  ]);
+
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
     // No dirty flag to set — it's derived from `baseline` on the next render,
@@ -623,6 +714,15 @@ export default function PartPricing({
     setCostingQtyStr(costingBaseline);
     setCostingSaveState('idle');
   };
+
+  // The single persisted 0% tier the card wrote for itself, still untouched.
+  // Not "any tier that happens to be 0" — a shop with two breaks has been in
+  // here and made choices.
+  const isStarterZeroMarkup =
+    !dirty &&
+    rows.length === 1 &&
+    rows[0]?.id !== undefined &&
+    parseNumber(rows[0]?.markupPercent) === 0;
 
   // Removing a row leaves no dirty row to count; UnsavedChangesBar falls back
   // to generic phrasing rather than claiming zero.
@@ -954,6 +1054,21 @@ export default function PartPricing({
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* The starter tier is quotable but sells at cost, and a 0 someone
+              never typed should not read like a decision they made. Says it
+              once, plainly, and disappears the moment a markup is entered —
+              a shop that genuinely sells this at cost is not nagged twice. */}
+          {isStarterZeroMarkup && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mt: 1 }}
+            >
+              Ready to quote at 0% markup — this part currently sells for what it
+              costs. Set your markup above when you know it.
+            </Typography>
+          )}
 
           <Box
             sx={{

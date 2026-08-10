@@ -317,3 +317,161 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     expect(mockUpdatePartCostingBatchQuantity).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================================
+// The starter tier: a new part is quotable the moment it has a cost.
+//
+// Before this, adding the first operation or material left the part costed but
+// NOT quotable — `get_priceable_part_ids` wants a tier carrying a non-null
+// markup, and the card only offered an empty row someone had to fill in and
+// save. The card now writes that row itself at 0%.
+//
+// It is the single auto-save on a card whose standard is explicit Save, so what
+// these tests pin down is mostly where it must NOT fire.
+// ============================================================================
+describe('PartPricing — starter tier at 0% markup', () => {
+  const user = userEvent.setup();
+
+  /** A breakdown with a real priced operation — i.e. there is a cost to mark up. */
+  const pricedBreakdown = {
+    labor_items: [
+      {
+        operation_name: 'Mill',
+        run_time_minutes: 10,
+        setup_time_minutes: 0,
+        labor_rate: 60,
+        cost: 10,
+        setup_cost: 0,
+      },
+    ],
+    material_items: [],
+    total_labor_cost: 10,
+    total_setup_cost: 0,
+    total_material_cost: 0,
+    total_cost: 10,
+    materials_complete: true,
+    warnings: [],
+  };
+
+  /** A made part with a routing row but nothing in it — cost rolls up to $0. */
+  const emptyBreakdown = { ...pricedBreakdown, labor_items: [], total_labor_cost: 0, total_cost: 0 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetTiersForPart.mockResolvedValue([]); // never configured
+    mockCalculateRoutingCost.mockResolvedValue(pricedBreakdown);
+    mockGetComputedPartCost.mockResolvedValue(10);
+    mockReplaceTiersForPart.mockResolvedValue(undefined);
+    mockGetCurrentMember.mockResolvedValue({ id: 'u1' });
+  });
+
+  const starterCall = () => mockReplaceTiersForPart.mock.calls[0];
+
+  it('writes one 0% tier at min qty 1 once the part has a priced operation', async () => {
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+    expect(starterCall()[0]).toBe('c1');
+    expect(starterCall()[1]).toBe('p1');
+    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
+  });
+
+  it('tells the parent, so the workspace stops saying "needs cost"', async () => {
+    const onPricingChanged = vi.fn();
+    render(
+      <PartPricing companyId="c1" part={part} refreshKey={0} onPricingChanged={onPricingChanged} />,
+    );
+
+    await waitFor(() => expect(onPricingChanged).toHaveBeenCalled());
+  });
+
+  it('leaves an audit note saying the app wrote it, not a person', async () => {
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await waitFor(() => expect(mockAddPartPricingNote).toHaveBeenCalled());
+    const body = mockAddPartPricingNote.mock.calls[0][3] as string;
+    expect(body).toMatch(/automatically/i);
+    expect(body).toMatch(/0% markup/);
+  });
+
+  it('does NOT fire for a part with a routing row but no priced work', async () => {
+    // $0 cost + 0% markup would make the part quotable for nothing — the one
+    // outcome worse than not being quotable at all.
+    mockCalculateRoutingCost.mockResolvedValue(emptyBreakdown);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByText('Pricing');
+    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire for a part with no routing and no BOM at all', async () => {
+    mockCalculateRoutingCost.mockResolvedValue(null);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByText('Pricing');
+    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
+  });
+
+  it('does NOT touch a part that already has tiers', async () => {
+    mockGetTiersForPart.mockResolvedValue([savedTier]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByDisplayValue('100');
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
+  });
+
+  it('does not write twice when a sibling panel bumps refreshKey', async () => {
+    const { rerender } = render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+
+    // The reload after the write returns the persisted row, as the DB would.
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
+    ]);
+    const loadsBefore = mockGetTiersForPart.mock.calls.length;
+    rerender(<PartPricing companyId="c1" part={part} refreshKey={1} />);
+
+    // The bump re-reads the tiers, as it should...
+    await waitFor(() =>
+      expect(mockGetTiersForPart.mock.calls.length).toBeGreaterThan(loadsBefore),
+    );
+    // ...and finding a persisted 0% row, writes nothing.
+    expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires for a bought part once its procurement cost resolves', async () => {
+    const bought = { ...part, source: 'bought' } as Part;
+    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
+  });
+
+  it('does NOT fire for a bought part with no vendor cost yet', async () => {
+    const bought = { ...part, source: 'bought' } as Part;
+    mockGetComputedPartCost.mockResolvedValue(null);
+    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
+
+    await screen.findByText('Pricing');
+    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
+  });
+
+  it('says the part sells at cost, and stops saying it once a markup is typed', async () => {
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
+    ]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByText(/sells for what it\s+costs/i);
+
+    // Typing a real markup is a decision; the nudge has done its job.
+    const markupBox = (await screen.findAllByRole('textbox'))[1];
+    await user.clear(markupBox);
+    await user.type(markupBox, '30');
+
+    await waitFor(() => expect(screen.queryByText(/sells for what it\s+costs/i)).toBeNull());
+  });
+});

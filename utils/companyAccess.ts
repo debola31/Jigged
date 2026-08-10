@@ -598,3 +598,36 @@ export async function setCompanyDefaultPaymentTerms(
   }
   return next;
 }
+
+/**
+ * Record whether the shop's logo already contains its company name.
+ *
+ * Read-modify-write of the whole settings object, mirroring the payment-terms writers above — the
+ * outer spread is what keeps the sibling `features`, `defaults` and `custom_payment_terms` blocks
+ * alive; writing the key alone would silently drop every feature flag on the company.
+ *
+ * See `readLogoIncludesName` for why this is a question rather than something we detect.
+ */
+export async function setLogoIncludesName(
+  companyId: string,
+  includesName: boolean,
+): Promise<void> {
+  const supabase = getSupabase();
+  const company = await getCompany(companyId);
+  if (!company) {
+    throw new Error('Company not found.');
+  }
+  const settings = (company.settings ?? {}) as Record<string, unknown>;
+  const nextSettings = { ...settings, logo_includes_name: includesName } as Json;
+  const { error } = await supabase
+    .from('companies')
+    .update({ settings: nextSettings, updated_at: new Date().toISOString() })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating logo naming setting:', error);
+    throw toFriendlyError(error, {
+      entity: 'logo setting',
+      fallback: 'Failed to save that setting.',
+    });
+  }
+}

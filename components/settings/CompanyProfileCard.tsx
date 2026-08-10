@@ -17,7 +17,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
 import Divider from '@mui/material/Divider';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
@@ -28,10 +30,12 @@ import UploadIcon from '@mui/icons-material/Upload';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import {
   getCompany,
+  setLogoIncludesName,
   updateCompanyLogo,
   updateCompanyProfile,
   type CompanyProfilePatch,
 } from '@/utils/companyAccess';
+import { readLogoIncludesName } from '@/lib/companyDefaults';
 import CountrySelect from '@/components/common/CountrySelect';
 import StateSelect from '@/components/common/StateSelect';
 import { isValidPhone, isValidPostalCode } from '@/lib/validators';
@@ -86,6 +90,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
   const [logoPath, setLogoPath] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [includesName, setIncludesName] = useState(false);
 
   const loadPreview = useCallback(async (path: string | null) => {
     setLogoPath(path);
@@ -124,6 +129,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
           postal_code: company.postal_code ?? '',
           country: company.country ?? '',
         });
+        setIncludesName(readLogoIncludesName(company));
         await loadPreview(company.logo_url ?? null);
       } finally {
         if (!cancelled) setLoading(false);
@@ -194,6 +200,19 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
     }
   };
 
+  const handleIncludesName = async (next: boolean) => {
+    // Optimistic: the box moves under the finger and reverts only if the write fails. Waiting on a
+    // round trip to tick a checkbox reads as a broken control.
+    setIncludesName(next);
+    setError(null);
+    try {
+      await setLogoIncludesName(companyId, next);
+    } catch (err) {
+      setIncludesName(!next);
+      setError(err instanceof Error ? err.message : 'Failed to save that setting.');
+    }
+  };
+
   const handleLogoRemove = async () => {
     if (!logoPath) return;
     setError(null);
@@ -218,7 +237,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
   return (
     <SettingsSection
       title="Company Profile"
-      description="Your logo and return address, printed at the top of quotes, packing slips and job travelers. Leave a field blank to omit it."
+      description="Your logo and address, printed at the top of every document."
     >
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -309,39 +328,53 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                 )}
               </Box>
               {/*
-                Guidance worth giving, because all three of these are mistakes a shop makes once and
-                only discovers on a printed page:
-                  - grayscale, because most shop printers are mono lasers and a logo that separates
-                    only by hue turns to mud;
-                  - transparent PNG, because the page is white and a baked-in white rectangle shows
-                    as a box the moment anything sits behind it;
-                  - wide is fine, because the aspect is preserved now — it was forced square until
-                    this batch, which squashed most wordmarks.
+                Two facts, no lecture. The earlier version also advised checking the logo reads in
+                black and white "since most shop printers are mono lasers" — true, and exactly the
+                kind of line that explains a machinist's own workshop back to them. Someone who needs
+                that advice will not act on it here; someone who doesn't reads the card as padded.
+                The transparency tip stays because it is the mistake that actually shows up on a
+                printed page: a baked-in white rectangle becomes a visible box.
               */}
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                PNG or JPEG, up to {MAX_MB} MB. A wide logo is fine — it keeps its shape. A PNG with
-                a transparent background prints cleanest, and it&apos;s worth checking it still
-                reads in black and white, since most shop printers are mono lasers.
+                PNG or JPEG, up to {MAX_MB} MB. A transparent PNG looks best.
               </Typography>
+
+              {/*
+                The one thing we cannot work out from the file itself, and it changes what prints.
+                Most shop logos are wordmarks — the mark IS the name — and printing the name again
+                says it twice in two typefaces. But a logo that is a bare symbol must have the name
+                printed or the document goes out unnamed. Unticked is the safe default: a duplicated
+                name is untidy, a missing one is broken.
+              */}
+              <FormControlLabel
+                sx={{ mt: 1, alignItems: 'flex-start' }}
+                control={
+                  <Checkbox
+                    checked={includesName}
+                    onChange={(e) => void handleIncludesName(e.target.checked)}
+                    disabled={logoBusy || !logoPath}
+                    sx={{ pt: 0.25 }}
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Logo includes company name
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      {logoPath
+                        ? "We won't print your name under the logo."
+                        : 'Upload a logo first.'}
+                    </Typography>
+                  </Box>
+                }
+              />
             </Box>
           </Box>
 
           <Divider sx={{ my: 3 }} />
 
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                label="Phone"
-                value={form.phone}
-                onChange={handleChange('phone')}
-                fullWidth
-                size="small"
-                type="tel"
-                autoComplete="tel"
-                error={phoneInvalid}
-                helperText={phoneInvalid ? 'Enter a valid phone number' : undefined}
-              />
-            </Grid>
             <Grid size={{ xs: 12 }}>
               <TextField
                 label="Address line 1"
@@ -403,6 +436,20 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   setSuccess(false);
                 }}
                 size="small"
+              />
+            </Grid>
+            {/* Phone last, matching the order it prints in: street, city line, then contact. */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <TextField
+                label="Phone"
+                value={form.phone}
+                onChange={handleChange('phone')}
+                fullWidth
+                size="small"
+                type="tel"
+                autoComplete="tel"
+                error={phoneInvalid}
+                helperText={phoneInvalid ? 'Enter a valid phone number' : undefined}
               />
             </Grid>
           </Grid>

@@ -224,7 +224,7 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
           >
             <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                Default payment terms
+                Payment terms
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 Used on a new quote when the customer has no terms of their own. Setting a
@@ -249,7 +249,7 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  inputProps={{ ...params.inputProps, 'aria-label': 'Default payment terms' }}
+                  inputProps={{ ...params.inputProps, 'aria-label': 'Payment terms' }}
                 />
               )}
             />

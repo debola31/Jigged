@@ -14,11 +14,11 @@ import { isQuoteExpired, daysUntilExpiration } from '@/types/quote';
 import { quantityUnitSuffix } from '@/lib/standardUnits';
 import {
   ATTRIBUTION_MARK,
-  drawCompanyLogo,
+  drawShopHeaderBlock,
   loadLogoAsDataUrl,
-  LOGO_BOX,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
+import { readLogoIncludesName } from '@/lib/companyDefaults';
 
 const MARGIN = 40;
 
@@ -37,43 +37,17 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 /**
- * Lines of text for the top-left "shop header".
- * Targets a 2-line address: address_line1 + address_line2 combined onto one line
- * when short enough, then city/state/zip on a second line. Phone goes underneath.
- * Email and website are intentionally omitted from the header — clutter on a printed
- * customer-facing document.
+ * The shop header block — logo, name and address — is drawn by `drawShopHeaderBlock`
+ * (utils/packingSlipPdf.ts), shared with the packing slip and the job traveler.
+ *
+ * This file used to carry its own near-identical copy of the address-line builder. Three documents
+ * printing the same shop's return address from three implementations is three places for them to
+ * disagree, and the header layout now has real logic in it — a logo sized against the space the
+ * header already occupies — which is not something to maintain in triplicate.
+ *
+ * Email and website are intentionally absent from the header: clutter on a customer-facing document,
+ * and nothing has ever read those columns.
  */
-const ADDRESS_COMBINE_MAX_CHARS = 50;
-
-function buildShopHeaderLines(company: Company): string[] {
-  const lines: string[] = [];
-
-  // Combine address line 1 and 2 onto one line when reasonably short; otherwise stack.
-  const a1 = company.address_line1?.trim();
-  const a2 = company.address_line2?.trim();
-  if (a1 && a2) {
-    const combined = `${a1}, ${a2}`;
-    if (combined.length <= ADDRESS_COMBINE_MAX_CHARS) {
-      lines.push(combined);
-    } else {
-      lines.push(a1);
-      lines.push(a2);
-    }
-  } else if (a1) {
-    lines.push(a1);
-  } else if (a2) {
-    lines.push(a2);
-  }
-
-  const cityStateZip = [company.city, company.state].filter(Boolean).join(', ');
-  const cityStateZipFull = [cityStateZip, company.postal_code].filter(Boolean).join(' ').trim();
-  if (cityStateZipFull) lines.push(cityStateZipFull);
-  if (company.country && company.country.toUpperCase() !== 'USA') lines.push(company.country);
-
-  if (company.phone) lines.push(company.phone);
-
-  return lines;
-}
 
 // The customer/address/contact block is now read from the quote's frozen
 // snapshot columns (see generateQuotePdf), not resolved from the live joined
@@ -154,33 +128,12 @@ export async function generateQuotePdf(
   // ---------- Header: company block (top-left) + QUOTE + meta (top-right) ----------
   const headerTop = MARGIN;
 
-  // The shop's logo, if it has one. The packing slip and the traveler have carried it for a long
-  // time and the quote never did — which had it exactly backwards, since the quote is the one
-  // document that goes to a customer who has not decided to buy yet.
-  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, supabase ?? null);
-  let logoWidth = 0;
-  if (logoDataUrl) logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
-
-  // Top-left: company name (bold) then address / contact lines, beside the logo when there is one.
-  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(30);
-  doc.text(company.name, shopNameX, headerTop + 12);
-
-  const shopLines = buildShopHeaderLines(company);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(80);
-  shopLines.forEach((line, i) => {
-    doc.text(line, shopNameX, headerTop + 28 + i * 12);
-  });
-  const shopBlockBottom = Math.max(
-    headerTop + 28 + shopLines.length * 12,
-    logoWidth > 0 ? headerTop + LOGO_BOX : headerTop,
-  );
-
   // Top-right: QUOTE title + stacked meta (no box, right-aligned).
+  //
+  // **The right column is built before the left, deliberately.** It is the taller of the two, so it
+  // sets the header's height — and therefore how much vertical room the shop block on the left can
+  // use without pushing the quote down the page. Drawing the left first means sizing a logo blind,
+  // which is how it ended up in a 56pt box while the header had 110pt to give.
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
   doc.setTextColor(30);
@@ -218,6 +171,20 @@ export async function generateQuotePdf(
     doc.text(row.text, pageWidth - MARGIN, headerTop + 40 + i * 14, { align: 'right' });
   });
   const metaBlockBottom = headerTop + 40 + metaRows.length * 14;
+
+  // Top-left: the shop's identity, sized against the header the right column just established.
+  // A quote with three meta rows has a shorter header than one with five, so the budget is
+  // computed per quote rather than assumed.
+  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, supabase ?? null);
+  const shopBlockBottom = drawShopHeaderBlock(doc, {
+    company,
+    logoDataUrl,
+    logoIncludesName: readLogoIncludesName(company),
+    x: MARGIN,
+    y: headerTop,
+    availableBottom: metaBlockBottom,
+    nameSize: 14,
+  });
 
   let cursorY = Math.max(shopBlockBottom, metaBlockBottom) + 16;
 

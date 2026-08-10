@@ -35,13 +35,12 @@ import { buildScanUrl, scanOrigin } from '@/lib/jiggedScan';
 import { drawQrCode, QR_QUIET_MODULES, type QrErrorCorrection } from '@/lib/qrVector';
 import {
   attributionLine,
-  buildShopHeaderLines,
-  drawCompanyLogo,
+  drawShopHeaderBlock,
   formatDate,
   loadLogoAsDataUrl,
-  LOGO_BOX,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
+import { readLogoIncludesName } from '@/lib/companyDefaults';
 
 const MARGIN = 40;
 
@@ -133,35 +132,7 @@ export async function generateJobTravelerPdf(
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
 
-  // ---------- Header: shop block (left) ----------
   const headerTop = MARGIN;
-  let logoBottom = headerTop;
-
-  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
-  let logoWidth = 0;
-  if (logoDataUrl) {
-    logoWidth = drawCompanyLogo(doc, logoDataUrl, MARGIN, headerTop);
-    if (logoWidth > 0) logoBottom = headerTop + LOGO_BOX;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(30);
-  // Measured from what was drawn rather than a fixed 70pt — see drawCompanyLogo.
-  const shopNameX = logoWidth > 0 ? MARGIN + logoWidth + 14 : MARGIN;
-  doc.text(company.name, shopNameX, headerTop + 14);
-
-  const shopLines = buildShopHeaderLines(company);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.setTextColor(90);
-  shopLines.forEach((line, i) => {
-    doc.text(line, shopNameX, headerTop + 30 + i * 11.5);
-  });
-  const shopBlockBottom = Math.max(
-    logoBottom,
-    headerTop + (shopLines.length ? 30 + shopLines.length * 11.5 : 18),
-  );
 
   // ---------- Header: the traveler QR (far right, top-aligned) ----------
   // The QR sits BESIDE the title, not under it, so header height is one element
@@ -230,6 +201,23 @@ export async function generateJobTravelerPdf(
   // Header height is whichever column runs longest. The HOT stamp MUST be in
   // this max: its bottom sits 16pt below a 56pt QR, so leaving it out draws the
   // divider straight through the stamp on every hot job.
+  // ---------- Header: shop block (left) ----------
+  // Drawn last of the header pieces, because the QR and the HOT stamp on the right decide how tall
+  // this header is — and therefore how much room the logo can take without pushing the Operations
+  // table down. On a hot job the stamp extends the header, so the logo gets more room there; the
+  // ceiling inside `drawShopHeaderBlock` is what stops the same shop's mark changing size between a
+  // hot traveler and a cold one.
+  const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  const shopBlockBottom = drawShopHeaderBlock(doc, {
+    company,
+    logoDataUrl,
+    logoIncludesName: readLogoIncludesName(company),
+    x: MARGIN,
+    y: headerTop,
+    availableBottom: Math.max(qrBlockBottom, hotStampBottom),
+    nameSize: 14,
+  });
+
   let cursorY = Math.max(shopBlockBottom, qrBlockBottom, hotStampBottom) + 16;
 
   // ---------- Divider ----------

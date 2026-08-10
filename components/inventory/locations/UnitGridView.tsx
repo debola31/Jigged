@@ -207,7 +207,9 @@ function GridBody({
          */
         overflowY: 'auto',
         maxHeight: { md: 'calc(100vh - 520px)' },
-        minHeight: { md: 200 },
+        // Floor only where there is something to hold up. A single-place unit is one square, and
+        // giving it a 200px surface drew an empty box under the cell that read as a failed load.
+        minHeight: shape.bands.length > 1 ? { md: 200 } : undefined,
         p: 1,
         // Hug the grid rather than the page. A 2-wide cabinet on a monitor otherwise sits in a
         // surface running the whole width with a metre of nothing beside it; a 15-wide one still

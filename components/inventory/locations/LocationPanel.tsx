@@ -62,7 +62,6 @@ export interface LocationPanelActions {
   onDelete: (node: InventoryLocationNode) => void;
   onAddChild: (node: InventoryLocationNode) => void;
   onDuplicate: (node: InventoryLocationNode) => void;
-  onMoveInto: (node: InventoryLocationNode) => void;
 }
 
 export interface LocationPanelProps {
@@ -224,7 +223,6 @@ export default function LocationPanel({
                 [
                   ['Rename', actions.onEdit],
                   ['Duplicate', actions.onDuplicate],
-                  ['Move into…', actions.onMoveInto],
                   ['Delete', actions.onDelete],
                 ] as const
               ).map(([label, run]) => (
@@ -243,17 +241,17 @@ export default function LocationPanel({
         )}
       </Stack>
 
-      {structured && (
-        <Box sx={{ mb: 3 }}>
-          <UnitGridView
-            unit={unit}
-            occupancy={occupancy}
-            selectedId={place.id}
-            onOpenCell={onSelectPlace}
-            onOpenBand={onSelectPlace}
-          />
-        </Box>
-      )}
+      {/* Always drawn. A single-place unit is one square rather than no grid at all — picking the
+          Yard used to look like nothing had happened next to picking a cabinet. */}
+      <Box sx={{ mb: 3 }}>
+        <UnitGridView
+          unit={unit}
+          occupancy={occupancy}
+          selectedId={place.id}
+          onOpenCell={onSelectPlace}
+          onOpenBand={onSelectPlace}
+        />
+      </Box>
 
       <Box ref={contentsRef}>
         <Divider sx={{ mb: 2 }} />

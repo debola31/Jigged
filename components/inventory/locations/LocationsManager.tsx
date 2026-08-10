@@ -11,12 +11,15 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
@@ -29,21 +32,16 @@ import {
   updateLocation,
   duplicateLocation,
   deleteLocation,
-  moveLocation,
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
-import { locationParentOptions } from '@/utils/locationDestinations';
 import { orderUnits } from '@/lib/locationGrid';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
-import LocationPicker, { type LocationPickerOption } from './LocationPicker';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import LocationPanel from './LocationPanel';
 
-/** Sentinel for "no parent". A picker option needs an id, and `null` is not one. */
-const TOP_LEVEL = '__top__';
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -90,12 +88,13 @@ const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 interface LocationsManagerProps {
   companyId: string;
   /**
-   * The unit being viewed, from the route. Absent on the list.
+   * The unit being shown, from `?unit=` on the URL.
    *
-   * This was local state, which made the drawn unit an inline swap under the list's own chrome —
-   * no back button, no shareable link, and the list's toolbar following you into a screen where
-   * "Add storage" acted on something you were no longer looking at. Reading it from the URL is
-   * what makes the unit a place you can be rather than a mode the list is in.
+   * A **query param on one page**, not a nested route. It was `/locations/{unitId}` for a day, and
+   * that is the wrong model for a workspace: picking a cabinet is a selection within one screen,
+   * not a journey to another, and Next treated each pick as a page transition — the whole thing
+   * blanked and reloaded to change one pane. A search param still gives a shareable link and a
+   * working back button, without pretending the pane is a destination.
    */
   unitId?: string;
 }
@@ -144,6 +143,8 @@ export default function LocationsManager({
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [placeId, setPlaceId] = useState<string | null>(null);
+  /** Filters the unit list. Held here because the field lives in the page header. */
+  const [query, setQuery] = useState('');
 
 
 
@@ -218,8 +219,17 @@ export default function LocationsManager({
    * drawer, so a shop could easily end up with named furniture and no places in it. Naming and
    * shaping are one decision, and since `create_location_tree` they are also one transaction.
    */
-  const unitHref = (id: string) => `/dashboard/${companyId}/inventory/locations/${id}`;
   const listHref = `/dashboard/${companyId}/inventory/locations`;
+  /**
+   * `replace`, not `push`, and `scroll: false`.
+   *
+   * Replace because clicking through six cabinets should not bury the page you arrived from under
+   * six history entries — back means "leave storage", which is what someone pressing it wants.
+   * `scroll: false` because the default scrolls to the top on every navigation, which would throw
+   * away the position you had in a 12-row grid.
+   */
+  const showUnit = (id: string | null) =>
+    router.replace(id ? `${listHref}?unit=${id}` : listHref, { scroll: false });
 
   const openAddStorage = () =>
     setBuilder({
@@ -231,11 +241,10 @@ export default function LocationsManager({
     });
 
   const openUnit_ = (node: InventoryLocationNode) => {
-    if (node.children.length === 0) {
-      setPlaceId(node.id);
-      return;
-    }
-    router.push(unitHref(node.id));
+    // Clearing the place matters: keeping it would carry a bin from the last cabinet into this
+    // one, where it is not on the grid and its contents are simply wrong.
+    setPlaceId(null);
+    showUnit(node.id);
   };
 
   /**
@@ -247,7 +256,8 @@ export default function LocationsManager({
   const openCell = (locationId: string) => {
     const node = byNodeId.get(locationId);
     if (node && node.children.length > 0) {
-      router.push(unitHref(locationId));
+      setPlaceId(null);
+      showUnit(locationId);
       return;
     }
     setPlaceId(locationId);
@@ -326,67 +336,14 @@ export default function LocationsManager({
         setToast(e instanceof Error ? e.message : 'Failed to duplicate location.');
       }
     },
-    onMoveInto: (node: InventoryLocationNode) => {
-      setPlaceId(null);
-      setMoveState({ open: true, node });
-    },
     onDelete: (node: InventoryLocationNode) => {
       setPlaceId(null);
       setDeleteState({ open: true, node });
     },
   };
 
-  /**
-   * Re-parent a place.
-   *
-   * `moveLocation` shipped with the first locations migration, complete with cycle detection and
-   * tests, and never had a caller — so a cabinet created under the wrong parent was permanent and
-   * the only remedy was deleting the subtree and rebuilding it. Drag-to-reparent stays cut
-   * (§5.5); this is the same picker the rest of the app uses.
-   *
-   * The options exclude the node itself AND its descendants. `moveLocation` refuses a cycle
-   * anyway, but offering a destination that will be rejected is a worse experience than not
-   * offering it — the guard is the backstop, not the interface.
-   *
-   * Same reasoning now excludes any place holding stock DIRECTLY. Since 20260806160053 a location
-   * that holds stock cannot become a container, and unlike "Divide it up…" a Move has no
-   * distribution step to hang on it — so the database simply refuses. A cabinet whose *shelves*
-   * are full is still a fine destination, which is why `locationParentOptions` reads `directParts`
-   * rather than the rolled-up `hasStock`: the latter would exclude every populated cabinet in the
-   * shop and quietly empty this list.
-   */
-  const [moveState, setMoveState] = useState<{ open: boolean; node: InventoryLocationNode | null }>({
-    open: false,
-    node: null,
-  });
-  const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
-  const [moving, setMoving] = useState(false);
 
-  const moveOptions = useMemo<LocationPickerOption[]>(() => {
-    const node = moveState.node;
-    if (!node) return [];
-    return [
-      { id: TOP_LEVEL, label: 'Top level (not inside anything)', kind: null },
-      ...locationParentOptions(locations, { nodeId: node.id, occupancy }),
-    ];
-  }, [moveState.node, locations, occupancy]);
 
-  const confirmMove = async () => {
-    const node = moveState.node;
-    if (!node || !moveTo) return;
-    setMoving(true);
-    try {
-      await moveLocation(node.id, moveTo.id === TOP_LEVEL ? null : moveTo.id, companyId);
-      await reload();
-      setToast(`Moved ${node.name}.`);
-      setMoveState({ open: false, node: null });
-      setMoveTo(null);
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Failed to move location.');
-    } finally {
-      setMoving(false);
-    }
-  };
 
   const submitForm = async (values: LocationFormValues) => {
     if (formState.location) {
@@ -433,20 +390,63 @@ export default function LocationsManager({
   return (
     <Box>
       {/*
-        Page chrome, cut back to what belongs to the PAGE.
+        One header row, and the order is by scope: the two controls that act on the LIST sit above
+        the list's own column, and the two that act on the WHOLE SHOP sit right.
 
-        It once held five setup controls — Scan · Print all labels · New top-level location ·
-        Build visually, plus a Board|List toggle — on a page whose own spec section is titled
-        "Design for the sustain, not the setup". Then three, aimed at three different scopes.
-
-        Now: `Count all parts` is the only thing here, because it is the only one that acts on the
-        whole shop and the only one you come back to do. `Add storage` moved into the list, which
-        is what it adds to. `Print all labels` is setup — it happens once, and it now lives on the
-        list's own header only when there is something to print.
+        It has been three separate arrangements. Five setup controls — Scan · Print all labels ·
+        New top-level location · Build visually, plus a Board|List toggle — on a page whose own
+        spec section is titled "Design for the sustain, not the setup". Then three in a toolbar
+        aimed at three different scopes. Then a search box stranded inside the list column while
+        the page's own buttons floated above it. Same row now, grouped by what they touch.
       */}
       {tree.length > 0 && (
-        <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 1,
+            mb: 2,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          {/*
+            Goes with the list, so it goes when the list goes. On a phone a unit takes the whole
+            screen, and a search field that filters a list you cannot see — beside a button that
+            adds to it — is two controls acting on something off-screen.
+          */}
+          <Box
+            sx={{
+              display: { xs: openUnit ? 'none' : 'flex', md: 'flex' },
+              gap: 1,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              flex: { xs: '1 1 100%', sm: '0 0 auto' },
+            }}
+          >
+            <TextField
+              size="small"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find a place"
+              type="search"
+              sx={{ width: { xs: '100%', sm: 260 } }}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openAddStorage}>
+              Add storage
+            </Button>
+          </Box>
+
           <Box sx={{ flex: 1 }} />
+
           <Button
             variant="outlined"
             startIcon={<QrCode2Icon />}
@@ -456,7 +456,7 @@ export default function LocationsManager({
             Print all labels
           </Button>
           <Button
-            variant="contained"
+            variant="outlined"
             startIcon={<FactCheckOutlinedIcon />}
             onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
           >
@@ -543,8 +543,8 @@ export default function LocationsManager({
                 tree={tree}
                 occupancy={occupancy}
                 selectedId={openUnit?.id ?? null}
+                query={query}
                 onOpen={openUnit_}
-                onAddStorage={openAddStorage}
               />
             </Box>
 
@@ -561,7 +561,7 @@ export default function LocationsManager({
                   backSlot={
                     <Button
                       startIcon={<ArrowBackIcon />}
-                      onClick={() => router.push(listHref)}
+                      onClick={() => showUnit(null)}
                       // Only where the list is not already beside you. On a wide screen it would
                       // be a back link out of something you can still see.
                       sx={{ ml: -1, mb: 0.5, display: { xs: 'inline-flex', md: 'none' } }}
@@ -626,43 +626,6 @@ export default function LocationsManager({
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
         }}
       />
-
-      <Dialog
-        open={moveState.open}
-        onClose={() => {
-          setMoveState({ open: false, node: null });
-          setMoveTo(null);
-        }}
-        fullWidth
-        maxWidth="xs"
-      >
-        <DialogTitle>Move {moveState.node?.name}</DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Everything inside it moves too, and the stock goes with it — this changes where a
-            place sits, not what is in it.
-          </DialogContentText>
-          <LocationPicker
-            label="Move it into"
-            options={moveOptions}
-            value={moveTo}
-            onChange={setMoveTo}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              setMoveState({ open: false, node: null });
-              setMoveTo(null);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button variant="contained" disabled={!moveTo || moving} onClick={confirmMove}>
-            Move
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>
         <DialogTitle>Delete location?</DialogTitle>

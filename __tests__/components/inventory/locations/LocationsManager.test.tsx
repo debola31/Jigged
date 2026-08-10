@@ -134,12 +134,39 @@ describe('LocationsManager', () => {
    * list's own toolbar following the reader into a cabinet where "Add storage" acted on something
    * they were no longer looking at.
    */
-  it('navigates to the unit rather than swapping the list in place', async () => {
+  /**
+   * Picking a unit is a SELECTION on one page, not a journey to another.
+   *
+   * It was a nested route for a day, and Next treated every pick as a page transition — the whole
+   * screen blanked and reloaded to change one pane. `replace`, so clicking through six cabinets
+   * does not bury the page you arrived from under six history entries, and `scroll: false` so a
+   * pick does not throw away your position in a 12-row grid.
+   */
+  it('selects the unit on the same page rather than navigating to another', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/locations/cab3');
+    expect(routerMocks.replace).toHaveBeenCalledWith(
+      '/dashboard/co1/inventory/locations?unit=cab3',
+      { scroll: false },
+    );
+    expect(routerMocks.push).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The bug this closes: clicking a single-place unit set the selected PLACE without changing the
+   * unit, so the pane carried on showing the previous cabinet and the click looked like a no-op.
+   */
+  it('selects a single-place unit like any other', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Yard/ }));
+    expect(routerMocks.replace).toHaveBeenCalledWith(
+      '/dashboard/co1/inventory/locations?unit=yard',
+      { scroll: false },
+    );
   });
 
   /**
@@ -155,8 +182,8 @@ describe('LocationsManager', () => {
     for (const label of [/count or put away/i, /change layout/i, /print qr/i]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
-    // …and the do-it-once four are behind a menu, so seven buttons do not wrap to three rows and
-    // push the grid off a phone.
+    // …and the do-it-once ones are behind a menu, so seven buttons do not wrap to three rows and
+    // push the grid off a phone. `Move into…` is gone entirely — see the test below.
     expect(screen.queryByRole('button', { name: /^rename$/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /more actions for Cabinet 3/i })).toBeInTheDocument();
   });
@@ -168,13 +195,29 @@ describe('LocationsManager', () => {
    * swapped the page — the seam that made this read as two products. Now every unit lands in the
    * same pane, which simply has no grid to draw for this one.
    */
-  it('shows a single-place unit in the same pane, with no grid', async () => {
+  it('shows a single-place unit in the same pane, drawn as one square', async () => {
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
     // Twice, deliberately: on its card in the list and again in the pane beside it.
     expect(await screen.findAllByText('One place')).toHaveLength(2);
     expect(screen.getByText(/what's here/i)).toBeInTheDocument();
-    expect(screen.queryByText(/change its layout to add places/i)).not.toBeInTheDocument();
+    // Drawn, not a bare contents list — the same shape as every other unit, with one cell.
+    expect(screen.getByRole('button', { name: /^Yard —/ })).toBeInTheDocument();
+  });
+
+  /**
+   * `Move into…` is gone. Re-parenting a unit was the one thing `Change layout` cannot do, and it
+   * was reachable from a menu nobody opened; 118 of Contour's 121 legacy locations were flat and
+   * its five real units nest under nothing. Recorded here so its removal is deliberate rather than
+   * something that quietly fell out of a refactor.
+   */
+  it('no longer offers Move into', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await user.click(await screen.findByRole('button', { name: /more actions for Cabinet 3/i }));
+    expect(screen.queryByRole('menuitem', { name: /move into/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeInTheDocument();
   });
 
   /**

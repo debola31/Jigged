@@ -164,8 +164,22 @@ export function readUnitLayout(
 ): UnitLayout {
   const depth = depthBelow(unit);
 
-  // A leaf unit holds stock itself; there is no grid to draw and the caller shows its contents.
-  if (depth === 0) return { kind: 'list', cells: [] };
+  /*
+   * A unit that IS a place still draws — as a grid of exactly one cell.
+   *
+   * It used to return nothing and the pane rendered a bare contents list, so picking the Yard
+   * looked like nothing had happened next to picking a cabinet. Consistency is the whole point of
+   * the workspace: every unit is drawn, some are just one square.
+   */
+  if (depth === 0) {
+    const cell = toCell(unit, occupancy);
+    return {
+      kind: 'grid',
+      bands: [{ id: unit.id, name: unit.name, cells: [cell], isLeafItself: true }],
+      columns: 1,
+      ragged: false,
+    };
+  }
 
   if (depth <= 2) return { kind: 'grid', ...toShape(unit, occupancy) };
 

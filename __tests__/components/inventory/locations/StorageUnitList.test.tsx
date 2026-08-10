@@ -38,20 +38,20 @@ const renderList = (
   tree: InventoryLocationNode[],
   counts: Array<[string, number]> = [],
   selectedId: string | null = null,
+  query = '',
 ) => {
   const onOpen = vi.fn();
-  const onAddStorage = vi.fn();
   render(
     <StorageUnitList
       tree={tree}
       occupancy={rollUpOccupancy(tree, new Map(counts))}
       onOpen={onOpen}
-      onAddStorage={onAddStorage}
       selectedId={selectedId}
+      query={query}
     />,
     { wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider> },
   );
-  return { onOpen, onAddStorage };
+  return { onOpen };
 };
 
 beforeEach(() => vi.clearAllMocks());
@@ -151,42 +151,28 @@ describe('StorageUnitList', () => {
   });
 
   /**
-   * Not discovery — a shop can see all of its units. This is for speed: typing "weld" beats
-   * reading. Names only, because matching a nested `Bin 5` would put a cabinet in the results for
-   * a reason invisible in the row.
+   * The field lives in the page header now; this only applies the filter. Not discovery — a shop
+   * can see all of its units — but speed: typing "weld" beats reading. Names only, because
+   * matching a nested `Bin 5` would put a cabinet in the results for a reason invisible in the row.
    */
-  describe('search', () => {
+  describe('filtering', () => {
     const tree = () => [
       node('Form Tool Cabinet', run('Row', 2), { sort_order: 0 }),
       node('Metal Shelf By Welder', run('Row', 2), { sort_order: 1 }),
       node('Yard', [], { sort_order: 2 }),
     ];
 
-    it('filters the list as you type, case-insensitively', async () => {
-      const user = userEvent.setup();
-      renderList(tree());
-
-      await user.type(screen.getByPlaceholderText(/find a place/i), 'weld');
+    it('shows only what matches, case-insensitively', () => {
+      renderList(tree(), [], null, 'weld');
       expect(screen.getByText('Metal Shelf By Welder')).toBeInTheDocument();
       expect(screen.queryByText('Form Tool Cabinet')).not.toBeInTheDocument();
       expect(screen.queryByText('Yard')).not.toBeInTheDocument();
     });
 
-    it('says so when nothing matches, rather than showing an empty pane', async () => {
-      const user = userEvent.setup();
-      renderList(tree());
-
-      await user.type(screen.getByPlaceholderText(/find a place/i), 'zzz');
+    it('says so when nothing matches, rather than showing an empty column', () => {
+      renderList(tree(), [], null, 'zzz');
       expect(screen.getByText(/nothing matches/i)).toBeInTheDocument();
     });
   });
 
-  /** Adding storage acts on the list, so it lives with the list. */
-  it('offers Add storage beside the search', async () => {
-    const user = userEvent.setup();
-    const { onAddStorage } = renderList([node('Cabinet 1', run('Row', 2))]);
-
-    await user.click(screen.getByRole('button', { name: /add storage/i }));
-    expect(onAddStorage).toHaveBeenCalled();
-  });
 });

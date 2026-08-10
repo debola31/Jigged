@@ -203,9 +203,18 @@ describe('shapes it declines to draw', () => {
     expect((layout as { kind: 'list'; cells: Array<{ name: string }> }).cells).toHaveLength(1);
   });
 
-  it('has nothing to draw for a unit that is itself one place', () => {
-    const layout = readUnitLayout(node('Yard'), noStock());
-    expect(layout).toEqual({ kind: 'list', cells: [] });
+  /**
+   * A unit that IS a place still draws — as one square. It used to return nothing, so picking the
+   * Yard looked like nothing had happened next to picking a cabinet.
+   */
+  it('draws a single-place unit as a grid of one cell', () => {
+    const yard = node('Yard');
+    const layout = readUnitLayout(yard, noStock()) as GridShape & { kind: 'grid' };
+
+    expect(layout.kind).toBe('grid');
+    expect(layout.bands).toHaveLength(1);
+    expect(layout.bands[0].isLeafItself).toBe(true);
+    expect(layout.bands[0].cells[0].id).toBe(yard.id);
   });
 });
 

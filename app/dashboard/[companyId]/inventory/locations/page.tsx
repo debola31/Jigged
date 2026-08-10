@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 
@@ -13,6 +13,7 @@ export default function InventoryLocationsPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
+  const unitId = useSearchParams().get('unit');
   const { setTitle } = usePageTitle();
   const { features, loading } = useCompanyFeatures();
   const enabled = features.inventory_locations;
@@ -48,7 +49,7 @@ export default function InventoryLocationsPage() {
           there is nothing to go back *to* — and the page it pointed at no longer exists, so it
           would have bounced through a redirect to land on Parts. A back link out of a top-level
           destination is chrome pretending to be navigation. */}
-      <LocationsManager companyId={companyId} />
+      <LocationsManager companyId={companyId} unitId={unitId ?? undefined} />
     </Box>
   );
 }

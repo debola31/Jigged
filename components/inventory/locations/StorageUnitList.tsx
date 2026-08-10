@@ -24,24 +24,19 @@
  *
  * ## Search
  *
- * Not discovery — a shop has five to twenty units and can see all of them. It is for *speed*:
- * typing "weld" beats reading. It filters on the unit's own name only. Matching a nested `Bin 5`
- * would put a cabinet in the results for a reason invisible in the row, and nobody hunts for a bin
- * from here — they open the cabinet they already have in mind.
+ * The field itself lives in the page header, with the other controls; this only applies the
+ * filter. Not discovery — a shop has five to twenty units and can see all of them. It is for
+ * *speed*: typing "weld" beats reading. Names only. Matching a nested `Bin 5` would put a cabinet
+ * in the results for a reason invisible in the row, and nobody hunts for a bin from here.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
-import InputAdornment from '@mui/material/InputAdornment';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import AddIcon from '@mui/icons-material/Add';
-import SearchIcon from '@mui/icons-material/Search';
 
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
@@ -60,7 +55,8 @@ export interface StorageUnitListProps {
   onOpen: (node: InventoryLocationNode) => void;
   /** Which one is showing. */
   selectedId?: string | null;
-  onAddStorage: () => void;
+  /** Filter text, owned by the page so the field can sit in the header with the other controls. */
+  query?: string;
 }
 
 /** Empty vs has-stock, as a dot. Nothing here claims to know capacity. */
@@ -90,10 +86,8 @@ export default function StorageUnitList({
   occupancy,
   onOpen,
   selectedId,
-  onAddStorage,
+  query = '',
 }: StorageUnitListProps) {
-  const [query, setQuery] = useState('');
-
   const units = useMemo(() => {
     const all = orderUnits(tree);
     const q = query.trim().toLowerCase();
@@ -101,39 +95,7 @@ export default function StorageUnitList({
   }, [tree, query]);
 
   return (
-    <Stack spacing={1.5}>
-      <Stack direction="row" spacing={1} alignItems="center">
-        <TextField
-          size="small"
-          fullWidth
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Find a place"
-          // A search field, not a form field: no floating label eating a line, and the icon says
-          // what it is without a caption. `type="search"` brings the platform's own clear control.
-          type="search"
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon fontSize="small" />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        {/* Lives with the list because it acts on the list. It was in the page toolbar, one of
-            three controls aimed at three different scopes. */}
-        <Button
-          variant="contained"
-          onClick={onAddStorage}
-          aria-label="Add storage"
-          sx={{ flexShrink: 0, minWidth: 0, px: 2 }}
-        >
-          <AddIcon />
-        </Button>
-      </Stack>
-
+    <Box>
       {units.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 2 }}>
           Nothing matches &ldquo;{query}&rdquo;.
@@ -194,6 +156,6 @@ export default function StorageUnitList({
           })}
         </Stack>
       )}
-    </Stack>
+    </Box>
   );
 }

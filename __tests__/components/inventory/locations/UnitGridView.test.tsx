@@ -178,9 +178,10 @@ describe('UnitGridView — the shapes', () => {
     expect(screen.getByText(/nests deeper than the grid draws/i)).toBeInTheDocument();
   });
 
-  it('says what an empty unit needs, rather than drawing nothing', () => {
-    renderGrid(node('New Cabinet'));
-    expect(screen.getByText(/change its layout to add places/i)).toBeInTheDocument();
+  it('draws a unit with no structure as a single square rather than an empty state', () => {
+    renderGrid(node('Yard'));
+    expect(screen.getByRole('button', { name: /^Yard/ })).toBeInTheDocument();
+    expect(screen.queryByText(/change its layout to add places/i)).not.toBeInTheDocument();
   });
 });
 

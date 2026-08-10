@@ -37,10 +37,9 @@ import {
   getPartChargePrice,
   ensurePartUnitConversion,
 } from '@/utils/partsAccess';
-import { getCompany } from '@/utils/companyAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
-import type { BomLineFormData, BomLineWithChildPart, ChargeBasis, ChargeRateSource } from '@/types/bom';
+import type { BomLineFormData, BomLineWithChildPart, ChargeBasis } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
   type PartSelectOption,
@@ -91,22 +90,14 @@ const formatPercent = (n: number): string =>
   `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 
 /**
- * How a price-basis line's rate was arrived at, in words. Never "at price" on
- * its own: a number a shop cannot trace to a setting it recognises is the exact
- * opacity that got the shared markup-rates module deleted.
+ * A price-basis line, in words — always with the markup that produced it, so the
+ * number on the row can be traced to the material's own Pricing page rather than
+ * appearing from nowhere.
  */
-const rateSourceLabel = (
-  source: ChargeRateSource | null,
-  markupPercent: number | null,
-): string => {
-  if (source === 'tier') return 'charge at price · own tier';
-  if (source === 'company_default') {
-    return markupPercent === null
-      ? 'charge at price · shop default'
-      : `charge at price · shop default ${formatPercent(markupPercent)}`;
-  }
-  return 'charge at price · no markup set';
-};
+const chargeAtPriceLabel = (markupPercent: number | null): string =>
+  markupPercent === null
+    ? 'charge at price · no markup set'
+    : `charge at price · ${formatPercent(markupPercent)} markup`;
 
 /**
  * Materials editor on the part detail page.
@@ -146,9 +137,7 @@ interface ChildCostTier {
   costPerUnit: number | null;
   /** On a price-basis line: what the parent is actually charged at this break. */
   chargedPerUnit: number | null;
-  /** On a price-basis line: which rung produced `chargedPerUnit`. */
-  rateSource: ChargeRateSource | null;
-  /** On a price-basis line: the markup % applied. */
+  /** On a price-basis line: the markup % the child's tier applied. */
   markupPercent: number | null;
 }
 
@@ -185,25 +174,7 @@ export default function PartBomPanel({
   const [pendingDelete, setPendingDelete] = useState<BomLineWithChildPart | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // The shop-wide default material markup, so the bulk control can name the
-  // number it is about to apply instead of gesturing at "price". null = unset.
-  const [defaultMarkup, setDefaultMarkup] = useState<number | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCompany(companyId)
-      .then((c) => {
-        if (!cancelled) setDefaultMarkup(c?.default_material_markup_percent ?? null);
-      })
-      .catch(() => {
-        // A missing default only costs the bulk control its number, not its
-        // function — leave it null and let the copy fall back.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
 
   const {
     data: rowsData,
@@ -315,20 +286,17 @@ export default function PartBomPanel({
                 costPerUnit = null;
               }
               // On a price-basis line, also resolve what the parent is actually
-              // charged — and WHICH rung produced it. Naming the source is not
-              // decoration: a shop-wide default resolved at read time with
-              // nothing on screen to say where the number came from is the
-              // failure that got the markup_rates module deleted.
+              // charged, and the markup behind it. Showing the markup is not
+              // decoration: a charged number a shop cannot trace to a page it
+              // recognises is the opacity that got markup_rates deleted.
               let chargedPerUnit: number | null = null;
-              let rateSource: ChargeRateSource | null = null;
               let markupPercent: number | null = null;
               if (row.charge_basis === 'price') {
                 const priced = await getPartChargePrice(child.id, qty).catch(() => null);
                 chargedPerUnit = priced?.unit_price ?? null;
-                rateSource = priced?.rate_source ?? null;
                 markupPercent = priced?.markup_percent ?? null;
               }
-              return { qty, unit, costPerUnit, chargedPerUnit, rateSource, markupPercent };
+              return { qty, unit, costPerUnit, chargedPerUnit, markupPercent };
             }),
           );
           next.set(row.id, ladder);
@@ -412,7 +380,6 @@ export default function PartBomPanel({
         basis: value.charge_basis,
         bulk: false,
         child_source: value.childPart.source,
-        rate_source: null,
       });
       closeEditor();
       await fetchRows();
@@ -444,7 +411,6 @@ export default function PartBomPanel({
         basis,
         bulk: true,
         child_source: 'bought',
-        rate_source: basis === 'price' && defaultMarkup !== null ? 'company_default' : null,
       });
       if (changed > 0) {
         await fetchRows();
@@ -545,10 +511,11 @@ export default function PartBomPanel({
         </Box>
       )}
 
-      {/* Bulk basis, shown only when there is purchased material to act on. The
-          copy names the default's number when one is set — pairing the gesture
-          with the value is what makes it a one-click decision during setup
-          rather than a toggle whose effect you have to go and look up. */}
+      {/* Bulk basis, shown only when there is purchased material to act on. A
+          shop that marks up purchased material marks up ALL of it, and setting
+          that one line at a time is the difference between a five-minute change
+          and an afternoon. Each material's own Pricing page decides BY HOW MUCH —
+          there is no shop-wide number standing behind this button. */}
       {!readOnly && !loading && purchasedLineCount > 0 && (
         <Box
           sx={{
@@ -573,9 +540,7 @@ export default function PartBomPanel({
             disabled={bulkSaving || editorOpen || saving}
             onClick={() => void handleBulkChargeBasis('price')}
           >
-            {defaultMarkup !== null
-              ? `Charge at your shop default (${formatPercent(defaultMarkup)})`
-              : 'Charge at marked-up price'}
+            Charge at their marked-up price
           </Button>
           <Button
             size="small"
@@ -584,12 +549,9 @@ export default function PartBomPanel({
           >
             Charge at our cost
           </Button>
-          {defaultMarkup === null && (
-            <Typography variant="caption" color="text.secondary">
-              Each material needs its own pricing tier until you set a default
-              material markup in Settings.
-            </Typography>
-          )}
+          <Typography variant="caption" color="text.secondary">
+            Each material&apos;s markup comes from its own Pricing card.
+          </Typography>
         </Box>
       )}
 
@@ -664,12 +626,13 @@ export default function PartBomPanel({
                 });
               }
             }
-            // Never just "at price" — always which rung set the number.
+            // Never just "at price" — always the markup that set the number.
             if (row.charge_basis === 'price') {
+              const markup = ladder[0]?.markupPercent ?? null;
               captionParts.push({
                 key: 'basis',
-                text: rateSourceLabel(ladder[0]?.rateSource ?? null, ladder[0]?.markupPercent ?? null),
-                warning: ladderLoaded && ladder[0]?.rateSource == null,
+                text: chargeAtPriceLabel(markup),
+                warning: ladderLoaded && ladder.length > 0 && markup === null,
               });
             }
             // Only meaningful for a fractional-capable line; "whole units" on a
@@ -859,7 +822,7 @@ export default function PartBomPanel({
                     !missingCost &&
                     row.charge_basis === 'price' &&
                     ladder.length > 0 &&
-                    ladder[0].rateSource === null && (
+                    ladder[0].markupPercent === null && (
                       <Box
                         sx={{
                           display: 'flex',
@@ -871,11 +834,8 @@ export default function PartBomPanel({
                       >
                         <ErrorOutlineIcon sx={{ fontSize: 16 }} />
                         <Typography variant="caption">
-                          Charged at price, but this material has no markup — add a
-                          pricing tier on it
-                          {child.source === 'bought'
-                            ? ', or set a default material markup in Settings.'
-                            : '. A made part is never covered by the shop default.'}
+                          Charged at price, but this material has no markup — open it
+                          and add a pricing tier.
                         </Typography>
                       </Box>
                     )}

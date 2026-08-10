@@ -11,15 +11,17 @@ The rules this file pins down, each of which is easy to get subtly wrong and
 impossible to notice afterwards because the failure mode is a quote that is
 quietly a few percent off:
 
-  * NO-OP. With every line at 'cost' the two modes agree, with or without a
-    company default set. Nothing that exists today changes value.
+  * NO-OP. With every line at 'cost' the two modes agree. Nothing that exists
+    today changes value.
+  * ONE SOURCE. A 'price' line takes the child's OWN pricing tier. The shop's
+    starter markups (companies.default_markup_*) seed a part's FIRST TIER at
+    write time and are never read by the rollup — asserted by setting them high
+    and watching nothing move.
   * NESTING. A 'cost' line contributes the child's CHARGE BASE, so a material
     markup declared deep in a tree survives the hop up — but is applied exactly
     ONCE, never re-applied at the made part above it.
-  * BOUGHT-ONLY DEFAULT. companies.default_material_markup_percent covers a
-    bought child with no tier. It never covers a made one; that stays a gap.
-  * NO SILENT FALLBACK. A price line with no tier and no eligible default is
-    un-priceable, not quietly costed.
+  * NO SILENT FALLBACK. A price line whose child has no tier is un-priceable,
+    not quietly costed — and no shop-wide number rescues it.
 
 The priceability agreement across those combinations lives in
 `test_priceability_agreement.py`.
@@ -57,7 +59,8 @@ def admin() -> Client:
 class ChargeBasisEnv:
     """The worked example from the #727 plan, built for real.
 
-    Company default 25%.
+    The company has BOTH starter markups set high (made 40%, bought 25%) purely
+    so the tests can prove the rollup ignores them.
       BAR      bought, cost $10/ea, NO pricing tier
       BRACKET  made,   labor $30/unit, BOM = 1 x BAR on a PRICE line, no tier
       ASSEMBLY made,   labor $20/unit, own markup 40%, BOM = 1 x BRACKET
@@ -97,9 +100,14 @@ def _price(admin: Client, part_id: str, qty: float = 1) -> dict | None:
     return rows[0] if rows else None
 
 
-def _set_default(admin: Client, company_id: str, markup: float | None) -> None:
+def _set_starter_markups(admin: Client, company_id: str, made: float, bought: float) -> None:
+    """Set the shop's STARTER markups. These seed a part's first tier when it is
+    created; nothing in this file's rollup should ever react to them."""
     admin.table("companies").update(
-        {"default_material_markup_percent": markup}
+        {
+            "default_markup_made_percent": made,
+            "default_markup_bought_percent": bought,
+        }
     ).eq("id", company_id).execute()
 
 
@@ -113,7 +121,13 @@ def env(admin: Client):
 
     company = (
         admin.table("companies")
-        .insert({"name": f"ChargeBasis-{suffix}", "default_material_markup_percent": 25})
+        .insert(
+            {
+                "name": f"ChargeBasis-{suffix}",
+                "default_markup_made_percent": 40,
+                "default_markup_bought_percent": 25,
+            }
+        )
         .execute()
     )
     company_id = company.data[0]["id"]
@@ -231,13 +245,10 @@ def env(admin: Client):
 
 # ── The two no-op guarantees ────────────────────────────────────────────────
 # This is the money-path requirement: shipping the migration must not move a
-# single existing number. Both halves matter — setting a shop-wide default is
-# ALSO a no-op until some line opts in, which is what makes it safe to turn on
-# before touching any BOM.
+# single existing number.
 
 
-def test_all_cost_lines_no_default_is_a_no_op(admin: Client, env: ChargeBasisEnv):
-    _set_default(admin, env.company_id, None)
+def test_all_cost_lines_are_a_no_op(admin: Client, env: ChargeBasisEnv):
     _set_basis(admin, env.bracket_bom_id, "cost")
 
     for part_id in (env.bar_id, env.bracket_id, env.assembly_id):
@@ -245,39 +256,44 @@ def test_all_cost_lines_no_default_is_a_no_op(admin: Client, env: ChargeBasisEnv
             assert _cost(admin, part_id, qty) == _charge_base(admin, part_id, qty)
 
 
-def test_default_alone_changes_nothing(admin: Client, env: ChargeBasisEnv):
-    # A shop can set its default markup before touching a single BOM line and
-    # nothing reprices. The default is only ever consulted on a 'price' line.
-    _set_basis(admin, env.bracket_bom_id, "cost")
-    _set_default(admin, env.company_id, None)
-    before = {
-        p: [_charge_base(admin, p, q) for q in (1, 10, 100)]
-        for p in (env.bar_id, env.bracket_id, env.assembly_id)
-    }
+def test_starter_markups_never_move_a_rollup(admin: Client, env: ChargeBasisEnv):
+    # The settings a shop is most likely to change, changed as hard as they can
+    # be — and every number stays put, on cost lines AND price lines. This is the
+    # test that would fail if a read-time fallback ever crept back into the
+    # rollup, which is the failure mode that got markup_rates deleted.
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": env.bar_id,
+            "company_id": env.company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "markup_percent": 10,
+        }
+    ).execute()
+    parts = (env.bar_id, env.bracket_id, env.assembly_id)
 
-    _set_default(admin, env.company_id, 25)
-    after = {
-        p: [_charge_base(admin, p, q) for q in (1, 10, 100)]
-        for p in (env.bar_id, env.bracket_id, env.assembly_id)
-    }
+    _set_starter_markups(admin, env.company_id, made=0, bought=0)
+    before = {p: [_charge_base(admin, p, q) for q in (1, 10, 100)] for p in parts}
+
+    _set_starter_markups(admin, env.company_id, made=99, bought=99)
+    after = {p: [_charge_base(admin, p, q) for q in (1, 10, 100)] for p in parts}
     assert before == after
 
 
-# ── The price rungs ─────────────────────────────────────────────────────────
+# ── The price rule: the child's own tier, and nothing else ──────────────────
 
 
-def test_bought_child_with_no_tier_uses_the_company_default(
+def test_child_with_no_tier_has_no_price_even_with_starter_markups_set(
     admin: Client, env: ChargeBasisEnv
 ):
-    priced = _price(admin, env.bar_id, 1)
-    assert priced is not None
-    assert _num(priced["unit_price"]) == Decimal("12.50")  # 10 x 1.25
-    assert priced["rate_source"] == "company_default"
-    assert _num(priced["markup_percent"]) == Decimal("25")
+    # BAR is bought, has a cost, and the shop's bought starter markup is 25% —
+    # and it still resolves to NO ROW, because that setting is a seed for a first
+    # tier, not a rule the rollup consults.
+    assert _price(admin, env.bar_id, 1) is None
 
 
-def test_own_tier_beats_the_company_default(admin: Client, env: ChargeBasisEnv):
-    # Explicit beats default: give BAR a 10% tier and the shop-wide 25% steps aside.
+def test_price_comes_from_the_child_own_tier(admin: Client, env: ChargeBasisEnv):
+    # Give BAR a 10% tier. That, not the shop's 25%, is what the parent pays.
     admin.table("part_pricing_tiers").insert(
         {
             "part_id": env.bar_id,
@@ -290,18 +306,13 @@ def test_own_tier_beats_the_company_default(admin: Client, env: ChargeBasisEnv):
 
     priced = _price(admin, env.bar_id, 1)
     assert priced is not None
-    assert _num(priced["unit_price"]) == Decimal("11.00")
-    assert priced["rate_source"] == "tier"
+    assert _num(priced["unit_price"]) == Decimal("11.00")  # 10 x 1.10, not x 1.25
     assert _num(priced["markup_percent"]) == Decimal("10")
 
 
-def test_no_tier_and_no_default_is_unpriceable_never_cost(
-    admin: Client, env: ChargeBasisEnv
-):
-    _set_default(admin, env.company_id, None)
-
-    # No rung applies, so the price resolver returns NO ROW at all — not the
-    # cost, which is the silent fallback this rule exists to forbid.
+def test_no_tier_is_unpriceable_never_cost(admin: Client, env: ChargeBasisEnv):
+    # No tier, so the price resolver returns NO ROW at all — not the cost, which
+    # is the silent fallback this rule exists to forbid.
     assert _price(admin, env.bar_id, 1) is None
     # And the gap propagates: BRACKET charges BAR at price, so BRACKET cannot be
     # costed either.
@@ -313,28 +324,43 @@ def test_no_tier_and_no_default_is_unpriceable_never_cost(
 # ── The nesting rule, and no double-marking ─────────────────────────────────
 
 
+def _price_bar_at_25(admin: Client, env: ChargeBasisEnv) -> None:
+    """BAR's own 25% tier. It used to get this number from a shop-wide default;
+    now it carries it itself, which is the whole point of the revision."""
+    admin.table("part_pricing_tiers").insert(
+        {
+            "part_id": env.bar_id,
+            "company_id": env.company_id,
+            "sequence": 10,
+            "quantity": 1,
+            "markup_percent": 25,
+        }
+    ).execute()
+
+
 def test_cost_line_carries_the_child_charge_base_exactly_once(
     admin: Client, env: ChargeBasisEnv
 ):
+    _price_bar_at_25(admin, env)
     # BRACKET: true 40 (30 labor + 10 bar), charge base 42.50 (30 + 10 x 1.25).
     assert _cost(admin, env.bracket_id, 1) == Decimal("40")
     assert _charge_base(admin, env.bracket_id, 1) == Decimal("42.50")
 
     # ASSEMBLY takes BRACKET at OUR COST — which means BRACKET's charge base, so
     # the material markup survives the hop. It is NOT re-marked: 62.50, not
-    # 20 + 42.50 x 1.25. The default never applies to a made part.
+    # 20 + 42.50 x 1.25.
     assert _charge_base(admin, env.assembly_id, 1) == Decimal("62.50")
     assert _cost(admin, env.assembly_id, 1) == Decimal("60")
 
     priced = _price(admin, env.assembly_id, 1)
     assert priced is not None
     assert _num(priced["unit_price"]) == Decimal("87.50")  # 62.50 x 1.40
-    assert priced["rate_source"] == "tier"
 
 
 def test_stacking_is_allowed_and_visible(admin: Client, env: ChargeBasisEnv):
     # BRACKET charged at price into ASSEMBLY, with its own 15% tier: material
     # 25% + bracket 15% + assembly 40% all compound, deliberately.
+    _price_bar_at_25(admin, env)
     admin.table("part_pricing_tiers").insert(
         {
             "part_id": env.bracket_id,
@@ -358,10 +384,14 @@ def test_stacking_is_allowed_and_visible(admin: Client, env: ChargeBasisEnv):
     assert _cost(admin, env.assembly_id, 1) == Decimal("60")
 
 
-def test_default_never_covers_a_made_child(admin: Client, env: ChargeBasisEnv):
-    # BRACKET charged at price with NO tier of its own. It is made, so the
-    # shop-wide default does not apply and this stays a gap — marking up
-    # in-house work is a deliberate decision that needs its own tier.
+def test_a_made_child_at_price_needs_its_own_tier_too(
+    admin: Client, env: ChargeBasisEnv
+):
+    # BRACKET charged at price with NO tier of its own. Nothing covers for it —
+    # not the shop's made starter markup (40% on this fixture), which is a seed
+    # for a first tier and not a rule. Marking up in-house work is a deliberate
+    # decision that lives on that part's Pricing page.
+    _price_bar_at_25(admin, env)
     _set_basis(admin, env.asm_bom_id, "price")
     assert _price(admin, env.bracket_id, 1) is None
     assert _charge_base(admin, env.assembly_id, 1) is None

@@ -32,15 +32,15 @@ export interface Company {
   // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
   settings?: Record<string, unknown> | null;
   /**
-   * Shop-wide default material markup % (#727). Applied to a BOUGHT material
-   * charged at price on a BOM line that has no pricing tier of its own.
+   * The markup % a part's FIRST pricing tier is created with, split by source
+   * (#727). Read once, when that tier is written; never by the cost rollup, so
+   * changing either never reprices a part that already has tiers.
    *
-   * NULL = unset, and unset is meaningful: such a line is un-priceable and
-   * surfaces as a gap rather than silently falling back to cost. A real column
-   * rather than a `settings.defaults` entry because the cost engine reads it in
-   * SQL — see the docstring on `setCompanyDefaultMaterialMarkup`.
+   * Both default to 0 — price = cost — which is what every company had before
+   * the setting existed. See `setCompanyStarterMarkups`.
    */
-  default_material_markup_percent?: number | null;
+  default_markup_made_percent?: number;
+  default_markup_bought_percent?: number;
 }
 
 /**
@@ -344,7 +344,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_material_markup_percent'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_markup_made_percent, default_markup_bought_percent'
     )
     .eq('id', companyId)
     .single();
@@ -610,52 +610,67 @@ export async function setCompanyDefaultPaymentTerms(
 }
 
 /**
- * The shop-wide default material markup % — what a BOUGHT material is marked up
- * by when a BOM line charges it at price and that material has no pricing tier
- * of its own (#727). Pass null to clear it.
+ * The two shop-wide starter markups: what a MADE part and a BOUGHT part get on
+ * their first pricing tier when that tier is created for them (#727).
  *
- * **A real column, not a `settings.defaults` entry**, unlike every other default
- * in this file. Three reasons, any one disqualifying:
- *   1. The engine that reads it is SQL (`compute_part_price_explain_at_qty`). A
- *      jsonb path would put the clamp/fallback semantics in `lib/companyDefaults`
- *      and force a second copy of them into the rollup, with nothing enforcing
- *      agreement — two definitions of a money rule.
- *   2. `KNOWN_DEFAULTS` is integer-only (`coerceInt`, a `type="number"` whole-number
- *      field). `part_pricing_tiers.markup_percent` is numeric(10,6) precisely
- *      because 0.01% quantization visibly moved the price.
- *   3. That registry is dense — every descriptor has a non-null fallback — so
- *      "unset" cannot be expressed, and unset is the whole no-op guarantee for
- *      companies that never touch this feature.
+ * **These are seed values, not a pricing rule.** They are read at exactly one
+ * moment — when a part with a cost has no tiers yet — and written into that
+ * part's own tier row. Nothing reads them afterwards, so raising the made markup
+ * to 30% reprices nothing that already exists; it changes what the next part
+ * starts at. A part's price lives on its own Pricing page, which is the only
+ * place the rollup looks.
  *
- * **Provenance is not optional here.** This is a shared default resolved at READ
- * time, which is the shape of the `markup_rates` module deleted in July 2026. It
- * only stays honest because every surface that uses it says so by name, and
- * because a committed quote snapshots the resolved rate and its source — so
- * changing this number never rewrites what an old quote says about itself.
+ * That write-time boundary is deliberate and load-bearing. `lib/companyDefaults`
+ * records why shop-wide payment terms are safe — resolved once into the quote's
+ * own column, with the form naming where the value came from — and calls that
+ * "the whole difference from the markup_rates module deleted in July 2026, where
+ * a shared default resolved at READ time with nothing on screen to say where the
+ * number came from." An earlier draft of #727 had exactly that read-time shape.
+ *
+ * Real columns rather than `settings.defaults` / KNOWN_DEFAULTS because that
+ * registry's `coerceInt` rounds to a whole number, and a markup is
+ * numeric(10,6): a shop selling at 22.5% must not be seeded at 23%.
  */
-export async function setCompanyDefaultMaterialMarkup(
+export interface CompanyStarterMarkups {
+  made: number;
+  bought: number;
+}
+
+export function readCompanyStarterMarkups(
+  company: Pick<Company, 'default_markup_made_percent' | 'default_markup_bought_percent'> | null | undefined,
+): CompanyStarterMarkups {
+  return {
+    made: company?.default_markup_made_percent ?? 0,
+    bought: company?.default_markup_bought_percent ?? 0,
+  };
+}
+
+export async function setCompanyStarterMarkups(
   companyId: string,
-  markupPercent: number | null,
-): Promise<number | null> {
-  if (markupPercent !== null && (!Number.isFinite(markupPercent) || markupPercent < 0)) {
-    throw new Error('Default material markup must be zero or greater.');
+  markups: CompanyStarterMarkups,
+): Promise<CompanyStarterMarkups> {
+  for (const [label, value] of Object.entries(markups)) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`The ${label}-part starter markup must be zero or greater.`);
+    }
   }
   const supabase = getSupabase();
   const { error } = await supabase
     .from('companies')
     .update({
-      default_material_markup_percent: markupPercent,
+      default_markup_made_percent: markups.made,
+      default_markup_bought_percent: markups.bought,
       updated_at: new Date().toISOString(),
     })
     .eq('id', companyId);
   if (error) {
-    console.error('Error updating default material markup:', error);
+    console.error('Error updating starter markups:', error);
     throw toFriendlyError(error, {
-      entity: 'material markup',
-      fallback: 'Failed to save the default material markup.',
+      entity: 'starter markup',
+      fallback: 'Failed to save the default markups.',
     });
   }
-  return markupPercent;
+  return markups;
 }
 
 /**

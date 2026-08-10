@@ -15,7 +15,8 @@ import posthog from 'posthog-js';
 import {
   getCompany,
   getCustomPaymentTerms,
-  setCompanyDefaultMaterialMarkup,
+  readCompanyStarterMarkups,
+  setCompanyStarterMarkups,
   setCompanyDefaultPaymentTerms,
   updateCompanyDefaults,
 } from '@/utils/companyAccess';
@@ -73,11 +74,11 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [terms, setTerms] = useState('');
-  // Blank string = unset, which is meaningful here: it means a material charged
-  // at price must carry its own pricing tier. Kept as a string so "0%" (charge
-  // material at cost, deliberately) stays distinguishable from "not set".
-  const [materialMarkup, setMaterialMarkup] = useState('');
-  const [materialMarkupBaseline, setMaterialMarkupBaseline] = useState('');
+  // Strings so a half-typed "22." survives a render. Both are numeric(10,6) and
+  // NOT NULL — 0 is a real value, not "unset".
+  const [madeMarkup, setMadeMarkup] = useState('0');
+  const [boughtMarkup, setBoughtMarkup] = useState('0');
+  const [markupBaseline, setMarkupBaseline] = useState({ made: '0', bought: '0' });
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -95,10 +96,10 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
         if (cancelled) return;
         setForm(toFormState(readCompanyDefaults(company)));
         setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
-        const markup = company?.default_material_markup_percent;
-        const markupStr = markup === null || markup === undefined ? '' : String(markup);
-        setMaterialMarkup(markupStr);
-        setMaterialMarkupBaseline(markupStr);
+        const starters = readCompanyStarterMarkups(company);
+        setMadeMarkup(String(starters.made));
+        setBoughtMarkup(String(starters.bought));
+        setMarkupBaseline({ made: String(starters.made), bought: String(starters.bought) });
         setSavedTerms(customTerms);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
@@ -134,8 +135,10 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
     },
     {},
   );
-  const materialMarkupError = materialMarkupFieldError(materialMarkup);
-  const hasErrors = Object.keys(errors).length > 0 || materialMarkupError !== null;
+  const madeMarkupError = markupFieldError(madeMarkup);
+  const boughtMarkupError = markupFieldError(boughtMarkup);
+  const hasErrors =
+    Object.keys(errors).length > 0 || madeMarkupError !== null || boughtMarkupError !== null;
 
   const handleSave = async () => {
     if (hasErrors) {
@@ -155,17 +158,22 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       // second read happens before the first write lands and one silently clobbers the other.
       await updateCompanyDefaults(companyId, patch);
       setTerms((await setCompanyDefaultPaymentTerms(companyId, terms)) ?? '');
-      // A real column, so this one is an independent write — no settings
+      // Real columns, so this is an independent write — no settings
       // read-modify-write to serialize against.
-      const trimmedMarkup = materialMarkup.trim();
-      const nextMarkup = trimmedMarkup === '' ? null : Number(trimmedMarkup);
-      if (trimmedMarkup !== materialMarkupBaseline.trim()) {
-        await setCompanyDefaultMaterialMarkup(companyId, nextMarkup);
-        posthog.capture('material markup default set', {
-          had_previous: materialMarkupBaseline.trim() !== '',
-          cleared: nextMarkup === null,
+      const nextMade = madeMarkup.trim();
+      const nextBought = boughtMarkup.trim();
+      if (nextMade !== markupBaseline.made || nextBought !== markupBaseline.bought) {
+        await setCompanyStarterMarkups(companyId, {
+          made: Number(nextMade),
+          bought: Number(nextBought),
         });
-        setMaterialMarkupBaseline(trimmedMarkup);
+        posthog.capture('starter markups set', {
+          made_changed: nextMade !== markupBaseline.made,
+          bought_changed: nextBought !== markupBaseline.bought,
+          made_is_zero: Number(nextMade) === 0,
+          bought_is_zero: Number(nextBought) === 0,
+        });
+        setMarkupBaseline({ made: nextMade, bought: nextBought });
       }
       setSuccess(true);
     } catch (err) {
@@ -280,49 +288,78 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
           </Box>
 
           <Divider sx={{ my: 2 }} />
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 2,
-              flexWrap: 'wrap',
-            }}
-          >
-            <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                Default material markup
-              </Typography>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Applied to purchased materials on BOM lines set to charge at price, when
-                that material has no pricing tier of its own. Leave blank to require a
-                tier on every material. Never applies to parts you make — mark those up
-                with their own pricing tier.
-              </Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            Starting markup on a new part
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            When a part first has a cost, its Pricing card creates a tier for it at this
+            markup, so the part can be quoted straight away. It is a starting point, not a
+            rule: each part&apos;s Pricing card owns its price from then on, and changing
+            these never reprices a part you have already set up. Use 0 to start at cost.
+          </Typography>
+
+          {(
+            [
+              {
+                key: 'made' as const,
+                label: 'Parts you make',
+                help: 'Applied to a made part’s first tier.',
+                value: madeMarkup,
+                setValue: setMadeMarkup,
+                error: madeMarkupError,
+              },
+              {
+                key: 'bought' as const,
+                label: 'Parts you buy',
+                help: 'Applied to a bought part’s first tier — including a purchased material a BOM line charges at its marked-up price.',
+                value: boughtMarkup,
+                setValue: setBoughtMarkup,
+                error: boughtMarkupError,
+              },
+            ]
+          ).map((f) => (
+            <Box
+              key={f.key}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+                flexWrap: 'wrap',
+                mb: 1.5,
+              }}
+            >
+              <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {f.label}
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {f.help}
+                </Typography>
+              </Box>
+              <TextField
+                value={f.value}
+                onChange={(e) => {
+                  f.setValue(e.target.value);
+                  setSuccess(false);
+                }}
+                size="small"
+                type="number"
+                inputProps={{
+                  min: 0,
+                  step: 'any',
+                  inputMode: 'decimal',
+                  'aria-label': `Starting markup — ${f.label}`,
+                }}
+                error={Boolean(f.error)}
+                helperText={f.error}
+                sx={{ width: 160 }}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+              />
             </Box>
-            <TextField
-              value={materialMarkup}
-              onChange={(e) => {
-                setMaterialMarkup(e.target.value);
-                setSuccess(false);
-              }}
-              size="small"
-              type="number"
-              placeholder="Not set"
-              inputProps={{
-                min: 0,
-                step: 'any',
-                inputMode: 'decimal',
-                'aria-label': 'Default material markup',
-              }}
-              error={Boolean(materialMarkupError)}
-              helperText={materialMarkupError}
-              sx={{ width: 160 }}
-              InputProps={{
-                endAdornment: <InputAdornment position="end">%</InputAdornment>,
-              }}
-            />
-          </Box>
+          ))}
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
             <Button
@@ -341,13 +378,14 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
 }
 
 /**
- * Blank is valid and means "unset". Anything else must be a number >= 0 — the
- * column is numeric(10,6), deliberately not the whole-number shape KNOWN_DEFAULTS
- * enforces, because 0.01% of markup visibly moves a price.
+ * A number >= 0. Decimals allowed on purpose — the column is numeric(10,6),
+ * deliberately not the whole-number shape KNOWN_DEFAULTS enforces, because
+ * 0.01% of markup visibly moves a price. Blank is not valid: 0 is how you say
+ * "sell at cost", and there is no third state.
  */
-function materialMarkupFieldError(raw: string): string | null {
+function markupFieldError(raw: string): string | null {
   const trimmed = raw.trim();
-  if (trimmed === '') return null;
+  if (trimmed === '') return 'Required — use 0 to sell at cost';
   const n = Number(trimmed);
   if (!Number.isFinite(n)) return 'Enter a number';
   if (n < 0) return 'Cannot be negative';

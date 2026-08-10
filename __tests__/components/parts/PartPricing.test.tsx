@@ -12,6 +12,7 @@ const mockGetComputedPartCost = vi.fn();
 const mockUpdatePartCostingBatchQuantity = vi.fn();
 const mockAddPartPricingNote = vi.fn();
 const mockGetCurrentMember = vi.fn();
+const mockGetCompany = vi.fn();
 
 vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersForPart: (...a: unknown[]) => mockGetTiersForPart(...a),
@@ -32,6 +33,16 @@ vi.mock('@/utils/partsAccess', () => ({
 }));
 vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: (...a: unknown[]) => mockGetCurrentMember(...a),
+}));
+vi.mock('@/utils/companyAccess', () => ({
+  getCompany: (...a: unknown[]) => mockGetCompany(...a),
+  readCompanyStarterMarkups: (c: {
+    default_markup_made_percent?: number;
+    default_markup_bought_percent?: number;
+  } | null) => ({
+    made: c?.default_markup_made_percent ?? 0,
+    bought: c?.default_markup_bought_percent ?? 0,
+  }),
 }));
 
 const part = {
@@ -64,6 +75,10 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     mockGetComputedPartCost.mockResolvedValue(15);
     mockReplaceTiersForPart.mockResolvedValue(undefined);
     mockGetCurrentMember.mockResolvedValue(null);
+    mockGetCompany.mockResolvedValue({
+      default_markup_made_percent: 0,
+      default_markup_bought_percent: 0,
+    });
   });
 
   /** The Min qty box for the first tier row. */
@@ -324,12 +339,14 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
 // Before this, adding the first operation or material left the part costed but
 // NOT quotable — `get_priceable_part_ids` wants a tier carrying a non-null
 // markup, and the card only offered an empty row someone had to fill in and
-// save. The card now writes that row itself at 0%.
+// save. The card now writes that row itself, at the shop's starting markup for
+// the part's source (companies.default_markup_made/bought_percent, 0 by default).
 //
 // It is the single auto-save on a card whose standard is explicit Save, so what
-// these tests pin down is mostly where it must NOT fire.
+// these tests pin down is mostly where it must NOT fire — plus that the number
+// comes from the setting and says so.
 // ============================================================================
-describe('PartPricing — starter tier at 0% markup', () => {
+describe('PartPricing — starter tier from the shop default', () => {
   const user = userEvent.setup();
 
   /** A breakdown with a real priced operation — i.e. there is a cost to mark up. */
@@ -363,11 +380,15 @@ describe('PartPricing — starter tier at 0% markup', () => {
     mockGetComputedPartCost.mockResolvedValue(10);
     mockReplaceTiersForPart.mockResolvedValue(undefined);
     mockGetCurrentMember.mockResolvedValue({ id: 'u1' });
+    mockGetCompany.mockResolvedValue({
+      default_markup_made_percent: 0,
+      default_markup_bought_percent: 0,
+    });
   });
 
   const starterCall = () => mockReplaceTiersForPart.mock.calls[0];
 
-  it('writes one 0% tier at min qty 1 once the part has a priced operation', async () => {
+  it('writes one tier at min qty 1 once the part has a priced operation', async () => {
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
@@ -421,6 +442,41 @@ describe('PartPricing — starter tier at 0% markup', () => {
     const body = mockAddPartPricingNote.mock.calls[0][3] as string;
     expect(body).toMatch(/automatically/i);
     expect(body).toMatch(/0% markup/);
+    expect(body).toMatch(/shop default/i);
+  });
+
+  it('uses the MADE default for a made part', async () => {
+    mockGetCompany.mockResolvedValue({
+      default_markup_made_percent: 35,
+      default_markup_bought_percent: 12,
+    });
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 35 }]);
+  });
+
+  it('uses the BOUGHT default for a bought part', async () => {
+    mockGetCompany.mockResolvedValue({
+      default_markup_made_percent: 35,
+      default_markup_bought_percent: 12,
+    });
+    const bought = { ...part, source: 'bought' } as Part;
+    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 12 }]);
+  });
+
+  it('writes nothing when the company row cannot be read', async () => {
+    // Guessing 0 would write a markup the shop never chose. Better to leave the
+    // card exactly as it behaved before the feature existed.
+    mockGetCompany.mockRejectedValue(new Error('offline'));
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByText('Pricing');
+    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
+    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
   });
 
   it('does NOT fire for a part with a routing row but no priced work', async () => {
@@ -488,19 +544,35 @@ describe('PartPricing — starter tier at 0% markup', () => {
     expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
   });
 
-  it('says the part sells at cost, and stops saying it once a markup is typed', async () => {
+  it('names Settings as the source, and says what 0% means in money', async () => {
     mockGetTiersForPart.mockResolvedValue([
       { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
     ]);
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     await screen.findByText(/sells for what it\s+costs/i);
+    await screen.findByText(/starting markup for parts you\s+make/i);
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
 
-    // Typing a real markup is a decision; the nudge has done its job.
+    // Changing it is a decision about THIS part; the hint has done its job.
     const markupBox = (await screen.findAllByRole('textbox'))[1];
     await user.clear(markupBox);
     await user.type(markupBox, '30');
 
     await waitFor(() => expect(screen.queryByText(/sells for what it\s+costs/i)).toBeNull());
+  });
+
+  it('at a non-zero default it names the source without the sells-at-cost line', async () => {
+    mockGetCompany.mockResolvedValue({
+      default_markup_made_percent: 35,
+      default_markup_bought_percent: 12,
+    });
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 35 },
+    ]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByText(/Ready to quote at 35% markup/);
+    expect(screen.queryByText(/sells for what it costs/i)).toBeNull();
   });
 });

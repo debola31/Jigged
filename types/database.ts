@@ -173,7 +173,8 @@ export type Database = {
           city: string | null
           country: string | null
           created_at: string | null
-          default_material_markup_percent: number | null
+          default_markup_bought_percent: number
+          default_markup_made_percent: number
           demo_company_id: string | null
           email: string | null
           id: string
@@ -194,7 +195,8 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_material_markup_percent?: number | null
+          default_markup_bought_percent?: number
+          default_markup_made_percent?: number
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -215,7 +217,8 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_material_markup_percent?: number | null
+          default_markup_bought_percent?: number
+          default_markup_made_percent?: number
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -2564,7 +2567,6 @@ export type Database = {
         Row: {
           charge_basis: string
           charge_markup_percent: number | null
-          charge_rate_source: string | null
           company_id: string
           cost_per_unit: number | null
           created_at: string
@@ -2584,7 +2586,6 @@ export type Database = {
         Insert: {
           charge_basis?: string
           charge_markup_percent?: number | null
-          charge_rate_source?: string | null
           company_id: string
           cost_per_unit?: number | null
           created_at?: string
@@ -2604,7 +2605,6 @@ export type Database = {
         Update: {
           charge_basis?: string
           charge_markup_percent?: number | null
-          charge_rate_source?: string | null
           company_id?: string
           cost_per_unit?: number | null
           created_at?: string
@@ -3634,7 +3634,6 @@ export type Database = {
         Args: { p_part_id: string; p_qty: number }
         Returns: {
           markup_percent: number
-          rate_source: string
           unit_price: number
         }[]
       }

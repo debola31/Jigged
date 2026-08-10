@@ -18,18 +18,18 @@
  *                               '{defaults,quote_validity_days}', '20')
  *    WHERE id = '<company-uuid>';
  *
- * ONE DEFAULT DELIBERATELY LIVES OUTSIDE ALL OF THIS: the shop-wide material
- * markup (`companies.default_material_markup_percent`, #727). It looks exactly
- * like a KNOWN_DEFAULTS entry — a bounded per-tenant number — and it is a real
- * column anyway, for three reasons: the SQL cost rollup reads it (a jsonb path
- * would force a second copy of the clamp/fallback rules into the engine, with
- * nothing keeping the two in agreement); `coerceInt` below rounds to a whole
- * number, and a markup is numeric(10,6) precisely because 0.01% moves a price;
- * and this registry is dense — every descriptor has a non-null `fallback` — so
- * it cannot express "unset", which is the state that means "a material charged
- * at price must carry its own pricing tier". Do not "tidy" it in here.
- * Writer + full rationale: `setCompanyDefaultMaterialMarkup` in
- * `utils/companyAccess.ts`.
+ * TWO DEFAULTS DELIBERATELY LIVE OUTSIDE ALL OF THIS: the shop's starting
+ * markups for new parts (`companies.default_markup_made_percent` /
+ * `default_markup_bought_percent`, #727). They look exactly like KNOWN_DEFAULTS
+ * entries — bounded per-tenant numbers — and they are real columns anyway
+ * because `coerceInt` below rounds to a whole number, and a markup is
+ * numeric(10,6) precisely because 0.01% moves a price. A shop selling at 22.5%
+ * must not be seeded at 23%. Do not "tidy" them in here.
+ *
+ * They follow the same read-ONCE-at-write-time discipline the payment-terms
+ * note below describes, for the same reason: resolved into a part's own pricing
+ * tier when it is created, never consulted again. Writer + full rationale:
+ * `setCompanyStarterMarkups` in `utils/companyAccess.ts`.
  */
 
 import type { Company } from '@/utils/companyAccess';

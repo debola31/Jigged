@@ -16,12 +16,20 @@ const getCompany = vi.hoisted(() => vi.fn());
 const getCustomPaymentTerms = vi.hoisted(() => vi.fn());
 const updateCompanyDefaults = vi.hoisted(() => vi.fn());
 const setCompanyDefaultPaymentTerms = vi.hoisted(() => vi.fn());
+const setCompanyStarterMarkups = vi.hoisted(() => vi.fn());
 
 vi.mock('@/utils/companyAccess', () => ({
   getCompany,
   getCustomPaymentTerms,
   updateCompanyDefaults,
   setCompanyDefaultPaymentTerms,
+  setCompanyStarterMarkups,
+  // Not mocked away: it is a pure read over the company row, and stubbing it
+  // would hide a mismatch between what the card renders and what the column is.
+  readCompanyStarterMarkups: (c: { default_markup_made_percent?: number; default_markup_bought_percent?: number } | null) => ({
+    made: c?.default_markup_made_percent ?? 0,
+    bought: c?.default_markup_bought_percent ?? 0,
+  }),
 }));
 
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';

@@ -26,8 +26,7 @@ export interface BomLine {
    * What this child contributes to the parent's rollup (#727).
    *
    * `'cost'` (default) — our cost of the child, i.e. its charge base.
-   * `'price'` — the child's marked-up price: its own pricing tier, else the
-   * company's default material markup if the child is bought.
+   * `'price'` — the child's marked-up price, from its own pricing tier.
    *
    * Per-line, not per-part: a shop may charge material at price on customer
    * jobs and at cost on internal stock-making work orders.
@@ -39,9 +38,6 @@ export interface BomLine {
 
 /** What a BOM line contributes to its parent's rollup. */
 export type ChargeBasis = 'cost' | 'price';
-
-/** Which rung of the price rule produced a `'price'` line's rate. */
-export type ChargeRateSource = 'tier' | 'company_default';
 
 export const CHARGE_BASIS_LABELS: Record<ChargeBasis, string> = {
   cost: 'Our cost',

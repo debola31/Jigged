@@ -7,7 +7,7 @@ import {
   getPartCostExplain,
   getPartChargePrice,
 } from '@/utils/partsAccess';
-import type { ChargeBasis, ChargeRateSource } from '@/types/bom';
+import type { ChargeBasis } from '@/types/bom';
 
 export interface CostWarning {
   type:
@@ -74,9 +74,7 @@ export interface MaterialItem {
   true_cost: number;
   /** What this line contributes to the parent's rollup (#727). */
   charge_basis: ChargeBasis;
-  /** Which rung produced the charged rate; null on a `'cost'` line. */
-  charge_rate_source: ChargeRateSource | null;
-  /** The markup % actually applied; null on a `'cost'` line. */
+  /** The markup % the child's tier applied; null on a `'cost'` line. */
   charge_markup_percent: number | null;
   /** `quantity` converted to the child's primary unit — per parent unit. */
   qty_in_primary: number;
@@ -383,18 +381,16 @@ export async function calculateRoutingCost(
       }
 
       // What this line actually charges the parent. On a 'price' line the rate
-      // is the child's marked-up price and the RUNG that produced it comes back
-      // from SQL — the three-rung rule (own tier → shop default for bought →
-      // nothing) has exactly one implementation, and re-deriving it here would
-      // make two, in two languages, on a money path.
+      // is the child's marked-up price, resolved in SQL against the child's own
+      // pricing tier — one implementation of the tier-band rule, not a second
+      // copy of it here in another language on a money path.
       let chargedUnitRate = childChargeBase;
-      let chargeRateSource: ChargeRateSource | null = null;
       let chargeMarkupPercent: number | null = null;
       if (line.charge_basis === 'price') {
         const priced = await getPartChargePrice(child.id, childValQty).catch(() => null);
         if (!priced || priced.unit_price === null) {
           const detail =
-            'is charged at price but has no markup — add a pricing tier on this material, or set a default material markup in Settings';
+            'is charged at price but has no markup — add a pricing tier on this material';
           warnings.push({
             type: 'missing_child_markup',
             message: `${itemName}: ${detail}`,
@@ -408,7 +404,6 @@ export async function calculateRoutingCost(
           continue;
         }
         chargedUnitRate = priced.unit_price;
-        chargeRateSource = priced.rate_source;
         chargeMarkupPercent = priced.markup_percent;
       }
 
@@ -429,7 +424,6 @@ export async function calculateRoutingCost(
         true_cost_per_unit: Math.round(childTrueCost * 10000) / 10000,
         true_cost: Math.round(perParentUnit(childTrueCost) * 100) / 100,
         charge_basis: line.charge_basis,
-        charge_rate_source: chargeRateSource,
         charge_markup_percent: chargeMarkupPercent,
         qty_in_primary: qtyInPrimary,
         consume_whole_units: line.consume_whole_units,

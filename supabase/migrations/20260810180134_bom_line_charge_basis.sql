@@ -23,10 +23,8 @@
 --                                            ? charge_base(Cᵢ, valqtyᵢ)
 --                                            : price(Cᵢ, valqtyᵢ) )
 --
---   price(C,q):  own pricing tier            → source 'tier'
---                else company default (BOUGHT children only)
---                                             → source 'company_default'
---                else NULL                    → un-priceable, surfaced as a gap
+--   price(C,q):  the child's own pricing tier — and nothing else.
+--                No tier → NULL → un-priceable, surfaced as a gap.
 --
 -- A line's basis governs how that child is charged into its parent AT EVERY LEVEL:
 -- a 'cost' line contributes the child's CHARGE BASE (not its true cost), so a
@@ -34,18 +32,20 @@
 -- evaporating one level higher. The two modes are therefore one function body with
 -- one flag, not two engines — see part_rollup_at_qty.
 --
--- NO-OP GUARANTEE. Every line defaults to 'cost' and every company's default
--- markup starts NULL, so charge_base ≡ true_cost and compute_part_cost_at_qty
--- returns exactly what it returned before this migration. No BOM changes value; no
--- price moves. Asserted directly by the integration tests.
+-- NO-OP GUARANTEE. Every line defaults to 'cost', so charge_base ≡ true_cost and
+-- compute_part_cost_at_qty returns exactly what it returned before this
+-- migration. No BOM changes value; no price moves. The two markup defaults start
+-- at 0 and are never read by the rollup, so they cannot move one either.
+-- Asserted directly by the integration tests.
 --
--- BOUGHT-ONLY DEFAULT. The company default applies to bought children only. Every
--- incumbent (Fulcrum, ProShop, JobBOSS²) scopes material markup to out-of-pocket
--- purchased cost, never in-house labor; the default already propagates upward from
--- bought leaves via the nesting rule, so applying it again at a made mid-level part
--- would double-mark the embedded material AND mark up labor nobody declared.
--- Marking up in-house work is deliberate transfer pricing and needs an explicit
--- tier on that part.
+-- ONE PLACE TO SET A MARKUP. A part's markup lives on its own Pricing page, and
+-- that is the only thing this rollup reads. An earlier draft added a shop-wide
+-- material markup consulted INSIDE the rollup; it is gone, because a shared
+-- default resolved at read time is precisely what got the markup_rates module
+-- deleted in July 2026. The setup problem it was solving — a new part being
+-- uncostable-then-unquotable until someone types a number — is solved instead by
+-- companies.default_markup_made_percent / _bought_percent, which seed a part's
+-- FIRST TIER when it is created and are never read again.
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- 1. SCHEMA
@@ -57,46 +57,57 @@ ALTER TABLE public.parts_bom
     CHECK (charge_basis IN ('cost', 'price'));
 
 COMMENT ON COLUMN public.parts_bom.charge_basis IS
-  'What this child contributes to the parent''s rollup: ''cost'' (default) = the child''s charge base, i.e. our cost of it; ''price'' = the child''s marked-up price (its own pricing tier, else the company default material markup for bought children). Per-line by design — a shop may charge material at price on customer jobs and at cost on internal stock-making work orders.';
+  'What this child contributes to the parent''s rollup: ''cost'' (default) = the child''s charge base, i.e. our cost of it; ''price'' = the child''s marked-up price, from its own pricing tier. Per-line by design — a shop may charge material at price on customer jobs and at cost on internal stock-making work orders.';
 
--- 1b. The shop-wide default material markup.
+-- 1b. The two shop-wide starter markups.
 --
--- A REAL COLUMN, not a companies.settings jsonb entry in lib/companyDefaults.ts
--- KNOWN_DEFAULTS, for three reasons — any one of them disqualifying:
---   1. The engine that reads it is THIS FILE. A jsonb path would mean the
---      clamp/fallback semantics live in the TS registry and get re-implemented in
---      SQL with nothing enforcing agreement — a second copy of a money rule.
---   2. That registry's coerceInt() rounds to a whole number. part_pricing_tiers
---      .markup_percent is numeric(10,6), widened from numeric(5,2) precisely
---      because 0.01% quantization visibly moved the price.
---   3. The registry is dense — every descriptor has a non-null fallback and
---      readCompanyDefault returns `number`. "Unset" cannot be expressed, and
---      unset-means-no-default is the entire no-op guarantee above.
--- NULL = unset = a price-basis child must carry its own pricing tier.
+-- These are NOT read by the rollup. They are read ONCE, when a part's first
+-- pricing tier is created for it (part page or CSV import), and written into
+-- that part's own tier row. From then on the part's Pricing page is the only
+-- source of truth for what it sells at, and changing these settings never moves
+-- a price that already exists.
+--
+-- That write-time boundary is the whole design. lib/companyDefaults.ts records
+-- why: shop-wide payment terms are safe because they resolve once into the
+-- quote's own column, and that is "the whole difference from the markup_rates
+-- module deleted in July 2026, where a shared default resolved at READ time with
+-- nothing on screen to say where the number came from." An earlier draft of this
+-- migration had a read-time default inside the price rung; it is gone.
+--
+-- REAL COLUMNS rather than companies.settings / KNOWN_DEFAULTS: that registry's
+-- coerceInt() rounds to a whole number, and part_pricing_tiers.markup_percent is
+-- numeric(10,6) precisely because 0.01% quantization visibly moved the price. A
+-- shop that sells at 22.5% must not be seeded at 23%.
+--
+-- NOT NULL DEFAULT 0 on both: 0 means "price = cost", which is the honest
+-- starting point and the behaviour every existing company already has. There is
+-- no "unset" state to reason about.
 ALTER TABLE public.companies
-  ADD COLUMN default_material_markup_percent numeric(10,6)
-    CHECK (default_material_markup_percent IS NULL
-           OR default_material_markup_percent >= 0);
+  ADD COLUMN default_markup_made_percent numeric(10,6) NOT NULL DEFAULT 0
+    CHECK (default_markup_made_percent >= 0),
+  ADD COLUMN default_markup_bought_percent numeric(10,6) NOT NULL DEFAULT 0
+    CHECK (default_markup_bought_percent >= 0);
 
-COMMENT ON COLUMN public.companies.default_material_markup_percent IS
-  'Shop-wide default markup % applied to a BOUGHT material charged at price on a BOM line that has no pricing tier of its own. NULL = unset: such a line is un-priceable and surfaces as a gap (no silent fallback to cost). Never applies to made parts — see the migration header.';
+COMMENT ON COLUMN public.companies.default_markup_made_percent IS
+  'Markup % written into the FIRST pricing tier of a MADE part when that tier is created for it (first cost on the part page, or CSV import). Seed value only — read at write time, never by the cost rollup, so changing it never reprices a part that already has tiers. Default 0 = price starts at cost.';
+COMMENT ON COLUMN public.companies.default_markup_bought_percent IS
+  'The same, for BOUGHT parts. Split from made because a shop marks up purchased goods and its own labour at different rates.';
 
 -- 1c. Quote snapshot fidelity.
 --
--- charge_basis + true cost alone cannot explain a price-basis line: which rung
--- fired is unrecoverable, and so is the percentage (for a made child the charged
--- and true rates have DIFFERENT bases, so charged/true - 1 ≠ markup). Both are
--- captured so a committed quote keeps saying "shop default 25%" after the setting
--- becomes 30% — the read-time-shared-default failure that got the markup_rates
--- module deleted in July 2026 is exactly what these two columns prevent.
+-- charge_basis + true cost alone cannot explain a price-basis line: the markup
+-- is NOT recoverable after the fact, because for a made child the charged and
+-- true rates have different bases, so charged/true - 1 ≠ markup. Freezing it
+-- keeps a committed quote able to state its own effective margin even after the
+-- child's tiers move.
+--
+-- There is no `charge_rate_source`: the rate comes from the child's own pricing
+-- tier, and there is no other rung it could have come from.
 ALTER TABLE public.quote_materials
   ADD COLUMN charge_basis text NOT NULL DEFAULT 'cost'
     CHECK (charge_basis IN ('cost', 'price')),
   ADD COLUMN true_cost_per_unit numeric,
   ADD COLUMN true_line_cost numeric,
-  ADD COLUMN charge_rate_source text
-    CHECK (charge_rate_source IS NULL
-           OR charge_rate_source IN ('tier', 'company_default')),
   ADD COLUMN charge_markup_percent numeric(10,6);
 
 -- Data at rest, not a read-time fallback: every existing row is a 'cost' row, so
@@ -115,10 +126,8 @@ COMMENT ON COLUMN public.quote_materials.true_cost_per_unit IS
   'The child''s TRUE cost per unit, ignoring every charge basis in the tree. The denominator for effective margin.';
 COMMENT ON COLUMN public.quote_materials.true_line_cost IS
   'Per-parent-unit contribution at the TRUE cost rate.';
-COMMENT ON COLUMN public.quote_materials.charge_rate_source IS
-  'Which rung produced the charged rate on a ''price'' line: ''tier'' (the material''s own pricing tier) or ''company_default'' (the shop-wide material markup). NULL on ''cost'' lines — nothing was resolved.';
 COMMENT ON COLUMN public.quote_materials.charge_markup_percent IS
-  'The markup % actually applied on a ''price'' line, frozen. Not derivable from charged-vs-true, and must not move when the company default later changes.';
+  'The markup % actually applied on a ''price'' line, frozen. Not derivable from charged-vs-true, and must not move when the child''s pricing tiers later change.';
 
 ALTER TABLE public.quote_line_items
   ADD COLUMN true_cost_per_unit numeric;
@@ -342,17 +351,21 @@ $function$;
 COMMENT ON FUNCTION public.part_rollup_at_qty(uuid, numeric, boolean) IS
   'THE cost/charge rollup for a part at a quantity — one body, two modes. p_apply_charge_basis=false ignores every parts_bom.charge_basis and returns TRUE COST (identical to the pre-#727 compute_part_cost_at_qty). true honors each line: a ''cost'' line contributes the child''s charge base, a ''price'' line the child''s marked-up price. Callers use the two named wrappers; this exists so there is only one implementation of the math.';
 
--- ── The price rung ────────────────────────────────────────────────────────────
--- Returns the rate AND which rung produced it. The UI and the quote snapshot both
--- need the source, and deriving it at the call site would be a second copy of the
--- rule on a money path.
+-- ── The price a child is charged at ──────────────────────────────────────────
+-- One source: the child's OWN pricing tier. There is no shop-wide fallback here
+-- — a default that resolved at read time is exactly what got the markup_rates
+-- module deleted, and the shop-wide starter markups above solve the same setup
+-- problem at write time instead, by giving every costed part a tier of its own.
+--
+-- Returns the markup alongside the rate because the quote snapshot freezes it
+-- (it is not recoverable from charged-vs-true) and deriving it at the call site
+-- would be a second copy of the rule on a money path.
 CREATE OR REPLACE FUNCTION public.compute_part_price_explain_at_qty(
     p_part_id uuid,
     p_qty numeric
 )
 RETURNS TABLE(
     unit_price     numeric,
-    rate_source    text,
     markup_percent numeric
 )
  LANGUAGE plpgsql
@@ -361,13 +374,10 @@ AS $function$
 DECLARE
     v_markup    numeric;
     v_basis_qty numeric;
-    v_source    text;
     v_base      numeric;
-    v_default   numeric;
 BEGIN
-    -- Rung 1 — the child's OWN pricing tier. Explicit beats default. Mirrors
-    -- resolveMarkupAtQty: largest quantity <= qty, floored to the lowest break
-    -- when below the ladder.
+    -- Mirrors resolveMarkupAtQty: largest quantity <= qty, floored to the lowest
+    -- break when below the ladder.
     SELECT pt.markup_percent, pt.quantity
       INTO v_markup, v_basis_qty
       FROM public.part_pricing_tiers pt
@@ -387,44 +397,25 @@ BEGIN
          LIMIT 1;
     END IF;
 
-    IF v_markup IS NOT NULL THEN
-        -- The tier's listed price holds for its whole band, so the base is
-        -- evaluated at the TIER's quantity — the number this part's own Pricing
-        -- card shows for that break (founder rule, 2026-08-07).
-        v_source := 'tier';
-    ELSE
-        -- Rung 2 — the shop-wide default, BOUGHT children only.
-        SELECT c.default_material_markup_percent
-          INTO v_default
-          FROM public.parts p
-          JOIN public.companies c ON c.id = p.company_id
-         WHERE p.id = p_part_id
-           AND p.source = 'bought';
-
-        -- Rung 3 — nothing. A gap to surface, never a silent fall back to cost.
-        IF v_default IS NULL THEN
-            RETURN;
-        END IF;
-
-        v_markup    := v_default;
-        v_source    := 'company_default';
-        -- No tier means no band to hold, so the base is evaluated at the
-        -- quantity actually being valued.
-        v_basis_qty := p_qty;
+    -- No tier, no price. A gap to surface, never a silent fall back to cost.
+    IF v_markup IS NULL THEN
+        RETURN;
     END IF;
 
+    -- The tier's listed price holds for its whole band, so the base is evaluated
+    -- at the TIER's quantity — the number this part's own Pricing card shows for
+    -- that break (founder rule, 2026-08-07).
     v_base := public.part_rollup_at_qty(p_part_id, v_basis_qty, true);
 
     unit_price     := CASE WHEN v_base IS NULL THEN NULL
                            ELSE round(v_base * (1 + v_markup / 100.0), 2) END;
-    rate_source    := v_source;
     markup_percent := v_markup;
     RETURN NEXT;
 END;
 $function$;
 
 COMMENT ON FUNCTION public.compute_part_price_explain_at_qty(uuid, numeric) IS
-  'The price a part is charged at when a BOM line charges it at price, plus WHICH rung produced it: ''tier'' (its own pricing tier, base evaluated at the tier''s own quantity per the tier-band rule) or ''company_default'' (companies.default_material_markup_percent, bought parts only, base evaluated at p_qty). Returns NO ROW when neither applies — the caller must treat that as un-priceable, never as cost.';
+  'The price a part is charged at when a BOM line charges it at price: its own pricing tier, with the base evaluated at that tier''s own quantity per the tier-band rule, plus the markup applied. Returns NO ROW when the part has no markup tier — the caller must treat that as un-priceable, never as cost. There is deliberately no shop-wide fallback: companies.default_markup_* seed a part''s FIRST TIER at write time, and are never consulted here.';
 
 CREATE OR REPLACE FUNCTION public.compute_part_price_at_qty(p_part_id uuid, p_qty numeric)
  RETURNS numeric
@@ -510,16 +501,7 @@ DECLARE
     v_missing_markups  jsonb;
     v_missing_op_rates jsonb;
     v_unit_cost        numeric;
-    v_default_markup   numeric;
 BEGIN
-    -- The shop-wide default, read once from the root part's company. A BOM tree
-    -- lives inside one company (RLS scopes every read to the caller's companies).
-    SELECT c.default_material_markup_percent
-      INTO v_default_markup
-      FROM public.parts p
-      JOIN public.companies c ON c.id = p.company_id
-     WHERE p.id = p_part_id;
-
     WITH RECURSIVE tree(part_id, part_name, source, cumulative_qty, depth, charged_at_price) AS (
         SELECT p.id, p.part_name, p.source, p_qty, 0, false
           FROM public.parts p
@@ -590,18 +572,12 @@ BEGIN
                )
     ),
     -- Markup is needed by the ROOT (the part being quoted) and by any child
-    -- CHARGED AT PRICE — its markup is what the parent pays. A bought child
-    -- covered by the shop-wide default needs no tier of its own.
+    -- CHARGED AT PRICE — its markup is what the parent pays, and there is no
+    -- shop-wide fallback to cover for a missing tier.
     markups AS (
         SELECT tr.part_id, tr.part_name, tr.source, MIN(tr.depth) AS depth
           FROM tree tr
-         WHERE (
-                   tr.depth = 0
-                   OR (
-                       tr.charged_at_price
-                       AND NOT (tr.source = 'bought' AND v_default_markup IS NOT NULL)
-                   )
-               )
+         WHERE (tr.depth = 0 OR tr.charged_at_price)
            AND NOT EXISTS (
                    SELECT 1 FROM public.part_pricing_tiers pt
                     WHERE pt.part_id = tr.part_id
@@ -679,7 +655,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.compute_part_cost_explain(uuid, numeric) IS
-  'TRUE unit cost (charge bases ignored) plus the three structural gap arrays: bought leaves with no procurement tier, parts that need a markup and lack one, and routing ops with no rate. A part needs a markup when it is the ROOT being quoted or when a BOM line charges it AT PRICE — unless it is a bought part covered by companies.default_material_markup_percent. is_priceable is the AND of the three arrays being empty, and matches get_priceable_part_ids exactly.';
+  'TRUE unit cost (charge bases ignored) plus the three structural gap arrays: bought leaves with no procurement tier, parts that need a markup and lack one, and routing ops with no rate. A part needs a markup when it is the ROOT being quoted or when a BOM line charges it AT PRICE. is_priceable is the AND of the three arrays being empty, and matches get_priceable_part_ids exactly.';
 
 CREATE OR REPLACE FUNCTION public.get_priceable_part_ids(p_company_id uuid)
  RETURNS uuid[]
@@ -691,14 +667,7 @@ DECLARE
     v_costable uuid[];
     v_priceable uuid[];
     v_new uuid[];
-    v_default_markup numeric;
 BEGIN
-    -- Read the shop-wide default once, not per fixed-point iteration.
-    SELECT c.default_material_markup_percent
-      INTO v_default_markup
-      FROM public.companies c
-     WHERE c.id = p_company_id;
-
     -- COSTABLE — a part whose cost resolves. Markup is NOT required here unless a
     -- BOM line charges the child at price (below). Base case: bought parts with a
     -- non-expired procurement tier.
@@ -740,12 +709,11 @@ BEGIN
                 )
           )
           -- Every BOM child must already be costable — AND, when the line charges
-          -- it at price, must have a markup to charge: its own tier, or the
-          -- shop-wide default if it is a bought part.
+          -- it at price, must carry its own markup tier. Nothing covers for a
+          -- missing one.
           AND NOT EXISTS (
               SELECT 1
               FROM public.parts_bom b
-              JOIN public.parts cp ON cp.id = b.child_part_id
               WHERE b.parent_part_id = p.id
                 AND (
                     NOT (b.child_part_id = ANY(v_costable))
@@ -757,7 +725,6 @@ BEGIN
                             WHERE t.part_id = b.child_part_id
                               AND t.markup_percent IS NOT NULL
                         )
-                        AND NOT (cp.source = 'bought' AND v_default_markup IS NOT NULL)
                     )
                 )
           );
@@ -785,4 +752,4 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.get_priceable_part_ids(uuid) IS
-    'Returns the part ids in a company that are ready to quote: cost resolves (bought: procurement tier; made: all ops priced and all BOM children costable) AND the part itself has a non-null-markup pricing tier. A material''s own markup is required only when a BOM line charges it AT PRICE — and even then not if it is a bought part covered by companies.default_material_markup_percent. Matches compute_part_cost_explain.is_priceable.';
+    'Returns the part ids in a company that are ready to quote: cost resolves (bought: procurement tier; made: all ops priced and all BOM children costable) AND the part itself has a non-null-markup pricing tier. A material''s own markup is required only when a BOM line charges it AT PRICE. Matches compute_part_cost_explain.is_priceable.';

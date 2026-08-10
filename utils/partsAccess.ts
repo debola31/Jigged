@@ -9,7 +9,6 @@ import type { Database } from '@/types/database';
 // to know about scope), but every other NOT NULL column has to be
 // present for the typed insert to compile.
 type PartsInsert = Database['public']['Tables']['parts']['Insert'];
-import type { ChargeRateSource } from '@/types/bom';
 import type {
   Part,
   PartFormData,
@@ -1230,23 +1229,18 @@ export async function getComputedPartChargeBase(
 }
 
 /**
- * What a child is charged at when a BOM line charges it at price, and WHICH rung
- * of the rule produced that rate.
+ * What a child is charged at when a BOM line charges it at price: its own
+ * pricing tier, with the base evaluated at that tier's own quantity (the
+ * tier-band rule), plus the markup that produced it.
  *
- * `'tier'` — the child's own pricing tier (base evaluated at the tier's own
- * quantity, per the tier-band rule, so the number equals what the child's Pricing
- * card lists for that break).
- * `'company_default'` — `companies.default_material_markup_percent`, bought parts
- * only.
- *
- * Returns `null` when neither applies. That is a data gap the caller must
- * surface — never a silent fall back to cost. The source comes from SQL rather
- * than being re-derived here so the three-rung rule has exactly one
- * implementation.
+ * Returns `null` when the part has no markup tier. That is a data gap the caller
+ * must surface — never a silent fall back to cost, and never a shop-wide
+ * default: `companies.default_markup_*` seed a part's FIRST TIER at write time
+ * and are not consulted here. The markup comes back from SQL rather than being
+ * re-derived so the rule has exactly one implementation.
  */
 export interface PartChargePrice {
   unit_price: number | null;
-  rate_source: ChargeRateSource;
   markup_percent: number | null;
 }
 
@@ -1270,7 +1264,6 @@ export async function getPartChargePrice(
   if (!row) return null;
   return {
     unit_price: row.unit_price === null ? null : Number(row.unit_price),
-    rate_source: row.rate_source as ChargeRateSource,
     markup_percent: row.markup_percent === null ? null : Number(row.markup_percent),
   };
 }

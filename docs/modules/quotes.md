@@ -147,10 +147,9 @@ don't touch them.
 **A material row records how it was charged, not just what it cost** ([#727]). `charge_basis` says
 `'cost'` or `'price'`; `cost_per_unit` / `line_cost` are the rate and contribution that went INTO
 the rollup; `true_cost_per_unit` / `true_line_cost` are the same at true cost. On a `'price'` row,
-`charge_rate_source` (`'tier'` | `'company_default'`) and `charge_markup_percent` record **which
-rung produced the rate and by how much** — frozen, because a quote priced against a 25% shop
-default must keep saying 25% after the setting becomes 30%. Neither is recoverable after the fact:
-for a made child the charged and true rates have different bases, so `charged/true − 1 ≠ markup`.
+`charge_markup_percent` records **the markup the child's tier applied** — frozen, because it is not
+recoverable after the fact: for a made child the charged and true rates have different bases, so
+`charged/true − 1 ≠ markup`, and the child's tiers may since have moved.
 
 > ⚠ **Nothing reads these two tables today.** The cost-breakdown accordion that rendered them was
 > removed from the quote detail page on 2026-04-30 (`db33416d`); its components
@@ -159,7 +158,8 @@ for a made child the charged and true rates have different bases, so `charged/tr
 > because they are the record of how a quote was priced and that record is the thing you cannot
 > reconstruct later. So `quote_operations` / `quote_materials` are **write-only** until a surface
 > renders them again — including the #727 provenance columns above, which exist so that surface
-> can say *"shop default 25%"* about a quote priced before the setting moved. Re-mounting a
+> can say what markup a line was charged at, whatever the child's Pricing page says today.
+> Re-mounting a
 > breakdown is what would answer the question a pilot buyer asked verbatim, *"where does the final
 > number come from?"*
 

@@ -51,11 +51,11 @@ const mockGetComputedPartChargeBase = vi.fn(async (partId: string, qty: number) 
   if (childCostMap.has(partId)) return childCostMap.get(partId) ?? null;
   return 0;
 });
-// compute_part_price_explain_at_qty: the rate a 'price' line charges, and which
-// rung produced it. null (no row) = no tier and no eligible company default.
+// compute_part_price_explain_at_qty: the rate a 'price' line charges and the
+// markup behind it. null (no row) = the child has no markup tier at all.
 const childPriceMap = new Map<
   string,
-  { unit_price: number | null; rate_source: 'tier' | 'company_default'; markup_percent: number | null } | null
+  { unit_price: number | null; markup_percent: number | null } | null
 >();
 const mockGetPartChargePrice = vi.fn(async (partId: string) =>
   childPriceMap.has(partId) ? childPriceMap.get(partId)! : null,
@@ -183,10 +183,8 @@ interface BomOverrides {
   chargeBasis?: 'cost' | 'price';
   /** The child's charge base, when it must differ from its true cost. */
   childChargeBase?: number | null;
-  /** What a 'price' line is charged; null = no tier and no eligible default. */
-  childPrice?:
-    | { unit_price: number | null; rate_source: 'tier' | 'company_default'; markup_percent: number | null }
-    | null;
+  /** What a 'price' line is charged; null = the child has no markup tier. */
+  childPrice?: { unit_price: number | null; markup_percent: number | null } | null;
 }
 
 function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
@@ -1011,8 +1009,7 @@ describe('calculateRoutingCost — charge basis', () => {
     expect(mat.cost).toBe(20);
     expect(mat.true_cost).toBe(20);
     expect(result!.total_material_cost).toBe(result!.total_material_true_cost);
-    // Nothing was resolved, so nothing is claimed about a rate source.
-    expect(mat.charge_rate_source).toBeNull();
+    // Nothing was resolved, so no markup is claimed.
     expect(mat.charge_markup_percent).toBeNull();
     expect(mockGetPartChargePrice).not.toHaveBeenCalled();
   });
@@ -1023,7 +1020,7 @@ describe('calculateRoutingCost — charge basis', () => {
         quantity: 2,
         childCost: 10,
         chargeBasis: 'price',
-        childPrice: { unit_price: 12.5, rate_source: 'company_default', markup_percent: 25 },
+        childPrice: { unit_price: 12.5, markup_percent: 25 },
       }),
     ]);
 
@@ -1039,28 +1036,27 @@ describe('calculateRoutingCost — charge basis', () => {
     expect(result!.total_material_true_cost).toBe(20);
   });
 
-  it('records WHICH rung set the rate, so the number is never anonymous', async () => {
+  it('records the markup behind each rate, so no charged number is anonymous', async () => {
     mockGetBomForPart.mockResolvedValue([
       makeBomLine({
         childId: 'bar',
         childCost: 10,
         chargeBasis: 'price',
-        childPrice: { unit_price: 11, rate_source: 'tier', markup_percent: 10 },
+        childPrice: { unit_price: 11, markup_percent: 10 },
       }),
       makeBomLine({
         id: 'bom-2',
         childId: 'bushing',
         childCost: 4,
         chargeBasis: 'price',
-        childPrice: { unit_price: 5, rate_source: 'company_default', markup_percent: 25 },
+        childPrice: { unit_price: 5, markup_percent: 25 },
       }),
     ]);
 
     const result = await calculateRoutingCost('part-1', 1);
 
-    expect(result!.material_items[0].charge_rate_source).toBe('tier');
+    // Each comes from that child's own pricing tier — there is no other source.
     expect(result!.material_items[0].charge_markup_percent).toBe(10);
-    expect(result!.material_items[1].charge_rate_source).toBe('company_default');
     expect(result!.material_items[1].charge_markup_percent).toBe(25);
   });
 
@@ -1092,7 +1088,7 @@ describe('calculateRoutingCost — charge basis', () => {
         childName: 'BAR STOCK',
         childCost: 10,
         chargeBasis: 'price',
-        childPrice: null, // no tier, and no eligible company default
+        childPrice: null, // the child carries no markup tier
       }),
     ]);
 
@@ -1104,9 +1100,8 @@ describe('calculateRoutingCost — charge basis', () => {
     const warning = result!.warnings.find((w) => w.type === 'missing_child_markup');
     expect(warning).toBeDefined();
     expect(warning!.child_part_name).toBe('BAR STOCK');
-    // Both fixes named — a tier on the material, or a shop-wide default.
+    // The one fix there is: a pricing tier on that material.
     expect(warning!.detail).toMatch(/pricing tier/);
-    expect(warning!.detail).toMatch(/default material markup/);
     // The line is dropped from the rollup rather than costed at 10.
     expect(result!.material_items).toHaveLength(0);
   });
@@ -1120,7 +1115,7 @@ describe('calculateRoutingCost — charge basis', () => {
         consumeWholeUnits: true,
         childCost: 100,
         chargeBasis: 'price',
-        childPrice: { unit_price: 125, rate_source: 'company_default', markup_percent: 25 },
+        childPrice: { unit_price: 125, markup_percent: 25 },
       }),
     ]);
 
@@ -1144,7 +1139,7 @@ describe('calculateRoutingCost — charge basis', () => {
         childBatchQty: 25,
         childCost: 109,
         chargeBasis: 'price',
-        childPrice: { unit_price: 130.8, rate_source: 'tier', markup_percent: 20 },
+        childPrice: { unit_price: 130.8, markup_percent: 20 },
       }),
     ]);
 

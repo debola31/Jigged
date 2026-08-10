@@ -164,22 +164,24 @@ one level higher. Two modes, one function body:
 |---|---|---|
 | `compute_part_cost_at_qty` | bases ignored | TRUE cost. Unchanged by #727. The margin denominator |
 | `compute_part_charge_base_at_qty` | bases honored | What a PRICE is built on. `quote_line_items.base_cost_per_unit` |
-| `compute_part_price_explain_at_qty` | — | A child's charged rate **and which rung produced it** |
+| `compute_part_price_explain_at_qty` | — | A child's charged rate from its own tier, **and the markup that produced it** (frozen onto the quote) |
 
 Both are `part_rollup_at_qty(part, qty, apply_charge_basis)` with the flag flipped, so the math has
 one implementation and the two can't drift.
 
-**The price rule, in order.** Child's own pricing tier (base evaluated at *that tier's* quantity —
-the tier-band rule, so the number equals what the child's Pricing card lists) → the company default
-**for bought children only** → **NULL, un-priceable, flagged**. There is no fourth rung: an unset
-default plus no tier is a gap to surface, never a silent fall back to cost.
+**The price rule.** The child's own pricing tier, with the base evaluated at *that tier's* quantity
+(the tier-band rule, so the number equals what the child's Pricing card lists) — and nothing else.
+No tier means **NULL, un-priceable, flagged**: never a silent fall back to cost, and never a
+shop-wide number.
 
-**Why the default is bought-only.** Every incumbent (Fulcrum Shop Rate, ProShop estimating
-templates, JobBOSS² preset rates) scopes material markup to out-of-pocket purchased cost, never
-in-house labor. The default already propagates upward from bought leaves via the nesting rule above,
-so applying it again at a made mid-level part would double-mark the embedded material *and* mark up
-labor nobody declared. Marking up in-house work is deliberate transfer pricing and needs an explicit
-tier on that part.
+**There is deliberately no shop-wide markup inside this rollup.** A draft of #727 had one, for
+bought children with no tier of their own, and it was removed before shipping: a shared default
+resolved at *read* time with nothing on screen to say where the number came from is exactly what
+got the `markup_rates` module deleted in July 2026
+([`20260713011616`](../../supabase/migrations/20260713011616_remove_markup_rates_module.sql)). The
+setup problem it solved — a part being costed but not quotable until someone types a markup — is
+solved at **write** time instead, by the starter tier below. A markup lives in one place: the part's
+own Pricing page.
 
 > Worked example. Default 25%. `BAR` bought, cost $10, no tier. `BRACKET` made, labor $30, BOM =
 > 1 × BAR **at price**. `ASSEMBLY` made, labor $20, own markup 40%, BOM = 1 × BRACKET **at cost**.
@@ -190,16 +192,15 @@ tier on that part.
 > margin (37.8%) so the stacking is seen rather than discovered.
 
 **Priceability moves with it.** `20260715180446` had established that only the root needs a markup.
-A `'price'` line makes that false for that edge; the company default makes it false again the other
-way. `compute_part_cost_explain` and `get_priceable_part_ids` both encode *a price-basis child is
-satisfied iff it has a markup tier, or it is bought and the default is set* — and an agreement test
-covers tier / default-only / neither / made-child-with-default.
+A `'price'` line makes that false for that edge, so `compute_part_cost_explain` and
+`get_priceable_part_ids` both encode *the root needs a markup, and so does any child charged at
+price* — nothing covers for a missing tier. An agreement test holds the two views together.
 
 **Setting it at scale.** Storage is per-line by design (the same material is charged at price on a
 customer job and at cost on an internal stock-making work order). The BOM panel adds one bulk
-control over *purchased* materials only, whose copy names the default's number when one is set —
-one click plus one number is the onboarding path, and per-material tiers stay the exception they are
-everywhere else in the industry.
+control over *purchased* materials only — a shop that marks up purchased material marks up all of
+it, and setting that line by line is the difference between a five-minute change and an afternoon.
+How much each material marks up still comes from its own Pricing card.
 
 ### `part_attachments`
 
@@ -337,14 +338,25 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   the same engine made parts use.
 - A **new part opens with one unfilled row** (Min qty 1, Markup blank) and stays not-priceable —
   **until it has a cost.** The moment the part's first priced operation or material lands, the card
-  writes that row for itself at **0% markup**, and the part becomes quotable with nobody having
-  typed anything.
+  writes that row for itself at the **shop's starting markup** (0% out of the box), and the part
+  becomes quotable with nobody having typed anything.
 
-  **Why 0 and not a prompt.** `get_priceable_part_ids` needs a tier carrying a non-null markup, so
-  before this the answer to "why can't I quote this part I just set up?" was a blank box on a card
-  the user had no reason to open. The step taught nothing: the answer is always *some* markup. 0%
-  is the honest placeholder because it claims no margin the shop hasn't chosen — price = cost, and
-  the tier table says so on its face.
+  **Where the number comes from.** `companies.default_markup_made_percent` /
+  `default_markup_bought_percent` — the shop's *starting* markup, split by source because a shop
+  marks up purchased goods and its own labour at different rates. Both are `numeric(10,6) NOT NULL
+  DEFAULT 0`, so out of the box a starter tier is 0% and the part sells at cost.
+
+  **They are seed values, not a pricing rule.** They are read at exactly one moment — when a costed
+  part has no tiers — and written into that part's own tier row. Nothing reads them again, so
+  raising the made markup to 30% reprices nothing that already exists; it changes what the *next*
+  part starts at. That write-time boundary is the whole design, and it is why the rollup (above) has
+  no shop-wide fallback: `lib/companyDefaults.ts` records that resolving a shared default at read
+  time, with nothing on screen to say where the number came from, is what got `markup_rates`
+  deleted.
+
+  **Why a default rather than a prompt.** Before this, the answer to "why can't I quote the part I
+  just set up?" was a blank box on a card the user had no reason to open. The step taught nothing —
+  the answer is always *some* markup.
 
   **This is the only auto-save on a card whose whole standard is explicit Save**
   ([interaction-standards §2](../interaction-standards.md#2-saving)), and the exception is drawn
@@ -358,9 +370,17 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   **for nothing** — worse than not being quotable at all. So the trigger is a priced labor or
   material item in the breakdown (bought parts: a resolved procurement cost at qty 1).
 
-  While that starter tier is still the only tier and still 0%, a caption under the table reads
-  *"Ready to quote at 0% markup — this part currently sells for what it costs."* It disappears the
-  moment a markup is typed, so a shop that genuinely sells at cost is not nagged twice.
+  While that starter tier is still the only tier and still sitting at the shop's number, a caption
+  under the table names its source — *"…your shop's starting markup for parts you make, from
+  Settings. Change it here for this part alone."* — and, at 0%, says what that means in money
+  ("this part sells for what it costs"), because selling at cost is not something a shop should
+  discover on an accepted quote. It disappears the moment the markup is changed.
+
+  **The CSV importer seeds it too**, for rows it creates that arrive with a cost (a bought row with
+  `cost_per_unit`). A made row has no routing yet, so it gets its tier from the part page later.
+  Without this an onboarding import lands un-quotable, because nobody opens 8,000 part pages — and
+  the read-time fallback that used to cover that case is gone. It never touches a part that already
+  has tiers.
 
   ⚠ *This doc previously said "Nothing is auto-applied on create" — still true of **create**; the
   starter tier is written on first **cost**, not on create.*
@@ -553,7 +573,7 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | Unit-price → markup back-calculation (incl. negative markup, zero base, NaN) | `__tests__/types/quote.test.ts` → `calculateMarkupFromUnitPrice` |
 | Create-mode validation (empty name, duplicate name, success) and existing-mode blur auto-save | `__tests__/components/parts/PartIdentitySection.test.tsx` → `PartIdentitySection` |
 | Staged tier edits surviving a `refreshKey` bump from a sibling save | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — staged tier edits survive sibling saves` (13 its) |
-| Starter 0% tier: written once on first cost; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the sells-at-cost caption clearing on a typed markup | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — starter tier at 0% markup` (10 its) |
+| Starter tier: written once on first cost at the shop's markup for the part's source; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the source caption clearing on a changed markup | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — starter tier from the shop default` |
 | Part-level procurement tiers, explicit Save, red no-cost starter row, vendor pick not discarding staged edits | `__tests__/components/parts/PartProcurementPricingPanel.test.tsx` → `PartProcurementPricingPanel — part-level tiers, explicit save` (3 its) |
 | Priceability / completeness derivation | `__tests__/components/parts/partSetupStatus.test.ts` → `getPartSetupStatus` (5 its) |
 | Completeness banner render | `__tests__/components/parts/workspace/tabs/WorkspaceTab.test.tsx` → `WorkspaceTab completeness banner` (4 its) |

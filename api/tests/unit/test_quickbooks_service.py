@@ -766,3 +766,74 @@ def test_discover_po_custom_field_ignores_a_disabled_slot(monkeypatch):
     found = qb.discover_po_custom_field(None, "c1")
     assert found["id"] is None
     assert found["candidates"] == []
+
+
+# ───────────────────────── invoiced-quantity scoping ─────────────────────────
+class _InvoicedFakeTable:
+    """Routes by table name, enough for sum_invoiced_by_part's two reads."""
+
+    def __init__(self, name: str, job_parts: list, line_items: list):
+        self.name = name
+        self.job_parts = job_parts
+        self.line_items = line_items
+
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def in_(self, *a, **k):
+        return self
+
+    def execute(self):
+        return _Resp(self.job_parts if self.name == "job_parts" else self.line_items)
+
+
+class _InvoicedFakeDB:
+    def __init__(self, job_parts: list, line_items: list):
+        self.job_parts = job_parts
+        self.line_items = line_items
+
+    def table(self, name):
+        return _InvoicedFakeTable(name, self.job_parts, self.line_items)
+
+
+def test_sum_invoiced_counts_every_realm():
+    """Invoiced quantity is NOT scoped by realm, and that is the fix.
+
+    assert_invoice_not_over_ordered (migration 20260702011324) counts every
+    created non-void line with no realm predicate. While this function filtered
+    by realm the two disagreed, so a company whose realm changed got a generous
+    qty_invoiceable from the route and then an opaque 500 from the trigger.
+    Switching a company between QuickBooks Online and Desktop changes the scope
+    key by construction, so this would have fired on day one of QBD.
+    """
+    db = _InvoicedFakeDB(
+        job_parts=[{"id": "jp1"}],
+        line_items=[
+            {"job_part_id": "jp1", "quantity": 4,
+             "link": {"status": "created", "voided_at": None}},
+            # A different accounting file entirely — still counted, because the
+            # DB trigger counts it.
+            {"job_part_id": "jp1", "quantity": 6,
+             "link": {"status": "created", "voided_at": None}},
+        ],
+    )
+    assert qb.sum_invoiced_by_part(db, "job1") == {"jp1": 10.0}
+
+
+def test_sum_invoiced_ignores_pending_and_voided_links():
+    """Only 'created' and non-void counts — the same predicate the trigger uses."""
+    db = _InvoicedFakeDB(
+        job_parts=[{"id": "jp1"}],
+        line_items=[
+            {"job_part_id": "jp1", "quantity": 5,
+             "link": {"status": "created", "voided_at": None}},
+            {"job_part_id": "jp1", "quantity": 3,
+             "link": {"status": "pending", "voided_at": None}},
+            {"job_part_id": "jp1", "quantity": 7,
+             "link": {"status": "created", "voided_at": "2026-08-01T00:00:00Z"}},
+        ],
+    )
+    assert qb.sum_invoiced_by_part(db, "job1") == {"jp1": 5.0}

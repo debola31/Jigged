@@ -708,9 +708,29 @@ def sum_shipped_by_part(db: Client, job_id: str) -> dict[str, float]:
     return out
 
 
-def sum_invoiced_by_part(db: Client, job_id: str, realm: str) -> dict[str, float]:
-    """Created, non-voided invoiced quantity per job_part for a job in this realm.
-    The Jigged-side source of truth for 'how much of each part is already billed'."""
+def sum_invoiced_by_part(db: Client, job_id: str) -> dict[str, float]:
+    """Created, non-voided invoiced quantity per job_part for a job.
+
+    DELIBERATELY NOT SCOPED BY REALM, and that is a fix rather than an omission.
+
+    This function exists to pre-empt assert_invoice_not_over_ordered (migration
+    20260702011324), the BEFORE INSERT trigger that is the real invariant. That
+    trigger counts EVERY created non-void line for the part, with no realm
+    predicate. While this counted only the current realm, the two disagreed the
+    moment a company's realm changed: the route computed a generous
+    qty_invoiceable, let the push through, and the trigger raised
+    check_violation -> an opaque HTTP 500 instead of a readable 400.
+
+    A realm change is not hypothetical — reconnecting to a different QuickBooks
+    company does it, and switching a company between accounting providers does it
+    by construction (a Conductor end-user id is never a QBO realm id). Counting
+    every created line makes this guard agree with the invariant it guards, which
+    is strictly the safer direction: it can only ever report MORE already-invoiced
+    quantity, never less.
+
+    Dropping the realm predicate is also what leaves this loader, load_billable_parts
+    and load_firm_invoice_lines provider-agnostic, so one billing path serves both
+    QuickBooks Online and QuickBooks Desktop."""
     parts = db.table("job_parts").select("id").eq("job_id", job_id).execute().data or []
     part_ids = [p["id"] for p in parts]
     out: dict[str, float] = {pid: 0.0 for pid in part_ids}
@@ -718,7 +738,7 @@ def sum_invoiced_by_part(db: Client, job_id: str, realm: str) -> dict[str, float
         return out
     rows = (
         db.table("quickbooks_invoice_line_items")
-        .select("job_part_id, quantity, link:quickbooks_invoice_links!inner(status, voided_at, realm_id)")
+        .select("job_part_id, quantity, link:quickbooks_invoice_links!inner(status, voided_at)")
         .in_("job_part_id", part_ids)
         .execute()
         .data
@@ -728,16 +748,19 @@ def sum_invoiced_by_part(db: Client, job_id: str, realm: str) -> dict[str, float
         link = r.get("link") or {}
         if link.get("status") != "created" or link.get("voided_at") is not None:
             continue
-        if realm is not None and link.get("realm_id") != realm:
-            continue
         out[r["job_part_id"]] = out.get(r["job_part_id"], 0.0) + float(r["quantity"])
     return out
 
 
-def load_billable_parts(db: Client, company_id: str, job: dict, realm: str) -> list[dict]:
+def load_billable_parts(db: Client, company_id: str, job: dict, realm: str | None = None) -> list[dict]:
     """Per-part billing context for the invoice picker + preflight: ordered,
-    shipped, already-invoiced, and invoiceable (= shipped - invoiced, the ship-cap)
-    quantities, plus the agreed unit price. Ordered by job_part sequence."""
+    shipped, already-invoiced, and invoiceable (= ordered - invoiced, the ordered-cap)
+    quantities, plus the agreed unit price. Ordered by job_part sequence.
+
+    `realm` is accepted and IGNORED. Invoiced quantity is counted across every realm
+    now, to agree with the assert_invoice_not_over_ordered trigger — see
+    sum_invoiced_by_part. The parameter is kept so the call is provider-agnostic and
+    callers need not know that scope no longer matters here."""
     job_id = job["id"]
     job_parts = (
         db.table("job_parts")
@@ -755,7 +778,7 @@ def load_billable_parts(db: Client, company_id: str, job: dict, realm: str) -> l
             part_by_id[r["id"]] = r
 
     shipped = sum_shipped_by_part(db, job_id)
-    invoiced = sum_invoiced_by_part(db, job_id, realm)
+    invoiced = sum_invoiced_by_part(db, job_id)
 
     out: list[dict] = []
     for r in job_parts:
@@ -785,11 +808,12 @@ def load_billable_parts(db: Client, company_id: str, job: dict, realm: str) -> l
 
 
 def load_firm_invoice_lines(
-    db: Client, company_id: str, job: dict, selection: list[dict], realm: str
+    db: Client, company_id: str, job: dict, selection: list[dict], realm: str | None = None
 ) -> tuple[list[dict], Optional[dict], list[dict]]:
     """Build QBO invoice lines from an explicit per-part quantity SELECTION
     ([{job_part_id, quantity}]) — the multi-invoice-per-job model. Enforces the
-    ship-cap (each selected qty must be > 0 and <= shipped - already-invoiced) and
+    ORDERED-cap (each selected qty must be > 0 and <= ordered - already-invoiced;
+    the docstring said "ship-cap" long after the code stopped gating on shipping) and
     snapshots each part's agreed unit_price. Returns (qbo_lines, bill_addr,
     snapshot_rows) where snapshot_rows are the quickbooks_invoice_line_items to
     persist on success. Raises QuickBooksValidationError (-> HTTP 400) for a bad

@@ -403,7 +403,7 @@ async def preflight(company_id: str, job_id: str, request: Request):
         # Per-part billing context (ordered / shipped / invoiced / invoiceable + price)
         # for the quantity picker. Replaces the old whole-job "lines_preview": a job now
         # has many invoices, each billing a chosen quantity of shipped-but-unbilled parts.
-        parts = qb.load_billable_parts(db, company_id, job, realm)
+        parts = qb.load_billable_parts(db, company_id, job)
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)
 
@@ -500,14 +500,14 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         # A sibling request for this same draft is in flight — do not double-POST.
         return {"in_progress": True}
 
-    # Build + validate the selected lines (ship-cap, price snapshot). Done after the
+    # Build + validate the selected lines (ordered-cap, price snapshot). Done after the
     # created/pending short-circuit above but before claiming a NEW row, so a bad
     # selection returns 400 without leaving a junk pending link (resume of an
     # error/stale row re-validates cleanly — its lines aren't counted yet).
     selection = [{"job_part_id": ln.job_part_id, "quantity": ln.quantity} for ln in body.lines]
     try:
         lines, bill_addr, snapshot_rows = qb.load_firm_invoice_lines(
-            db, company_id, job, selection, realm
+            db, company_id, job, selection
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)

@@ -23,13 +23,13 @@ sentry-sdk[fastapi]>=2.0.0
 # Pin the SDK line that supports API version 2026-06-24.dahlia.
 stripe>=12.0.0
 
-# Outbound email (quote-to-customer, future invitation emails)
-resend>=0.17.0
 # Outbound HTTP for the QuickBooks OAuth + API calls (also present transitively
 # via supabase, but services/quickbooks.py imports it directly).
 httpx>=0.27.0
-# FastAPI multipart uploads (used by /api/quotes/{id}/email for the PDF blob).
-python-multipart>=0.0.9
+# `resend` and `python-multipart` were dropped with /api/quotes/{id}/email: it was
+# the only route that sent mail from Python and the only one that took a
+# multipart upload. Every live email in the product is sent by a Supabase Edge
+# Function calling Resend over fetch (see docs/modules/invitation-system.md).
 
 # Database
 # psycopg2-binary is NOT imported anywhere under api/ — grep it and you will find

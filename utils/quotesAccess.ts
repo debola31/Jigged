@@ -13,10 +13,6 @@ import type {
   QuoteWithRelations,
   QuoteFormData,
   QuoteFilters,
-  QuoteCostBreakdown,
-  QuoteOperationSnapshot,
-  QuoteMaterialSnapshot,
-  QuotePartCostBreakdown,
   QuoteLineItem,
   CompanyMember,
   PricingBasisSnapshot,
@@ -989,64 +985,6 @@ async function writeCostSnapshotsForPart(
     const { error } = await supabase.from('quote_materials').insert(matRows);
     if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
-}
-
-/**
- * Read the full cost breakdown for a quote, one section per distinct part
- * plus the snapshotted line items. Snapshot tables are the single source of truth.
- */
-export async function getQuoteCostBreakdown(
-  quoteId: string,
-  _companyId: string,
-): Promise<QuoteCostBreakdown | null> {
-  const supabase = getSupabase();
-
-  const [opsResp, matsResp, lineItems] = await Promise.all([
-    supabase
-      .from('quote_operations')
-      .select('*')
-      .eq('quote_id', quoteId)
-      .order('sequence', { ascending: true }),
-    supabase
-      .from('quote_materials')
-      .select('*')
-      .eq('quote_id', quoteId)
-      .order('sequence', { ascending: true }),
-    getLineItemsForQuote(quoteId),
-  ]);
-
-  if (opsResp.error) throw opsResp.error;
-  if (matsResp.error) throw matsResp.error;
-
-  const operations = (opsResp.data || []) as QuoteOperationSnapshot[];
-  const materials = (matsResp.data || []) as QuoteMaterialSnapshot[];
-
-  const partIds = new Set<string>();
-  for (const o of operations) partIds.add(o.part_id);
-  for (const m of materials) partIds.add(m.part_id);
-  for (const li of lineItems) partIds.add(li.part_id);
-
-  const parts: QuotePartCostBreakdown[] = [];
-  for (const partId of partIds) {
-    const partOps = operations.filter((o) => o.part_id === partId);
-    const partMats = materials.filter((m) => m.part_id === partId);
-
-    const totalRunCost = partOps.reduce((sum, o) => sum + (o.run_cost ?? 0), 0);
-    const totalSetupCost = partOps.reduce((sum, o) => sum + (o.setup_cost ?? 0), 0);
-    const totalMaterialCost = partMats.reduce((sum, m) => sum + (m.line_cost ?? 0), 0);
-
-    parts.push({
-      part_id: partId,
-      operations: partOps,
-      materials: partMats,
-      total_run_cost: Math.round(totalRunCost * 100) / 100,
-      total_setup_cost: Math.round(totalSetupCost * 100) / 100,
-      total_labor_cost: Math.round((totalRunCost + totalSetupCost) * 100) / 100,
-      total_material_cost: Math.round(totalMaterialCost * 100) / 100,
-    });
-  }
-
-  return { parts, line_items: lineItems };
 }
 
 // ============== Manual expire ==============

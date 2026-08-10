@@ -98,6 +98,18 @@ export const ALLOWLIST = new Map<string, string>([
     'docs/modules/operator-view.md::docs/modules/partial-operation-completion-design.md',
     'Records a design doc folded into this one and deleted.',
   ],
+  [
+    'docs/modules/quotes.md::api/services/email.py',
+    'Names the Python email service deleted with POST /api/quotes/{id}/email, its only caller — the absence is the point (all mail now goes out from Edge Functions).',
+  ],
+  [
+    'docs/modules/invitation-system.md::api/services/email.py',
+    'Same deletion, restated where the doc used to claim invitation email could "ride the same plumbing later".',
+  ],
+  [
+    'docs/architecture.md::api/services/email.py',
+    'Same deletion, restated beside the env-var list that no longer carries RESEND_API_KEY for the backend.',
+  ],
 ]);
 
 // ============== Fences ==============

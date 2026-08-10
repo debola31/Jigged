@@ -152,11 +152,16 @@ rung produced the rate and by how much** — frozen, because a quote priced agai
 default must keep saying 25% after the setting becomes 30%. Neither is recoverable after the fact:
 for a made child the charged and true rates have different bases, so `charged/true − 1 ≠ markup`.
 
-`QuoteCostBreakdownView` renders all of it: a **Charged at** column reading *Our cost* / *Price
-(own tier)* / *Price (shop default 25%)*, the underlying cost beneath a charged rate, an "of which
-material markup" line, and an **Effective margin** column on the tier table. That column is the
-answer to the question a pilot buyer asked verbatim — *"where does the final number come from?"* —
-and it is why stacked markup is seen rather than discovered.
+> ⚠ **Nothing reads these two tables today.** The cost-breakdown accordion that rendered them was
+> removed from the quote detail page on 2026-04-30 (`db33416d`); its components
+> (`QuoteCostBreakdown`, `QuoteCostBreakdownView`), the `getQuoteCostBreakdown` reader and the
+> row types were deleted as dead code once that was noticed. The tables are still **written**,
+> because they are the record of how a quote was priced and that record is the thing you cannot
+> reconstruct later. So `quote_operations` / `quote_materials` are **write-only** until a surface
+> renders them again — including the #727 provenance columns above, which exist so that surface
+> can say *"shop default 25%"* about a quote priced before the setting moved. Re-mounting a
+> breakdown is what would answer the question a pilot buyer asked verbatim, *"where does the final
+> number come from?"*
 
 Jobs point back via `jobs.source_quote_line_item_id`; follow `quote_line_items.id →` it to list
 every job from a quote.
@@ -318,7 +323,10 @@ that flag:
 | Fully converted | View PDF, Delete |
 
 Expired quotes still show convert; the expired-price warning surfaces in the modal rather than
-gating the button. **Email was descoped** — there is no Email action, and no server send.
+gating the button. **Email was descoped** — there is no Email action, and no server send. The
+Resend-backed `POST /api/quotes/{id}/email` that the removed dialog used outlived its caller by two
+months and has now been deleted too, along with `api/services/email.py` (its only consumer) and the
+`resend` / `python-multipart` dependencies.
 
 ### Convert to Job modal
 
@@ -560,7 +568,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** the quote form, **when** submitting, **then** it blocks until every part block has a part and at least one valid quantity row, quantities unique within a part — *automation-pending (#367)*.
 - [ ] **Given** an existing active, unconverted quote, **when** a part is added, a quantity edited and a part removed, **then** all three persist across reload — *verified by `e2e/quote-edit.spec.ts` > `Quote edit — reload contract`*.
 - [ ] **Given** `updateQuote`, **when** it saves, **then** it reconciles line items by id — insert / update / delete — *verified by `__tests__/utils/quotesAccess.test.ts` > `updateQuote — reconcile (Issue #324 / #317 policy)`*.
-- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** the cost breakdown renders, **then** it appears with `run_cost = 0` and a non-zero setup cost — regression for **#224** — *automation-pending (#367)*.
+- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** its cost snapshot is written, **then** it is stored with `run_cost = 0` and a non-zero setup cost — regression for **#224**. *(Was written against the cost-breakdown accordion, which no longer exists; the invariant now lives in the `quote_operations` row.)* — *automation-pending (#367)*.
 
 **Frozen pricing and drift**
 

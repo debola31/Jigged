@@ -460,8 +460,10 @@ Feature-scoped groups, each owned by its module doc rather than repeated here:
 `STRIPE_RESTRICTED_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` /
 `STRIPE_FOUNDING_PRICE_ID` ([modules/billing.md](modules/billing.md); note §8.4 —
 the restricted key deliberately has **no** fallback to `STRIPE_SECRET_KEY`),
-`QUICKBOOKS_*` + `APP_BASE_URL`, `RESEND_API_KEY` / `QUOTES_FROM_EMAIL`, and
-`SENTRY_DSN` ([telemetry.md](telemetry.md)).
+`QUICKBOOKS_*` + `APP_BASE_URL`, and `SENTRY_DSN` ([telemetry.md](telemetry.md)).
+`RESEND_API_KEY` is an **Edge Function** secret, not a backend one — Python stopped
+sending mail when `/api/quotes/{id}/email` and `api/services/email.py` were deleted
+([modules/invitation-system.md](modules/invitation-system.md)).
 
 *(§10 Development Commands was removed 2026-08-03: CLAUDE.md genuinely does own it,
 and this copy said `pip install -r requirements.txt` / `python index.py` against the

@@ -975,6 +975,16 @@ async function writeCostSnapshotsForPart(
       // mode) so the itemized breakdown can explain a line whose per-part
       // quantity × cost_per_unit no longer multiplies out to line_cost.
       units_consumed: item.units_consumed,
+      // #727. The basis, the true cost beneath it, and — frozen — which rung
+      // produced the charged rate and the markup it applied. Frozen because the
+      // breakdown must keep saying "shop default 25%" after the company default
+      // becomes 30%: a quote explains itself as it was priced, not as the
+      // settings read today.
+      charge_basis: item.charge_basis,
+      true_cost_per_unit: item.true_cost_per_unit,
+      true_line_cost: item.true_cost,
+      charge_rate_source: item.charge_rate_source,
+      charge_markup_percent: item.charge_markup_percent,
     }));
     const { error } = await supabase.from('quote_materials').insert(matRows);
     if (error) throw toFriendlyError(error, { entity: 'quote' });

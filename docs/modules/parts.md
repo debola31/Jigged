@@ -132,6 +132,75 @@ it on the quote ([Quotes — per-quote overrides](quotes.md#quote_line_items)). 
 shorthand for "compute the markup that yields this"; nothing else needs keeping in lockstep because
 there is no stored `unit_price`.
 
+### `parts_bom`
+
+One row per material consumed when making the parent. Part-attached, not routing-attached, so a
+sub-assembly can be a child of several parents without per-routing duplication.
+
+| Field | Type | Notes |
+|---|---|---|
+| parent_part_id / child_part_id | UUID | The edge. A `BEFORE INSERT/UPDATE` trigger rejects cycles (depth 50) |
+| quantity + unit | Numeric + text | Per parent unit. Below 1 is a yield ("1 strip makes 20"); a unit other than the child's primary resolves through `parts_unit_conversions` |
+| consume_whole_units | Boolean | Ceiling to discrete stock. **Derived from the unit** (count → whole), not a manual toggle |
+| charge_basis | Text | `'cost'` (default) or `'price'` — see below |
+
+#### Charge basis — what a child contributes to the parent's rollup ([#727])
+
+The rollup used to always take the child's **cost**, so a child's declared markup evaporated the
+moment it was consumed. The only way to express "markup on material, straight cost on machining"
+was padding the child's cost with hidden margin, which falsifies the cost field.
+
+Each line now declares one of:
+
+- **`'cost'`** (default) — our cost of the child.
+- **`'price'`** — the child's marked-up price.
+
+**A line's basis governs how that child is charged into its parent at every level.** A `'cost'`
+line contributes the child's *charge base* — its rollup honoring its own declarations — not its true
+cost, so a material markup declared deep in a tree survives the hop upward instead of evaporating
+one level higher. Two modes, one function body:
+
+| Function | Mode | Means |
+|---|---|---|
+| `compute_part_cost_at_qty` | bases ignored | TRUE cost. Unchanged by #727. The margin denominator |
+| `compute_part_charge_base_at_qty` | bases honored | What a PRICE is built on. `quote_line_items.base_cost_per_unit` |
+| `compute_part_price_explain_at_qty` | — | A child's charged rate **and which rung produced it** |
+
+Both are `part_rollup_at_qty(part, qty, apply_charge_basis)` with the flag flipped, so the math has
+one implementation and the two can't drift.
+
+**The price rule, in order.** Child's own pricing tier (base evaluated at *that tier's* quantity —
+the tier-band rule, so the number equals what the child's Pricing card lists) → the company default
+**for bought children only** → **NULL, un-priceable, flagged**. There is no fourth rung: an unset
+default plus no tier is a gap to surface, never a silent fall back to cost.
+
+**Why the default is bought-only.** Every incumbent (Fulcrum Shop Rate, ProShop estimating
+templates, JobBOSS² preset rates) scopes material markup to out-of-pocket purchased cost, never
+in-house labor. The default already propagates upward from bought leaves via the nesting rule above,
+so applying it again at a made mid-level part would double-mark the embedded material *and* mark up
+labor nobody declared. Marking up in-house work is deliberate transfer pricing and needs an explicit
+tier on that part.
+
+> Worked example. Default 25%. `BAR` bought, cost $10, no tier. `BRACKET` made, labor $30, BOM =
+> 1 × BAR **at price**. `ASSEMBLY` made, labor $20, own markup 40%, BOM = 1 × BRACKET **at cost**.
+> BAR charges $12.50; BRACKET's charge base is $42.50 (true cost $40); ASSEMBLY takes $42.50 —
+> **not** $42.50 × 1.25 — for a base of $62.50 and a price of $87.50 against a true cost of $60.
+> The $2.50 uplift is counted exactly once. Put BRACKET on a `'price'` line with its own 15% tier
+> and the price becomes $96.43 — stacked deliberately, and the quote breakdown shows the effective
+> margin (37.8%) so the stacking is seen rather than discovered.
+
+**Priceability moves with it.** `20260715180446` had established that only the root needs a markup.
+A `'price'` line makes that false for that edge; the company default makes it false again the other
+way. `compute_part_cost_explain` and `get_priceable_part_ids` both encode *a price-basis child is
+satisfied iff it has a markup tier, or it is bought and the default is set* — and an agreement test
+covers tier / default-only / neither / made-child-with-default.
+
+**Setting it at scale.** Storage is per-line by design (the same material is charged at price on a
+customer job and at cost on an internal stock-making work order). The BOM panel adds one bulk
+control over *purchased* materials only, whose copy names the default's number when one is set —
+one click plus one number is the onboarding path, and per-material tiers stay the exception they are
+everywhere else in the industry.
+
 ### `part_attachments`
 
 Engineering files — drawings (PDF), CAD (STEP), legacy CAD (DWG). Bytes live in the **private**
@@ -368,10 +437,16 @@ Part of the **office/admin dashboard** — nothing here is operator-facing.
 
 | Layer | Produced by | Shape |
 |---|---|---|
-| 1. Routing cost | `calculateRoutingCost(partId)`, live | per-op run + setup, per-material line costs, warnings |
-| 2. Tier cost | `calculateTierPricing(breakdown, quantity, markup)` | `base_cost_per_unit = run_labor/unit + material/unit + (total_setup / quantity)`; `unit_price = base × (1 + markup/100)` |
-| 3. Quote line item | Frozen at quote creation | `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, is_quote_override)` — see [quotes.md](quotes.md#quote_line_items) |
+| 1. Routing cost | `calculateRoutingCost(partId)`, live | per-op run + setup, per-material line costs **at two rates** (charged and true — see [`parts_bom`](#parts_bom)), warnings |
+| 2. Tier cost | `calculateTierPricing(breakdown, quantity, markup)` | `base_cost_per_unit = run_labor/unit + charged material/unit + (total_setup / quantity)`; `unit_price = base × (1 + markup/100)`. `trueCostPerUnit` is the same figure at true cost — the margin denominator |
+| 3. Quote line item | Frozen at quote creation | `(part_id, quantity, unit_price, total_price, markup_percent, base_cost_per_unit, true_cost_per_unit, is_quote_override)` — see [quotes.md](quotes.md#quote_line_items) |
 | 4. Job part | Copied at quote→job conversion | `(quantity, unit_price, total_price)`. Unlike the quote line, `job_parts.quantity` is **editable** post-conversion (with fulfillment guardrails) and `total_price` re-derives as `quantity × unit_price`. **Invoicing and revenue read the job part, not the quote snapshot** — it is the post-conversion source of truth. See [jobs.md](jobs.md) |
+
+**Base is the CHARGE base, not true cost** ([#727]). Markup applies to what the materials are
+charged into the part at, so `getTiersWithComputedPrices` and `getPartPriceAtQty` both resolve
+through `compute_part_charge_base_at_qty`. The two numbers are identical until a BOM line is set to
+charge its child at price; when they diverge, the Cost card grows a **Material markup / unit** row
+and a **Price base / unit** total so the Pricing card's Base is traceable from the same screen.
 
 **Bought parts** have no routing: base cost comes from procurement tiers via
 `compute_part_cost_at_qty`. The shared resolver `getTiersWithComputedPrices` falls back to that when
@@ -468,3 +543,4 @@ Historical doc-vs-code divergences from the 2026 audit are on [#334]; automation
 [#367]: https://github.com/debola31/Jigged/issues/367
 [#411]: https://github.com/debola31/Jigged/issues/411
 [#571]: https://github.com/debola31/Jigged/issues/571
+[#727]: https://github.com/debola31/Jigged/issues/727

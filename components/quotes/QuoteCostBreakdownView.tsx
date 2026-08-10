@@ -10,6 +10,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Divider from '@mui/material/Divider';
 import Chip from '@mui/material/Chip';
+import Tooltip from '@mui/material/Tooltip';
 import type {
   QuoteOperationSnapshot,
   QuoteMaterialSnapshot,
@@ -32,6 +33,26 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function formatPercent(n: number, digits = 1): string {
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: digits })}%`;
+}
+
+/**
+ * What a material line was charged at, in words — read from the SNAPSHOT, never
+ * recomputed. A quote priced against a 25% shop default keeps saying 25% after
+ * the setting becomes 30%: it explains itself as it was priced.
+ */
+function chargedAtLabel(mat: QuoteMaterialSnapshot): string {
+  if (mat.charge_basis !== 'price') return 'Our cost';
+  if (mat.charge_rate_source === 'tier') return 'Price (own tier)';
+  if (mat.charge_rate_source === 'company_default') {
+    return mat.charge_markup_percent === null
+      ? 'Price (shop default)'
+      : `Price (shop default ${formatPercent(mat.charge_markup_percent, 2)})`;
+  }
+  return 'Price';
+}
+
 export default function QuoteCostBreakdownView({
   partName,
   operations,
@@ -41,6 +62,11 @@ export default function QuoteCostBreakdownView({
   const totalRunPerUnit = round2(operations.reduce((s, o) => s + (o.run_cost ?? 0), 0));
   const totalSetupBatch = round2(operations.reduce((s, o) => s + (o.setup_cost ?? 0), 0));
   const totalMaterialPerUnit = round2(materials.reduce((s, m) => s + (m.line_cost ?? 0), 0));
+  const totalMaterialTruePerUnit = round2(
+    materials.reduce((s, m) => s + (m.true_line_cost ?? m.line_cost ?? 0), 0),
+  );
+  const hasMaterialMarkup =
+    Math.abs(totalMaterialPerUnit - totalMaterialTruePerUnit) >= 0.005;
 
   return (
     <Box sx={{ mb: 4 }}>
@@ -113,7 +139,8 @@ export default function QuoteCostBreakdownView({
                   <TableCell>Item</TableCell>
                   <TableCell align="right">Qty / unit</TableCell>
                   <TableCell align="right">Unit</TableCell>
-                  <TableCell align="right">Cost / unit</TableCell>
+                  <TableCell>Charged at</TableCell>
+                  <TableCell align="right">Rate / unit</TableCell>
                   <TableCell align="right">Line / unit</TableCell>
                 </TableRow>
               </TableHead>
@@ -140,19 +167,43 @@ export default function QuoteCostBreakdownView({
                       </TableCell>
                       <TableCell align="right">{mat.quantity}</TableCell>
                       <TableCell align="right">{mat.unit ?? '—'}</TableCell>
-                      <TableCell align="right">{formatCurrency(mat.cost_per_unit)}</TableCell>
+                      <TableCell>{chargedAtLabel(mat)}</TableCell>
+                      <TableCell align="right">
+                        {formatCurrency(mat.cost_per_unit)}
+                        {/* On a price line, the cost underneath — so the uplift
+                            is readable on the row that produced it. */}
+                        {mat.charge_basis === 'price' && mat.true_cost_per_unit !== null && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: 'block' }}
+                          >
+                            cost {formatCurrency(mat.true_cost_per_unit)}
+                          </Typography>
+                        )}
+                      </TableCell>
                       <TableCell align="right">{formatCurrency(mat.line_cost)}</TableCell>
                     </TableRow>
                   );
                 })}
                 <TableRow>
-                  <TableCell colSpan={4} sx={{ fontWeight: 600 }}>
+                  <TableCell colSpan={5} sx={{ fontWeight: 600 }}>
                     Total materials / unit
                   </TableCell>
                   <TableCell align="right" sx={{ fontWeight: 600 }}>
                     {formatCurrency(totalMaterialPerUnit)}
                   </TableCell>
                 </TableRow>
+                {hasMaterialMarkup && (
+                  <TableRow>
+                    <TableCell colSpan={5} sx={{ color: 'text.secondary' }}>
+                      of which material markup
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: 'text.secondary' }}>
+                      {formatCurrency(round2(totalMaterialPerUnit - totalMaterialTruePerUnit))}
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -178,6 +229,17 @@ export default function QuoteCostBreakdownView({
                   <TableCell align="right">Setup / unit</TableCell>
                   <TableCell align="right">Markup %</TableCell>
                   <TableCell align="right">Unit price</TableCell>
+                  <TableCell align="right">
+                    <Tooltip
+                      title={
+                        hasMaterialMarkup
+                          ? 'Margin over what this part actually costs us. It is wider than the markup % because materials are charged into the base at their marked-up price — both markups are in this number.'
+                          : 'Margin over what this part actually costs us.'
+                      }
+                    >
+                      <span>Effective margin</span>
+                    </Tooltip>
+                  </TableCell>
                   <TableCell align="right">Total</TableCell>
                 </TableRow>
               </TableHead>
@@ -186,6 +248,14 @@ export default function QuoteCostBreakdownView({
                   const setupPerUnit = li.quantity > 0 ? round2(totalSetupBatch / li.quantity) : 0;
                   const baseFromSnapshot =
                     li.base_cost_per_unit ?? round2(totalRunPerUnit + totalMaterialPerUnit + setupPerUnit);
+                  // Against TRUE cost, so stacked markup is seen rather than
+                  // discovered. Blank when the line has no snapshotted cost —
+                  // an unknown margin is not a zero one.
+                  const trueCost = li.true_cost_per_unit;
+                  const effectiveMargin =
+                    trueCost === null || li.unit_price === 0
+                      ? null
+                      : ((li.unit_price - trueCost) / li.unit_price) * 100;
                   return (
                     <TableRow key={li.id}>
                       <TableCell align="right">{li.quantity}</TableCell>
@@ -205,6 +275,9 @@ export default function QuoteCostBreakdownView({
                             sx={{ ml: 1, height: 18 }}
                           />
                         )}
+                      </TableCell>
+                      <TableCell align="right">
+                        {effectiveMargin === null ? '—' : formatPercent(effectiveMargin)}
                       </TableCell>
                       <TableCell align="right" sx={{ fontWeight: 600 }}>
                         {formatCurrency(li.total_price)}

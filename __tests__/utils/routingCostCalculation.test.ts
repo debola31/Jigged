@@ -41,6 +41,25 @@ const mockGetComputedPartCost = vi.fn(async (partId: string, qty: number) => {
   if (childCostMap.has(partId)) return childCostMap.get(partId) ?? null;
   return 0;
 });
+// Charge base defaults to the SAME number as true cost — which is exactly what
+// the SQL does while every line reads 'cost'. A test that wants them to diverge
+// (a child whose own BOM charges something at price) stages chargeBaseMap.
+const chargeBaseMap = new Map<string, number | null>();
+const mockGetComputedPartChargeBase = vi.fn(async (partId: string, qty: number) => {
+  if (chargeBaseMap.has(partId)) return chargeBaseMap.get(partId) ?? null;
+  if (childCostFn.has(partId)) return childCostFn.get(partId)!(qty);
+  if (childCostMap.has(partId)) return childCostMap.get(partId) ?? null;
+  return 0;
+});
+// compute_part_price_explain_at_qty: the rate a 'price' line charges, and which
+// rung produced it. null (no row) = no tier and no eligible company default.
+const childPriceMap = new Map<
+  string,
+  { unit_price: number | null; rate_source: 'tier' | 'company_default'; markup_percent: number | null } | null
+>();
+const mockGetPartChargePrice = vi.fn(async (partId: string) =>
+  childPriceMap.has(partId) ? childPriceMap.get(partId)! : null,
+);
 const mockGetPartCostExplain = vi.fn(async (partId: string, qty: number) => ({
   unit_cost: childCostMap.has(partId) ? childCostMap.get(partId) ?? null : 0,
   missing_leaves: childCostMap.get(partId) === null
@@ -61,6 +80,9 @@ vi.mock('@/utils/bomAccess', () => ({
 }));
 vi.mock('@/utils/partsAccess', () => ({
   getComputedPartCost: (...args: [string, number]) => mockGetComputedPartCost(...args),
+  getComputedPartChargeBase: (...args: [string, number]) =>
+    mockGetComputedPartChargeBase(...args),
+  getPartChargePrice: (...args: [string, number]) => mockGetPartChargePrice(...args),
   getPartCostExplain: (...args: [string, number]) => mockGetPartCostExplain(...args),
 }));
 vi.mock('@/lib/supabase', () => {
@@ -157,6 +179,14 @@ interface BomOverrides {
   childBatchQty?: number | null;
   /** Qty-dependent child cost: overrides childCost, keyed into childCostFn. */
   childCostByQty?: (qty: number) => number | null;
+  /** #727 — what this line contributes to the parent. Default 'cost'. */
+  chargeBasis?: 'cost' | 'price';
+  /** The child's charge base, when it must differ from its true cost. */
+  childChargeBase?: number | null;
+  /** What a 'price' line is charged; null = no tier and no eligible default. */
+  childPrice?:
+    | { unit_price: number | null; rate_source: 'tier' | 'company_default'; markup_percent: number | null }
+    | null;
 }
 
 function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
@@ -173,6 +203,12 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
     childCostMap.set(childId, childCost);
   }
   childNameMap.set(childId, childName);
+  if ('childChargeBase' in overrides) {
+    chargeBaseMap.set(childId, overrides.childChargeBase ?? null);
+  }
+  if ('childPrice' in overrides) {
+    childPriceMap.set(childId, overrides.childPrice ?? null);
+  }
   return {
     id: overrides.id ?? 'bom-1',
     parent_part_id: 'part-1',
@@ -181,6 +217,7 @@ function makeBomLine(overrides: BomOverrides = {}): BomLineWithChildPart {
     unit: overrides.unit ?? 'ea',
     sequence: 10,
     consume_whole_units: overrides.consumeWholeUnits ?? false,
+    charge_basis: overrides.chargeBasis ?? 'cost',
     notes: null,
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
@@ -209,6 +246,8 @@ describe('calculateRoutingCost', () => {
     childCostMap.clear();
     childCostFn.clear();
     childNameMap.clear();
+    chargeBaseMap.clear();
+    childPriceMap.clear();
     mockSupabaseConversions.length = 0;
     mockGetComputedPartCost.mockClear();
   });
@@ -926,5 +965,220 @@ describe('calculateRoutingCost — yield / ceiling / batch pinning', () => {
     expect(item.qty_in_primary).toBeCloseTo(0.05, 6);
     expect(item.consume_whole_units).toBe(true);
     expect(item.units_consumed).toBe(1);
+  });
+});
+
+// ============================================================================
+// Per-BOM-line charge basis (#727)
+//
+// A line contributes the child's COST (default) or its MARKED-UP PRICE. Every
+// line produces two numbers — the charged rate, which markup is applied to, and
+// the true cost, which effective margin is measured against. The interesting
+// cases are the ones where those two diverge, and where they must NOT.
+//
+// The SQL side owns the three-rung rule (own tier -> shop default for bought ->
+// nothing) and the multi-level math; those are pinned in
+// api/tests/integration/test_bom_charge_basis.py. What is tested here is that
+// the TS mirror asks the right question and does the right arithmetic with the
+// answer.
+// ============================================================================
+describe('calculateRoutingCost — charge basis', () => {
+  beforeEach(() => {
+    mockGetRoutingForPart.mockReset();
+    mockGetRoutingForPart.mockResolvedValue(null); // BOM-only; isolate material math
+    mockGetBomForPart.mockReset();
+    mockGetBomForPart.mockResolvedValue([]);
+    childCostMap.clear();
+    childCostFn.clear();
+    childNameMap.clear();
+    chargeBaseMap.clear();
+    childPriceMap.clear();
+    mockSupabaseConversions.length = 0;
+    mockGetComputedPartCost.mockClear();
+    mockGetComputedPartChargeBase.mockClear();
+    mockGetPartChargePrice.mockClear();
+  });
+
+  it('defaults to cost, and then charged and true are the same number', async () => {
+    mockGetBomForPart.mockResolvedValue([makeBomLine({ quantity: 2, childCost: 10 })]);
+
+    const result = await calculateRoutingCost('part-1', 1);
+
+    const mat = result!.material_items[0];
+    expect(mat.charge_basis).toBe('cost');
+    expect(mat.cost_per_unit).toBe(10);
+    expect(mat.true_cost_per_unit).toBe(10);
+    expect(mat.cost).toBe(20);
+    expect(mat.true_cost).toBe(20);
+    expect(result!.total_material_cost).toBe(result!.total_material_true_cost);
+    // Nothing was resolved, so nothing is claimed about a rate source.
+    expect(mat.charge_rate_source).toBeNull();
+    expect(mat.charge_markup_percent).toBeNull();
+    expect(mockGetPartChargePrice).not.toHaveBeenCalled();
+  });
+
+  it('charges a price line at the resolved price and keeps true cost intact', async () => {
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        quantity: 2,
+        childCost: 10,
+        chargeBasis: 'price',
+        childPrice: { unit_price: 12.5, rate_source: 'company_default', markup_percent: 25 },
+      }),
+    ]);
+
+    const result = await calculateRoutingCost('part-1', 1);
+
+    const mat = result!.material_items[0];
+    expect(mat.charge_basis).toBe('price');
+    expect(mat.cost_per_unit).toBe(12.5);
+    expect(mat.cost).toBe(25); // 2 x 12.50 — what the price is built on
+    expect(mat.true_cost_per_unit).toBe(10);
+    expect(mat.true_cost).toBe(20); // 2 x 10 — what it costs us
+    expect(result!.total_material_cost).toBe(25);
+    expect(result!.total_material_true_cost).toBe(20);
+  });
+
+  it('records WHICH rung set the rate, so the number is never anonymous', async () => {
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        childId: 'bar',
+        childCost: 10,
+        chargeBasis: 'price',
+        childPrice: { unit_price: 11, rate_source: 'tier', markup_percent: 10 },
+      }),
+      makeBomLine({
+        id: 'bom-2',
+        childId: 'bushing',
+        childCost: 4,
+        chargeBasis: 'price',
+        childPrice: { unit_price: 5, rate_source: 'company_default', markup_percent: 25 },
+      }),
+    ]);
+
+    const result = await calculateRoutingCost('part-1', 1);
+
+    expect(result!.material_items[0].charge_rate_source).toBe('tier');
+    expect(result!.material_items[0].charge_markup_percent).toBe(10);
+    expect(result!.material_items[1].charge_rate_source).toBe('company_default');
+    expect(result!.material_items[1].charge_markup_percent).toBe(25);
+  });
+
+  it('a cost line carries the child CHARGE BASE, not its true cost', async () => {
+    // The nesting rule: a markup declared inside the child survives the hop up.
+    // Child costs 40 but its own BOM charges something at price, so its charge
+    // base is 42.50 — and "our cost" of it, to this parent, is 42.50.
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        childSource: 'made',
+        childBatchQty: 1,
+        childCost: 40,
+        childChargeBase: 42.5,
+      }),
+    ]);
+
+    const result = await calculateRoutingCost('part-1', 1);
+
+    const mat = result!.material_items[0];
+    expect(mat.cost_per_unit).toBe(42.5);
+    expect(mat.true_cost_per_unit).toBe(40);
+    expect(result!.total_material_cost).toBe(42.5);
+    expect(result!.total_material_true_cost).toBe(40);
+  });
+
+  it('warns instead of falling back to cost when a price line has no markup', async () => {
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        childName: 'BAR STOCK',
+        childCost: 10,
+        chargeBasis: 'price',
+        childPrice: null, // no tier, and no eligible company default
+      }),
+    ]);
+
+    const result = await calculateRoutingCost('part-1', 1);
+
+    expect(result!.materials_complete).toBe(false);
+    expect(result!.total_material_cost).toBeNull();
+    expect(result!.total_cost).toBeNull();
+    const warning = result!.warnings.find((w) => w.type === 'missing_child_markup');
+    expect(warning).toBeDefined();
+    expect(warning!.child_part_name).toBe('BAR STOCK');
+    // Both fixes named — a tier on the material, or a shop-wide default.
+    expect(warning!.detail).toMatch(/pricing tier/);
+    expect(warning!.detail).toMatch(/default material markup/);
+    // The line is dropped from the rollup rather than costed at 10.
+    expect(result!.material_items).toHaveLength(0);
+  });
+
+  it('applies the whole-unit ceiling to the charged rate and the true rate alike', async () => {
+    // 0.4 strips/part x 3 parts = 1.2 -> 2 whole strips. Both rates ceiling the
+    // same way; only the per-unit number differs.
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        quantity: 0.4,
+        consumeWholeUnits: true,
+        childCost: 100,
+        chargeBasis: 'price',
+        childPrice: { unit_price: 125, rate_source: 'company_default', markup_percent: 25 },
+      }),
+    ]);
+
+    const result = await calculateRoutingCost('part-1', 3);
+
+    const mat = result!.material_items[0];
+    expect(mat.units_consumed).toBe(2);
+    expect(mat.cost).toBeCloseTo((2 * 125) / 3, 2);
+    expect(mat.true_cost).toBeCloseTo((2 * 100) / 3, 2);
+  });
+
+  it('resolves a made child price at its costing lot size, not the consumed qty', async () => {
+    // Batch pinning is unchanged by the charge basis: the price rung is asked
+    // about the same valuation quantity the cost path uses. Any divergence here
+    // is how you get a quote nobody can explain.
+    mockGetBomForPart.mockResolvedValue([
+      makeBomLine({
+        childId: 'sub',
+        quantity: 1,
+        childSource: 'made',
+        childBatchQty: 25,
+        childCost: 109,
+        chargeBasis: 'price',
+        childPrice: { unit_price: 130.8, rate_source: 'tier', markup_percent: 20 },
+      }),
+    ]);
+
+    await calculateRoutingCost('part-1', 4);
+
+    expect(mockGetPartChargePrice).toHaveBeenCalledWith('sub', 25);
+    expect(mockGetComputedPartCost).toHaveBeenCalledWith('sub', 25);
+  });
+});
+
+describe('calculateTierPricing — true cost alongside the charge base', () => {
+  it('reports both, so effective margin is measurable', () => {
+    const breakdown = {
+      labor_items: [],
+      material_items: [],
+      total_labor_cost: 20,
+      total_setup_cost: 0,
+      total_material_cost: 42.5, // materials charged at price
+      total_cost: 62.5,
+      total_material_true_cost: 40,
+      total_true_cost: 60,
+      materials_complete: true,
+      warnings: [],
+    };
+
+    const pricing = calculateTierPricing(breakdown, 1, 40);
+
+    expect(pricing.baseCostPerUnit).toBe(62.5);
+    expect(pricing.unitPrice).toBe(87.5); // markup applies to the CHARGE base
+    expect(pricing.trueCostPerUnit).toBe(60);
+    // (87.50 - 60) / 87.50 — wider than the 40% on the tier, which is the whole
+    // reason the quote breakdown shows it.
+    const effectiveMargin =
+      ((pricing.unitPrice! - pricing.trueCostPerUnit!) / pricing.unitPrice!) * 100;
+    expect(effectiveMargin).toBeCloseTo(31.4, 1);
   });
 });

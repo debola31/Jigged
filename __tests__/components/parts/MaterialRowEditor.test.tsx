@@ -59,6 +59,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -82,6 +83,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -179,7 +181,7 @@ describe('MaterialRowEditor — single quantity field', () => {
     );
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
 
-    const unit = await screen.findByRole('combobox');
+    const unit = await screen.findByRole('combobox', { name: /unit/i });
     await waitFor(() => expect(unit).not.toHaveAttribute('aria-disabled', 'true'));
 
     // Opening it offers the standard siblings.
@@ -195,7 +197,7 @@ describe('MaterialRowEditor — single quantity field', () => {
     );
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
 
-    const unit = await screen.findByRole('combobox');
+    const unit = await screen.findByRole('combobox', { name: /unit/i });
     await waitFor(() => expect(unit).toHaveAttribute('aria-disabled', 'true'));
   });
 
@@ -207,6 +209,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -219,5 +222,47 @@ describe('MaterialRowEditor — single quantity field', () => {
 
     await screen.findByLabelText(/per part/i);
     expect(screen.queryByLabelText(/Batch qty/i)).toBeNull();
+  });
+
+  // #727. Money control: it decides whether the job pays our cost for a material
+  // or what we sell it for, so the default must be the pre-feature behaviour and
+  // the change must reach the caller intact.
+  describe('charge basis', () => {
+    it('defaults to our cost and saves it', async () => {
+      nextPickOption = makeOption({ primary_unit: 'each' });
+      const onSave = vi.fn();
+      render(
+        <MaterialRowEditor companyId="co-1" onSave={onSave} onCancel={() => undefined} />,
+      );
+      await user.click(screen.getByRole('button', { name: 'pick-part' }));
+      await user.type(await screen.findByLabelText(/per part/i), '2');
+
+      expect(screen.getByRole('combobox', { name: /charge at/i })).toHaveTextContent(
+        'Our cost',
+      );
+
+      await user.click(screen.getByRole('button', { name: /add to bom/i }));
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ charge_basis: 'cost', quantity: '2' }),
+      );
+    });
+
+    it('passes marked-up price through when the user picks it', async () => {
+      nextPickOption = makeOption({ primary_unit: 'each' });
+      const onSave = vi.fn();
+      render(
+        <MaterialRowEditor companyId="co-1" onSave={onSave} onCancel={() => undefined} />,
+      );
+      await user.click(screen.getByRole('button', { name: 'pick-part' }));
+      await user.type(await screen.findByLabelText(/per part/i), '2');
+
+      await user.click(screen.getByRole('combobox', { name: /charge at/i }));
+      await user.click(await screen.findByRole('option', { name: 'Marked-up price' }));
+
+      await user.click(screen.getByRole('button', { name: /add to bom/i }));
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ charge_basis: 'price' }),
+      );
+    });
   });
 });

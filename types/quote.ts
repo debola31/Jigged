@@ -1,4 +1,5 @@
 import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot';
+import type { ChargeBasis, ChargeRateSource } from '@/types/bom';
 
 /**
  * Quote status values
@@ -134,7 +135,18 @@ export interface QuoteLineItem {
   unit_price: number;
   total_price: number | null;
   markup_percent: number | null;
+  /**
+   * The CHARGE base the price was built on, at the matched tier's quantity. The
+   * row's own invariant is `unit_price = base_cost_per_unit × (1 + markup/100)`.
+   */
   base_cost_per_unit: number | null;
+  /**
+   * True rolled-up cost per unit at the same quantity, every BOM charge basis
+   * ignored (#727). Effective margin = (unit_price - true_cost_per_unit) /
+   * unit_price. Equals `base_cost_per_unit` whenever no material is charged at
+   * price, which is every line until someone sets that toggle.
+   */
+  true_cost_per_unit: number | null;
   /**
    * True when the salesperson typed a one-off price/markup on the quote form
    * that diverged from the source tier. UI surfaces a green "adjusted for this quote" chip.
@@ -510,7 +522,12 @@ export interface QuoteMaterialSnapshot {
   item_name: string;
   quantity: number;
   unit: string | null;
+  /**
+   * The rate that went INTO the rollup: the child's cost on a `'cost'` line,
+   * its marked-up price on a `'price'` line. Read with `charge_basis`.
+   */
   cost_per_unit: number | null;
+  /** Per-parent-unit contribution at the charged rate. */
   line_cost: number | null;
   /**
    * Total units of this material consumed across the quoted order (the discrete
@@ -519,6 +536,20 @@ export interface QuoteMaterialSnapshot {
    * fractional row where `quantity` is the literal per-unit value.
    */
   units_consumed: number | null;
+  /** The BOM line's charge basis at quote time (#727). */
+  charge_basis: ChargeBasis;
+  /** True cost per unit and per-parent-unit, every charge basis ignored. */
+  true_cost_per_unit: number | null;
+  true_line_cost: number | null;
+  /**
+   * Which rung produced the charged rate on a `'price'` line, and the markup it
+   * applied — both FROZEN. The quote must keep saying "shop default 25%" after
+   * the company default becomes 30%, and neither is recoverable from
+   * charged-vs-true (a made child's charged and true rates have different bases).
+   * NULL on `'cost'` lines: nothing was resolved.
+   */
+  charge_rate_source: ChargeRateSource | null;
+  charge_markup_percent: number | null;
   created_at: string;
 }
 

@@ -1,13 +1,20 @@
 import { getSupabase } from '@/lib/supabase';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 import { getBomForPart } from '@/utils/bomAccess';
-import { getComputedPartCost, getPartCostExplain } from '@/utils/partsAccess';
+import {
+  getComputedPartCost,
+  getComputedPartChargeBase,
+  getPartCostExplain,
+  getPartChargePrice,
+} from '@/utils/partsAccess';
+import type { ChargeBasis, ChargeRateSource } from '@/types/bom';
 
 export interface CostWarning {
   type:
     | 'empty_operation'
     | 'missing_labor_rate'
     | 'missing_material_cost'
+    | 'missing_child_markup'
     | 'no_operations'
     | 'missing_external_pricing';
   /**
@@ -52,10 +59,25 @@ export interface MaterialItem {
   /** Per-parent-unit BOM quantity in `unit` (e.g. 0.05 strips/part). */
   quantity: number;
   unit: string;
-  /** Child cost per its primary unit at the valuation qty (pinned batch or consumed). */
+  /**
+   * The rate that goes INTO the rollup, per the child's primary unit at the
+   * valuation qty (pinned batch or consumed): the child's cost on a `'cost'`
+   * line, its marked-up price on a `'price'` line. True cost is
+   * `true_cost_per_unit`; the two are equal on a `'cost'` line.
+   */
   cost_per_unit: number;
-  /** Per-parent-unit material contribution (ceiling-adjusted when whole-unit). */
+  /** Per-parent-unit contribution at the charged rate (ceiling-adjusted when whole-unit). */
   cost: number;
+  /** The child's TRUE cost per unit, ignoring every charge basis in the tree. */
+  true_cost_per_unit: number;
+  /** Per-parent-unit contribution at the TRUE cost rate. */
+  true_cost: number;
+  /** What this line contributes to the parent's rollup (#727). */
+  charge_basis: ChargeBasis;
+  /** Which rung produced the charged rate; null on a `'cost'` line. */
+  charge_rate_source: ChargeRateSource | null;
+  /** The markup % actually applied; null on a `'cost'` line. */
+  charge_markup_percent: number | null;
   /** `quantity` converted to the child's primary unit — per parent unit. */
   qty_in_primary: number;
   /** Whether this line ceilings consumption to whole units. */
@@ -75,10 +97,19 @@ export interface RoutingCostBreakdown {
   total_labor_cost: number;
   total_setup_cost: number;
   /** null when any BOM line is missing a priced cost — mirrors the SQL
-   * `compute_part_cost_at_qty` behavior of propagating NULL up the tree. */
+   * `compute_part_cost_at_qty` behavior of propagating NULL up the tree.
+   * This is the CHARGE base contribution: markup applies on top of it. */
   total_material_cost: number | null;
   /** null when total_material_cost is null. */
   total_cost: number | null;
+  /**
+   * The same two totals at TRUE cost — every charge basis ignored. Equal to
+   * their charged counterparts until a line charges its child at price; the
+   * difference is the material markup baked into the price, and the denominator
+   * for effective margin.
+   */
+  total_material_true_cost: number | null;
+  total_true_cost: number | null;
   /** false when any BOM line could not be priced (unit conversion missing,
    * cost lookup threw, or child returned null). Callers that display a
    * Base/unit or Unit price must blank those values when this is false. */
@@ -95,13 +126,17 @@ export interface RoutingCostBreakdown {
  * `total_setup_cost` and are NOT amortized at this layer (callers like
  * `calculateTierPricing` divide by the tier qty to spread them).
  *
- * BOM child costs come from `compute_part_cost_at_qty(child_id,
- * parent_qty * qty_in_child_primary_unit)` — i.e. the child is tier-matched
- * at the *cascaded* qty actually being consumed across the parent batch.
- * Setup amortization for sub-assemblies falls out of that recursion: a
- * sub-assembly's setup divided by the cascaded qty contributes
- * `sub_setup / parent_qty` per parent unit (one sub-assembly setup spread
- * across the parent batch run).
+ * BOM child rates come from the SQL rollup at the child's valuation qty — a
+ * made child at its costing lot size, a bought child at the cascaded qty
+ * actually consumed across the parent batch. Setup amortization for
+ * sub-assemblies falls out of that recursion: a sub-assembly's setup divided by
+ * the cascaded qty contributes `sub_setup / parent_qty` per parent unit.
+ *
+ * Each line produces TWO numbers (#727): the CHARGED rate — the child's charge
+ * base on a `'cost'` line, its marked-up price on a `'price'` line — and the
+ * TRUE cost. Markup applies to the charged totals; effective margin is measured
+ * against the true ones. Every line defaults to `'cost'`, and then the two are
+ * the same number.
  *
  * Returns null if the part has no routing AND no BOM.
  */
@@ -282,9 +317,19 @@ export async function calculateRoutingCost(
       const pinned = child.source === 'made';
       const childValQty = pinned ? (child.costing_batch_quantity ?? 1) : unitsConsumed;
 
-      let childUnitCost: number | null = null;
+      // Two numbers per child, always:
+      //   childChargeBase — what a 'cost' line contributes. The child's rollup
+      //     HONORING its own declarations, so a material markup declared inside
+      //     the child survives the hop up instead of evaporating here.
+      //   childTrueCost  — every basis in the subtree ignored. Margin denominator.
+      // They are the same number until someone sets the toggle somewhere below.
+      let childChargeBase: number | null = null;
+      let childTrueCost: number | null = null;
       try {
-        childUnitCost = await getComputedPartCost(child.id, childValQty);
+        [childChargeBase, childTrueCost] = await Promise.all([
+          getComputedPartChargeBase(child.id, childValQty),
+          getComputedPartCost(child.id, childValQty),
+        ]);
       } catch (err) {
         const detail = `cost lookup failed (${(err as Error).message})`;
         warnings.push({
@@ -300,7 +345,7 @@ export async function calculateRoutingCost(
         continue;
       }
 
-      if (childUnitCost === null) {
+      if (childChargeBase === null || childTrueCost === null) {
         // Surface the deepest offending bought leaf via the explain RPC. The
         // BOM panel uses this to render an actionable tooltip with the leaf's
         // name + a link to its detail page. Explain at the same valuation qty
@@ -337,20 +382,55 @@ export async function calculateRoutingCost(
         continue;
       }
 
+      // What this line actually charges the parent. On a 'price' line the rate
+      // is the child's marked-up price and the RUNG that produced it comes back
+      // from SQL — the three-rung rule (own tier → shop default for bought →
+      // nothing) has exactly one implementation, and re-deriving it here would
+      // make two, in two languages, on a money path.
+      let chargedUnitRate = childChargeBase;
+      let chargeRateSource: ChargeRateSource | null = null;
+      let chargeMarkupPercent: number | null = null;
+      if (line.charge_basis === 'price') {
+        const priced = await getPartChargePrice(child.id, childValQty).catch(() => null);
+        if (!priced || priced.unit_price === null) {
+          const detail =
+            'is charged at price but has no markup — add a pricing tier on this material, or set a default material markup in Settings';
+          warnings.push({
+            type: 'missing_child_markup',
+            message: `${itemName}: ${detail}`,
+            detail,
+            material_id: line.id,
+            child_part_id: child.id,
+            child_part_name: itemName,
+            child_part_source: child.source,
+          });
+          materialsComplete = false;
+          continue;
+        }
+        chargedUnitRate = priced.unit_price;
+        chargeRateSource = priced.rate_source;
+        chargeMarkupPercent = priced.markup_percent;
+      }
+
       // Per-parent-unit material contribution. The (fractional && not-pinned)
       // path is the LEGACY expression, kept textually identical so every
       // pre-existing BOM line yields a byte-identical cost. Ceiling / pinning
       // take the general (consumed × unit_cost) / batch form.
-      const materialCost =
+      const perParentUnit = (rate: number): number =>
         !line.consume_whole_units && !pinned
-          ? qtyInPrimary * childUnitCost
-          : (unitsConsumed * childUnitCost) / safeQty;
+          ? qtyInPrimary * rate
+          : (unitsConsumed * rate) / safeQty;
       materialItems.push({
         item_name: itemName,
         quantity: bomQty,
         unit: effectiveBomUnit || '',
-        cost_per_unit: Math.round(childUnitCost * 10000) / 10000,
-        cost: Math.round(materialCost * 100) / 100,
+        cost_per_unit: Math.round(chargedUnitRate * 10000) / 10000,
+        cost: Math.round(perParentUnit(chargedUnitRate) * 100) / 100,
+        true_cost_per_unit: Math.round(childTrueCost * 10000) / 10000,
+        true_cost: Math.round(perParentUnit(childTrueCost) * 100) / 100,
+        charge_basis: line.charge_basis,
+        charge_rate_source: chargeRateSource,
+        charge_markup_percent: chargeMarkupPercent,
         qty_in_primary: qtyInPrimary,
         consume_whole_units: line.consume_whole_units,
         units_consumed: unitsConsumed,
@@ -369,6 +449,13 @@ export async function calculateRoutingCost(
     totalMaterialCost === null
       ? null
       : Math.round((totalLaborCost + totalMaterialCost) * 100) / 100;
+  const totalMaterialTrueCost = materialsComplete
+    ? Math.round(materialItems.reduce((sum, item) => sum + item.true_cost, 0) * 100) / 100
+    : null;
+  const totalTrueCost =
+    totalMaterialTrueCost === null
+      ? null
+      : Math.round((totalLaborCost + totalMaterialTrueCost) * 100) / 100;
 
   return {
     labor_items: laborItems,
@@ -377,6 +464,8 @@ export async function calculateRoutingCost(
     total_setup_cost: totalSetupCost,
     total_material_cost: totalMaterialCost,
     total_cost: totalCost,
+    total_material_true_cost: totalMaterialTrueCost,
+    total_true_cost: totalTrueCost,
     materials_complete: materialsComplete,
     warnings,
   };
@@ -390,9 +479,13 @@ function formatQty(q: number): string {
 export interface TierPricing {
   /** null when the breakdown has incomplete materials — see
    * `RoutingCostBreakdown.materials_complete`. UI should render "—" rather
-   * than a misleading number that silently treats unpriced materials as $0. */
+   * than a misleading number that silently treats unpriced materials as $0.
+   * This is the CHARGE base — the number the markup is applied to. */
   baseCostPerUnit: number | null;
   unitPrice: number | null;
+  /** The same per-unit figure at TRUE cost. Equal to `baseCostPerUnit` unless a
+   * BOM line charges its child at price; the gap is the material markup. */
+  trueCostPerUnit: number | null;
 }
 
 /**
@@ -419,7 +512,7 @@ export function calculateTierPricing(
   // If any BOM line couldn't be priced, the breakdown's material total is
   // null — there is no honest Base/unit to display.
   if (breakdown.total_material_cost === null) {
-    return { baseCostPerUnit: null, unitPrice: null };
+    return { baseCostPerUnit: null, unitPrice: null, trueCostPerUnit: null };
   }
   const qty = Math.max(quantity, 1);
   const runPerUnit = breakdown.total_labor_cost;
@@ -432,5 +525,12 @@ export function calculateTierPricing(
       ? null
       : Math.round(baseCostPerUnit * (1 + markupPercent / 100) * 100) / 100;
 
-  return { baseCostPerUnit, unitPrice };
+  const trueCostPerUnit =
+    breakdown.total_material_true_cost === null
+      ? null
+      : Math.round(
+          (runPerUnit + breakdown.total_material_true_cost + setupPerUnit) * 100,
+        ) / 100;
+
+  return { baseCostPerUnit, unitPrice, trueCostPerUnit };
 }

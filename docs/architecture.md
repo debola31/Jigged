@@ -77,7 +77,7 @@ cross-tenant reads; one user can belong to many companies.
 
 | Table | Shape that matters |
 |---|---|
-| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts)). |
+| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_material_markup_percent` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts)). `default_material_markup_percent` is a **real column, not a settings key**, because the SQL cost rollup reads it — see [parts.md](modules/parts.md#parts_bom). |
 | `user_company_access` | `(user_id, company_id) UNIQUE`; `role` CHECK-constrained to **`admin` \| `user` \| `operator`** (default `operator`); also `name`, `email`, `pin_hash`, `excluded_from_metrics`. *(Previously listed an `owner` role; the constraint has never allowed it.)* |
 | `user_preferences` | `user_id UNIQUE`, `last_company_id`, `preferences jsonb`. |
 

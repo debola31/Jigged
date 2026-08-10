@@ -31,6 +31,16 @@ export interface Company {
   demo_company_id?: string | null;
   // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
   settings?: Record<string, unknown> | null;
+  /**
+   * Shop-wide default material markup % (#727). Applied to a BOUGHT material
+   * charged at price on a BOM line that has no pricing tier of its own.
+   *
+   * NULL = unset, and unset is meaningful: such a line is un-priceable and
+   * surfaces as a gap rather than silently falling back to cost. A real column
+   * rather than a `settings.defaults` entry because the cost engine reads it in
+   * SQL — see the docstring on `setCompanyDefaultMaterialMarkup`.
+   */
+  default_material_markup_percent?: number | null;
 }
 
 /**
@@ -334,7 +344,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_material_markup_percent'
     )
     .eq('id', companyId)
     .single();
@@ -597,6 +607,55 @@ export async function setCompanyDefaultPaymentTerms(
     });
   }
   return next;
+}
+
+/**
+ * The shop-wide default material markup % — what a BOUGHT material is marked up
+ * by when a BOM line charges it at price and that material has no pricing tier
+ * of its own (#727). Pass null to clear it.
+ *
+ * **A real column, not a `settings.defaults` entry**, unlike every other default
+ * in this file. Three reasons, any one disqualifying:
+ *   1. The engine that reads it is SQL (`compute_part_price_explain_at_qty`). A
+ *      jsonb path would put the clamp/fallback semantics in `lib/companyDefaults`
+ *      and force a second copy of them into the rollup, with nothing enforcing
+ *      agreement — two definitions of a money rule.
+ *   2. `KNOWN_DEFAULTS` is integer-only (`coerceInt`, a `type="number"` whole-number
+ *      field). `part_pricing_tiers.markup_percent` is numeric(10,6) precisely
+ *      because 0.01% quantization visibly moved the price.
+ *   3. That registry is dense — every descriptor has a non-null fallback — so
+ *      "unset" cannot be expressed, and unset is the whole no-op guarantee for
+ *      companies that never touch this feature.
+ *
+ * **Provenance is not optional here.** This is a shared default resolved at READ
+ * time, which is the shape of the `markup_rates` module deleted in July 2026. It
+ * only stays honest because every surface that uses it says so by name, and
+ * because a committed quote snapshots the resolved rate and its source — so
+ * changing this number never rewrites what an old quote says about itself.
+ */
+export async function setCompanyDefaultMaterialMarkup(
+  companyId: string,
+  markupPercent: number | null,
+): Promise<number | null> {
+  if (markupPercent !== null && (!Number.isFinite(markupPercent) || markupPercent < 0)) {
+    throw new Error('Default material markup must be zero or greater.');
+  }
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('companies')
+    .update({
+      default_material_markup_percent: markupPercent,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating default material markup:', error);
+    throw toFriendlyError(error, {
+      entity: 'material markup',
+      fallback: 'Failed to save the default material markup.',
+    });
+  }
+  return markupPercent;
 }
 
 /**

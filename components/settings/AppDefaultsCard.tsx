@@ -11,9 +11,11 @@ import Divider from '@mui/material/Divider';
 import InputAdornment from '@mui/material/InputAdornment';
 import SaveIcon from '@mui/icons-material/Save';
 import Autocomplete from '@mui/material/Autocomplete';
+import posthog from 'posthog-js';
 import {
   getCompany,
   getCustomPaymentTerms,
+  setCompanyDefaultMaterialMarkup,
   setCompanyDefaultPaymentTerms,
   updateCompanyDefaults,
 } from '@/utils/companyAccess';
@@ -71,6 +73,11 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [terms, setTerms] = useState('');
+  // Blank string = unset, which is meaningful here: it means a material charged
+  // at price must carry its own pricing tier. Kept as a string so "0%" (charge
+  // material at cost, deliberately) stays distinguishable from "not set".
+  const [materialMarkup, setMaterialMarkup] = useState('');
+  const [materialMarkupBaseline, setMaterialMarkupBaseline] = useState('');
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -88,6 +95,10 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
         if (cancelled) return;
         setForm(toFormState(readCompanyDefaults(company)));
         setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
+        const markup = company?.default_material_markup_percent;
+        const markupStr = markup === null || markup === undefined ? '' : String(markup);
+        setMaterialMarkup(markupStr);
+        setMaterialMarkupBaseline(markupStr);
         setSavedTerms(customTerms);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
@@ -123,7 +134,8 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
     },
     {},
   );
-  const hasErrors = Object.keys(errors).length > 0;
+  const materialMarkupError = materialMarkupFieldError(materialMarkup);
+  const hasErrors = Object.keys(errors).length > 0 || materialMarkupError !== null;
 
   const handleSave = async () => {
     if (hasErrors) {
@@ -143,6 +155,18 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       // second read happens before the first write lands and one silently clobbers the other.
       await updateCompanyDefaults(companyId, patch);
       setTerms((await setCompanyDefaultPaymentTerms(companyId, terms)) ?? '');
+      // A real column, so this one is an independent write — no settings
+      // read-modify-write to serialize against.
+      const trimmedMarkup = materialMarkup.trim();
+      const nextMarkup = trimmedMarkup === '' ? null : Number(trimmedMarkup);
+      if (trimmedMarkup !== materialMarkupBaseline.trim()) {
+        await setCompanyDefaultMaterialMarkup(companyId, nextMarkup);
+        posthog.capture('material markup default set', {
+          had_previous: materialMarkupBaseline.trim() !== '',
+          cleared: nextMarkup === null,
+        });
+        setMaterialMarkupBaseline(trimmedMarkup);
+      }
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings.');
@@ -255,6 +279,51 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
             />
           </Box>
 
+          <Divider sx={{ my: 2 }} />
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                Default material markup
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Applied to purchased materials on BOM lines set to charge at price, when
+                that material has no pricing tier of its own. Leave blank to require a
+                tier on every material. Never applies to parts you make — mark those up
+                with their own pricing tier.
+              </Typography>
+            </Box>
+            <TextField
+              value={materialMarkup}
+              onChange={(e) => {
+                setMaterialMarkup(e.target.value);
+                setSuccess(false);
+              }}
+              size="small"
+              type="number"
+              placeholder="Not set"
+              inputProps={{
+                min: 0,
+                step: 'any',
+                inputMode: 'decimal',
+                'aria-label': 'Default material markup',
+              }}
+              error={Boolean(materialMarkupError)}
+              helperText={materialMarkupError}
+              sx={{ width: 160 }}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">%</InputAdornment>,
+              }}
+            />
+          </Box>
+
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
             <Button
               variant="contained"
@@ -269,6 +338,20 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       )}
     </SettingsSection>
   );
+}
+
+/**
+ * Blank is valid and means "unset". Anything else must be a number >= 0 — the
+ * column is numeric(10,6), deliberately not the whole-number shape KNOWN_DEFAULTS
+ * enforces, because 0.01% of markup visibly moves a price.
+ */
+function materialMarkupFieldError(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return 'Enter a number';
+  if (n < 0) return 'Cannot be negative';
+  return null;
 }
 
 function emptyForm(): FormState {

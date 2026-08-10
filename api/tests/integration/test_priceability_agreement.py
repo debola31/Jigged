@@ -211,3 +211,130 @@ def test_list_and_detail_agree_when_everything_has_markup(admin: Client, env: Pr
     assert explain["is_priceable"] is True
     assert explain["missing_markups"] == []
     assert env.parent_id in list_priceable
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Charge basis (#727) re-opens the markup question for ONE edge at a time.
+#
+# "A material's markup is never used inside a parent" stopped being true the
+# moment a BOM line could charge its child at PRICE — and the shop-wide default
+# then makes it untrue in the other direction, because a bought child covered by
+# the default needs no tier of its own. The rule both views must encode:
+#
+#     a price-basis child is satisfied  <=>  it has a markup tier
+#                                            OR (it is bought AND the default is set)
+#
+# These four cases are the whole truth table. They fail loudly if the list RPC
+# and the detail explain ever drift apart on it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _charge_at_price(admin: Client, env: PriceabilityEnv) -> None:
+    admin.table("parts_bom").update({"charge_basis": "price"}).eq(
+        "parent_part_id", env.parent_id
+    ).eq("child_part_id", env.sub_id).execute()
+
+
+def _set_company_default(admin: Client, env: PriceabilityEnv, markup: float | None) -> None:
+    admin.table("companies").update(
+        {"default_material_markup_percent": markup}
+    ).eq("id", env.company_id).execute()
+
+
+def test_price_basis_child_without_markup_blocks_the_parent(
+    admin: Client, env: PriceabilityEnv
+):
+    # PARENT is sellable, but it charges SUB at price and SUB has no markup —
+    # there is no number to charge. Both views must say so, and both must name
+    # SUB rather than leaving the user hunting.
+    _apply_default(admin, env, env.parent_id)
+    _charge_at_price(admin, env)
+
+    explain = _detail_explain(admin, env.parent_id)
+    list_priceable = _list_priceable(admin, env.company_id)
+
+    assert explain["is_priceable"] is False
+    assert env.sub_id in {g["part_id"] for g in explain["missing_markups"]}
+    assert env.parent_id not in list_priceable
+
+
+def test_price_basis_child_with_its_own_markup_is_satisfied(
+    admin: Client, env: PriceabilityEnv
+):
+    _apply_default(admin, env, env.parent_id)
+    _apply_default(admin, env, env.sub_id)
+    _charge_at_price(admin, env)
+
+    explain = _detail_explain(admin, env.parent_id)
+    assert explain["is_priceable"] is True
+    assert explain["missing_markups"] == []
+    assert env.parent_id in _list_priceable(admin, env.company_id)
+
+
+def test_company_default_does_not_cover_a_MADE_child(
+    admin: Client, env: PriceabilityEnv
+):
+    # SUB is a made part. The shop-wide material markup is scoped to purchased
+    # cost, so it must NOT rescue this — marking up in-house work is a decision,
+    # not a default.
+    _apply_default(admin, env, env.parent_id)
+    _charge_at_price(admin, env)
+    _set_company_default(admin, env, 25)
+
+    explain = _detail_explain(admin, env.parent_id)
+    assert explain["is_priceable"] is False
+    assert env.sub_id in {g["part_id"] for g in explain["missing_markups"]}
+    assert env.parent_id not in _list_priceable(admin, env.company_id)
+
+
+def test_company_default_covers_a_BOUGHT_child_and_the_verdict_flips_back(
+    admin: Client, env: PriceabilityEnv
+):
+    # Swap the price-basis child for a bought one with a procurement tier but no
+    # pricing tier — the L&L case: purchased material, marked up shop-wide.
+    suffix = uuid.uuid4().hex[:8]
+    bought = (
+        admin.table("parts")
+        .insert(
+            {
+                "company_id": env.company_id,
+                "part_name": f"BAR-{suffix}",
+                "source": "bought",
+                "primary_unit": "ea",
+            }
+        )
+        .execute()
+    )
+    bought_id = bought.data[0]["id"]
+    admin.table("part_procurement_tiers").insert(
+        {"part_id": bought_id, "min_quantity": 1, "cost_per_unit": 10}
+    ).execute()
+    admin.table("parts_bom").update(
+        {"child_part_id": bought_id, "charge_basis": "price"}
+    ).eq("parent_part_id", env.parent_id).eq("child_part_id", env.sub_id).execute()
+    _apply_default(admin, env, env.parent_id)
+
+    try:
+        # Default unset: no tier, no rung — blocked, and the bought child is named.
+        _set_company_default(admin, env, None)
+        explain = _detail_explain(admin, env.parent_id)
+        assert explain["is_priceable"] is False
+        assert bought_id in {g["part_id"] for g in explain["missing_markups"]}
+        assert env.parent_id not in _list_priceable(admin, env.company_id)
+
+        # Default set: covered, on both views, with no tier added anywhere. This
+        # is the setup cliff the default exists to remove.
+        _set_company_default(admin, env, 25)
+        explain = _detail_explain(admin, env.parent_id)
+        assert explain["is_priceable"] is True
+        assert explain["missing_markups"] == []
+        assert env.parent_id in _list_priceable(admin, env.company_id)
+
+        # Cleared again: the verdict flips straight back, no stale state.
+        _set_company_default(admin, env, None)
+        assert _detail_explain(admin, env.parent_id)["is_priceable"] is False
+        assert env.parent_id not in _list_priceable(admin, env.company_id)
+    finally:
+        admin.table("parts_bom").delete().eq("parent_part_id", env.parent_id).execute()
+        admin.table("part_procurement_tiers").delete().eq("part_id", bought_id).execute()
+        admin.table("parts").delete().eq("id", bought_id).execute()

@@ -129,7 +129,8 @@ only uniqueness rule is `(quote_id, sequence)`.
 | `quote_id`, `company_id`, `part_id`, `sequence` | `sequence` (10, 20, 30 …) drives detail/PDF order |
 | `quantity` | > 0, and **fractional** — parts sold by the dozen, ounce, pound or length |
 | `unit_price` | Snapshotted. **Frozen by default** — never silently repriced when the source tier moves |
-| `total_price`, `markup_percent`, `base_cost_per_unit` | Snapshots; base cost supports internal cost-vs-sell reporting |
+| `total_price`, `markup_percent`, `base_cost_per_unit` | Snapshots. `base_cost_per_unit` is the **charge base** the markup was applied to, so the row's own arithmetic holds |
+| `true_cost_per_unit` | What the part actually costs us at the same quantity, every BOM charge basis ignored ([#727]). Effective margin = `(unit_price − true_cost_per_unit) / unit_price`. Equal to `base_cost_per_unit` unless a material is charged at price |
 | `source_tier_id` | Soft reference; set null if the tier is later deleted |
 | `pricing_basis_snapshot` | jsonb — the frozen tier curve. This is what drift compares against |
 | `basis_unknown` | `true` on rows predating the snapshot migration |
@@ -142,6 +143,20 @@ only uniqueness rule is `(quote_id, sequence)`.
 once per **distinct part** by `writeCostSnapshotsForPart` and captured **at the lowest quoted
 quantity** (a price-options quote has no single "the" quantity). Immutable — later routing edits
 don't touch them.
+
+**A material row records how it was charged, not just what it cost** ([#727]). `charge_basis` says
+`'cost'` or `'price'`; `cost_per_unit` / `line_cost` are the rate and contribution that went INTO
+the rollup; `true_cost_per_unit` / `true_line_cost` are the same at true cost. On a `'price'` row,
+`charge_rate_source` (`'tier'` | `'company_default'`) and `charge_markup_percent` record **which
+rung produced the rate and by how much** — frozen, because a quote priced against a 25% shop
+default must keep saying 25% after the setting becomes 30%. Neither is recoverable after the fact:
+for a made child the charged and true rates have different bases, so `charged/true − 1 ≠ markup`.
+
+`QuoteCostBreakdownView` renders all of it: a **Charged at** column reading *Our cost* / *Price
+(own tier)* / *Price (shop default 25%)*, the underlying cost beneath a charged rate, an "of which
+material markup" line, and an **Effective margin** column on the tier table. That column is the
+answer to the question a pilot buyer asked verbatim — *"where does the final number come from?"* —
+and it is why stacked markup is seen rather than discovered.
 
 Jobs point back via `jobs.source_quote_line_item_id`; follow `quote_line_items.id →` it to list
 every job from a quote.
@@ -366,7 +381,8 @@ The math lives on the part's tiers; the quote is a snapshot. On the part (see
 ```
 total_setup_cost  = Σ (setup_min / 60 × labor_rate)
 run_per_unit      = Σ (run_min   / 60 × labor_rate)
-material_per_unit = Σ (qty × cost_per_unit)
+material_per_unit = Σ (qty × charged_rate)   -- cost, or the child's price on a
+                                             -- charge-at-price BOM line (#727)
 
 base_cost_per_unit (at tier qty Q) = run_per_unit + material_per_unit + (total_setup_cost / Q)
 unit_price                         = base_cost_per_unit × (1 + markup_percent / 100)
@@ -378,7 +394,7 @@ procurement tiers via `compute_part_cost_at_qty`, so they resolve a real tier pr
 need a manual per-line override.
 
 On the quote, `createQuote` inserts one row per (part, quantity), with `unit_price` from
-`resolveTier`, `base_cost_per_unit` from `getComputedPartCost` **at the matched break's quantity**
+`resolveTier`, `base_cost_per_unit` from `getComputedPartChargeBase` **at the matched break's quantity**
 — not the order quantity, so the row's own `unit_price = base_cost_per_unit × (1 + markup/100)`
 still holds — `source_tier_id` as a soft reference, and `pricing_basis_snapshot` as the frozen
 tier table. A
@@ -580,3 +596,5 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   `Collapse`, and the duplicate-code / duplicate-part-name error paths).
 - **`createQuote`'s basis-snapshot write is asserted only through the resolver's unit tests** and
   the column's presence in the schema, not end to end.
+
+[#727]: https://github.com/debola31/Jigged/issues/727

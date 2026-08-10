@@ -173,6 +173,7 @@ export type Database = {
           city: string | null
           country: string | null
           created_at: string | null
+          default_material_markup_percent: number | null
           demo_company_id: string | null
           email: string | null
           id: string
@@ -193,6 +194,7 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
+          default_material_markup_percent?: number | null
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -213,6 +215,7 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
+          default_material_markup_percent?: number | null
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -2098,6 +2101,7 @@ export type Database = {
       }
       parts_bom: {
         Row: {
+          charge_basis: string
           child_part_id: string
           consume_whole_units: boolean
           created_at: string
@@ -2110,6 +2114,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          charge_basis?: string
           child_part_id: string
           consume_whole_units?: boolean
           created_at?: string
@@ -2122,6 +2127,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          charge_basis?: string
           child_part_id?: string
           consume_whole_units?: boolean
           created_at?: string
@@ -2482,6 +2488,7 @@ export type Database = {
           sequence: number
           source_tier_id: string | null
           total_price: number | null
+          true_cost_per_unit: number | null
           unit_price: number
         }
         Insert: {
@@ -2500,6 +2507,7 @@ export type Database = {
           sequence: number
           source_tier_id?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price: number
         }
         Update: {
@@ -2518,6 +2526,7 @@ export type Database = {
           sequence?: number
           source_tier_id?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number
         }
         Relationships: [
@@ -2553,6 +2562,9 @@ export type Database = {
       }
       quote_materials: {
         Row: {
+          charge_basis: string
+          charge_markup_percent: number | null
+          charge_rate_source: string | null
           company_id: string
           cost_per_unit: number | null
           created_at: string
@@ -2564,10 +2576,15 @@ export type Database = {
           quantity: number
           quote_id: string
           sequence: number
+          true_cost_per_unit: number | null
+          true_line_cost: number | null
           unit: string | null
           units_consumed: number | null
         }
         Insert: {
+          charge_basis?: string
+          charge_markup_percent?: number | null
+          charge_rate_source?: string | null
           company_id: string
           cost_per_unit?: number | null
           created_at?: string
@@ -2579,10 +2596,15 @@ export type Database = {
           quantity: number
           quote_id: string
           sequence: number
+          true_cost_per_unit?: number | null
+          true_line_cost?: number | null
           unit?: string | null
           units_consumed?: number | null
         }
         Update: {
+          charge_basis?: string
+          charge_markup_percent?: number | null
+          charge_rate_source?: string | null
           company_id?: string
           cost_per_unit?: number | null
           created_at?: string
@@ -2594,6 +2616,8 @@ export type Database = {
           quantity?: number
           quote_id?: string
           sequence?: number
+          true_cost_per_unit?: number | null
+          true_line_cost?: number | null
           unit?: string | null
           units_consumed?: number | null
         }
@@ -3584,6 +3608,10 @@ export type Database = {
         Args: { p_job_id: string }
         Returns: string
       }
+      compute_part_charge_base_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: number
+      }
       compute_part_cost_at_qty: {
         Args: { p_part_id: string; p_qty: number }
         Returns: number
@@ -3596,6 +3624,18 @@ export type Database = {
           missing_markups: Json
           missing_op_rates: Json
           unit_cost: number
+        }[]
+      }
+      compute_part_price_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: number
+      }
+      compute_part_price_explain_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: {
+          markup_percent: number
+          rate_source: string
+          unit_price: number
         }[]
       }
       contact_block_snapshot: { Args: { p_contact_id: string }; Returns: Json }
@@ -3823,6 +3863,14 @@ export type Database = {
           usage_count: number
           viewer_count: number
         }[]
+      }
+      part_rollup_at_qty: {
+        Args: {
+          p_apply_charge_basis: boolean
+          p_part_id: string
+          p_qty: number
+        }
+        Returns: number
       }
       parts_deletion_impact: {
         Args: { p_ids: string[] }

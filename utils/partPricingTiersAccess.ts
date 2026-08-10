@@ -6,7 +6,7 @@ import type {
   PartPricingTierInput,
   ComputedPartPricingTier,
 } from '@/types/partPricing';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import { getComputedPartChargeBase } from '@/utils/partsAccess';
 import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
 
 /**
@@ -32,13 +32,18 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
  * The price of a part at a specific quantity — the SINGLE SOURCE OF TRUTH the
  * Pricing card, the quote form, and the persisted quote line all use.
  *
- * `base_cost` comes from the ONE canonical engine `compute_part_cost_at_qty`
- * (via `getComputedPartCost`) at the ACTUAL qty; the markup is the tier that
+ * `base_cost` comes from the ONE canonical engine (via
+ * `getComputedPartChargeBase`) at the ACTUAL qty; the markup is the tier that
  * applies at that qty; `unit_price = base × (1 + markup/100)`. Because base is
  * computed at the exact qty (not read off a step-function tier ladder), the
  * number is exact at every qty and identical wherever it's shown. A caller that
  * already has the tier list passes it in to skip the extra fetch; otherwise the
  * tiers are loaded here.
+ *
+ * **The base is the CHARGE base, not the true cost** (#727): markup applies to
+ * what we charge ourselves for the materials, so a BOM line set to charge its
+ * child at price is already inside `base_cost`. The two are the same number
+ * until someone sets that toggle.
  */
 export interface PartPriceAtQty {
   base_cost: number | null;
@@ -56,7 +61,7 @@ export async function getPartPriceAtQty(
   const ladder = tiers ?? (await getTiersForPart(partId));
   const [resolved, base] = await Promise.all([
     Promise.resolve(resolveMarkupAtQty(ladder, qty)),
-    getComputedPartCost(partId, qty).catch(() => null),
+    getComputedPartChargeBase(partId, qty).catch(() => null),
   ]);
   const unit_price = resolved ? unitPriceFromBase(base, resolved.markup_percent) : null;
   return {
@@ -70,8 +75,8 @@ export async function getPartPriceAtQty(
 
 /**
  * The tier ladder with each tier's `unit_price` computed AT THAT TIER'S OWN
- * QUANTITY, all through the one canonical engine (`getComputedPartCost` — the
- * same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
+ * QUANTITY, all through the one canonical engine (`getComputedPartChargeBase` —
+ * the same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
  * disagree). Drives the quote-form tier ladder, the drift snapshot, and the
  * Pricing card's tier table. A null markup or an unresolvable base yields
  * `unit_price = null` so the "no usable tier" check still fires.
@@ -89,7 +94,7 @@ export async function getTiersWithComputedPrices(
 
   return Promise.all(
     tiers.map(async (t) => {
-      const base = await getComputedPartCost(partId, t.quantity).catch(() => null);
+      const base = await getComputedPartChargeBase(partId, t.quantity).catch(() => null);
       return { ...t, unit_price: unitPriceFromBase(base, t.markup_percent) };
     }),
   );

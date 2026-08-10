@@ -14,6 +14,7 @@ import PartAutocomplete, { type PartSelectOption } from '@/components/parts/Part
 import { getPartUnitConversions } from '@/utils/partsAccess';
 import { defaultConsumeWholeUnits, unitShortLabel } from '@/lib/standardUnits';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
+import { CHARGE_BASIS_LABELS, type ChargeBasis } from '@/types/bom';
 
 export type { PartSelectOption };
 
@@ -24,6 +25,8 @@ export interface MaterialEditorValue {
   unit: string;
   /** Ceiling consumption to whole units at the order qty (discrete stock). */
   consume_whole_units: boolean;
+  /** What this material contributes to the parent's cost: our cost, or its price. */
+  charge_basis: ChargeBasis;
 }
 
 /** Format a yield ratio for display — collapse near-integers to a clean int. */
@@ -74,18 +77,25 @@ const EMPTY_VALUE: MaterialEditorValue = {
   quantity: '',
   unit: '',
   consume_whole_units: false,
+  charge_basis: 'cost',
 };
 
 /**
  * Inline editor for a single Materials row on the part detail page.
  *
- * Three fields, nothing else: the material part, its unit, and one quantity-per-
- * part field. The quantity accepts a whole number, a decimal, or a simple
- * fraction ("1/20") — a value below 1 is a yield (many parts from one unit), so
- * there is no separate yield mode. Whether discrete stock is drawn in whole
- * units is derived automatically from the unit (count → whole). A made child's
- * costing batch (for setup amortization) is set on that child's own page, not
- * here.
+ * Four fields, nothing else: the material part, its unit, one quantity-per-part
+ * field, and what the material is charged at. The quantity accepts a whole
+ * number, a decimal, or a simple fraction ("1/20") — a value below 1 is a yield
+ * (many parts from one unit), so there is no separate yield mode. Whether
+ * discrete stock is drawn in whole units is derived automatically from the unit
+ * (count → whole). A made child's costing batch (for setup amortization) is set
+ * on that child's own page, not here.
+ *
+ * **"Charge at" is labelled by intent, not mechanism.** It answers "what does
+ * this material cost the job?" — our cost, or what we sell it for — which is a
+ * question a shop owner already has an answer to. It is NOT derived from the
+ * unit or the source: charging material at price on a customer job and at cost
+ * on an internal stock-making work order is the same material, two lines.
  */
 export default function MaterialRowEditor({
   companyId,
@@ -177,6 +187,7 @@ export default function MaterialRowEditor({
       // Whole-unit consumption is derived from the unit, not a manual toggle:
       // count/discrete stock rounds up, continuous material is fractional.
       consume_whole_units: defaultConsumeWholeUnits(value.unit),
+      charge_basis: value.charge_basis,
     });
   };
 
@@ -264,6 +275,28 @@ export default function MaterialRowEditor({
             }
           />
         </Box>
+
+        {/* What the material contributes to this part's cost. Default "Our cost"
+            is what every BOM did before this field existed. */}
+        <TextField
+          select
+          label="Charge at"
+          value={value.charge_basis}
+          onChange={(e) =>
+            setValue((prev) => ({ ...prev, charge_basis: e.target.value as ChargeBasis }))
+          }
+          size="small"
+          disabled={saving}
+          sx={{ width: 190 }}
+          helperText={
+            value.charge_basis === 'price'
+              ? 'Uses this material’s pricing tier'
+              : 'What it costs us'
+          }
+        >
+          <MenuItem value="cost">{CHARGE_BASIS_LABELS.cost}</MenuItem>
+          <MenuItem value="price">{CHARGE_BASIS_LABELS.price}</MenuItem>
+        </TextField>
       </Box>
 
       {error && (

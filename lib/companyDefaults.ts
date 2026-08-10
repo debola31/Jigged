@@ -17,6 +17,19 @@
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
  *                               '{defaults,quote_validity_days}', '20')
  *    WHERE id = '<company-uuid>';
+ *
+ * ONE DEFAULT DELIBERATELY LIVES OUTSIDE ALL OF THIS: the shop-wide material
+ * markup (`companies.default_material_markup_percent`, #727). It looks exactly
+ * like a KNOWN_DEFAULTS entry — a bounded per-tenant number — and it is a real
+ * column anyway, for three reasons: the SQL cost rollup reads it (a jsonb path
+ * would force a second copy of the clamp/fallback rules into the engine, with
+ * nothing keeping the two in agreement); `coerceInt` below rounds to a whole
+ * number, and a markup is numeric(10,6) precisely because 0.01% moves a price;
+ * and this registry is dense — every descriptor has a non-null `fallback` — so
+ * it cannot express "unset", which is the state that means "a material charged
+ * at price must carry its own pricing tier". Do not "tidy" it in here.
+ * Writer + full rationale: `setCompanyDefaultMaterialMarkup` in
+ * `utils/companyAccess.ts`.
  */
 
 import type { Company } from '@/utils/companyAccess';

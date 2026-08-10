@@ -630,16 +630,40 @@ export default function PartPricing({
     : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
   // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
+  //
+  // Two figures now (#727). `materialPerUnit` is TRUE cost — what the materials
+  // cost us — because this card is the Cost card and "Cost / unit" must mean
+  // cost. `materialChargedPerUnit` is what the price is built on: it includes
+  // any child charged at its marked-up price. Identical until someone sets that
+  // toggle, and the card only grows the extra rows when they diverge.
   const materialPerUnit: number | null = breakdown
+    ? breakdown.total_material_true_cost === null
+      ? null
+      : Math.round(breakdown.total_material_true_cost * 100) / 100
+    : 0;
+  const materialChargedPerUnit: number | null = breakdown
     ? breakdown.total_material_cost === null
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
-  // The three lines sum to the part's unit cost at the batch size.
+  // The three lines sum to the part's TRUE unit cost at the batch size.
   const costPerUnit: number | null =
     materialPerUnit === null
       ? null
       : Math.round((runPerUnit + setupPerUnit + materialPerUnit) * 100) / 100;
+  // The markup our own materials carry into the price, and the base the Pricing
+  // card's tier table applies its markup to. Rendered only when non-zero, so
+  // the common card is unchanged.
+  const materialMarkupPerUnit: number | null =
+    materialPerUnit === null || materialChargedPerUnit === null
+      ? null
+      : Math.round((materialChargedPerUnit - materialPerUnit) * 100) / 100;
+  const showMaterialMarkup =
+    materialMarkupPerUnit !== null && Math.abs(materialMarkupPerUnit) >= 0.005;
+  const priceBasePerUnit: number | null =
+    materialChargedPerUnit === null
+      ? null
+      : Math.round((runPerUnit + setupPerUnit + materialChargedPerUnit) * 100) / 100;
 
   const warningsAlert =
     !isBought && breakdown && breakdown.warnings.length > 0 ? (
@@ -782,6 +806,38 @@ export default function PartPricing({
                     {formatCurrency(costPerUnit)}
                   </Typography>
                 </Box>
+
+                {/* Only when a material is charged at price. Two extra lines
+                    make the Pricing card's Base / unit traceable from here —
+                    otherwise the two cards would show different numbers with
+                    nothing on screen to explain the gap. */}
+                {showMaterialMarkup && (
+                  <>
+                    <SummaryRow
+                      label="Material markup / unit"
+                      value={formatCurrency(materialMarkupPerUnit)}
+                    />
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        pt: 0.5,
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Price base / unit
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {formatCurrency(priceBasePerUnit)}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Materials on this BOM are charged at their marked-up price, so
+                      the Pricing card below applies its markup to the price base,
+                      not to cost.
+                    </Typography>
+                  </>
+                )}
               </Box>
             )}
 

@@ -6,10 +6,11 @@ import type {
   BomLineFormData,
   BomLineWithChildPart,
   BomLineWithParentPart,
+  ChargeBasis,
 } from '@/types/bom';
 
 const BOM_COLUMNS =
-  'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, created_at, updated_at';
+  'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, charge_basis, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
   'id, part_name, description, primary_unit, is_stocked, source, costing_batch_quantity';
@@ -61,6 +62,7 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
         unit: row.unit,
         sequence: row.sequence,
         consume_whole_units: Boolean(row.consume_whole_units),
+        charge_basis: row.charge_basis,
         created_at: row.created_at,
         updated_at: row.updated_at,
         child_part: {
@@ -145,6 +147,7 @@ export async function getBomParents(childPartId: string): Promise<BomLineWithPar
         unit: row.unit,
         sequence: row.sequence,
         consume_whole_units: Boolean(row.consume_whole_units),
+        charge_basis: row.charge_basis,
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_part: parent,
@@ -273,6 +276,7 @@ export async function addBomLine(
       unit: formData.unit.trim(),
       sequence,
       consume_whole_units: formData.consume_whole_units,
+      charge_basis: formData.charge_basis,
     })
     .select(BOM_COLUMNS)
     .single();
@@ -330,6 +334,7 @@ export async function updateBomLine(
       quantity,
       unit: formData.unit.trim(),
       consume_whole_units: formData.consume_whole_units,
+      charge_basis: formData.charge_basis,
       updated_at: new Date().toISOString(),
     })
     .eq('id', bomLineId)
@@ -344,6 +349,46 @@ export async function updateBomLine(
     throw toFriendlyError(error, { entity: 'BOM line' });
   }
   return data as BomLine;
+}
+
+/**
+ * Set the charge basis on every BOM line of `parentPartId` whose child is a
+ * BOUGHT part, in one write. Returns how many lines were changed.
+ *
+ * Setting the basis line by line is fine for a three-line BOM and miserable
+ * across a real parts list — a shop that marks up purchased material marks up
+ * ALL of it. Storage stays per-line (a shop may still charge material at cost on
+ * an internal work order); this is only the gesture.
+ *
+ * Scoped to bought children deliberately: charging a made sub-assembly at price
+ * is a transfer-pricing decision about in-house work, and a bulk button is the
+ * wrong way to make it.
+ */
+export async function setChargeBasisForPurchasedMaterials(
+  parentPartId: string,
+  chargeBasis: ChargeBasis,
+): Promise<number> {
+  const supabase = getSupabase();
+
+  // parts_bom has no `source`, so resolve the bought children first rather than
+  // filtering on an embedded column (PostgREST can't UPDATE through a join).
+  const { data: lines, error: linesError } = await supabase
+    .from('parts_bom')
+    .select('id, child_part:parts!parts_bom_child_part_id_fkey!inner(source)')
+    .eq('parent_part_id', parentPartId)
+    .eq('child_part.source', 'bought');
+  if (linesError) throw toFriendlyError(linesError, { entity: 'BOM line' });
+
+  const ids = ((lines || []) as Array<{ id: string }>).map((l) => l.id);
+  if (ids.length === 0) return 0;
+
+  const { error } = await supabase
+    .from('parts_bom')
+    .update({ charge_basis: chargeBasis, updated_at: new Date().toISOString() })
+    .in('id', ids);
+  if (error) throw toFriendlyError(error, { entity: 'BOM line' });
+
+  return ids.length;
 }
 
 export async function deleteBomLine(bomLineId: string): Promise<void> {

@@ -67,6 +67,35 @@ describe('UnitGridView — the touch floor', () => {
       expect(cell).toHaveStyle({ height: '44px' });
     }
   });
+
+  /**
+   * 44px is a FLOOR, not a cap — `flex: 1 0 44px`. Shrink disabled is the half that matters: it is
+   * what stops the grid quietly fitting a 15-wide cabinet to a phone at 24px a cell. Grow is what
+   * lets a three-wide shelf spread far enough to read `Center` rather than `Cent`.
+   *
+   * Verified in a real browser at 390px, where the cabinet holds at 44 and scrolls while the
+   * ragged shelf's cells reach ~95. jsdom has no layout engine, so this pins the declaration.
+   */
+  it('declares cells growable but never shrinkable', () => {
+    renderGrid(node('Cabinet', [node('Row 1', [node('Left'), node('Right')], { sort_order: 0 })]));
+    expect(screen.getByRole('button', { name: /^Left/ })).toHaveStyle({ flex: '1 0 44px' });
+  });
+
+  /**
+   * `Bin 7` shows as `7` — the band is already a row of bins, and the number is the coordinate the
+   * operator counts along. A name with no number is shown in FULL: truncating to four characters
+   * gave `Cent` and `Righ`, which read as typos, and the cells have room once the band is narrow.
+   */
+  it('shows a bin by its number and a named place by its name', () => {
+    renderGrid(
+      node('Cabinet', [
+        node('Row 1', [node('Bin 7', [], { sort_order: 0 })], { sort_order: 0 }),
+        node('Row 2', [node('Center', [], { sort_order: 0 })], { sort_order: 1 }),
+      ]),
+    );
+    expect(screen.getByRole('button', { name: /^Bin 7/ })).toHaveTextContent('7');
+    expect(screen.getByRole('button', { name: /^Center/ })).toHaveTextContent('Center');
+  });
 });
 
 describe('UnitGridView — the shapes', () => {

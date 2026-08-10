@@ -77,9 +77,14 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
       onClick={onOpen}
       aria-label={label}
       sx={{
-        width: wide ? '100%' : CELL,
         height: CELL,
-        flex: wide ? 1 : `0 0 ${CELL}px`,
+        // 44px is a FLOOR, not a cap. `1 0 44px` lets a narrow band spread — a shelf split
+        // Left/Center/Right gets ~95px a cell at 390px and reads its names in full — while a
+        // 15-wide cabinet cannot shrink below the floor and scrolls instead. Shrink is disabled,
+        // which is the half that matters: it is what stops the grid quietly fitting itself to the
+        // phone at 24px a cell.
+        flex: wide ? 1 : `1 0 ${CELL}px`,
+        minWidth: wide ? undefined : CELL,
         borderRadius: 1,
         border: '1px solid',
         borderColor: cell.hasStock ? 'success.main' : 'divider',
@@ -105,15 +110,19 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
 }
 
 /**
- * What fits in 44px.
+ * What to show in a cell.
  *
- * `Bin 7` → `7`, because the row is already a row of bins and the number is the coordinate the
- * operator is counting along. A name with no number keeps its first characters instead — `Left`,
- * `Center`, `Right` are distinguishable at three.
+ * `Bin 7` → `7`. The band is already a row of bins, so the number is the whole of what
+ * distinguishes this one — and it is the coordinate the operator is counting along ("five slots
+ * over"). Printing `Bin 7` in 44px would ellipsize to `Bin…`, which distinguishes nothing.
+ *
+ * A name with no number is shown **in full** and left to CSS ellipsis. Cells grow when the band is
+ * narrow, so `Left` / `Center` / `Right` on a three-wide shelf have room — truncating them to four
+ * characters gave `Cent` and `Righ`, which read as typos.
  */
 function shortLabel(name: string): string {
   const trailing = name.match(/(\d+)\s*$/);
-  return trailing ? trailing[1] : name.slice(0, 4);
+  return trailing ? trailing[1] : name;
 }
 
 function GridBody({
@@ -136,7 +145,15 @@ function GridBody({
       <Stack spacing={`${GAP}px`} sx={{ minWidth: 'min-content' }}>
         {shape.bands.map((band) => (
           <Box key={band.id} sx={{ display: 'flex', alignItems: 'center', gap: `${GAP}px` }}>
-            {/* Pinned through the horizontal scroll — the row name IS the coordinate. */}
+            {/*
+              Pinned through the horizontal scroll — the row name IS the coordinate the operator is
+              counting along, and losing it as you pan sideways loses the thing he is using.
+
+              `height` and the flex centring are not cosmetic: without them the label box is only as
+              tall as its text, and cells scrolling underneath show through above and below it. Found
+              by panning a real 12 × 15 cabinet at 390px, not by a test — jsdom has no layout engine,
+              so nothing here could have caught it.
+            */}
             <Box
               sx={{
                 position: 'sticky',
@@ -144,7 +161,10 @@ function GridBody({
                 zIndex: 1,
                 width: LABEL_W,
                 flex: `0 0 ${LABEL_W}px`,
-                bgcolor: 'background.paper',
+                height: CELL,
+                display: 'flex',
+                alignItems: 'center',
+                bgcolor: 'background.default',
                 pr: 1,
               }}
             >

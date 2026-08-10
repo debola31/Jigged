@@ -517,28 +517,40 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
 
           {openUnit ? (
             <Box>
-              {/* Back, name, and the shape stated in words — the operator built fifteen wide
-                  wanting twelve and nothing ever told him what he had. */}
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+              {/*
+                Back on its own line, then the name.
+
+                These were one row — back · name · Manage — and at 390px that left the name about
+                110px, so `Form Tool Cabinet` rendered as `Form Tool Ca…`. The name is the one thing
+                on this screen you cannot infer from anything else, so it gets the full width and the
+                two controls share the row below it.
+              */}
+              <Box sx={{ mb: 2 }}>
                 <Button
                   startIcon={<ArrowBackIcon />}
                   onClick={() => setOpenUnitId(null)}
-                  sx={{ flexShrink: 0 }}
+                  sx={{ ml: -1, mb: 0.5 }}
                 >
                   All storage
                 </Button>
-                <Box sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography variant="h6" noWrap sx={{ fontWeight: 700 }}>
-                    {openUnit.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {describeShape(openUnit)}
-                  </Typography>
-                </Box>
-                <Button variant="outlined" onClick={() => openSheet(openUnit)}>
-                  Manage
-                </Button>
-              </Stack>
+                <Stack direction="row" alignItems="flex-end" spacing={1}>
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
+                      {openUnit.name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {describeShape(openUnit)}
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="outlined"
+                    onClick={() => openSheet(openUnit)}
+                    sx={{ flexShrink: 0 }}
+                  >
+                    Manage
+                  </Button>
+                </Stack>
+              </Box>
 
               <UnitGridView unit={openUnit} occupancy={occupancy} onOpenCell={openCell} />
             </Box>

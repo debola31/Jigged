@@ -298,7 +298,7 @@ this is only the index.
 | Phase | Journeys | Delivers |
 |---|---|---|
 | **1 — close the loop** ✅ **2026-07-28** | J1 opening balances · J9 count sheet · J4 material check · J7 issue-to-job | Numbers get in, get used on a job, stay true. **Zero new tables, zero migrations** |
-| **2 — locations reshaped** | J2 | Incremental places, a permanent visual board, photos and fill state; retires the structure-first wizard |
+| **2 — locations reshaped** | J2 | Incremental places, a permanent visual board and fill state; retires the structure-first wizard |
 | **3 — purchasing** | J5 POs · J6 receiving · J10 buy list + on-order · J4's shop-wide shortage view | Completes **Flow 3** and satisfies **FR-2** properly. This is issue #571 |
 | **4 — debt paydown** | J8 remnants | Remnants, reconciliation, one-stock-engine collapse, `job_materials` drop |
 

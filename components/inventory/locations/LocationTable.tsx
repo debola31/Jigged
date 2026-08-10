@@ -78,6 +78,7 @@ import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
+import { compareLocationNames } from '@/lib/locationTree';
 
 /**
  * Roots first by explicit order, `Unassigned` always last.
@@ -89,7 +90,7 @@ export function placeOrder(a: InventoryLocationNode, b: InventoryLocationNode): 
   const aSys = a.kind === SYSTEM_KIND ? 1 : 0;
   const bSys = b.kind === SYSTEM_KIND ? 1 : 0;
   if (aSys !== bSys) return aSys - bSys;
-  return a.sort_order - b.sort_order || a.name.localeCompare(b.name);
+  return a.sort_order - b.sort_order || compareLocationNames(a.name, b.name);
 }
 
 /**
@@ -209,7 +210,7 @@ export default function LocationTable({ tree, occupancy, onOpen, onCountHere }: 
 
                   Deliberately NOT "a parent row expands": that gives one gesture two meanings
                   depending on whether a row happens to have children, and it would cost parent
-                  rows their drawer — where rename, print QR, photo and history live. Expanding is
+                  rows their drawer — where rename, print QR and history live. Expanding is
                   the chevron's job, and it costs nothing to separate them because the drawer
                   already lists what is inside with each child clickable.
 

@@ -14,15 +14,9 @@ import { toFriendlyError } from '@/lib/supabaseErrors';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
-import { computePathNames } from '@/lib/locationTree';
+import { compareLocationNames, computePathNames } from '@/lib/locationTree';
 import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
-import {
-  deleteFileFromStorage,
-  generateStoragePath,
-  getSignedUrls,
-  uploadFileToStorage,
-} from '@/utils/storageHelpers';
 import type {
   CreateLocationInput,
   DepleteOptions,
@@ -41,7 +35,7 @@ import type {
 import type { MaterialLocation } from '@/types/materialCheck';
 
 const LOCATION_COLUMNS =
-  'id, company_id, parent_id, name, kind, sort_order, photo_path, created_at, updated_at';
+  'id, company_id, parent_id, name, kind, sort_order, created_at, updated_at';
 
 /** Split an id list so a batched `.in()` stays inside PostgREST's URL limits. */
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -91,26 +85,17 @@ export interface LocationBoardData {
   locations: InventoryLocation[];
   /** Direct counts only — roll up with `rollUpOccupancy` before rendering. */
   directPartCounts: ReadonlyMap<string, number>;
-  /**
-   * `photo_path` → signed URL, for the locations that have a photo.
-   *
-   * Resolved here rather than per tile: the bucket is private, so each thumbnail needs a signed
-   * URL, and a board of 22 places would otherwise open 22 connections on every load. An absent
-   * key means "no URL" (no photo, or an unreadable object) and renders as the drawn tile.
-   */
-  photoUrls: ReadonlyMap<string, string>;
 }
-
-/** How long a board thumbnail's signed URL stays good. Matches the other media surfaces. */
-const PHOTO_URL_EXPIRY_SECONDS = 4 * 60 * 60;
 
 /**
  * Everything the storage board needs, in a **fixed** number of requests whatever the tree size.
  *
- * Two `.from()` reads (locations + occupancy) plus, only when some location has a photo, one
- * batched `createSignedUrls`. Deliberately one function rather than three calls at the call site:
- * it gives the manager a single `useLoad` and gives the test a single thing to pin. A board that
- * grew a request per location would be the N+1 this shape exists to prevent — see the
+ * Exactly two `.from()` reads — locations and occupancy — unconditionally. It used to be "two, plus
+ * one batched `createSignedUrls` when some location had a photo", which was only ever two because
+ * no company ever set a photo; place photos are gone (313 locations, 0 photos), so the guarantee is
+ * now structural rather than accidental. Deliberately one function rather than two calls at the
+ * call site: it gives the manager a single `useLoad` and gives the test a single thing to pin. A
+ * board that grew a request per location would be the N+1 this shape exists to prevent — see the
  * request-count test.
  */
 export async function getLocationBoard(companyId: string): Promise<LocationBoardData> {
@@ -119,79 +104,25 @@ export async function getLocationBoard(companyId: string): Promise<LocationBoard
     getLocationOccupancy(companyId),
   ]);
 
-  const paths = locations
-    .map((l) => l.photo_path)
-    .filter((p): p is string => Boolean(p));
-  // Skipped entirely when nothing has a photo, which is every company today.
-  const photoUrls = paths.length > 0 ? await getSignedUrls(paths, PHOTO_URL_EXPIRY_SECONDS) : EMPTY_URLS;
-
-  return { locations, directPartCounts, photoUrls };
-}
-
-const EMPTY_URLS: ReadonlyMap<string, string> = new Map();
-
-/**
- * Attach a photo to a location, replacing any previous one.
- *
- * Compression happens in the browser before this is called (`compressPhoto`), matching the job-feed
- * pipeline — a phone photo is several MB of pixels nobody needs at thumbnail size.
- *
- * Upload first, then point the row at it, then delete the old object. That order means a failure
- * anywhere leaves a *readable* location: a failed upload changes nothing, and a failed cleanup
- * leaves an invisible orphan in the bucket rather than a row pointing at a file that isn't there.
- * Same trade `note_media` makes deliberately.
- */
-export async function setLocationPhoto(
-  companyId: string,
-  locationId: string,
-  file: File,
-  previousPath?: string | null,
-): Promise<InventoryLocation> {
-  const path = generateStoragePath(companyId, 'locations', locationId, file.name);
-  await uploadFileToStorage(path, file);
-
-  let updated: InventoryLocation;
-  try {
-    updated = await updateLocation(locationId, { photo_path: path });
-  } catch (e) {
-    // Don't leave an object nothing references.
-    await deleteFileFromStorage(path).catch(() => {});
-    throw e;
-  }
-
-  if (previousPath && previousPath !== path) {
-    await deleteFileFromStorage(previousPath).catch((err) =>
-      console.warn('Replaced a location photo but could not remove the old file:', err),
-    );
-  }
-  return updated;
-}
-
-/** Drop a location's photo. Clears the row first, so a failed file delete only orphans bytes. */
-export async function clearLocationPhoto(
-  locationId: string,
-  currentPath: string | null,
-): Promise<InventoryLocation> {
-  const updated = await updateLocation(locationId, { photo_path: null });
-  if (currentPath) {
-    await deleteFileFromStorage(currentPath).catch((err) =>
-      console.warn('Cleared a location photo but could not remove the file:', err),
-    );
-  }
-  return updated;
-}
-
-/** A signed URL for one location's photo — for the detail sheet, which shows one at a time. */
-export async function getLocationPhotoUrl(path: string): Promise<string | null> {
-  const urls = await getSignedUrls([path], PHOTO_URL_EXPIRY_SECONDS);
-  return urls.get(path) ?? null;
+  return { locations, directPartCounts };
 }
 
 // ===========================================================================
 // Tree CRUD
 // ===========================================================================
 
-/** Flat list of every location in a company, ordered for stable tree assembly. */
+/**
+ * Flat list of every location in a company, ordered for stable tree assembly.
+ *
+ * **Re-sorted client-side, and that is the point.** Postgres orders text by collation, so the
+ * server's `.order('name')` puts `Bin 10` before `Bin 2`. This is the root of that bug for the whole
+ * module: `buildLocationTree` relies on this order for child ordering, so every consumer that does
+ * not sort for itself — the tree, the detail sheet's child list, `duplicateLocation`'s sibling
+ * numbering — inherits it. Fixing it here repairs all of them at once.
+ *
+ * The `.order()` calls stay: they make the response deterministic before we touch it, and
+ * `sort_order` is the primary key of the ordering either way. Only the name tiebreak is redone.
+ */
 export async function getLocations(companyId: string): Promise<InventoryLocation[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -205,7 +136,9 @@ export async function getLocations(companyId: string): Promise<InventoryLocation
     console.error('Error fetching inventory locations:', error);
     throw error;
   }
-  return (data ?? []) as InventoryLocation[];
+  return ((data ?? []) as InventoryLocation[]).sort(
+    (a, b) => a.sort_order - b.sort_order || compareLocationNames(a.name, b.name),
+  );
 }
 
 /** Assemble a flat location list into a nested tree (roots first). */
@@ -624,7 +557,7 @@ export async function getBalancesForPart(
         kind: loc?.kind ?? null,
       };
     })
-    .sort((a, b) => a.path.join(' / ').localeCompare(b.path.join(' / ')));
+    .sort((a, b) => compareLocationNames(a.path.join(' / '), b.path.join(' / ')));
 }
 
 /**
@@ -709,8 +642,12 @@ export async function getBalancesForParts(
   }
 
   for (const list of byPart.values()) {
-    list.sort((a, b) => [...a.path, a.locationName].join(' / ')
-      .localeCompare([...b.path, b.locationName].join(' / ')));
+    list.sort((a, b) =>
+      compareLocationNames(
+        [...a.path, a.locationName].join(' / '),
+        [...b.path, b.locationName].join(' / '),
+      ),
+    );
   }
   return byPart;
 }
@@ -914,7 +851,7 @@ export async function resolveScan(locationId: string): Promise<ResolvedScan> {
 
   const children = locations
     .filter((l) => l.parent_id === locationId)
-    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    .sort((a, b) => a.sort_order - b.sort_order || compareLocationNames(a.name, b.name));
 
   return { node, path, children, contents: page.contents, contentsTotal: page.total };
 }

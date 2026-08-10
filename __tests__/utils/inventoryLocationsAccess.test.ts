@@ -50,14 +50,17 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
 }));
 
-// The board resolves photo URLs through storageHelpers; stub the module so no real client is
-// built and so the request-budget tests can count storage calls separately from `.from()` reads.
+/**
+ * Kept AFTER location photos were removed, and deliberately.
+ *
+ * Nothing in this module signs a URL directly any more — but it still reaches `storageHelpers`
+ * TRANSITIVELY, through `resolveMovementAttribution`, which signs the photo on a MOVEMENT. That
+ * path never fires today only because every movement fixture below has `photo_path: null`; the
+ * first one that doesn't would call the real `getSignedUrls`, whose `getSupabase().storage` is
+ * absent from the client mock above, and die with an error about `storage` rather than about
+ * anything this file is testing.
+ */
 vi.mock('@/utils/storageHelpers', () => ({
-  generateStoragePath: vi.fn((co: string, kind: string, id: string, f: string) => `${co}/${kind}/${id}/${f}`),
-  // Async, because the code under test chains `.catch()` on the delete — a bare `vi.fn()`
-  // returns undefined and blows up on `.catch is not a function`.
-  uploadFileToStorage: vi.fn(async () => {}),
-  deleteFileFromStorage: vi.fn(async () => {}),
   getSignedUrls: vi.fn(async () => new Map()),
 }));
 
@@ -82,18 +85,10 @@ import {
   LOCATION_CONTENTS_LIMIT,
   LOCATION_PAGE_SIZE,
   bulkPutAway,
-  setLocationPhoto,
-  clearLocationPhoto,
   resolveScan,
   getRecentActivity,
   getLocationHistory,
 } from '@/utils/inventoryLocationsAccess';
-import {
-  deleteFileFromStorage,
-  generateStoragePath,
-  getSignedUrls,
-  uploadFileToStorage,
-} from '@/utils/storageHelpers';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { ID_CHUNK } from '@/lib/queryLimits';
 
@@ -103,7 +98,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   name: over.id,
   kind: null,
   sort_order: 0,
-  photo_path: null,
   created_at: '',
   updated_at: '',
   ...over,
@@ -746,74 +740,6 @@ describe('bulkPutAway', () => {
   it('propagates the DB refusal instead of reporting a silent success', async () => {
     state.rpc = { data: null, error: { message: 'Too many parts at once (1001 of a maximum 1000).' } };
     await expect(bulkPutAway('un', 'yard', ['p1'])).rejects.toBeTruthy();
-  });
-});
-
-/**
- * Photos.
- *
- * The budget matters as much as the behaviour: the bucket is private, so a naive board would sign
- * one URL per tile on every load. `getLocationBoard` resolves them all in a single batched call —
- * and skips storage entirely when nothing has a photo, which is every company today.
- */
-describe('location photos', () => {
-  const withPhotos = (n: number) =>
-    Array.from({ length: n }, (_, i) =>
-      loc({ id: `l${i}`, photo_path: `co1/locations/l${i}/p.jpg` }),
-    );
-
-  it('signs every tile’s photo in ONE storage call, whatever the board size', async () => {
-    state.fromQueue = [{ data: withPhotos(40), error: null }, { data: [], error: null }];
-    vi.mocked(getSignedUrls).mockResolvedValue(new Map([['co1/locations/l0/p.jpg', 'https://s/0']]));
-
-    const board = await getLocationBoard('co1');
-
-    expect(getSignedUrls).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(getSignedUrls).mock.calls[0][0]).toHaveLength(40);
-    expect(board.photoUrls.get('co1/locations/l0/p.jpg')).toBe('https://s/0');
-  });
-
-  it('touches storage not at all when no location has a photo', async () => {
-    state.fromQueue = [
-      { data: [loc({ id: 'l1' }), loc({ id: 'l2' })], error: null },
-      { data: [], error: null },
-    ];
-    const board = await getLocationBoard('co1');
-
-    expect(getSignedUrls).not.toHaveBeenCalled();
-    expect(board.photoUrls.size).toBe(0);
-  });
-
-  /**
-   * Upload, then point the row at it, then remove the old file. A failure at any step leaves a
-   * READABLE location — the reverse order could leave a row pointing at a file that isn't there.
-   */
-  it('uploads before pointing the row at it, and cleans up the replaced file', async () => {
-    queueFrom({ data: loc({ id: 'cab', photo_path: 'co1/locations/cab/new.jpg' }), error: null });
-
-    await setLocationPhoto('co1', 'cab', new File(['x'], 'new.jpg'), 'co1/locations/cab/old.jpg');
-
-    expect(uploadFileToStorage).toHaveBeenCalledWith('co1/locations/cab/new.jpg', expect.anything());
-    expect(deleteFileFromStorage).toHaveBeenCalledWith('co1/locations/cab/old.jpg');
-    // Path namespacing is what the storage.objects RLS policies gate on — first segment = company.
-    expect(vi.mocked(generateStoragePath).mock.calls[0].slice(0, 2)).toEqual(['co1', 'locations']);
-  });
-
-  it('removes the just-uploaded file if the row update fails, leaving no orphan', async () => {
-    queueFrom({ data: null, error: { code: '42501', message: 'permission denied' } });
-
-    await expect(
-      setLocationPhoto('co1', 'cab', new File(['x'], 'new.jpg'), null),
-    ).rejects.toBeTruthy();
-    expect(deleteFileFromStorage).toHaveBeenCalledWith('co1/locations/cab/new.jpg');
-  });
-
-  it('clears the row first, so a failed file delete only orphans bytes', async () => {
-    queueFrom({ data: loc({ id: 'cab', photo_path: null }), error: null });
-    vi.mocked(deleteFileFromStorage).mockRejectedValueOnce(new Error('gone'));
-
-    // Must not throw: the location is already photo-less, which is what the user asked for.
-    await expect(clearLocationPhoto('cab', 'co1/locations/cab/old.jpg')).resolves.toBeTruthy();
   });
 });
 

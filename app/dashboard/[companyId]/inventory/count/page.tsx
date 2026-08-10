@@ -123,7 +123,7 @@ import {
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
-import { computePathNames } from '@/lib/locationTree';
+import { compareLocationNames, computePathNames } from '@/lib/locationTree';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -463,7 +463,7 @@ export default function InventoryCountPage() {
               return;
             }
             [...kids]
-              .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+              .sort((a, b) => a.sort_order - b.sort_order || compareLocationNames(a.name, b.name))
               .forEach(walk);
           };
           walk(here);

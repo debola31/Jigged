@@ -28,6 +28,7 @@ import type {
 import { createLocation, getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
+import { compareLocationNames } from '@/lib/locationTree';
 import PartLocationActionModal, {
   type LocationAction,
   type LocationOption,
@@ -136,7 +137,7 @@ export default function PartLocationInventory({
       balances
         .filter((b) => Number(b.quantity ?? 0) > 0)
         .map((b) => ({ id: b.location_id, label: b.path.join(' › ') || b.location_name, quantity: b.quantity }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
+        .sort((a, b) => compareLocationNames(a.label, b.label)),
     [balances],
   );
 

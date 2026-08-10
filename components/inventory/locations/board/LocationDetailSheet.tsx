@@ -35,7 +35,6 @@ import QrCode2Icon from '@mui/icons-material/QrCode2';
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
-import LocationPhoto from './LocationPhoto';
 import { useLoad } from '@/hooks/useLoad';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -166,12 +165,7 @@ export interface LocationDetailSheetProps {
   /** Ancestors, root → node (inclusive), for the breadcrumb. */
   path: InventoryLocationNode[];
   occupancy: OccupancyMap;
-  /** Signed URL for this location's photo, resolved by the board's batched read. */
-  photoUrl?: string | null;
   actions: LocationSheetActions;
-  /** Omit to hide the photo controls entirely (the system bucket has no shelf to photograph). */
-  onPickPhoto?: (node: InventoryLocationNode, file: File) => Promise<void>;
-  onClearPhoto?: (node: InventoryLocationNode) => Promise<void>;
   /** Re-target the sheet at another node (a child row, or a breadcrumb hop). */
   onNavigate: (node: InventoryLocationNode) => void;
   onClose: () => void;
@@ -182,10 +176,7 @@ export default function LocationDetailSheet({
   node,
   path,
   occupancy,
-  photoUrl,
   actions,
-  onPickPhoto,
-  onClearPhoto,
   onNavigate,
   onClose,
 }: LocationDetailSheetProps) {
@@ -236,18 +227,6 @@ export default function LocationDetailSheet({
           <Box sx={{ mb: 2 }}>
             <FillLine node={node} occupancy={occupancy} />
           </Box>
-
-          {/* Identifies the place, so it sits with the name and fill state rather than down among
-              the actions. Withheld from the system bucket — there is no shelf to photograph. */}
-          {node.kind !== 'system' && onPickPhoto && onClearPhoto && (
-            <LocationPhoto
-              url={photoUrl ?? null}
-              locationName={node.name}
-              hasPhoto={Boolean(node.photo_path)}
-              onPick={(file) => onPickPhoto(node, file)}
-              onClear={() => onClearPhoto(node)}
-            />
-          )}
 
           {/* The auto-managed 'Unassigned' bucket is not a place — it's the pile of parts nobody
               has put away yet. Say that, because the count is otherwise alarming without an

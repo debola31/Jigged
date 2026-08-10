@@ -22,6 +22,7 @@ import {
   adjustStockAtLocation,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import { compareLocationNames } from '@/lib/locationTree';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import LocationPicker, {
   type LocationPickerOption,
@@ -169,7 +170,7 @@ export default function PartLocationActionModal({
     if (action !== 'deplete') return withQty;
     return withQty.sort((a, b) => {
       if ((a.quantity > 0) !== (b.quantity > 0)) return a.quantity > 0 ? -1 : 1;
-      return a.label.localeCompare(b.label);
+      return compareLocationNames(a.label, b.label);
     });
   })();
 

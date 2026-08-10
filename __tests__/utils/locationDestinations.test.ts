@@ -30,7 +30,6 @@ const loc = (
     name,
     kind,
     sort_order: 0,
-    photo_path: null,
     created_at: '',
     updated_at: '',
   }) as InventoryLocation;
@@ -128,5 +127,38 @@ describe('locationParentOptions', () => {
 
   it('never offers the put-away pile', () => {
     expect(ids(locationParentOptions(TREE, { nodeId: 'yard', occupancy }))).not.toContain('pile');
+  });
+});
+
+/**
+ * Natural order, on the picker that made it matter.
+ *
+ * A 12 × 15 cabinet puts 180 bins in one Move list. Sorted by plain `localeCompare` that reads
+ * `Bin 1, Bin 10, Bin 11, … Bin 2`, and the has-stock-first grouping has to survive the fix.
+ */
+describe('natural ordering', () => {
+  it('orders bins by number, not by character', () => {
+    const locs = [
+      loc('cab', 'Cabinet 1'),
+      loc('b1', 'Bin 1', 'cab'),
+      loc('b10', 'Bin 10', 'cab'),
+      loc('b2', 'Bin 2', 'cab'),
+    ];
+    expect(stockDestinationOptions(locs).map((o) => o.label)).toEqual([
+      'Cabinet 1 › Bin 1',
+      'Cabinet 1 › Bin 2',
+      'Cabinet 1 › Bin 10',
+    ]);
+  });
+
+  it('still puts places already holding some of this part first', () => {
+    const locs = [loc('cab', 'Cabinet 1'), loc('b1', 'Bin 1', 'cab'), loc('b10', 'Bin 10', 'cab')];
+    const options = stockDestinationOptions(locs, {
+      balances: [
+        { location_id: 'b10', quantity: 4 },
+      ] as unknown as Parameters<typeof stockDestinationOptions>[1]['balances'],
+    });
+    // Bin 10 sorts after Bin 1 by name, but holding stock outranks the name.
+    expect(options.map((o) => o.label)).toEqual(['Cabinet 1 › Bin 10', 'Cabinet 1 › Bin 1']);
   });
 });

@@ -246,7 +246,7 @@ describe('OperatorPartLookup — the put-away picker', () => {
   it('loads the places only when asked, not on every lookup', async () => {
     const user = userEvent.setup();
     mockLocations.mockResolvedValue([
-      { id: 'l1', company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', code: null, sort_order: 0, photo_path: null, created_at: '', updated_at: '' },
+      { id: 'l1', company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', sort_order: 0, created_at: '', updated_at: '' },
     ]);
     renderLookup();
     await pick(user);

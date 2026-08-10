@@ -25,7 +25,6 @@ const node = (
   parent_id: null,
   kind: null,
   sort_order: 0,
-  photo_path: null,
   created_at: '',
   updated_at: '',
   children: [],

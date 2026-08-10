@@ -23,7 +23,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string; name: string }): I
   kind: 'shelf',
   code: null,
   sort_order: 0,
-  photo_path: null,
   created_at: '',
   updated_at: '',
   ...over,

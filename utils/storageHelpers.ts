@@ -32,7 +32,6 @@ export type StorageEntityType =
   | 'jobs'
   | 'parts'
   | 'work-centers'
-  | 'locations'
   /**
    * Evidence photographed when stock moves. Filed under the LOCATION id, not the transaction's —
    * the row does not exist yet when the file is uploaded, because `photo_path` is written at INSERT
@@ -237,11 +236,11 @@ export async function getSignedUrl(
  *
  * The batched sibling of `getSignedUrl`. Without it, anything rendering a grid of private images
  * pays a round trip per tile: `NoteMediaGallery` works around the gap with `Promise.all` over
- * singles, and the storage board would have done the same once every location could carry a photo.
+ * singles, and a bin's movement history would do the same, one request per photographed movement.
  *
  * Returns a `path → url` map rather than an array, so a caller can look up by the value it already
  * holds. **Paths that fail are simply absent** rather than throwing: one unreadable photo must not
- * blank an entire board, and the callers all render a placeholder when a path has no URL.
+ * blank an entire history, and the callers all render a placeholder when a path has no URL.
  */
 export async function getSignedUrls(
   paths: string[],

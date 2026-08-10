@@ -83,7 +83,7 @@ off by default elsewhere, and only the founder flips it.
 | **Tag a removal to a job** | Same tab → `Remove` → job picker | Restored 2026-07-28 (#59). |
 | See where one part lives | `/parts/{id}` → Inventory tab | Per-location balances with full paths. |
 | **Read a part's ledger** | Same tab → history table | Date, type, qty, job, place, notes (editable), **who did it**, and any movement photo. |
-| Name the places we already have | Storage | `Add storage` in the toolbar → name it. Flat. `Divide it up…` on a row only if it needs rows/bins. |
+| Add a place, and say how it is divided | Storage | `Add storage` → name it **and** shape it on one screen, written in one `create_location_tree` call. Levels are optional: no levels is one place (the yard). Re-shaped later from the unit's sheet → `Change layout…`. **Was two steps until 2026-08-10** — name a bare place, then find `Divide it up…` inside its detail drawer — which is how a shop ended up with named furniture and nothing in it. |
 | **Reorganise a place** | Storage → click a place | `Rename`, `Duplicate`, `Add one inside`, **`Move into…`** (re-parent), `Delete` (empty subtrees only). |
 | Print labels | Storage toolbar / place drawer | `Print all labels` for setup, or `Print QR` for one place **and everything under it**. There is no row selection: bulk-print-a-subset is the only job those checkboxes served, nobody has asked for it twice, and a checkbox column charges every row on every visit for it. |
 | **See what happened in one place** | Storage → click a place → `Recent activity` | Movements with author and photo. Offered for `Unassigned` too. |

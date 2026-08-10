@@ -78,13 +78,21 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
       aria-label={label}
       sx={{
         height: CELL,
-        // 44px is a FLOOR, not a cap. `1 0 44px` lets a narrow band spread — a shelf split
-        // Left/Center/Right gets ~95px a cell at 390px and reads its names in full — while a
-        // 15-wide cabinet cannot shrink below the floor and scrolls instead. Shrink is disabled,
-        // which is the half that matters: it is what stops the grid quietly fitting itself to the
-        // phone at 24px a cell.
-        flex: wide ? 1 : `1 0 ${CELL}px`,
-        minWidth: wide ? undefined : CELL,
+        /*
+         * 44px is a FLOOR, and the cell sizes to its content above it.
+         *
+         * `flex: 1 0 44px` was tried and is wrong on a wide screen: a cabinet two bins across gave
+         * each cell half the monitor, so `Left` and `Right` rendered as two 790px slabs running the
+         * width of the page. Growth has to be bounded by the content, not by the container.
+         *
+         * `0 0 auto` + `minWidth` gives exactly that: `Bin 7` shows `7` and sits at the 44px floor,
+         * `Center` sizes to its own text, and a 15-wide cabinet still cannot shrink below the floor
+         * — it scrolls. Shrink stays disabled, which is the half that matters: it is what stops the
+         * grid quietly fitting itself to a phone at 24px a cell.
+         */
+        flex: wide ? 1 : '0 0 auto',
+        minWidth: CELL,
+        px: 1,
         borderRadius: 1,
         border: '1px solid',
         borderColor: cell.hasStock ? 'success.main' : 'divider',
@@ -92,7 +100,6 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
         color: cell.hasStock ? 'success.contrastText' : 'text.secondary',
         fontSize: 12,
         fontWeight: cell.hasStock ? 700 : 400,
-        px: 0.5,
         overflow: 'hidden',
         // A container's stock lives in its children, so tapping it drills rather than acting.
         // Dashed says "there is more inside" without spending a colour on it.
@@ -133,13 +140,23 @@ function GridBody({
   onOpenCell: (id: string) => void;
 }) {
   return (
-    <Box
+    <Paper
+      elevation={1}
       sx={{
         // The grid scrolls, never the page. Wide content earning its own scroll container is the
         // house rule; here it is also what keeps cells at the touch floor.
+        //
+        // A real surface rather than a bare Box: the pinned row-label column must be opaque, so it
+        // needs something to match. Against the page gradient it read as a dark block bleeding
+        // toward the sidebar.
         overflowX: 'auto',
         overflowY: 'visible',
-        pb: 1,
+        p: 1,
+        // Hug the grid rather than the page. A 2-wide cabinet on a monitor otherwise sits in a
+        // surface running the whole width with a metre of nothing beside it; a 15-wide one still
+        // fills the space and scrolls, because the cap is the container.
+        width: 'fit-content',
+        maxWidth: '100%',
       }}
     >
       <Stack spacing={`${GAP}px`} sx={{ minWidth: 'min-content' }}>
@@ -164,7 +181,11 @@ function GridBody({
                 height: CELL,
                 display: 'flex',
                 alignItems: 'center',
-                bgcolor: 'background.default',
+                // Matches the Paper the grid sits on, so the pinned column reads as part of the
+                // grid rather than as a dark block running off toward the sidebar. It has to be
+                // opaque — cells scroll underneath it.
+                bgcolor: 'background.paper',
+                pl: 1,
                 pr: 1,
               }}
             >
@@ -191,7 +212,7 @@ function GridBody({
           </Box>
         ))}
       </Stack>
-    </Box>
+    </Paper>
   );
 }
 
@@ -204,7 +225,7 @@ export default function UnitGridView({ unit, occupancy, onOpenCell }: UnitGridVi
       return (
         <Paper elevation={0} sx={{ p: 3, textAlign: 'center', bgcolor: 'action.hover' }}>
           <Typography color="text.secondary">
-            Nothing inside {unit.name} yet — divide it up to add places.
+            Nothing inside {unit.name} yet — change its layout to add places.
           </Typography>
         </Paper>
       );

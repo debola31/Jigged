@@ -48,6 +48,7 @@ import {
   getLocationBoard,
   deleteLocation,
   materializeLocationSpec,
+  createLocation,
 } from '@/utils/inventoryLocationsAccess';
 import { generateLocationLabelSheet } from '@/utils/locationLabelPdf';
 import type { InventoryLocation } from '@/types/inventoryLocations';
@@ -223,12 +224,12 @@ describe('LocationsManager', () => {
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
     await user.click(await screen.findByRole('button', { name: /manage/i }));
-    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
+    await user.click(await screen.findByRole('button', { name: /change layout/i }));
 
     // Title proves parentPath. There is no palette step to click through any more.
-    expect(await screen.findByText('Divide up Cabinet 3')).toBeInTheDocument();
+    expect(await screen.findByText('Change the layout of Cabinet 3')).toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
     const [, parentId, spec] = vi.mocked(materializeLocationSpec).mock.calls[0];
     expect(parentId).toBe('cab3');
@@ -247,8 +248,8 @@ describe('LocationsManager', () => {
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
     await user.click(await screen.findByRole('button', { name: /manage/i }));
-    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
-    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /change layout/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
     // Shelf A and Shelf B carry sort_order 0 in the fixture, so the run must start at 1.
     const startSortOrder = vi.mocked(materializeLocationSpec).mock.calls[0][3];
@@ -282,8 +283,8 @@ describe('LocationsManager', () => {
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
     await user.click(await screen.findByRole('button', { name: /manage/i }));
-    await user.click(await screen.findByRole('button', { name: /divide it up/i }));
-    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /change layout/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
     const spec = vi.mocked(materializeLocationSpec).mock.calls[0][2];
     expect(spec.map((n) => n.name)).toEqual(['Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8']);
@@ -357,5 +358,60 @@ describe('LocationsManager — count or put away', () => {
     await user.click(await screen.findByRole('button', { name: /put these away/i }));
 
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=un');
+  });
+
+  /**
+   * Adding storage is ONE step.
+   *
+   * It used to be two: name a bare place here, then find `Divide it up…` inside its detail sheet
+   * to give it any structure. Nobody making a cabinet wants an empty cabinet, and the second half
+   * was behind a drawer — so a shop could end up with named furniture and no places in it. Since
+   * `create_location_tree` the whole thing is also one transaction, so there is no reason to split
+   * the decision either.
+   */
+  it('names the unit and shapes it in one step, in one call', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    await user.click(screen.getByRole('button', { name: /add storage/i }));
+    await user.type(await screen.findByLabelText(/what is it called/i), 'New Cabinet');
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
+
+    // ONE call, and the unit is the ROOT of the spec rather than a separate create beforehand.
+    expect(materializeLocationSpec).toHaveBeenCalledTimes(1);
+    expect(createLocation).not.toHaveBeenCalled();
+    const [, parentId, spec] = vi.mocked(materializeLocationSpec).mock.calls[0];
+    expect(parentId).toBeNull();
+    expect(spec).toHaveLength(1);
+    expect(spec[0].name).toBe('New Cabinet');
+    expect(spec[0].children.map((n) => n.name)).toEqual([
+      'Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5',
+    ]);
+  });
+
+  /** The count is what you get to put things in, not how many rows it takes to build it. */
+  it('counts places rather than nodes — 5 rows x 2 is 10, not 15', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    await user.click(screen.getByRole('button', { name: /add storage/i }));
+    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /15 locations/i })).not.toBeInTheDocument();
+  });
+
+  /** A name is required; the layout is not — "the yard" is one place and that is a valid unit. */
+  it('will not create an unnamed unit, and warns before a duplicate name', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" />);
+    await screen.findByRole('button', { name: /^Cabinet 3/ });
+
+    await user.click(screen.getByRole('button', { name: /add storage/i }));
+    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/what is it called/i), 'Cabinet 3');
+    expect(await screen.findByText(/you already have a cabinet 3/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /create 10 places/i })).toBeDisabled();
   });
 });

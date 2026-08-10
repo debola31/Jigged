@@ -200,10 +200,27 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
    *
    * Only something with structure gets drawn. A unit with nothing inside it — the Yard, a bench,
    * the `Unassigned` pile — IS one place, so it opens its sheet: there is no grid, and drawing an
-   * empty one to say "divide it up" would answer a question nobody asked. The pile needs no
+   * empty one to say "change its layout" would answer a question nobody asked. The pile needs no
    * special case of its own; having no children is what it has in common with the Yard, and its
    * sheet already leads with "Put these away" rather than a count.
    */
+  /**
+   * Adding storage is ONE step now: name it and say how it is divided, together.
+   *
+   * It used to be two — create a bare place here, then find `Divide it up…` inside its detail
+   * sheet. Nobody making a cabinet wants an empty cabinet, and the second half was behind a
+   * drawer, so a shop could easily end up with named furniture and no places in it. Naming and
+   * shaping are one decision, and since `create_location_tree` they are also one transaction.
+   */
+  const openAddStorage = () =>
+    setBuilder({
+      open: true,
+      parentId: null,
+      parentPath: [],
+      existingSiblingNames: [],
+      startSortOrder: tree.reduce((max, n) => Math.max(max, n.sort_order), -1) + 1,
+    });
+
   const openUnit_ = (node: InventoryLocationNode) => {
     if (node.children.length === 0) {
       setSheetId(node.id);
@@ -450,7 +467,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
         <Button
           variant="contained"
           startIcon={<AddIcon />}
-          onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
+          onClick={openAddStorage}
         >
           Add storage
         </Button>
@@ -469,7 +486,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
           at, and the one thing here you come back to do. */}
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
         Your storage, and what&apos;s in it. Click a place to count it, put parts away, print its QR
-        label, or divide it up. Adding and removing stock happens on the part itself, or on the
+        label, or change its layout. Adding and removing stock happens on the part itself, or on the
         shop floor by scanning a label.
       </Typography>
 
@@ -494,9 +511,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}
-                onClick={() =>
-                  setFormState({ open: true, location: null, parentId: null, parentPath: [] })
-                }
+                onClick={openAddStorage}
               >
                 Add storage
               </Button>
@@ -603,6 +618,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
         companyId={companyId}
         parentId={builder.parentId}
         parentPath={builder.parentPath}
+        siblingNames={tree.map((n) => n.name)}
         existingSiblingNames={builder.existingSiblingNames}
         startSortOrder={builder.startSortOrder}
         onClose={() => setBuilder((s) => ({ ...s, open: false }))}

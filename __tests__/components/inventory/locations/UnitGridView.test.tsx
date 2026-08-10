@@ -69,16 +69,21 @@ describe('UnitGridView — the touch floor', () => {
   });
 
   /**
-   * 44px is a FLOOR, not a cap — `flex: 1 0 44px`. Shrink disabled is the half that matters: it is
-   * what stops the grid quietly fitting a 15-wide cabinet to a phone at 24px a cell. Grow is what
-   * lets a three-wide shelf spread far enough to read `Center` rather than `Cent`.
+   * 44px is a FLOOR and the cell sizes to its content above it — never to the container.
    *
-   * Verified in a real browser at 390px, where the cabinet holds at 44 and scrolls while the
-   * ragged shelf's cells reach ~95. jsdom has no layout engine, so this pins the declaration.
+   * `flex: 1 0 44px` was tried and was wrong on a wide screen: a cabinet two bins across gave each
+   * cell half the monitor, so `Left` and `Right` rendered as two 790px slabs across the page.
+   * Growth has to be bounded by the content. Shrink stays disabled, which is the half that
+   * matters — it is what stops a 15-wide cabinet quietly fitting itself to a phone at 24px a cell.
+   *
+   * Both directions measured in a real browser: the cabinet holds at exactly 44 and scrolls; a
+   * three-wide shelf sizes to its names. jsdom has no layout engine, so this pins the declaration.
    */
-  it('declares cells growable but never shrinkable', () => {
+  it('declares cells content-sized above a 44px floor, and never shrinkable', () => {
     renderGrid(node('Cabinet', [node('Row 1', [node('Left'), node('Right')], { sort_order: 0 })]));
-    expect(screen.getByRole('button', { name: /^Left/ })).toHaveStyle({ flex: '1 0 44px' });
+    const cell = screen.getByRole('button', { name: /^Left/ });
+    expect(cell).toHaveStyle({ flex: '0 0 auto' });
+    expect(cell).toHaveStyle({ minWidth: '44px' });
   });
 
   /**
@@ -175,7 +180,7 @@ describe('UnitGridView — the shapes', () => {
 
   it('says what an empty unit needs, rather than drawing nothing', () => {
     renderGrid(node('New Cabinet'));
-    expect(screen.getByText(/divide it up to add places/i)).toBeInTheDocument();
+    expect(screen.getByText(/change its layout to add places/i)).toBeInTheDocument();
   });
 });
 

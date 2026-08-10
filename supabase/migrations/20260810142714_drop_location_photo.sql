@@ -1,0 +1,47 @@
+-- Drop `inventory_locations.photo_path`: place photos are gone.
+--
+-- Added 20260730020251 as docs/modules/inventory.md §5.5 decision 5 — "A photo of the actual rack
+-- beats any icon" — and never used once. Measured against production before writing this:
+--
+--   * 313 locations, **0** with a non-null photo_path
+--   * **0** storage objects under any {company_id}/locations/ prefix in the attachments bucket
+--   * getLocationPhotoUrl had no caller, ever
+--
+-- So this loses nothing at rest and orphans no bytes. What the shop actually wants photographed is
+-- the MATERIAL, not the shelf: `inventory_transactions.photo_path` stays exactly as it is, and the
+-- one path that could not attach one (stocking a part into a bin it was not in yet) was fixed in
+-- the PR before this. Do not let a find-and-replace on "photo_path" reach that column.
+--
+-- ## Ordering — this is the contract half of an expand/contract
+--
+-- PostgREST rejects an entire select if one named column is missing (42703 -> 400), and
+-- LOCATION_COLUMNS backs six reads including `resolveScan`, which is what a printed QR label
+-- resolves through. Dropping the column while the served bundle still names it would take out
+-- Storage, the operator bin view, every picker, the material check and the count worksheets at
+-- once — the same shape as the 2026-08-03 customer_contacts.is_billing_default outage.
+--
+-- `vercel.json` sets git.deploymentEnabled.main = false and .github/workflows/deploy-production.yml
+-- gates the Vercel deploy on Supabase's production-apply check, so on merge the migration lands
+-- FIRST and the frontend follows. The frontend therefore had to stop selecting the column in its
+-- own PR, which it did (#747, merged 2026-08-10). This migration is safe only because that shipped
+-- first and open browser tabs have had time to turn over.
+--
+-- ## Why this is one statement
+--
+--   * No IF EXISTS. Production has the column; a silent no-op would hide drift rather than surface
+--     it, which is exactly how the August outage stayed invisible for two days.
+--   * No CASCADE. Measured on production via pg_depend: 0 non-auto dependents, 0 indexes, 0
+--     constraints, 0 policies naming this column. Nothing else comes with it.
+--   * No DROP FUNCTION. `subdivide_location` is RETURNS SETOF public.inventory_locations, but a
+--     function's return type depends on the table's COMPOSITE TYPE, not on individual attributes,
+--     and its body is `SELECT *`, which expands at execution. So it needs no recreate — which
+--     matters, because CLAUDE.md's rule is that a DROP FUNCTION destroys both the ACL and the
+--     COMMENT. Recreating it "to be safe" would also put it back in scope for the
+--     function_execute_leaks() allowlist review for no reason.
+--   * No NOTIFY pgrst. Production carries pgrst_ddl_watch on ddl_command_end, so ALTER TABLE
+--     reloads the schema cache by itself.
+--
+-- The COMMENT ON COLUMN from 20260730020251 is removed automatically with the attribute. That
+-- migration itself is applied history and is left untouched.
+
+ALTER TABLE public.inventory_locations DROP COLUMN photo_path;

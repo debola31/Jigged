@@ -325,84 +325,111 @@ describe('RPC wrappers', () => {
 });
 
 // ---------------------------------------------------------------------------
+/**
+ * One call, one transaction (#618).
+ *
+ * This used to insert node-by-node in an awaited loop: a 12 × 15 cabinet was 240 sequential round
+ * trips, slow enough on shop hardware that the owner thought the app had frozen — and a failure
+ * halfway left a partial tree with no rollback. `create_location_tree` does the whole subtree in
+ * one statement, so the assertions worth having are the REQUEST COUNT and the payload shape.
+ */
 describe('materializeLocationSpec', () => {
-  it('recursively creates parent-then-child and returns every created row', async () => {
-    const spec = [
-      {
-        key: '0',
-        name: 'Cabinet 1',
-        kind: 'cabinet',
-        children: [
-          {
-            key: '0/0',
-            name: 'Row 1',
-            kind: 'row',
-            children: [],
-          },
-        ],
-      },
-    ];
-    // One insert per node, and nothing else — see the request-budget test below.
-    queueFrom({ data: loc({ id: 'a', name: 'Cabinet 1' }), error: null });
-    queueFrom({ data: loc({ id: 'b', name: 'Row 1', parent_id: 'a' }), error: null });
+  const spec = [
+    {
+      key: '0',
+      name: 'Cabinet 1',
+      kind: 'cabinet',
+      children: [{ key: '0/0', name: 'Row 1', kind: 'row', children: [] }],
+    },
+  ];
 
-    const created = await materializeLocationSpec('co1', null, spec);
+  it('creates the whole tree in ONE request, whatever its size', async () => {
+    const big = Array.from({ length: 15 }, (_, r) => ({
+      key: `${r}`,
+      name: `Row ${r + 1}`,
+      kind: 'row',
+      children: Array.from({ length: 15 }, (_, c) => ({
+        key: `${r}/${c}`,
+        name: `Bin ${c + 1}`,
+        kind: 'bin',
+        children: [],
+      })),
+    }));
+    state.rpc = { data: [loc({ id: 'a' })], error: null };
 
-    expect(created.map((r) => r.id)).toEqual(['a', 'b']);
-    // first from() is the cabinet insert; assert the payload carries the spec fields
-    const cabinetBuilder = mockSupabase.from.mock.results[0].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(cabinetBuilder.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parent_id: null,
-        name: 'Cabinet 1',
-        sort_order: 0,
-      }),
-    );
+    await materializeLocationSpec('co1', 'cab', big);
+
+    // 240 nodes. The old shape was 240 inserts plus a parent check.
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(1);
+    expect(mockSupabase.from).not.toHaveBeenCalled();
   });
 
   /**
-   * The nested parents this function inserts are rows it created moments earlier in the same
-   * company, so re-fetching each one to prove it belongs there bought nothing and cost a request
-   * per node — a 16-node cabinet paid ~31 requests for 16 inserts. Only the caller's `parentId`
-   * is unverified, and it's checked once.
+   * The RPC rejects a forward reference rather than guessing, so the flattened list has to arrive
+   * depth-first with every parent ahead of its children. Getting this wrong would silently root a
+   * node in the wrong place, which is unrecoverable.
    */
-  it('validates the caller-supplied parent once, not once per node', async () => {
-    const spec = [
-      {
-        key: '0',
-        name: 'Row 1',
-        kind: 'row',
-        children: [
-          { key: '0/0', name: 'Left', kind: 'bin', children: [] },
-          { key: '0/1', name: 'Right', kind: 'bin', children: [] },
-        ],
-      },
-    ];
-    queueFrom({ data: loc({ id: 'cab', company_id: 'co1' }), error: null }); // the ONE parent check
-    queueFrom({ data: loc({ id: 'r1' }), error: null });
-    queueFrom({ data: loc({ id: 'l' }), error: null });
-    queueFrom({ data: loc({ id: 'r' }), error: null });
+  it('sends a flat parent-before-child node list, with the parent id and company', async () => {
+    state.rpc = { data: [loc({ id: 'a' }), loc({ id: 'b' })], error: null };
 
     const created = await materializeLocationSpec('co1', 'cab', spec);
 
-    expect(created).toHaveLength(3);
-    // 1 parent check + 3 inserts. The old shape spent 3 extra getLocation calls on parents it
-    // had just created itself.
-    expect(mockSupabase.from).toHaveBeenCalledTimes(4);
+    expect(created.map((r) => r.id)).toEqual(['a', 'b']);
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(args[0]).toBe('create_location_tree');
+    expect(args[1].p_company_id).toBe('co1');
+    expect(args[1].p_parent_id).toBe('cab');
+    expect(args[1].p_nodes).toEqual([
+      { ref: '0', parent_ref: null, name: 'Cabinet 1', kind: 'cabinet', sort_order: 0 },
+      { ref: '0/0', parent_ref: '0', name: 'Row 1', kind: 'row', sort_order: 0 },
+    ]);
   });
 
-  it('still rejects a parent from another company, before writing anything', async () => {
-    queueFrom({ data: loc({ id: 'cab', company_id: 'OTHER' }), error: null });
-    await expect(
-      materializeLocationSpec('co1', 'cab', [{ key: '0', name: 'Row 1', kind: 'row', children: [] }]),
-    ).rejects.toThrow(/same company/i);
-    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+  /**
+   * A root-level create — a whole new storage unit — is the case the old RPC could not express,
+   * because it derived the company from the parent row. `undefined` rather than `null` so
+   * PostgREST omits the argument and the SQL DEFAULT applies.
+   */
+  it('omits the parent for a root-level create', async () => {
+    state.rpc = { data: [loc({ id: 'a' })], error: null };
+
+    await materializeLocationSpec('co1', null, spec);
+
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(args[1].p_parent_id).toBeUndefined();
+  });
+
+  it('offsets the top level by startSortOrder, so a repeat subdivide appends', async () => {
+    state.rpc = { data: [], error: null };
+
+    await materializeLocationSpec('co1', 'cab', spec, 3);
+
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect((args[1].p_nodes as Array<{ sort_order: number }>)[0].sort_order).toBe(3);
+  });
+
+  /**
+   * Tenancy and the billing gate now live in the RPC, which is the point — they cannot be skipped
+   * by a caller. The wrapper's job is only to render the refusal like every other write on this
+   * table rather than leaking a raw SQLSTATE.
+   */
+  it('surfaces the database refusal instead of reporting a silent success', async () => {
+    state.rpc = { data: null, error: { message: 'access denied to company OTHER' } };
+    await expect(materializeLocationSpec('co1', 'cab', spec)).rejects.toBeTruthy();
+  });
+
+  it('names a duplicate sibling as a name clash, not a constraint violation', async () => {
+    state.rpc = {
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+    };
+    await expect(materializeLocationSpec('co1', 'cab', spec)).rejects.toThrow(/already/i);
   });
 });
 
 describe('duplicateLocation', () => {
-  it('deep-copies a subtree as a bumped sibling, codes re-derived, structure only', async () => {
-    // Existing: Cabinet 1 (C01) → Bin 1 (C01-B01)
+  it('deep-copies a subtree as a bumped sibling, structure only', async () => {
+    // Existing: Cabinet 1 → Bin 1
     queueFrom({
       data: [
         loc({ id: 'cab', name: 'Cabinet 1', kind: 'cabinet' }),
@@ -410,25 +437,22 @@ describe('duplicateLocation', () => {
       ],
       error: null,
     });
-    // materialize → new cabinet insert, then the copied bin under it. No per-node parent check:
-    // the bin's parent is the cabinet this call just created.
-    queueFrom({ data: loc({ id: 'cab2', name: 'Cabinet 2' }), error: null });
-    queueFrom({ data: loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2' }), error: null });
+    state.rpc = {
+      data: [loc({ id: 'cab2', name: 'Cabinet 2' }), loc({ id: 'b2', name: 'Bin 1', parent_id: 'cab2' })],
+      error: null,
+    };
 
     const created = await duplicateLocation('co1', 'cab');
 
     expect(created.map((r) => r.id)).toEqual(['cab2', 'b2']);
-    // from() #0 = getLocations; #1 = new cabinet insert. sort_order lands AFTER
-    // the one existing sibling (sort_order 0), so the copy doesn't jump to front.
-    const cabInsert = mockSupabase.from.mock.results[1].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(cabInsert.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ parent_id: null, name: 'Cabinet 2', sort_order: 1 }),
-    );
-    // #2 = copied bin insert, code re-derived under the new cabinet
-    const binInsert = mockSupabase.from.mock.results[2].value as Record<string, ReturnType<typeof vi.fn>>;
-    expect(binInsert.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ parent_id: 'cab2', name: 'Bin 1' }),
-    );
+    // One read for the tree, one RPC for the copy.
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    const nodes = args[1].p_nodes as Array<Record<string, unknown>>;
+    // The copy is named past the existing sibling and sorts AFTER it, so it doesn't jump to front.
+    expect(nodes[0]).toMatchObject({ parent_ref: null, name: 'Cabinet 2', sort_order: 1 });
+    // Children ride along under the copy's own ref, never the original's id.
+    expect(nodes[1]).toMatchObject({ parent_ref: nodes[0].ref, name: 'Bin 1' });
   });
 });
 
@@ -626,15 +650,23 @@ describe('duplicate sibling names', () => {
     );
   });
 
-  // Every node the wizard generates goes through the same insert, so a collision mid-run surfaces
-  // the same actionable message rather than raw constraint text.
-  it('surfaces the same message from inside a generated spec', async () => {
-    queueFrom({ data: null, error: UNIQUE_VIOLATION });
+  /**
+   * A generated spec gets the same actionable sentence, minus the name.
+   *
+   * It USED to name the offender ("already a \"Row 1\"") because the old loop knew which node it
+   * was inserting when the 23505 landed. `create_location_tree` writes the whole subtree in one
+   * statement, so no single name is attributable any more. Worth the trade: this case is now rare
+   * by construction, because `buildSpecFromLevels` continues numbering past the parent's existing
+   * siblings (Row 4-6, not a second Row 1-3) precisely so a repeat subdivide cannot collide. What
+   * must not regress is the message being actionable rather than raw constraint text.
+   */
+  it('surfaces a name-clash message from inside a generated spec', async () => {
+    state.rpc = { data: null, error: UNIQUE_VIOLATION };
     await expect(
       materializeLocationSpec('co1', null, [
         { key: '0', name: 'Row 1', kind: 'row', children: [] },
       ]),
-    ).rejects.toThrow(/already a "Row 1" in the same place/i);
+    ).rejects.toThrow(/already a location with that name in the same place/i);
   });
 });
 

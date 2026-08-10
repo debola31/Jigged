@@ -43,6 +43,7 @@ import Stack from '@mui/material/Stack';
 import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
+import { alpha } from '@mui/material/styles';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
@@ -65,6 +66,14 @@ export interface UnitGridViewProps {
   occupancy: OccupancyMap;
   /** Tapping a place. The caller decides whether that opens a sheet or navigates. */
   onOpenCell: (locationId: string) => void;
+  /**
+   * Tapping a row's label.
+   *
+   * A row is a real location — it can be renamed, printed, deleted — and until this existed the
+   * grid gave it no action path at all: the old accordion could open any node, and the first cut
+   * of the grid could only open leaves. Omit it and the label is inert text.
+   */
+  onOpenBand?: (locationId: string) => void;
 }
 
 function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onOpen: () => void }) {
@@ -95,9 +104,24 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
         px: 1,
         borderRadius: 1,
         border: '1px solid',
+        /*
+         * A TINT, not a fill.
+         *
+         * This was `success.dark` with `success.contrastText` — a saturated green block with dark
+         * text — and design-system.md warns about exactly that two sections above the exception it
+         * looked like it was using: a success *fill* on a button "reads as already done", which is
+         * the trap the green "Complete" buttons set. The sanctioned exception is scoped in writing
+         * to `FillDot, a 7px dot`; a 44px tap target is not a dot.
+         *
+         * So the hue stays (it is still the fill-state signal, and it has to survive being scanned
+         * across 180 cells at arm's length) while the treatment becomes a tint with a solid border
+         * and ordinary white text. It reads as *marked*, not as *done*, and white on the tint holds
+         * contrast on the indigo ground where dark-on-green did not.
+         */
         borderColor: cell.hasStock ? 'success.main' : 'divider',
-        bgcolor: cell.hasStock ? 'success.dark' : 'action.hover',
-        color: cell.hasStock ? 'success.contrastText' : 'text.secondary',
+        bgcolor: (t) =>
+          cell.hasStock ? alpha(t.palette.success.main, 0.22) : t.palette.action.hover,
+        color: cell.hasStock ? 'text.primary' : 'text.secondary',
         fontSize: 12,
         fontWeight: cell.hasStock ? 700 : 400,
         overflow: 'hidden',
@@ -135,9 +159,11 @@ function shortLabel(name: string): string {
 function GridBody({
   shape,
   onOpenCell,
+  onOpenBand,
 }: {
   shape: GridShape;
   onOpenCell: (id: string) => void;
+  onOpenBand?: (id: string) => void;
 }) {
   return (
     <Paper
@@ -189,9 +215,32 @@ function GridBody({
                 pr: 1,
               }}
             >
-              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
-                {band.name}
-              </Typography>
+              {onOpenBand && !band.isLeafItself ? (
+                <Typography
+                  component="button"
+                  variant="body2"
+                  noWrap
+                  title={`Open ${band.name}`}
+                  onClick={() => onOpenBand(band.id)}
+                  sx={{
+                    background: 'none',
+                    border: 0,
+                    p: 0,
+                    font: 'inherit',
+                    fontWeight: 600,
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    '&:hover': { textDecoration: 'underline' },
+                  }}
+                >
+                  {band.name}
+                </Typography>
+              ) : (
+                <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
+                  {band.name}
+                </Typography>
+              )}
             </Box>
 
             {band.isLeafItself ? (
@@ -216,7 +265,12 @@ function GridBody({
   );
 }
 
-export default function UnitGridView({ unit, occupancy, onOpenCell }: UnitGridViewProps) {
+export default function UnitGridView({
+  unit,
+  occupancy,
+  onOpenCell,
+  onOpenBand,
+}: UnitGridViewProps) {
   const layout: UnitLayout = readUnitLayout(unit, occupancy);
   const [section, setSection] = useState(0);
 
@@ -269,7 +323,7 @@ export default function UnitGridView({ unit, occupancy, onOpenCell }: UnitGridVi
             <Tab key={s.id} label={s.name} sx={{ minHeight: 48 }} />
           ))}
         </Tabs>
-        <GridBody shape={active} onOpenCell={onOpenCell} />
+        <GridBody shape={active} onOpenCell={onOpenCell} onOpenBand={onOpenBand} />
       </Box>
     );
   }
@@ -281,7 +335,7 @@ export default function UnitGridView({ unit, occupancy, onOpenCell }: UnitGridVi
           Some rows are divided and some aren&apos;t — shown as they are.
         </Typography>
       )}
-      <GridBody shape={layout} onOpenCell={onOpenCell} />
+      <GridBody shape={layout} onOpenCell={onOpenCell} onOpenBand={onOpenBand} />
     </Box>
   );
 }

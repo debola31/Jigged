@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
@@ -19,6 +21,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
+import ViewQuiltOutlinedIcon from '@mui/icons-material/ViewQuiltOutlined';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 
@@ -34,7 +37,12 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { locationParentOptions } from '@/utils/locationDestinations';
-import { describeShape, orderUnits } from '@/lib/locationGrid';
+import {
+  countOccupiedPlaces,
+  countStockablePlaces,
+  describeShape,
+  orderUnits,
+} from '@/lib/locationGrid';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import LocationPicker, { type LocationPickerOption } from './LocationPicker';
@@ -107,10 +115,39 @@ const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 
 interface LocationsManagerProps {
   companyId: string;
+  /**
+   * The unit being viewed, from the route. Absent on the list.
+   *
+   * This was local state, which made the drawn unit an inline swap under the list's own chrome —
+   * no back button, no shareable link, and the list's toolbar following you into a screen where
+   * "Add storage" acted on something you were no longer looking at. Reading it from the URL is
+   * what makes the unit a place you can be rather than a mode the list is in.
+   */
+  unitId?: string;
+  /**
+   * TEMPORARY, for choosing between two layouts. Remove with the decision.
+   *
+   * `true` keeps the unit list beside the drawn unit (master–detail); `false` gives the unit the
+   * whole width. Driven by `?panes=1` so both can be compared on identical data.
+   */
+  showListBeside?: boolean;
 }
 
-export default function LocationsManager({ companyId }: LocationsManagerProps) {
+export default function LocationsManager({
+  companyId,
+  unitId,
+  showListBeside = false,
+}: LocationsManagerProps) {
   const router = useRouter();
+  /**
+   * Master–detail only survives where there is room for both. Below `md` the rail is hidden, so
+   * the unit gets the whole screen and has to behave like it: its own back button, and none of
+   * the list's toolbar — which would otherwise offer "Add storage" beside a list that is not
+   * there. `noSsr` because the answer depends on the viewport, and guessing it on the server
+   * produces one frame of the wrong layout.
+   */
+  const wideEnoughForPanes = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true });
+  const listBeside = showListBeside && wideEnoughForPanes;
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /**
@@ -141,14 +178,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [sheetId, setSheetId] = useState<string | null>(null);
 
-  /**
-   * Which unit is open, or null for the list of units.
-   *
-   * Two screens rather than one nested table: you already know which piece of furniture you meant
-   * before you go looking inside it, and the accordion this replaces made the whole shop pay 237
-   * rows for that. An id, not a node — a reload has to re-resolve fresh children.
-   */
-  const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -193,7 +223,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   const sheetNode = sheetId ? byNodeId.get(sheetId) ?? null : null;
   const sheetPath = useMemo(() => (sheetId ? nodePath(sheetId, byNodeId) : []), [sheetId, byNodeId]);
 
-  const openUnit = openUnitId ? byNodeId.get(openUnitId) ?? null : null;
+  const openUnit = unitId ? byNodeId.get(unitId) ?? null : null;
 
   /**
    * Opening a unit from the list.
@@ -212,6 +242,9 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
    * drawer, so a shop could easily end up with named furniture and no places in it. Naming and
    * shaping are one decision, and since `create_location_tree` they are also one transaction.
    */
+  const unitHref = (id: string) => `/dashboard/${companyId}/inventory/locations/${id}`;
+  const listHref = `/dashboard/${companyId}/inventory/locations`;
+
   const openAddStorage = () =>
     setBuilder({
       open: true,
@@ -226,7 +259,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       setSheetId(node.id);
       return;
     }
-    setOpenUnitId(node.id);
+    router.push(unitHref(node.id));
   };
 
   /**
@@ -238,7 +271,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   const openCell = (locationId: string) => {
     const node = byNodeId.get(locationId);
     if (node && node.children.length > 0) {
-      setOpenUnitId(locationId);
+      router.push(unitHref(locationId));
       return;
     }
     setSheetId(locationId);
@@ -450,8 +483,13 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       */}
       {/* Hidden entirely with no places: `Print all labels` has nothing to print, `Count
           everything` has nothing to count, and a second `Add storage` would sit a few hundred
-          pixels above the one in the empty-state card. One screen, one call to action. */}
-      {tree.length > 0 && (
+          pixels above the one in the empty-state card. One screen, one call to action.
+
+          Also hidden on a unit, unless the list is beside it. Every control here acts on the
+          LIST — add a unit, print every label, count the whole shop — and following the reader
+          into one cabinet meant offering actions aimed at something they were no longer looking
+          at. It stays in master–detail because there the list is still on screen. */}
+      {tree.length > 0 && (!openUnit || listBeside) && (
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
         <Box sx={{ flex: 1 }} />
         <Button
@@ -484,11 +522,13 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       {/* The page never said what it was for, and a first-time reader could not tell — reasonably,
           because almost every control on it is one-time setup. Two sentences: what you're looking
           at, and the one thing here you come back to do. */}
+      {(!openUnit || listBeside) && (
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
         Your storage, and what&apos;s in it. Click a place to count it, put parts away, print its QR
         label, or change its layout. Adding and removing stock happens on the part itself, or on the
         shop floor by scanning a label.
       </Typography>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -531,43 +571,93 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
           )}
 
           {openUnit ? (
-            <Box>
-              {/*
-                Back on its own line, then the name.
+            <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+              {/* TEMPORARY — the master–detail half of the layout comparison. Desktop only: at
+                  phone width the unit always gets the whole screen. */}
+              {listBeside && (
+                <Box
+                  sx={{
+                    display: { xs: 'none', md: 'block' },
+                    width: 300,
+                    flexShrink: 0,
+                  }}
+                >
+                  <StorageUnitList
+                    tree={tree}
+                    occupancy={occupancy}
+                    selectedId={openUnit.id}
+                    dense
+                    onOpen={openUnit_}
+                    onCountHere={(node) =>
+                      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
+                    }
+                  />
+                </Box>
+              )}
 
-                These were one row — back · name · Manage — and at 390px that left the name about
-                110px, so `Form Tool Cabinet` rendered as `Form Tool Ca…`. The name is the one thing
-                on this screen you cannot infer from anything else, so it gets the full width and the
-                two controls share the row below it.
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              {/*
+                The unit's own header, carrying the unit's own actions.
+
+                They used to live behind a `Manage` button that opened the shared detail sheet — so
+                acting on the cabinet you were looking at meant opening a drawer over it. You act on
+                the thing in front of you; the sheet is now only for a place INSIDE the unit.
               */}
               <Box sx={{ mb: 2 }}>
-                <Button
-                  startIcon={<ArrowBackIcon />}
-                  onClick={() => setOpenUnitId(null)}
-                  sx={{ ml: -1, mb: 0.5 }}
-                >
-                  All storage
-                </Button>
-                <Stack direction="row" alignItems="flex-end" spacing={1}>
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
-                      {openUnit.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {describeShape(openUnit)}
-                    </Typography>
-                  </Box>
+                {!listBeside && (
+                  <Button
+                    startIcon={<ArrowBackIcon />}
+                    onClick={() => router.push(listHref)}
+                    sx={{ ml: -1, mb: 0.5 }}
+                  >
+                    All storage
+                  </Button>
+                )}
+                <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
+                  {openUnit.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {describeShape(openUnit)} · {countOccupiedPlaces(openUnit, occupancy)} of{' '}
+                  {countStockablePlaces(openUnit)} places in use
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Button
+                    variant="contained"
+                    startIcon={<FactCheckOutlinedIcon />}
+                    onClick={() => sheetActions.onCountHere(openUnit)}
+                  >
+                    Count or put away
+                  </Button>
                   <Button
                     variant="outlined"
-                    onClick={() => openSheet(openUnit)}
-                    sx={{ flexShrink: 0 }}
+                    startIcon={<ViewQuiltOutlinedIcon />}
+                    onClick={() => sheetActions.onSubdivide(openUnit)}
                   >
-                    Manage
+                    Change layout
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<QrCode2Icon />}
+                    onClick={() => sheetActions.onPrintQR(openUnit)}
+                  >
+                    Print QR
+                  </Button>
+                  <Button variant="outlined" onClick={() => sheetActions.onEdit(openUnit)}>
+                    Rename
+                  </Button>
+                  <Button variant="outlined" onClick={() => sheetActions.onDelete(openUnit)}>
+                    Delete
                   </Button>
                 </Stack>
               </Box>
 
-              <UnitGridView unit={openUnit} occupancy={occupancy} onOpenCell={openCell} />
+              <UnitGridView
+                unit={openUnit}
+                occupancy={occupancy}
+                onOpenCell={openCell}
+                onOpenBand={(id) => setSheetId(id)}
+              />
+            </Box>
             </Box>
           ) : (
             <StorageUnitList

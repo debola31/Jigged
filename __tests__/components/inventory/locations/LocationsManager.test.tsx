@@ -128,22 +128,35 @@ describe('LocationsManager', () => {
   });
 
   /**
-   * Two screens now: a unit card opens the DRAWN unit, and the sheet — which owns every action —
-   * is one tap further in. That is the trade the grid makes, and it is worth pinning: tapping a
-   * cabinet used to open a drawer of actions, and now it opens the cabinet.
+   * A unit is a ROUTE, not a mode the list is in.
+   *
+   * It was local state until 2026-08-10, which meant no back button, no shareable link, and the
+   * list's own toolbar following the reader into a cabinet where "Add storage" acted on something
+   * they were no longer looking at.
    */
-  it('opens the unit as a grid, and its sheet from Manage', async () => {
+  it('navigates to the unit rather than swapping the list in place', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    // The grid, not the sheet: both shelves are drawn as cells with their fill state named.
-    expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
-    expect(screen.queryByText('Inside (2)')).not.toBeInTheDocument();
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/locations/cab3');
+  });
 
-    await user.click(screen.getByRole('button', { name: /manage/i }));
-    expect(await screen.findByText('Inside (2)')).toBeInTheDocument();
-    expect(screen.getByText(/nothing here directly · 3 parts in sub-locations/i)).toBeInTheDocument();
+  /**
+   * On the unit, the unit's own actions are on the unit — not behind a drawer over it. The sheet
+   * is now only for a place INSIDE the unit, which is also what gives a row band an action path.
+   */
+  it('draws the unit and carries its actions in its own header', async () => {
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    // The grid: both shelves are drawn as cells with their fill state named.
+    expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
+    for (const label of [/change layout/i, /print qr/i, /rename/i, /delete/i, /count or put away/i]) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    // The list's toolbar does not follow you in.
+    expect(screen.queryByRole('button', { name: /add storage/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /print all labels/i })).not.toBeInTheDocument();
   });
 
   /**
@@ -220,10 +233,8 @@ describe('LocationsManager', () => {
    */
   it('launches Subdivide aimed at the unit, carrying its code and existing children', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
 
     // Title proves parentPath. There is no palette step to click through any more.
@@ -244,10 +255,8 @@ describe('LocationsManager', () => {
    */
   it('sorts new children after the ones already inside, not interleaved with them', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
     await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
@@ -279,10 +288,8 @@ describe('LocationsManager', () => {
         loc({ id: 'r3', name: 'Row 3', parent_id: 'cab3' }),
       ]),
     );
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
     await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 

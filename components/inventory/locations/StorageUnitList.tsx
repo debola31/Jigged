@@ -53,6 +53,10 @@ export interface StorageUnitListProps {
   onOpen: (node: InventoryLocationNode) => void;
   /** Straight to this unit's count worksheet, without opening it. */
   onCountHere: (node: InventoryLocationNode) => void;
+  /** Highlighted as the one currently open. Only meaningful beside a unit. */
+  selectedId?: string | null;
+  /** Tighter, for use as a rail rather than the whole page. */
+  dense?: boolean;
 }
 
 /** Empty vs has-stock, as a dot. Nothing here claims to know capacity. */
@@ -82,11 +86,13 @@ export default function StorageUnitList({
   occupancy,
   onOpen,
   onCountHere,
+  selectedId,
+  dense = false,
 }: StorageUnitListProps) {
   const units = orderUnits(tree);
 
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={dense ? 1 : 1.5}>
       {units.map((unit) => {
         const occ = occupancyFor(occupancy, unit.id);
         const isSystem = unit.kind === SYSTEM_KIND;
@@ -100,16 +106,36 @@ export default function StorageUnitList({
         const used = places > 0 ? countOccupiedPlaces(unit, occupancy) : 0;
         const countLabel = isSystem ? `Put away from ${unit.name}` : `Count ${unit.name}`;
 
+        const selected = unit.id === selectedId;
+
         return (
-          <Card key={unit.id} elevation={2}>
+          <Card
+            key={unit.id}
+            elevation={selected ? 4 : 2}
+            sx={
+              selected
+                ? { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: -1 }
+                : undefined
+            }
+          >
             <Box sx={{ display: 'flex', alignItems: 'stretch' }}>
               <CardActionArea
                 onClick={() => onOpen(unit)}
-                sx={{ flex: 1, minWidth: 0, p: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  p: dense ? 1.25 : 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                }}
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
-                    <Typography sx={{ fontWeight: 600, fontSize: '1.05rem', minWidth: 0 }} noWrap>
+                    <Typography
+                      sx={{ fontWeight: 600, fontSize: dense ? '0.95rem' : '1.05rem', minWidth: 0 }}
+                      noWrap
+                    >
                       {unit.name}
                     </Typography>
                     {isSystem && (
@@ -118,17 +144,20 @@ export default function StorageUnitList({
                   </Stack>
 
                   {isSystem ? (
-                    <Typography variant="body2" color="text.secondary">
-                      Parts with no recorded place yet — your put-away list, not a shelf.
+                    <Typography variant="body2" color="text.secondary" noWrap={dense}>
+                      {dense
+                        ? 'Parts with no place yet'
+                        : 'Parts with no recorded place yet — your put-away list, not a shelf.'}
                     </Typography>
                   ) : (
                     <Stack direction="row" alignItems="center" spacing={1}>
                       <FillDot filled={occ.hasStock} />
                       {/* Places used of places — never a percentage, and never a part count
                           dressed as one. Three parts in one bin is ONE place in use. */}
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" color="text.secondary" noWrap={dense}>
                         {describeShape(unit)}
-                        {places > 0 && ` · ${used} of ${places} places in use`}
+                        {places > 0 &&
+                          (dense ? ` · ${used}/${places} used` : ` · ${used} of ${places} places in use`)}
                       </Typography>
                     </Stack>
                   )}
@@ -138,7 +167,12 @@ export default function StorageUnitList({
 
               {/* Sits outside the action area so one gesture never means two things. 48px because
                   the theme applies the touch floor to Button and ListItemButton but NOT to
-                  IconButton, which renders ~34px at size="small". */}
+                  IconButton, which renders ~34px at size="small".
+
+                  Dropped in `dense`: as a rail beside a unit its job is navigation, the same action
+                  is on the unit's own header, and the 48px it costs is the difference between a
+                  name reading in full and reading as `Unassign…`. */}
+              {!dense && (
               <Tooltip title={countLabel}>
                 <IconButton
                   onClick={() => onCountHere(unit)}
@@ -148,6 +182,7 @@ export default function StorageUnitList({
                   <FactCheckOutlinedIcon />
                 </IconButton>
               </Tooltip>
+              )}
             </Box>
           </Card>
         );

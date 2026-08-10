@@ -264,7 +264,12 @@ the set by order, weight, an icon, or a count, not by giving one a border and th
   ([`OutsideWorkPanel`](../components/jobs/OutsideWorkPanel.tsx),
   [`OperationCard`](../components/jobs/OperationCard.tsx)).
 - **Fill state** — `success.main` for "has stock", a hollow `text.disabled` outline for "empty"
-  (`FillDot`, a 7px dot). Read as *status*, not good/bad: an empty bin isn't a failure, it's the
+  (`FillDot`, a 7px dot). **Scoped to the dot, and 2026-08-10 is why that scope is written down:**
+  the storage grid took the same rule to a 44px cell and rendered an occupied bin as a solid
+  `success.dark` button with dark text, which is precisely the "reads as *already done*" failure the
+  Buttons section warns about. On anything tap-sized the signal is a **tint plus a solid border**
+  with ordinary text ([`UnitGridView`](../components/inventory/locations/UnitGridView.tsx)) — same
+  hue, so it still scans across 180 cells, without borrowing a button's meaning. Read as *status*, not good/bad: an empty bin isn't a failure, it's the
   [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal that something needs
   ordering. **Never a percentage or a gauge** — we do not know a shelf's capacity, so "72% full"
   would be an invented number carrying the confidence of a measured one. Binary is the honest

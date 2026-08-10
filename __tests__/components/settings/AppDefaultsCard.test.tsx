@@ -46,13 +46,13 @@ describe('AppDefaultsCard', () => {
 
     // One SettingsSection, so exactly one heading and one Save for the whole group.
     expect(await screen.findByRole('heading', { name: /company default settings/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/default payment terms/i)).toHaveValue('Net 30');
+    expect(screen.getByLabelText(/^payment terms$/i)).toHaveValue('Net 30');
     expect(screen.getAllByRole('button', { name: /^save$/i })).toHaveLength(1);
   });
 
   it('offers the shop’s own saved terms alongside the presets', async () => {
     render(<AppDefaultsCard companyId={CO} />);
-    const input = await screen.findByLabelText(/default payment terms/i);
+    const input = await screen.findByLabelText(/^payment terms$/i);
 
     await userEvent.clear(input);
     await userEvent.type(input, '2%');
@@ -72,7 +72,7 @@ describe('AppDefaultsCard', () => {
    */
   it('writes both halves in sequence, never concurrently', async () => {
     render(<AppDefaultsCard companyId={CO} />);
-    const input = await screen.findByLabelText(/default payment terms/i);
+    const input = await screen.findByLabelText(/^payment terms$/i);
 
     await userEvent.clear(input);
     await userEvent.type(input, 'Net 45');
@@ -88,7 +88,7 @@ describe('AppDefaultsCard', () => {
 
   it('keeps the numeric patch numeric — the registry did not become a union', async () => {
     render(<AppDefaultsCard companyId={CO} />);
-    await screen.findByLabelText(/default payment terms/i);
+    await screen.findByLabelText(/^payment terms$/i);
 
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }));
 

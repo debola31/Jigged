@@ -295,8 +295,16 @@ export function drawCompanyLogo(
 
 // ─────────────────────────── The shop header block ───────────────────────────
 
-/** Gap between the logo and the text stacked beneath it. */
-const SHOP_LOGO_GAP = 12;
+/**
+ * Gap between the logo and the text stacked beneath it.
+ *
+ * **6, not 12.** The address under a mark is part of the same lockup and should read as one block;
+ * the text's own leading already adds ~10pt below this, so 12 put roughly 15pt of white between the
+ * logo's last pixel and the top of the address — more than a full line of 9.5pt type, which reads
+ * as two separate things that happen to be stacked. Tightening it also hands the difference back to
+ * the logo, since the budget it comes out of is the same one the logo is sized against.
+ */
+const SHOP_LOGO_GAP = 6;
 
 /**
  * Ceilings on the drawn logo.
@@ -372,12 +380,27 @@ export function drawShopHeaderBlock(
   }: ShopHeaderOptions,
 ): number {
   const shopLines = buildShopHeaderLines(company);
-  const showName = !logoIncludesName;
+
+  /**
+   * **The name is suppressed only if a logo actually carries it.**
+   *
+   * `logoIncludesName` is a statement about the *logo*, so it means nothing when there is no logo —
+   * and honouring it anyway prints a document with no company name on it at all, which is the one
+   * outcome this whole setting exists to avoid. A shop can easily reach that state: tick the box,
+   * then remove the logo.
+   *
+   * Decided up front from whether a logo will be *attempted*, because the text's height sets the
+   * logo's budget. If the attempt then fails, the name is restored below — safe, because a failed
+   * logo hands its entire budget back to the text.
+   */
+  const hasLogo = Boolean(logoDataUrl);
+  let showName = !logoIncludesName || !hasLogo;
 
   // What the text under the logo will occupy, so the logo can be given the remainder.
   const textHeight = (showName ? SHOP_NAME_H : 0) + shopLines.length * SHOP_LINE_H;
 
   let logoBottom = y;
+  let logoDrawn = false;
   if (logoDataUrl) {
     try {
       const props = doc.getImageProperties(logoDataUrl);
@@ -390,6 +413,7 @@ export function drawShopHeaderBlock(
           const w = h * ratio;
           doc.addImage(logoDataUrl, props.fileType, x, y, w, h, undefined, 'FAST');
           logoBottom = y + h + SHOP_LOGO_GAP;
+          logoDrawn = true;
         }
       }
     } catch {
@@ -397,6 +421,11 @@ export function drawShopHeaderBlock(
       // gone anyway.
     }
   }
+
+  // The logo we were counting on to carry the name did not render — an unreadable file, or a header
+  // too short to hold it. Print the name rather than ship an unnamed document. Nothing overflows:
+  // the space the logo would have taken is now free.
+  if (!logoDrawn) showName = true;
 
   let ty = logoBottom;
   if (showName) {

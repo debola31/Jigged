@@ -356,7 +356,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   <Checkbox
                     checked={includesName}
                     onChange={(e) => void handleIncludesName(e.target.checked)}
-                    disabled={logoBusy}
+                    disabled={logoBusy || !logoPath}
                     sx={{ pt: 0.25 }}
                   />
                 }
@@ -366,8 +366,9 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                       My logo already includes my company name
                     </Typography>
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      Then we won&apos;t print your name next to it, and the logo gets that space
-                      instead.
+                      {logoPath
+                        ? "Then we won't print your name next to it, and the logo gets that space instead."
+                        : 'Upload a logo first — your name is always printed while there isn\u2019t one.'}
                     </Typography>
                   </Box>
                 }
@@ -378,19 +379,6 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
           <Divider sx={{ my: 3 }} />
 
           <Grid container spacing={2}>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                label="Phone"
-                value={form.phone}
-                onChange={handleChange('phone')}
-                fullWidth
-                size="small"
-                type="tel"
-                autoComplete="tel"
-                error={phoneInvalid}
-                helperText={phoneInvalid ? 'Enter a valid phone number' : undefined}
-              />
-            </Grid>
             <Grid size={{ xs: 12 }}>
               <TextField
                 label="Address line 1"
@@ -452,6 +440,20 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                   setSuccess(false);
                 }}
                 size="small"
+              />
+            </Grid>
+            {/* Phone last, matching the order it prints in: street, city line, then contact. */}
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <TextField
+                label="Phone"
+                value={form.phone}
+                onChange={handleChange('phone')}
+                fullWidth
+                size="small"
+                type="tel"
+                autoComplete="tel"
+                error={phoneInvalid}
+                helperText={phoneInvalid ? 'Enter a valid phone number' : undefined}
               />
             </Grid>
           </Grid>

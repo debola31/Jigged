@@ -105,6 +105,41 @@ describe('drawShopHeaderBlock — the "logo includes my name" answer', () => {
     expect(drawn(t)).toContain('L&L Machine & Tool');
   });
 
+  /**
+   * **The document must never go out unnamed.**
+   *
+   * `logoIncludesName` is a claim about the logo, so it means nothing without one — and a shop
+   * reaches that state trivially: tick the box, then remove the logo. Honouring the setting anyway
+   * printed a quote with no company name anywhere on it, which is the exact outcome the setting
+   * exists to prevent.
+   */
+  it('still prints the name when the box is ticked but there is no logo', () => {
+    const t = target();
+    drawShopHeaderBlock(t.doc, {
+      company, logoDataUrl: null, logoIncludesName: true, ...QUOTE,
+    });
+    expect(drawn(t)).toContain('L&L Machine & Tool');
+  });
+
+  it('still prints the name when the logo was ticked but could not be read', () => {
+    const t = target(null);
+    drawShopHeaderBlock(t.doc, {
+      company, logoDataUrl: 'data:image/png;base64,broken', logoIncludesName: true, ...QUOTE,
+    });
+    expect(t.addImage).not.toHaveBeenCalled();
+    expect(drawn(t)).toContain('L&L Machine & Tool');
+  });
+
+  it('still prints the name when the header was too short to draw the logo', () => {
+    const t = target();
+    drawShopHeaderBlock(t.doc, {
+      company, logoDataUrl: 'data:image/png;base64,x', logoIncludesName: true,
+      x: 40, y: 40, availableBottom: 70,
+    });
+    expect(t.addImage).not.toHaveBeenCalled();
+    expect(drawn(t)).toContain('L&L Machine & Tool');
+  });
+
   it('omits it when the logo already says it', () => {
     const t = target();
     drawShopHeaderBlock(t.doc, {

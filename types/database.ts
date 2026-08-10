@@ -649,7 +649,6 @@ export type Database = {
           kind: string | null
           name: string
           parent_id: string | null
-          photo_path: string | null
           sort_order: number
           updated_at: string
         }
@@ -660,7 +659,6 @@ export type Database = {
           kind?: string | null
           name: string
           parent_id?: string | null
-          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -671,7 +669,6 @@ export type Database = {
           kind?: string | null
           name?: string
           parent_id?: string | null
-          photo_path?: string | null
           sort_order?: number
           updated_at?: string
         }
@@ -3614,6 +3611,25 @@ export type Database = {
         Args: { p_job_part_id: string; p_routing_id: string }
         Returns: number
       }
+      create_location_tree: {
+        Args: { p_company_id: string; p_nodes: Json; p_parent_id?: string }
+        Returns: {
+          company_id: string
+          created_at: string
+          id: string
+          kind: string | null
+          name: string
+          parent_id: string | null
+          sort_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "inventory_locations"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       create_shipment_with_line_items: {
         Args: {
           p_carrier: string
@@ -3861,7 +3877,6 @@ export type Database = {
           kind: string | null
           name: string
           parent_id: string | null
-          photo_path: string | null
           sort_order: number
           updated_at: string
         }[]

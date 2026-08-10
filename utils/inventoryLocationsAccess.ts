@@ -218,9 +218,9 @@ function mapLocationWriteError(error: { code?: string; message?: string }, name?
 /**
  * The insert half of `createLocation`, with the parent check already done.
  *
- * Split out for `materializeLocationSpec`, whose nested parents are rows it created moments ago
- * in this same company — re-fetching each one to prove that costs a request per node for no
- * information. A 16-node cabinet went from ~31 requests to ~17.
+ * Split out when `materializeLocationSpec` shared it; that caller now goes through
+ * `create_location_tree`, so `createLocation` is the only one left. Kept separate rather than
+ * inlined because the parent check and the insert fail differently and are worth reading apart.
  */
 async function insertLocation(
   companyId: string,
@@ -340,45 +340,30 @@ export async function deleteLocation(id: string): Promise<void> {
   }
 }
 
-/** Insert a spec forest under a parent already proven to be in `companyId`. */
-async function insertSpecForest(
-  companyId: string,
-  parentId: string | null,
-  nodes: LocationSpecNode[],
-  startSortOrder: number,
-): Promise<InventoryLocation[]> {
-  const created: InventoryLocation[] = [];
-  let sortOrder = startSortOrder;
-  for (const node of nodes) {
-    const row = await insertLocation(companyId, {
-      parent_id: parentId,
-      name: node.name,
-      kind: node.kind,
-      sort_order: sortOrder++,
-    });
-    created.push(row);
-    if (node.children.length > 0) {
-      // `row` was just inserted with company_id = companyId, so its children need no re-check.
-      created.push(...(await insertSpecForest(companyId, row.id, node.children, 0)));
-    }
-  }
-  return created;
-}
-
 /**
  * Materialize a LocationSpecNode forest (built client-side by the visual builder) into
- * inventory_locations. Parent before children; names and codes come straight from the precomputed
- * spec. Every location is stockable and printable.
+ * `inventory_locations`, in **one transaction and one round trip**.
  *
- * The caller-supplied `parentId` is validated ONCE here. It used to be re-validated inside
- * `createLocation` for every node, including nodes whose parent this function had just created —
- * a wasted `getLocation` per node (a 16-node cabinet cost ~31 requests instead of ~17).
+ * ## What this replaced, and why it mattered (#618)
  *
- * Still sequential and still **not transactional**: a failure partway leaves the nodes created
- * before it. That's why `buildSpecFromLevels` takes the parent's existing sibling names — a
- * repeat subdivide continues the numbering instead of colliding, so the sibling-name unique
- * index can't kill a run halfway. A single multi-row insert (or an RPC) is the real fix and is
- * tracked separately.
+ * It used to insert each node with its own awaited `INSERT`, recursively. A 12 × 15 cabinet was 240
+ * sequential round trips — slow enough on an old office computer that a shop owner concluded the
+ * app had frozen, which is the observation that got this fixed. And a failure partway left every
+ * node created before it: a partial tree, no rollback, an opaque error.
+ *
+ * Two mitigations used to stand in for the real fix and are now unnecessary. The parent was
+ * validated once here rather than per node (a 16-node cabinet cost ~31 requests instead of ~17) —
+ * `create_location_tree` proves the parent itself, in the same transaction, so that read is gone
+ * too. And `buildSpecFromLevels` continues sibling numbering so a repeat subdivide could not die
+ * halfway on the unique index; that is still worth having, because continuing the numbering is what
+ * the user meant, but it is no longer load-bearing for atomicity.
+ *
+ * ## Shape
+ *
+ * `flattenSpec` is shared with `subdivideLocation`: both RPCs take the same flat
+ * `{ref, parent_ref}` list, parent before child, so the client serializes a spec exactly once.
+ * `startSortOrder` still offsets the top level — a repeat subdivide appends rather than
+ * interleaving with what is already there.
  */
 export async function materializeLocationSpec(
   companyId: string,
@@ -386,8 +371,21 @@ export async function materializeLocationSpec(
   nodes: LocationSpecNode[],
   startSortOrder = 0,
 ): Promise<InventoryLocation[]> {
-  await assertParentInCompany(parentId, companyId);
-  return insertSpecForest(companyId, parentId, nodes, startSortOrder);
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc('create_location_tree', {
+    p_company_id: companyId,
+    p_parent_id: parentId ?? undefined,
+    p_nodes: flattenSpec(nodes, null, startSortOrder),
+  });
+
+  if (error) {
+    console.error('Error creating location tree:', error);
+    // A duplicate sibling name is the one failure a user can act on, and it arrives raw as
+    // `23505 duplicate key value violates unique constraint`. Same mapper as every other write
+    // path on this table, so the message does not depend on which one you came through.
+    throw mapLocationWriteError(error, undefined);
+  }
+  return (data ?? []) as InventoryLocation[];
 }
 
 /** One part's stock moving into one of the sub-locations about to be created. */

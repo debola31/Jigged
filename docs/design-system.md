@@ -460,9 +460,9 @@ same switch two different ways across pages.
 *(Was "Tile-and-sheet". Corrected 2026-08-03 when the drawn storage board was replaced by an
 indented table, and again **2026-08-10** when the table was replaced by
 [`StorageUnitList`](../components/inventory/locations/StorageUnitList.tsx) →
-[`UnitGridView`](../components/inventory/locations/UnitGridView.tsx). The sheet has outlived all
-three as [`LocationDetailSheet`](../components/inventory/locations/board/LocationDetailSheet.tsx),
-which is the pattern's actual claim: what a row **is** kept changing, what a row **does** did not.)*
+[`UnitGridView`](../components/inventory/locations/UnitGridView.tsx). The sheet outlived all three and
+was then deleted itself, 2026-08-10, when the pane it kept opening over could simply show the
+thing — see the correction below.)*
 
 **Withdrawn:** the drawn board — wrong because on a real shop it drew almost nothing. A node's `kind`
 only changes the rack border, and the whole tile body was gated behind `children.length > 0` because

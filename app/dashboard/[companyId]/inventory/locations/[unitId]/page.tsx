@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 
@@ -14,8 +14,6 @@ export default function StorageUnitPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const unitId = params.unitId as string;
-  // TEMPORARY, for choosing between two layouts. Remove with the decision.
-  const showListBeside = useSearchParams().get('panes') === '1';
   const { setTitle } = usePageTitle();
   const { features, loading } = useCompanyFeatures();
   const enabled = features.inventory_locations;
@@ -54,7 +52,7 @@ export default function StorageUnitPage() {
           a page whose chrome belongs to it — the list's "Add storage" toolbar used to follow you
           in here, acting on something you were no longer looking at. It also matches the operator
           surface, which has been route-per-location since the QR scheme was built. */}
-      <LocationsManager companyId={companyId} unitId={unitId} showListBeside={showListBeside} />
+      <LocationsManager companyId={companyId} unitId={unitId} />
     </Box>
   );
 }

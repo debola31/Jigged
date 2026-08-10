@@ -71,8 +71,10 @@ const LABEL_W = 72;
 export interface UnitGridViewProps {
   unit: InventoryLocationNode;
   occupancy: OccupancyMap;
-  /** Tapping a place. The caller decides whether that opens a sheet or navigates. */
+  /** Tapping a place. The caller decides what that means. */
   onOpenCell: (locationId: string) => void;
+  /** The place currently being shown below the grid, marked so you can see where you are. */
+  selectedId?: string | null;
   /**
    * Tapping a row's label.
    *
@@ -83,7 +85,17 @@ export interface UnitGridViewProps {
   onOpenBand?: (locationId: string) => void;
 }
 
-function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onOpen: () => void }) {
+function CellButton({
+  cell,
+  wide,
+  selected,
+  onOpen,
+}: {
+  cell: GridCell;
+  wide: boolean;
+  selected: boolean;
+  onOpen: () => void;
+}) {
   const label = cell.hasStock
     ? `${cell.name} — ${cell.totalParts} ${cell.totalParts === 1 ? 'part' : 'parts'}`
     : `${cell.name} — empty`;
@@ -125,7 +137,10 @@ function CellButton({ cell, wide, onOpen }: { cell: GridCell; wide: boolean; onO
          * and ordinary white text. It reads as *marked*, not as *done*, and white on the tint holds
          * contrast on the indigo ground where dark-on-green did not.
          */
-        borderColor: cell.hasStock ? 'success.main' : 'divider',
+        // Selection outranks fill state: you need to see where you are more than whether it is
+        // occupied, and the occupancy is still carried by the tint and the accessible name.
+        borderColor: selected ? 'primary.main' : cell.hasStock ? 'success.main' : 'divider',
+        borderWidth: selected ? 2 : 1,
         bgcolor: (t) =>
           cell.hasStock ? alpha(t.palette.success.main, 0.22) : t.palette.action.hover,
         color: cell.hasStock ? 'text.primary' : 'text.secondary',
@@ -165,10 +180,12 @@ function shortLabel(name: string): string {
 
 function GridBody({
   shape,
+  selectedId,
   onOpenCell,
   onOpenBand,
 }: {
   shape: GridShape;
+  selectedId?: string | null;
   onOpenCell: (id: string) => void;
   onOpenBand?: (id: string) => void;
 }) {
@@ -183,7 +200,14 @@ function GridBody({
         // needs something to match. Against the page gradient it read as a dark block bleeding
         // toward the sidebar.
         overflowX: 'auto',
-        overflowY: 'visible',
+        /*
+         * The grid owns the VERTICAL overflow too, so a 12-row cabinet does not push what is in
+         * the selected bin off the bottom of the page — the answer to a click has to be visible
+         * from the click. Capped rather than absolute so a 2-row unit still hugs its content.
+         */
+        overflowY: 'auto',
+        maxHeight: { md: 'calc(100vh - 520px)' },
+        minHeight: { md: 200 },
         p: 1,
         // Hug the grid rather than the page. A 2-wide cabinet on a monitor otherwise sits in a
         // surface running the whole width with a metre of nothing beside it; a 15-wide one still
@@ -253,7 +277,12 @@ function GridBody({
             {band.isLeafItself ? (
               // A bare shelf is one place, not a short row. Full width says so.
               <Box sx={{ display: 'flex', flex: 1, minWidth: shape.columns * (CELL + GAP) }}>
-                <CellButton cell={band.cells[0]} wide onOpen={() => onOpenCell(band.cells[0].id)} />
+                <CellButton
+                  cell={band.cells[0]}
+                  wide
+                  selected={band.cells[0].id === selectedId}
+                  onOpen={() => onOpenCell(band.cells[0].id)}
+                />
               </Box>
             ) : (
               band.cells.map((cell) => (
@@ -261,6 +290,7 @@ function GridBody({
                   key={cell.id}
                   cell={cell}
                   wide={false}
+                  selected={cell.id === selectedId}
                   onOpen={() => onOpenCell(cell.id)}
                 />
               ))
@@ -277,6 +307,7 @@ export default function UnitGridView({
   occupancy,
   onOpenCell,
   onOpenBand,
+  selectedId,
 }: UnitGridViewProps) {
   const layout: UnitLayout = readUnitLayout(unit, occupancy);
   const [section, setSection] = useState(0);
@@ -330,7 +361,12 @@ export default function UnitGridView({
             <Tab key={s.id} label={s.name} sx={{ minHeight: 48 }} />
           ))}
         </Tabs>
-        <GridBody shape={active} onOpenCell={onOpenCell} onOpenBand={onOpenBand} />
+        <GridBody
+          shape={active}
+          selectedId={selectedId}
+          onOpenCell={onOpenCell}
+          onOpenBand={onOpenBand}
+        />
       </Box>
     );
   }
@@ -342,7 +378,12 @@ export default function UnitGridView({
           Some rows are divided and some aren&apos;t — shown as they are.
         </Typography>
       )}
-      <GridBody shape={layout} onOpenCell={onOpenCell} onOpenBand={onOpenBand} />
+      <GridBody
+        shape={layout}
+        selectedId={selectedId}
+        onOpenCell={onOpenCell}
+        onOpenBand={onOpenBand}
+      />
     </Box>
   );
 }

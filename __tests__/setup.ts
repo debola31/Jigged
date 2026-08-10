@@ -38,3 +38,16 @@ afterEach(() => {
 afterAll(() => {
   server.close();
 });
+
+/**
+ * jsdom has no layout engine, so it implements no scrolling at all — `Element.scrollIntoView` is
+ * simply absent and any component that calls it throws in tests while working perfectly in a
+ * browser. A no-op is the honest stand-in: the call is a *side effect on the viewport*, and a
+ * test that has no viewport has nothing to assert about it either way.
+ *
+ * Same family as `window.matchMedia`, which jsdom also omits — which is why responsive branches
+ * here are written as CSS breakpoints rather than `useMediaQuery`, so they stay exercisable.
+ */
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

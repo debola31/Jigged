@@ -1,40 +1,47 @@
 'use client';
 
 /**
- * Storage, as a list of the units in the shop. Screen 1.
+ * The units in the shop, as a list you pick from. The left pane.
  *
  * ## What this replaced
  *
  * An indented table with one open branch, which at Contour's real scale meant **237 rows, 216 of
  * them leaves and 180 in a single cabinet**. The table's founding argument was that once you stop
  * defaulting to the generator, "a flat shop's table is 12–18 rows in total". The shop then
- * deliberately built a 12 × 15 cabinet, and the operator's reaction to scrolling it was the reason
- * this exists. That premise is measured and withdrawn; see inventory.md §5.12.
+ * deliberately built a 12 × 15 cabinet, and the operator's reaction to scrolling it is why this
+ * exists. That premise is measured and withdrawn; see inventory.md §5.12.
  *
- * ## Five cards, not two hundred rows
+ * ## Why it stays on screen
  *
- * A unit is the thing you walk to — a cabinet, a shelf, the yard. There are about five. Every one
- * of them fits above the fold with no chevrons, no nesting and no expand state to hold, and the
- * detail lives one tap in, where you already know which piece of furniture you meant.
+ * It was a page you left in order to look at a cabinet. As a pane it stays put, so switching units
+ * is one click instead of back-then-forward, and the whole shop's fill state stays readable while
+ * you work inside one piece of furniture.
  *
- * **The shape is read back in words** ("12 rows × 15 each"), because the operator built fifteen
- * wide when he wanted twelve and nothing ever told him what he had. A shape you can read is a
- * shape you can notice is wrong.
+ * **Every unit is listed the same way, including the ones that are a single place.** The Yard has
+ * no rows and no bins; it used to open a drawer while a cabinet opened a grid, and that seam is
+ * what made the page feel like two products. One list, one destination, and the pane beside it
+ * says what the thing actually is.
  *
- * Occupancy is places-used-of-places, rolled up. Never a percentage: capacity is unknown, and
- * "72% full" is the invented number that costs credibility.
+ * ## Search
+ *
+ * Not discovery — a shop has five to twenty units and can see all of them. It is for *speed*:
+ * typing "weld" beats reading. It filters on the unit's own name only. Matching a nested `Bin 5`
+ * would put a cabinet in the results for a reason invisible in the row, and nobody hunts for a bin
+ * from here — they open the cabinet they already have in mind.
  */
 
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardActionArea from '@mui/material/CardActionArea';
 import Chip from '@mui/material/Chip';
+import InputAdornment from '@mui/material/InputAdornment';
 import Stack from '@mui/material/Stack';
-import Tooltip from '@mui/material/Tooltip';
+import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
+import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
@@ -49,14 +56,11 @@ import { SYSTEM_KIND } from '@/lib/locationKinds';
 export interface StorageUnitListProps {
   tree: InventoryLocationNode[];
   occupancy: OccupancyMap;
-  /** Open the unit — the grid for a real one, the worksheet for the put-away pile. */
+  /** Show this unit in the pane beside the list. */
   onOpen: (node: InventoryLocationNode) => void;
-  /** Straight to this unit's count worksheet, without opening it. */
-  onCountHere: (node: InventoryLocationNode) => void;
-  /** Highlighted as the one currently open. Only meaningful beside a unit. */
+  /** Which one is showing. */
   selectedId?: string | null;
-  /** Tighter, for use as a rail rather than the whole page. */
-  dense?: boolean;
+  onAddStorage: () => void;
 }
 
 /** Empty vs has-stock, as a dot. Nothing here claims to know capacity. */
@@ -85,108 +89,111 @@ export default function StorageUnitList({
   tree,
   occupancy,
   onOpen,
-  onCountHere,
   selectedId,
-  dense = false,
+  onAddStorage,
 }: StorageUnitListProps) {
-  const units = orderUnits(tree);
+  const [query, setQuery] = useState('');
+
+  const units = useMemo(() => {
+    const all = orderUnits(tree);
+    const q = query.trim().toLowerCase();
+    return q ? all.filter((u) => u.name.toLowerCase().includes(q)) : all;
+  }, [tree, query]);
 
   return (
-    <Stack spacing={dense ? 1 : 1.5}>
-      {units.map((unit) => {
-        const occ = occupancyFor(occupancy, unit.id);
-        const isSystem = unit.kind === SYSTEM_KIND;
-        // The pile is not furniture: it has no shape to state and counting it is really putting
-        // away. Everything else reports how it is built and how much of it is in use.
-        //
-        // LEAVES, not nodes. A 12 × 15 cabinet is 180 places, not 192 — the twelve rows are
-        // structure, and stock cannot sit in one. Counting nodes overstates capacity by every
-        // container the shop owns.
-        const places = unit.children.length === 0 ? 0 : countStockablePlaces(unit);
-        const used = places > 0 ? countOccupiedPlaces(unit, occupancy) : 0;
-        const countLabel = isSystem ? `Put away from ${unit.name}` : `Count ${unit.name}`;
+    <Stack spacing={1.5}>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <TextField
+          size="small"
+          fullWidth
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find a place"
+          // A search field, not a form field: no floating label eating a line, and the icon says
+          // what it is without a caption. `type="search"` brings the platform's own clear control.
+          type="search"
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+        {/* Lives with the list because it acts on the list. It was in the page toolbar, one of
+            three controls aimed at three different scopes. */}
+        <Button
+          variant="contained"
+          onClick={onAddStorage}
+          aria-label="Add storage"
+          sx={{ flexShrink: 0, minWidth: 0, px: 2 }}
+        >
+          <AddIcon />
+        </Button>
+      </Stack>
 
-        const selected = unit.id === selectedId;
+      {units.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ px: 1, py: 2 }}>
+          Nothing matches &ldquo;{query}&rdquo;.
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {units.map((unit) => {
+            const occ = occupancyFor(occupancy, unit.id);
+            const isSystem = unit.kind === SYSTEM_KIND;
+            // LEAVES, not nodes. A 12 × 15 cabinet is 180 places, not 192 — the twelve rows are
+            // structure and stock cannot sit in one. Counting nodes overstates a shop's capacity
+            // by every container it owns.
+            const places = unit.children.length === 0 ? 0 : countStockablePlaces(unit);
+            const used = places > 0 ? countOccupiedPlaces(unit, occupancy) : 0;
+            const selected = unit.id === selectedId;
 
-        return (
-          <Card
-            key={unit.id}
-            elevation={selected ? 4 : 2}
-            sx={
-              selected
-                ? { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: -1 }
-                : undefined
-            }
-          >
-            <Box sx={{ display: 'flex', alignItems: 'stretch' }}>
-              <CardActionArea
-                onClick={() => onOpen(unit)}
-                sx={{
-                  flex: 1,
-                  minWidth: 0,
-                  p: dense ? 1.25 : 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.5,
-                }}
+            return (
+              <Card
+                key={unit.id}
+                elevation={selected ? 4 : 2}
+                sx={
+                  selected
+                    ? { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: -1 }
+                    : undefined
+                }
               >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
-                    <Typography
-                      sx={{ fontWeight: 600, fontSize: dense ? '0.95rem' : '1.05rem', minWidth: 0 }}
-                      noWrap
-                    >
-                      {unit.name}
-                    </Typography>
-                    {isSystem && (
-                      <Chip size="small" label="Put-away pile" variant="outlined" />
-                    )}
-                  </Stack>
-
-                  {isSystem ? (
-                    <Typography variant="body2" color="text.secondary" noWrap={dense}>
-                      {dense
-                        ? 'Parts with no place yet'
-                        : 'Parts with no recorded place yet — your put-away list, not a shelf.'}
-                    </Typography>
-                  ) : (
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <FillDot filled={occ.hasStock} />
-                      {/* Places used of places — never a percentage, and never a part count
-                          dressed as one. Three parts in one bin is ONE place in use. */}
-                      <Typography variant="body2" color="text.secondary" noWrap={dense}>
-                        {describeShape(unit)}
-                        {places > 0 &&
-                          (dense ? ` · ${used}/${places} used` : ` · ${used} of ${places} places in use`)}
-                      </Typography>
-                    </Stack>
-                  )}
-                </Box>
-                <KeyboardArrowRightIcon color="action" />
-              </CardActionArea>
-
-              {/* Sits outside the action area so one gesture never means two things. 48px because
-                  the theme applies the touch floor to Button and ListItemButton but NOT to
-                  IconButton, which renders ~34px at size="small".
-
-                  Dropped in `dense`: as a rail beside a unit its job is navigation, the same action
-                  is on the unit's own header, and the 48px it costs is the difference between a
-                  name reading in full and reading as `Unassign…`. */}
-              {!dense && (
-              <Tooltip title={countLabel}>
-                <IconButton
-                  onClick={() => onCountHere(unit)}
-                  aria-label={countLabel}
-                  sx={{ width: 48, alignSelf: 'center', mr: 1 }}
+                <CardActionArea
+                  onClick={() => onOpen(unit)}
+                  sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}
                 >
-                  <FactCheckOutlinedIcon />
-                </IconButton>
-              </Tooltip>
-              )}
-            </Box>
-          </Card>
-        );
-      })}
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
+                      <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
+                        {unit.name}
+                      </Typography>
+                      {isSystem && <Chip size="small" label="Put-away pile" variant="outlined" />}
+                    </Stack>
+
+                    {isSystem ? (
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        Parts with no place yet
+                      </Typography>
+                    ) : (
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <FillDot filled={occ.hasStock} />
+                        {/* Places used of places — never a percentage, and never a part count
+                            dressed as one. Three parts in one bin is ONE place in use. */}
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          {describeShape(unit)}
+                          {places > 0 && ` · ${used}/${places} used`}
+                        </Typography>
+                      </Stack>
+                    )}
+                  </Box>
+                </CardActionArea>
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
     </Stack>
   );
 }

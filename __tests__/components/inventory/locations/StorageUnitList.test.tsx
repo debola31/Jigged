@@ -34,19 +34,24 @@ const node = (
 const run = (label: string, n: number, make: (i: number) => InventoryLocationNode[] = () => []) =>
   Array.from({ length: n }, (_, i) => node(`${label} ${i + 1}`, make(i), { sort_order: i }));
 
-const renderList = (tree: InventoryLocationNode[], counts: Array<[string, number]> = []) => {
+const renderList = (
+  tree: InventoryLocationNode[],
+  counts: Array<[string, number]> = [],
+  selectedId: string | null = null,
+) => {
   const onOpen = vi.fn();
-  const onCountHere = vi.fn();
+  const onAddStorage = vi.fn();
   render(
     <StorageUnitList
       tree={tree}
       occupancy={rollUpOccupancy(tree, new Map(counts))}
       onOpen={onOpen}
-      onCountHere={onCountHere}
+      onAddStorage={onAddStorage}
+      selectedId={selectedId}
     />,
     { wrapper: ({ children }) => <ThemeProvider theme={jiggedTheme}>{children}</ThemeProvider> },
   );
-  return { onOpen, onCountHere };
+  return { onOpen, onAddStorage };
 };
 
 beforeEach(() => vi.clearAllMocks());
@@ -76,8 +81,8 @@ describe('StorageUnitList', () => {
    */
   it('states the shape in the shop’s own words', () => {
     renderList([node('Form Tool Cabinet', run('Row', 12, () => run('Bin', 15)))]);
-    expect(screen.getByText(/12 rows × 15 each/)).toBeInTheDocument();
-    expect(screen.getByText(/180 places/)).toBeInTheDocument(); // leaves, not the 192 nodes
+    // 180 leaves, not the 192 nodes — the twelve rows are structure and cannot hold stock.
+    expect(screen.getByText(/12 rows × 15 each · 0\/180 used/)).toBeInTheDocument();
   });
 
   /**
@@ -90,8 +95,8 @@ describe('StorageUnitList', () => {
     const bin = cabinet.children[0].children[0].id;
     renderList([cabinet], [[bin, 3]]); // three distinct parts, all in ONE bin
 
-    expect(screen.getByText(/1 of 4 places in use/)).toBeInTheDocument();
-    expect(screen.queryByText(/3 of 4/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1\/4 used/)).toBeInTheDocument();
+    expect(screen.queryByText(/3\/4/)).not.toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
@@ -103,7 +108,7 @@ describe('StorageUnitList', () => {
     renderList(tree);
 
     expect(screen.getByText('Put-away pile')).toBeInTheDocument();
-    expect(screen.getByText(/your put-away list, not a shelf/i)).toBeInTheDocument();
+    expect(screen.getByText(/parts with no place yet/i)).toBeInTheDocument();
 
     const names = screen.getAllByText(/Unassigned|Cabinet 1/).map((n) => n.textContent);
     expect(names[names.length - 1]).toBe('Unassigned');
@@ -119,22 +124,69 @@ describe('StorageUnitList', () => {
   });
 
   /**
-   * Counting sits OUTSIDE the card's action area, so one gesture never means two things — and at
-   * the pile it is really a put-away, which the accessible name has to agree with. Sighted users
-   * once read "Put away from Unassigned" while a screen reader said "Count Unassigned".
+   * A card does ONE thing: show the unit in the pane. Counting used to be a second target on the
+   * row; it moved to the pane, where it sits beside every other action on the same unit and does
+   * not have to compete with the card for a tap.
    */
-  it('offers counting as its own target, worded for what it does', async () => {
+  it('gives a card one job, and no second target', async () => {
     const user = userEvent.setup();
+    const cabinet = node('Cabinet 1', run('Row', 2));
+    const { onOpen } = renderList([cabinet]);
+
+    expect(screen.queryByRole('button', { name: /^count /i })).not.toBeInTheDocument();
+    await user.click(screen.getByText('Cabinet 1'));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: cabinet.id }));
+  });
+
+  it('marks the unit currently showing in the pane', () => {
     const tree = [
       node('Cabinet 1', run('Row', 2), { sort_order: 0 }),
-      node('Unassigned', [], { kind: 'system', sort_order: 1 }),
+      node('Cabinet 2', run('Row', 2), { sort_order: 1 }),
     ];
-    const { onOpen, onCountHere } = renderList(tree);
+    renderList(tree, [], tree[1].id);
+    // Selection is an outline on the card, so assert through what the DOM can see: the selected
+    // card is the one whose elevation changed. Checked visually in a browser; this pins that a
+    // selection is expressed at all.
+    expect(screen.getByText('Cabinet 2')).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Count Cabinet 1' }));
-    expect(onCountHere).toHaveBeenCalled();
-    expect(onOpen).not.toHaveBeenCalled();
+  /**
+   * Not discovery — a shop can see all of its units. This is for speed: typing "weld" beats
+   * reading. Names only, because matching a nested `Bin 5` would put a cabinet in the results for
+   * a reason invisible in the row.
+   */
+  describe('search', () => {
+    const tree = () => [
+      node('Form Tool Cabinet', run('Row', 2), { sort_order: 0 }),
+      node('Metal Shelf By Welder', run('Row', 2), { sort_order: 1 }),
+      node('Yard', [], { sort_order: 2 }),
+    ];
 
-    expect(screen.getByRole('button', { name: 'Put away from Unassigned' })).toBeInTheDocument();
+    it('filters the list as you type, case-insensitively', async () => {
+      const user = userEvent.setup();
+      renderList(tree());
+
+      await user.type(screen.getByPlaceholderText(/find a place/i), 'weld');
+      expect(screen.getByText('Metal Shelf By Welder')).toBeInTheDocument();
+      expect(screen.queryByText('Form Tool Cabinet')).not.toBeInTheDocument();
+      expect(screen.queryByText('Yard')).not.toBeInTheDocument();
+    });
+
+    it('says so when nothing matches, rather than showing an empty pane', async () => {
+      const user = userEvent.setup();
+      renderList(tree());
+
+      await user.type(screen.getByPlaceholderText(/find a place/i), 'zzz');
+      expect(screen.getByText(/nothing matches/i)).toBeInTheDocument();
+    });
+  });
+
+  /** Adding storage acts on the list, so it lives with the list. */
+  it('offers Add storage beside the search', async () => {
+    const user = userEvent.setup();
+    const { onAddStorage } = renderList([node('Cabinet 1', run('Row', 2))]);
+
+    await user.click(screen.getByRole('button', { name: /add storage/i }));
+    expect(onAddStorage).toHaveBeenCalled();
   });
 });

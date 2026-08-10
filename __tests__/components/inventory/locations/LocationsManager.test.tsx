@@ -92,7 +92,7 @@ describe('LocationsManager', () => {
     // Cabinet 3 holds nothing DIRECTLY; both its shelves hold something. The roll-up is the
     // reason a full cabinet never reads empty, and it survived the table being deleted too.
     expect(await screen.findByRole('button', { name: /^Cabinet 3/ })).toBeInTheDocument();
-    expect(screen.getByText(/2 of 2 places in use/)).toBeInTheDocument();
+    expect(screen.getByText(/2\/2 used/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Yard/ })).toBeInTheDocument();
     expect(getLocationBoard).toHaveBeenCalledTimes(1);
     expect(getLocationBoard).toHaveBeenCalledWith('co1');
@@ -146,17 +146,51 @@ describe('LocationsManager', () => {
    * On the unit, the unit's own actions are on the unit — not behind a drawer over it. The sheet
    * is now only for a place INSIDE the unit, which is also what gives a row band an action path.
    */
-  it('draws the unit and carries its actions in its own header', async () => {
+  it('draws the unit and carries its actions on the unit', async () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     // The grid: both shelves are drawn as cells with their fill state named.
     expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
-    for (const label of [/change layout/i, /print qr/i, /rename/i, /delete/i, /count or put away/i]) {
+    // The three you reach for while working are on the surface…
+    for (const label of [/count or put away/i, /change layout/i, /print qr/i]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
-    // The list's toolbar does not follow you in.
-    expect(screen.queryByRole('button', { name: /add storage/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /print all labels/i })).not.toBeInTheDocument();
+    // …and the do-it-once four are behind a menu, so seven buttons do not wrap to three rows and
+    // push the grid off a phone.
+    expect(screen.queryByRole('button', { name: /^rename$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /more actions for Cabinet 3/i })).toBeInTheDocument();
+  });
+
+  /**
+   * A single-place unit is not a special case any more.
+   *
+   * The Yard has no rows and no bins. It used to open a right-anchored drawer while a cabinet
+   * swapped the page — the seam that made this read as two products. Now every unit lands in the
+   * same pane, which simply has no grid to draw for this one.
+   */
+  it('shows a single-place unit in the same pane, with no grid', async () => {
+    render(<LocationsManager companyId="co1" unitId="yard" />);
+
+    // Twice, deliberately: on its card in the list and again in the pane beside it.
+    expect(await screen.findAllByText('One place')).toHaveLength(2);
+    expect(screen.getByText(/what's here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/change its layout to add places/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Clicking a bin does NOT navigate: the grid stays put and the contents open underneath, so
+   * working through a cabinet costs no page loads and never loses your position.
+   */
+  it('opens a place beneath the grid rather than navigating away from it', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Shelf A/ }));
+
+    expect(await screen.findByText(/what's in Shelf A/i)).toBeInTheDocument();
+    // Still on the same unit, still showing its grid.
+    expect(screen.getByRole('button', { name: /^Shelf B/ })).toBeInTheDocument();
+    expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
   /**
@@ -212,17 +246,14 @@ describe('LocationsManager', () => {
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count');
   });
 
-  it('routes the sheet delete through the confirm dialog', async () => {
+  it('routes delete through the confirm dialog', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="yard" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Yard/ }));
-    await user.click(await screen.findByRole('button', { name: /delete/i }));
+    await user.click(await screen.findByRole('button', { name: /more actions for Yard/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
 
-    // The sheet closes first — two stacked surfaces leave nothing legible underneath.
     expect(await screen.findByText(/delete location\?/i)).toBeInTheDocument();
-    expect(screen.queryByText("What's here")).not.toBeInTheDocument();
-
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
     expect(deleteLocation).toHaveBeenCalledWith('yard');
   });
@@ -326,19 +357,25 @@ describe('LocationsManager', () => {
  * you come back to do.
  */
 describe('LocationsManager — count or put away', () => {
-  it('says what the page is for, rather than leaving you to infer it', async () => {
+  /**
+   * The paragraph of instructions is gone. It explained a page whose shape did not explain
+   * itself — a list you clicked to swap the page out from under you. A list beside the thing it
+   * selects needs no caption; the empty pane says the one thing worth saying.
+   */
+  it('explains the pane by its shape, not a paragraph above it', async () => {
     render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
-    expect(screen.getByText(/Your storage, and what's in it/i)).toBeInTheDocument();
+
+    expect(screen.queryByText(/Adding and removing stock happens on the part itself/i))
+      .not.toBeInTheDocument();
+    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
   });
 
   it('routes a real location to its own worksheet', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="yard" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Yard/ }));
     await user.click(await screen.findByRole('button', { name: /count or put away/i }));
-
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=yard');
   });
 
@@ -359,12 +396,22 @@ describe('LocationsManager — count or put away', () => {
   /** The put-away entry a real shop needs most: `Unassigned` is where all 9,428 parts start. */
   it('routes the put-away pile to the same worksheet', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="un" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Unassigned/ }));
     await user.click(await screen.findByRole('button', { name: /put these away/i }));
-
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=un');
+  });
+
+  /**
+   * The pile is not furniture. Offering `Change layout` on it promises something the database
+   * refuses outright — `assert_location_parent_holds_no_stock` will not give it children.
+   */
+  it('withholds layout and labelling from the put-away pile', async () => {
+    render(<LocationsManager companyId="co1" unitId="un" />);
+
+    await screen.findByRole('button', { name: /put these away/i });
+    expect(screen.queryByRole('button', { name: /change layout/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^print qr$/i })).not.toBeInTheDocument();
   });
 
   /**

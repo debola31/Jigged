@@ -376,6 +376,35 @@ describe('PartPricing — starter tier at 0% markup', () => {
     expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
   });
 
+  it('fires for a part whose only cost is a material — no operations at all', async () => {
+    // The reported case: a made part with one purchased material on its BOM and
+    // an empty routing. Cost resolves, so the part must become quotable.
+    mockCalculateRoutingCost.mockResolvedValue({
+      ...pricedBreakdown,
+      labor_items: [],
+      total_labor_cost: 0,
+      material_items: [
+        {
+          item_name: 'BUY-MOTOR-12V',
+          quantity: 9,
+          unit: 'ea',
+          cost_per_unit: 14.5,
+          cost: 130.5,
+          qty_in_primary: 9,
+          consume_whole_units: true,
+          units_consumed: 9,
+        },
+      ],
+      total_material_cost: 130.5,
+      total_cost: 130.5,
+    });
+
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
+  });
+
   it('tells the parent, so the workspace stops saying "needs cost"', async () => {
     const onPricingChanged = vi.fn();
     render(

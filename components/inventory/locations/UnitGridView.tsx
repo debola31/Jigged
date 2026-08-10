@@ -8,7 +8,8 @@
  * Contour's Form Tool Cabinet is 12 rows × 15 bins. Fitting fifteen columns across a 390px phone
  * means roughly **24px per cell** after gutters. WCAG 2.2 SC 2.5.8 sets 24×24 CSS px as the AA
  * floor *and* requires spacing such that a 24px circle on one target does not reach another — which
- * a 24px cell with any visible gutter fails. The W3C's own recommended size is 44×44.
+ * a 24px cell with any visible gutter fails. The house floor is **48** (design-system.md), stricter
+ * than the W3C's recommended 44, and it applies here like anywhere else.
  *
  * Every cell here is a control that opens a stock ledger. A near-miss books material to the wrong
  * bin, and this is used standing at a cabinet, on a phone, in bright light, sometimes with dirty
@@ -55,8 +56,14 @@ import {
   type UnitLayout,
 } from '@/lib/locationGrid';
 
-/** The touch floor. Not a style value — see the header. */
-const CELL = 44;
+/**
+ * The touch floor. Not a style value — see the header.
+ *
+ * **48, not 44.** WCAG 2.2 recommends 44 and this started there, which was quietly lowering the
+ * house floor because an external standard permitted it. design-system.md's rule is 48 and the
+ * grid scrolls either way, so matching it costs a slightly wider scroll and nothing else.
+ */
+const CELL = 48;
 const GAP = 4;
 /** Wide enough for "Row 12" without truncating, narrow enough not to eat a phone screen. */
 const LABEL_W = 72;

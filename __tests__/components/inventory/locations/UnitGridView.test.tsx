@@ -57,14 +57,14 @@ const renderGrid = (unit: InventoryLocationNode, counts: Array<[string, number]>
 beforeEach(() => vi.clearAllMocks());
 
 describe('UnitGridView — the touch floor', () => {
-  it('keeps every cell at 44px rather than shrinking a 15-wide cabinet to fit', () => {
+  it('keeps every cell at the 48px house floor rather than shrinking a 15-wide cabinet to fit', () => {
     const cabinet = node('Form Tool Cabinet', run('Row', 12, () => run('Bin', 15)));
     renderGrid(cabinet);
 
     const cells = screen.getAllByRole('button');
     expect(cells.length).toBe(180);
     for (const cell of cells.slice(0, 5)) {
-      expect(cell).toHaveStyle({ height: '44px' });
+      expect(cell).toHaveStyle({ height: '48px' });
     }
   });
 
@@ -79,11 +79,11 @@ describe('UnitGridView — the touch floor', () => {
    * Both directions measured in a real browser: the cabinet holds at exactly 44 and scrolls; a
    * three-wide shelf sizes to its names. jsdom has no layout engine, so this pins the declaration.
    */
-  it('declares cells content-sized above a 44px floor, and never shrinkable', () => {
+  it('declares cells content-sized above the floor, and never shrinkable', () => {
     renderGrid(node('Cabinet', [node('Row 1', [node('Left'), node('Right')], { sort_order: 0 })]));
     const cell = screen.getByRole('button', { name: /^Left/ });
     expect(cell).toHaveStyle({ flex: '0 0 auto' });
-    expect(cell).toHaveStyle({ minWidth: '44px' });
+    expect(cell).toHaveStyle({ minWidth: '48px' });
   });
 
   /**

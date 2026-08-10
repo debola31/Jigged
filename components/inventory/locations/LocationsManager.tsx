@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useRouter } from 'next/navigation';
@@ -14,6 +14,8 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import Stack from '@mui/material/Stack';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -147,7 +149,35 @@ export default function LocationsManager({
    * produces one frame of the wrong layout.
    */
   const wideEnoughForPanes = useMediaQuery(useTheme().breakpoints.up('md'), { noSsr: true });
-  const listBeside = showListBeside && wideEnoughForPanes;
+
+  /**
+   * TEMPORARY — the layout being evaluated. Remove with the decision.
+   *
+   * Held in localStorage rather than the URL so switching survives moving between units: the
+   * point of the comparison is how each layout feels while you use it, and re-typing a query
+   * param at every navigation is not how either would actually be used.
+   */
+  const [panes, setPanes] = useState<boolean>(showListBeside);
+  useEffect(() => {
+    // Guarded: this is scaffolding, and scaffolding must never be the thing that throws. jsdom
+    // gives a `window` with no `localStorage`, and a private-mode browser can throw on access.
+    try {
+      const saved = window.localStorage?.getItem('storage-layout');
+      if (saved) setPanes(saved === 'panes');
+    } catch {
+      /* keep the default */
+    }
+  }, []);
+  const chooseLayout = (next: boolean) => {
+    setPanes(next);
+    try {
+      window.localStorage?.setItem('storage-layout', next ? 'panes' : 'pages');
+    } catch {
+      /* the choice still applies for this render */
+    }
+  };
+
+  const listBeside = panes && wideEnoughForPanes;
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /**
@@ -620,6 +650,36 @@ export default function LocationsManager({
                   {describeShape(openUnit)} · {countOccupiedPlaces(openUnit, occupancy)} of{' '}
                   {countStockablePlaces(openUnit)} places in use
                 </Typography>
+                {/* TEMPORARY — layout comparison. Remove with the decision. */}
+                {wideEnoughForPanes && (
+                  <Box
+                    sx={{
+                      mb: 1.5,
+                      p: 1,
+                      border: '1px dashed',
+                      borderColor: 'warning.main',
+                      borderRadius: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      width: 'fit-content',
+                    }}
+                  >
+                    <Typography variant="caption" color="warning.main" sx={{ fontWeight: 700 }}>
+                      TRYING TWO LAYOUTS
+                    </Typography>
+                    <ToggleButtonGroup
+                      size="small"
+                      exclusive
+                      value={panes ? 'panes' : 'pages'}
+                      onChange={(_, v: string | null) => v && chooseLayout(v === 'panes')}
+                    >
+                      <ToggleButton value="pages">Full page</ToggleButton>
+                      <ToggleButton value="panes">List beside</ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+                )}
+
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Button
                     variant="contained"

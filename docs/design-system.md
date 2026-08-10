@@ -53,6 +53,11 @@ decisions they produced, which is the sole way a reader can tell whether a new s
 
 ---
 
+**Count what a person can act on, not what the system writes.** A generator that inserts 4 rows and
+8 bins has created 12 rows in a table and **8 places** someone can put something in; the rows are
+structure and cannot hold stock. "Create 12 locations" followed by eight usable spots overstates a
+shop's storage by every container it owns. Say the number that survives contact with the job.
+
 ## Writing UI
 
 **MUI components, always** — `Button`, `TextField`, `Card`, `Paper`, `Box`, `Typography`, `List` /
@@ -168,14 +173,30 @@ down wrong for as long as it existed.
 | `IconButton`, including [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) — which defaults to `size="small"` | **No.** MUI's own padding leaves it well under the floor |
 | `Checkbox` · `Chip` · `Tab` · `ToggleButton` · a hand-rolled `<Box onClick>` or `CardActionArea` | **No.** Nothing constrains them |
 
-**Named gap: nothing measures a target.**
+**A dense grid of targets SCROLLS; it does not shrink.** When many tap targets have to sit together
+— a cabinet 15 bins across, a calendar, a seat map — the tempting move is to divide the viewport by
+the column count. Fifteen columns on a 390px phone is ~24px a cell, which is the WCAG 2.2 AA
+*minimum* and fails its spacing clause besides. Keep the floor and let the container scroll
+sideways in its own overflow box; the physical thing is wider than your hand too. Two mechanics make
+that hold, and both are easy to get backwards:
+
+- **Shrink disabled is the half that protects the floor.** `flex: 0 0 auto` with a `minWidth`, never
+  `flex: 1` — a growable-and-shrinkable cell quietly fits itself to the phone.
+- **Growth is bounded by content, not by the container.** `flex: 1 0 48px` looks right on a phone and
+  gives each cell half a monitor on a 2-wide unit. Ask for the floor, then let the content decide.
+
+**Named gap: nothing measures a target — and a unit test cannot.** jsdom has no layout engine, so a
+component test can assert the *declaration* and never the rendered box. Every layout claim in this
+section — the floor, the scroll container, a sticky column covering its row — needs a real browser at
+a real width. Three defects in the storage grid (labels not covering their band, a truncated title, a
+cell stretched to 790px) all passed a green suite and were found in ten minutes of driving the app.
 [`interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts) scans for button colour,
 value-shaped placeholders and grey delete icons — not size. An undersized tap target ships green.
 
 **Where the gap is tolerable, and where it isn't.** Undersized `IconButton`s cluster on admin
 surfaces, which are mouse-driven office computers, and a mouse hits a 30px target fine. On the
 operator surface the floor is real and unforgiving — a phone, one-handed, sometimes gloved. That is
-also the whole origin of [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action):
+also the whole origin of [row-and-sheet](#row-and-sheet-one-tap-target-and-a-sheet-for-what-has-no-surface-of-its-own):
 the forcing case was an element drawn ~6px tall that could not be raised to 48px in place.
 
 ### The operator surface is a phone
@@ -212,7 +233,7 @@ keep it. Two standards were live in two files with nothing marking either dead; 
 The rest of that block stands, because it is right and cheap:
 
 - **Keyboard-reachable, with a visible focus indicator.** The
-  [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action) rule that a row's name
+  [row-and-sheet](#row-and-sheet-one-tap-target-and-a-sheet-for-what-has-no-surface-of-its-own) rule that a row's name
   stays a real `<button>` — rather than a `<tr>` pretending to be a control — exists for this.
 - **Semantic HTML and real ARIA labels.** Use MUI's `component` prop for the element, and label every
   icon-only control: [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) makes
@@ -434,7 +455,7 @@ same switch two different ways across pages.
 
 ---
 
-## Row-and-sheet: one tap target, a sheet that owns every action
+## Row-and-sheet: one tap target, and a sheet for what has no surface of its own
 
 *(Was "Tile-and-sheet". Corrected 2026-08-03 when the drawn storage board was replaced by an
 indented table, and again **2026-08-10** when the table was replaced by
@@ -466,8 +487,20 @@ argument wanted, and which the flat-shop data of the time genuinely did not just
 stayed true throughout: **no user had ever been observed using any storage UI here.** One now has.
 
 **The surviving standard.** Where rows or tiles are dense enough that per-element controls would have
-to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet every
-action. The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
+to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet its
+actions.
+
+> **Corrected 2026-08-10 — "a sheet that owns EVERY action" is what to avoid.** The rule as written
+> survives a list and breaks the moment anything in that list earns a surface of its own. Storage
+> grew a page per unit, the unit's actions stayed in the shared sheet, and the result read as two
+> products stitched together: opening a cabinet swapped the list in place under a toolbar that still
+> acted on the list, while its own actions sat behind a `Manage` button that opened a drawer *over*
+> the thing you were looking at.
+>
+> **Actions belong to the surface that shows the thing.** A sheet is for what has no surface of its
+> own — a bin inside a cabinet, a row inside a grid. When something earns a page, its actions move
+> onto that page and the sheet keeps only its children. The test is one question: *is the thing I am
+> acting on the thing I am looking at?* The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
 5-row × 2-side cabinet into a ~**500px** tile.
 
 **Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only

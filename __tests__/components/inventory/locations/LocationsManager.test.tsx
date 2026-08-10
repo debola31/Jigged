@@ -88,14 +88,11 @@ describe('LocationsManager', () => {
   it('loads locations and occupancy in one request pair and rolls it up the tree', async () => {
     render(<LocationsManager companyId="co1" />);
 
-    // Cabinet 3 holds nothing DIRECTLY; its shelves hold 3 between them. The roll-up is the
-    // reason a full cabinet never reads empty, and it survived the board being deleted.
-    expect(await screen.findByRole('button', { name: 'Cabinet 3' })).toBeInTheDocument();
-    expect(screen.getByText('3 parts')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Yard' })).toBeInTheDocument();
-    // Several places hold one part each in the fixture; the roll-up on Cabinet 3 above is the
-    // assertion that matters here.
-    expect(screen.getAllByText('1 part').length).toBeGreaterThan(0);
+    // Cabinet 3 holds nothing DIRECTLY; both its shelves hold something. The roll-up is the
+    // reason a full cabinet never reads empty, and it survived the table being deleted too.
+    expect(await screen.findByRole('button', { name: /^Cabinet 3/ })).toBeInTheDocument();
+    expect(screen.getByText(/2 of 2 places in use/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Yard/ })).toBeInTheDocument();
     expect(getLocationBoard).toHaveBeenCalledTimes(1);
     expect(getLocationBoard).toHaveBeenCalledWith('co1');
   });
@@ -129,12 +126,21 @@ describe('LocationsManager', () => {
     expect(screen.queryByRole('button', { name: /add manually/i })).not.toBeInTheDocument();
   });
 
-  it('opens the sheet from a board tile and shows what is inside', async () => {
+  /**
+   * Two screens now: a unit card opens the DRAWN unit, and the sheet — which owns every action —
+   * is one tap further in. That is the trade the grid makes, and it is worth pinning: tapping a
+   * cabinet used to open a drawer of actions, and now it opens the cabinet.
+   */
+  it('opens the unit as a grid, and its sheet from Manage', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    // The grid, not the sheet: both shelves are drawn as cells with their fill state named.
+    expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
+    expect(screen.queryByText('Inside (2)')).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: /manage/i }));
     expect(await screen.findByText('Inside (2)')).toBeInTheDocument();
     expect(screen.getByText(/nothing here directly · 3 parts in sub-locations/i)).toBeInTheDocument();
   });
@@ -216,6 +222,7 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /divide it up/i }));
 
     // Title proves parentPath. There is no palette step to click through any more.
@@ -239,6 +246,7 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /divide it up/i }));
     await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
 
@@ -273,6 +281,7 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" />);
 
     await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
+    await user.click(await screen.findByRole('button', { name: /manage/i }));
     await user.click(await screen.findByRole('button', { name: /divide it up/i }));
     await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
 

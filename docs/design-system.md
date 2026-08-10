@@ -431,11 +431,12 @@ same switch two different ways across pages.
 
 ## Row-and-sheet: one tap target, a sheet that owns every action
 
-*(Was "Tile-and-sheet". Corrected 2026-08-03: the drawn storage board it described was deleted in
-`db58ae8` for [`LocationTable`](../components/inventory/locations/LocationTable.tsx), an indented
-table. The sheet survives as
-[`LocationDetailSheet`](../components/inventory/locations/board/LocationDetailSheet.tsx) — whose own
-header comment still describes the deleted drawing.)*
+*(Was "Tile-and-sheet". Corrected 2026-08-03 when the drawn storage board was replaced by an
+indented table, and again **2026-08-10** when the table was replaced by
+[`StorageUnitList`](../components/inventory/locations/StorageUnitList.tsx) →
+[`UnitGridView`](../components/inventory/locations/UnitGridView.tsx). The sheet has outlived all
+three as [`LocationDetailSheet`](../components/inventory/locations/board/LocationDetailSheet.tsx),
+which is the pattern's actual claim: what a row **is** kept changing, what a row **does** did not.)*
 
 **Withdrawn:** the drawn board — wrong because on a real shop it drew almost nothing. A node's `kind`
 only changes the rack border, and the whole tile body was gated behind `children.length > 0` because
@@ -445,9 +446,19 @@ generator permits four.
 
 **Withdrawn:** "a list is out because Cabinet 1 alone exploded into 15 rows" — wrong because that was
 an artefact of the **wizard**, not of lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in
-one pass. Stop defaulting to it and a flat shop's whole table is **12–18 rows**. Twelve of twelve
-surveyed tools present locations as a tree or table, none draws them — convergent evolution, not user
-research, and **no user has ever been observed using any storage UI here**, board or table.
+one pass. Twelve of twelve surveyed tools present locations as a tree or table, none draws them —
+convergent evolution, not user research.
+
+**Withdrawn 2026-08-10 — "stop defaulting to the wizard and a flat shop's whole table is 12–18
+rows".** Wrong by an order of magnitude, and it was the table's founding claim. Contour built **237
+locations, 216 of them leaves and 180 in a single cabinet**, deliberately, by hand. The generator was
+never why storage got big; a shop with real storage is big. **Measuring the default rather than the
+ceiling is the mistake worth carrying forward** — it is the same error in both directions, since the
+board before it was justified on the same 12–18.
+
+Storage is now a list of *units* that opens a *drawn* unit — which is the shape the original board
+argument wanted, and which the flat-shop data of the time genuinely did not justify. The line that
+stayed true throughout: **no user had ever been observed using any storage UI here.** One now has.
 
 **The surviving standard.** Where rows or tiles are dense enough that per-element controls would have
 to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet every

@@ -6,14 +6,12 @@ import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
 import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import TuneIcon from '@mui/icons-material/Tune';
@@ -21,7 +19,15 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
-import { resolveScan, getLocations, getLocationHistory } from '@/utils/inventoryLocationsAccess';
+import {
+  resolveScan,
+  getLocations,
+  getLocationHistory,
+  getLocationOccupancy,
+  buildLocationTree,
+} from '@/utils/inventoryLocationsAccess';
+import { rollUpOccupancy } from '@/utils/locationOccupancy';
+import UnitGridView from '@/components/inventory/locations/UnitGridView';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
@@ -116,6 +122,30 @@ export default function OperatorBinViewPage() {
   };
 
   const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
+
+  /**
+   * Fill state for the drawn grid.
+   *
+   * One aggregated read (`inventory_location_occupancy`), constant size whatever the tree — the
+   * same view the office board uses, and the reason it is a view at all: counting
+   * `part_location_stock` client-side would silently truncate at PostgREST's `max_rows`.
+   */
+  const { data: directPartCounts } = useLoad(() => getLocationOccupancy(companyId), [companyId]);
+
+  /** The subtree rooted here, with occupancy rolled up, for `UnitGridView`. */
+  const { gridUnit, gridOccupancy } = useMemo(() => {
+    const roots = buildLocationTree(allLocations ?? []);
+    const occ = rollUpOccupancy(roots, directPartCounts ?? new Map());
+    const find = (nodes: typeof roots): (typeof roots)[number] | null => {
+      for (const n of nodes) {
+        if (n.id === locationId) return n;
+        const hit = find(n.children);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return { gridUnit: find(roots), gridOccupancy: occ };
+  }, [allLocations, directPartCounts, locationId]);
   // Containers, the `Unassigned` pile and this bin itself are all dropped by the shared rule —
   // a container cannot hold stock, so moving stock into one would only raise on arrival.
   const moveDestinations = useMemo(
@@ -165,29 +195,32 @@ export default function OperatorBinViewPage() {
         )}
       </Box>
 
-      {/* Sub-locations: drill down */}
-      {children.length > 0 && (
+      {/*
+        Sub-locations, DRAWN.
+
+        This was a vertical stack of cards — one per child — so scanning a 12 × 15 cabinet's label
+        opened twelve cards, and each of those opened fifteen more. The operator's own model is
+        spatial ("three rows down, five slots over"), and a card stack is the one shape that
+        cannot express it.
+
+        Same `UnitGridView` the office uses, at what is **already the QR target route**: a cell tap
+        lands on exactly the bin view that exists now, at exactly the URL a bin's own label points
+        to. No new route, no new payload shape, nothing to reprint.
+      */}
+      {children.length > 0 && gridUnit && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="overline" color="text.secondary">
             Sub-locations
           </Typography>
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {children.map((child) => (
-              <Card key={child.id} elevation={2}>
-                <CardActionArea
-                  onClick={() => router.push(`/operator/${companyId}/inventory/locations/${child.id}`)}
-                  sx={{ minHeight: 56 }}
-                >
-                  <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 600 }}>{child.name}</Typography>
-                    </Box>
-                    <KeyboardArrowRightIcon color="action" />
-                  </CardContent>
-                </CardActionArea>
-              </Card>
-            ))}
-          </Stack>
+          <Box sx={{ mt: 0.5 }}>
+            <UnitGridView
+              unit={gridUnit}
+              occupancy={gridOccupancy}
+              onOpenCell={(id) =>
+                router.push(`/operator/${companyId}/inventory/locations/${id}`)
+              }
+            />
+          </Box>
         </Box>
       )}
 

@@ -11,6 +11,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+import Stack from '@mui/material/Stack';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -18,6 +19,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
@@ -32,12 +34,14 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
 import { locationParentOptions } from '@/utils/locationDestinations';
+import { describeShape, orderUnits } from '@/lib/locationGrid';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
 import LocationPicker, { type LocationPickerOption } from './LocationPicker';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
-import LocationTable, { placeOrder } from './LocationTable';
+import StorageUnitList from './StorageUnitList';
+import UnitGridView from './UnitGridView';
 import LocationDetailSheet from './board/LocationDetailSheet';
 
 /** Sentinel for "no parent". A picker option needs an id, and `null` is not one. */
@@ -137,6 +141,15 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [sheetId, setSheetId] = useState<string | null>(null);
 
+  /**
+   * Which unit is open, or null for the list of units.
+   *
+   * Two screens rather than one nested table: you already know which piece of furniture you meant
+   * before you go looking inside it, and the accordion this replaces made the whole shop pay 237
+   * rows for that. An id, not a node — a reload has to re-resolve fresh children.
+   */
+  const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+
   const [formState, setFormState] = useState<{
     open: boolean;
     location: InventoryLocation | null;
@@ -172,13 +185,47 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   // Sorted once here so the board and the list agree — `Unassigned` last in both. Sorting only
   // inside the board left the list leading with the put-away pile, which is the impression the
   // board's ordering exists to avoid.
-  const tree = useMemo(() => buildLocationTree(locations).sort(placeOrder), [locations]);
+  const tree = useMemo(() => orderUnits(buildLocationTree(locations)), [locations]);
   const byNodeId = useMemo(() => indexTree(tree), [tree]);
   const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
 
   const sheetNode = sheetId ? byNodeId.get(sheetId) ?? null : null;
   const sheetPath = useMemo(() => (sheetId ? nodePath(sheetId, byNodeId) : []), [sheetId, byNodeId]);
+
+  const openUnit = openUnitId ? byNodeId.get(openUnitId) ?? null : null;
+
+  /**
+   * Opening a unit from the list.
+   *
+   * Only something with structure gets drawn. A unit with nothing inside it — the Yard, a bench,
+   * the `Unassigned` pile — IS one place, so it opens its sheet: there is no grid, and drawing an
+   * empty one to say "divide it up" would answer a question nobody asked. The pile needs no
+   * special case of its own; having no children is what it has in common with the Yard, and its
+   * sheet already leads with "Put these away" rather than a count.
+   */
+  const openUnit_ = (node: InventoryLocationNode) => {
+    if (node.children.length === 0) {
+      setSheetId(node.id);
+      return;
+    }
+    setOpenUnitId(node.id);
+  };
+
+  /**
+   * Tapping a cell in the grid.
+   *
+   * A container drills in — its stock lives in its children, so acting on it directly is exactly
+   * what the container/bin invariant refuses. A leaf opens the sheet, which owns every action.
+   */
+  const openCell = (locationId: string) => {
+    const node = byNodeId.get(locationId);
+    if (node && node.children.length > 0) {
+      setOpenUnitId(locationId);
+      return;
+    }
+    setSheetId(locationId);
+  };
 
   /**
    * Names already taken beside whatever the form is about to write.
@@ -373,9 +420,13 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
         "an indented text tree is the opposite of the map the research asks for, and Cabinet 1
         alone exploded into 15 rows". The second half was an artefact of the WIZARD, not of
         lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in one pass. And the map it
-        was protecting turned out to draw nothing for a flat shop. The list won in the end —
-        see the note at the top of `LocationTable`. There is no toggle now because there is
-        nothing to toggle between.
+        was protecting turned out to draw nothing for a flat shop.
+
+        **Corrected again 2026-08-10, and this time by measurement.** The list's own founding
+        claim — "stop defaulting to the wizard and a flat shop's table is 12–18 rows in total" —
+        was falsified by the shop building 237 locations, 180 of them bins in one cabinet. The
+        table is gone; storage is a list of UNITS, and a unit opens as a drawn grid. There is no
+        toggle because there is still nothing to toggle between.
 
         `Add storage` moved here from the board's in-grid tile: a table has no grid to hold a
         tile, and a toolbar button is where every other "new thing" in this product lives.
@@ -464,14 +515,43 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
             </Alert>
           )}
 
-          <LocationTable
-            tree={tree}
-            occupancy={occupancy}
-            onOpen={openSheet}
-            onCountHere={(node) =>
-              router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
-            }
-          />
+          {openUnit ? (
+            <Box>
+              {/* Back, name, and the shape stated in words — the operator built fifteen wide
+                  wanting twelve and nothing ever told him what he had. */}
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                <Button
+                  startIcon={<ArrowBackIcon />}
+                  onClick={() => setOpenUnitId(null)}
+                  sx={{ flexShrink: 0 }}
+                >
+                  All storage
+                </Button>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography variant="h6" noWrap sx={{ fontWeight: 700 }}>
+                    {openUnit.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {describeShape(openUnit)}
+                  </Typography>
+                </Box>
+                <Button variant="outlined" onClick={() => openSheet(openUnit)}>
+                  Manage
+                </Button>
+              </Stack>
+
+              <UnitGridView unit={openUnit} occupancy={occupancy} onOpenCell={openCell} />
+            </Box>
+          ) : (
+            <StorageUnitList
+              tree={tree}
+              occupancy={occupancy}
+              onOpen={openUnit_}
+              onCountHere={(node) =>
+                router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
+              }
+            />
+          )}
         </>
       )}
 

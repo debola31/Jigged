@@ -21,7 +21,11 @@ vi.mock('@/utils/routingCostCalculation', () => ({
   calculateRoutingCost: (...a: unknown[]) => mockCalculateRoutingCost(...a),
 }));
 vi.mock('@/utils/partsAccess', () => ({
+  // The tier table's Base / unit is the CHARGE base (#727) — the number markup
+  // is applied to. Same value as true cost until a BOM line charges its child at
+  // price, so one mock backs both.
   getComputedPartCost: (...a: unknown[]) => mockGetComputedPartCost(...a),
+  getComputedPartChargeBase: (...a: unknown[]) => mockGetComputedPartCost(...a),
   updatePartCostingBatchQuantity: (...a: unknown[]) =>
     mockUpdatePartCostingBatchQuantity(...a),
   addPartPricingNote: (...a: unknown[]) => mockAddPartPricingNote(...a),

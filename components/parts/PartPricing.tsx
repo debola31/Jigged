@@ -27,7 +27,7 @@ import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAc
 import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 import {
   addPartPricingNote,
-  getComputedPartCost,
+  getComputedPartChargeBase,
   updatePartCostingBatchQuantity,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
@@ -125,8 +125,8 @@ function parseNumber(s: string): number | null {
 
 /**
  * Recompute a tier row's Base/unit and Unit price from the SINGLE-SOURCE base
- * cost at that tier's own quantity — `baseCostByQty` holds
- * `getComputedPartCost(part, qty)` results (the same engine the quote form and
+ * base at that tier's own quantity — `baseCostByQty` holds
+ * `getComputedPartChargeBase(part, qty)` results (the same engine the quote form and
  * the persisted line use, so a tier's price here matches a quote at that qty).
  * Base absent from the map = not fetched yet → render "—" until it lands.
  */
@@ -186,7 +186,7 @@ function blankRow(): EditRow {
  *       PartProcurementPricingPanel card above this one — keeping
  *       cost-of-goods and markup visually distinct
  *     - Base / unit comes from get_procurement_cost(qty) at each tier qty
- *       (same compute engine, getComputedPartCost), so the card shows the
+ *       (same compute engine, getComputedPartChargeBase), so the card shows the
  *       final unit-price-after-markup just like a made part. (Since PR #567
  *       collapsed procurement to part-level tiers, this cost is deterministic
  *       — no "which vendor wins" ambiguity.)
@@ -211,10 +211,11 @@ export default function PartPricing({
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  // Base cost per tier quantity, from the ONE canonical engine
-  // (getComputedPartCost → compute_part_cost_at_qty) — the same source the quote
-  // form and the persisted line use, so a tier's Base/unit + Unit price match a
-  // quote at that qty. `breakdown` is kept only for the cost build-up + warnings.
+  // Base per tier quantity, from the ONE canonical engine
+  // (getComputedPartChargeBase → compute_part_charge_base_at_qty) — the same
+  // source the quote form and the persisted line use, so a tier's Base/unit +
+  // Unit price match a quote at that qty. `breakdown` is kept only for the cost
+  // build-up + warnings.
   const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
   const inFlightTierQtys = useRef<Set<number>>(new Set());
   const tierBaseCostsRef = useRef(tierBaseCosts);
@@ -289,9 +290,9 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        // unitPrice + baseCostPerUnit are filled in by the base-cost effect
-        // (getComputedPartCost per tier qty → base × markup) once the async
-        // costs land; start blank so nothing stale renders.
+        // unitPrice + baseCostPerUnit are filled in by the base effect
+        // (getComputedPartChargeBase per tier qty → base × markup) once the
+        // async values land; start blank so nothing stale renders.
         unitPrice: '',
         baseCostPerUnit: null,
       }));
@@ -389,9 +390,15 @@ export default function PartPricing({
     };
   }, [partId, isBought, costingQty, refreshKey]);
 
-  // Fetch the single-source base cost for each distinct tier quantity via the
-  // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
-  // one the quote form and the persisted line use. Debounced so editing a tier
+  // Fetch the single-source base for each distinct tier quantity via the
+  // canonical engine, the same one the quote form and the persisted line use.
+  //
+  // It is the CHARGE base (compute_part_charge_base_at_qty), not true cost:
+  // markup applies to what materials are charged into the part at, so a BOM line
+  // set to charge its child at price is already inside this number. Identical to
+  // true cost until someone sets that toggle — and when they diverge, the Cost
+  // card above names the gap (Material markup / unit → Price base / unit) so the
+  // two cards can't look like they disagree. Debounced so editing a tier
   // qty doesn't refetch on every keystroke. Works for BOTH made and bought parts
   // — for a bought part the engine reads its procurement tiers — so the Pricing
   // card can show the same Base/unit + final Unit-price columns for both.
@@ -416,7 +423,7 @@ export default function PartPricing({
     const handle = setTimeout(() => {
       for (const q of missing) {
         inFlightTierQtys.current.add(q);
-        getComputedPartCost(forPartId, q)
+        getComputedPartChargeBase(forPartId, q)
           .catch(() => null)
           .then((base) => {
             inFlightTierQtys.current.delete(q);

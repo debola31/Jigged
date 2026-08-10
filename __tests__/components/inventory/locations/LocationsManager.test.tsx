@@ -8,7 +8,7 @@
  * one action-less row reading "Unassigned".
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, routerMocks } from '../../../test-utils';
+import { render, screen, within, routerMocks } from '../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
 // `importOriginal` below pulls in the real access module, which constructs a Supabase client at
@@ -36,8 +36,21 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
     getLocationHistory: vi.fn(async () => []),
     // Subdivide runs the real builder, so its write has to be stubbed here too.
     materializeLocationSpec: vi.fn(async () => [{ id: 'new' }]),
+    // The three verbs that write. Unmocked they are `undefined` and only fail on submit, which is
+    // the failure mode most likely to be mistaken for a UI bug.
+    addStockAtLocation: vi.fn(async () => ({})),
+    depleteStockAtLocation: vi.fn(async () => ({})),
+    transferStock: vi.fn(async () => ({})),
   };
 });
+
+// The Add picker offers the whole stocked catalogue. Without this it reaches the stubbed Supabase
+// client and the dialog renders its error state instead of a part list.
+vi.mock('@/utils/partsAccess', () => ({
+  getStockedParts: vi.fn(async () => [
+    { id: 'p1', part_name: 'RAW-STEEL-BLANK', primary_unit: 'ea' },
+  ]),
+}));
 
 vi.mock('@/utils/locationLabelPdf', () => ({
   generateLocationLabelSheet: vi.fn(async () => ({ save: vi.fn() })),
@@ -179,7 +192,7 @@ describe('LocationsManager', () => {
     // The grid: both shelves are drawn as cells with their fill state named.
     expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
     // The three you reach for while working are on the surface…
-    for (const label of [/count or put away/i, /change layout/i, /print qr/i]) {
+    for (const label of [/^adjust$/i, /change layout/i, /print qr/i]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     // …and the do-it-once ones are behind a menu, so seven buttons do not wrap to three rows and
@@ -275,18 +288,20 @@ describe('LocationsManager', () => {
   });
 
   /**
-   * The board is the hub, so the company-wide sheet is reached from here.
+   * The company-wide sheet is NOT reached from here, and that is the correction.
    *
-   * "Count all parts", not "Count everything": every other control on this board is
-   * place-scoped, so "everything" read as "all the places" rather than "the whole catalogue".
+   * `Count all parts` opened one list of every stocked part in the shop. Nobody audits a shop that
+   * way — you audit one cabinet, walking bin to bin, which is what `Adjust` on a unit does now that
+   * the worksheet resolves a container to every leaf under it. The shop-wide sheet still exists as
+   * `Count Inventory` on the Parts toolbar, where the noun is the items rather than the places.
    */
-  it('offers Count all parts, since /inventory no longer exists to host it', async () => {
-    const user = userEvent.setup();
+  it('no longer offers a company-wide count from Storage', async () => {
     render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
-    await user.click(screen.getByRole('button', { name: /count all parts/i }));
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count');
+    expect(screen.queryByRole('button', { name: /count all parts/i })).not.toBeInTheDocument();
+    // The one page-level control that IS about every place stays.
+    expect(screen.getByRole('button', { name: /print all labels/i })).toBeInTheDocument();
   });
 
   it('routes delete through the confirm dialog', async () => {
@@ -399,7 +414,22 @@ describe('LocationsManager', () => {
  * one-time setup. This is the route out to the place-scoped worksheet, which is the one thing here
  * you come back to do.
  */
-describe('LocationsManager — count or put away', () => {
+/**
+ * The four verbs, and why there are exactly four.
+ *
+ * Storage could not move stock at all: `Count or put away` was a single button that navigated to
+ * the count worksheet, so from here you could audit a place and empty it, and could not put
+ * anything into it. Every real write lived on the operator's phone or a part's own page, both
+ * part-first — you find the part, then say where. Standing at a cabinet you have the opposite
+ * information.
+ *
+ * The names are the operator's, in the operator's fixed order, because they are the four kinds of
+ * ledger row and there is no fifth: addition, depletion, transfer, adjustment. **`Count` and `Put
+ * away` were never separate actions** — `commitCount` writes one `adjustStockAtLocation` per line
+ * and `bulk_put_away` writes ordinary transfer pairs, so each was a batch form of a verb already
+ * here. That is why `Adjust` navigates to the worksheet instead of opening a dialog.
+ */
+describe('LocationsManager — the four verbs', () => {
   /**
    * The paragraph of instructions is gone. It explained a page whose shape did not explain
    * itself — a list you clicked to swap the page out from under you. A list beside the thing it
@@ -414,34 +444,105 @@ describe('LocationsManager — count or put away', () => {
     expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
   });
 
-  it('routes a real location to its own worksheet', async () => {
+  it('offers the four verbs on a place, in the operator order', async () => {
+    render(<LocationsManager companyId="co1" unitId="yard" />);
+
+    await screen.findByRole('button', { name: /^adjust$/i });
+    const labels = ['Add', 'Remove', 'Move', 'Adjust'];
+    const found = labels.map((l) => screen.getByRole('button', { name: new RegExp(`^${l}$`, 'i') }));
+    // ORDER, not just presence: the same person may use this and the phone in one day, and muscle
+    // memory should not have to be re-learned per screen.
+    for (let i = 1; i < found.length; i += 1) {
+      expect(
+        found[i - 1].compareDocumentPosition(found[i]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it('routes Adjust to the worksheet for that place', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
-    await user.click(await screen.findByRole('button', { name: /count or put away/i }));
+    await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=yard');
   });
 
   /**
-   * The worksheet counts what a place holds DIRECTLY, and since 20260806160053 a place with
-   * sub-locations holds nothing directly — so this button could only ever open a blank sheet. Its
-   * children each carry their own.
+   * The reversal that makes container-scoped auditing work.
+   *
+   * A container holds no stock of its own (20260806160053), so this button used to be withheld on
+   * one — it could only have opened a blank sheet. The worksheet now resolves a container to every
+   * leaf under it, which is how an audit physically happens: one cabinet, bin by bin. So the button
+   * is offered, and it is the cabinet's primary action.
    */
-  it('offers no worksheet for a place that has sub-locations', async () => {
+  it('audits a whole cabinet from the unit, not just one bin', async () => {
     const user = userEvent.setup();
-    render(<LocationsManager companyId="co1" />);
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await user.click(await screen.findByRole('button', { name: /^Cabinet 3/ }));
-
-    expect(screen.queryByRole('button', { name: /count or put away/i })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
+    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=cab3');
   });
 
-  /** The put-away entry a real shop needs most: `Unassigned` is where all 9,428 parts start. */
-  it('routes the put-away pile to the same worksheet', async () => {
+  it('opens Add against the place you are looking at', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="yard" />);
+
+    await user.click(await screen.findByRole('button', { name: /^add$/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: /add stock here/i })).toBeInTheDocument();
+    // The place is named IN the dialog: the whole point is that you already know where you are.
+    expect(within(dialog).getByText('Yard')).toBeInTheDocument();
+  });
+
+  /**
+   * You cannot take out of, or move from, an empty drawer — and offering it would open a picker
+   * with no options in it. Disabled rather than hidden: a control that vanishes reads as a bug,
+   * and its absence would not explain itself.
+   */
+  it('disables Remove and Move on a place holding nothing', async () => {
+    vi.mocked(getLocationBoard).mockResolvedValue(
+      board(SEED_LOCATIONS, [['shelf-a', 2], ['un', 7]]),
+    );
+    render(<LocationsManager companyId="co1" unitId="yard" />);
+
+    await screen.findByRole('button', { name: /^adjust$/i });
+    expect(screen.getByRole('button', { name: /^remove$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^move$/i })).toBeDisabled();
+    // Add is always available: an empty bin is exactly where you put something.
+    expect(screen.getByRole('button', { name: /^add$/i })).toBeEnabled();
+  });
+
+  /**
+   * Stock does not live in a cabinet, so the cabinet's own row offers no way to put any there.
+   * The four verbs appear once a place inside it is selected — which is also the only point at
+   * which "add what, where" has an answer.
+   */
+  it('offers no stock verbs on a container until a place inside it is picked', async () => {
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await screen.findByRole('button', { name: /^adjust$/i });
+    for (const verb of [/^add$/i, /^remove$/i, /^move$/i]) {
+      expect(screen.queryByRole('button', { name: verb })).not.toBeInTheDocument();
+    }
+    expect(screen.getByText(/pick a place above/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The put-away pile gets the same four verbs as anything else.
+   *
+   * `Put these away` is gone as a name because it was never its own action — it opened the same
+   * worksheet, whose control reads `Move N to…` and whose write is `bulk_put_away`, a batch of
+   * ordinary transfers. Emptying the pile is therefore a Move, and the bulk form of it is one click
+   * further on, inside the worksheet that `Adjust` opens.
+   */
+  it('gives the put-away pile the same verbs, and routes Adjust to its worksheet', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="un" />);
 
-    await user.click(await screen.findByRole('button', { name: /put these away/i }));
+    expect(await screen.findByRole('button', { name: /^move$/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /put these away/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^adjust$/i }));
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=un');
   });
 
@@ -452,7 +553,7 @@ describe('LocationsManager — count or put away', () => {
   it('withholds layout and labelling from the put-away pile', async () => {
     render(<LocationsManager companyId="co1" unitId="un" />);
 
-    await screen.findByRole('button', { name: /put these away/i });
+    await screen.findByRole('button', { name: /^adjust$/i });
     expect(screen.queryByRole('button', { name: /change layout/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^print qr$/i })).not.toBeInTheDocument();
   });

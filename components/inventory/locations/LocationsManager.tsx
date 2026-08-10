@@ -22,7 +22,6 @@ import AddIcon from '@mui/icons-material/Add';
 import SearchIcon from '@mui/icons-material/Search';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 import {
@@ -41,6 +40,8 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import LocationPanel from './LocationPanel';
+import PlaceStockActionModal, { type PlaceStockAction } from './PlaceStockActionModal';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
@@ -219,6 +220,14 @@ export default function LocationsManager({
    * drawer, so a shop could easily end up with named furniture and no places in it. Naming and
    * shaping are one decision, and since `create_location_tree` they are also one transaction.
    */
+  /**
+   * Which stock verb is open, and on what.
+   *
+   * The node rather than an id: the dialog titles itself with the place's name, and looking it
+   * back up would go stale the moment a rename lands between opening and rendering.
+   */
+  const [stockAction, setStockAction] = useState<{ action: PlaceStockAction; node: InventoryLocationNode } | null>(null);
+
   const listHref = `/dashboard/${companyId}/inventory/locations`;
   /**
    * `replace`, not `push`, and `scroll: false`.
@@ -291,10 +300,21 @@ export default function LocationsManager({
   // Every action closes the sheet first: they all open a modal of their own, and two stacked
   // surfaces on a tablet leaves nothing legible underneath.
   const sheetActions = {
-    onCountHere: (node: InventoryLocationNode) => {
+    /*
+     * The audit, at whatever scope was clicked.
+     *
+     * `?location=` resolves a container to every leaf under it, so this one handler means "audit
+     * this bin" on a bin and "audit this whole cabinet, bin by bin" on a cabinet — which is the
+     * scale an audit actually happens at. It navigates rather than opening a dialog because an
+     * audit is inherently multi-part; the other three verbs act on one part and stay in place.
+     */
+    onAdjust: (node: InventoryLocationNode) => {
       setPlaceId(null);
       router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
     },
+    onAddStock: (node: InventoryLocationNode) => setStockAction({ action: 'add', node }),
+    onRemoveStock: (node: InventoryLocationNode) => setStockAction({ action: 'deplete', node }),
+    onMoveStock: (node: InventoryLocationNode) => setStockAction({ action: 'move', node }),
     onAddChild: (node: InventoryLocationNode) => {
       setPlaceId(null);
       setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
@@ -447,6 +467,15 @@ export default function LocationsManager({
 
           <Box sx={{ flex: 1 }} />
 
+          {/*
+            `Count all parts` is gone from here, and nothing replaced it.
+
+            It opened the company-wide count sheet — every stocked part across the shop in one
+            list. Nobody audits a shop that way: you audit one cabinet, walking bin to bin, which
+            is what `Adjust` on a unit now does (the worksheet resolves a container to every leaf
+            under it). A shop-wide sheet still exists for whoever wants one; it is `Count
+            Inventory` on the Parts toolbar, where the noun is the items rather than the places.
+          */}
           <Button
             variant="outlined"
             startIcon={<QrCode2Icon />}
@@ -454,13 +483,6 @@ export default function LocationsManager({
             disabled={loading || allLabels.length === 0}
           >
             Print all labels
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<FactCheckOutlinedIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
-          >
-            Count all parts
           </Button>
         </Box>
       )}
@@ -626,6 +648,27 @@ export default function LocationsManager({
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
         }}
       />
+
+      {/*
+        Add · Remove · Move on one place. Mounted only while open, so the part catalogue and the
+        bin's contents are read when the verb is chosen rather than on every panel render.
+      */}
+      {stockAction && (
+        <PlaceStockActionModal
+          open
+          action={stockAction.action}
+          companyId={companyId}
+          locationId={stockAction.node.id}
+          locationName={stockAction.node.name}
+          // Leaves only, never the put-away pile, and never back to where it already is.
+          moveDestinations={stockDestinationOptions(locations, { excludeId: stockAction.node.id })}
+          onClose={() => setStockAction(null)}
+          onDone={async () => {
+            await reload();
+            setToast('Stock updated.');
+          }}
+        />
+      )}
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>
         <DialogTitle>Delete location?</DialogTitle>

@@ -55,7 +55,18 @@ import PlaceHistory from './board/PlaceHistory';
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 export interface LocationPanelActions {
-  onCountHere: (node: InventoryLocationNode) => void;
+  /**
+   * The audit. Opens the count worksheet scoped to this node — which, for a container, means every
+   * bin under it, resolved by the worksheet itself.
+   *
+   * Named for what it writes rather than for the tool it opens. A count commits one
+   * `adjustStockAtLocation` per line, so "Count" and "Adjust" were never two things: one is the
+   * batch form of the other. Four verbs, four ledger row types, no fifth concept.
+   */
+  onAdjust: (node: InventoryLocationNode) => void;
+  onAddStock: (node: InventoryLocationNode) => void;
+  onRemoveStock: (node: InventoryLocationNode) => void;
+  onMoveStock: (node: InventoryLocationNode) => void;
   onSubdivide: (node: InventoryLocationNode) => void;
   onPrintQR: (node: InventoryLocationNode) => void;
   onEdit: (node: InventoryLocationNode) => void;
@@ -178,17 +189,26 @@ export default function LocationPanel({
             : 'One place'}
       </Typography>
 
-      {/* The unit's own actions, on the unit. `Change layout` is withheld from the put-away pile:
-          it is not furniture, and the database refuses to give it children anyway. */}
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Button
-          variant="contained"
-          startIcon={<FactCheckOutlinedIcon />}
-          onClick={() => actions.onCountHere(unit)}
-        >
-          {isSystem ? 'Put these away' : 'Count or put away'}
-        </Button>
-        {!isSystem && (
+      {/*
+        The unit's own actions, on the unit. `Change layout` is withheld from the put-away pile:
+        it is not furniture, and the database refuses to give it children anyway.
+
+        `Adjust` appears here ONLY on a unit with structure, where it means "audit every bin under
+        this cabinet" — which is how you would physically do it, walking bin to bin. A unit that is
+        a single place gets its four verbs in the contents section below instead; showing Adjust in
+        both rows would offer the same action twice at the same scope.
+      */}
+      {!isSystem && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+          {structured && (
+            <Button
+              variant="contained"
+              startIcon={<FactCheckOutlinedIcon />}
+              onClick={() => actions.onAdjust(unit)}
+            >
+              Adjust
+            </Button>
+          )}
           <>
             <Button
               variant="outlined"
@@ -205,8 +225,8 @@ export default function LocationPanel({
               Print QR
             </Button>
             {/* The rest behind a menu. Seven buttons wrapped to three rows on a phone and pushed
-                the grid — the thing you came for — off the screen. These four are the ones you do
-                once: rename, copy, re-parent, remove. */}
+                the grid — the thing you came for — off the screen. These three are the ones you do
+                once to the furniture: rename, copy, remove. */}
             <IconButton
               aria-label={`More actions for ${unit.name}`}
               onClick={(e) => setMoreAnchor(e.currentTarget)}
@@ -238,8 +258,8 @@ export default function LocationPanel({
               ))}
             </Menu>
           </>
-        )}
-      </Stack>
+        </Stack>
+      )}
 
       {/* Always drawn. A single-place unit is one square rather than no grid at all — picking the
           Yard used to look like nothing had happened next to picking a cabinet. */}
@@ -271,29 +291,70 @@ export default function LocationPanel({
       ) : (
         <Box sx={{ mt: 0.5 }}>
           <ContentsList key={place.id} locationId={place.id} />
+
+          {/*
+            The four verbs, on the place, in the order fixed across both surfaces.
+
+            ORDER is the same as the operator's phone — Add, Remove, Move, Adjust — because the same
+            person may use both in a day and muscle memory should not have to be re-learned per
+            screen. Each writes exactly one kind of ledger row, and there are exactly four kinds:
+            addition, depletion, transfer, adjustment. `Count` and `Put away` are not missing — a
+            count IS a batch of adjustments (`commitCount` calls `adjustStockAtLocation` per line)
+            and a put-away IS a batch of transfers (`bulk_put_away`), so both are the same four
+            verbs at a different scale, which is what `Adjust` opening the worksheet means here.
+
+            Adjust is the only one that navigates. It is inherently multi-part — you are auditing a
+            shelf, not correcting one number — and the worksheet it opens already earns its shape.
+          */}
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-            <Button size="small" variant="outlined" onClick={() => actions.onCountHere(place)}>
-              Count here
+            <Button size="small" variant="contained" onClick={() => actions.onAddStock(place)}>
+              Add
             </Button>
+            {/* Nothing to take out of, or move from, an empty place — and offering it would open a
+                picker with no options in it. The empty state is ordinary, not an error. */}
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!placeOcc.hasStock}
+              onClick={() => actions.onRemoveStock(place)}
+            >
+              Remove
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={!placeOcc.hasStock}
+              onClick={() => actions.onMoveStock(place)}
+            >
+              Move
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => actions.onAdjust(place)}>
+              Adjust
+            </Button>
+          </Stack>
+
+          {/* What you do to the PLACE rather than to the stock in it, kept apart so the row above
+              reads as one set of four. */}
+          <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
             {!viewingUnitItself && (
               <>
-                <Button size="small" variant="outlined" onClick={() => actions.onPrintQR(place)}>
+                <Button size="small" variant="text" onClick={() => actions.onPrintQR(place)}>
                   Print QR
                 </Button>
-                <Button size="small" variant="outlined" onClick={() => actions.onEdit(place)}>
+                <Button size="small" variant="text" onClick={() => actions.onEdit(place)}>
                   Rename
                 </Button>
                 {/* Only offered on an empty place: `delete_location` refuses a subtree that holds
                     stock, so showing it on a loaded bin promises something the database declines. */}
                 {!placeOcc.hasStock && (
-                  <Button size="small" variant="outlined" onClick={() => actions.onDelete(place)}>
+                  <Button size="small" variant="text" onClick={() => actions.onDelete(place)}>
                     Delete
                   </Button>
                 )}
               </>
             )}
             {!structured && (
-              <Button size="small" variant="outlined" onClick={() => actions.onAddChild(unit)}>
+              <Button size="small" variant="text" onClick={() => actions.onAddChild(unit)}>
                 Add one inside
               </Button>
             )}

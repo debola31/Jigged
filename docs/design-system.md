@@ -467,12 +467,15 @@ existing drill-down, so the two surfaces read the same way.
 
 **One gesture, one meaning.** The whole row opens the place; expanding is the *chevron's* job. Making
 a parent row expand instead gives one gesture two meanings depending on whether a row happens to have
-children, and costs parent rows their drawer — where rename, print QR, photo and history live.
+children, and costs parent rows their drawer — where rename, print QR and history live.
 
-**A photo carries identity, not state** — *this is the shelf you're standing at*, versus what's in
-it. Photos live in the sheet, not the table: the list is the find-one-name-among-121 view and has to
-stay cheap, and a private-bucket thumbnail costs a signed URL. Resolve them in one batched
-`getSignedUrls` ([`storageHelpers.ts`](../utils/storageHelpers.ts)), never one request per row.
+> **Withdrawn 2026-08-10 — "a photo carries identity, not state".** A place used to carry a photo,
+> on the reasoning that *this is the shelf you're standing at* is a different fact from what is in
+> it. Nobody ever took one: 0 of 313 locations, 0 objects in the bucket. Photos of the **material**
+> moving through a place survive and are the ones that get used. The batching rule the paragraph
+> carried is unaffected and still applies wherever private thumbnails are rendered in a list —
+> resolve them in one `getSignedUrls` ([`storageHelpers.ts`](../utils/storageHelpers.ts)), never one
+> request per row.
 
 ## Setup pages need a recurring job, or say what they're for
 

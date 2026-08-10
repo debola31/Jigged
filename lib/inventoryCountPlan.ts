@@ -5,6 +5,7 @@
  * thin network driver (utils/inventoryCountAccess.ts) only walks the plan and reports progress.
  */
 
+import { compareLocationNames } from '@/lib/locationTree';
 import type {
   CountCandidate,
   CountEntries,
@@ -92,7 +93,7 @@ export function groupByPart(candidates: CountCandidate[]): CountGroup[] {
 
   const groups = [...byPart.values()];
   for (const g of groups) {
-    g.rows.sort((x, y) => x.target.locationPath.localeCompare(y.target.locationPath));
+    g.rows.sort((x, y) => compareLocationNames(x.target.locationPath, y.target.locationPath));
   }
   return groups.sort((a, b) => a.partName.localeCompare(b.partName));
 }

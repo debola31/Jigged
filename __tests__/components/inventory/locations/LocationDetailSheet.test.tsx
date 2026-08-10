@@ -17,10 +17,6 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
 }));
 
 // The photo control compresses in the browser before uploading; jsdom has no canvas worker.
-vi.mock('@/utils/imageCompression', () => ({
-  compressPhoto: vi.fn(async (file: File) => ({ file })),
-}));
-
 import LocationDetailSheet from '@/components/inventory/locations/board/LocationDetailSheet';
 import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy } from '@/utils/locationOccupancy';
@@ -61,9 +57,6 @@ const renderSheet = (
     path = [target],
     counts = [] as Array<[string, number]>,
     onNavigate = vi.fn(),
-    photoUrl = null as string | null,
-    onPickPhoto = vi.fn(async () => {}),
-    onClearPhoto = vi.fn(async () => {}),
   } = {},
 ) => {
   const acts = actions();
@@ -73,15 +66,12 @@ const renderSheet = (
       node={target}
       path={path}
       occupancy={rollUpOccupancy(roots, new Map(counts))}
-      photoUrl={photoUrl}
       actions={acts}
-      onPickPhoto={onPickPhoto}
-      onClearPhoto={onClearPhoto}
       onNavigate={onNavigate}
       onClose={vi.fn()}
     />,
   );
-  return { acts, onNavigate, onPickPhoto, onClearPhoto };
+  return { acts, onNavigate };
 };
 
 beforeEach(() => {
@@ -266,55 +256,5 @@ describe('LocationDetailSheet — count or put away', () => {
     expect(screen.queryByRole('button', { name: /count or put away/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /put these away/i }));
     expect(acts.onCountHere).toHaveBeenCalledWith(un);
-  });
-});
-
-/**
- * Photos — §5.5 decision 5.
- *
- * The one case worth being careful about is a `photo_path` that exists but whose URL didn't
- * resolve: an empty frame reads as "no photo" and invites someone to add a second one, so it has
- * to say what actually happened.
- */
-describe('LocationDetailSheet — photo', () => {
-  it('offers to add one when there is none', () => {
-    renderSheet(node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet' }));
-    expect(screen.getByRole('button', { name: /add a photo/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
-  });
-
-  it('shows the photo and offers to replace or remove it', () => {
-    renderSheet(
-      node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet', photo_path: 'p.jpg' }),
-      { photoUrl: 'https://signed/p' },
-    );
-    expect(screen.getByAltText('Photo of Cabinet 3')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /replace photo/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /remove/i })).toBeInTheDocument();
-  });
-
-  it('says the photo could not be loaded rather than showing an empty frame', () => {
-    renderSheet(
-      node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet', photo_path: 'p.jpg' }),
-      { photoUrl: null },
-    );
-    expect(screen.getByText(/has a photo, but it couldn't be loaded/i)).toBeInTheDocument();
-  });
-
-  it('removes on request', async () => {
-    const user = userEvent.setup();
-    const { onClearPhoto } = renderSheet(
-      node({ id: 'cab', name: 'Cabinet 3', kind: 'cabinet', photo_path: 'p.jpg' }),
-      { photoUrl: 'https://signed/p' },
-    );
-
-    await user.click(screen.getByRole('button', { name: /remove/i }));
-    expect(onClearPhoto).toHaveBeenCalledTimes(1);
-  });
-
-  /** There is no shelf to photograph, and the bucket isn't a place. */
-  it('offers nothing for the system bucket', () => {
-    renderSheet(node({ id: 'un', name: 'Unassigned', kind: 'system' }));
-    expect(screen.queryByRole('button', { name: /add a photo/i })).not.toBeInTheDocument();
   });
 });

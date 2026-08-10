@@ -7,10 +7,27 @@ import jiggedTheme from '@/lib/theme';
 import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
 import { addStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import { getStockedParts } from '@/utils/partsAccess';
+import { uploadFileToStorage } from '@/utils/storageHelpers';
 import type { Part } from '@/types/part';
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({ addStockAtLocation: vi.fn() }));
 vi.mock('@/utils/partsAccess', () => ({ getStockedParts: vi.fn() }));
+// Mirrors OperatorLocationActionModal.test.tsx, because this modal now does the same thing:
+// storageHelpers reaches lib/supabase, which builds its client eagerly at import time whenever
+// `window` exists, and `compressPhoto` runs browser-image-compression, which needs a canvas jsdom
+// does not have — the real one throws and the field reports a failed pick instead of attaching.
+vi.mock('@/utils/storageHelpers', () => ({
+  generateStoragePath: (co: string, kind: string, id: string, name: string) =>
+    `${co}/${kind}/${id}/${name}`,
+  uploadFileToStorage: vi.fn(async () => undefined),
+}));
+vi.mock('@/utils/imageCompression', () => ({
+  compressPhoto: vi.fn(async (f: File) => ({ file: f })),
+}));
+vi.mock('posthog-js', () => ({ default: { capture: vi.fn() } }));
+// jsdom implements neither; the preview thumbnail needs both.
+if (!URL.createObjectURL) URL.createObjectURL = vi.fn(() => 'blob:preview');
+if (!URL.revokeObjectURL) URL.revokeObjectURL = vi.fn();
 
 const part = (over: { id: string; part_name: string }) =>
   ({ ...over, primary_unit: 'ea' }) as unknown as Part;
@@ -76,8 +93,75 @@ describe('OperatorReceivePartModal', () => {
       expect(addStockAtLocation).toHaveBeenCalledWith('pA', 'loc1', 10, 'ea', {
         notes: undefined,
         operatorId: 'op1',
+        photoPath: undefined,
       }),
     );
     expect(onDone).toHaveBeenCalled();
+  });
+
+  /**
+   * The bug this closes.
+   *
+   * Two modals write stock at a bin, and only the OTHER one offered a photo — so a part gained one
+   * on its second visit to a shelf and never on its first, which is exactly backwards: the first
+   * drop is the one nobody else has seen. `uploadMovementPhoto` is now shared by both.
+   */
+  describe('photo on the first drop', () => {
+    const file = () => new File(['x'], 'shelf.jpg', { type: 'image/jpeg' });
+
+    const pickPartAndQuantity = async (user: ReturnType<typeof userEvent.setup>) => {
+      await openPartPicker();
+      await user.click(await screen.findByRole('option', { name: 'Part A' }));
+      await user.type(screen.getByRole('spinbutton', { name: 'Quantity' }), '10');
+    };
+
+    it('offers a photo when stocking a part into a bin for the first time', async () => {
+      renderModal();
+      expect(await screen.findByRole('button', { name: /add a photo/i })).toBeInTheDocument();
+    });
+
+    it('uploads BEFORE the write, and sends the path it just wrote', async () => {
+      const user = userEvent.setup();
+      (addStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      renderModal();
+
+      await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file());
+      await screen.findByText(/photo attached/i);
+      await pickPartAndQuantity(user);
+      await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+      await waitFor(() => expect(addStockAtLocation).toHaveBeenCalled());
+      // `photo_path` is written at INSERT inside the RPC and immutable after, so an upload that
+      // ran second could never be attached — the order is the whole point.
+      expect(vi.mocked(uploadFileToStorage).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(addStockAtLocation).mock.invocationCallOrder[0],
+      );
+      expect(addStockAtLocation).toHaveBeenCalledWith(
+        'pA',
+        'loc1',
+        10,
+        'ea',
+        expect.objectContaining({ photoPath: vi.mocked(uploadFileToStorage).mock.calls[0][0] }),
+      );
+    });
+
+    /**
+     * A failed upload aborts the write, and says so in its own words. Left to the shared mapper it
+     * would read "Failed to add stock", which points at the quantity — so an operator retypes a
+     * number that was never the problem.
+     */
+    it('records nothing when the upload fails, and names the photo as the reason', async () => {
+      const user = userEvent.setup();
+      vi.mocked(uploadFileToStorage).mockRejectedValueOnce(new Error('offline'));
+      renderModal();
+
+      await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file());
+      await screen.findByText(/photo attached/i);
+      await pickPartAndQuantity(user);
+      await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+      expect(await screen.findByText(/couldn't upload the photo/i)).toBeInTheDocument();
+      expect(addStockAtLocation).not.toHaveBeenCalled();
+    });
   });
 });

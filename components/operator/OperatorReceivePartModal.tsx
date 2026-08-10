@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import posthog from 'posthog-js';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -15,6 +16,8 @@ import Alert from '@mui/material/Alert';
 import { addStockAtLocation } from '@/utils/inventoryLocationsAccess';
 import { getStockedParts } from '@/utils/partsAccess';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
+import MovementPhotoField from '@/components/operator/MovementPhotoField';
+import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
 import type { Part } from '@/types/part';
 
 interface OperatorReceivePartModalProps {
@@ -53,6 +56,14 @@ export default function OperatorReceivePartModal({
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
   const [notes, setNotes] = useState('');
+  /**
+   * The photo of what was just put down.
+   *
+   * This is the FIRST time the part lands in this bin, which makes it the drop most worth
+   * photographing — nobody has seen it here before. It was the one stock-in path without a photo
+   * field, so a part gained one only on its second visit.
+   */
+  const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +74,7 @@ export default function OperatorReceivePartModal({
     setQuantity('');
     setUnit('');
     setNotes('');
+    setPhoto(null);
     setError(null);
     setLoadingParts(true);
     try {
@@ -100,9 +112,26 @@ export default function OperatorReceivePartModal({
     setSaving(true);
     setError(null);
     try {
+      // Upload before the write: `photo_path` is set at INSERT and immutable afterwards, so the RPC
+      // has to be handed a path. A failure throws a MovementPhotoUploadError whose message is
+      // already written for a human, and the catch below renders it verbatim.
+      const photoPath = photo ? await uploadMovementPhoto(companyId, locationId, photo) : undefined;
+
       await addStockAtLocation(part.id, locationId, qty, unit, {
         notes: notes || undefined,
         operatorId: operatorId || undefined,
+        photoPath,
+      });
+      // Matches the shape `OperatorLocationActionModal` sends, so both stock-in paths land on one
+      // event. `action: 'add'` because that is what this is — the only difference is that the part
+      // was not here yet, which `part_id` and the bin's history already tell you.
+      posthog.capture('stock updated', {
+        surface: 'operator_receive',
+        action: 'add',
+        part_id: part.id,
+        quantity: qty,
+        unit,
+        location_id: locationId,
       });
       await onDone();
       onClose();
@@ -168,6 +197,9 @@ export default function OperatorReceivePartModal({
             minRows={2}
             fullWidth
           />
+          {/* Same control, same position relative to notes, as the four-verb modal — so attaching a
+              photo is the same gesture wherever stock goes in. Optional and quiet about it. */}
+          <MovementPhotoField value={photo} onChange={setPhoto} disabled={saving} />
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>

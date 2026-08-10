@@ -21,7 +21,7 @@ import {
 } from '@/utils/inventoryLocationsAccess';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
-import { generateStoragePath, uploadFileToStorage } from '@/utils/storageHelpers';
+import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -143,34 +143,17 @@ export default function OperatorLocationActionModal({
     setError(null);
     try {
       /**
-       * Upload BEFORE the write, never after.
+       * Upload BEFORE the write, never after — and a failed upload aborts the write rather than
+       * saving silently without the photo the operator just attached.
        *
-       * `photo_path` is set at INSERT inside the RPC and is immutable afterwards, so there is no
-       * second step in which to attach it. The cost is that a failed RPC leaves an orphaned object
-       * in the bucket; the alternative — insert, upload, then UPDATE the path — needs the column to
-       * stay mutable, and evidence that can be swapped later is not evidence.
-       *
-       * A failed UPLOAD does abort the write, because saving silently without the photo the
-       * operator just attached would be a lie about what was recorded.
+       * Both halves of that, and the message a failure produces, live in `uploadMovementPhoto`
+       * because `OperatorReceivePartModal` has to do exactly the same thing. It throws a
+       * `MovementPhotoUploadError`, which `ErrorAlert` renders verbatim — so the catch below is the
+       * only one needed.
        */
       let photoPath: string | undefined;
       if (photo && showPhoto) {
-        const path = generateStoragePath(companyId, 'inventory-transactions', locationId, photo.name);
-        try {
-          await uploadFileToStorage(path, photo);
-        } catch (e) {
-          // Named separately from the write's own failure. The shared mapper would render this as
-          // "Failed to update stock", which points at the quantity — so an operator would retype a
-          // number that was never the problem, on a shop-wifi upload that just needs retrying.
-          setError(
-            `Couldn't upload the photo (${
-              e instanceof Error ? e.message : 'unknown error'
-            }). Nothing was recorded — try again, or remove the photo and save.`,
-          );
-          setSaving(false);
-          return;
-        }
-        photoPath = path;
+        photoPath = await uploadMovementPhoto(companyId, locationId, photo);
       }
 
       if (action === 'add') {

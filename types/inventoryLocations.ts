@@ -13,8 +13,6 @@ export interface InventoryLocation {
   name: string;
   kind: string | null;
   sort_order: number;
-  /** Path in the private `attachments` bucket to a photo of this place — see §5.5 decision 5. */
-  photo_path: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,7 +31,7 @@ export interface CreateLocationInput {
 }
 
 export type UpdateLocationInput = Partial<
-  Pick<InventoryLocation, 'name' | 'kind' | 'sort_order' | 'photo_path'>
+  Pick<InventoryLocation, 'name' | 'kind' | 'sort_order'>
 >;
 
 /**

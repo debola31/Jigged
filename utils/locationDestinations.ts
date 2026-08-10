@@ -29,7 +29,7 @@
  * functions you can test without a network.
  */
 import type { LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
-import { computePathNames } from '@/lib/locationTree';
+import { compareLocationNames, computePathNames } from '@/lib/locationTree';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
 import type {
@@ -93,7 +93,7 @@ export function stockDestinationOptions(
       const aHas = (a.quantity ?? 0) > 0;
       const bHas = (b.quantity ?? 0) > 0;
       if (aHas !== bHas) return aHas ? -1 : 1;
-      return a.label.localeCompare(b.label);
+      return compareLocationNames(a.label, b.label);
     });
 }
 
@@ -146,5 +146,5 @@ export function locationParentOptions(
         occupancyFor(occupancy, l.id).directParts === 0,
     )
     .map((l) => ({ id: l.id, label: labelFor(l, byId), kind: l.kind }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => compareLocationNames(a.label, b.label));
 }

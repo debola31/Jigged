@@ -21,6 +21,7 @@ import {
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { resolveFallbackPlace, countNote } from '@/lib/inventoryCountPlan';
+import { compareLocationNames } from '@/lib/locationTree';
 import type {
   CountCandidate,
   CountCommitProgress,
@@ -338,7 +339,7 @@ export async function loadPartEverywhereCandidates(
               locationPath: [...b.path, b.location_name].join(' › ') || b.location_name,
             },
           }))
-          .sort((a, b) => a.target.locationPath.localeCompare(b.target.locationPath));
+          .sort((a, b) => compareLocationNames(a.target.locationPath, b.target.locationPath));
 
   return { partName: data.part_name, candidates };
 }

@@ -218,16 +218,20 @@ the ordering guarantee.
 
 ### Is the workflow the only path to production?
 
-**UNVERIFIED — and the claim it replaces was false.** `CLAUDE.md` asserted Vercel's git auto-deploy was
-off for `main` via `git.deploymentEnabled` in `vercel.json`. It is not: [`vercel.json`](../../vercel.json)
-holds only `functions` and `rewrites`, and the *only* occurrence of `deploymentEnabled` anywhere in the
-repo was that sentence describing itself.
+**Mostly, and the repo half is now verified.** [`vercel.json`](../../vercel.json) **does** set
+`git.deploymentEnabled: { "main": false }`, so a push to `main` does not deploy by itself — the gate
+above does, after the database says yes. Two things remain true and worth keeping in mind:
 
-Verifiable from files: the workflow deploys production on every push to `main` and gates it on the
-migration verdict. Whether Vercel's git integration *also* auto-deploys `main` is a dashboard setting
-with no representation in this repo — confirm it in Vercel before treating the gate as an exclusive
-chokepoint. `vercel deploy --prod` is in any case a documented manual escape hatch, so the workflow is
-not the only *possible* path.
+- Whether Vercel's git integration is *additionally* disabled in the dashboard has no representation
+  in this repo, so it cannot be checked from files.
+- `vercel deploy --prod` is a documented manual escape hatch, so the workflow is not the only
+  *possible* path — just the only automatic one.
+
+> **Corrected 2026-08-10.** This section previously read **UNVERIFIED** and asserted that
+> `vercel.json` "holds only `functions` and `rewrites`" — which contradicted the workflow section
+> above it, and was false at the time of correction. It mattered: the ordering guarantee that makes
+> destructive migrations safe to split expand/contract rests entirely on this gate being the deploy
+> chokepoint, so anyone reasoning from this section was reasoning from the wrong premise.
 
 ## Schema source-of-truth
 

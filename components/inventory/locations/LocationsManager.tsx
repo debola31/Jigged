@@ -41,6 +41,7 @@ import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import LocationPanel from './LocationPanel';
 import PlaceStockActionModal, { type PlaceStockAction } from './PlaceStockActionModal';
+import PlaceAdjustModal from './PlaceAdjustModal';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
 
@@ -228,6 +229,9 @@ export default function LocationsManager({
    */
   const [stockAction, setStockAction] = useState<{ action: PlaceStockAction; node: InventoryLocationNode } | null>(null);
 
+  /** The place whose contents are being audited in a dialog. Leaves only — see `onAdjust`. */
+  const [adjusting, setAdjusting] = useState<InventoryLocationNode | null>(null);
+
   const listHref = `/dashboard/${companyId}/inventory/locations`;
   /**
    * `replace`, not `push`, and `scroll: false`.
@@ -309,8 +313,18 @@ export default function LocationsManager({
      * audit is inherently multi-part; the other three verbs act on one part and stay in place.
      */
     onAdjust: (node: InventoryLocationNode) => {
-      setPlaceId(null);
-      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
+      // ONE PLACE IS A DIALOG. MANY PLACES ARE THE WORKSHEET.
+      //
+      // A leaf is the same weight as the other three verbs — a handful of rows, typed and saved
+      // without leaving the grid. A container is a walk of the shop: the worksheet resolves it to
+      // every leaf under it and brings search, paging and per-line commit reporting, which a dialog
+      // has no business growing. Both ends call `commitCount`, so the rows written are identical.
+      if (node.children.length > 0) {
+        setPlaceId(null);
+        router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
+        return;
+      }
+      setAdjusting(node);
     },
     onAddStock: (node: InventoryLocationNode) => setStockAction({ action: 'add', node }),
     onRemoveStock: (node: InventoryLocationNode) => setStockAction({ action: 'deplete', node }),
@@ -648,6 +662,20 @@ export default function LocationsManager({
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
         }}
       />
+
+      {adjusting && (
+        <PlaceAdjustModal
+          open
+          companyId={companyId}
+          locationId={adjusting.id}
+          locationName={adjusting.name}
+          onClose={() => setAdjusting(null)}
+          onDone={async () => {
+            await reload();
+            setToast('Counts saved.');
+          }}
+        />
+      )}
 
       {/*
         Add · Remove · Move on one place. Mounted only while open, so the part catalogue and the

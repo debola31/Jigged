@@ -459,12 +459,22 @@ describe('LocationsManager — the four verbs', () => {
     }
   });
 
-  it('routes Adjust to the worksheet for that place', async () => {
+  /**
+   * ONE PLACE IS A DIALOG. MANY PLACES ARE THE WORKSHEET.
+   *
+   * Adjusting a single bin used to navigate to the worksheet, which for a place holding two parts
+   * cost a page transition, a two-step wizard, a search box over two rows and a bulk put-away panel
+   * the `Move` verb now duplicates. A leaf is the same weight as the other three verbs, so it gets
+   * what they get — a dialog that leaves the grid where it is.
+   */
+  it('adjusts a single place in a dialog, without leaving the page', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
     await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=yard');
+
+    expect(await screen.findByRole('heading', { name: /adjust what's in Yard/i })).toBeInTheDocument();
+    expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
   /**
@@ -473,7 +483,8 @@ describe('LocationsManager — the four verbs', () => {
    * A container holds no stock of its own (20260806160053), so this button used to be withheld on
    * one — it could only have opened a blank sheet. The worksheet now resolves a container to every
    * leaf under it, which is how an audit physically happens: one cabinet, bin by bin. So the button
-   * is offered, and it is the cabinet's primary action.
+   * is offered, it is the cabinet's primary action, and it is the ONE scope that still navigates:
+   * search, paging and per-line commit reporting over 180 bins is not dialog work.
    */
   it('audits a whole cabinet from the unit, not just one bin', async () => {
     const user = userEvent.setup();
@@ -542,8 +553,11 @@ describe('LocationsManager — the four verbs', () => {
     expect(await screen.findByRole('button', { name: /^move$/i })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /put these away/i })).not.toBeInTheDocument();
 
+    // The pile is a leaf, so it takes the dialog like any other single place.
     await user.click(screen.getByRole('button', { name: /^adjust$/i }));
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=un');
+    expect(
+      await screen.findByRole('heading', { name: /adjust what's in Unassigned/i }),
+    ).toBeInTheDocument();
   });
 
   /**

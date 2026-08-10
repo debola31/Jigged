@@ -237,7 +237,7 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
   return (
     <SettingsSection
       title="Company Profile"
-      description="Your logo and return address, printed at the top of quotes, packing slips and job travelers. Leave a field blank to omit it."
+      description="Your logo and address, printed at the top of every document."
     >
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -328,27 +328,23 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                 )}
               </Box>
               {/*
-                Guidance worth giving, because all three of these are mistakes a shop makes once and
-                only discovers on a printed page:
-                  - grayscale, because most shop printers are mono lasers and a logo that separates
-                    only by hue turns to mud;
-                  - transparent PNG, because the page is white and a baked-in white rectangle shows
-                    as a box the moment anything sits behind it;
-                  - wide is fine, because the aspect is preserved now — it was forced square until
-                    this batch, which squashed most wordmarks.
+                Two facts, no lecture. The earlier version also advised checking the logo reads in
+                black and white "since most shop printers are mono lasers" — true, and exactly the
+                kind of line that explains a machinist's own workshop back to them. Someone who needs
+                that advice will not act on it here; someone who doesn't reads the card as padded.
+                The transparency tip stays because it is the mistake that actually shows up on a
+                printed page: a baked-in white rectangle becomes a visible box.
               */}
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                PNG or JPEG, up to {MAX_MB} MB. A wide logo is fine — it keeps its shape. A PNG with
-                a transparent background prints cleanest, and it&apos;s worth checking it still
-                reads in black and white, since most shop printers are mono lasers.
+                PNG or JPEG, up to {MAX_MB} MB. A transparent PNG looks best.
               </Typography>
 
               {/*
                 The one thing we cannot work out from the file itself, and it changes what prints.
                 Most shop logos are wordmarks — the mark IS the name — and printing the name again
-                beside one says it twice in two typefaces. But a logo that is a bare symbol must
-                have the name printed or the document goes out unnamed. Unticked is the safe
-                default: a duplicated name is untidy, a missing one is broken.
+                says it twice in two typefaces. But a logo that is a bare symbol must have the name
+                printed or the document goes out unnamed. Unticked is the safe default: a duplicated
+                name is untidy, a missing one is broken.
               */}
               <FormControlLabel
                 sx={{ mt: 1, alignItems: 'flex-start' }}
@@ -363,12 +359,12 @@ export default function CompanyProfileCard({ companyId }: CompanyProfileCardProp
                 label={
                   <Box>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      My logo already includes my company name
+                      Logo includes company name
                     </Typography>
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       {logoPath
-                        ? "Then we won't print your name next to it, and the logo gets that space instead."
-                        : 'Upload a logo first — your name is always printed while there isn\u2019t one.'}
+                        ? "We won't print your name under the logo."
+                        : 'Upload a logo first.'}
                     </Typography>
                   </Box>
                 }

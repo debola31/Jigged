@@ -127,16 +127,6 @@ function UnitAdjustBody({
   const rows: CountCandidate[] = useMemo(() => data?.candidates ?? [], [data]);
   const clipped = data ? Math.max(0, data.total - data.candidates.length) : 0;
 
-  /** Filtering is client-side because the whole cabinet is already in hand. */
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.partName.toLowerCase().includes(q) || r.target.locationPath.toLowerCase().includes(q),
-    );
-  }, [rows, search]);
-
   /** Rows carrying a usable number. A blank, a stray minus, a half-typed decimal are not counts. */
   const counted = useMemo(
     () =>
@@ -145,6 +135,33 @@ function UnitAdjustBody({
         .filter((c) => Number.isFinite(c.value) && c.value >= 0),
     [rows, entries],
   );
+
+  /**
+   * Filtering is client-side because the whole cabinet is already in hand — and **a row you have
+   * typed into is exempt from it.**
+   *
+   * That exemption is not a nicety, it is the fix for an invisible write. `counted` is derived from
+   * every row, because that is what the blank-row rule requires; the list rendered only what
+   * matched the search. So typing 550 into an o-ring, then filtering to "bearing", left the o-ring
+   * off screen and still in the batch: the button read "Save 1 count" over a list that showed
+   * nothing to save. Whatever is about to be written is on screen at the moment you press the
+   * button, at any filter, or the filter is a way to commit something you cannot see.
+   */
+  const countedKeys = useMemo(
+    () => new Set(counted.map((c) => countRowKey(c.row))),
+    [counted],
+  );
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        countedKeys.has(countRowKey(r)) ||
+        r.partName.toLowerCase().includes(q) ||
+        r.target.locationPath.toLowerCase().includes(q),
+    );
+  }, [rows, search, countedKeys]);
 
   const save = async () => {
     if (counted.length === 0) return;
@@ -237,6 +254,11 @@ function UnitAdjustBody({
               placeholder="Filter by part or place…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              helperText={
+                search.trim() && counted.length > 0
+                  ? `Showing ${visible.length} of ${rows.length} — including ${counted.length} you have counted.`
+                  : ' '
+              }
             />
           )}
 

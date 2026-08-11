@@ -177,12 +177,27 @@ function PlaceDrawerBody({
       />
 
       <Box sx={{ p: 2, overflowY: 'auto' }}>
-        <Typography variant="overline" color="text.secondary">
-          What&apos;s here
-        </Typography>
-        <Box sx={{ mt: 0.5, mb: 2 }}>
-          <Contents key={`${place.id}:${stamp}`} locationId={place.id} />
-        </Box>
+        {/*
+          ONE LIST AT A TIME.
+
+          `Remove`, `Move` and `Adjust` list the very same parts with a quantity field on each — the
+          form's row is a strict superset of this one, carrying the name, the amount here and the
+          unit. Rendering both painted a 57-part pile twice and put the verb you had just pressed
+          a screen and a half above the rows it applied to.
+
+          `Add` keeps it, and that is not an inconsistency: its rows are the parts you are putting
+          IN, so without this you would have nothing on screen saying what is already there.
+        */}
+        {(!openForm || openForm === 'add') && (
+          <>
+            <Typography variant="overline" color="text.secondary">
+              What&apos;s here
+            </Typography>
+            <Box sx={{ mt: 0.5, mb: 2 }}>
+              <Contents key={`${place.id}:${stamp}`} locationId={place.id} />
+            </Box>
+          </>
+        )}
 
         {/*
           The four verbs, in the order fixed across both surfaces — Add, Remove, Move, Adjust. Each

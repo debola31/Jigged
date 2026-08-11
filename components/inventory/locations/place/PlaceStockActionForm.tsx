@@ -53,6 +53,16 @@
  * put a quantity. Taking three of the twelve on a shelf is the ordinary case here. The worksheet
  * keeps the atomic whole-balance version for the job it was built for.
  *
+ * ## When the bin holds a lot
+ *
+ * `Remove` and `Move` list everything at the place, which is right for the three-part bin that is
+ * the normal case and wrong for the put-away pile — measured at 57 rows at one real shop. Above
+ * eight rows a filter appears, and **a row you have typed into is exempt from it**. That exemption
+ * is the whole safety of the feature: `lines` is derived from every row, because the blank-row rule
+ * requires it, so a filter that could hide a typed row would be a way to write something you cannot
+ * see. Nothing reorders either — a row stays where it loaded whether you type in it or not, because
+ * a list that rearranges under a person mid-count is a second way to lose your place.
+ *
  * ## Which parts each verb offers
  *
  * `Remove` and `Move` can only touch what is **here**, so their rows ARE the bin's contents: you
@@ -119,6 +129,9 @@ const SUBMIT: Record<PlaceStockAction, string> = {
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
+/** Rows above which a filter earns its place. Matches the unit-level drawer's own threshold. */
+const FILTER_FROM = 8;
+
 /** One line of the form: a part, and how much of it. `onHand` is null when it is not here yet. */
 interface Row {
   partId: string;
@@ -165,6 +178,8 @@ export default function PlaceStockActionForm({
    */
   const [pickText, setPickText] = useState('');
   const [destination, setDestination] = useState<LocationPickerOption | null>(null);
+  /** Only rendered above `FILTER_FROM` rows; a three-part bin needs no search box. */
+  const [filter, setFilter] = useState('');
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -247,6 +262,14 @@ export default function PlaceStockActionForm({
         .filter((l) => Number.isFinite(l.value) && l.value > 0),
     [rows, qty],
   );
+
+  /** Filtered rows — with every line exempt, so nothing about to be written can be off screen. */
+  const filled = useMemo(() => new Set(lines.map((l) => l.row.partId)), [lines]);
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => filled.has(r.partId) || r.partName.toLowerCase().includes(q));
+  }, [rows, filter, filled]);
 
   const submit = async () => {
     if (lines.length === 0) return;
@@ -396,7 +419,21 @@ export default function PlaceStockActionForm({
           </Typography>
         ) : (
           <Stack spacing={1}>
-            {rows.map((row) => {
+            {/* A search box on a three-row bin is a control that costs more than it saves. */}
+            {rows.length > FILTER_FROM && (
+              <TextField
+                size="small"
+                placeholder="Filter by part…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                helperText={
+                  filter.trim() && lines.length > 0
+                    ? `Showing ${visible.length} of ${rows.length} — including ${lines.length} you have filled in.`
+                    : ' '
+                }
+              />
+            )}
+            {visible.map((row) => {
               const typed = qty[row.partId] ?? '';
               const value = parseFloat(typed);
               const over = row.onHand != null && Number.isFinite(value) && value > row.onHand;

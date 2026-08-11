@@ -283,6 +283,71 @@ describe('PlaceStockActionForm', () => {
     expect(screen.getByRole('button', { name: /^remove stock$/i })).toBeDisabled();
   });
 
+  /**
+   * A filter is a way to write something you cannot see, unless a filled row is exempt from it.
+   *
+   * `lines` is derived from EVERY row, because the blank-row rule requires it. So filtering the
+   * list without exempting what has been typed leaves the batch holding rows that are off screen —
+   * a submit button counting things the list is not showing.
+   */
+  describe('when the place holds a lot', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      part_id: `p${i}`,
+      part_name: i === 0 ? 'RAW-STEEL-BLANK' : `BUY-WIDGET-${i}`,
+      primary_unit: 'ea',
+      quantity: 10 + i,
+      location_id: 'bin5',
+    }));
+
+    const setupMany = () => {
+      vi.mocked(getLocationContents).mockResolvedValueOnce({ contents: many, total: many.length });
+      return setup('deplete');
+    };
+
+    it('offers a filter only once the list is long', async () => {
+      setup('deplete');
+      await screen.findByText('RAW-STEEL-BLANK');
+      // Two rows need no search box.
+      expect(screen.queryByPlaceholderText(/filter by part/i)).not.toBeInTheDocument();
+    });
+
+    it('narrows the list as you filter', async () => {
+      const user = userEvent.setup();
+      setupMany();
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.type(screen.getByPlaceholderText(/filter by part/i), 'WIDGET-3');
+      expect(screen.getByText('BUY-WIDGET-3')).toBeInTheDocument();
+      expect(screen.queryByText('BUY-WIDGET-5')).not.toBeInTheDocument();
+    });
+
+    it('keeps a filled row on screen however you filter', async () => {
+      const user = userEvent.setup();
+      setupMany();
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.type(qtyFor('RAW-STEEL-BLANK'), '4');
+      // Filter to something that cannot match it.
+      await user.type(screen.getByPlaceholderText(/filter by part/i), 'WIDGET-7');
+
+      expect(screen.getByText('RAW-STEEL-BLANK')).toBeInTheDocument();
+      expect(qtyFor('RAW-STEEL-BLANK')).toHaveValue(4);
+      // …and the submit says the same number the list is showing.
+      expect(screen.getByRole('button', { name: /^remove stock$/i })).toBeEnabled();
+    });
+
+    it('says the filtered view still includes what you filled in', async () => {
+      const user = userEvent.setup();
+      setupMany();
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.type(qtyFor('RAW-STEEL-BLANK'), '4');
+      await user.type(screen.getByPlaceholderText(/filter by part/i), 'WIDGET-7');
+
+      expect(screen.getByText(/including 1 you have filled in/i)).toBeInTheDocument();
+    });
+  });
+
   it('says which verb it is', async () => {
     setup('add');
     expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();

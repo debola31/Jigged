@@ -509,9 +509,12 @@ describe('LocationsManager — the four verbs', () => {
     await user.click(adjust);
 
     expect(screen.getByText(/type what you actually counted/i)).toBeInTheDocument();
-    // Still there: what is in the bin, and the other three verbs.
-    expect(screen.getByText(/what's here/i)).toBeInTheDocument();
+    // The other three verbs stay on screen — this is one page, not a view swap.
     expect(screen.getByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^move$/i })).toBeInTheDocument();
+    // …and the read-only list steps aside, because Adjust lists the very same parts with a field
+    // on each. Painting both put the verb a screen and a half above the rows it applies to.
+    expect(screen.queryByText(/what's here/i)).not.toBeInTheDocument();
     expect(adjust).toHaveAttribute('aria-expanded', 'true');
     expect(routerMocks.push).not.toHaveBeenCalled();
 

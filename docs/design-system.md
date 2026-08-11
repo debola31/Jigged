@@ -528,6 +528,28 @@ actions.
 >   Drawer did not. Sticky headers inside one need `background.default`, not `paper`, or the rows
 >   scroll through the heading.
 
+**A filter must never hide what is about to be written — 2026-08-11.**
+
+A batch form derives what it will write from **every** row, because the rule that a blank row is not
+an instruction requires it. A filter narrows what is *rendered*. Left alone those two disagree, and
+the disagreement is an invisible write: type a count into an o-ring, filter to "bearing", and the
+button reads `Save 1 count` over a list showing nothing to save. It shipped that way in a drawer and
+was caught in review before anyone used it.
+
+The fix is structural, not a warning. **A row carrying a value is exempt from the filter**, so the
+write set is on screen at the moment the button is pressed, at any filter and any scroll position.
+Say it in the helper text too — *"Showing 2 of 57 — including 1 you have filled in"* — so the
+exemption reads as deliberate rather than as a filter that does not work.
+
+The general form: **whenever a control narrows a list that a submit reads in full, the submit's set
+is the thing that must stay visible.** Filtering, paging and collapsing are all the same hazard.
+
+**And do not paint the same list twice.** The place drawer rendered a read-only *What's here* above a
+form whose rows were a strict superset of it — same names, same quantities, plus a field. On a
+57-part put-away pile that is two full screens of the same information, with the verb you just
+pressed a screen and a half above the rows it applies to. The read-only list now steps aside for the
+verbs that list the same places, and stays only for `Add`, whose rows are the parts going *in*.
+
 **Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only
 because the alternative was losing the depiction entirely. Reach for a sheet when the row's *value is
 what it depicts*, not merely when a row has several actions. It also matches the operator bin view's

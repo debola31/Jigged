@@ -52,6 +52,11 @@ class AccountingProvider(Protocol):
     #: Persisted to quickbooks_invoice_links.realm_id / quickbooks_customer_map.realm_id.
     scope_id: str
 
+    #: True when the connection exists but can no longer be used until the shop
+    #: reconnects. QBO sets this on a genuine invalid_grant; QBD has no refresh
+    #: token to expire, so it is always False there.
+    requires_reconnect: bool
+
     #: True when the vendor deduplicates a replayed create (QBO's ?requestid=).
     #: False for QBD: Conductor has no idempotency mechanism and does not dedupe
     #: externalId, so an ambiguous outcome must never be retried automatically --

@@ -2453,6 +2453,7 @@ export type Database = {
           job_id: string
           provider: string
           pushed_by: string | null
+          qb_customer_id: string | null
           qb_invoice_doc_number: string | null
           qb_invoice_id: string | null
           qb_invoice_sync_token: string | null
@@ -2461,6 +2462,7 @@ export type Database = {
           quote_id: string | null
           realm_id: string
           status: string
+          transaction_date: string | null
           updated_at: string
           voided_at: string | null
           voided_by: string | null
@@ -2472,6 +2474,7 @@ export type Database = {
           job_id: string
           provider?: string
           pushed_by?: string | null
+          qb_customer_id?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
@@ -2480,6 +2483,7 @@ export type Database = {
           quote_id?: string | null
           realm_id: string
           status?: string
+          transaction_date?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null
@@ -2491,6 +2495,7 @@ export type Database = {
           job_id?: string
           provider?: string
           pushed_by?: string | null
+          qb_customer_id?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
@@ -2499,6 +2504,7 @@ export type Database = {
           quote_id?: string | null
           realm_id?: string
           status?: string
+          transaction_date?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null

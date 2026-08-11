@@ -27,6 +27,11 @@ class QbdProvider:
         self._conn = conn
         self._end_user_id = qbd._end_user_id(conn)
 
+    #: QuickBooks Desktop has no refresh token to expire. A connection either
+    #: works or the shop PC is unreachable, and the latter is QbdOffline (a
+    #: retryable warning) rather than a reconnect.
+    requires_reconnect = False
+
     @property
     def scope_id(self) -> str:
         """The Conductor end-user id IS the connected company file, exactly as a

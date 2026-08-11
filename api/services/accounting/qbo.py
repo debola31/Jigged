@@ -32,6 +32,12 @@ class QboProvider:
     def scope_id(self) -> str:
         return self._conn["realm_id"]
 
+    @property
+    def requires_reconnect(self) -> bool:
+        """Set on a genuine invalid_grant: the refresh token is dead and only the
+        shop can re-authorise."""
+        return bool(self._conn.get("reconnect_required"))
+
     # ── customers ────────────────────────────────────────────────────────────
     def find_customer_candidates(self, name: str) -> dict:
         return qb.find_customer_candidates(self._db, self._company_id, name)
@@ -62,7 +68,25 @@ class QboProvider:
 
     # ── the invoice ──────────────────────────────────────────────────────────
     def build_invoice_payload(self, **kwargs) -> dict:
-        return qb.quote_to_invoice_payload(**kwargs)
+        """Maps the shared push path's canonical kwargs onto the QBO body.
+
+        Selects rather than forwards: the canonical set carries fields that only
+        QuickBooks Desktop has (`transaction_date`, which QBO derives server-side;
+        `sales_tax_code_id`, which QBO deliberately replaces with a pinned 'NON';
+        `request_id`, which QBO passes as ?requestid= instead of as an externalId).
+        Forwarding them would be a TypeError on every push.
+        """
+        return qb.quote_to_invoice_payload(
+            customer_ref=kwargs["customer_ref"],
+            item_ref=kwargs["item_ref"],
+            job_number=kwargs.get("job_number"),
+            customer_po_number=kwargs.get("customer_po_number"),
+            bill_addr=kwargs.get("bill_addr"),
+            lines=kwargs["lines"],
+            sales_term_id=kwargs.get("sales_term_id"),
+            po_custom_field_id=kwargs.get("po_custom_field_id"),
+            po_custom_field_name=kwargs.get("po_custom_field_name"),
+        )
 
     def create_invoice(self, payload: dict, *, request_id: str) -> CreatedInvoice:
         result = qb.create_invoice(self._db, self._company_id, payload, request_id)

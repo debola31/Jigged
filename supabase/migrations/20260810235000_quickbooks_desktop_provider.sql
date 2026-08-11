@@ -246,6 +246,22 @@ ALTER TABLE public.quickbooks_invoice_links
 -- of rows and the match is client-side. Verified end to end.
 -- The number QuickBooks assigned is recorded in the existing qb_invoice_doc_number.
 
+-- What the recovery probe needs to narrow its window, captured at claim time.
+--
+-- find_created_invoice lists by customerIds + a one-day transactionDate window and
+-- matches externalId client-side. Both are recorded rather than re-derived: the customer
+-- could be re-mapped between the push and the verify, and transaction_date is supplied by
+-- the browser (which knows the shop's timezone), so deriving it from created_at::date
+-- would be wrong at exactly the day boundary where it matters most.
+ALTER TABLE public.quickbooks_invoice_links
+    ADD COLUMN IF NOT EXISTS qb_customer_id text,
+    ADD COLUMN IF NOT EXISTS transaction_date date;
+
+COMMENT ON COLUMN public.quickbooks_invoice_links.qb_customer_id IS
+  'The accounting-system customer this invoice was pushed to, recorded at claim time so the QuickBooks Desktop recovery probe can narrow its search window without re-deriving a mapping that may since have changed.';
+COMMENT ON COLUMN public.quickbooks_invoice_links.transaction_date IS
+  'The invoice date sent to the accounting system. Recorded because the recovery probe filters on it, and because it comes from the browser''s timezone rather than the server''s UTC date.';
+
 -- A fourth status. 'needs_verification' = the create returned an AMBIGUOUS outcome
 -- (timeout / connection loss) and a probe could not yet find the invoice. It deliberately
 -- does NOT count toward invoiced quantity: every compute function and

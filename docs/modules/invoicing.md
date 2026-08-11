@@ -1,8 +1,14 @@
 # Invoicing
 
-How Jigged bills a job. Invoicing is delegated to **QuickBooks Online (QBO)** — QBO
-owns the invoice document and numbering — while Jigged owns the invoice **record** and
-the **per-part quantities** each invoice billed. See also
+How Jigged bills a job. Invoicing is delegated to **QuickBooks** — which owns the invoice
+document and its numbering — while Jigged owns the invoice **record** and the **per-part
+quantities** each invoice billed.
+
+A company connects **either QuickBooks Online or QuickBooks Desktop**, never both (a database
+invariant, not just a route check). Everything on this page is true of both: the billing model,
+the ordered cap, the price lock and the idempotency claim are one shared implementation. What
+differs about Desktop — no deep link, no idempotency key, tax codes, the `needs_verification`
+state — is [quickbooks-desktop.md](quickbooks-desktop.md). See also
 [quickbooks integration](../../CLAUDE.md) provenance, [jobs](jobs.md), and
 [shipments](shipments.md).
 

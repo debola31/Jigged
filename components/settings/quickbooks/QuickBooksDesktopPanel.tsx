@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
@@ -13,6 +13,7 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import QuickBooksUnreachableAlert from '@/components/quickbooks/QuickBooksUnreachableAlert';
+import { useLoad } from '@/hooks/useLoad';
 import {
   disconnectQuickBooksDesktop,
   getQuickBooksDesktopStatus,
@@ -44,26 +45,17 @@ export default function QuickBooksDesktopPanel({
   onDisconnected: () => void;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<DesktopStatus | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // useLoad rather than a hand-rolled effect: every setState happens inside the
+  // async callback, which is what keeps this off react-hooks/set-state-in-effect.
+  const { data: status, error: loadError, reload: load } = useLoad<DesktopStatus>(
+    () => getQuickBooksDesktopStatus(companyId),
+    [companyId],
+  );
+  const loadFailed = Boolean(loadError);
   const [busy, setBusy] = useState(false);
   const [unreachable, setUnreachable] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<DesktopIncomeAccount[] | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setStatus(await getQuickBooksDesktopStatus(companyId));
-      setLoadFailed(false);
-    } catch {
-      // A failed read is "couldn't check", not "not connected".
-      setLoadFailed(true);
-    }
-  }, [companyId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const handleTest = async () => {
     setBusy(true);

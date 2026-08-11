@@ -30,6 +30,7 @@ Detailed specs live in [modules/](modules/).
 
 **Selling and ordering:** [customers.md](modules/customers.md) ·
 [quotes.md](modules/quotes.md) · [invoicing.md](modules/invoicing.md) ·
+[quickbooks-desktop.md](modules/quickbooks-desktop.md) ·
 [billing.md](modules/billing.md)
 
 **Making:** [parts.md](modules/parts.md) · [routings.md](modules/routings.md) ·

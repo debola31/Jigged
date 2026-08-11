@@ -99,9 +99,35 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     }
   }, [companyId]);
 
+  // The mount load is written out rather than calling loadStatus(), which sets
+  // `loading` synchronously and would trip react-hooks/set-state-in-effect. Every
+  // setState below happens inside the async callback.
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [online, desk] = await Promise.all([
+          getQuickBooksStatus(companyId),
+          getQuickBooksDesktopStatus(companyId).catch(() => null),
+        ]);
+        if (!cancelled) {
+          setStatus(online);
+          setDesktop(desk);
+          setStatusFailed(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStatusFailed(true);
+          setError(err instanceof Error ? err.message : 'Failed to load QuickBooks status.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   // Surface the connect/error outcome from the OAuth callback redirect, then
   // strip the ?qb= param so a refresh doesn't re-show it.

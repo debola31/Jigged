@@ -198,10 +198,21 @@ export default function PlaceStockActionForm({
   /** Only rendered above `FILTER_FROM` rows; a three-part bin needs no search box. */
   const [filter, setFilter] = useState('');
   const [job, setJob] = useState<JobWithRelations | null>(null);
+  /**
+   * One note for the batch.
+   *
+   * The single-part form had this and the batch rewrite dropped it — a silent capability loss, and
+   * the note is often the only record of WHY ("scrapped, bad heat"). Per batch rather than per row
+   * because the reason is the same for everything you are carrying in one trip; a per-row note
+   * would be a second column on a row already carrying three controls.
+   */
+  const [notes, setNotes] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failures, setFailures] = useState<Array<{ partName: string; message: string }>>([]);
+  /** How many lines landed in the last partial save — captured, not recomputed from live state. */
+  const [saved, setSaved] = useState(0);
   /**
    * The caught error object, not a formatted string: `ErrorAlert` needs the object to tell a
    * billing block from an ordinary failure. Validation messages stay plain strings, which it
@@ -330,6 +341,7 @@ export default function PlaceStockActionForm({
      * put-away was protecting against.
      */
     const failed: Array<{ partName: string; message: string }> = [];
+    const succeeded: string[] = [];
     for (let i = 0; i < lines.length; i += 1) {
       const { row, value } = lines[i];
       setProgress({ done: i, total: lines.length });
@@ -337,15 +349,18 @@ export default function PlaceStockActionForm({
       try {
         if (action === 'add') {
           await addStockAtLocation(row.partId, locationId, value, unit, {
+            notes: notes || undefined,
             operatorId: operatorId || undefined,
           });
         } else if (action === 'deplete') {
           await depleteStockAtLocation(row.partId, locationId, value, unit, {
+            notes: notes || undefined,
             operatorId: operatorId || undefined,
             jobId: job?.id,
           });
         } else {
           await transferStock(row.partId, locationId, destination!.id, value, unit, {
+            notes: notes || undefined,
             operatorId: operatorId || undefined,
           });
         }
@@ -362,6 +377,7 @@ export default function PlaceStockActionForm({
           unit,
           location_id: locationId,
         });
+        succeeded.push(row.partId);
       } catch (e) {
         failed.push({
           partName: row.partName,
@@ -375,8 +391,27 @@ export default function PlaceStockActionForm({
     await onDone();
 
     if (failed.length > 0) {
-      // Stay open with the failures named: what landed is real, and re-doing the whole batch to
-      // retry one line is how a person ends up double-counting the other four.
+      /*
+       * DISARM WHAT LANDED, or retrying doubles it.
+       *
+       * The form stays open so a failed line can be fixed without re-typing the others — and until
+       * this ran, the quantities of the lines that SUCCEEDED were still in the boxes, so the button
+       * still read `Remove stock (5)` and pressing it, the single most obvious next move, ran those
+       * four again. `add_stock_at_location` is a delta, not a set, so adding 12 twice leaves 24 in
+       * the bin and nothing to undo it with.
+       *
+       * The comment that used to sit here described exactly this hazard as the reason the form stays
+       * open. It stayed open and stayed armed.
+       */
+      setQty((q) => {
+        const next = { ...q };
+        for (const id of succeeded) delete next[id];
+        return next;
+      });
+      // A picked `add` row that landed is done with; leaving it would put a zero-quantity row back
+      // in a list whose whole purpose is the parts you are still adding.
+      if (action === 'add') setPicked((p) => p.filter((r) => !succeeded.includes(r.partId)));
+      setSaved(succeeded.length);
       setFailures(failed);
       return;
     }
@@ -407,7 +442,9 @@ export default function PlaceStockActionForm({
 
         {failures.length > 0 && (
           <Alert severity="warning">
-            {lines.length - failures.length} saved. These did not:{' '}
+            {/* The captured count, not `lines.length - failures.length` — the lines that landed have
+                just been cleared out of `lines`, so recomputing it would report zero. */}
+            {saved} saved and cleared from this list. These did not:{' '}
             {failures.map((f) => `${f.partName} (${f.message})`).join('; ')}
           </Alert>
         )}
@@ -596,6 +633,17 @@ export default function PlaceStockActionForm({
         {/* One job for the batch: you are issuing this handful of material to one job. */}
         {action === 'deplete' && rows.length > 0 && (
           <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
+        )}
+
+        {rows.length > 0 && (
+          <TextField
+            label="Notes (optional)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            size="small"
+            multiline
+            minRows={2}
+          />
         )}
 
         {progress && progress.total > 0 && (

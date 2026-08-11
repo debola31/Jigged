@@ -37,7 +37,7 @@
  * doors must not disagree about what an untouched row means.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -54,7 +54,7 @@ import ErrorAlert from '@/components/common/ErrorAlert';
 import { useLoad } from '@/hooks/useLoad';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { commitCount, loadCountCandidatesForPlaces } from '@/utils/inventoryCountAccess';
-import { countRowKey } from '@/lib/inventoryCountPlan';
+import { committableVariances, contestedParts, countRowKey } from '@/lib/inventoryCountPlan';
 import type { CountCandidate, CountVariance } from '@/types/inventoryCount';
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { compareLocationNames } from '@/lib/locationTree';
@@ -104,7 +104,8 @@ function UnitAdjustBody({
   companyId,
   onClose,
   onChanged,
-}: UnitAdjustDrawerProps & { unit: InventoryLocationNode }) {
+  onDirty,
+}: UnitAdjustDrawerProps & { unit: InventoryLocationNode; onDirty: (dirty: boolean) => void }) {
   /** row key → what was typed, verbatim. Strings, so a half-typed "1." is not yet a number. */
   const [entries, setEntries] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
@@ -112,6 +113,8 @@ function UnitAdjustBody({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failures, setFailures] = useState<Array<{ partName: string; locationName: string; message: string }>>([]);
   const [error, setError] = useState<unknown>(null);
+  /** Held back by the contested-parts gate, waiting for the person to say go on. */
+  const [pending, setPending] = useState<{ toCommit: CountVariance[]; contested: CountVariance[][] } | null>(null);
 
   const places = useMemo(() => leavesOf(unit), [unit]);
 
@@ -135,6 +138,9 @@ function UnitAdjustBody({
         .filter((c) => Number.isFinite(c.value) && c.value >= 0),
     [rows, entries],
   );
+
+  // Tell the shell whether a stray backdrop click would cost anything.
+  useEffect(() => onDirty(counted.length > 0), [counted.length, onDirty]);
 
   /**
    * Filtering is client-side because the whole cabinet is already in hand — and **a row you have
@@ -189,8 +195,47 @@ function UnitAdjustBody({
         };
       });
 
-      setProgress({ done: 0, total: variances.length });
-      const result = await commitCount(variances, {
+      /*
+       * Two gates the worksheet has and this drawer did not, both of which matter MORE here
+       * because this sheet spans several bins by construction.
+       *
+       * `committableVariances` drops zero-delta lines. Without it a clean audit writes an
+       * `adjustment` row per unchanged part, which `BinHistory` renders as "set to N" — a bin's
+       * real history buried under twenty rows saying nothing happened.
+       *
+       * `contestedParts` is #656: a part counted at two bins where stock moved BETWEEN them while
+       * you were counting. Both counts are true; the pair is not, because an absolute write
+       * replays a once-true observation over a movement that came after it. It is fed EVERY
+       * counted line, not the committable ones — the zero-delta half is exactly what reveals it.
+       */
+      const toCommit = committableVariances(variances);
+      const contested = contestedParts(variances);
+      if (contested.length > 0) {
+        setPending({ toCommit, contested });
+        setSaving(false);
+        return;
+      }
+      await runCommit(toCommit);
+    } catch (e) {
+      setError(e);
+      setSaving(false);
+    }
+  };
+
+  /** The write itself, once the gate above has let it through or been overridden. */
+  const runCommit = async (toCommit: CountVariance[]) => {
+    setPending(null);
+    if (toCommit.length === 0) {
+      // Everything counted matched. Nothing to write, and saying so beats a silent close.
+      await onChanged();
+      setSaving(false);
+      onClose();
+      return;
+    }
+    setSaving(true);
+    try {
+      setProgress({ done: 0, total: toCommit.length });
+      const result = await commitCount(toCommit, {
         operatorId,
         onProgress: (p) => setProgress({ done: p.done, total: p.total }),
       });
@@ -217,8 +262,15 @@ function UnitAdjustBody({
       <PlaceViewHeader
         title={`Bulk Adjust ${unit.name}`}
         subtitle={`${places.length} ${places.length === 1 ? 'place' : 'places'}`}
+        // Disabled mid-commit. It was not, so closing while lines were still being written let the
+        // remaining writes land with the "which ones failed" report thrown away.
         action={
-          <IconButton aria-label="Close" onClick={onClose} sx={{ width: 48, height: 48 }}>
+          <IconButton
+            aria-label="Close"
+            onClick={onClose}
+            disabled={saving}
+            sx={{ width: 48, height: 48 }}
+          >
             <CloseIcon />
           </IconButton>
         }
@@ -231,6 +283,32 @@ function UnitAdjustBody({
           </Typography>
 
           {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
+
+          {/*
+            The one thing worth interrupting a count for. Named rather than tallied: "1 item moved"
+            on a sheet holding one part at three shelves does not say which shelf to go back to.
+          */}
+          {pending && (
+            <Alert
+              severity="warning"
+              action={
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" onClick={() => setPending(null)}>
+                    Re-check
+                  </Button>
+                  <Button size="small" variant="contained" onClick={() => void runCommit(pending.toCommit)}>
+                    Save anyway
+                  </Button>
+                </Stack>
+              }
+            >
+              Stock moved between these places while you were counting:{' '}
+              {pending.contested
+                .map((rows) => `${rows[0].candidate.partName} (${rows.map((r) => r.candidate.target.locationPath).join(' and ')})`)
+                .join('; ')}
+              . Saving both counts would put back what has legitimately left.
+            </Alert>
+          )}
 
           {failures.length > 0 && (
             <Alert severity="warning">
@@ -437,11 +515,23 @@ function UnitAdjustBody({
 
 export default function UnitAdjustDrawer(props: UnitAdjustDrawerProps) {
   const { unit, onClose } = props;
+  /**
+   * Typed counts are not thrown away by a stray click.
+   *
+   * The drawer is 560px of a screen whose remaining width is the cabinet you are auditing, so the
+   * backdrop is the most clickable thing on the page — and an unguarded backdrop dismiss unmounts
+   * the body and every count in it. A cabinet audit is twenty minutes of walking; Escape and the
+   * backdrop now only close it while nothing has been typed.
+   */
+  const [dirty, setDirty] = useState(false);
   return (
     <Drawer
       anchor="right"
       open={Boolean(unit)}
-      onClose={onClose}
+      onClose={(_, reason) => {
+        if (dirty && (reason === 'backdropClick' || reason === 'escapeKeyDown')) return;
+        onClose();
+      }}
       sx={{
         '& .MuiDrawer-paper': {
           // Wider than the place drawer: this one carries a place on every row as well as the four
@@ -455,7 +545,7 @@ export default function UnitAdjustDrawer(props: UnitAdjustDrawerProps) {
     >
       {/* Keyed by unit: opening a different cabinet starts a fresh sheet rather than carrying the
           last one's typed counts under a new name. */}
-      {unit && <UnitAdjustBody {...props} key={unit.id} unit={unit} />}
+      {unit && <UnitAdjustBody {...props} key={unit.id} unit={unit} onDirty={setDirty} />}
     </Drawer>
   );
 }

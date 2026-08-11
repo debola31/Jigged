@@ -57,6 +57,7 @@ import { getCurrentMember } from '@/utils/operatorAccess';
 import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import { useLoad } from '@/hooks/useLoad';
 import { commitCount } from '@/utils/inventoryCountAccess';
+import { committableVariances } from '@/lib/inventoryCountPlan';
 import type { CountVariance } from '@/types/inventoryCount';
 import type { LocationContent } from '@/types/inventoryLocations';
 
@@ -149,8 +150,26 @@ export default function PlaceAdjustForm({
         };
       });
 
-      setProgress({ done: 0, total: variances.length });
-      const result = await commitCount(variances, {
+      /*
+       * Zero-delta lines are dropped, as the worksheet drops them.
+       *
+       * `adjust_stock_at_location` inserts unconditionally, so a clean count of a five-part bin
+       * wrote five `adjustment` rows recording that nothing changed — and the bin's history renders
+       * each as "set to N", burying the movements that did happen under the ones that did not.
+       *
+       * `contestedParts` is deliberately NOT used here: it guards a part counted at SEVERAL places
+       * where stock moved between them, and this form is one place, so every part has one row.
+       */
+      const toCommit = committableVariances(variances);
+      if (toCommit.length === 0) {
+        // Everything matched. Nothing to write, and closing quietly beats a save that saved nothing.
+        await onDone();
+        onCancel();
+        return;
+      }
+
+      setProgress({ done: 0, total: toCommit.length });
+      const result = await commitCount(toCommit, {
         operatorId,
         onProgress: (p) => setProgress({ done: p.done, total: p.total }),
       });

@@ -439,6 +439,73 @@ describe('PlaceStockActionForm', () => {
     });
   });
 
+  /**
+   * THE DOUBLE-WRITE.
+   *
+   * The form stays open after a partial failure so a bad line can be fixed without re-typing the
+   * others — and until this was fixed, the quantities of the lines that SUCCEEDED were still in
+   * their boxes, so the button still read `Remove stock (2)` and pressing it ran them again.
+   * `add_stock_at_location` is a delta, so adding 12 twice leaves 24 and nothing undoes it.
+   */
+  it('disarms the lines that landed, so retrying cannot write them twice', async () => {
+    const user = userEvent.setup();
+    vi.mocked(depleteStockAtLocation)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(new Error('Insufficient stock'));
+    setup('deplete');
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    await user.type(qtyFor('RAW-STEEL-BLANK'), '3');
+    await user.type(qtyFor('BUY-ORING-214'), '99');
+    await user.click(screen.getByRole('button', { name: /remove stock \(2\)/i }));
+
+    expect(await screen.findByText(/BUY-ORING-214 \(Insufficient stock\)/)).toBeInTheDocument();
+    // The line that landed is out of the boxes…
+    expect(qtyFor('RAW-STEEL-BLANK')).toHaveValue(null);
+    // …and out of the batch, so the obvious next press retries only the failure.
+    expect(screen.getByRole('button', { name: /^remove stock$/i })).toBeEnabled();
+
+    vi.mocked(depleteStockAtLocation).mockClear();
+    await user.click(screen.getByRole('button', { name: /^remove stock$/i }));
+    expect(depleteStockAtLocation).toHaveBeenCalledTimes(1);
+    expect(depleteStockAtLocation).toHaveBeenCalledWith('p-oring', 'bin5', 99, 'ea', expect.anything());
+  });
+
+  it('reports how many landed, counted before they were cleared', async () => {
+    const user = userEvent.setup();
+    vi.mocked(depleteStockAtLocation)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(new Error('nope'));
+    setup('deplete');
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    await user.type(qtyFor('RAW-STEEL-BLANK'), '3');
+    await user.type(qtyFor('BUY-ORING-214'), '2');
+    await user.click(screen.getByRole('button', { name: /remove stock \(2\)/i }));
+
+    // Not "0 saved" — the count is captured before the successful rows leave `lines`.
+    expect(await screen.findByText(/1 saved and cleared from this list/i)).toBeInTheDocument();
+  });
+
+  /** The note is often the only record of WHY. The batch rewrite dropped it; it is back. */
+  it('carries one note for the batch', async () => {
+    const user = userEvent.setup();
+    setup('deplete');
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    await user.type(qtyFor('RAW-STEEL-BLANK'), '3');
+    await user.type(screen.getByLabelText(/notes/i), 'scrapped, bad heat');
+    await user.click(screen.getByRole('button', { name: /^remove stock$/i }));
+
+    expect(depleteStockAtLocation).toHaveBeenCalledWith(
+      'p-steel',
+      'bin5',
+      3,
+      'ea',
+      expect.objectContaining({ notes: 'scrapped, bad heat' }),
+    );
+  });
+
   it('says which verb it is', async () => {
     setup('add');
     expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();

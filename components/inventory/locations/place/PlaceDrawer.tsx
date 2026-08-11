@@ -32,9 +32,9 @@
  *
  * ## On a phone
  *
- * `anchor="bottom"` under `sm` and `right` above it. A bottom sheet is where a thumb already is, and
- * the grid stays visible above it — the operator can see the cabinet he is standing at while he
- * records what he took out of it.
+ * Full width under `sm`, a column beside the grid above it. (An earlier draft of this comment
+ * promised a bottom-anchored sheet under `sm`; it was never built, and describing a layout the code
+ * does not have is how the next person inherits a wrong model of the surface.)
  */
 
 import { useState } from 'react';

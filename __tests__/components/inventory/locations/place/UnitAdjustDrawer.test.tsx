@@ -165,6 +165,72 @@ describe('UnitAdjustDrawer', () => {
    * the other reading, "everything matches", writes nothing at all, because zero-delta lines are
    * dropped. See PlaceStockActionForm, where Remove and Move do get one.
    */
+  /**
+   * A clean count writes nothing.
+   *
+   * `adjust_stock_at_location` inserts unconditionally, so without `committableVariances` a bin
+   * where everything matched wrote one `adjustment` per part — rendered in the bin's history as
+   * "set to N", burying the movements that did happen under the ones that did not.
+   */
+  it('writes nothing for a count that matches what was recorded', async () => {
+    const user = userEvent.setup();
+    setup();
+    await screen.findByRole('heading', { name: /bulk adjust/i });
+
+    await user.type(countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580');
+    await user.click(screen.getByRole('button', { name: /save 1 count/i }));
+
+    expect(commitCount).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('writes only the lines that changed something', async () => {
+    const user = userEvent.setup();
+    setup();
+    await screen.findByRole('heading', { name: /bulk adjust/i });
+
+    await user.type(countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580'); // unchanged
+    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '550'); // −2
+    await user.click(screen.getByRole('button', { name: /save 2 counts/i }));
+
+    const [variances] = vi.mocked(commitCount).mock.calls[0];
+    expect(variances).toHaveLength(1);
+    expect(variances[0].candidate.partId).toBe('p-oring');
+  });
+
+  /**
+   * #656, and this drawer is squarely the case it guards: a sheet that spans several bins by
+   * construction. A part counted at two of them where stock moved BETWEEN them mid-count — both
+   * counts true, the pair not, because an absolute write replays a once-true observation over a
+   * movement that came after it.
+   */
+  it('stops before saving when stock moved between two bins mid-count', async () => {
+    const user = userEvent.setup();
+    setup();
+    await screen.findByRole('heading', { name: /bulk adjust/i });
+
+    // The o-ring moved from Shelf A to Shelf B while the count was open.
+    vi.mocked(loadCountCandidatesForPlaces).mockResolvedValueOnce({
+      candidates: [
+        candidate('p-bear', 'BUY-BEARING-608ZZ', 'shelf-a', 'Shelf A', 580),
+        candidate('p-oring', 'BUY-ORING-214', 'shelf-a', 'Shelf A', 822),
+        candidate('p-oring', 'BUY-ORING-214', 'shelf-b', 'Shelf B', 558),
+      ],
+      total: 3,
+    });
+
+    await user.type(countedFor('BUY-ORING-214', 'Shelf A'), '828');
+    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '552');
+    await user.click(screen.getByRole('button', { name: /save 2 counts/i }));
+
+    expect(await screen.findByText(/stock moved between these places/i)).toBeInTheDocument();
+    expect(commitCount).not.toHaveBeenCalled();
+
+    // …and it is a gate, not a refusal.
+    await user.click(screen.getByRole('button', { name: /save anyway/i }));
+    expect(commitCount).toHaveBeenCalled();
+  });
+
   it('offers no All, because an audit has none to offer', async () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });

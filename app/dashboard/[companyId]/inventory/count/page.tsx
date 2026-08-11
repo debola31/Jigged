@@ -29,6 +29,11 @@
  *
  * ## Two ways in, one worksheet
  *
+ * **Storage is no longer one of them.** Auditing a bin and auditing a whole cabinet both happen in a
+ * drawer on the Storage page itself as of 2026-08-10 — same `commitCount`, same `adjustment` rows,
+ * without leaving the grid you are auditing. What still arrives here is the shop-wide sheet from the
+ * Parts toolbar, and one part at one place from its own balance row.
+ *
  * With no `?location=`, this is the company-wide sheet described above: pick parts across the shop.
  *
  * With `?location=<id>`, it is **place-scoped**, which is what §5.11 asked for all along — you walk

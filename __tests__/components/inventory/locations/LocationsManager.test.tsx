@@ -52,6 +52,12 @@ vi.mock('@/utils/partsAccess', () => ({
   ]),
 }));
 
+// The unit-scoped Bulk Adjust drawer reads the whole subtree's rows through this.
+vi.mock('@/utils/inventoryCountAccess', () => ({
+  loadCountCandidatesForPlaces: vi.fn(async () => ({ candidates: [], total: 0 })),
+  commitCount: vi.fn(async () => ({ committed: 0, failures: [] })),
+}));
+
 vi.mock('@/utils/locationLabelPdf', () => ({
   generateLocationLabelSheet: vi.fn(async () => ({ save: vi.fn() })),
 }));
@@ -517,18 +523,24 @@ describe('LocationsManager — the four verbs', () => {
   /**
    * The reversal that makes container-scoped auditing work.
    *
-   * A container holds no stock of its own (20260806160053), so this button used to be withheld on
-   * one — it could only have opened a blank sheet. The worksheet now resolves a container to every
-   * leaf under it, which is how an audit physically happens: one cabinet, bin by bin. So the button
-   * is offered, it is the cabinet's primary action, and it is the ONE scope that still navigates:
-   * search, paging and per-line commit reporting over 180 bins is not dialog work.
+   * A container holds no stock of its own (20260806160053), so this button was once withheld on one
+   * — it could only have opened a blank sheet. Auditing a container means auditing every leaf under
+   * it, which is how it physically happens: one cabinet, bin by bin.
+   *
+   * And it no longer navigates. It was the last control on Storage that did, for the operation you
+   * are most likely to run while looking at the cabinet.
    */
-  it('audits a whole cabinet from the unit, not just one bin', async () => {
+  it('audits a whole cabinet in a drawer, without leaving the page', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /^bulk adjust$/i }));
-    expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=cab3');
+
+    const heading = await screen.findByRole('heading', { name: /bulk adjust Cabinet 3/i });
+    // Both shelves are in scope — a container is audited through its bins. Scoped to the drawer,
+    // because the unit's own card in the list says "2 places" too.
+    expect(within(heading.parentElement!).getByText(/2 places/i)).toBeInTheDocument();
+    expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
   it('opens Add against the place you are looking at', async () => {

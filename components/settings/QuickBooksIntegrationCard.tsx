@@ -15,6 +15,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Divider from '@mui/material/Divider';
+import Card from '@mui/material/Card';
+import Stack from '@mui/material/Stack';
 import {
   getQuickBooksStatus,
   startQuickBooksConnect,
@@ -24,6 +26,16 @@ import {
   type QuickBooksPoField,
 } from '@/utils/quickbooksAccess';
 import SettingsSection from '@/components/settings/SettingsSection';
+import DesktopAuthHandoff from '@/components/settings/quickbooks/DesktopAuthHandoff';
+import QuickBooksDesktopPanel from '@/components/settings/quickbooks/QuickBooksDesktopPanel';
+import LoadFailedState from '@/components/common/LoadFailedState';
+import posthog from 'posthog-js';
+import {
+  getQuickBooksDesktopStatus,
+  startQuickBooksDesktopConnect,
+  type DesktopLink,
+  type DesktopStatus,
+} from '@/utils/quickbooksDesktop';
 
 interface QuickBooksIntegrationCardProps {
   companyId: string;
@@ -43,6 +55,12 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   // trip to Intuit for a value that only changes when a human edits their
   // QuickBooks settings, and nothing on this page is blocked without it.
   const [poField, setPoField] = useState<QuickBooksPoField | null>(null);
+  // A FAILED status check is its own state, distinct from "not connected".
+  // Without it, a network blip renders "Connect to QuickBooks" to a shop that is
+  // already connected -- a failed check shown as a definitive negative.
+  const [statusFailed, setStatusFailed] = useState(false);
+  const [desktop, setDesktop] = useState<DesktopStatus | null>(null);
+  const [pendingLink, setPendingLink] = useState<DesktopLink | null>(null);
 
   const handleCheckPoField = async () => {
     setError(null);
@@ -65,9 +83,16 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const loadStatus = useCallback(async () => {
     try {
       setLoading(true);
-      const s = await getQuickBooksStatus(companyId);
-      setStatus(s);
+      const [online, desk] = await Promise.all([
+        getQuickBooksStatus(companyId),
+        getQuickBooksDesktopStatus(companyId).catch(() => null),
+      ]);
+      setStatus(online);
+      setDesktop(desk);
+      setStatusFailed(false);
+      if (desk?.linked) setPendingLink(null);
     } catch (err) {
+      setStatusFailed(true);
       setError(err instanceof Error ? err.message : 'Failed to load QuickBooks status.');
     } finally {
       setLoading(false);
@@ -75,23 +100,8 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   }, [companyId]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await getQuickBooksStatus(companyId);
-        if (!cancelled) setStatus(s);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load QuickBooks status.');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
+    void loadStatus();
+  }, [loadStatus]);
 
   // Surface the connect/error outcome from the OAuth callback redirect, then
   // strip the ?qb= param so a refresh doesn't re-show it.
@@ -108,6 +118,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const handleConnect = async () => {
     setError(null);
     setBusy(true);
+    posthog.capture('accounting connect started', { provider: 'qbo' });
     try {
       const url = await startQuickBooksConnect(companyId);
       window.location.href = url;
@@ -132,13 +143,33 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     }
   };
 
-  const connected = status?.connected ?? false;
+  const handleConnectDesktop = async () => {
+    setError(null);
+    setBusy(true);
+    posthog.capture('accounting connect started', { provider: 'qbd' });
+    try {
+      setPendingLink(await startQuickBooksDesktopConnect(companyId));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Could not start the QuickBooks Desktop setup.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  const statusChip = !loading ? (
+  const connected = status?.connected ?? false;
+  const desktopConnected = desktop?.connected ?? false;
+  const desktopLinked = desktop?.linked ?? false;
+
+  // Deliberately `undefined` while loading AND when the check failed: a chip
+  // reading "Not connected" is an assertion, and we only made a request that
+  // errored. CLAUDE.md -- "Couldn't check" is never "denied".
+  const statusChip = !loading && !statusFailed ? (
     <>
       <StatusChip
-        label={connected ? 'Connected' : 'Not connected'}
-        color={connected ? 'success' : 'default'}
+        label={connected || desktopLinked ? 'Connected' : 'Not connected'}
+        color={connected || desktopLinked ? 'success' : 'default'}
       />
       {/* Secondary environment tag — kept outlined to sit quietly next to status. */}
       {connected && status?.environment === 'sandbox' && (
@@ -149,7 +180,9 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
 
   return (
     <SettingsSection
-      title="QuickBooks Online"
+      title={
+        connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
+      }
       statusChip={statusChip}
       description="Connect QuickBooks Online to push converted quotes as invoices. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
     >
@@ -168,11 +201,60 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
           </Box>
+        ) : statusFailed ? (
+          /* A failed check must NOT offer to connect: with two providers that
+             would show "pick a provider" to a shop that already has one. */
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <LoadFailedState error={error} entity="your QuickBooks connection" onRetry={loadStatus} />
+          </Box>
+        ) : desktopConnected ? (
+          desktopLinked ? (
+            <QuickBooksDesktopPanel
+              companyId={companyId}
+              onDisconnected={() => {
+                setPendingLink(null);
+                void loadStatus();
+              }}
+            />
+          ) : (
+            <DesktopAuthHandoff
+              authFlowUrl={pendingLink?.auth_flow_url ?? ''}
+              expiresAt={pendingLink?.expires_at ?? null}
+              checking={busy}
+              onCheckNow={() => void loadStatus()}
+              onNewLink={handleConnectDesktop}
+            />
+          )
+        ) : pendingLink ? (
+          <DesktopAuthHandoff
+            authFlowUrl={pendingLink.auth_flow_url}
+            expiresAt={pendingLink.expires_at}
+            checking={busy}
+            onCheckNow={() => void loadStatus()}
+            onNewLink={handleConnectDesktop}
+          />
         ) : !connected ? (
-          <Button variant="contained" onClick={handleConnect} disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-            Connect to QuickBooks
-          </Button>
+          <Box>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Pick the QuickBooks your shop uses. You can connect one, not both.
+            </Typography>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+              <ProviderOption
+                title="QuickBooks Online"
+                detail="You open QuickBooks in a web browser and sign in at qbo.intuit.com."
+                actionLabel="Connect QuickBooks Online"
+                onConnect={handleConnect}
+                busy={busy}
+              />
+              <ProviderOption
+                title="QuickBooks Desktop"
+                detail="QuickBooks is installed on a computer in the shop � Pro, Premier or Enterprise."
+                actionLabel="Connect QuickBooks Desktop"
+                onConnect={handleConnectDesktop}
+                busy={busy}
+              />
+            </Stack>
+          </Box>
         ) : (
           <>
             {status?.reconnect_required && (
@@ -270,5 +352,37 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         </DialogActions>
       </Dialog>
     </SettingsSection>
+  );
+}
+
+
+/** One of the two co-equal provider choices. Both buttons are `contained`: they
+ *  are peers, and ranking them by giving one a border would imply a house
+ *  recommendation we do not have. */
+function ProviderOption({
+  title,
+  detail,
+  actionLabel,
+  onConnect,
+  busy,
+}: {
+  title: string;
+  detail: string;
+  actionLabel: string;
+  onConnect: () => void;
+  busy?: boolean;
+}) {
+  return (
+    <Card variant="outlined" sx={{ flex: 1, p: 2 }}>
+      <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+        {title}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {detail}
+      </Typography>
+      <Button variant="contained" onClick={onConnect} disabled={busy}>
+        {actionLabel}
+      </Button>
+    </Card>
   );
 }

@@ -85,6 +85,14 @@ export default function InvoicesMenu({
             ),
           )
         )}
+        {invoices.length > 0 && invoices.every((i) => !i.url) && (
+          <MenuItem disabled sx={{ whiteSpace: 'normal', maxWidth: 320 }}>
+            <ListItemText
+              secondary="QuickBooks Desktop has no web page to link to — open the invoice in QuickBooks on the shop computer."
+              slotProps={{ secondary: { variant: 'caption' } }}
+            />
+          </MenuItem>
+        )}
         <Divider />
         <MenuItem
           onClick={() => {

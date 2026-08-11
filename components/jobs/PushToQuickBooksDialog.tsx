@@ -1,5 +1,9 @@
 'use client';
 
+import posthog from 'posthog-js';
+import LinearProgress from '@mui/material/LinearProgress';
+import AlertTitle from '@mui/material/AlertTitle';
+import QuickBooksUnreachableAlert from '@/components/quickbooks/QuickBooksUnreachableAlert';
 import { useState, useCallback } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -21,6 +25,8 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import {
+  isQuickBooksUnreachable,
+  isQuickBooksUnverified,
   preflightJobPush,
   pushJobToQuickBooks,
   type PreflightResult,
@@ -62,6 +68,8 @@ export default function PushToQuickBooksDialog({
   const [loading, setLoading] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unreachable, setUnreachable] = useState<string | null>(null);
+  const [unverified, setUnverified] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [choice, setChoice] = useState<string>(CREATE_SENTINEL);
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
@@ -149,7 +157,12 @@ export default function PushToQuickBooksDialog({
     // blocker allows it; we point it at the QuickBooks invoice once the push
     // returns. (A window.open after the await loses the user-activation the
     // blocker requires.) If the push yields no invoice, close the placeholder.
-    const invoiceWindow = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    // Only QuickBooks ONLINE has a web invoice to deep-link to. Opening a
+    // placeholder tab for a Desktop push would flash an empty window and close it
+    // several seconds later, because there is no URL to point it at.
+    const willDeepLink = preflight?.has_deep_links !== false;
+    const invoiceWindow =
+      willDeepLink && typeof window !== 'undefined' ? window.open('', '_blank') : null;
     if (invoiceWindow) invoiceWindow.opener = null; // reverse-tabnabbing guard
     try {
       const customer: PushCustomerDecision =
@@ -187,6 +200,12 @@ export default function PushToQuickBooksDialog({
       } else {
         invoiceWindow?.close();
       }
+      posthog.capture('invoice pushed', {
+        provider: preflight?.provider ?? 'qbo',
+        line_count: lines.length,
+        already_existed: Boolean(result.already_existed),
+        has_deep_link: Boolean(result.url),
+      });
       const docRef = result.doc_number ? `Invoice ${result.doc_number}` : 'Invoice';
       onPushed(
         result.already_existed
@@ -195,7 +214,18 @@ export default function PushToQuickBooksDialog({
       );
     } catch (err) {
       invoiceWindow?.close();
-      setError(err instanceof Error ? err.message : 'Failed to push to QuickBooks.');
+      // Retrying reuses the SAME requestId ON PURPOSE. If the first attempt
+      // reached QuickBooks and we lost the answer, the replay collides on the
+      // idempotency key and adopts the invoice that already exists rather than
+      // creating a second one. Minting a fresh id here is the intuitive move and
+      // the bug.
+      if (isQuickBooksUnreachable(err)) {
+        setUnreachable(err instanceof Error ? err.message : null);
+      } else if (isQuickBooksUnverified(err)) {
+        setUnverified(err instanceof Error ? err.message : 'Check QuickBooks before retrying.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to push to QuickBooks.');
+      }
     } finally {
       setPushing(false);
     }
@@ -219,6 +249,39 @@ export default function PushToQuickBooksDialog({
     >
       <DialogTitle>Create QuickBooks invoice for {jobNumber}</DialogTitle>
       <DialogContent dividers>
+        {unreachable !== null && (
+          <QuickBooksUnreachableAlert
+            message={unreachable}
+            onRetry={() => {
+              setUnreachable(null);
+              void handlePush();
+            }}
+            busy={pushing}
+          />
+        )}
+        {unverified !== null && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <AlertTitle>We couldn&apos;t confirm that invoice</AlertTitle>
+            {unverified} It may already exist in QuickBooks, so Jigged will not try again on its
+            own — creating a second one is the risk we refuse to take.
+          </Alert>
+        )}
+        {preflight?.blocked && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            An earlier invoice for this job could not be confirmed in QuickBooks. Check it there
+            before creating another.
+          </Alert>
+        )}
+        {pushing && (
+          <Box sx={{ mb: 2 }}>
+            <LinearProgress />
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }} aria-live="polite">
+              {preflight?.provider === 'qbd'
+                ? 'Sending to QuickBooks on the shop computer — this can take a few seconds.'
+                : 'Sending to QuickBooks…'}
+            </Typography>
+          </Box>
+        )}
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />

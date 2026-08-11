@@ -180,6 +180,25 @@ const jiggedTheme = createTheme({
         },
       },
     },
+    /*
+     * A MODAL SURFACE IS OPAQUE. `background.paper` is `rgba(32, 38, 82, 0.78)` on purpose — a card
+     * is meant to sit *on* the lit canvas and let a little of it through. A drawer is not a card:
+     * it covers the page, and at 78% the page reads straight through it. Caught on a 390px screen,
+     * where a full-width drawer over a full-width grid made both illegible at once.
+     *
+     * Dialog and Menu already carry this same override for this same reason; a drawer was the one
+     * modal surface still inheriting the card value. Every drawer in the app today sets its own
+     * paper background, so this changes none of them — it fixes the DEFAULT, which is what the next
+     * one will get.
+     */
+    MuiDrawer: {
+      styleOverrides: {
+        paper: {
+          backgroundColor: '#111439',
+          backgroundImage: 'linear-gradient(135deg, #111439 0%, #1a1f4a 100%)',
+        },
+      },
+    },
     MuiListItemButton: {
       styleOverrides: {
         root: {

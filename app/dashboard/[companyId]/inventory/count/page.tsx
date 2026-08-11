@@ -262,7 +262,11 @@ export default function InventoryCountPage() {
     // and "Count  in Shelf A" is worse than the generic title for the moment in between.
     if (partScope && partName && locationName) setTitle(`Count ${partName} in ${locationName}`);
     else if (everywhereScope && partName) setTitle(`Count ${partName} everywhere`);
-    else if (locationMode && locationName) setTitle(`Count ${locationName}`);
+    // `Bulk Adjust`, matching the button that opens it. A count IS a batch of adjustments —
+    // `commitCount` writes one `adjustStockAtLocation` per line — so naming the page for the tool
+    // while the button named the outcome made two names for one thing. The shop-wide entry keeps
+    // `Count Inventory`: it is reached from Parts, where the noun is the items, not the places.
+    else if (locationMode && locationName) setTitle(`Bulk Adjust ${locationName}`);
     else setTitle('Count Inventory');
     return () => setTitle(null);
   }, [setTitle, locationMode, locationName, partScope, everywhereScope, partName]);
@@ -311,6 +315,16 @@ export default function InventoryCountPage() {
    * its own bin — so this hides one control rather than restricting the sheet.
    */
   const [countingSubtree, setCountingSubtree] = useState(false);
+
+  /**
+   * The bins this sheet actually spans, and which of them a newly-found part goes into.
+   *
+   * Only meaningful when `countingSubtree` — a single-bin sheet has exactly one answer and asking
+   * would be a dropdown of one. Held here rather than recomputed because the walk that produces it
+   * runs inside the load effect, against the full location list this component does not keep.
+   */
+  const [leafOptions, setLeafOptions] = useState<LocationPickerOption[]>([]);
+  const [addTo, setAddTo] = useState<LocationPickerOption | null>(null);
 
   /** Put-away state: the destination, and whether a move is in flight. */
   const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
@@ -467,7 +481,14 @@ export default function InventoryCountPage() {
               .forEach(walk);
           };
           walk(here);
-          setCountingSubtree(leaves.length > 1 || leaves[0]?.id !== here.id);
+          const subtree = leaves.length > 1 || leaves[0]?.id !== here.id;
+          setCountingSubtree(subtree);
+          // The bins a found part may be added to. Empty on a single-bin sheet, where the sheet's
+          // own location IS the answer and a picker of one is friction.
+          setLeafOptions(
+            subtree ? leaves.map((l) => ({ id: l.id, label: l.path || l.name })) : [],
+          );
+          setAddTo(null);
 
           const { candidates: found, total } = await loadCountCandidatesForPlaces(
             leaves.length === 1 && leaves[0].id === here.id
@@ -671,16 +692,42 @@ export default function InventoryCountPage() {
     if (!option || !locationId) return;
     setAddNonce((n) => n + 1);
 
-    // `selected` is keyed by `countRowKey` (`partId::locationId`), so probing it with a bare part
-    // id never matched and this guard has never once fired — re-adding a part silently re-fetched
-    // and overwrote its row, discarding whatever had been typed into it.
-    if ([...selected.values()].some((c) => c.partId === option.id)) {
-      setSnack({ msg: `${option.part_name} is already on the sheet.`, severity: 'success' });
+    /*
+     * On a subtree sheet the row must target a BIN, never the cabinet.
+     *
+     * `adjust_stock_at_location` refuses a place that has sub-locations, so targeting the container
+     * produced a row you could tick, type into, and only then be told "That place has
+     * sub-locations, so stock goes in one of those rather than in it" — after the count, which is
+     * the one moment a person is least willing to redo. Asked here instead, before the row exists.
+     */
+    const target = countingSubtree ? addTo : { id: locationId, label: locationName };
+    if (!target) {
+      setSnack({
+        msg: `Choose which place ${option.part_name} is in — a cabinet holds no stock itself.`,
+        severity: 'error',
+      });
+      return;
+    }
+
+    /*
+     * Already on the sheet AT THIS PLACE — not merely already on the sheet.
+     *
+     * The guard was per-PART, which was right while a sheet meant one bin. A subtree sheet spans a
+     * whole cabinet, and finding the same o-ring in Shelf A and again in Shelf B is an ordinary
+     * morning: rejecting the second would make the more thorough count the one the software
+     * refuses to record. Row-scoped, matching `countRowKey`, which is what `selected` is keyed by.
+     */
+    const dupKey = `${option.id}::${target.id}`;
+    if ([...selected.values()].some((c) => countRowKey(c) === dupKey)) {
+      setSnack({
+        msg: `${option.part_name} is already on the sheet at ${target.label}.`,
+        severity: 'success',
+      });
       return;
     }
     setAddingPart(true);
     try {
-      const c = await loadPartAtLocationCandidate(companyId, option.id, locationId, locationName);
+      const c = await loadPartAtLocationCandidate(companyId, option.id, target.id, target.label);
       setSelected((prev) => new Map(prev).set(countRowKey(c), c));
       // Prepend so it is visible without hunting: it is not on this page of the server list, and
       // may not be on any page.
@@ -688,6 +735,8 @@ export default function InventoryCountPage() {
       // every row that shares a part id would delete its other shelves from the list.
       setCandidates((prev) => [c, ...prev.filter((x) => countRowKey(x) !== countRowKey(c))]);
       rememberOpenedWith([c]);
+      // Not cleared: on a subtree sheet you are standing at one bin working through it, so the
+      // next thing you find is far more likely to be in the same place than in a different one.
     } catch (e) {
       setSnack({
         msg: e instanceof Error ? e.message : 'Could not add that part.',
@@ -1094,7 +1143,16 @@ export default function InventoryCountPage() {
             </Card>
           ) : (
             <>
-              <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+              {/*
+                `flex-start`, not `center`.
+                
+                The add-a-part field carries helper text and the search field does not, so centring
+                them aligned their MIDDLES and left the two input boxes visibly off by half a line.
+                Aligning the tops lines up the boxes, which is the part a person is looking at.
+              */}
+              <Box
+                sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'flex-start' }}
+              >
                 <TextField
                   placeholder={locationMode ? 'Search what’s here…' : 'Search parts...'}
                   size="small"
@@ -1116,6 +1174,27 @@ export default function InventoryCountPage() {
                       size="small"
                       disabled={addingPart}
                       helperText="Adds it to this sheet even if the system says none is here."
+                    />
+                  </Box>
+                )}
+                {/*
+                  WHICH BIN it goes in, and it is not optional on a subtree sheet.
+
+                  `addPartHere` used to target the sheet's own `?location=`, which on a cabinet is
+                  the CONTAINER — and `adjust_stock_at_location` refuses one, so a part added this
+                  way could be typed, counted and only then rejected with "That place has
+                  sub-locations". A container holds no stock; its bins do. So when the sheet spans
+                  several bins, say which.
+                */}
+                {locationMode && countingSubtree && (
+                  <Box sx={{ width: 300 }}>
+                    <LocationPicker
+                      label="…into which place?"
+                      options={leafOptions}
+                      value={addTo}
+                      onChange={setAddTo}
+                      size="small"
+                      helperText="Stock lives in the bins, not in the cabinet."
                     />
                   </Box>
                 )}

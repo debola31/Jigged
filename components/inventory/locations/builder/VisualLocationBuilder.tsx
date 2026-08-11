@@ -9,12 +9,13 @@ import DialogActions from '@mui/material/DialogActions';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
 
 import type { LevelSpec, LocationContent, LocationSpecNode } from '@/types/inventoryLocations';
 import {
   buildSpecFromLevels,
   collectSpecLeaves,
-  countSpecNodes,
   removeSpecNode,
   addChildUnder,
   duplicateNode,
@@ -56,6 +57,11 @@ interface VisualLocationBuilderProps {
   /** Human path of the parent, for the dialog title. */
   parentPath?: string[];
   /**
+   * Names already at the top level, so the new unit's name can be checked before it is typed into
+   * a 23505. Only meaningful when `parentId` is null.
+   */
+  siblingNames?: string[];
+  /**
    * Names the parent already holds, so a repeat subdivide continues the numbering (Row 4–6)
    * instead of regenerating Row 1–3 and colliding.
    */
@@ -78,6 +84,7 @@ export default function VisualLocationBuilder({
   companyId,
   parentId = null,
   parentPath,
+  siblingNames,
   existingSiblingNames,
   startSortOrder = 0,
   onClose,
@@ -97,6 +104,16 @@ export default function VisualLocationBuilder({
    * an "Auto Create" wizard. None of them makes you choose an icon first.
    */
   const subdividing = parentId !== null;
+  /**
+   * The unit's own name, when this is creating one.
+   *
+   * Storage used to be two steps: name a place in one modal, then find `Divide it up…` inside its
+   * detail sheet to give it any structure. Nobody creating a cabinet wants a cabinet with nothing
+   * in it, and the second step was buried behind a drawer — so the shop ended up with an empty
+   * cabinet and no obvious way to say what was inside it. Naming and shaping are one decision, so
+   * they are one screen, and `create_location_tree` writes the whole thing in one transaction.
+   */
+  const [unitName, setUnitName] = useState('');
   const [levels, setLevels] = useState<LevelSpec[]>(() => cloneLevels(DEFAULT_LEVELS));
   // Once a single branch is fine-tuned, the tree is hand-edited directly and no
   // longer regenerated from `levels` (which becomes the "Start over" template).
@@ -119,6 +136,7 @@ export default function VisualLocationBuilder({
   const [step, setStep] = useState<'layout' | 'distribute'>('layout');
 
   const reset = () => {
+    setUnitName('');
     setLevels(cloneLevels(DEFAULT_LEVELS));
     setCustomized(false);
     setEditedTree([]);
@@ -142,7 +160,31 @@ export default function VisualLocationBuilder({
     [levels, existingSiblingNames],
   );
   const tree = customized ? editedTree : uniformTree;
-  const total = countSpecNodes(tree);
+  /**
+   * What actually gets written.
+   *
+   * Subdividing sends the levels straight under the existing parent. Creating a unit wraps them in
+   * a root node named by the field above, so the unit and everything inside it land in ONE
+   * `create_location_tree` call rather than a create followed by a subdivide.
+   */
+  const spec = useMemo(
+    () =>
+      subdividing
+        ? tree
+        : [{ key: 'unit', name: unitName.trim(), kind: null, children: tree }],
+    [subdividing, tree, unitName],
+  );
+  const leaves = useMemo(() => collectSpecLeaves(spec), [spec]);
+  /**
+   * **Places**, not nodes.
+   *
+   * This counted every node the spec would insert, so "4 rows × 2" reported **12** — four rows plus
+   * eight bins — and the operator then found eight places. The rows are structure: the
+   * container/bin invariant means stock cannot sit in one, so counting them told someone they were
+   * getting half again as much storage as they were. Leaves are what you can put something in, and
+   * `places` is the word the Storage screen already uses for them.
+   */
+  const total = leaves.length;
 
   // Editing lives in the config; the preview is read-only.
   const enterCustomize = () => {
@@ -170,8 +212,15 @@ export default function VisualLocationBuilder({
 
   /** Only a loaded parent needs the second step; an empty one keeps the original single screen. */
   const needsDistribution = contents.length > 0;
-  const leaves = useMemo(() => collectSpecLeaves(tree), [tree]);
   const distributionReady = isDistributionComplete(contents, assignments);
+
+  /** Matched the way the sibling-name index does, so the warning and the constraint agree. */
+  const trimmedName = unitName.trim();
+  const duplicateName = trimmedName
+    ? (siblingNames ?? []).find((n) => n.trim().toLowerCase() === trimmedName.toLowerCase())
+    : undefined;
+  /** A unit needs a name. Its levels are optional — "the yard" is one place and that is fine. */
+  const canCreate = subdividing ? total > 0 : Boolean(trimmedName) && !duplicateName;
 
   const handleCreate = async () => {
     setCreating(true);
@@ -195,7 +244,7 @@ export default function VisualLocationBuilder({
         );
         onCreated(created.length);
       } else {
-        const created = await materializeLocationSpec(companyId, parentId, tree, startSortOrder);
+        const created = await materializeLocationSpec(companyId, parentId, spec, startSortOrder);
         onCreated(created.length);
       }
       onClose();
@@ -216,12 +265,41 @@ export default function VisualLocationBuilder({
     >
       <DialogTitle>
         {subdividing
-          ? `Divide up ${parentPath?.length ? parentPath.join(' › ') : 'this unit'}`
-          : 'Add several places at once'}
+          ? `Change the layout of ${parentPath?.length ? parentPath.join(' › ') : 'this unit'}`
+          : 'Add storage'}
       </DialogTitle>
       <DialogContent dividers sx={{ minHeight: 420 }}>
         <Box>
           <Box sx={{ minWidth: 0, display: step === 'layout' ? 'block' : 'none' }}>
+            {!subdividing && (
+              <Box sx={{ mb: 3 }}>
+                {/* freeSolo, so it stays a name field that happens to suggest — picking an existing
+                    name is how you avoid typing a second spelling of it. Same control and the same
+                    case-insensitive match the sibling-name index uses, so the warning and the
+                    constraint cannot disagree. */}
+                <Autocomplete
+                  freeSolo
+                  options={siblingNames ?? []}
+                  value={unitName}
+                  onInputChange={(_, v) => setUnitName(v)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="What is it called?"
+                      placeholder="Cabinet 1, the shelf by the welder, the yard…"
+                      autoFocus
+                      required
+                      error={Boolean(duplicateName)}
+                      helperText={
+                        duplicateName
+                          ? `You already have a ${duplicateName}.`
+                          : 'Then say how it is divided up — or leave it as one place.'
+                      }
+                    />
+                  )}
+                />
+              </Box>
+            )}
             {/* Kept mounted rather than unmounted when the distribute step is showing: the level
                 config holds the hand-edited tree, and stepping back to fix a name must not reset
                 it to the generated default. */}
@@ -279,7 +357,7 @@ export default function VisualLocationBuilder({
           <Button
             variant="contained"
             onClick={() => setStep('distribute')}
-            disabled={creating || total === 0}
+            disabled={creating || !canCreate}
           >
             Next: where does the stock go?
           </Button>
@@ -289,12 +367,12 @@ export default function VisualLocationBuilder({
             onClick={handleCreate}
             disabled={
               creating ||
-              total === 0 ||
+              !canCreate ||
               loadingContents ||
               (needsDistribution && !distributionReady)
             }
           >
-            Create {total} location{total === 1 ? '' : 's'}
+            Create {total} place{total === 1 ? '' : 's'}
           </Button>
         )}
       </DialogActions>

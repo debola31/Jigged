@@ -65,21 +65,21 @@ describe('the level generator', () => {
 
     expect(screen.getAllByText('Call them').length).toBeGreaterThan(0);
     // 5 rows + their 10 sides — `countSpecNodes` counts parents too.
-    expect(await screen.findByRole('button', { name: /create 15 locations/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeInTheDocument();
     expect(screen.queryByText(/what kind of storage/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/how is this unit divided up inside/i)).not.toBeInTheDocument();
   });
 
   it('names the unit it is dividing, so you know where you are', () => {
     subdivide();
-    expect(screen.getByText('Divide up Cabinet 3')).toBeInTheDocument();
+    expect(screen.getByText('Change the layout of Cabinet 3')).toBeInTheDocument();
   });
 
   it('creates under the parent, with the parent code prefixed', async () => {
     const user = userEvent.setup();
     subdivide();
 
-    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
     const [companyId, parentId, spec] = (materializeLocationSpec as Mock).mock.calls[0];
     expect(companyId).toBe('co1');
@@ -98,7 +98,7 @@ describe('the level generator', () => {
     // which makes it load-bearing rather than decorative.
     expect(await screen.findByText(/→ Row 4, Row 5, Row 6/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /create 15 locations/i }));
+    await user.click(screen.getByRole('button', { name: /create 10 places/i }));
     const spec = (materializeLocationSpec as Mock).mock.calls[0][2];
     expect(spec.map((n: { name: string }) => n.name)).toEqual([
       'Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8',
@@ -108,31 +108,31 @@ describe('the level generator', () => {
   it('customizes a single branch, then can start over', async () => {
     const user = userEvent.setup();
     subdivide();
-    await screen.findByRole('button', { name: /create 15 locations/i });
+    await screen.findByRole('button', { name: /create 10 places/i });
 
     await user.click(screen.getByRole('button', { name: /customize individual spots/i }));
     expect(screen.getByRole('button', { name: /^start over$/i })).toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /^add$/i })[0]);
-    expect(await screen.findByRole('button', { name: /create 16 locations/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /create 11 places/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /^start over$/i }));
     const confirms = screen.getAllByRole('button', { name: /^start over$/i });
     await user.click(confirms[confirms.length - 1]);
-    expect(await screen.findByRole('button', { name: /create 15 locations/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeInTheDocument();
     expect(screen.getAllByText('Call them').length).toBeGreaterThan(0);
   });
 
   it('duplicates one branch from the customize editor', async () => {
     const user = userEvent.setup();
     subdivide();
-    await screen.findByRole('button', { name: /create 15 locations/i });
+    await screen.findByRole('button', { name: /create 10 places/i });
 
     await user.click(screen.getByRole('button', { name: /customize individual spots/i }));
     await user.click(await screen.findByRole('button', { name: /duplicate row 1/i }));
 
     // Row 1 plus its two sides, cloned.
-    expect(await screen.findByRole('button', { name: /create 18 locations/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /create 12 places/i })).toBeInTheDocument();
   });
 });
 
@@ -233,7 +233,7 @@ describe('dividing up a shelf that holds stock', () => {
     const user = userEvent.setup();
     subdivide();
 
-    await user.click(await screen.findByRole('button', { name: /create 15 locations/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
     expect(materializeLocationSpec).toHaveBeenCalled();
     expect(subdivideLocation).not.toHaveBeenCalled();

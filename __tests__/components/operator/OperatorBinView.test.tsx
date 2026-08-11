@@ -8,6 +8,7 @@ import OperatorBinViewPage from '@/app/operator/[companyId]/inventory/locations/
 import {
   resolveScan,
   depleteStockAtLocation,
+  getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 
@@ -18,12 +19,19 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
-vi.mock('@/utils/inventoryLocationsAccess', () => ({
+vi.mock('@/utils/inventoryLocationsAccess', async () => ({
   resolveScan: vi.fn(),
   // Move destinations: the page loads the whole tree so tapping Move doesn't wait on a fetch.
   getLocations: vi.fn(async () => []),
   // Recent activity for this bin. Empty by default — these tests are about the contents.
   getLocationHistory: vi.fn(async () => []),
+  // Fill state for the drawn sub-locations. One aggregated read, the same view the office uses.
+  getLocationOccupancy: vi.fn(async () => new Map()),
+  // Not mocked away: the page builds the subtree it draws from `getLocations` above, and these
+  // tests assert what that drawing contains. Re-exported so the real one runs.
+  buildLocationTree: (await vi.importActual<typeof import('@/utils/inventoryLocationsAccess')>(
+    '@/utils/inventoryLocationsAccess',
+  )).buildLocationTree,
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
   adjustStockAtLocation: vi.fn(),
@@ -92,15 +100,25 @@ describe('OperatorBinViewPage', () => {
     expect(screen.getByText('12')).toBeInTheDocument();
   });
 
-  it('drills down into a sub-location', async () => {
+  /**
+   * Sub-locations are DRAWN now, not stacked as cards — the same `UnitGridView` the office uses,
+   * at what is already the QR target route. The grid needs grandchildren to know what is a row and
+   * what is a cell, which `resolveScan` does not carry, so it reads the tree from `getLocations`.
+   */
+  it('draws sub-locations as a grid and drills into one', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
-      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+      scanWith([loc({ id: 'sub1', name: 'Sub A' })], []),
     );
+    vi.mocked(getLocations).mockResolvedValue([
+      loc({ id: 'loc1', name: 'Bin 3' }),
+      loc({ id: 'sub1', name: 'Sub A', parent_id: 'loc1' }),
+    ]);
     renderPage();
 
-    expect(await screen.findByText('Sub A')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByText('Sub A'));
+    // A leaf child draws as a full-width cell, and its accessible name carries the fill state
+    // rather than leaving occupancy to colour alone.
+    const cell = await screen.findByRole('button', { name: /^Sub A/ });
+    await userEvent.click(cell);
     expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
   });
 
@@ -113,11 +131,15 @@ describe('OperatorBinViewPage', () => {
    */
   it('offers no way to stock a place that has sub-locations', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
-      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+      scanWith([loc({ id: 'sub1', name: 'Sub A' })], []),
     );
+    vi.mocked(getLocations).mockResolvedValue([
+      loc({ id: 'loc1', name: 'Bin 3' }),
+      loc({ id: 'sub1', name: 'Sub A', parent_id: 'loc1' }),
+    ]);
     renderPage();
 
-    expect(await screen.findByText('Sub A')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Sub A/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /stock a part/i })).not.toBeInTheDocument();
     expect(screen.getByText(/stock goes in the sub-locations above/i)).toBeInTheDocument();
   });

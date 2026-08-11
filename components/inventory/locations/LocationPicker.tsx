@@ -57,6 +57,14 @@ export interface LocationPickerProps {
   unit?: string;
   required?: boolean;
   disabled?: boolean;
+  /**
+   * Field density, forwarded to the input.
+   *
+   * Exists so this can stand in a toolbar beside `size="small"` fields without being the one
+   * control half a line taller than its neighbours — which is exactly how it read next to the
+   * count sheet's search box.
+   */
+  size?: 'small' | 'medium';
   helperText?: string;
   error?: boolean;
   /**
@@ -80,6 +88,7 @@ export default function LocationPicker({
   disabled = false,
   helperText,
   error = false,
+  size = 'medium',
   onCreate,
 }: LocationPickerProps) {
   const [creating, setCreating] = useState(false);
@@ -167,6 +176,7 @@ export default function LocationPicker({
       renderInput={(params) => (
         <TextField
           {...params}
+          size={size}
           label={label}
           required={required}
           error={error || Boolean(createError)}

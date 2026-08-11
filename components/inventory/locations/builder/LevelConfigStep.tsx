@@ -173,7 +173,7 @@ export default function LevelConfigStep({
         )}
 
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'right' }}>
-          <strong>{total}</strong> location{total === 1 ? '' : 's'}
+          <strong>{total}</strong> place{total === 1 ? '' : 's'}
         </Typography>
       </Box>
     );
@@ -293,7 +293,7 @@ export default function LevelConfigStep({
         </Button>
         <Box sx={{ flex: 1 }} />
         <Typography variant="body2" color="text.secondary">
-          <strong>{total}</strong> location{total === 1 ? '' : 's'}
+          <strong>{total}</strong> place{total === 1 ? '' : 's'}
         </Typography>
       </Stack>
 

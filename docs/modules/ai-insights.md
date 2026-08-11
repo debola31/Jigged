@@ -60,8 +60,7 @@ plays to what LLMs are good at.
 The code is the source of truth; this doc has been wrong about both before.
 
 **`ALLOWED_TABLES` — 19:** `companies`, `customers`, `vendors`, `parts`, `part_pricing_tiers`,
-`parts_bom`, `parts_unit_conversions`, `quotes`, `quote_line_items`, `quote_materials`,
-`quote_operations`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`,
+`parts_bom`, `parts_unit_conversions`, `quotes`, `quote_line_items`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`,
 `routings`, `routing_operations`, `inventory_transactions`.
 
 **`SENSITIVE_TABLES` — 14:** `user_company_access`, `user_preferences`, `system_admins`,

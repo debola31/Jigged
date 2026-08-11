@@ -27,10 +27,11 @@ import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAc
 import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 import {
   addPartPricingNote,
-  getComputedPartCost,
+  getComputedPartChargeBase,
   updatePartCostingBatchQuantity,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
@@ -125,8 +126,8 @@ function parseNumber(s: string): number | null {
 
 /**
  * Recompute a tier row's Base/unit and Unit price from the SINGLE-SOURCE base
- * cost at that tier's own quantity — `baseCostByQty` holds
- * `getComputedPartCost(part, qty)` results (the same engine the quote form and
+ * base at that tier's own quantity — `baseCostByQty` holds
+ * `getComputedPartChargeBase(part, qty)` results (the same engine the quote form and
  * the persisted line use, so a tier's price here matches a quote at that qty).
  * Base absent from the map = not fetched yet → render "—" until it lands.
  */
@@ -154,6 +155,11 @@ function recomputeRow(row: EditRow, baseCostByQty: Map<number, number | null>): 
  * no persisted tiers yet — the user fills the markup and saves. Until then the
  * part reads as "no markup / not priceable".
  */
+/** A markup for prose: trims the trailing zeros a numeric(10,6) round-trips. */
+function formatPercentValue(n: number): string {
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 6 })}%`;
+}
+
 function blankRow(): EditRow {
   return {
     sequence: 10,
@@ -186,7 +192,7 @@ function blankRow(): EditRow {
  *       PartProcurementPricingPanel card above this one — keeping
  *       cost-of-goods and markup visually distinct
  *     - Base / unit comes from get_procurement_cost(qty) at each tier qty
- *       (same compute engine, getComputedPartCost), so the card shows the
+ *       (same compute engine, getComputedPartChargeBase), so the card shows the
  *       final unit-price-after-markup just like a made part. (Since PR #567
  *       collapsed procurement to part-level tiers, this cost is deterministic
  *       — no "which vendor wins" ambiguity.)
@@ -211,10 +217,11 @@ export default function PartPricing({
 
   const [rows, setRows] = useState<EditRow[]>([]);
   const [breakdown, setBreakdown] = useState<RoutingCostBreakdown | null>(null);
-  // Base cost per tier quantity, from the ONE canonical engine
-  // (getComputedPartCost → compute_part_cost_at_qty) — the same source the quote
-  // form and the persisted line use, so a tier's Base/unit + Unit price match a
-  // quote at that qty. `breakdown` is kept only for the cost build-up + warnings.
+  // Base per tier quantity, from the ONE canonical engine
+  // (getComputedPartChargeBase → compute_part_charge_base_at_qty) — the same
+  // source the quote form and the persisted line use, so a tier's Base/unit +
+  // Unit price match a quote at that qty. `breakdown` is kept only for the cost
+  // build-up + warnings.
   const [tierBaseCosts, setTierBaseCosts] = useState<Map<number, number | null>>(new Map());
   const inFlightTierQtys = useRef<Set<number>>(new Set());
   const tierBaseCostsRef = useRef(tierBaseCosts);
@@ -237,6 +244,10 @@ export default function PartPricing({
   // even if the previous part left staged edits behind; a sibling-panel refresh
   // on the SAME part must not.
   const loadedPartIdRef = useRef<string | null>(null);
+  // The shop's starting markup for this part's source. Read once per company;
+  // used to SEED the first tier and to caption where that number came from.
+  // null while it loads — the starter write waits rather than guessing 0.
+  const [starterMarkup, setStarterMarkup] = useState<number | null>(null);
   const saving = saveState === 'saving';
 
   const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
@@ -261,6 +272,24 @@ export default function PartPricing({
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
   const costingDirty = costingQtyStr.trim() !== costingBaseline.trim();
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCompany(companyId)
+      .then((c) => {
+        if (cancelled) return;
+        const starters = readCompanyPricingDefaults(c);
+        setStarterMarkup(isBought ? starters.bought : starters.made);
+      })
+      .catch(() => {
+        // Leave it null: the starter tier simply doesn't fire, and the card
+        // behaves as it did before the setting existed. Guessing 0 here would
+        // write a markup the shop may not have chosen.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, isBought]);
   const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
     const n = parseFloat(costingQtyStr);
@@ -289,9 +318,9 @@ export default function PartPricing({
         sequence: t.sequence,
         quantity: String(t.quantity),
         markupPercent: t.markup_percent !== null ? String(t.markup_percent) : '',
-        // unitPrice + baseCostPerUnit are filled in by the base-cost effect
-        // (getComputedPartCost per tier qty → base × markup) once the async
-        // costs land; start blank so nothing stale renders.
+        // unitPrice + baseCostPerUnit are filled in by the base effect
+        // (getComputedPartChargeBase per tier qty → base × markup) once the
+        // async values land; start blank so nothing stale renders.
         unitPrice: '',
         baseCostPerUnit: null,
       }));
@@ -389,9 +418,15 @@ export default function PartPricing({
     };
   }, [partId, isBought, costingQty, refreshKey]);
 
-  // Fetch the single-source base cost for each distinct tier quantity via the
-  // canonical engine (getComputedPartCost → compute_part_cost_at_qty), the same
-  // one the quote form and the persisted line use. Debounced so editing a tier
+  // Fetch the single-source base for each distinct tier quantity via the
+  // canonical engine, the same one the quote form and the persisted line use.
+  //
+  // It is the CHARGE base (compute_part_charge_base_at_qty), not true cost:
+  // markup applies to what materials are charged into the part at, so a BOM line
+  // set to charge its child at price is already inside this number. Identical to
+  // true cost until someone sets that toggle — and when they diverge, the Cost
+  // card above names the gap (Material markup / unit → Price base / unit) so the
+  // two cards can't look like they disagree. Debounced so editing a tier
   // qty doesn't refetch on every keystroke. Works for BOTH made and bought parts
   // — for a bought part the engine reads its procurement tiers — so the Pricing
   // card can show the same Base/unit + final Unit-price columns for both.
@@ -416,7 +451,7 @@ export default function PartPricing({
     const handle = setTimeout(() => {
       for (const q of missing) {
         inFlightTierQtys.current.add(q);
-        getComputedPartCost(forPartId, q)
+        getComputedPartChargeBase(forPartId, q)
           .catch(() => null)
           .then((base) => {
             inFlightTierQtys.current.delete(q);
@@ -443,6 +478,7 @@ export default function PartPricing({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
   }, [tierBaseCosts]);
+
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
@@ -617,6 +653,19 @@ export default function PartPricing({
     setCostingSaveState('idle');
   };
 
+
+  // The single tier the part was set up with, still sitting at the shop's
+  // starting markup. Not "any tier that matches" — a shop with two breaks
+  // has been in here and made choices, and one that typed the same number by
+  // hand doesn't need telling where it came from either (it stops matching the
+  // moment they change it, which is the only time the hint has anything to say).
+  const isUntouchedStarterTier =
+    !dirty &&
+    starterMarkup !== null &&
+    rows.length === 1 &&
+    rows[0]?.id !== undefined &&
+    parseNumber(rows[0]?.markupPercent) === starterMarkup;
+
   // Removing a row leaves no dirty row to count; UnsavedChangesBar falls back
   // to generic phrasing rather than claiming zero.
   const dirtyRowCount = dirtyRowFlags.filter(Boolean).length;
@@ -630,16 +679,40 @@ export default function PartPricing({
     : 0;
   // null when materials are incomplete: render "Materials / unit: —" so the
   // gap is visible. 0 (or no rendering) is reserved for "no BOM at all".
+  //
+  // Two figures now (#727). `materialPerUnit` is TRUE cost — what the materials
+  // cost us — because this card is the Cost card and "Cost / unit" must mean
+  // cost. `materialChargedPerUnit` is what the price is built on: it includes
+  // any child charged at its marked-up price. Identical until someone sets that
+  // toggle, and the card only grows the extra rows when they diverge.
   const materialPerUnit: number | null = breakdown
+    ? breakdown.total_material_true_cost === null
+      ? null
+      : Math.round(breakdown.total_material_true_cost * 100) / 100
+    : 0;
+  const materialChargedPerUnit: number | null = breakdown
     ? breakdown.total_material_cost === null
       ? null
       : Math.round(breakdown.total_material_cost * 100) / 100
     : 0;
-  // The three lines sum to the part's unit cost at the batch size.
+  // The three lines sum to the part's TRUE unit cost at the batch size.
   const costPerUnit: number | null =
     materialPerUnit === null
       ? null
       : Math.round((runPerUnit + setupPerUnit + materialPerUnit) * 100) / 100;
+  // The markup our own materials carry into the price, and the base the Pricing
+  // card's tier table applies its markup to. Rendered only when non-zero, so
+  // the common card is unchanged.
+  const materialMarkupPerUnit: number | null =
+    materialPerUnit === null || materialChargedPerUnit === null
+      ? null
+      : Math.round((materialChargedPerUnit - materialPerUnit) * 100) / 100;
+  const showMaterialMarkup =
+    materialMarkupPerUnit !== null && Math.abs(materialMarkupPerUnit) >= 0.005;
+  const priceBasePerUnit: number | null =
+    materialChargedPerUnit === null
+      ? null
+      : Math.round((runPerUnit + setupPerUnit + materialChargedPerUnit) * 100) / 100;
 
   const warningsAlert =
     !isBought && breakdown && breakdown.warnings.length > 0 ? (
@@ -782,6 +855,38 @@ export default function PartPricing({
                     {formatCurrency(costPerUnit)}
                   </Typography>
                 </Box>
+
+                {/* Only when a material is charged at price. Two extra lines
+                    make the Pricing card's Base / unit traceable from here —
+                    otherwise the two cards would show different numbers with
+                    nothing on screen to explain the gap. */}
+                {showMaterialMarkup && (
+                  <>
+                    <SummaryRow
+                      label="Material markup / unit"
+                      value={formatCurrency(materialMarkupPerUnit)}
+                    />
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        pt: 0.5,
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Price base / unit
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {formatCurrency(priceBasePerUnit)}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Materials on this BOM are charged at their marked-up price, so
+                      the Pricing card below applies its markup to the price base,
+                      not to cost.
+                    </Typography>
+                  </>
+                )}
               </Box>
             )}
 
@@ -891,6 +996,28 @@ export default function PartPricing({
               </TableBody>
             </Table>
           </TableContainer>
+
+          {/* A number the card wrote, not one the user typed — so it says where
+              it came from. At 0% it also says what that means, because "sells at
+              cost" is the part a shop must not discover on an accepted quote.
+              Disappears the moment the markup is changed. */}
+          {isUntouchedStarterTier && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mt: 1 }}
+            >
+              {starterMarkup === 0
+                ? 'Ready to quote at 0% markup — this part sells for what it costs. '
+                : `Ready to quote at ${formatPercentValue(starterMarkup)} markup. `}
+              That is your shop&apos;s starting markup for parts you{' '}
+              {isBought ? 'buy' : 'make'}, from{' '}
+              <Link href={`/dashboard/${companyId}/settings`} style={{ color: 'inherit' }}>
+                Settings
+              </Link>
+              . Change it here for this part alone.
+            </Typography>
+          )}
 
           <Box
             sx={{

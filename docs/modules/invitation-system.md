@@ -86,7 +86,7 @@ earlier draft of this same spec* and is not in the code today.
 | **`/dashboard/[companyId]/settings/*` route tree** | **Never built** | Team lives at `/dashboard/[companyId]/team`, reached from dashboard navigation. *([demo-mode.md](./demo-mode.md) "Depends on:" still lists "the Settings page layout from invitation-system.md" — a stale cross-reference to this never-built tree; the fix belongs in that doc.)* |
 | **`InviteTeamMemberDialog` modal** | **Never built** | Inviting is a full page (§4). |
 | **Scheduled expiry job (`pg_cron`)** | **Not needed** | Expiry is lazy (§6). |
-| **FastAPI invitation routes** | **Never built** | Supabase-first architecture (CLAUDE.md, API Architecture Rule). `api/services/email.py` exists for other transactional mail and its docstring notes invitation email "can ride the same plumbing later" — it is not wired to invitations. |
+| **FastAPI invitation routes** | **Never built** | Supabase-first architecture (CLAUDE.md, API Architecture Rule). *(This row used to point at `api/services/email.py`, whose docstring said invitation email "can ride the same plumbing later". It never did — invitations ship on the Edge Function calling Resend over `fetch` (§7) — and that module was deleted with the quote-email route, its only caller. Python sends no mail at all now.)* |
 | **Automated tests** | **Partial** — the accept page and the existing-user E2E journey are covered; everything else is still `automation-pending (#367)` | See §8. |
 
 ---

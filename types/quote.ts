@@ -134,7 +134,18 @@ export interface QuoteLineItem {
   unit_price: number;
   total_price: number | null;
   markup_percent: number | null;
+  /**
+   * The CHARGE base the price was built on, at the matched tier's quantity. The
+   * row's own invariant is `unit_price = base_cost_per_unit × (1 + markup/100)`.
+   */
   base_cost_per_unit: number | null;
+  /**
+   * True rolled-up cost per unit at the same quantity, every BOM charge basis
+   * ignored (#727). Effective margin = (unit_price - true_cost_per_unit) /
+   * unit_price. Equals `base_cost_per_unit` whenever no material is charged at
+   * price, which is every line until someone sets that toggle.
+   */
+  true_cost_per_unit: number | null;
   /**
    * True when the salesperson typed a one-off price/markup on the quote form
    * that diverged from the source tier. UI surfaces a green "adjusted for this quote" chip.
@@ -478,68 +489,14 @@ export const QUOTE_STATUS_CONFIG: Record<
 };
 
 /**
- * Per-operation cost snapshot captured at quote creation.
- * Scoped per (quote, part) so multi-part quotes capture each part's ops independently.
+ * `quote_operations` / `quote_materials` are still WRITTEN at quote creation by
+ * `writeCostSnapshotsForPart` — they are the immutable record of how a quote was
+ * priced, including (since #727) which charge basis each material used and the
+ * markup that produced its rate.
+ *
+ * Nothing READS them today. The row types and the aggregate that the quote
+ * cost-breakdown accordion used were deleted with it; the columns and their
+ * COMMENTs are the schema's own documentation, and `types/database.ts` carries
+ * the shapes. Re-add typed readers here when a surface renders the record again.
  */
-export interface QuoteOperationSnapshot {
-  id: string;
-  quote_id: string;
-  company_id: string;
-  part_id: string;
-  sequence: number;
-  operation_name: string;
-  run_time_minutes: number | null;
-  setup_time_minutes: number | null;
-  labor_rate: number | null;
-  run_cost: number | null;
-  setup_cost: number | null;
-  created_at: string;
-}
 
-/**
- * Per-material cost snapshot captured at quote creation.
- * Scoped per (quote, part).
- */
-export interface QuoteMaterialSnapshot {
-  id: string;
-  quote_id: string;
-  company_id: string;
-  part_id: string;
-  sequence: number;
-  material_part_id: string | null;
-  item_name: string;
-  quantity: number;
-  unit: string | null;
-  cost_per_unit: number | null;
-  line_cost: number | null;
-  /**
-   * Total units of this material consumed across the quoted order (the discrete
-   * count in whole-unit mode). Reconciles `quantity` (per-part, e.g. 0.05) with
-   * `line_cost` when ceiling makes them not multiply out. NULL = legacy/
-   * fractional row where `quantity` is the literal per-unit value.
-   */
-  units_consumed: number | null;
-  created_at: string;
-}
-
-/**
- * Full cost breakdown read back from the snapshot tables for a single part within a quote.
- */
-export interface QuotePartCostBreakdown {
-  part_id: string;
-  operations: QuoteOperationSnapshot[];
-  materials: QuoteMaterialSnapshot[];
-  total_run_cost: number;
-  total_setup_cost: number;
-  total_labor_cost: number;
-  total_material_cost: number;
-}
-
-/**
- * Aggregated breakdown for a whole quote: one entry per distinct part, plus
- * the line items (so the UI can overlay actual/computed prices per tier).
- */
-export interface QuoteCostBreakdown {
-  parts: QuotePartCostBreakdown[];
-  line_items: QuoteLineItem[];
-}

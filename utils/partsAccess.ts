@@ -1162,11 +1162,15 @@ export async function ensurePartUnitConversion(
 // ============================================================
 
 /**
- * Compute a part's per-unit cost at a given quantity by calling the
- * canonical SQL function `compute_part_cost_at_qty`. The function walks the
- * BOM recursively, picks each bought leaf's procurement tier at the
+ * A part's TRUE per-unit cost at a given quantity — what the part costs us —
+ * via the canonical SQL function `compute_part_cost_at_qty`. The function walks
+ * the BOM recursively, picks each bought leaf's procurement tier at the
  * cumulative cascaded qty, and rolls labor + setup/qty + materials up to
  * the root.
+ *
+ * **This ignores every `parts_bom.charge_basis`**, so it is unchanged by #727
+ * and is the honest denominator for effective margin. The number a PRICE is
+ * built on is `getComputedPartChargeBase`.
  *
  * Returns `null` when any bought leaf in the subtree has no matching
  * procurement tier. Callers that need to surface *which* leaf is missing
@@ -1193,6 +1197,75 @@ export async function getComputedPartCost(
   }
 
   return data === null ? null : Number(data);
+}
+
+/**
+ * The base a PRICE is built on: the same rollup, but honoring every
+ * `parts_bom.charge_basis` in the tree (a `'price'` line contributes the child's
+ * marked-up price instead of our cost).
+ *
+ * Equals `getComputedPartCost` whenever no line charges at price, which is every
+ * BOM until someone sets the toggle. **Every pricing surface must use this one** —
+ * `unit_price = base × (1 + markup/100)` only holds if `base` is the charge base.
+ * Returns `null` when a price-basis child has no tier and no company default.
+ */
+export async function getComputedPartChargeBase(
+  partId: string,
+  qty: number,
+): Promise<number | null> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('compute_part_charge_base_at_qty', {
+    p_part_id: partId,
+    p_qty: qty,
+  });
+
+  if (error) {
+    console.error('Error computing part charge base:', error);
+    throw error;
+  }
+
+  return data === null ? null : Number(data);
+}
+
+/**
+ * What a child is charged at when a BOM line charges it at price: its own
+ * pricing tier, with the base evaluated at that tier's own quantity (the
+ * tier-band rule), plus the markup that produced it.
+ *
+ * Returns `null` when the part has no markup tier. That is a data gap the caller
+ * must surface — never a silent fall back to cost, and never a shop-wide
+ * default: `companies.default_markup_*` seed a part's FIRST TIER at write time
+ * and are not consulted here. The markup comes back from SQL rather than being
+ * re-derived so the rule has exactly one implementation.
+ */
+export interface PartChargePrice {
+  unit_price: number | null;
+  markup_percent: number | null;
+}
+
+export async function getPartChargePrice(
+  partId: string,
+  qty: number,
+): Promise<PartChargePrice | null> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.rpc('compute_part_price_explain_at_qty', {
+    p_part_id: partId,
+    p_qty: qty,
+  });
+
+  if (error) {
+    console.error('Error resolving part charge price:', error);
+    throw error;
+  }
+
+  const row = (data ?? [])[0];
+  if (!row) return null;
+  return {
+    unit_price: row.unit_price === null ? null : Number(row.unit_price),
+    markup_percent: row.markup_percent === null ? null : Number(row.markup_percent),
+  };
 }
 
 export interface PartCostMissingLeaf {

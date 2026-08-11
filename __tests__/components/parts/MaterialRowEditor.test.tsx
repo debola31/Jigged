@@ -59,6 +59,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -82,6 +83,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -179,7 +181,7 @@ describe('MaterialRowEditor — single quantity field', () => {
     );
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
 
-    const unit = await screen.findByRole('combobox');
+    const unit = await screen.findByRole('combobox', { name: /unit/i });
     await waitFor(() => expect(unit).not.toHaveAttribute('aria-disabled', 'true'));
 
     // Opening it offers the standard siblings.
@@ -195,7 +197,7 @@ describe('MaterialRowEditor — single quantity field', () => {
     );
     await user.click(screen.getByRole('button', { name: 'pick-part' }));
 
-    const unit = await screen.findByRole('combobox');
+    const unit = await screen.findByRole('combobox', { name: /unit/i });
     await waitFor(() => expect(unit).toHaveAttribute('aria-disabled', 'true'));
   });
 
@@ -207,6 +209,7 @@ describe('MaterialRowEditor — single quantity field', () => {
       quantity: '0.05',
       unit: 'each',
       consume_whole_units: true,
+      charge_basis: 'cost',
     };
     render(
       <MaterialRowEditor
@@ -220,4 +223,52 @@ describe('MaterialRowEditor — single quantity field', () => {
     await screen.findByLabelText(/per part/i);
     expect(screen.queryByLabelText(/Batch qty/i)).toBeNull();
   });
+
+  // #727. Charge basis is decided once per part on the Materials panel, not on
+  // every row — a shop that marks up purchased material marks up all of it, and
+  // a fourth control here bought nothing. What this editor must still do is
+  // carry the value through untouched, so editing a row's quantity cannot
+  // silently reset how that material is charged.
+  describe('charge basis', () => {
+    it('offers no control for it', async () => {
+      nextPickOption = makeOption({ primary_unit: 'each' });
+      render(
+        <MaterialRowEditor companyId="co-1" onSave={() => undefined} onCancel={() => undefined} />,
+      );
+      await user.click(screen.getByRole('button', { name: 'pick-part' }));
+      await screen.findByLabelText(/per part/i);
+
+      expect(screen.queryByRole('combobox', { name: /charge at/i })).toBeNull();
+      expect(screen.queryByText(/marked-up price/i)).toBeNull();
+    });
+
+    it('carries an existing line’s basis through an unrelated edit', async () => {
+      const initial: MaterialEditorValue = {
+        childPart: makeOption({ primary_unit: 'each' }),
+        quantity: '2',
+        unit: 'each',
+        consume_whole_units: true,
+        charge_basis: 'price',
+      };
+      const onSave = vi.fn();
+      render(
+        <MaterialRowEditor
+          companyId="co-1"
+          initial={initial}
+          onSave={onSave}
+          onCancel={() => undefined}
+        />,
+      );
+
+      const qty = await screen.findByLabelText(/per part/i);
+      await user.clear(qty);
+      await user.type(qty, '7');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ quantity: '7', charge_basis: 'price' }),
+      );
+    });
+  });
 });
+

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import posthog from 'posthog-js';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -16,6 +17,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Link from '@mui/material/Link';
 import Chip from '@mui/material/Chip';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -29,11 +32,18 @@ import {
   addBomLine,
   updateBomLine,
   checkBomCycle,
+  setChargeBasisForMaterials,
 } from '@/utils/bomAccess';
-import { getComputedPartCost, ensurePartUnitConversion } from '@/utils/partsAccess';
+import {
+  getComputedPartCost,
+  getPartChargePrice,
+  ensurePartUnitConversion,
+} from '@/utils/partsAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
-import type { BomLineFormData, BomLineWithChildPart } from '@/types/bom';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
+import { chargeBasisForNewLine } from '@/types/bom';
+import type { BomLineFormData, BomLineWithChildPart, ChargeBasis } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
   type PartSelectOption,
@@ -80,6 +90,19 @@ const formatCurrency = (n: number | null): string => {
 const formatQuantity = (n: number): string =>
   n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
+const formatPercent = (n: number): string =>
+  `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+
+/**
+ * A price-basis line, in words — always with the markup that produced it, so the
+ * number on the row can be traced to the material's own Pricing page rather than
+ * appearing from nowhere.
+ */
+const chargeAtPriceLabel = (markupPercent: number | null): string =>
+  markupPercent === null
+    ? 'charge at price · no markup set'
+    : `charge at price · ${formatPercent(markupPercent)} markup`;
+
 /**
  * Materials editor on the part detail page.
  *
@@ -116,6 +139,10 @@ interface ChildCostTier {
   qty: number;
   unit: string;
   costPerUnit: number | null;
+  /** On a price-basis line: what the parent is actually charged at this break. */
+  chargedPerUnit: number | null;
+  /** On a price-basis line: the markup % the child's tier applied. */
+  markupPercent: number | null;
 }
 
 // Stable empty fallback so the tier-ladder effect + render don't churn while
@@ -150,6 +177,25 @@ export default function PartBomPanel({
 
   const [pendingDelete, setPendingDelete] = useState<BomLineWithChildPart | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [bulkSaving, setBulkSaving] = useState(false);
+  // The shop's default for a NEW purchased material. Only consulted when this
+  // part has no purchased materials yet to take a stance from.
+  const [shopBasis, setShopBasis] = useState<ChargeBasis>('cost');
+
+  useEffect(() => {
+    let cancelled = false;
+    getCompany(companyId)
+      .then((c) => {
+        if (!cancelled) setShopBasis(readCompanyPricingDefaults(c).materialChargeBasis);
+      })
+      .catch(() => {
+        // Fall back to 'cost', which is what the column defaults to anyway.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   const {
     data: rowsData,
@@ -260,7 +306,18 @@ export default function PartBomPanel({
               } catch {
                 costPerUnit = null;
               }
-              return { qty, unit, costPerUnit };
+              // On a price-basis line, also resolve what the parent is actually
+              // charged, and the markup behind it. Showing the markup is not
+              // decoration: a charged number a shop cannot trace to a page it
+              // recognises is the opacity that got markup_rates deleted.
+              let chargedPerUnit: number | null = null;
+              let markupPercent: number | null = null;
+              if (row.charge_basis === 'price') {
+                const priced = await getPartChargePrice(child.id, qty).catch(() => null);
+                chargedPerUnit = priced?.unit_price ?? null;
+                markupPercent = priced?.markup_percent ?? null;
+              }
+              return { qty, unit, costPerUnit, chargedPerUnit, markupPercent };
             }),
           );
           next.set(row.id, ladder);
@@ -293,11 +350,19 @@ export default function PartBomPanel({
   const handleEditorSave = async (value: MaterialEditorValue) => {
     if (!value.childPart) return;
 
+    // An EDIT keeps whatever the line had; only an ADD resolves a basis. The
+    // precedence rule itself is named in types/bom.ts.
+    const isAdd = editorState.mode === 'add';
+    const chargeBasis: ChargeBasis = isAdd
+      ? chargeBasisForNewLine(materialsBasis, shopBasis)
+      : value.charge_basis;
+
     const formData: BomLineFormData = {
       child_part_id: value.childPart.id,
       quantity: value.quantity,
       unit: value.unit,
       consume_whole_units: value.consume_whole_units,
+      charge_basis: chargeBasis,
     };
 
     setEditorError(null);
@@ -339,6 +404,11 @@ export default function PartBomPanel({
         // cycle pre-check internally when the child differs.
         await updateBomLine(existing.id, formData);
       }
+      posthog.capture('bom line charge basis set', {
+        basis: chargeBasis,
+        bulk: false,
+        child_source: value.childPart.source,
+      });
       closeEditor();
       await fetchRows();
       onChanged?.();
@@ -349,6 +419,35 @@ export default function PartBomPanel({
       setEditorError(err instanceof Error ? err.message : 'Failed to save material.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Set every purchased-material line on this part at once.
+   *
+   * A shop that marks up purchased material marks up ALL of it — setting that
+   * one line at a time is the difference between a five-minute change and an
+   * afternoon. Storage stays per-line (the same material can be charged at cost
+   * on an internal work order); this is only the gesture.
+   */
+  const handleBulkChargeBasis = async (basis: ChargeBasis) => {
+    setBulkSaving(true);
+    setError(null);
+    try {
+      const changed = await setChargeBasisForMaterials(partId, basis);
+      posthog.capture('bom line charge basis set', {
+        basis,
+        bulk: true,
+        child_source: 'all',
+      });
+      if (changed > 0) {
+        await fetchRows();
+        onChanged?.();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update materials.');
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -368,6 +467,20 @@ export default function PartBomPanel({
   };
 
   const editorOpen = editorState.mode !== 'closed';
+  // Every material, made or bought: both carry costs and pricing tiers, and the
+  // rollup has never told them apart.
+  const materialLineCount = rows.length;
+  // null = mixed. Reachable by import, or by lines written before this became a
+  // single per-part control; the toggle shows nothing selected rather than
+  // picking one and misreporting the rest.
+  const materialsBasis: ChargeBasis | null =
+    materialLineCount === 0
+      ? null
+      : rows.every((r) => r.charge_basis === 'price')
+        ? 'price'
+        : rows.every((r) => r.charge_basis === 'cost')
+          ? 'cost'
+          : null;
 
   // Build the editor's initial value from the row being edited.
   const editingRow =
@@ -392,6 +505,7 @@ export default function PartBomPanel({
         quantity: String(editingRow.quantity),
         unit: editingRow.unit,
         consume_whole_units: editingRow.consume_whole_units,
+        charge_basis: editingRow.charge_basis,
       }
     : undefined;
 
@@ -435,6 +549,55 @@ export default function PartBomPanel({
               </Button>
             </Box>
           )}
+        </Box>
+      )}
+
+      {/* THE control for charge basis — one per part, not one per material,
+          and it covers every material rather than only the purchased ones.
+          "How do we value what goes into this part?" is one question.
+
+          It shows state rather than offering two actions: which way this part
+          is set is the thing you come here to check. "Mixed" is reachable by
+          import, so it renders as neither selected rather than lying. */}
+      {!readOnly && !loading && materialLineCount > 0 && (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            flexWrap: 'wrap',
+            mb: 2,
+            p: 1,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Charge the {materialLineCount}{' '}
+            {materialLineCount === 1 ? 'material' : 'materials'} at:
+          </Typography>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={materialsBasis}
+            disabled={bulkSaving || editorOpen || saving}
+            onChange={(_, next: ChargeBasis | null) => {
+              // Null is the click that would deselect the active button; a part
+              // is always charged one way or the other, so ignore it.
+              if (next) void handleBulkChargeBasis(next);
+            }}
+          >
+            <ToggleButton value="cost">Our cost</ToggleButton>
+            <ToggleButton value="price">Their marked-up price</ToggleButton>
+          </ToggleButtonGroup>
+          <Typography variant="caption" color="text.secondary">
+            {materialsBasis === 'price'
+              ? 'How much each is marked up comes from its own Pricing card.'
+              : materialsBasis === null
+                ? 'These materials are set differently from each other — pick one to align them.'
+                : null}
+          </Typography>
         </Box>
       )}
 
@@ -493,12 +656,30 @@ export default function PartBomPanel({
                       : `${formatCurrency(only.costPerUnit)}/${only.unit}`,
                   warning: only.costPerUnit === null,
                 });
+                // Both numbers on the row that causes the uplift, so the gap
+                // between what it costs and what the job pays is legible here
+                // rather than only at quote time.
+                if (row.charge_basis === 'price' && only.chargedPerUnit !== null) {
+                  captionParts.push({
+                    key: 'charged',
+                    text: `charged ${formatCurrency(only.chargedPerUnit)}/${only.unit}`,
+                  });
+                }
               } else if (ladder.length > 1) {
                 captionParts.push({
                   key: 'cost',
                   text: `${ladder.length} qty breaks`,
                 });
               }
+            }
+            // Never just "at price" — always the markup that set the number.
+            if (row.charge_basis === 'price') {
+              const markup = ladder[0]?.markupPercent ?? null;
+              captionParts.push({
+                key: 'basis',
+                text: chargeAtPriceLabel(markup),
+                warning: ladderLoaded && ladder.length > 0 && markup === null,
+              });
             }
             // Only meaningful for a fractional-capable line; "whole units" on a
             // part that can't be split says nothing.
@@ -624,7 +805,10 @@ export default function PartBomPanel({
                     <Box
                       sx={{
                         display: 'grid',
-                        gridTemplateColumns: 'auto auto',
+                        // A price-basis line shows both numbers per break: what
+                        // it costs, and what the job is charged.
+                        gridTemplateColumns:
+                          row.charge_basis === 'price' ? 'auto auto auto' : 'auto auto',
                         columnGap: 2,
                         rowGap: 0.25,
                         alignItems: 'baseline',
@@ -646,6 +830,15 @@ export default function PartBomPanel({
                       >
                         Cost / unit
                       </Typography>
+                      {row.charge_basis === 'price' && (
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ fontWeight: 600, textAlign: 'right' }}
+                        >
+                          Charged / unit
+                        </Typography>
+                      )}
                       {ladder.map((t, i) => (
                         <Box key={`tier-${i}`} sx={{ display: 'contents' }}>
                           <Typography variant="caption">
@@ -656,10 +849,42 @@ export default function PartBomPanel({
                               ? '—'
                               : `${formatCurrency(t.costPerUnit)}/${t.unit}`}
                           </Typography>
+                          {row.charge_basis === 'price' && (
+                            <Typography variant="caption" sx={{ textAlign: 'right' }}>
+                              {t.chargedPerUnit === null
+                                ? '—'
+                                : `${formatCurrency(t.chargedPerUnit)}/${t.unit}`}
+                            </Typography>
+                          )}
                         </Box>
                       ))}
                     </Box>
                   )}
+
+                  {/* Charged at price but nothing says by how much. Not a
+                      fallback to cost — an un-priceable line, named as one,
+                      with both fixes on screen. */}
+                  {ladderLoaded &&
+                    !missingCost &&
+                    row.charge_basis === 'price' &&
+                    ladder.length > 0 &&
+                    ladder[0].markupPercent === null && (
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.5,
+                          color: 'error.main',
+                          mt: 0.25,
+                        }}
+                      >
+                        <ErrorOutlineIcon sx={{ fontSize: 16 }} />
+                        <Typography variant="caption">
+                          Charged at price, but this material has no markup — open it
+                          and add a pricing tier.
+                        </Typography>
+                      </Box>
+                    )}
 
                   {missingCost && (
                     <Box

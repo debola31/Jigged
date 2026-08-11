@@ -1,0 +1,719 @@
+-- Per-BOM-line charge basis: a child contributes its COST (default) or its
+-- MARKED-UP PRICE to the parent's rollup. Issue #727.
+--
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- WHY
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- Every part already carries cost tiers and pricing tiers. What was missing is one
+-- rollup rule: a child in a parent's BOM always contributed its COST, so the
+-- child's declared markup evaporated. The only way to express "markup on material,
+-- straight cost on machining" was padding the child's cost with hidden margin —
+-- which falsifies the cost field and corrupts the ground-truth data the product
+-- exists to accumulate.
+--
+-- Now each BOM line declares what the child contributes. Cost fields stay true
+-- cost; markup lives where it is declared. Economically this is transfer pricing:
+-- "we sell the material to the job at our material price."
+--
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- THE RULE
+-- ═══════════════════════════════════════════════════════════════════════════════
+--   true_cost(P,n)   = ops(P,n) + Σ qᵢ × true_cost(Cᵢ, valqtyᵢ)     ← ignores bases
+--   charge_base(P,n) = ops(P,n) + Σ qᵢ × ( basisᵢ = 'cost'
+--                                            ? charge_base(Cᵢ, valqtyᵢ)
+--                                            : price(Cᵢ, valqtyᵢ) )
+--
+--   price(C,q):  the child's own pricing tier — and nothing else.
+--                No tier → NULL → un-priceable, surfaced as a gap.
+--
+-- A line's basis governs how that child is charged into its parent AT EVERY LEVEL:
+-- a 'cost' line contributes the child's CHARGE BASE (not its true cost), so a
+-- material markup declared deep in a tree survives the hop upward instead of
+-- evaporating one level higher. The two modes are therefore one function body with
+-- one flag, not two engines — see part_rollup_at_qty.
+--
+-- NO-OP GUARANTEE. Every line defaults to 'cost', so charge_base ≡ true_cost and
+-- compute_part_cost_at_qty returns exactly what it returned before this
+-- migration. No BOM changes value; no price moves. The two markup defaults start
+-- at 0 and are never read by the rollup, so they cannot move one either.
+-- Asserted directly by the integration tests.
+--
+-- ONE PLACE TO SET A MARKUP. A part's markup lives on its own Pricing page, and
+-- that is the only thing this rollup reads. An earlier draft added a shop-wide
+-- material markup consulted INSIDE the rollup; it is gone, because a shared
+-- default resolved at read time is precisely what got the markup_rates module
+-- deleted in July 2026. The setup problem it was solving — a new part being
+-- uncostable-then-unquotable until someone types a number — is solved instead by
+-- companies.default_markup_made_percent / _bought_percent, which seed a part's
+-- FIRST TIER when it is created and are never read again.
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 1. SCHEMA
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+-- 1a. The per-line declaration. Default 'cost' = today's behavior for every row.
+ALTER TABLE public.parts_bom
+  ADD COLUMN charge_basis text NOT NULL DEFAULT 'cost'
+    CHECK (charge_basis IN ('cost', 'price'));
+
+COMMENT ON COLUMN public.parts_bom.charge_basis IS
+  'What this child contributes to the parent''s rollup: ''cost'' (default) = the child''s charge base, i.e. our cost of it; ''price'' = the child''s marked-up price, from its own pricing tier. Per-line by design — a shop may charge material at price on customer jobs and at cost on internal stock-making work orders.';
+
+-- 1b. The two shop-wide starter markups.
+--
+-- These are NOT read by the rollup. They are read ONCE, when a part's first
+-- pricing tier is created for it (part page or CSV import), and written into
+-- that part's own tier row. From then on the part's Pricing page is the only
+-- source of truth for what it sells at, and changing these settings never moves
+-- a price that already exists.
+--
+-- That write-time boundary is the whole design. lib/companyDefaults.ts records
+-- why: shop-wide payment terms are safe because they resolve once into the
+-- quote's own column, and that is "the whole difference from the markup_rates
+-- module deleted in July 2026, where a shared default resolved at READ time with
+-- nothing on screen to say where the number came from." An earlier draft of this
+-- migration had a read-time default inside the price rung; it is gone.
+--
+-- REAL COLUMNS rather than companies.settings / KNOWN_DEFAULTS: that registry's
+-- coerceInt() rounds to a whole number, and part_pricing_tiers.markup_percent is
+-- numeric(10,6) precisely because 0.01% quantization visibly moved the price. A
+-- shop that sells at 22.5% must not be seeded at 23%.
+--
+-- NOT NULL DEFAULT 0 on both: 0 means "price = cost", which is the honest
+-- starting point and the behaviour every existing company already has. There is
+-- no "unset" state to reason about.
+ALTER TABLE public.companies
+  ADD COLUMN default_markup_made_percent numeric(10,6) NOT NULL DEFAULT 0
+    CHECK (default_markup_made_percent >= 0),
+  ADD COLUMN default_markup_bought_percent numeric(10,6) NOT NULL DEFAULT 0
+    CHECK (default_markup_bought_percent >= 0);
+
+COMMENT ON COLUMN public.companies.default_markup_made_percent IS
+  'Markup % written into the FIRST pricing tier of a MADE part when that tier is created for it (first cost on the part page, or CSV import). Seed value only — read at write time, never by the cost rollup, so changing it never reprices a part that already has tiers. Default 0 = price starts at cost.';
+COMMENT ON COLUMN public.companies.default_markup_bought_percent IS
+  'The same, for BOUGHT parts. Split from made because a shop marks up purchased goods and its own labour at different rates.';
+
+ALTER TABLE public.quote_line_items
+  ADD COLUMN true_cost_per_unit numeric;
+
+UPDATE public.quote_line_items
+   SET true_cost_per_unit = base_cost_per_unit;
+
+COMMENT ON COLUMN public.quote_line_items.base_cost_per_unit IS
+  'The CHARGE BASE the price was built on, at the matched tier''s quantity. The row''s own invariant is unit_price = base_cost_per_unit × (1 + markup_percent/100).';
+COMMENT ON COLUMN public.quote_line_items.true_cost_per_unit IS
+  'True rolled-up cost per unit at the same quantity, ignoring every BOM charge basis. Effective margin = (unit_price - true_cost_per_unit) / unit_price. Equals base_cost_per_unit whenever no material is charged at price.';
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 2. ENGINE — one body, two modes
+-- ═══════════════════════════════════════════════════════════════════════════════
+--
+-- part_rollup_at_qty holds what used to be compute_part_cost_at_qty's body,
+-- verbatim, plus ONE branch in the BOM loop. The flag propagates through the
+-- recursion, so `false` reproduces the old function exactly and `true` honors
+-- every declaration in the tree.
+--
+-- compute_part_cost_at_qty is CREATE OR REPLACE'd in place rather than dropped and
+-- recreated with a defaulted third argument: a 2-arg call would then be ambiguous
+-- against the 3-arg overload, and DROP FUNCTION destroys both the ACL and the
+-- COMMENT. Replacing in place keeps its existing grants untouched.
+--
+-- part_rollup_at_qty and compute_part_price_explain_at_qty are mutually recursive.
+-- plpgsql resolves called functions at execution time, so creation order is free.
+
+CREATE OR REPLACE FUNCTION public.part_rollup_at_qty(
+    p_part_id uuid,
+    p_qty numeric,
+    p_apply_charge_basis boolean
+)
+ RETURNS numeric
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_source text;
+    v_part_name text;
+    v_routing_id uuid;
+    v_total numeric := 0;
+    v_op RECORD;
+    v_op_cost numeric;
+    v_bom RECORD;
+    v_to_primary_factor numeric;
+    v_qty_in_primary_unit numeric;
+    v_consumed numeric;
+    v_child_val_qty numeric;
+    v_pinned boolean;
+    v_child_cost numeric;
+    v_tier_cost numeric;
+BEGIN
+    IF p_qty IS NULL OR p_qty <= 0 THEN
+        RAISE EXCEPTION 'part_rollup_at_qty: p_qty must be > 0 (got %)', p_qty
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT source, part_name
+      INTO v_source, v_part_name
+      FROM public.parts
+     WHERE id = p_part_id;
+    IF v_source IS NULL THEN
+        RAISE EXCEPTION 'part_rollup_at_qty: part % not found', p_part_id;
+    END IF;
+
+    -- ---------- Bought parts: resolve to the part's own tier sheet ----------
+    -- A bought part has no BOM, so the charge-basis flag cannot apply here. Its
+    -- own markup is added by the CALLER (the price rung), never by itself.
+    IF v_source = 'bought' THEN
+        SELECT t.cost_per_unit
+          INTO v_tier_cost
+          FROM public.part_procurement_tiers t
+         WHERE t.part_id = p_part_id
+           AND t.min_quantity <= p_qty
+           AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+         ORDER BY t.cost_per_unit ASC,
+                  t.min_quantity DESC
+         LIMIT 1;
+        -- Below every break: floor to the lowest-min tier (smallest pack you can
+        -- buy) so the part is still costable, rather than returning NULL.
+        IF v_tier_cost IS NULL THEN
+            SELECT t.cost_per_unit
+              INTO v_tier_cost
+              FROM public.part_procurement_tiers t
+             WHERE t.part_id = p_part_id
+               AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+             ORDER BY t.min_quantity ASC,
+                      t.cost_per_unit ASC
+             LIMIT 1;
+        END IF;
+        RETURN v_tier_cost;
+    END IF;
+
+    -- ---------- Made parts: own routing + BOM rollup ----------
+    SELECT id INTO v_routing_id FROM public.routings WHERE part_id = p_part_id;
+
+    IF v_routing_id IS NOT NULL THEN
+        FOR v_op IN
+            SELECT ro.setup_minutes,
+                   ro.cycle_minutes_per_unit,
+                   ro.labor_rate_override,
+                   ro.external_unit_price,
+                   wc.kind          AS wc_kind,
+                   wc.labor_rate    AS wc_labor_rate
+              FROM public.routing_operations ro
+              JOIN public.work_centers wc ON wc.id = ro.work_center_id
+             WHERE ro.routing_id = v_routing_id
+        LOOP
+            IF v_op.wc_kind = 'internal' THEN
+                IF v_op.labor_rate_override IS NULL AND v_op.wc_labor_rate IS NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot compute cost for part %: internal routing op has no labor rate (neither override nor work_center default)',
+                        v_part_name
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                v_op_cost := (COALESCE(v_op.setup_minutes, 0) / p_qty
+                              + COALESCE(v_op.cycle_minutes_per_unit, 0))
+                             * COALESCE(v_op.labor_rate_override, v_op.wc_labor_rate)
+                             / 60.0;
+            ELSE
+                IF v_op.external_unit_price IS NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot compute cost for part %: external routing op has no unit price (external_unit_price is required)',
+                        v_part_name
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                v_op_cost := COALESCE(v_op.external_unit_price, 0);
+            END IF;
+            v_total := v_total + v_op_cost;
+        END LOOP;
+    END IF;
+
+    FOR v_bom IN
+        SELECT b.quantity,
+               b.unit,
+               b.child_part_id,
+               b.consume_whole_units,
+               b.charge_basis,
+               c.primary_unit          AS child_primary_unit,
+               c.part_name             AS child_part_name,
+               c.source                AS child_source,
+               c.costing_batch_quantity AS child_costing_batch_quantity
+          FROM public.parts_bom b
+          JOIN public.parts c ON c.id = b.child_part_id
+         WHERE b.parent_part_id = p_part_id
+    LOOP
+        IF v_bom.unit IS DISTINCT FROM v_bom.child_primary_unit THEN
+            SELECT to_primary_factor INTO v_to_primary_factor
+              FROM public.parts_unit_conversions
+             WHERE part_id = v_bom.child_part_id
+               AND from_unit = v_bom.unit;
+            IF v_to_primary_factor IS NULL THEN
+                RAISE EXCEPTION
+                    'No unit conversion from % to % for part %',
+                    v_bom.unit, v_bom.child_primary_unit, v_bom.child_part_name
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            v_qty_in_primary_unit := v_bom.quantity * v_to_primary_factor;
+        ELSE
+            v_qty_in_primary_unit := v_bom.quantity;
+        END IF;
+
+        -- Units of the child physically consumed across the parent batch of
+        -- p_qty. Whole-unit lines ceiling to discrete stock; fractional lines
+        -- are exact.
+        IF v_bom.consume_whole_units THEN
+            v_consumed := ceil(p_qty * v_qty_in_primary_unit);
+        ELSE
+            v_consumed := p_qty * v_qty_in_primary_unit;
+        END IF;
+
+        -- A MADE child is valued at its standard costing lot size (setup
+        -- amortized over the run it's produced in), fixed regardless of how many
+        -- this order draws. A BOUGHT child is valued at what we actually consume
+        -- (to hit the right procurement tier / floor).
+        v_pinned := (v_bom.child_source = 'made');
+        IF v_pinned THEN
+            v_child_val_qty := v_bom.child_costing_batch_quantity;
+        ELSE
+            v_child_val_qty := v_consumed;
+        END IF;
+
+        -- THE ONE NEW BRANCH. Tier resolution for the price rung uses the SAME
+        -- valuation quantity the cost path already uses — any divergence produces
+        -- unexplainable quotes, and for bought material the two are identical
+        -- anyway (valqty IS the consumed qty).
+        IF p_apply_charge_basis AND v_bom.charge_basis = 'price' THEN
+            SELECT unit_price
+              INTO v_child_cost
+              FROM public.compute_part_price_explain_at_qty(
+                       v_bom.child_part_id, v_child_val_qty);
+        ELSE
+            v_child_cost := public.part_rollup_at_qty(
+                v_bom.child_part_id,
+                v_child_val_qty,
+                p_apply_charge_basis
+            );
+        END IF;
+
+        IF v_child_cost IS NULL THEN
+            RETURN NULL;
+        END IF;
+
+        IF NOT v_bom.consume_whole_units AND NOT v_pinned THEN
+            -- Bought child, fractional consumption — textually identical to the
+            -- pre-feature expression so those lines stay byte-for-byte the same.
+            v_total := v_total + v_qty_in_primary_unit * v_child_cost;
+        ELSE
+            -- Made (lot-size valuation) and/or whole-unit ceiling: per parent
+            -- unit = consumed units × unit cost, spread across the p_qty units.
+            v_total := v_total + (v_consumed * v_child_cost) / p_qty;
+        END IF;
+    END LOOP;
+
+    RETURN v_total;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.part_rollup_at_qty(uuid, numeric, boolean) IS
+  'THE cost/charge rollup for a part at a quantity — one body, two modes. p_apply_charge_basis=false ignores every parts_bom.charge_basis and returns TRUE COST (identical to the pre-#727 compute_part_cost_at_qty). true honors each line: a ''cost'' line contributes the child''s charge base, a ''price'' line the child''s marked-up price. Callers use the two named wrappers; this exists so there is only one implementation of the math.';
+
+-- ── The price a child is charged at ──────────────────────────────────────────
+-- One source: the child's OWN pricing tier. There is no shop-wide fallback here
+-- — a default that resolved at read time is exactly what got the markup_rates
+-- module deleted, and the shop-wide starter markups above solve the same setup
+-- problem at write time instead, by giving every costed part a tier of its own.
+--
+-- Returns the markup alongside the rate because the quote snapshot freezes it
+-- (it is not recoverable from charged-vs-true) and deriving it at the call site
+-- would be a second copy of the rule on a money path.
+CREATE OR REPLACE FUNCTION public.compute_part_price_explain_at_qty(
+    p_part_id uuid,
+    p_qty numeric
+)
+RETURNS TABLE(
+    unit_price     numeric,
+    markup_percent numeric
+)
+ LANGUAGE plpgsql
+ STABLE
+AS $function$
+DECLARE
+    v_markup    numeric;
+    v_basis_qty numeric;
+    v_base      numeric;
+BEGIN
+    -- Mirrors resolveMarkupAtQty: largest quantity <= qty, floored to the lowest
+    -- break when below the ladder.
+    SELECT pt.markup_percent, pt.quantity
+      INTO v_markup, v_basis_qty
+      FROM public.part_pricing_tiers pt
+     WHERE pt.part_id = p_part_id
+       AND pt.markup_percent IS NOT NULL
+       AND pt.quantity <= p_qty
+     ORDER BY pt.quantity DESC
+     LIMIT 1;
+
+    IF v_markup IS NULL THEN
+        SELECT pt.markup_percent, pt.quantity
+          INTO v_markup, v_basis_qty
+          FROM public.part_pricing_tiers pt
+         WHERE pt.part_id = p_part_id
+           AND pt.markup_percent IS NOT NULL
+         ORDER BY pt.quantity ASC
+         LIMIT 1;
+    END IF;
+
+    -- No tier, no price. A gap to surface, never a silent fall back to cost.
+    IF v_markup IS NULL THEN
+        RETURN;
+    END IF;
+
+    -- The tier's listed price holds for its whole band, so the base is evaluated
+    -- at the TIER's quantity — the number this part's own Pricing card shows for
+    -- that break (founder rule, 2026-08-07).
+    v_base := public.part_rollup_at_qty(p_part_id, v_basis_qty, true);
+
+    unit_price     := CASE WHEN v_base IS NULL THEN NULL
+                           ELSE round(v_base * (1 + v_markup / 100.0), 2) END;
+    markup_percent := v_markup;
+    RETURN NEXT;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.compute_part_price_explain_at_qty(uuid, numeric) IS
+  'The price a part is charged at when a BOM line charges it at price: its own pricing tier, with the base evaluated at that tier''s own quantity per the tier-band rule, plus the markup applied. Returns NO ROW when the part has no markup tier — the caller must treat that as un-priceable, never as cost. There is deliberately no shop-wide fallback: companies.default_markup_* seed a part''s FIRST TIER at write time, and are never consulted here.';
+
+CREATE OR REPLACE FUNCTION public.compute_part_price_at_qty(p_part_id uuid, p_qty numeric)
+ RETURNS numeric
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT unit_price FROM public.compute_part_price_explain_at_qty(p_part_id, p_qty);
+$function$;
+
+COMMENT ON FUNCTION public.compute_part_price_at_qty(uuid, numeric) IS
+  'Rate-only wrapper over compute_part_price_explain_at_qty, so there is one implementation of the three-rung rule. NULL when no rung applies.';
+
+-- ── The two named modes ───────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.compute_part_cost_at_qty(p_part_id uuid, p_qty numeric)
+ RETURNS numeric
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT public.part_rollup_at_qty(p_part_id, p_qty, false);
+$function$;
+
+COMMENT ON FUNCTION public.compute_part_cost_at_qty(uuid, numeric) IS
+  'TRUE unit cost at a quantity — what the part costs us. Ignores every parts_bom.charge_basis, so it is unchanged by #727 and is the honest denominator for effective margin. Bought: procurement tier at that qty, floored to the lowest tier below the minimum. Made: routing ops + BOM children (a made child at its costing lot size, a bought child at the consumed qty). Raises on missing labor rate / external pricing / unit conversion. The number a PRICE is built on is compute_part_charge_base_at_qty.';
+
+CREATE OR REPLACE FUNCTION public.compute_part_charge_base_at_qty(p_part_id uuid, p_qty numeric)
+ RETURNS numeric
+ LANGUAGE sql
+ STABLE
+AS $function$
+    SELECT public.part_rollup_at_qty(p_part_id, p_qty, true);
+$function$;
+
+COMMENT ON FUNCTION public.compute_part_charge_base_at_qty(uuid, numeric) IS
+  'The base a PRICE is built on: the rollup honoring every parts_bom.charge_basis in the tree. Equals compute_part_cost_at_qty whenever no line charges at price. This is what markup is applied to, and what quote_line_items.base_cost_per_unit snapshots.';
+
+-- Browser roles need these: the pricing card, the BOM panel and the quote form all
+-- call them directly. All four are SECURITY INVOKER, so RLS still contains them —
+-- the companies read inside the price rung resolves through user_company_access.
+GRANT EXECUTE ON FUNCTION public.part_rollup_at_qty(uuid, numeric, boolean)
+  TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.compute_part_price_explain_at_qty(uuid, numeric)
+  TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.compute_part_price_at_qty(uuid, numeric)
+  TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.compute_part_charge_base_at_qty(uuid, numeric)
+  TO anon, authenticated, service_role;
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 3. PRICEABILITY — both halves of the agreement move together
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- 20260715180446 established that only the ROOT needs a markup, reasoning that "a
+-- material's markup is never used when it's consumed inside another part". A
+-- price-basis line makes that false for that edge — and the company default makes
+-- it false again in the other direction, because a bought child covered by the
+-- default needs no tier of its own.
+--
+-- The list RPC and the detail explain must agree in every combination, so both
+-- learn the same rule:
+--
+--   a price-basis child is satisfied  ⇔  it has a non-null-markup pricing tier
+--                                        OR (it is bought AND the company default
+--                                            is set)
+--
+-- is_priceable stays STRUCTURAL (the three gap arrays), deliberately. Adding "and
+-- the charge base resolves" would flip parts whose cost RAISES for reasons the
+-- arrays don't model — a missing unit conversion — while get_priceable_part_ids,
+-- which evaluates no costs, kept saying ready. That is the exact disagreement the
+-- agreement test exists to prevent.
+
+CREATE OR REPLACE FUNCTION public.compute_part_cost_explain(p_part_id uuid, p_qty numeric)
+RETURNS TABLE(
+    unit_cost        numeric,
+    missing_leaves   jsonb,
+    missing_markups  jsonb,
+    missing_op_rates jsonb,
+    is_priceable     boolean
+)
+    LANGUAGE plpgsql
+    STABLE
+    AS $$
+DECLARE
+    v_missing_leaves   jsonb;
+    v_missing_markups  jsonb;
+    v_missing_op_rates jsonb;
+    v_unit_cost        numeric;
+BEGIN
+    WITH RECURSIVE tree(part_id, part_name, source, cumulative_qty, depth, charged_at_price) AS (
+        SELECT p.id, p.part_name, p.source, p_qty, 0, false
+          FROM public.parts p
+         WHERE p.id = p_part_id
+
+        UNION ALL
+
+        SELECT c.id,
+               c.part_name,
+               c.source,
+               CASE
+                   -- Made child: value its subtree at its standard costing lot
+                   -- size (fixed, not the cascaded consumed qty).
+                   WHEN c.source = 'made' THEN
+                       c.costing_batch_quantity
+                   -- Bought whole-unit line: ceiling the cascaded consumption.
+                   WHEN b.consume_whole_units THEN
+                       ceil(
+                           t.cumulative_qty *
+                           CASE
+                               WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
+                                   b.quantity * COALESCE(
+                                       (SELECT uc.to_primary_factor
+                                          FROM public.parts_unit_conversions uc
+                                         WHERE uc.part_id = c.id
+                                           AND uc.from_unit = b.unit),
+                                       1
+                                   )
+                               ELSE b.quantity
+                           END
+                       )
+                   -- Bought fractional cascade.
+                   ELSE
+                       t.cumulative_qty *
+                       CASE
+                           WHEN b.unit IS DISTINCT FROM c.primary_unit THEN
+                               b.quantity * COALESCE(
+                                   (SELECT uc.to_primary_factor
+                                      FROM public.parts_unit_conversions uc
+                                     WHERE uc.part_id = c.id
+                                       AND uc.from_unit = b.unit),
+                                   1
+                               )
+                           ELSE b.quantity
+                       END
+               END,
+               t.depth + 1,
+               -- Is THIS node charged into its parent at price? Per-edge, so the
+               -- same part can be cost-charged in one BOM and price-charged in
+               -- another.
+               b.charge_basis = 'price'
+          FROM tree t
+          JOIN public.parts_bom b ON b.parent_part_id = t.part_id
+          JOIN public.parts c     ON c.id = b.child_part_id
+         WHERE t.source = 'made'
+           AND t.depth < 50
+    ),
+    -- A bought leaf is "missing" only if it has NO non-expired procurement tier.
+    leaves AS (
+        SELECT tr.part_id, tr.part_name, tr.depth, tr.cumulative_qty AS qty_required
+          FROM tree tr
+         WHERE tr.source = 'bought'
+           AND NOT EXISTS (
+                   SELECT 1
+                     FROM public.part_procurement_tiers t
+                    WHERE t.part_id = tr.part_id
+                      AND (t.expires_at IS NULL OR t.expires_at >= CURRENT_DATE)
+               )
+    ),
+    -- Markup is needed by the ROOT (the part being quoted) and by any child
+    -- CHARGED AT PRICE — its markup is what the parent pays, and there is no
+    -- shop-wide fallback to cover for a missing tier.
+    markups AS (
+        SELECT tr.part_id, tr.part_name, tr.source, MIN(tr.depth) AS depth
+          FROM tree tr
+         WHERE (tr.depth = 0 OR tr.charged_at_price)
+           AND NOT EXISTS (
+                   SELECT 1 FROM public.part_pricing_tiers pt
+                    WHERE pt.part_id = tr.part_id
+                      AND pt.markup_percent IS NOT NULL
+               )
+         GROUP BY tr.part_id, tr.part_name, tr.source
+    ),
+    op_rates AS (
+        SELECT tr.part_id, tr.part_name, MIN(tr.depth) AS depth
+          FROM tree tr
+          JOIN public.routings r            ON r.part_id = tr.part_id
+          JOIN public.routing_operations ro ON ro.routing_id = r.id
+          JOIN public.work_centers wc       ON wc.id = ro.work_center_id
+         WHERE tr.source = 'made'
+           AND (
+               (wc.kind = 'internal'
+                   AND ro.labor_rate_override IS NULL
+                   AND wc.labor_rate IS NULL)
+               OR
+               (wc.kind <> 'internal'
+                   AND ro.external_unit_price IS NULL)
+           )
+         GROUP BY tr.part_id, tr.part_name
+    )
+    SELECT
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',      l.part_id,
+                            'part_name',    l.part_name,
+                            'depth',        l.depth,
+                            'qty_required', l.qty_required
+                        )
+                        ORDER BY l.depth DESC, l.part_name ASC
+                    ), '[]'::jsonb)
+           FROM leaves l),
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',   m.part_id,
+                            'part_name', m.part_name,
+                            'depth',     m.depth,
+                            'source',    m.source
+                        )
+                        ORDER BY m.depth ASC, m.part_name ASC
+                    ), '[]'::jsonb)
+           FROM markups m),
+        (SELECT COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'part_id',   o.part_id,
+                            'part_name', o.part_name,
+                            'depth',     o.depth
+                        )
+                        ORDER BY o.depth ASC, o.part_name ASC
+                    ), '[]'::jsonb)
+           FROM op_rates o)
+      INTO v_missing_leaves, v_missing_markups, v_missing_op_rates;
+
+    BEGIN
+        v_unit_cost := public.compute_part_cost_at_qty(p_part_id, p_qty);
+    EXCEPTION WHEN OTHERS THEN
+        v_unit_cost := NULL;
+    END;
+
+    unit_cost        := v_unit_cost;
+    missing_leaves   := v_missing_leaves;
+    missing_markups  := v_missing_markups;
+    missing_op_rates := v_missing_op_rates;
+    is_priceable     := (v_missing_leaves = '[]'::jsonb
+                         AND v_missing_markups = '[]'::jsonb
+                         AND v_missing_op_rates = '[]'::jsonb);
+    RETURN NEXT;
+END;
+$$;
+
+COMMENT ON FUNCTION public.compute_part_cost_explain(uuid, numeric) IS
+  'TRUE unit cost (charge bases ignored) plus the three structural gap arrays: bought leaves with no procurement tier, parts that need a markup and lack one, and routing ops with no rate. A part needs a markup when it is the ROOT being quoted or when a BOM line charges it AT PRICE. is_priceable is the AND of the three arrays being empty, and matches get_priceable_part_ids exactly.';
+
+CREATE OR REPLACE FUNCTION public.get_priceable_part_ids(p_company_id uuid)
+ RETURNS uuid[]
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_costable uuid[];
+    v_priceable uuid[];
+    v_new uuid[];
+BEGIN
+    -- COSTABLE — a part whose cost resolves. Markup is NOT required here unless a
+    -- BOM line charges the child at price (below). Base case: bought parts with a
+    -- non-expired procurement tier.
+    SELECT COALESCE(array_agg(DISTINCT p.id), ARRAY[]::uuid[])
+    INTO v_costable
+    FROM public.parts p
+    WHERE p.company_id = p_company_id
+      AND p.source = 'bought'
+      AND EXISTS (
+          SELECT 1
+          FROM public.part_procurement_tiers pt
+          WHERE pt.part_id = p.id
+            AND (pt.expires_at IS NULL OR pt.expires_at >= CURRENT_DATE)
+      );
+
+    -- Fixed-point: add made parts whose routing is complete and whose BOM
+    -- children (if any) are all already costable. Bounded by BOM depth.
+    LOOP
+        SELECT COALESCE(array_agg(p.id), ARRAY[]::uuid[])
+        INTO v_new
+        FROM public.parts p
+        WHERE p.company_id = p_company_id
+          AND p.source = 'made'
+          AND NOT (p.id = ANY(v_costable))
+          -- Every routing op (if any) must have full pricing.
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.routings r
+              JOIN public.routing_operations ro ON ro.routing_id = r.id
+              JOIN public.work_centers wc ON wc.id = ro.work_center_id
+              WHERE r.part_id = p.id
+                AND (
+                    (wc.kind = 'internal'
+                        AND ro.labor_rate_override IS NULL
+                        AND wc.labor_rate IS NULL)
+                    OR
+                    (wc.kind <> 'internal'
+                        AND ro.external_unit_price IS NULL)
+                )
+          )
+          -- Every BOM child must already be costable — AND, when the line charges
+          -- it at price, must carry its own markup tier. Nothing covers for a
+          -- missing one.
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.parts_bom b
+              WHERE b.parent_part_id = p.id
+                AND (
+                    NOT (b.child_part_id = ANY(v_costable))
+                    OR (
+                        b.charge_basis = 'price'
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM public.part_pricing_tiers t
+                            WHERE t.part_id = b.child_part_id
+                              AND t.markup_percent IS NOT NULL
+                        )
+                    )
+                )
+          );
+
+        EXIT WHEN cardinality(v_new) = 0;
+        v_costable := v_costable || v_new;
+    END LOOP;
+
+    -- PRICEABLE = costable AND has its own non-null-markup pricing tier. Only the
+    -- part being sold needs a markup of its own; its materials need one only when
+    -- a line charges them at price.
+    SELECT COALESCE(array_agg(p.id), ARRAY[]::uuid[])
+    INTO v_priceable
+    FROM public.parts p
+    WHERE p.id = ANY(v_costable)
+      AND EXISTS (
+          SELECT 1
+          FROM public.part_pricing_tiers t
+          WHERE t.part_id = p.id
+            AND t.markup_percent IS NOT NULL
+      );
+
+    RETURN v_priceable;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.get_priceable_part_ids(uuid) IS
+    'Returns the part ids in a company that are ready to quote: cost resolves (bought: procurement tier; made: all ops priced and all BOM children costable) AND the part itself has a non-null-markup pricing tier. A material''s own markup is required only when a BOM line charges it AT PRICE. Matches compute_part_cost_explain.is_priceable.';

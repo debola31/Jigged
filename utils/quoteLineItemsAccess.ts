@@ -9,7 +9,7 @@ import {
   resolveMarkupAtQty,
   buildPricingBasisSnapshot,
 } from '@/utils/quotePricingResolver';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import { getComputedPartCost, getComputedPartChargeBase } from '@/utils/partsAccess';
 
 /**
  * Load line items for a quote (ordered by sequence) with the part joined in.
@@ -108,14 +108,24 @@ export async function insertLineItemForPart(
   // of quantity, so snapshotting it at the order qty would break the row's own
   // arithmetic: `unit_price = base_cost_per_unit × (1 + markup/100)` is the
   // invariant this column exists to record.
+  //
+  // It is the CHARGE base, for that same reason: a material charged at price is
+  // already inside the number markup was applied to. `true_cost_per_unit` is the
+  // same figure with every charge basis ignored, so the line can state its own
+  // effective margin without re-deriving anything later.
   let baseCost: number | null;
+  let trueCost: number | null;
   try {
-    baseCost = await getComputedPartCost(partId, basisQuantity);
+    [baseCost, trueCost] = await Promise.all([
+      getComputedPartChargeBase(partId, basisQuantity),
+      getComputedPartCost(partId, basisQuantity),
+    ]);
   } catch {
     // Cost RAISES on missing labor rates / external pricing / unit
     // conversions. Snapshot a null so the breakdown view can fall through
     // to its computed-live fallback rather than persisting wrong data.
     baseCost = null;
+    trueCost = null;
   }
 
   const totalPrice = Math.round(unitPrice * orderQuantity * 100) / 100;
@@ -138,6 +148,7 @@ export async function insertLineItemForPart(
       total_price: totalPrice,
       markup_percent: markupPercent,
       base_cost_per_unit: baseCost,
+      true_cost_per_unit: trueCost,
       is_quote_override: !!override,
       // Per-item lead time (per-part, denormalized onto each line row). Blank
       // ⇒ NULL, i.e. this line uses the quote-level lead time.
@@ -373,11 +384,18 @@ export async function repriceLineItemToCurrent(
 
   // Base at the matched break — the quantity the new price was derived from, so
   // `unit_price = base_cost_per_unit × (1 + markup/100)` still holds on the row.
+  // Charge base for that arithmetic; true cost alongside it for margin.
+  const baseQty = resolved.matched_tier_quantity ?? row.quantity;
   let base: number | null;
+  let trueBase: number | null;
   try {
-    base = await getComputedPartCost(row.part_id, resolved.matched_tier_quantity ?? row.quantity);
+    [base, trueBase] = await Promise.all([
+      getComputedPartChargeBase(row.part_id, baseQty),
+      getComputedPartCost(row.part_id, baseQty),
+    ]);
   } catch {
     base = null;
+    trueBase = null;
   }
 
   const newSnapshot = buildPricingBasisSnapshot(
@@ -397,6 +415,7 @@ export async function repriceLineItemToCurrent(
       // base here would leave the row asserting an arithmetic that no longer
       // holds, and it is what cost-vs-sell reporting reads.
       base_cost_per_unit: base,
+      true_cost_per_unit: trueBase,
       total_price: newTotal,
       pricing_basis_snapshot: newSnapshot as unknown as Json,
       basis_unknown: false,

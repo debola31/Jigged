@@ -27,6 +27,7 @@ import {
   type PartMarkupGap,
   type PartOpRateGap,
 } from '@/utils/partsAccess';
+import { ensureStarterPricingTier } from '@/utils/partPricingTiersAccess';
 import { parseBackChain } from '@/lib/partNavStack';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
@@ -203,9 +204,34 @@ export default function PartWorkspace({
 
   // Bumping refreshKey re-runs the part fetch (a useLoad dep) in place plus the
   // cost/priceability reload — replaces the old explicit silent fetchPart call.
+  //
+  // Every panel that can give a part its first COST routes through here — the
+  // routing editor, the materials list, the bought-part cost sheet. So this is
+  // where the part gets its first PRICING TIER too, and it happens BEFORE the
+  // bump: priceability is re-derived once, with the tier already in place.
+  //
+  // Doing it after (which is where it lived first) made the workspace flash
+  // "this part can't be quoted yet" for a second and then correct itself —
+  // the app visibly changing its mind about a part the user had just finished
+  // setting up. Costed and quotable are one event, so they land together.
+  //
+  // Skipped entirely once the part is priceable: no round trip on the ordinary
+  // save, only on the one that first creates a cost.
   const refreshAfterMutation = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+    const bump = () => setRefreshKey((k) => k + 1);
+    if (!partId || !part || isPriceable) {
+      bump();
+      return;
+    }
+    void ensureStarterPricingTier(companyId, partId, part.source)
+      .catch((err: unknown) => {
+        // Non-fatal: the refresh still happens, the part simply stays
+        // not-priceable until someone sets a markup by hand — which is exactly
+        // where it stood before this existed.
+        console.error('Failed to create the starter pricing tier:', err);
+      })
+      .finally(bump);
+  }, [companyId, partId, part, isPriceable]);
 
   // --- Exit guard (interaction-standards.md §2) -----------------------------
   // Tabs are conditionally rendered, so switching one unmounts its panels and

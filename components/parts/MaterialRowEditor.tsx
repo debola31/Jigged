@@ -14,6 +14,7 @@ import PartAutocomplete, { type PartSelectOption } from '@/components/parts/Part
 import { getPartUnitConversions } from '@/utils/partsAccess';
 import { defaultConsumeWholeUnits, unitShortLabel } from '@/lib/standardUnits';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
+import { type ChargeBasis } from '@/types/bom';
 
 export type { PartSelectOption };
 
@@ -24,6 +25,13 @@ export interface MaterialEditorValue {
   unit: string;
   /** Ceiling consumption to whole units at the order qty (discrete stock). */
   consume_whole_units: boolean;
+  /**
+   * What this material contributes to the parent's cost (#727). Carried, not
+   * edited: the control is one per part on the Materials panel, not one per row,
+   * because "we mark up purchased material" is a shop habit rather than a
+   * per-material decision. An edit here must preserve whatever the line has.
+   */
+  charge_basis: ChargeBasis;
 }
 
 /** Format a yield ratio for display — collapse near-integers to a clean int. */
@@ -74,18 +82,25 @@ const EMPTY_VALUE: MaterialEditorValue = {
   quantity: '',
   unit: '',
   consume_whole_units: false,
+  charge_basis: 'cost',
 };
 
 /**
  * Inline editor for a single Materials row on the part detail page.
  *
- * Three fields, nothing else: the material part, its unit, and one quantity-per-
- * part field. The quantity accepts a whole number, a decimal, or a simple
- * fraction ("1/20") — a value below 1 is a yield (many parts from one unit), so
- * there is no separate yield mode. Whether discrete stock is drawn in whole
- * units is derived automatically from the unit (count → whole). A made child's
- * costing batch (for setup amortization) is set on that child's own page, not
- * here.
+ * Three fields, nothing else: the material part, its unit, and one
+ * quantity-per-part field. The quantity accepts a whole number, a decimal, or a
+ * simple fraction ("1/20") — a value below 1 is a yield (many parts from one
+ * unit), so there is no separate yield mode. Whether discrete stock is drawn in
+ * whole units is derived automatically from the unit (count → whole). A made
+ * child's costing batch (for setup amortization) is set on that child's own
+ * page, not here.
+ *
+ * **Charge basis is deliberately NOT a field here.** It briefly was, and a
+ * fourth control on every material row bought nothing: a shop that marks up
+ * purchased material marks up all of it, so the decision belongs once per part,
+ * on the Materials panel. The value still rides along in
+ * `MaterialEditorValue.charge_basis` so editing a row preserves it.
  */
 export default function MaterialRowEditor({
   companyId,
@@ -177,6 +192,7 @@ export default function MaterialRowEditor({
       // Whole-unit consumption is derived from the unit, not a manual toggle:
       // count/discrete stock rounds up, continuous material is fractional.
       consume_whole_units: defaultConsumeWholeUnits(value.unit),
+      charge_basis: value.charge_basis,
     });
   };
 
@@ -264,6 +280,7 @@ export default function MaterialRowEditor({
             }
           />
         </Box>
+
       </Box>
 
       {error && (

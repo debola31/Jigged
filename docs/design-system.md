@@ -503,6 +503,31 @@ actions.
 > acting on the thing I am looking at?* The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
 5-row × 2-side cabinet into a ~**500px** tile.
 
+> **And then it came back, 2026-08-10 — which the rule above predicted rather than contradicted.**
+> The sheet was deleted because it owned the *cabinet's* actions while the pane showed the cabinet.
+> A **place** has no surface of its own and cannot get one: 180 bins do not each get a section under
+> a grid. So clicking a cell opens a drawer holding that place's contents, its four verbs, and its
+> history — the same rule, applied to the thing that genuinely has nowhere else to live.
+>
+> **The measurement that forced it back:** the contents had been put *under* the grid instead, so
+> selecting a bin near the top of a 12-row cabinet left the answer below the fold — and scrolling
+> the page to it moved the grid up under the cursor by about one row. Click Row 4, the page jumps,
+> click again where Row 4 was, and you select Row 5. Reported as an off-by-one in the grid; the grid
+> was aligned to half a pixel and every single click was correct. **A surface that scrolls the page
+> to answer you will be blamed for the click it moved.**
+>
+> Two corollaries, both learned the same afternoon:
+>
+> - **One layer.** A drawer's own actions are **views inside it**, never dialogs over it. Two stacked
+>   surfaces bury the subject under both, which is the failure the sheet was deleted for in the first
+>   place. Give every view the same header and the same way back.
+> - **A modal surface is opaque.** `background.paper` is `rgba(32, 38, 82, 0.78)` on purpose — a card
+>   is meant to let the lit canvas through. A drawer covers the page, and at 78% the page reads
+>   straight through it; on a 390px screen a full-width drawer over a full-width grid made both
+>   illegible at once. Dialog and Menu already carried solid overrides for exactly this reason and
+>   Drawer did not. Sticky headers inside one need `background.default`, not `paper`, or the rows
+>   scroll through the heading.
+
 **Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only
 because the alternative was losing the depiction entirely. Reach for a sheet when the row's *value is
 what it depicts*, not merely when a row has several actions. It also matches the operator bin view's

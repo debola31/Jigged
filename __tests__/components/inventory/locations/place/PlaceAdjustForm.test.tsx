@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '../../../test-utils';
+import { render, screen } from '../../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
@@ -39,7 +39,7 @@ vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: vi.fn(async () => ({ id: 'member-1' })),
 }));
 
-import PlaceAdjustModal from '@/components/inventory/locations/PlaceAdjustModal';
+import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
 import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import { commitCount } from '@/utils/inventoryCountAccess';
 
@@ -48,29 +48,49 @@ const onClose = vi.fn();
 
 const setup = () =>
   render(
-    <PlaceAdjustModal
-      open
+    <PlaceAdjustForm
       companyId="co1"
       locationId="bin5"
       locationName="Bin 5"
-      onClose={onClose}
+      onCancel={onClose}
       onDone={onDone}
     />,
   );
 
-const countedField = (partName: string) =>
-  within(screen.getByText(partName).closest('div')!.parentElement!).getByLabelText(/counted/i);
+/** Each row's own input, found by the accessible name that carries the part. */
+const countedField = (partName: string) => screen.getByLabelText(`Counted ${partName}`);
 
 beforeEach(() => vi.clearAllMocks());
 
-describe('PlaceAdjustModal', () => {
-  it('lists everything at the place with what is recorded', async () => {
+describe('PlaceAdjustForm', () => {
+  /** Three columns, because the deleted review step is only redundant if the delta is on the row. */
+  it('lists everything at the place under recorded / counted / changed', async () => {
     setup();
 
     expect(await screen.findByText('RAW-STEEL-BLANK')).toBeInTheDocument();
-    expect(screen.getByText(/recorded 180 ea/i)).toBeInTheDocument();
+    // `Recorded` appears once per row as an inline label for the stacked phone layout, plus once
+    // as the column heading — so this counts rather than asserting a single node.
+    expect(screen.getAllByText(/^recorded$/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/^counted$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^changed$/i)).toBeInTheDocument();
+    expect(screen.getByText('180')).toBeInTheDocument();
     expect(screen.getByText('BUY-ORING-214')).toBeInTheDocument();
-    expect(screen.getByText(/recorded 4 ea/i)).toBeInTheDocument();
+    expect(screen.getByText('4')).toBeInTheDocument();
+  });
+
+  /**
+   * An uncounted row shows an em dash, and a counted-but-unchanged row says so in words.
+   * "0" would be a third meaning competing with both.
+   */
+  it('distinguishes not-counted from counted-and-unchanged', async () => {
+    const user = userEvent.setup();
+    setup();
+    await screen.findByText('RAW-STEEL-BLANK');
+
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    await user.type(countedField('RAW-STEEL-BLANK'), '180');
+    expect(screen.getByText('same')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(1);
   });
 
   /** The rule this file exists for. */
@@ -123,7 +143,6 @@ describe('PlaceAdjustModal', () => {
     await user.type(countedField('RAW-STEEL-BLANK'), '175');
     expect(screen.getByText('-5')).toBeInTheDocument();
 
-    await user.clear(countedField('BUY-ORING-214'));
     await user.type(countedField('BUY-ORING-214'), '9');
     expect(screen.getByText('+5')).toBeInTheDocument();
   });

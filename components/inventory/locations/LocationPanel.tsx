@@ -16,26 +16,24 @@
  * the selected location at any depth, the sheet has nothing left to do, so `LocationDetailSheet`
  * was deleted rather than kept for leftovers.
  *
- * ## Three things stacked, and the order is the point
+ * ## Two things, and the place is not one of them
  *
- * 1. **The unit** — name, shape in words, and its actions.
- * 2. **The grid**, if it has structure. A unit that is a single place skips this: it has no
- *    inside, and drawing an empty one to say "change its layout" answers a question nobody asked.
- * 3. **What is in the selected place.** Clicking a bin does NOT navigate — the grid stays put and
- *    its contents open underneath, so poking through a cabinet costs no page loads and never
- *    loses your position. For a single-place unit this section is simply about the unit itself.
+ * 1. **The unit** — name, shape in words, and the actions that belong to the furniture.
+ * 2. **The grid**, which now fills the pane.
+ *
+ * A place's contents and its four verbs used to sit under the grid. They live in
+ * {@link PlaceDrawer} now, and the move is not cosmetic: selecting a bin near the top of a 12-row
+ * cabinet put the answer below the fold, so the page scrolled to it — which moved the grid up under
+ * the cursor by about one row, and a second click landed one row lower than the one you aimed at.
+ * Nothing below means nothing to scroll to. The grid holds still.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import Alert from '@mui/material/Alert';
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
-import CircularProgress from '@mui/material/CircularProgress';
-import Divider from '@mui/material/Divider';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import IconButton from '@mui/material/IconButton';
-import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
@@ -43,30 +41,21 @@ import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ViewQuiltOutlinedIcon from '@mui/icons-material/ViewQuiltOutlined';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 
-import { useLoad } from '@/hooks/useLoad';
-import { getLocationContents } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocationNode } from '@/types/inventoryLocations';
-import { occupancyFor, type OccupancyMap } from '@/utils/locationOccupancy';
+import type { OccupancyMap } from '@/utils/locationOccupancy';
 import { countOccupiedPlaces, countStockablePlaces, describeShape } from '@/lib/locationGrid';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import UnitGridView from './UnitGridView';
-import PlaceHistory from './board/PlaceHistory';
-
-const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 export interface LocationPanelActions {
   /**
-   * The audit. Opens the count worksheet scoped to this node — which, for a container, means every
-   * bin under it, resolved by the worksheet itself.
+   * The audit of the whole unit — the count worksheet over every bin under it.
    *
-   * Named for what it writes rather than for the tool it opens. A count commits one
-   * `adjustStockAtLocation` per line, so "Count" and "Adjust" were never two things: one is the
-   * batch form of the other. Four verbs, four ledger row types, no fifth concept.
+   * Named for what it writes rather than for the tool it opens: a count commits one
+   * `adjustStockAtLocation` per line, so "Count" and "Adjust" were never two things. A single
+   * place is audited in the drawer instead, so this and the drawer's `Adjust` never appear at once.
    */
   onAdjust: (node: InventoryLocationNode) => void;
-  onAddStock: (node: InventoryLocationNode) => void;
-  onRemoveStock: (node: InventoryLocationNode) => void;
-  onMoveStock: (node: InventoryLocationNode) => void;
   onSubdivide: (node: InventoryLocationNode) => void;
   onPrintQR: (node: InventoryLocationNode) => void;
   onEdit: (node: InventoryLocationNode) => void;
@@ -86,55 +75,6 @@ export interface LocationPanelProps {
   backSlot?: React.ReactNode;
 }
 
-/** Parts recorded directly at one place. Remounted by `key` per place, so it loads once each. */
-function ContentsList({ locationId }: { locationId: string }) {
-  const { data, loading, error } = useLoad(() => getLocationContents(locationId), [locationId]);
-
-  if (loading && !data) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-        <CircularProgress size={24} />
-      </Box>
-    );
-  }
-  if (error) return <Alert severity="error">Couldn&apos;t load what&apos;s stored here.</Alert>;
-
-  const contents = data?.contents ?? [];
-  const total = data?.total ?? 0;
-
-  if (contents.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        No parts recorded here.
-      </Typography>
-    );
-  }
-
-  return (
-    <Stack spacing={0.5}>
-      {/* An explicit cap, said out loud. This read used to be clipped silently by `max_rows`. */}
-      {total > contents.length && (
-        <Alert severity="info" sx={{ mb: 0.5 }}>
-          Showing the {contents.length} largest of {num(total)} parts here.
-        </Alert>
-      )}
-      {contents.map((c) => (
-        <Box key={c.part_id} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minHeight: 32 }}>
-          <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap title={c.part_name}>
-            {c.part_name}
-          </Typography>
-          <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-            {num(c.quantity)}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {c.primary_unit ?? ''}
-          </Typography>
-        </Box>
-      ))}
-    </Stack>
-  );
-}
-
 export default function LocationPanel({
   unit,
   place,
@@ -147,32 +87,17 @@ export default function LocationPanel({
   const structured = unit.children.length > 0;
   const places = structured ? countStockablePlaces(unit) : 0;
   const used = places > 0 ? countOccupiedPlaces(unit, occupancy) : 0;
-  const placeOcc = occupancyFor(occupancy, place.id);
-  /** The unit itself, when nothing inside it is selected — a place, not a container. */
-  const viewingUnitItself = place.id === unit.id;
 
-  /**
-   * Bring the contents into view when a place is picked.
+  /*
+   * THE SCROLL-INTO-VIEW IS GONE, and its absence is the fix for a reported bug.
    *
-   * A 12-row cabinet is taller than the viewport, so clicking a bin near the top put the answer
-   * below the fold — you tapped something and nothing appeared to happen. Found in a browser; a
-   * component test cannot see it, because jsdom has no scroll and no layout.
-   *
-   * Skipped when the unit itself is showing: that is the state you arrive in, and scrolling on
-   * arrival would move the page out from under someone who has not asked for anything yet.
+   * It existed because the contents sat below a grid taller than the viewport, so a click near the
+   * top produced an answer off screen. Scrolling to it moved the grid up under the cursor by about
+   * one row height — click Row 4, the page jumps, click again where Row 4 was, and you select
+   * Row 5. Measured: the cells and their labels are aligned to half a pixel, and one click always
+   * selected the row it was on. The page moving was the whole of it.
    */
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
-  const contentsRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (viewingUnitItself || !contentsRef.current) return;
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    // `center`, not `nearest`: the divider is usually already just-visible at the bottom of a
-    // tall grid, and `nearest` reads that as "no work to do" and leaves the answer off screen.
-    contentsRef.current.scrollIntoView({
-      behavior: reduced ? 'auto' : 'smooth',
-      block: 'center',
-    });
-  }, [place.id, viewingUnitItself]);
 
   return (
     <Box sx={{ minWidth: 0 }}>
@@ -273,98 +198,24 @@ export default function LocationPanel({
         />
       </Box>
 
-      <Box ref={contentsRef}>
-        <Divider sx={{ mb: 2 }} />
-      </Box>
-
-      {/* What is in the selected place. On a structured unit the grid above stays put while this
-          changes, so working through a cabinet costs no navigation at all. */}
-      <Typography variant="overline" color="text.secondary">
-        {structured && !viewingUnitItself ? `What's in ${place.name}` : "What's here"}
-      </Typography>
-
-      {structured && viewingUnitItself ? (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Pick a place above to see what is in it. Stock lives in the places, not in{' '}
+      {/*
+        A hint, not a section. The contents and the four verbs moved into the drawer, so the pane's
+        job ends at the grid — and a structured unit that has nothing selected needs one line saying
+        where stock actually lives, because a cabinet is not a place you can put anything.
+      */}
+      {structured && (
+        <Typography variant="body2" color="text.secondary">
+          Pick a place to see what is in it and act on it. Stock lives in the places, not in{' '}
           {unit.name} itself.
         </Typography>
-      ) : (
-        <Box sx={{ mt: 0.5 }}>
-          <ContentsList key={place.id} locationId={place.id} />
-
-          {/*
-            The four verbs, on the place, in the order fixed across both surfaces.
-
-            ORDER is the same as the operator's phone — Add, Remove, Move, Adjust — because the same
-            person may use both in a day and muscle memory should not have to be re-learned per
-            screen. Each writes exactly one kind of ledger row, and there are exactly four kinds:
-            addition, depletion, transfer, adjustment. `Count` and `Put away` are not missing — a
-            count IS a batch of adjustments (`commitCount` calls `adjustStockAtLocation` per line)
-            and a put-away IS a batch of transfers (`bulk_put_away`), so both are the same four
-            verbs at a different scale, which is what `Adjust` opening the worksheet means here.
-
-            Adjust is the only one that navigates. It is inherently multi-part — you are auditing a
-            shelf, not correcting one number — and the worksheet it opens already earns its shape.
-          */}
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-            <Button size="small" variant="contained" onClick={() => actions.onAddStock(place)}>
-              Add
-            </Button>
-            {/* Nothing to take out of, or move from, an empty place — and offering it would open a
-                picker with no options in it. The empty state is ordinary, not an error. */}
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!placeOcc.hasStock}
-              onClick={() => actions.onRemoveStock(place)}
-            >
-              Remove
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!placeOcc.hasStock}
-              onClick={() => actions.onMoveStock(place)}
-            >
-              Move
-            </Button>
-            <Button size="small" variant="outlined" onClick={() => actions.onAdjust(place)}>
-              Adjust
-            </Button>
-          </Stack>
-
-          {/* What you do to the PLACE rather than to the stock in it, kept apart so the row above
-              reads as one set of four. */}
-          <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-            {!viewingUnitItself && (
-              <>
-                <Button size="small" variant="text" onClick={() => actions.onPrintQR(place)}>
-                  Print QR
-                </Button>
-                <Button size="small" variant="text" onClick={() => actions.onEdit(place)}>
-                  Rename
-                </Button>
-                {/* Only offered on an empty place: `delete_location` refuses a subtree that holds
-                    stock, so showing it on a loaded bin promises something the database declines. */}
-                {!placeOcc.hasStock && (
-                  <Button size="small" variant="text" onClick={() => actions.onDelete(place)}>
-                    Delete
-                  </Button>
-                )}
-              </>
-            )}
-            {!structured && (
-              <Button size="small" variant="text" onClick={() => actions.onAddChild(unit)}>
-                Add one inside
-              </Button>
-            )}
-          </Stack>
-        </Box>
       )}
 
-      <Paper elevation={0} sx={{ mt: 3, bgcolor: 'transparent' }}>
-        <PlaceHistory key={place.id} locationId={place.id} locationName={place.name} />
-      </Paper>
+      {!structured && (
+        <Button size="small" variant="text" onClick={() => actions.onAddChild(unit)}>
+          Add one inside
+        </Button>
+      )}
+
     </Box>
   );
 }

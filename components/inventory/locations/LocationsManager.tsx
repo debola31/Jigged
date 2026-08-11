@@ -40,8 +40,7 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import LocationPanel from './LocationPanel';
-import PlaceStockActionModal, { type PlaceStockAction } from './PlaceStockActionModal';
-import PlaceAdjustModal from './PlaceAdjustModal';
+import PlaceDrawer from './place/PlaceDrawer';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
 
@@ -222,15 +221,21 @@ export default function LocationsManager({
    * shaping are one decision, and since `create_location_tree` they are also one transaction.
    */
   /**
-   * Which stock verb is open, and on what.
+   * The place the drawer is showing, if any.
    *
-   * The node rather than an id: the dialog titles itself with the place's name, and looking it
-   * back up would go stale the moment a rename lands between opening and rendering.
+   * Deliberately separate from `placeId`, which is what the grid draws as selected. Closing the
+   * drawer should not un-highlight the cell you were just looking at — you closed a panel, you did
+   * not change your mind about which bin you are at.
    */
-  const [stockAction, setStockAction] = useState<{ action: PlaceStockAction; node: InventoryLocationNode } | null>(null);
+  const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
 
-  /** The place whose contents are being audited in a dialog. Leaves only — see `onAdjust`. */
-  const [adjusting, setAdjusting] = useState<InventoryLocationNode | null>(null);
+  /**
+   * The node the drawer is showing.
+   *
+   * Resolved from the tree rather than stored, so a rename or a write that reloads the board is
+   * reflected in the drawer's own header instead of showing the name it had when you opened it.
+   */
+  const drawerPlace = drawerPlaceId ? byNodeId.get(drawerPlaceId) ?? null : null;
 
   const listHref = `/dashboard/${companyId}/inventory/locations`;
   /**
@@ -264,16 +269,19 @@ export default function LocationsManager({
    * Tapping a cell in the grid.
    *
    * A container drills in — its stock lives in its children, so acting on it directly is exactly
-   * what the container/bin invariant refuses. A leaf opens the sheet, which owns every action.
+   * what the container/bin invariant refuses. A leaf selects the cell AND opens the drawer beside
+   * it, which is where a place's contents and its four verbs live.
    */
   const openCell = (locationId: string) => {
     const node = byNodeId.get(locationId);
     if (node && node.children.length > 0) {
       setPlaceId(null);
+      setDrawerPlaceId(null);
       showUnit(locationId);
       return;
     }
     setPlaceId(locationId);
+    setDrawerPlaceId(locationId);
   };
 
   /**
@@ -301,34 +309,22 @@ export default function LocationsManager({
   const noRealStorage = tree.length > 0 && tree.every((n) => n.kind === 'system');
 
 
-  // Every action closes the sheet first: they all open a modal of their own, and two stacked
-  // surfaces on a tablet leaves nothing legible underneath.
+  // A unit's own actions. Everything that belongs to a PLACE lives in the drawer instead, so this
+  // list is short and none of it competes with the four verbs.
   const sheetActions = {
     /*
-     * The audit, at whatever scope was clicked.
+     * The audit of a whole unit.
      *
-     * `?location=` resolves a container to every leaf under it, so this one handler means "audit
-     * this bin" on a bin and "audit this whole cabinet, bin by bin" on a cabinet — which is the
-     * scale an audit actually happens at. It navigates rather than opening a dialog because an
-     * audit is inherently multi-part; the other three verbs act on one part and stay in place.
+     * `?location=` resolves a container to every leaf under it, so this means "audit this cabinet,
+     * bin by bin" — which is the scale an audit actually happens at. A single place is audited in
+     * the drawer instead; see `PlaceAdjustForm`. Both ends call `commitCount`, so the rows written
+     * are identical and the split is only in the surface.
      */
     onAdjust: (node: InventoryLocationNode) => {
-      // ONE PLACE IS A DIALOG. MANY PLACES ARE THE WORKSHEET.
-      //
-      // A leaf is the same weight as the other three verbs — a handful of rows, typed and saved
-      // without leaving the grid. A container is a walk of the shop: the worksheet resolves it to
-      // every leaf under it and brings search, paging and per-line commit reporting, which a dialog
-      // has no business growing. Both ends call `commitCount`, so the rows written are identical.
-      if (node.children.length > 0) {
-        setPlaceId(null);
-        router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
-        return;
-      }
-      setAdjusting(node);
+      setPlaceId(null);
+      setDrawerPlaceId(null);
+      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
     },
-    onAddStock: (node: InventoryLocationNode) => setStockAction({ action: 'add', node }),
-    onRemoveStock: (node: InventoryLocationNode) => setStockAction({ action: 'deplete', node }),
-    onMoveStock: (node: InventoryLocationNode) => setStockAction({ action: 'move', node }),
     onAddChild: (node: InventoryLocationNode) => {
       setPlaceId(null);
       setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
@@ -663,40 +659,24 @@ export default function LocationsManager({
         }}
       />
 
-      {adjusting && (
-        <PlaceAdjustModal
-          open
-          companyId={companyId}
-          locationId={adjusting.id}
-          locationName={adjusting.name}
-          onClose={() => setAdjusting(null)}
-          onDone={async () => {
-            await reload();
-            setToast('Counts saved.');
-          }}
-        />
-      )}
-
       {/*
-        Add · Remove · Move on one place. Mounted only while open, so the part catalogue and the
-        bin's contents are read when the verb is chosen rather than on every panel render.
+        One place, beside the grid it belongs to. Add · Remove · Move · Adjust are views INSIDE it
+        rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
+        buried under both, which is the failure the old detail sheet was deleted for.
       */}
-      {stockAction && (
-        <PlaceStockActionModal
-          open
-          action={stockAction.action}
-          companyId={companyId}
-          locationId={stockAction.node.id}
-          locationName={stockAction.node.name}
-          // Leaves only, never the put-away pile, and never back to where it already is.
-          moveDestinations={stockDestinationOptions(locations, { excludeId: stockAction.node.id })}
-          onClose={() => setStockAction(null)}
-          onDone={async () => {
-            await reload();
-            setToast('Stock updated.');
-          }}
-        />
-      )}
+      <PlaceDrawer
+        place={drawerPlace}
+        companyId={companyId}
+        path={drawerPlace ? computePath(drawerPlace.id, byId).join(' › ') : ''}
+        hasStock={drawerPlace ? occupancyFor(occupancy, drawerPlace.id).hasStock : false}
+        // Leaves only, never the put-away pile, and never back to where it already is.
+        moveDestinations={
+          drawerPlace ? stockDestinationOptions(locations, { excludeId: drawerPlace.id }) : []
+        }
+        actions={sheetActions}
+        onClose={() => setDrawerPlaceId(null)}
+        onChanged={reload}
+      />
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>
         <DialogTitle>Delete location?</DialogTitle>

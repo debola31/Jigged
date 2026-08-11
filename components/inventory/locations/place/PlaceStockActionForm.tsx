@@ -3,6 +3,12 @@
 /**
  * Add · Remove · Move, standing at one place. The office half of the operator's four verbs.
  *
+ * ## A view inside the place drawer, not a dialog of its own
+ *
+ * This was a `Dialog`, and opening it from the drawer would have stacked one surface on another —
+ * the exact thing that made `Manage` cover the cabinet you were acting on. The drawer swaps to this
+ * view instead and offers its own way back, so there is only ever one layer.
+ *
  * ## Why this exists at all
  *
  * The Storage tab could not move stock. `Count or put away` was one button that navigated to the
@@ -51,16 +57,12 @@
 import { useMemo, useState } from 'react';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
 import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
-import Dialog from '@mui/material/Dialog';
-import DialogActions from '@mui/material/DialogActions';
-import DialogContent from '@mui/material/DialogContent';
-import DialogTitle from '@mui/material/DialogTitle';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
-import Typography from '@mui/material/Typography';
 
 import ErrorAlert from '@/components/common/ErrorAlert';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
@@ -75,10 +77,11 @@ import {
   getLocationContents,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
+import { useLoad } from '@/hooks/useLoad';
 import type { LocationContent } from '@/types/inventoryLocations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
-import type { Part } from '@/types/part';
+import PlaceViewHeader from './PlaceViewHeader';
 
 /** The three verbs that act on one part at one place. `adjust` is the worksheet, not this. */
 export type PlaceStockAction = 'add' | 'deplete' | 'move';
@@ -97,8 +100,7 @@ const SUBMIT: Record<PlaceStockAction, string> = {
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
-export interface PlaceStockActionModalProps {
-  open: boolean;
+export interface PlaceStockActionFormProps {
   action: PlaceStockAction;
   companyId: string;
   /** The place being acted on. Fixed — this is the whole point of the component. */
@@ -106,31 +108,33 @@ export interface PlaceStockActionModalProps {
   locationName: string;
   /** Everywhere a `move` may land. Excludes this place — see the picker below. */
   moveDestinations: LocationPickerOption[];
-  onClose: () => void;
+  /** Back to the place overview. The drawer stays open. */
+  onCancel: () => void;
   onDone: () => void | Promise<void>;
 }
 
-export default function PlaceStockActionModal({
-  open,
+export default function PlaceStockActionForm({
   action,
   companyId,
   locationId,
   locationName,
   moveDestinations,
-  onClose,
+  onCancel,
   onDone,
-}: PlaceStockActionModalProps) {
+}: PlaceStockActionFormProps) {
   const fromHere = action !== 'add';
 
-  const [parts, setParts] = useState<Part[]>([]);
-  /** What is here now — loaded on open, because `Remove` and `Move` may only name these. */
-  const [contents, setContents] = useState<LocationContent[]>([]);
-  /** Set when the bin holds more than one read returns, so the cap is said rather than hidden. */
-  const [clipped, setClipped] = useState(0);
-  const [loadingParts, setLoadingParts] = useState(false);
   const [partId, setPartId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState('');
-  const [unit, setUnit] = useState('ea');
+  /**
+   * The unit, overridable.
+   *
+   * Held as an override rather than as the value itself because the selected part can change
+   * underneath it — including by being auto-selected as the bin's only occupant. A plain state
+   * would still read `ea` while the picker showed a part measured in feet, and a `Select` whose
+   * value is absent from its options renders blank.
+   */
+  const [unitOverride, setUnitOverride] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [destination, setDestination] = useState<LocationPickerOption | null>(null);
   const [saving, setSaving] = useState(false);
@@ -142,105 +146,89 @@ export default function PlaceStockActionModal({
   const [error, setError] = useState<unknown>(null);
 
   /** Job tag on a removal — the same affordance the operator and part paths already offer. */
-  const [jobs, setJobs] = useState<JobWithRelations[]>([]);
-  const [loadingJobs, setLoadingJobs] = useState(false);
   const [job, setJob] = useState<JobWithRelations | null>(null);
 
-  /**
-   * Who did this, so the bin's history can name them.
+
+  /*
+   * One read, chosen by verb.
    *
-   * `operator_id` is a `user_company_access.id`. The RPCs also stamp `created_by = auth.uid()`, but
-   * that is an `auth.users` id the browser cannot resolve to a name under any policy — so without
-   * this, every office-side movement stays permanently anonymous in the history this same panel
-   * renders directly underneath. Best-effort: a failed lookup writes no author rather than blocking
-   * a stock correction on a name.
+   * `Add` needs the catalogue; the other two need the bin. `useLoad` rather than a mount effect:
+   * the house hook handles the stale-response race, and keeps the fetch out of an effect body that
+   * would otherwise setState synchronously. Read here rather than handed down as a prop so the
+   * drawer's contents list and this form cannot disagree about what is in the drawer — one of them
+   * is reading a snapshot either way, and the one about to WRITE is the one that must be current.
    */
-  const [operatorId, setOperatorId] = useState<string | null>(null);
+  const { data, loading: loadingParts, error: loadError } = useLoad(
+    async () =>
+      action === 'add'
+        ? ({ kind: 'parts', parts: await getStockedParts(companyId) } as const)
+        : ({ kind: 'contents', page: await getLocationContents(locationId) } as const),
+    [action, companyId, locationId],
+  );
 
-  /** House convention: reset and load on `Dialog` enter, never a setState-in-effect. */
-  const handleEnter = async () => {
-    setPartId(null);
-    setQuantity('');
-    setUnit('ea');
-    setContents([]);
-    setClipped(0);
-    setNotes('');
-    setJob(null);
-    setDestination(null);
-    setError(null);
+  const contents: LocationContent[] = data?.kind === 'contents' ? data.page.contents : [];
+  const clipped =
+    data?.kind === 'contents' ? Math.max(0, data.page.total - data.page.contents.length) : 0;
 
-    getCurrentMember(companyId)
-      .then((m) => setOperatorId(m?.id ?? null))
-      .catch(() => setOperatorId(null));
+  /*
+   * Two side loads that are not the part list: who is doing this, and the jobs a removal may be
+   * tagged to. Both are fire-and-forget and neither gates the form, so they hang off `useLoad`
+   * rather than an effect that would setState synchronously — the author is best-effort by design
+   * (a failed lookup writes no author rather than blocking a stock correction on a name).
+   */
+  const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
+  const operatorId = member?.id ?? null;
 
-    if (action === 'deplete') {
-      setLoadingJobs(true);
-      loadTaggableJobs(companyId)
-        .then(setJobs)
-        .catch(() => setJobs([]))
-        .finally(() => setLoadingJobs(false));
-    }
-
-    /*
-     * `Add` needs the catalogue; the other two need the bin. Loaded here rather than handed down
-     * as a prop so the panel's contents list and this dialog cannot disagree about what is in the
-     * drawer — one of them would be reading a snapshot taken before the last write either way, and
-     * the one that is about to WRITE is the one that must be current.
-     */
-    setLoadingParts(true);
-    try {
-      if (action === 'add') {
-        setParts(await getStockedParts(companyId));
-      } else {
-        const page = await getLocationContents(locationId);
-        setContents(page.contents);
-        setClipped(Math.max(0, page.total - page.contents.length));
-        // One part in the bin is not a choice. Pre-select it so the common case — a bin holding
-        // exactly one thing — is quantity-and-go.
-        if (page.contents.length === 1) {
-          setPartId(page.contents[0].part_id);
-          setUnit(page.contents[0].primary_unit || 'ea');
-        }
-      }
-    } catch (e) {
-      setError(e);
-    } finally {
-      setLoadingParts(false);
-    }
-  };
+  const { data: jobs, loading: loadingJobs } = useLoad(
+    () => (action === 'deplete' ? loadTaggableJobs(companyId).catch(() => []) : Promise.resolve([])),
+    [action, companyId],
+  );
 
   /** One shape for the picker whichever list feeds it, so the render below has no branch. */
   const options = useMemo(
     () =>
-      fromHere
-        ? contents.map((c) => ({
+      // Derived inside the memo: a `?:` outside it produces a fresh array every render, which makes
+      // the memo's dependency change every render and the memo pointless.
+      data?.kind === 'contents'
+        ? data.page.contents.map((c) => ({
             id: c.part_id,
             name: c.part_name,
             primaryUnit: c.primary_unit || 'ea',
             onHand: c.quantity,
           }))
-        : parts.map((p) => ({
+        : (data?.parts ?? []).map((p) => ({
             id: p.id,
             name: p.part_name,
             primaryUnit: p.primary_unit || 'ea',
             onHand: null as number | null,
           })),
-    [fromHere, contents, parts],
+    [data],
   );
 
-  const selected = options.find((o) => o.id === partId) ?? null;
+  /**
+   * A bin holding exactly one part is not a choice, so it counts as chosen until you choose
+   * otherwise. Derived rather than written during the load: setting state from a fetch is what the
+   * cascading-render rule is about, and this needs no state to be true.
+   */
+  const only = fromHere && options.length === 1 ? options[0] : null;
+  const selected = options.find((o) => o.id === partId) ?? only;
 
   const unitOptions = useMemo(() => {
     const pu = selected?.primaryUnit || 'ea';
     return Array.from(new Set([pu, ...getStandardUnitsForUnit(pu)])).filter(Boolean);
   }, [selected]);
 
+  const unit = unitOverride && unitOptions.includes(unitOverride)
+    ? unitOverride
+    : selected?.primaryUnit || 'ea';
+
   const pickPart = (o: (typeof options)[number] | null) => {
     setPartId(o?.id ?? null);
-    setUnit(o?.primaryUnit || 'ea');
+    setUnitOverride(null);
   };
 
   const submit = async () => {
+    const partId = selected?.id ?? null;
     if (!partId) {
       setError('Choose a part.');
       return;
@@ -290,7 +278,7 @@ export default function PlaceStockActionModal({
         location_id: locationId,
       });
       await onDone();
-      onClose();
+      onCancel();
     } catch (e) {
       setError(e);
     } finally {
@@ -302,22 +290,14 @@ export default function PlaceStockActionModal({
   // saying "nothing is here" while the fetch is in flight is a wrong answer with a confident face.
   const nothingHere = fromHere && !loadingParts && contents.length === 0;
 
+  // Mount IS entering, now that the drawer owns the switch. Keyed by action upstream, so changing
+  // verb remounts and re-reads rather than reusing the previous verb's list.
   return (
-    <Dialog
-      open={open}
-      onClose={saving ? undefined : onClose}
-      maxWidth="sm"
-      fullWidth
-      slotProps={{ transition: { onEnter: handleEnter } }}
-    >
-      <DialogTitle>{TITLES[action]}</DialogTitle>
-      <DialogContent>
+    <Box>
+      <PlaceViewHeader title={TITLES[action]} subtitle={locationName} onBack={onCancel} />
+      <Box sx={{ px: 2, pb: 2 }}>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            At <strong>{locationName}</strong>
-          </Typography>
-
-          {error != null && <ErrorAlert error={error} />}
+          {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
           {nothingHere ? (
             // Not an error — an empty bin is an ordinary state, and the honest answer is that
@@ -367,7 +347,7 @@ export default function PlaceStockActionModal({
                   select
                   label="Unit"
                   value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
+                  onChange={(e) => setUnitOverride(e.target.value)}
                   sx={{ minWidth: 120 }}
                 >
                   {unitOptions.map((u) => (
@@ -393,7 +373,7 @@ export default function PlaceStockActionModal({
               )}
 
               {action === 'deplete' && (
-                <JobTagPicker jobs={jobs} loading={loadingJobs} value={job} onChange={setJob} />
+                <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
               )}
 
               <TextField
@@ -405,16 +385,16 @@ export default function PlaceStockActionModal({
               />
             </>
           )}
+          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
+            <Button onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant="contained" onClick={submit} disabled={saving || nothingHere}>
+              {saving ? 'Saving…' : SUBMIT[action]}
+            </Button>
+          </Stack>
         </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button variant="contained" onClick={submit} disabled={saving || nothingHere}>
-          {saving ? 'Saving…' : SUBMIT[action]}
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </Box>
+    </Box>
   );
 }

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '../../../test-utils';
+import { render, screen } from '../../../../test-utils';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}) }));
@@ -54,7 +54,7 @@ vi.mock('@/components/inventory/JobTagPicker', () => ({
   loadTaggableJobs: vi.fn(async () => []),
 }));
 
-import PlaceStockActionModal from '@/components/inventory/locations/PlaceStockActionModal';
+import PlaceStockActionForm from '@/components/inventory/locations/place/PlaceStockActionForm';
 import {
   addStockAtLocation,
   depleteStockAtLocation,
@@ -70,14 +70,13 @@ const DESTINATIONS = [
 
 const setup = (action: 'add' | 'deplete' | 'move') =>
   render(
-    <PlaceStockActionModal
-      open
+    <PlaceStockActionForm
       action={action}
       companyId="co1"
       locationId="bin5"
       locationName="Bin 5"
       moveDestinations={DESTINATIONS}
-      onClose={vi.fn()}
+      onCancel={vi.fn()}
       onDone={vi.fn()}
     />,
   );
@@ -89,7 +88,7 @@ const pickPart = async (user: ReturnType<typeof userEvent.setup>, name: string) 
 
 beforeEach(() => vi.clearAllMocks());
 
-describe('PlaceStockActionModal', () => {
+describe('PlaceStockActionForm', () => {
   /**
    * The axis, stated as a test.
    *
@@ -264,9 +263,9 @@ describe('PlaceStockActionModal', () => {
     expect(await screen.findByText(/showing the 1 largest of 240 parts here/i)).toBeInTheDocument();
   });
 
+  /** The drawer's header names the place; the form no longer repeats it in its own body. */
   it('names the place it is acting on', async () => {
     setup('add');
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText('Bin 5')).toBeInTheDocument();
+    expect(await screen.findByText('Bin 5')).toBeInTheDocument();
   });
 });

@@ -213,7 +213,6 @@ describe('LocationsManager', () => {
 
     // Twice, deliberately: on its card in the list and again in the pane beside it.
     expect(await screen.findAllByText('One place')).toHaveLength(2);
-    expect(screen.getByText(/what's here/i)).toBeInTheDocument();
     // Drawn, not a bare contents list — the same shape as every other unit, with one cell.
     expect(screen.getByRole('button', { name: /^Yard —/ })).toBeInTheDocument();
   });
@@ -237,15 +236,16 @@ describe('LocationsManager', () => {
    * Clicking a bin does NOT navigate: the grid stays put and the contents open underneath, so
    * working through a cabinet costs no page loads and never loses your position.
    */
-  it('opens a place beneath the grid rather than navigating away from it', async () => {
+  it('opens a place in the drawer rather than navigating away from it', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /^Shelf A/ }));
 
-    expect(await screen.findByText(/what's in Shelf A/i)).toBeInTheDocument();
-    // Still on the same unit, still showing its grid.
-    expect(screen.getByRole('button', { name: /^Shelf B/ })).toBeInTheDocument();
+    // The drawer names the place and its path — a shop can hold two bins both called Shelf A.
+    const drawer = await screen.findByRole('presentation');
+    expect(within(drawer).getByText('Shelf A')).toBeInTheDocument();
+    expect(within(drawer).getByText(/Cabinet 3/)).toBeInTheDocument();
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
@@ -444,9 +444,31 @@ describe('LocationsManager — the four verbs', () => {
     expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
   });
 
+  /**
+   * THE FIX FOR A REPORTED OFF-BY-ONE.
+   *
+   * The contents used to sit under the grid, so selecting a bin near the top of a 12-row cabinet
+   * put the answer below the fold and the panel scrolled the page to it. That moved the grid up
+   * under the cursor by about one row height — click Row 4, the page jumps, click again where Row 4
+   * was, and you get Row 5. Measured in a browser: cells and labels align to half a pixel and one
+   * click always selected the row it was on. The page moving was the whole of it.
+   *
+   * jsdom has no scroll and no layout, so this can only assert the STRUCTURAL cause: nothing below
+   * the grid to scroll to.
+   */
+  it('keeps the pane to the unit, with nothing below the grid to scroll to', async () => {
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await screen.findByRole('button', { name: /^Shelf A/ });
+    expect(screen.queryByText(/what's in shelf a/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/recent activity/i)).not.toBeInTheDocument();
+  });
+
   it('offers the four verbs on a place, in the operator order', async () => {
+    const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
+    await user.click(await screen.findByRole('button', { name: /^Yard —/ }));
     await screen.findByRole('button', { name: /^adjust$/i });
     const labels = ['Add', 'Remove', 'Move', 'Adjust'];
     const found = labels.map((l) => screen.getByRole('button', { name: new RegExp(`^${l}$`, 'i') }));
@@ -467,13 +489,16 @@ describe('LocationsManager — the four verbs', () => {
    * the `Move` verb now duplicates. A leaf is the same weight as the other three verbs, so it gets
    * what they get — a dialog that leaves the grid where it is.
    */
-  it('adjusts a single place in a dialog, without leaving the page', async () => {
+  it('adjusts a single place inside the drawer, without leaving the page', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
+    await user.click(await screen.findByRole('button', { name: /^Yard —/ }));
     await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
 
-    expect(await screen.findByRole('heading', { name: /adjust what's in Yard/i })).toBeInTheDocument();
+    // A VIEW, not a dialog over the drawer: one layer, with the header's Back as the way out.
+    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
+    expect(screen.getByText(/type what you actually counted/i)).toBeInTheDocument();
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
@@ -498,11 +523,10 @@ describe('LocationsManager — the four verbs', () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
+    await user.click(await screen.findByRole('button', { name: /^Yard —/ }));
     await user.click(await screen.findByRole('button', { name: /^add$/i }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('heading', { name: /add stock here/i })).toBeInTheDocument();
-    // The place is named IN the dialog: the whole point is that you already know where you are.
-    expect(within(dialog).getByText('Yard')).toBeInTheDocument();
+
+    expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();
   });
 
   /**
@@ -511,11 +535,13 @@ describe('LocationsManager — the four verbs', () => {
    * and its absence would not explain itself.
    */
   it('disables Remove and Move on a place holding nothing', async () => {
+    const user = userEvent.setup();
     vi.mocked(getLocationBoard).mockResolvedValue(
       board(SEED_LOCATIONS, [['shelf-a', 2], ['un', 7]]),
     );
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
+    await user.click(await screen.findByRole('button', { name: /^Yard —/ }));
     await screen.findByRole('button', { name: /^adjust$/i });
     expect(screen.getByRole('button', { name: /^remove$/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^move$/i })).toBeDisabled();
@@ -535,7 +561,34 @@ describe('LocationsManager — the four verbs', () => {
     for (const verb of [/^add$/i, /^remove$/i, /^move$/i]) {
       expect(screen.queryByRole('button', { name: verb })).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/pick a place above/i)).toBeInTheDocument();
+    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The drawer is per-place, so switching cells must not leave you inside the previous place's
+   * form with a new place's name on it. Enforced by a remount key rather than an effect.
+   */
+  it('returns to the overview when a different place is picked', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await user.click(await screen.findByRole('button', { name: /^Shelf A —/ }));
+    await user.click(await screen.findByRole('button', { name: /^add$/i }));
+    expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();
+
+    // Back returns to the overview WITHIN the drawer — one layer, never a dialog stacked on it.
+    await user.click(screen.getByRole('button', { name: /^back$/i }));
+    expect(screen.queryByText(/add stock here/i)).not.toBeInTheDocument();
+
+    // Then close, and pick the other shelf. The drawer is modal, so the grid behind it is inert
+    // until it closes — deliberate, and the reason this goes through Close rather than straight to
+    // the next cell.
+    await user.click(screen.getByRole('button', { name: /^close$/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shelf B —/ }));
+
+    // Remounted by key, so it is the overview again rather than Shelf A's Add form renamed.
+    expect(await screen.findByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    expect(screen.queryByText(/add stock here/i)).not.toBeInTheDocument();
   });
 
   /**
@@ -546,18 +599,13 @@ describe('LocationsManager — the four verbs', () => {
    * ordinary transfers. Emptying the pile is therefore a Move, and the bulk form of it is one click
    * further on, inside the worksheet that `Adjust` opens.
    */
-  it('gives the put-away pile the same verbs, and routes Adjust to its worksheet', async () => {
+  it('gives the put-away pile the same verbs in the same drawer', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="un" />);
 
+    await user.click(await screen.findByRole('button', { name: /^Unassigned —/ }));
     expect(await screen.findByRole('button', { name: /^move$/i })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /put these away/i })).not.toBeInTheDocument();
-
-    // The pile is a leaf, so it takes the dialog like any other single place.
-    await user.click(screen.getByRole('button', { name: /^adjust$/i }));
-    expect(
-      await screen.findByRole('heading', { name: /adjust what's in Unassigned/i }),
-    ).toBeInTheDocument();
   });
 
   /**
@@ -567,7 +615,10 @@ describe('LocationsManager — the four verbs', () => {
   it('withholds layout and labelling from the put-away pile', async () => {
     render(<LocationsManager companyId="co1" unitId="un" />);
 
-    await screen.findByRole('button', { name: /^adjust$/i });
+    // It draws like any other single place…
+    await screen.findByRole('button', { name: /^Unassigned —/ });
+    // …but it is not furniture: `assert_location_parent_holds_no_stock` refuses it children, and a
+    // pile has nothing to label.
     expect(screen.queryByRole('button', { name: /change layout/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^print qr$/i })).not.toBeInTheDocument();
   });

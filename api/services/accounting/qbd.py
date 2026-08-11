@@ -77,7 +77,9 @@ class QbdProvider:
             external_id=kwargs["request_id"],
             job_number=kwargs.get("job_number"),
             customer_po_number=kwargs.get("customer_po_number"),
-            billing_address=kwargs.get("billing_address"),
+            # The shared push path hands over a QuickBooks ONLINE-shaped address
+            # (Line1 / CountrySubDivisionCode). Desktop rejects it, so translate.
+            billing_address=qbd.to_qbd_address(kwargs.get("raw_billing_address")),
             terms_id=kwargs.get("term_id"),
             sales_tax_code_id=kwargs.get("sales_tax_code_id"),
         )

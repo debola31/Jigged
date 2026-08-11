@@ -192,6 +192,13 @@ def _raise_for_error(resp: httpx.Response, *, is_write: bool) -> None:
     # trustworthy for INVALID_REQUEST_ERROR, where it reads "An internal server
     # error occurred" for what is actually our own malformed request.
     friendly = err.get("userFacingMessage") or message
+    # ...EXCEPT for INVALID_REQUEST_ERROR, whose userFacingMessage reads "An
+    # internal server error occurred. Please try again." That is worse than
+    # useless: the fault is OUR malformed request, and the generic text sends a
+    # shop chasing an outage that is not happening. Verified live -- it masked a
+    # bad address payload during acceptance testing until this was changed.
+    if err.get("type") == "INVALID_REQUEST_ERROR":
+        friendly = message
     request_id = err.get("requestId")
 
     if resp.status_code in (401, 403):
@@ -568,6 +575,32 @@ def customer_tax_code_id(end_user_id: str, qb_customer_id: str) -> str | None:
 
 
 # ───────────────────────── The invoice ─────────────────────────
+def to_qbd_address(addr: dict | None) -> Optional[dict]:
+    """Jigged's customer_addresses row -> a QuickBooks Desktop address.
+
+    NOT interchangeable with services.quickbooks._to_qb_addr, which emits the
+    QuickBooks ONLINE shape (Line1 / City / CountrySubDivisionCode / PostalCode).
+    Passing that to Desktop is rejected -- caught in live acceptance, where the
+    rejection arrived as a generic "internal server error".
+    """
+    if not addr:
+        return None
+    out: dict = {}
+    if addr.get("address_line1"):
+        out["line1"] = addr["address_line1"]
+    if addr.get("address_line2"):
+        out["line2"] = addr["address_line2"]
+    if addr.get("city"):
+        out["city"] = addr["city"][:31]
+    if addr.get("state"):
+        out["state"] = addr["state"][:21]
+    if addr.get("postal_code"):
+        out["postalCode"] = addr["postal_code"][:13]
+    if addr.get("country"):
+        out["country"] = addr["country"]
+    return out or None
+
+
 def job_to_qbd_invoice_payload(
     *,
     customer_id: str,

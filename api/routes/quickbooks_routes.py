@@ -703,6 +703,22 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)
 
+    # The raw address row, for providers that shape it themselves.
+    # load_firm_invoice_lines returns bill_addr already in QuickBooks ONLINE's
+    # shape (Line1 / CountrySubDivisionCode); Desktop uses different key names and
+    # rejects that one outright.
+    raw_bill_addr = None
+    if job.get("billing_address_id"):
+        rows = (
+            db.table("customer_addresses")
+            .select("address_line1, address_line2, city, state, postal_code, country")
+            .eq("id", job["billing_address_id"])
+            .limit(1)
+            .execute()
+            .data
+        )
+        raw_bill_addr = rows[0] if rows else None
+
     if existing:
         row = existing[0]
         request_id = row["qb_request_id"]
@@ -863,7 +879,7 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             job_number=job.get("job_number"),
             customer_po_number=job.get("customer_po_number"),
             bill_addr=bill_addr,
-            billing_address=bill_addr,
+            raw_billing_address=raw_bill_addr,
             lines=lines,
             sales_term_id=sales_term_id,
             term_id=sales_term_id,

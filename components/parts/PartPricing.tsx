@@ -556,7 +556,18 @@ export default function PartPricing({
           console.error('Failed to log starter pricing note:', noteErr);
         }
         if (forPartId !== partIdRef.current) return;
-        await loadAll({ showSpinner: false });
+        // The user can start typing while this write is in flight — and then
+        // re-seeding the rows from the database would silently discard their
+        // staged edit. That is the exact section-isolation bug the load effect
+        // refuses to cause (interaction-standards §2, invariant 1), and calling
+        // loadAll directly here walks around that guard, so it has to be
+        // repeated. Nothing is lost by skipping: their own Save reconciles the
+        // ladder, deleting this starter row along the way.
+        if (!dirtyRef.current) {
+          await loadAll({ showSpinner: false });
+        }
+        // Fires either way — the part IS priceable now, and the workspace
+        // banner should stop saying otherwise.
         onPricingChanged?.();
       } catch (err) {
         // Non-fatal and non-retrying: the card still works, the user types a

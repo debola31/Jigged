@@ -499,6 +499,41 @@ describe('PartPricing — starter tier from the shop default', () => {
     expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
   });
 
+  it('never discards a staged edit made while its write is in flight', async () => {
+    // Caught by E2E, not by the unit tests: `parts-and-routing.spec.ts` types a
+    // Min qty and then saves an operation, and the Min qty came back as 1.
+    //
+    // The starter write reloads the tier rows when it lands, to pick up the new
+    // row's id — and a reload re-seeds from the database. If the user started
+    // typing in between, that wipes what they typed. It is the exact bug the
+    // load effect's isolation guard exists to prevent; calling loadAll directly
+    // walks around that guard, so the check has to be repeated here.
+    let releaseWrite: () => void = () => {};
+    mockReplaceTiersForPart.mockImplementation(
+      () => new Promise<void>((resolve) => { releaseWrite = () => resolve(); }),
+    );
+    // What the reload WOULD return: the persisted starter row, min qty 1.
+    mockGetTiersForPart.mockResolvedValue([]);
+
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+
+    // The user types while the write is still open.
+    const minQty = (await screen.findAllByRole('textbox'))[0];
+    await user.clear(minQty);
+    await user.type(minQty, '250');
+    await screen.findByText(/unsaved change/i);
+
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
+    ]);
+    releaseWrite();
+
+    // Their number stands, and it is still staged.
+    await waitFor(() => expect(minQty).toHaveValue('250'));
+    expect(screen.getByText(/unsaved change/i)).toBeInTheDocument();
+  });
+
   it('does NOT touch a part that already has tiers', async () => {
     mockGetTiersForPart.mockResolvedValue([savedTier]);
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);

@@ -10,10 +10,23 @@ from supabase import Client
 
 import services.quickbooks as qb
 
+# Aliased with a _service suffix on purpose. `from .qbd import QbdProvider` below
+# binds the SUBMODULE services.accounting.qbd onto this package's namespace, so a
+# plain `as qbd` alias for the service module is silently overwritten and every
+# call through it becomes an AttributeError at runtime.
+import services.quickbooks_desktop as qbd_service
+
 from .base import AccountingProvider, CreatedInvoice
+from .qbd import QbdProvider
 from .qbo import QboProvider
 
-__all__ = ["AccountingProvider", "CreatedInvoice", "QboProvider", "get_provider"]
+__all__ = [
+    "AccountingProvider",
+    "CreatedInvoice",
+    "QbdProvider",
+    "QboProvider",
+    "get_provider",
+]
 
 
 def get_provider(db: Client, company_id: str) -> AccountingProvider | None:
@@ -31,5 +44,8 @@ def get_provider(db: Client, company_id: str) -> AccountingProvider | None:
     if conn and conn.get("environment") == qb._environment():
         return QboProvider(db, company_id, conn)
 
-    # QuickBooks Desktop lands here in Phase 3 (services/quickbooks_desktop.py).
+    dconn = qbd_service.get_connection(db, company_id)
+    if dconn and dconn.get("environment") == qbd_service._environment():
+        return QbdProvider(db, company_id, dconn)
+
     return None

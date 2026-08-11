@@ -140,3 +140,87 @@ def test_quickbooks_module_is_untouched_by_the_seam():
         "load_firm_invoice_lines",
     ):
         assert hasattr(qb, name), f"services.quickbooks lost {name}"
+
+
+# ───────────────────────── QuickBooks Desktop ─────────────────────────
+class _TableAwareDB:
+    """Routes by table name, so a QBO row and a QBD row can be present or absent
+    independently -- which the single-provider dispatch actually depends on."""
+
+    def __init__(self, qbo_row=None, qbd_row=None):
+        self._rows = {
+            "quickbooks_connections": qbo_row,
+            "quickbooks_desktop_connections": qbd_row,
+        }
+
+    def table(self, name):
+        return _FakeConnTable(self._rows.get(name))
+
+
+def _qbd(conn=None):
+    from services.accounting.qbd import QbdProvider
+
+    return QbdProvider(
+        _TableAwareDB(),
+        "co-1",
+        conn or {"conductor_end_user_id": "end_usr_1", "environment": "sandbox"},
+    )
+
+
+def test_qbd_satisfies_the_protocol(monkeypatch):
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    assert isinstance(_qbd(), AccountingProvider)
+
+
+def test_qbd_scope_id_is_the_conductor_end_user(monkeypatch):
+    """The end-user id IS the connected company file, the QBD analogue of a realm
+    id. It is what lands in quickbooks_invoice_links.realm_id."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    assert _qbd().scope_id == "end_usr_1"
+
+
+def test_qbd_does_not_dedupe_replayed_creates(monkeypatch):
+    """Conductor has no idempotency key and does not dedupe externalId. Verified
+    that a create aborted client-side at 1s still produced an invoice, so the
+    shared push path must never auto-retry an ambiguous outcome here."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    assert _qbd().dedupes_replayed_creates is False
+
+
+def test_qbd_has_no_deep_link(monkeypatch):
+    """QuickBooks Desktop has no web app. InvoicesMenu already renders a
+    non-link row when the url is absent."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    assert _qbd().invoice_deep_link("2FBE0-1797378826") is None
+
+
+def test_qbd_rejects_a_connection_from_another_environment(monkeypatch):
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "production")
+    import services.quickbooks_desktop as qbd_service
+
+    with pytest.raises(qbd_service.QbdNotConnected):
+        _qbd({"conductor_end_user_id": "end_usr_1", "environment": "sandbox"})
+
+
+def test_get_provider_returns_qbd_when_only_desktop_is_connected(monkeypatch):
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    db = _TableAwareDB(
+        qbd_row={"conductor_end_user_id": "end_usr_9", "environment": "sandbox"}
+    )
+    provider = get_provider(db, "co-1")
+    assert provider is not None
+    assert provider.name == "qbd"
+    assert provider.scope_id == "end_usr_9"
+
+
+def test_get_provider_prefers_qbo_but_the_db_forbids_both(monkeypatch):
+    """assert_single_accounting_provider() makes 'both connected' unreachable, so
+    the check order cannot change the answer. This pins the dispatch anyway, so a
+    future edit that drops the trigger is caught by a failing expectation rather
+    than by a shop invoicing into the wrong system."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    db = _TableAwareDB(
+        qbo_row={"realm_id": "realm-1", "environment": "sandbox"},
+        qbd_row={"conductor_end_user_id": "end_usr_9", "environment": "sandbox"},
+    )
+    assert get_provider(db, "co-1").name == "qbo"

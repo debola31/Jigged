@@ -17,6 +17,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Link from '@mui/material/Link';
 import Chip from '@mui/material/Chip';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -329,12 +331,24 @@ export default function PartBomPanel({
   const handleEditorSave = async (value: MaterialEditorValue) => {
     if (!value.childPart) return;
 
+    // A new purchased material follows however this part is already set, so
+    // adding one more doesn't silently drop the panel into "mixed". An edit
+    // keeps whatever the line had. Made children stay at cost: marking up
+    // in-house work is a decision for that part's own Pricing card.
+    const isAdd = editorState.mode === 'add';
+    const chargeBasis: ChargeBasis =
+      isAdd && value.childPart.source === 'bought'
+        ? (purchasedBasis ?? 'cost')
+        : isAdd
+          ? 'cost'
+          : value.charge_basis;
+
     const formData: BomLineFormData = {
       child_part_id: value.childPart.id,
       quantity: value.quantity,
       unit: value.unit,
       consume_whole_units: value.consume_whole_units,
-      charge_basis: value.charge_basis,
+      charge_basis: chargeBasis,
     };
 
     setEditorError(null);
@@ -377,7 +391,7 @@ export default function PartBomPanel({
         await updateBomLine(existing.id, formData);
       }
       posthog.capture('bom line charge basis set', {
-        basis: value.charge_basis,
+        basis: chargeBasis,
         bulk: false,
         child_source: value.childPart.source,
       });
@@ -439,7 +453,19 @@ export default function PartBomPanel({
   };
 
   const editorOpen = editorState.mode !== 'closed';
-  const purchasedLineCount = rows.filter((r) => r.child_part.source === 'bought').length;
+  const purchasedRows = rows.filter((r) => r.child_part.source === 'bought');
+  const purchasedLineCount = purchasedRows.length;
+  // null = mixed. Only reachable by import or by data written before this was a
+  // single per-part control; the toggle shows nothing selected rather than
+  // picking one and misreporting the other lines.
+  const purchasedBasis: ChargeBasis | null =
+    purchasedLineCount === 0
+      ? null
+      : purchasedRows.every((r) => r.charge_basis === 'price')
+        ? 'price'
+        : purchasedRows.every((r) => r.charge_basis === 'cost')
+          ? 'cost'
+          : null;
 
   // Build the editor's initial value from the row being edited.
   const editingRow =
@@ -511,17 +537,19 @@ export default function PartBomPanel({
         </Box>
       )}
 
-      {/* Bulk basis, shown only when there is purchased material to act on. A
-          shop that marks up purchased material marks up ALL of it, and setting
-          that one line at a time is the difference between a five-minute change
-          and an afternoon. Each material's own Pricing page decides BY HOW MUCH —
-          there is no shop-wide number standing behind this button. */}
+      {/* THE control for charge basis — one per part, not one per material.
+          A shop that marks up purchased material marks up all of it, so a
+          per-row select bought nothing but a fourth field on every line.
+
+          It shows state rather than offering two actions: which way this part
+          is set is the thing you come here to check. "Mixed" is reachable by
+          import, so it renders as neither selected rather than lying. */}
       {!readOnly && !loading && purchasedLineCount > 0 && (
         <Box
           sx={{
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
+            gap: 1.5,
             flexWrap: 'wrap',
             mb: 2,
             p: 1,
@@ -530,27 +558,30 @@ export default function PartBomPanel({
             borderRadius: 1,
           }}
         >
-          <Typography variant="caption" color="text.secondary">
-            All {purchasedLineCount} purchased{' '}
-            {purchasedLineCount === 1 ? 'material' : 'materials'}:
+          <Typography variant="body2" color="text.secondary">
+            Charge the {purchasedLineCount} purchased{' '}
+            {purchasedLineCount === 1 ? 'material' : 'materials'} at:
           </Typography>
-          <Button
+          <ToggleButtonGroup
+            exclusive
             size="small"
-            variant="outlined"
+            value={purchasedBasis}
             disabled={bulkSaving || editorOpen || saving}
-            onClick={() => void handleBulkChargeBasis('price')}
+            onChange={(_, next: ChargeBasis | null) => {
+              // Null is the click that would deselect the active button; a part
+              // is always charged one way or the other, so ignore it.
+              if (next) void handleBulkChargeBasis(next);
+            }}
           >
-            Charge at their marked-up price
-          </Button>
-          <Button
-            size="small"
-            disabled={bulkSaving || editorOpen || saving}
-            onClick={() => void handleBulkChargeBasis('cost')}
-          >
-            Charge at our cost
-          </Button>
+            <ToggleButton value="cost">Our cost</ToggleButton>
+            <ToggleButton value="price">Their marked-up price</ToggleButton>
+          </ToggleButtonGroup>
           <Typography variant="caption" color="text.secondary">
-            Each material&apos;s markup comes from its own Pricing card.
+            {purchasedBasis === 'price'
+              ? 'How much each is marked up comes from its own Pricing card.'
+              : purchasedBasis === null
+                ? 'These materials are set differently from each other — pick one to align them.'
+                : null}
           </Typography>
         </Box>
       )}

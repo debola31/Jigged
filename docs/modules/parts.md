@@ -196,11 +196,22 @@ A `'price'` line makes that false for that edge, so `compute_part_cost_explain` 
 `get_priceable_part_ids` both encode *the root needs a markup, and so does any child charged at
 price* — nothing covers for a missing tier. An agreement test holds the two views together.
 
-**Setting it at scale.** Storage is per-line by design (the same material is charged at price on a
-customer job and at cost on an internal stock-making work order). The BOM panel adds one bulk
-control over *purchased* materials only — a shop that marks up purchased material marks up all of
-it, and setting that line by line is the difference between a five-minute change and an afternoon.
-How much each material marks up still comes from its own Pricing card.
+**One control, per part, over purchased materials.** The Materials panel carries a single toggle —
+*Charge the N purchased materials at: Our cost | Their marked-up price* — and it shows state rather
+than offering two actions, because which way a part is set is what you come there to check. A new
+purchased material follows whatever the part is already set to. How much each one marks up still
+comes from its own Pricing card.
+
+⚠ *There was briefly a per-row **Charge at** select in the material editor as well. It was removed:
+a shop that marks up purchased material marks up all of it, so a fourth control on every line bought
+nothing but width. The issue justified per-line granularity with "material at price on customer jobs
+but at cost on internal stock-making work orders" — but that distinction is **per-job**, and a BOM
+line cannot see which job consumes it, so the granularity never served the case that motivated it.*
+
+**The column stays per-line**, which is why none of this needed a migration and why an import can
+still set lines individually. A part whose lines disagree renders as "mixed" (neither option
+selected) rather than the toggle picking one and misreporting the rest. Made children stay at cost
+through the UI — marking up in-house work is a decision for that part's own Pricing card.
 
 ### `part_attachments`
 

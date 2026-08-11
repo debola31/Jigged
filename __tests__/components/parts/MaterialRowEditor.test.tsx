@@ -224,45 +224,51 @@ describe('MaterialRowEditor — single quantity field', () => {
     expect(screen.queryByLabelText(/Batch qty/i)).toBeNull();
   });
 
-  // #727. Money control: it decides whether the job pays our cost for a material
-  // or what we sell it for, so the default must be the pre-feature behaviour and
-  // the change must reach the caller intact.
+  // #727. Charge basis is decided once per part on the Materials panel, not on
+  // every row — a shop that marks up purchased material marks up all of it, and
+  // a fourth control here bought nothing. What this editor must still do is
+  // carry the value through untouched, so editing a row's quantity cannot
+  // silently reset how that material is charged.
   describe('charge basis', () => {
-    it('defaults to our cost and saves it', async () => {
+    it('offers no control for it', async () => {
       nextPickOption = makeOption({ primary_unit: 'each' });
-      const onSave = vi.fn();
       render(
-        <MaterialRowEditor companyId="co-1" onSave={onSave} onCancel={() => undefined} />,
+        <MaterialRowEditor companyId="co-1" onSave={() => undefined} onCancel={() => undefined} />,
       );
       await user.click(screen.getByRole('button', { name: 'pick-part' }));
-      await user.type(await screen.findByLabelText(/per part/i), '2');
+      await screen.findByLabelText(/per part/i);
 
-      expect(screen.getByRole('combobox', { name: /charge at/i })).toHaveTextContent(
-        'Our cost',
-      );
-
-      await user.click(screen.getByRole('button', { name: /add to bom/i }));
-      expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ charge_basis: 'cost', quantity: '2' }),
-      );
+      expect(screen.queryByRole('combobox', { name: /charge at/i })).toBeNull();
+      expect(screen.queryByText(/marked-up price/i)).toBeNull();
     });
 
-    it('passes marked-up price through when the user picks it', async () => {
-      nextPickOption = makeOption({ primary_unit: 'each' });
+    it('carries an existing line’s basis through an unrelated edit', async () => {
+      const initial: MaterialEditorValue = {
+        childPart: makeOption({ primary_unit: 'each' }),
+        quantity: '2',
+        unit: 'each',
+        consume_whole_units: true,
+        charge_basis: 'price',
+      };
       const onSave = vi.fn();
       render(
-        <MaterialRowEditor companyId="co-1" onSave={onSave} onCancel={() => undefined} />,
+        <MaterialRowEditor
+          companyId="co-1"
+          initial={initial}
+          onSave={onSave}
+          onCancel={() => undefined}
+        />,
       );
-      await user.click(screen.getByRole('button', { name: 'pick-part' }));
-      await user.type(await screen.findByLabelText(/per part/i), '2');
 
-      await user.click(screen.getByRole('combobox', { name: /charge at/i }));
-      await user.click(await screen.findByRole('option', { name: 'Marked-up price' }));
+      const qty = await screen.findByLabelText(/per part/i);
+      await user.clear(qty);
+      await user.type(qty, '7');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
 
-      await user.click(screen.getByRole('button', { name: /add to bom/i }));
       expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ charge_basis: 'price' }),
+        expect.objectContaining({ quantity: '7', charge_basis: 'price' }),
       );
     });
   });
 });
+

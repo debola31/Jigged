@@ -6,7 +6,14 @@ import type {
   PartPricingTierInput,
   ComputedPartPricingTier,
 } from '@/types/partPricing';
-import { getComputedPartChargeBase } from '@/utils/partsAccess';
+import {
+  getComputedPartChargeBase,
+  getComputedPartCost,
+  addPartPricingNote,
+} from '@/utils/partsAccess';
+import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import { getCompany, readCompanyStarterMarkups } from '@/utils/companyAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
 
 /**
@@ -224,4 +231,79 @@ export async function getPriceablePartIds(companyId: string): Promise<Set<string
     throw error;
   }
   return new Set((data ?? []) as string[]);
+}
+
+/**
+ * Give a part its first pricing tier, at the shop's starting markup, the moment
+ * it first has a cost — so "costed" and "quotable" happen together (#727).
+ *
+ * **Why this is not in the Pricing card.** It used to be, as an effect that
+ * noticed a cost had appeared and wrote a tier. Two problems, both real:
+ *
+ *   1. It ran AFTER the routing/BOM save had already refreshed the page, so the
+ *      workspace re-derived priceability in the gap and flashed "this part can't
+ *      be quoted yet" for a second before correcting itself. The user watched
+ *      the app change its mind.
+ *   2. An automatic write inside an explicit-Save card kept reaching around that
+ *      card's own guards — it ate a staged Min qty once and a staged operation
+ *      edit once, both caught by E2E.
+ *
+ * Called from the workspace's post-mutation refresh instead, BEFORE the refresh
+ * lands: the tier exists by the time anything re-reads priceability, so there is
+ * one transition rather than two.
+ *
+ * Returns true when it wrote a tier. No-ops (cheaply, in this order) when the
+ * part already has tiers, or has no cost to mark up yet.
+ */
+export async function ensureStarterPricingTier(
+  companyId: string,
+  partId: string,
+  source: 'made' | 'bought',
+): Promise<boolean> {
+  const existing = await getTiersForPart(partId);
+  if (existing.length > 0) return false;
+
+  // "Is there a cost", not "is there a routing". A made part whose operations
+  // were all deleted still HAS a routing row and rolls up to $0; a markup there
+  // would make it quotable for nothing, which is worse than not being quotable.
+  if (source === 'bought') {
+    const cost = await getComputedPartCost(partId, 1).catch(() => null);
+    if (cost === null) return false;
+  } else {
+    const breakdown = await calculateRoutingCost(partId, 1).catch(() => null);
+    const hasPricedWork =
+      !!breakdown &&
+      (breakdown.labor_items.length > 0 || breakdown.material_items.length > 0);
+    if (!hasPricedWork) return false;
+  }
+
+  const company = await getCompany(companyId);
+  // No company row, no starting markup to apply — writing 0 would be inventing a
+  // number the shop never chose.
+  if (!company) return false;
+  const starters = readCompanyStarterMarkups(company);
+  const markup = source === 'bought' ? starters.bought : starters.made;
+
+  await replaceTiersForPart(companyId, partId, [
+    { sequence: 10, quantity: 1, markup_percent: markup },
+  ]);
+
+  // Audit trail: a pricing row that appears with no trace is what the notes feed
+  // exists to prevent.
+  try {
+    const operator = await getCurrentMember(companyId);
+    if (operator) {
+      await addPartPricingNote(
+        partId,
+        companyId,
+        operator.id,
+        `Pricing started automatically at ${markup}% markup — your shop default for ${
+          source === 'bought' ? 'parts you buy' : 'parts you make'
+        } — so this part can be quoted. Adjust it any time.`,
+      );
+    }
+  } catch (noteErr) {
+    console.error('Failed to log starter pricing note:', noteErr);
+  }
+  return true;
 }

@@ -244,14 +244,6 @@ export default function PartPricing({
   // even if the previous part left staged edits behind; a sibling-panel refresh
   // on the SAME part must not.
   const loadedPartIdRef = useRef<string | null>(null);
-  // Parts this session has already tried to seed a starter tier for. Keyed by
-  // id so the attempt happens at most once per part — a failure must not retry
-  // on every render, and a success must not race the reload that follows it.
-  const starterTierAttemptedRef = useRef<Set<string>>(new Set());
-  // Set when the starter tier was written while the user had work staged, so the
-  // "this part is ready now" announcement to the workspace is owed but has not
-  // been made. Paid off by the effect below, once the card is idle.
-  const starterNotifyPendingRef = useRef(false);
   // The shop's starting markup for this part's source. Read once per company;
   // used to SEED the first tier and to caption where that number came from.
   // null while it loads — the starter write waits rather than guessing 0.
@@ -487,119 +479,6 @@ export default function PartPricing({
     setRows((prev) => prev.map((r) => recomputeRow(r, tierBaseCosts)));
   }, [tierBaseCosts]);
 
-  /**
-   * Does this part have something to price yet?
-   *
-   * Deliberately "is there a cost", not "is there a routing row". A made part
-   * whose operations were all deleted still HAS a routing row, and its cost
-   * rolls up to $0 — seeding a markup there would make it quotable for nothing,
-   * which is the one outcome worse than not being quotable at all. Labor and
-   * material items only appear once they actually price, so this waits for a
-   * real number. Bought parts have no breakdown; their cost is the procurement
-   * tier the base-cost effect already resolved at qty 1.
-   */
-  const hasCostBasis = isBought
-    ? (tierBaseCosts.get(1) ?? null) !== null
-    : breakdown !== null &&
-      (breakdown.labor_items.length > 0 || breakdown.material_items.length > 0);
-
-  /**
-   * A brand-new part gets its first tier at 0% markup, written for it.
-   *
-   * Until this existed, adding the first operation or material left the part
-   * costed but NOT quotable: `get_priceable_part_ids` requires a tier carrying a
-   * non-null markup, so the card showed an empty starter row and someone had to
-   * type a number and press Save before the part could go on a quote. That step
-   * taught nothing and blocked everything — the answer is always "some markup".
-   *
-   * The number comes from the shop's starting markup for this part's source
-   * (`companies.default_markup_made_percent` / `_bought_percent`, both 0 out of
-   * the box). It is read HERE, once, and written into the part's own tier —
-   * never consulted again. That write-time boundary is what separates this from
-   * the `markup_rates` module deleted in July 2026, and it is why the rollup has
-   * no shop-wide fallback of its own.
-   *
-   * **This is the one auto-save on a card whose whole standard is explicit Save**
-   * (interaction-standards §2, and the docstring above). The exception is narrow
-   * on purpose: it fires only when the part has NO persisted tiers at all, so it
-   * can never overwrite a decision; only when a cost exists to mark up; never
-   * while edits are staged; and at most once per part per session. It creates the
-   * row the card was already showing rather than changing a number anyone set.
-   */
-  useEffect(() => {
-    if (loading || saving || dirty || !hasCostBasis || starterMarkup === null) return;
-    // Exactly the untouched starter row — one row, never persisted, no markup.
-    const isUnpricedStarter =
-      rows.length === 1 && rows[0].id === undefined && rows[0].markupPercent === '';
-    if (!isUnpricedStarter) return;
-    if (starterTierAttemptedRef.current.has(partId)) return;
-    starterTierAttemptedRef.current.add(partId);
-
-    const forPartId = partId;
-    void (async () => {
-      try {
-        await replaceTiersForPart(companyId, forPartId, [
-          { sequence: 10, quantity: 1, markup_percent: starterMarkup },
-        ]);
-        // Audit trail. A pricing row that appears with no trace is exactly what
-        // the notes feed exists to prevent, so the note says plainly that the
-        // app wrote it and what to do about it.
-        try {
-          const operator = await getCurrentMember(companyId);
-          if (operator) {
-            await addPartPricingNote(
-              forPartId,
-              companyId,
-              operator.id,
-              `Pricing started automatically at ${starterMarkup}% markup — your shop default for ${
-                isBought ? 'parts you buy' : 'parts you make'
-              } — so this part can be quoted. Adjust it any time.`,
-            );
-          }
-        } catch (noteErr) {
-          console.error('Failed to log starter pricing note:', noteErr);
-        }
-        if (forPartId !== partIdRef.current) return;
-        // NOTHING here may touch the page while the user has work staged.
-        //
-        // Both of the follow-ups are destructive at the wrong moment. `loadAll`
-        // re-seeds these rows, discarding a typed Min qty. `onPricingChanged`
-        // bumps the workspace's refreshKey, which re-seeds the ROUTING panel
-        // too — and that panel keeps an open row editor with unsaved text in it.
-        // E2E caught both: first a Min qty reverting to 1, then an operation
-        // edit of 5 min/unit saving as the original 2. This is the
-        // section-isolation invariant (interaction-standards §2, invariant 1)
-        // reached through a side door: the load effect guards against a
-        // refreshKey bump, but an automatic write that CAUSES the bump walks
-        // straight around that guard.
-        //
-        // The user is never the one who asked for this write, so it waits.
-        if (dirtyRef.current) {
-          starterNotifyPendingRef.current = true;
-          return;
-        }
-        await loadAll({ showSpinner: false });
-        onPricingChanged?.();
-      } catch (err) {
-        // Non-fatal and non-retrying: the card still works, the user types a
-        // markup as before. Surfacing an error banner for a convenience the
-        // user never asked for would be worse than the missing row.
-        console.error('Failed to create the starter pricing tier:', err);
-      }
-    })();
-  }, [
-    loading,
-    saving,
-    dirty,
-    hasCostBasis,
-    starterMarkup,
-    isBought,
-    rows,
-    partId,
-    companyId,
-    loadAll,
-    onPricingChanged,
-  ]);
 
   const updateRows = (mapper: (prev: EditRow[]) => EditRow[]) => {
     setRows((prev) => mapper(prev));
@@ -774,23 +653,9 @@ export default function PartPricing({
     setCostingSaveState('idle');
   };
 
-  /**
-   * Pay off an announcement the starter write deferred.
-   *
-   * Without this the workspace would keep saying "this part isn't ready to
-   * quote" until some other mutation happened to bump refreshKey — stale, and
-   * about the one thing the starter tier exists to fix. Waiting for `dirty` to
-   * clear means the refresh lands when the user has nothing in flight, which is
-   * the only moment it is safe to re-seed the page.
-   */
-  useEffect(() => {
-    if (dirty || loading || saving || !starterNotifyPendingRef.current) return;
-    starterNotifyPendingRef.current = false;
-    void loadAll({ showSpinner: false }).then(() => onPricingChanged?.());
-  }, [dirty, loading, saving, loadAll, onPricingChanged]);
 
-  // The single persisted tier the card wrote for itself, still sitting at the
-  // shop's starting markup. Not "any tier that matches" — a shop with two breaks
+  // The single tier the part was set up with, still sitting at the shop's
+  // starting markup. Not "any tier that matches" — a shop with two breaks
   // has been in here and made choices, and one that typed the same number by
   // hand doesn't need telling where it came from either (it stops matching the
   // moment they change it, which is the only time the hint has anything to say).

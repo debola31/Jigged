@@ -358,12 +358,20 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   just set up?" was a blank box on a card the user had no reason to open. The step taught nothing —
   the answer is always *some* markup.
 
-  **This is the only auto-save on a card whose whole standard is explicit Save**
-  ([interaction-standards §2](../interaction-standards.md#2-saving)), and the exception is drawn
-  narrow so it can never overwrite a decision: it fires only when the part has **no persisted tiers
-  at all**, only when a cost exists to mark up, never while edits are staged, and at most once per
-  part. It creates the row the card was already displaying rather than changing a number anyone set,
-  and it logs a `pricing` note saying the app wrote it.
+  **It is written by the save that created the cost, not by the Pricing card.**
+  `ensureStarterPricingTier` runs inside the workspace's post-mutation refresh — the one choke point
+  every cost-creating panel (routing, materials, bought-part cost sheet) already goes through — and
+  it runs BEFORE the refresh lands, so priceability is re-derived once with the tier already there.
+  It never overwrites a decision: only a part with **no tiers at all** and a real cost qualifies, and
+  it logs a `pricing` note saying the app wrote it.
+
+  ⚠ *This lived as an effect inside `PartPricing` first, and both problems it caused are worth not
+  repeating. Running after the refresh made the workspace flash "this part isn't ready to quote"
+  for a second and then correct itself — the app visibly changing its mind about a part the user had
+  just set up. And an automatic write inside an explicit-Save card kept reaching around that card's
+  own isolation guard: it ate a staged Min qty once and a staged operation edit once, both caught by
+  E2E rather than by unit tests. The card is explicit-Save only again, which is what
+  [interaction-standards §2](../interaction-standards.md#2-saving) asks of it.*
 
   **The gate is "is there a cost", not "is there a routing".** A made part whose operations were all
   deleted still has a routing row and rolls up to $0; seeding a markup there would make it quotable

@@ -334,50 +334,38 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
 });
 
 // ============================================================================
-// The starter tier: a new part is quotable the moment it has a cost.
+// The starter tier no longer lives on this card.
 //
-// Before this, adding the first operation or material left the part costed but
-// NOT quotable — `get_priceable_part_ids` wants a tier carrying a non-null
-// markup, and the card only offered an empty row someone had to fill in and
-// save. The card now writes that row itself, at the shop's starting markup for
-// the part's source (companies.default_markup_made/bought_percent, 0 by default).
+// It used to be an effect here that noticed a cost had appeared and wrote a
+// tier. That was the wrong home twice over: it ran after the routing/BOM save
+// had already refreshed the page, so the workspace flashed "this part can't be
+// quoted yet" and then corrected itself; and an automatic write inside an
+// explicit-Save card kept reaching around this card's own guards, eating a
+// staged Min qty once and a staged operation edit once.
 //
-// It is the single auto-save on a card whose standard is explicit Save, so what
-// these tests pin down is mostly where it must NOT fire — plus that the number
-// comes from the setting and says so.
+// It is now `ensureStarterPricingTier`, called from the workspace's
+// post-mutation refresh BEFORE the refresh lands — covered by
+// `__tests__/utils/ensureStarterPricingTier.test.ts`. What stays here is the
+// caption that explains the resulting number.
 // ============================================================================
-describe('PartPricing — starter tier from the shop default', () => {
+describe('PartPricing — the starting-markup caption', () => {
   const user = userEvent.setup();
-
-  /** A breakdown with a real priced operation — i.e. there is a cost to mark up. */
-  const pricedBreakdown = {
-    labor_items: [
-      {
-        operation_name: 'Mill',
-        run_time_minutes: 10,
-        setup_time_minutes: 0,
-        labor_rate: 60,
-        cost: 10,
-        setup_cost: 0,
-      },
-    ],
-    material_items: [],
-    total_labor_cost: 10,
-    total_setup_cost: 0,
-    total_material_cost: 0,
-    total_cost: 10,
-    materials_complete: true,
-    warnings: [],
-  };
-
-  /** A made part with a routing row but nothing in it — cost rolls up to $0. */
-  const emptyBreakdown = { ...pricedBreakdown, labor_items: [], total_labor_cost: 0, total_cost: 0 };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetTiersForPart.mockResolvedValue([]); // never configured
-    mockCalculateRoutingCost.mockResolvedValue(pricedBreakdown);
-    mockGetComputedPartCost.mockResolvedValue(10);
+    mockCalculateRoutingCost.mockResolvedValue({
+      labor_items: [],
+      material_items: [],
+      total_labor_cost: 10,
+      total_setup_cost: 0,
+      total_material_cost: 5,
+      total_cost: 15,
+      total_material_true_cost: 5,
+      total_true_cost: 15,
+      materials_complete: true,
+      warnings: [],
+    });
+    mockGetComputedPartCost.mockResolvedValue(15);
     mockReplaceTiersForPart.mockResolvedValue(undefined);
     mockGetCurrentMember.mockResolvedValue({ id: 'u1' });
     mockGetCompany.mockResolvedValue({
@@ -386,229 +374,9 @@ describe('PartPricing — starter tier from the shop default', () => {
     });
   });
 
-  const starterCall = () => mockReplaceTiersForPart.mock.calls[0];
-
-  it('writes one tier at min qty 1 once the part has a priced operation', async () => {
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-    expect(starterCall()[0]).toBe('c1');
-    expect(starterCall()[1]).toBe('p1');
-    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
-  });
-
-  it('fires for a part whose only cost is a material — no operations at all', async () => {
-    // The reported case: a made part with one purchased material on its BOM and
-    // an empty routing. Cost resolves, so the part must become quotable.
-    mockCalculateRoutingCost.mockResolvedValue({
-      ...pricedBreakdown,
-      labor_items: [],
-      total_labor_cost: 0,
-      material_items: [
-        {
-          item_name: 'BUY-MOTOR-12V',
-          quantity: 9,
-          unit: 'ea',
-          cost_per_unit: 14.5,
-          cost: 130.5,
-          qty_in_primary: 9,
-          consume_whole_units: true,
-          units_consumed: 9,
-        },
-      ],
-      total_material_cost: 130.5,
-      total_cost: 130.5,
-    });
-
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
-  });
-
-  it('tells the parent, so the workspace stops saying "needs cost"', async () => {
-    const onPricingChanged = vi.fn();
-    render(
-      <PartPricing companyId="c1" part={part} refreshKey={0} onPricingChanged={onPricingChanged} />,
-    );
-
-    await waitFor(() => expect(onPricingChanged).toHaveBeenCalled());
-  });
-
-  it('leaves an audit note saying the app wrote it, not a person', async () => {
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await waitFor(() => expect(mockAddPartPricingNote).toHaveBeenCalled());
-    const body = mockAddPartPricingNote.mock.calls[0][3] as string;
-    expect(body).toMatch(/automatically/i);
-    expect(body).toMatch(/0% markup/);
-    expect(body).toMatch(/shop default/i);
-  });
-
-  it('uses the MADE default for a made part', async () => {
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 35,
-      default_markup_bought_percent: 12,
-    });
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 35 }]);
-  });
-
-  it('uses the BOUGHT default for a bought part', async () => {
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 35,
-      default_markup_bought_percent: 12,
-    });
-    const bought = { ...part, source: 'bought' } as Part;
-    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
-
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 12 }]);
-  });
-
-  it('writes nothing when the company row cannot be read', async () => {
-    // Guessing 0 would write a markup the shop never chose. Better to leave the
-    // card exactly as it behaved before the feature existed.
-    mockGetCompany.mockRejectedValue(new Error('offline'));
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await screen.findByText('Pricing');
-    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
-    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
-  });
-
-  it('does NOT fire for a part with a routing row but no priced work', async () => {
-    // $0 cost + 0% markup would make the part quotable for nothing — the one
-    // outcome worse than not being quotable at all.
-    mockCalculateRoutingCost.mockResolvedValue(emptyBreakdown);
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await screen.findByText('Pricing');
-    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
-    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
-  });
-
-  it('does NOT fire for a part with no routing and no BOM at all', async () => {
-    mockCalculateRoutingCost.mockResolvedValue(null);
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await screen.findByText('Pricing');
-    await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
-    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
-  });
-
-  it('never discards a staged edit made while its write is in flight', async () => {
-    // Caught by E2E, not by the unit tests: `parts-and-routing.spec.ts` types a
-    // Min qty and then saves an operation, and the Min qty came back as 1.
-    //
-    // The starter write reloads the tier rows when it lands, to pick up the new
-    // row's id — and a reload re-seeds from the database. If the user started
-    // typing in between, that wipes what they typed. It is the exact bug the
-    // load effect's isolation guard exists to prevent; calling loadAll directly
-    // walks around that guard, so the check has to be repeated here.
-    let releaseWrite: () => void = () => {};
-    mockReplaceTiersForPart.mockImplementation(
-      () => new Promise<void>((resolve) => { releaseWrite = () => resolve(); }),
-    );
-    // What the reload WOULD return: the persisted starter row, min qty 1.
+  it('never writes a tier — this card only saves when the user says so', async () => {
     mockGetTiersForPart.mockResolvedValue([]);
-
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-
-    // The user types while the write is still open.
-    const minQty = (await screen.findAllByRole('textbox'))[0];
-    await user.clear(minQty);
-    await user.type(minQty, '250');
-    await screen.findByText(/unsaved change/i);
-
-    mockGetTiersForPart.mockResolvedValue([
-      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
-    ]);
-    releaseWrite();
-
-    // Their number stands, and it is still staged.
-    await waitFor(() => expect(minQty).toHaveValue('250'));
-    expect(screen.getByText(/unsaved change/i)).toBeInTheDocument();
-  });
-
-  it('does not bump the page refresh while an edit is staged, but does once it clears', async () => {
-    // The second E2E failure: onPricingChanged bumps the workspace refreshKey,
-    // which re-seeds the ROUTING panel — and that panel holds an open row editor
-    // with unsaved text. An operation edited to 5 min/unit saved as the original
-    // 2, because the editor had been re-seeded under it. So the announcement
-    // waits for a moment the user isn't mid-something.
-    let releaseWrite: () => void = () => {};
-    mockReplaceTiersForPart.mockImplementation(
-      () => new Promise<void>((resolve) => { releaseWrite = () => resolve(); }),
-    );
-    const onPricingChanged = vi.fn();
-    render(
-      <PartPricing companyId="c1" part={part} refreshKey={0} onPricingChanged={onPricingChanged} />,
-    );
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-
-    const minQty = (await screen.findAllByRole('textbox'))[0];
-    await user.clear(minQty);
-    await user.type(minQty, '250');
-    await screen.findByText(/unsaved change/i);
-
-    mockGetTiersForPart.mockResolvedValue([
-      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
-    ]);
-    releaseWrite();
-
-    // Staged: the page must not be told anything yet.
-    await waitFor(() => expect(minQty).toHaveValue('250'));
-    expect(onPricingChanged).not.toHaveBeenCalled();
-
-    // Discard, and the owed announcement is paid — the workspace banner must not
-    // be left saying "not ready to quote" forever.
-    await user.click(screen.getByRole('button', { name: /Discard/i }));
-    await waitFor(() => expect(onPricingChanged).toHaveBeenCalled());
-  });
-
-  it('does NOT touch a part that already has tiers', async () => {
-    mockGetTiersForPart.mockResolvedValue([savedTier]);
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await screen.findByDisplayValue('100');
-    expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
-  });
-
-  it('does not write twice when a sibling panel bumps refreshKey', async () => {
-    const { rerender } = render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-
-    // The reload after the write returns the persisted row, as the DB would.
-    mockGetTiersForPart.mockResolvedValue([
-      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
-    ]);
-    const loadsBefore = mockGetTiersForPart.mock.calls.length;
-    rerender(<PartPricing companyId="c1" part={part} refreshKey={1} />);
-
-    // The bump re-reads the tiers, as it should...
-    await waitFor(() =>
-      expect(mockGetTiersForPart.mock.calls.length).toBeGreaterThan(loadsBefore),
-    );
-    // ...and finding a persisted 0% row, writes nothing.
-    expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1);
-  });
-
-  it('fires for a bought part once its procurement cost resolves', async () => {
-    const bought = { ...part, source: 'bought' } as Part;
-    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
-
-    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
-    expect(starterCall()[2]).toEqual([{ sequence: 10, quantity: 1, markup_percent: 0 }]);
-  });
-
-  it('does NOT fire for a bought part with no vendor cost yet', async () => {
-    const bought = { ...part, source: 'bought' } as Part;
-    mockGetComputedPartCost.mockResolvedValue(null);
-    render(<PartPricing companyId="c1" part={bought} refreshKey={0} />);
 
     await screen.findByText('Pricing');
     await waitFor(() => expect(mockGetTiersForPart).toHaveBeenCalled());
@@ -645,5 +413,16 @@ describe('PartPricing — starter tier from the shop default', () => {
 
     await screen.findByText(/Ready to quote at 35% markup/);
     expect(screen.queryByText(/sells for what it costs/i)).toBeNull();
+  });
+
+  it('says nothing about a ladder the shop has actually built', async () => {
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't1', sequence: 10, quantity: 1, markup_percent: 0 },
+      { id: 't2', sequence: 20, quantity: 100, markup_percent: 15 },
+    ]);
+    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
+
+    await screen.findByDisplayValue('100');
+    expect(screen.queryByText(/starting markup for parts you/i)).toBeNull();
   });
 });

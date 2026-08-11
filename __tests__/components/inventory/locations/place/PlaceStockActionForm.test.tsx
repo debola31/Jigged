@@ -348,6 +348,97 @@ describe('PlaceStockActionForm', () => {
     });
   });
 
+  /**
+   * Emptying a bin should not mean typing `2,099` correctly.
+   *
+   * `All` fills the FIELD rather than setting an everything-flag: the number lands in the input
+   * where it can be seen, changed and read back, and the write path stays the one path.
+   */
+  describe('All', () => {
+    it('fills a row with its whole on-hand, in that part\'s own unit', async () => {
+      const user = userEvent.setup();
+      setup('deplete');
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.click(screen.getByRole('button', { name: /use all 12 ea of RAW-STEEL-BLANK/i }));
+
+      expect(qtyFor('RAW-STEEL-BLANK')).toHaveValue(12);
+      // Only that row — `All` is per row, not a mode.
+      expect(qtyFor('BUY-ORING-214')).toHaveValue(null);
+    });
+
+    it('writes exactly what the field says', async () => {
+      const user = userEvent.setup();
+      setup('deplete');
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.click(screen.getByRole('button', { name: /use all 12 ea of RAW-STEEL-BLANK/i }));
+      await user.click(screen.getByRole('button', { name: /^remove stock$/i }));
+
+      expect(depleteStockAtLocation).toHaveBeenCalledWith(
+        'p-steel',
+        'bin5',
+        12,
+        'ea',
+        expect.anything(),
+      );
+    });
+
+    it('empties the whole bin in one press', async () => {
+      const user = userEvent.setup();
+      setup('deplete');
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.click(screen.getByRole('button', { name: /everything here/i }));
+
+      expect(qtyFor('RAW-STEEL-BLANK')).toHaveValue(12);
+      expect(qtyFor('BUY-ORING-214')).toHaveValue(4);
+      expect(screen.getByRole('button', { name: /remove stock \(2\)/i })).toBeEnabled();
+    });
+
+    /**
+     * Fills what is ON SCREEN. The set about to be written is never larger than the set you can
+     * see — and because a filled row is exempt from the filter, everything it fills stays visible.
+     */
+    it('fills only the rows a filter is showing', async () => {
+      const user = userEvent.setup();
+      const many = Array.from({ length: 12 }, (_, i) => ({
+        part_id: `p${i}`,
+        part_name: i === 0 ? 'RAW-STEEL-BLANK' : `BUY-WIDGET-${i}`,
+        primary_unit: 'ea',
+        quantity: 10 + i,
+        location_id: 'bin5',
+      }));
+      vi.mocked(getLocationContents).mockResolvedValueOnce({ contents: many, total: many.length });
+      setup('deplete');
+      await screen.findByText('RAW-STEEL-BLANK');
+
+      await user.type(screen.getByPlaceholderText(/filter by part/i), 'WIDGET-3');
+      await user.click(screen.getByRole('button', { name: /everything here/i }));
+
+      expect(qtyFor('BUY-WIDGET-3')).toHaveValue(13);
+      // The steel was filtered out and was NOT filled — so nothing was written off screen.
+      expect(screen.queryByText('RAW-STEEL-BLANK')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^remove stock$/i })).toBeEnabled();
+    });
+
+    /**
+     * `Adjust` gets no `All`, and `Add` gets none either.
+     *
+     * On an audit the equivalent value is 0 — calling zero "all" is the opposite word for the same
+     * button, it saves one character rather than five, and a one-tap way to zero a whole shelf is
+     * the most destructive thing here. `Add`'s rows have no on-hand to take all of.
+     */
+    it('is withheld from Add, which has no amount here to take', async () => {
+      const user = userEvent.setup();
+      setup('add');
+      await pickToAdd(user, 'RAW-BRASS-ROD');
+
+      expect(screen.queryByRole('button', { name: /use all/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /everything here/i })).not.toBeInTheDocument();
+    });
+  });
+
   it('says which verb it is', async () => {
     setup('add');
     expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();

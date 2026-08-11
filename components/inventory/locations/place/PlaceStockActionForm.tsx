@@ -63,6 +63,23 @@
  * see. Nothing reorders either — a row stays where it loaded whether you type in it or not, because
  * a list that rearranges under a person mid-count is a second way to lose your place.
  *
+ * ## `All`, and why only two verbs get it
+ *
+ * Emptying a bin should not mean typing `2,099` correctly. `Remove` and `Move` get an **All** on
+ * every row, and an `Everything here` above the list for the whole-bin case — because for those two
+ * "all" is a number the system already knows: the amount on hand.
+ *
+ * **`Adjust` deliberately gets neither.** Its equivalent value is `0`, and calling zero "all" is the
+ * opposite word for the same button. It would also save nothing — `0` is one character where
+ * `2,099` is five and has to match — and a one-tap way to zero an entire shelf is the most
+ * destructive thing in this module, which is not what a convenience button should be. The audit's
+ * other reading, *"everything matches what we thought"*, is not worth a button either: the worksheet
+ * drops zero-delta lines, so it would be a control that writes nothing.
+ *
+ * **`All` fills the field; it is not a mode.** No "everything" flag reaches the write path — the
+ * number lands in the input where you can see it, change it, and read it back before submitting.
+ * One write path, and the quantity you are about to commit is always on screen as a number.
+ *
  * ## Which parts each verb offers
  *
  * `Remove` and `Move` can only touch what is **here**, so their rows ARE the bin's contents: you
@@ -263,6 +280,13 @@ export default function PlaceStockActionForm({
     [rows, qty],
   );
 
+  /** Put this row's whole on-hand in its quantity box, in the part's own unit. */
+  const fillRow = (row: Row) => {
+    if (row.onHand == null) return;
+    setQty((q) => ({ ...q, [row.partId]: String(row.onHand) }));
+    setUnitFor((u) => ({ ...u, [row.partId]: row.primaryUnit }));
+  };
+
   /** Filtered rows — with every line exempt, so nothing about to be written can be off screen. */
   const filled = useMemo(() => new Set(lines.map((l) => l.row.partId)), [lines]);
   const visible = useMemo(() => {
@@ -270,6 +294,20 @@ export default function PlaceStockActionForm({
     if (!q) return rows;
     return rows.filter((r) => filled.has(r.partId) || r.partName.toLowerCase().includes(q));
   }, [rows, filter, filled]);
+
+  /** Every row on screen, filled with its whole on-hand. The empty-the-bin case. */
+  const fillAllVisible = () => {
+    setQty((q) => {
+      const next = { ...q };
+      for (const row of visible) if (row.onHand != null) next[row.partId] = String(row.onHand);
+      return next;
+    });
+    setUnitFor((u) => {
+      const next = { ...u };
+      for (const row of visible) if (row.onHand != null) next[row.partId] = row.primaryUnit;
+      return next;
+    });
+  };
 
   const submit = async () => {
     if (lines.length === 0) return;
@@ -419,6 +457,21 @@ export default function PlaceStockActionForm({
           </Typography>
         ) : (
           <Stack spacing={1}>
+            {/*
+              The whole-bin case: emptying a shelf, or putting the entire pile away.
+
+              Fills what is ON SCREEN, so a filtered list fills only what it is showing — and since
+              a filled row is exempt from the filter, everything it just filled stays visible. The
+              set you are about to write is never larger than the set you can see.
+            */}
+            {fromHere && rows.length > 1 && (
+              <Stack direction="row" justifyContent="flex-end">
+                <Button size="small" onClick={fillAllVisible}>
+                  Everything here
+                </Button>
+              </Stack>
+            )}
+
             {/* A search box on a three-row bin is a control that costs more than it saves. */}
             {rows.length > FILTER_FROM && (
               <TextField
@@ -492,6 +545,19 @@ export default function PlaceStockActionForm({
                         </MenuItem>
                       ))}
                     </TextField>
+                    {row.onHand != null && (
+                      <Button
+                        size="small"
+                        onClick={() => fillRow(row)}
+                        // The amount as of when this drawer opened. If someone empties the bin
+                        // meanwhile the RPC refuses the line and says so by name — a safe failure,
+                        // and the same one you would get having typed the number by hand.
+                        aria-label={`Use all ${num(row.onHand)} ${row.primaryUnit} of ${row.partName}`}
+                        sx={{ minWidth: 48 }}
+                      >
+                        All
+                      </Button>
+                    )}
                     {action === 'add' && (
                       <IconButton
                         aria-label={`Remove ${row.partName} from this list`}

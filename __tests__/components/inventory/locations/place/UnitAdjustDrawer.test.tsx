@@ -158,6 +158,21 @@ describe('UnitAdjustDrawer', () => {
     expect(screen.getByText(/including 1 you have counted/i)).toBeInTheDocument();
   });
 
+  /**
+   * Adjust has no `All`, by decision rather than by omission.
+   *
+   * Its equivalent value is 0 — calling zero "all" is the opposite word for the same button — and
+   * the other reading, "everything matches", writes nothing at all, because zero-delta lines are
+   * dropped. See PlaceStockActionForm, where Remove and Move do get one.
+   */
+  it('offers no All, because an audit has none to offer', async () => {
+    setup();
+    await screen.findByRole('heading', { name: /bulk adjust/i });
+
+    expect(screen.queryByRole('button', { name: /use all/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /everything here/i })).not.toBeInTheDocument();
+  });
+
   it('offers no filter on a short sheet', async () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });

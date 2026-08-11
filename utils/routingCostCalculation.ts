@@ -7,7 +7,6 @@ import {
   getPartCostExplain,
   getPartChargePrice,
 } from '@/utils/partsAccess';
-import type { ChargeBasis } from '@/types/bom';
 
 export interface CostWarning {
   type:
@@ -68,14 +67,16 @@ export interface MaterialItem {
   cost_per_unit: number;
   /** Per-parent-unit contribution at the charged rate (ceiling-adjusted when whole-unit). */
   cost: number;
-  /** The child's TRUE cost per unit, ignoring every charge basis in the tree. */
-  true_cost_per_unit: number;
-  /** Per-parent-unit contribution at the TRUE cost rate. */
+  /**
+   * Per-parent-unit contribution at the TRUE cost rate — every charge basis in
+   * the tree ignored. Sums into `total_material_true_cost`, which is what the
+   * Cost card's "Material markup / unit" row is measured against.
+   *
+   * The per-unit rate, the basis and the markup behind it used to live here too,
+   * to be frozen onto `quote_materials`. That table is gone (it had been
+   * write-only since 2026-04-30), so only the number with a reader remains.
+   */
   true_cost: number;
-  /** What this line contributes to the parent's rollup (#727). */
-  charge_basis: ChargeBasis;
-  /** The markup % the child's tier applied; null on a `'cost'` line. */
-  charge_markup_percent: number | null;
   /** `quantity` converted to the child's primary unit — per parent unit. */
   qty_in_primary: number;
   /** Whether this line ceilings consumption to whole units. */
@@ -385,7 +386,6 @@ export async function calculateRoutingCost(
       // pricing tier — one implementation of the tier-band rule, not a second
       // copy of it here in another language on a money path.
       let chargedUnitRate = childChargeBase;
-      let chargeMarkupPercent: number | null = null;
       if (line.charge_basis === 'price') {
         const priced = await getPartChargePrice(child.id, childValQty).catch(() => null);
         if (!priced || priced.unit_price === null) {
@@ -404,7 +404,6 @@ export async function calculateRoutingCost(
           continue;
         }
         chargedUnitRate = priced.unit_price;
-        chargeMarkupPercent = priced.markup_percent;
       }
 
       // Per-parent-unit material contribution. The (fractional && not-pinned)
@@ -421,10 +420,7 @@ export async function calculateRoutingCost(
         unit: effectiveBomUnit || '',
         cost_per_unit: Math.round(chargedUnitRate * 10000) / 10000,
         cost: Math.round(perParentUnit(chargedUnitRate) * 100) / 100,
-        true_cost_per_unit: Math.round(childTrueCost * 10000) / 10000,
         true_cost: Math.round(perParentUnit(childTrueCost) * 100) / 100,
-        charge_basis: line.charge_basis,
-        charge_markup_percent: chargeMarkupPercent,
         qty_in_primary: qtyInPrimary,
         consume_whole_units: line.consume_whole_units,
         units_consumed: unitsConsumed,

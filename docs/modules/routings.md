@@ -316,9 +316,12 @@ incomplete cost data and enter a manual override.
   `calculateRoutingCost(partId)` recomputes on load and after every routing auto-save. Each
   `part_pricing_tier` derives its `base_cost_per_unit` and `unit_price` from it, so routing
   edits propagate to all tiers — **no Recalculate button**.
-- **Quotes** — at `createQuote`, per-part cost snapshots (`quote_operations`,
-  `quote_materials`) are written once per distinct part so the breakdown survives later
-  routing edits. See [quotes.md — Snapshotted Line Items](quotes.md#quote_line_items).
+- **Quotes** — at `createQuote` the resolved PRICE is frozen onto the line item
+  (`unit_price`, `markup_percent`, `base_cost_per_unit`, `true_cost_per_unit`, and the tier curve),
+  so later routing edits never move a quoted price. ⚠ *This doc previously described per-part cost
+  snapshots into `quote_operations` / `quote_materials`; both tables were deleted in the #727 branch
+  after three and a half months write-only — see [quotes.md](quotes.md#the-reverse-link). The
+  itemised build-up behind a quote is no longer stored.*
 
 ---
 

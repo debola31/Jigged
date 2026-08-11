@@ -18,7 +18,6 @@ import type {
   PricingBasisSnapshot,
 } from '@/types/quote';
 import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
@@ -364,8 +363,7 @@ export async function getQuoteWithRelations(
 /**
  * Create a new quote with one line item per part. The unit price is auto-resolved
  * from the part's pricing tiers at the chosen order quantity (or hand-entered via
- * an override). Also writes per-part cost snapshots into quote_operations +
- * quote_materials.
+ * an override).
  */
 export async function createQuote(
   companyId: string,
@@ -456,30 +454,6 @@ export async function createQuote(
       block.lead_time_text,
     );
     sequence += 10;
-  }
-
-  // Cost snapshots (quote_operations / quote_materials) are keyed by
-  // (quote_id, part_id), so they're written ONCE per part — never once per
-  // quantity. A price-options quote has no single "the" quantity, so we
-  // snapshot at the lowest quoted quantity (deterministic; the per-unit
-  // material cost depends on qty via procurement tiers).
-  const lowestQtyByPart = new Map<string, number>();
-  for (const block of formData.parts) {
-    const current = lowestQtyByPart.get(block.part_id);
-    if (current === undefined || block.order_quantity < current) {
-      lowestQtyByPart.set(block.part_id, block.order_quantity);
-    }
-  }
-  for (const [partId, qty] of lowestQtyByPart) {
-    try {
-      await writeCostSnapshotsForPart(quote.id, companyId, partId, qty);
-    } catch (snapshotError) {
-      // No `captureException`: every error that can reach here began as a Supabase `{ error }`
-      // that the integration already reported — the inserts below, and `calculateRoutingCost`,
-      // whose only throw is a re-thrown `parts_unit_conversions` select error. Capturing again
-      // would file the same failure twice. (#708)
-      console.warn('Failed to write cost snapshot for part:', partId, snapshotError);
-    }
   }
 
   return { quote: asQuote(quote) };
@@ -908,80 +882,6 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
         fallback: 'Failed to archive these quotes.',
       });
     }
-  }
-}
-
-// ============== Cost Breakdown Snapshots ==============
-
-/**
- * Write (or overwrite) per-op + per-material cost snapshots for a single
- * (quote, part) pair using the live routing. Multi-part quotes call this
- * once per distinct part.
- *
- * `orderQuantity` is passed through to `calculateRoutingCost` so each
- * material's per-unit cost in the snapshot reflects the child's tier at
- * the cumulative qty the parent batch consumes. Without this, a quote at
- * qty=100 would snapshot child costs as if qty were 1.
- */
-async function writeCostSnapshotsForPart(
-  quoteId: string,
-  companyId: string,
-  partId: string,
-  orderQuantity: number,
-): Promise<void> {
-  const supabase = getSupabase();
-
-  const breakdown = await calculateRoutingCost(partId, orderQuantity);
-  if (!breakdown) return;
-
-  // Clear existing snapshot rows for this (quote, part) — idempotent.
-  await supabase.from('quote_operations').delete().eq('quote_id', quoteId).eq('part_id', partId);
-  await supabase.from('quote_materials').delete().eq('quote_id', quoteId).eq('part_id', partId);
-
-  if (breakdown.labor_items.length > 0) {
-    const opRows = breakdown.labor_items.map((item, index) => ({
-      quote_id: quoteId,
-      company_id: companyId,
-      part_id: partId,
-      sequence: index,
-      operation_name: item.operation_name,
-      run_time_minutes: item.run_time_minutes,
-      setup_time_minutes: item.setup_time_minutes,
-      labor_rate: item.labor_rate,
-      run_cost: item.cost,
-      setup_cost: item.setup_cost,
-    }));
-    const { error } = await supabase.from('quote_operations').insert(opRows);
-    if (error) throw toFriendlyError(error, { entity: 'quote' });
-  }
-
-  if (breakdown.material_items.length > 0) {
-    const matRows = breakdown.material_items.map((item, index) => ({
-      quote_id: quoteId,
-      company_id: companyId,
-      part_id: partId,
-      sequence: index,
-      material_part_id: null,
-      item_name: item.item_name,
-      quantity: item.quantity,
-      unit: item.unit,
-      cost_per_unit: item.cost_per_unit,
-      line_cost: item.cost,
-      // Discrete count actually consumed across the order (ceil in whole-unit
-      // mode) so the itemized breakdown can explain a line whose per-part
-      // quantity × cost_per_unit no longer multiplies out to line_cost.
-      units_consumed: item.units_consumed,
-      // #727. The basis, the true cost beneath it, and — frozen — the markup the
-      // child's tier applied. Frozen because it is not recoverable later: for a
-      // made child the charged and true rates have different bases, so
-      // charged/true - 1 is not the markup.
-      charge_basis: item.charge_basis,
-      true_cost_per_unit: item.true_cost_per_unit,
-      true_line_cost: item.true_cost,
-      charge_markup_percent: item.charge_markup_percent,
-    }));
-    const { error } = await supabase.from('quote_materials').insert(matRows);
-    if (error) throw toFriendlyError(error, { entity: 'quote' });
   }
 }
 

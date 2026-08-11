@@ -143,28 +143,6 @@ SCHEMA_CONTEXT = """
 - is_quote_override: BOOLEAN (true when the user manually overrode the price)
 - created_at: TIMESTAMPTZ
 
-### quote_materials (extra material lines on a quote, beyond the part's BOM)
-- id: UUID (PK)
-- quote_id: UUID (FK -> quotes.id)
-- company_id: UUID -- ALWAYS filter with $1
-- part_id: UUID (FK -> parts.id) -- the parent part this material belongs to
-- material_part_id: UUID (FK -> parts.id, nullable) -- the material itself
-- sequence: INTEGER
-- item_name: TEXT, quantity: NUMERIC, unit: TEXT
-- cost_per_unit: NUMERIC, line_cost: NUMERIC
-- created_at: TIMESTAMPTZ
-
-### quote_operations (extra operation lines on a quote, beyond the part's routing)
-- id: UUID (PK)
-- quote_id: UUID (FK -> quotes.id)
-- company_id: UUID -- ALWAYS filter with $1
-- part_id: UUID (FK -> parts.id)
-- sequence: INTEGER
-- operation_name: TEXT
-- run_time_minutes: NUMERIC, setup_time_minutes: NUMERIC
-- labor_rate: NUMERIC, run_cost: NUMERIC, setup_cost: NUMERIC
-- created_at: TIMESTAMPTZ
-
 ### jobs
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
@@ -298,8 +276,6 @@ SCHEMA_CONTEXT = """
 - quotes.customer_id -> customers.id
 - quote_line_items.quote_id -> quotes.id
 - quote_line_items.part_id -> parts.id
-- quote_materials.quote_id -> quotes.id, .part_id -> parts.id, .material_part_id -> parts.id
-- quote_operations.quote_id -> quotes.id, .part_id -> parts.id
 - routings.part_id -> parts.id (1:1)
 - routing_operations.routing_id -> routings.id
 - routing_operations.work_center_id -> work_centers.id
@@ -415,8 +391,6 @@ ALLOWED_TABLES = frozenset({
     "parts_unit_conversions",
     "quotes",
     "quote_line_items",
-    "quote_materials",
-    "quote_operations",
     "jobs",
     "job_parts",
     "job_operations",

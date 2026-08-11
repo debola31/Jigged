@@ -1003,14 +1003,11 @@ describe('calculateRoutingCost — charge basis', () => {
     const result = await calculateRoutingCost('part-1', 1);
 
     const mat = result!.material_items[0];
-    expect(mat.charge_basis).toBe('cost');
     expect(mat.cost_per_unit).toBe(10);
-    expect(mat.true_cost_per_unit).toBe(10);
     expect(mat.cost).toBe(20);
     expect(mat.true_cost).toBe(20);
     expect(result!.total_material_cost).toBe(result!.total_material_true_cost);
-    // Nothing was resolved, so no markup is claimed.
-    expect(mat.charge_markup_percent).toBeNull();
+    // A 'cost' line resolves no price at all.
     expect(mockGetPartChargePrice).not.toHaveBeenCalled();
   });
 
@@ -1027,16 +1024,14 @@ describe('calculateRoutingCost — charge basis', () => {
     const result = await calculateRoutingCost('part-1', 1);
 
     const mat = result!.material_items[0];
-    expect(mat.charge_basis).toBe('price');
     expect(mat.cost_per_unit).toBe(12.5);
     expect(mat.cost).toBe(25); // 2 x 12.50 — what the price is built on
-    expect(mat.true_cost_per_unit).toBe(10);
     expect(mat.true_cost).toBe(20); // 2 x 10 — what it costs us
     expect(result!.total_material_cost).toBe(25);
     expect(result!.total_material_true_cost).toBe(20);
   });
 
-  it('records the markup behind each rate, so no charged number is anonymous', async () => {
+  it('charges each line at its own child’s resolved rate', async () => {
     mockGetBomForPart.mockResolvedValue([
       makeBomLine({
         childId: 'bar',
@@ -1055,9 +1050,12 @@ describe('calculateRoutingCost — charge basis', () => {
 
     const result = await calculateRoutingCost('part-1', 1);
 
-    // Each comes from that child's own pricing tier — there is no other source.
-    expect(result!.material_items[0].charge_markup_percent).toBe(10);
-    expect(result!.material_items[1].charge_markup_percent).toBe(25);
+    // Each rate comes from that child's own pricing tier — there is no other
+    // source, and no shop-wide number standing behind either of them.
+    expect(result!.material_items[0].cost_per_unit).toBe(11);
+    expect(result!.material_items[0].true_cost).toBe(10);
+    expect(result!.material_items[1].cost_per_unit).toBe(5);
+    expect(result!.material_items[1].true_cost).toBe(4);
   });
 
   it('a cost line carries the child CHARGE BASE, not its true cost', async () => {
@@ -1077,7 +1075,7 @@ describe('calculateRoutingCost — charge basis', () => {
 
     const mat = result!.material_items[0];
     expect(mat.cost_per_unit).toBe(42.5);
-    expect(mat.true_cost_per_unit).toBe(40);
+    expect(mat.true_cost).toBe(40);
     expect(result!.total_material_cost).toBe(42.5);
     expect(result!.total_material_true_cost).toBe(40);
   });

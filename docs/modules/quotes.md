@@ -1,7 +1,7 @@
 # Quotes Module
 
 **Priority:** Must Have · **Depends on:** Customers, Parts (quotes price against a part's tiers) ·
-**Tables:** `quotes`, `quote_line_items`, `quote_operations`, `quote_materials`
+**Tables:** `quotes`, `quote_line_items`
 
 > **Condensed 2026-08-03: 9,341 → ~4,460 words (−52%), for [#634](https://github.com/debola31/Jigged/issues/634).**
 > What went: two sections describing one inline-create feature, an ASCII modal mockup, a
@@ -137,31 +137,29 @@ only uniqueness rule is `(quote_id, sequence)`.
 | `is_quote_override` | `true` when the salesperson typed a one-off price; drives the green "✏ adjusted for this quote" chip |
 | `lead_time_text` | Optional **per-part** override; NULL ⇒ use the quote-level value |
 
-### Cost snapshots and the reverse link
+### The reverse link
 
-`quote_operations` / `quote_materials` snapshot the part's routing at quote creation, written
-once per **distinct part** by `writeCostSnapshotsForPart` and captured **at the lowest quoted
-quantity** (a price-options quote has no single "the" quantity). Immutable — later routing edits
-don't touch them.
+**Withdrawn: per-quote cost snapshots.** `quote_operations` and `quote_materials` froze the cost
+build-up behind a quote — every operation and material, written once per part at quote creation by
+`writeCostSnapshotsForPart` — and a cost-breakdown accordion rendered them. The reasoning was sound:
+a part's routing and BOM keep changing, so the build-up behind an old quote cannot be reconstructed
+from the live part.
 
-**A material row records how it was charged, not just what it cost** ([#727]). `charge_basis` says
-`'cost'` or `'price'`; `cost_per_unit` / `line_cost` are the rate and contribution that went INTO
-the rollup; `true_cost_per_unit` / `true_line_cost` are the same at true cost. On a `'price'` row,
-`charge_markup_percent` records **the markup the child's tier applied** — frozen, because it is not
-recoverable after the fact: for a made child the charged and true rates have different bases, so
-`charged/true − 1 ≠ markup`, and the child's tiers may since have moved.
+`db33416d` (2026-04-30, "quotes done") rewrote this page and removed the accordion. Nobody removed
+the writer, so both tables kept filling on every quote for three and a half months with nothing able
+to read them. The components, the reader and the tables were all deleted in the #727 branch once
+that was noticed
+([`20260811010948`](../../supabase/migrations/20260811010948_drop_quote_cost_snapshots.sql)).
 
-> ⚠ **Nothing reads these two tables today.** The cost-breakdown accordion that rendered them was
-> removed from the quote detail page on 2026-04-30 (`db33416d`); its components
-> (`QuoteCostBreakdown`, `QuoteCostBreakdownView`), the `getQuoteCostBreakdown` reader and the
-> row types were deleted as dead code once that was noticed. The tables are still **written**,
-> because they are the record of how a quote was priced and that record is the thing you cannot
-> reconstruct later. So `quote_operations` / `quote_materials` are **write-only** until a surface
-> renders them again — including the #727 provenance columns above, which exist so that surface
-> can say what markup a line was charged at, whatever the child's Pricing page says today.
-> Re-mounting a
-> breakdown is what would answer the question a pilot buyer asked verbatim, *"where does the final
-> number come from?"*
+**What survives is the outcome, not the itemisation.** `quote_line_items` still freezes
+`unit_price`, `markup_percent`, `base_cost_per_unit` (the charge base), `true_cost_per_unit` (the
+same figure at true cost, so effective margin stays computable) and the full tier curve in
+`pricing_basis_snapshot`. A quote still knows what it charged and why; what it no longer knows is
+which operations and materials made up the base.
+
+**Rebuilding a breakdown means re-adding the capture, not just a screen** — those numbers only exist
+at quote time. That is the price of the deletion, taken deliberately rather than by leaving two
+tables filling in the dark.
 
 Jobs point back via `jobs.source_quote_line_item_id`; follow `quote_line_items.id →` it to list
 every job from a quote.
@@ -568,7 +566,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** the quote form, **when** submitting, **then** it blocks until every part block has a part and at least one valid quantity row, quantities unique within a part — *automation-pending (#367)*.
 - [ ] **Given** an existing active, unconverted quote, **when** a part is added, a quantity edited and a part removed, **then** all three persist across reload — *verified by `e2e/quote-edit.spec.ts` > `Quote edit — reload contract`*.
 - [ ] **Given** `updateQuote`, **when** it saves, **then** it reconciles line items by id — insert / update / delete — *verified by `__tests__/utils/quotesAccess.test.ts` > `updateQuote — reconcile (Issue #324 / #317 policy)`*.
-- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** its cost snapshot is written, **then** it is stored with `run_cost = 0` and a non-zero setup cost — regression for **#224**. *(Was written against the cost-breakdown accordion, which no longer exists; the invariant now lives in the `quote_operations` row.)* — *automation-pending (#367)*.
+- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** the part's cost is rolled up, **then** it contributes `run_cost = 0` and a non-zero setup cost — regression for **#224**. *(Was written against the cost-breakdown accordion and then its `quote_operations` row; both are gone, so the invariant now lives in `calculateRoutingCost` and the Cost card.)* — *automation-pending (#367)*.
 
 **Frozen pricing and drift**
 

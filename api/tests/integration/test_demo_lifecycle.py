@@ -91,8 +91,7 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
         wipe_company(t)
     wipe("job_materials", "job_id", job_ids)
     wipe("job_operations", "job_id", job_ids)
-    for t in ("job_parts", "jobs", "quote_line_items", "quote_materials", "quote_operations",
-              "quotes"):
+    for t in ("job_parts", "jobs", "quote_line_items", "quotes"):
         wipe_company(t)
     wipe("routing_operations", "routing_id", routing_ids)
     wipe_company("routings")

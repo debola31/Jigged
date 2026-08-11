@@ -93,42 +93,6 @@ COMMENT ON COLUMN public.companies.default_markup_made_percent IS
 COMMENT ON COLUMN public.companies.default_markup_bought_percent IS
   'The same, for BOUGHT parts. Split from made because a shop marks up purchased goods and its own labour at different rates.';
 
--- 1c. Quote snapshot fidelity.
---
--- charge_basis + true cost alone cannot explain a price-basis line: the markup
--- is NOT recoverable after the fact, because for a made child the charged and
--- true rates have different bases, so charged/true - 1 ≠ markup. Freezing it
--- keeps a committed quote able to state its own effective margin even after the
--- child's tiers move.
---
--- There is no `charge_rate_source`: the rate comes from the child's own pricing
--- tier, and there is no other rung it could have come from.
-ALTER TABLE public.quote_materials
-  ADD COLUMN charge_basis text NOT NULL DEFAULT 'cost'
-    CHECK (charge_basis IN ('cost', 'price')),
-  ADD COLUMN true_cost_per_unit numeric,
-  ADD COLUMN true_line_cost numeric,
-  ADD COLUMN charge_markup_percent numeric(10,6);
-
--- Data at rest, not a read-time fallback: every existing row is a 'cost' row, so
--- its charged numbers ARE its true numbers.
-UPDATE public.quote_materials
-   SET true_cost_per_unit = cost_per_unit,
-       true_line_cost     = line_cost;
-
-COMMENT ON COLUMN public.quote_materials.cost_per_unit IS
-  'The rate that actually went INTO the rollup for this material — the child''s cost on a ''cost'' line, its marked-up price on a ''price'' line. Read it together with charge_basis. True cost is true_cost_per_unit.';
-COMMENT ON COLUMN public.quote_materials.line_cost IS
-  'Per-parent-unit contribution at the charged rate. Σ line_cost reconciles against quote_line_items.base_cost_per_unit.';
-COMMENT ON COLUMN public.quote_materials.charge_basis IS
-  'The BOM line''s charge basis at quote time: ''cost'' or ''price''.';
-COMMENT ON COLUMN public.quote_materials.true_cost_per_unit IS
-  'The child''s TRUE cost per unit, ignoring every charge basis in the tree. The denominator for effective margin.';
-COMMENT ON COLUMN public.quote_materials.true_line_cost IS
-  'Per-parent-unit contribution at the TRUE cost rate.';
-COMMENT ON COLUMN public.quote_materials.charge_markup_percent IS
-  'The markup % actually applied on a ''price'' line, frozen. Not derivable from charged-vs-true, and must not move when the child''s pricing tiers later change.';
-
 ALTER TABLE public.quote_line_items
   ADD COLUMN true_cost_per_unit numeric;
 

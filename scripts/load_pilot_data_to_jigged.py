@@ -272,7 +272,7 @@ def confirm_destructive(cur, company_id: str) -> None:
     if jobs or quotes:
         log(f"\nNOTE: jobs/quotes will be deleted to free up FK references.")
         log(f"Their child tables (job_parts, job_operations, job_materials,")
-        log(f"quote_line_items, quote_materials, quote_operations) cascade automatically.")
+        log(f"quote_line_items) cascade automatically.")
 
     log("\nThis will then INSERT:")
     log(f"vendors                   ~50", indent=1)
@@ -299,9 +299,9 @@ def clear_tables(cur, company_id: str) -> None:
     cur.execute("DELETE FROM jobs WHERE company_id = %s", (company_id,))
     log(f"deleted jobs (cascades to job_parts/job_operations/job_materials): {cur.rowcount}", indent=1)
 
-    # quotes CASCADE to quote_line_items, quote_materials, quote_operations.
+    # quotes CASCADE to quote_line_items.
     cur.execute("DELETE FROM quotes WHERE company_id = %s", (company_id,))
-    log(f"deleted quotes (cascades to quote_line_items/quote_materials/quote_operations): {cur.rowcount}", indent=1)
+    log(f"deleted quotes (cascades to quote_line_items): {cur.rowcount}", indent=1)
 
     # routing_operations -> work_centers (RESTRICT), so delete routings (cascades to routing_ops) first
     cur.execute("""

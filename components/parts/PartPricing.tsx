@@ -248,6 +248,10 @@ export default function PartPricing({
   // id so the attempt happens at most once per part — a failure must not retry
   // on every render, and a success must not race the reload that follows it.
   const starterTierAttemptedRef = useRef<Set<string>>(new Set());
+  // Set when the starter tier was written while the user had work staged, so the
+  // "this part is ready now" announcement to the workspace is owed but has not
+  // been made. Paid off by the effect below, once the card is idle.
+  const starterNotifyPendingRef = useRef(false);
   // The shop's starting markup for this part's source. Read once per company;
   // used to SEED the first tier and to caption where that number came from.
   // null while it loads — the starter write waits rather than guessing 0.
@@ -556,18 +560,25 @@ export default function PartPricing({
           console.error('Failed to log starter pricing note:', noteErr);
         }
         if (forPartId !== partIdRef.current) return;
-        // The user can start typing while this write is in flight — and then
-        // re-seeding the rows from the database would silently discard their
-        // staged edit. That is the exact section-isolation bug the load effect
-        // refuses to cause (interaction-standards §2, invariant 1), and calling
-        // loadAll directly here walks around that guard, so it has to be
-        // repeated. Nothing is lost by skipping: their own Save reconciles the
-        // ladder, deleting this starter row along the way.
-        if (!dirtyRef.current) {
-          await loadAll({ showSpinner: false });
+        // NOTHING here may touch the page while the user has work staged.
+        //
+        // Both of the follow-ups are destructive at the wrong moment. `loadAll`
+        // re-seeds these rows, discarding a typed Min qty. `onPricingChanged`
+        // bumps the workspace's refreshKey, which re-seeds the ROUTING panel
+        // too — and that panel keeps an open row editor with unsaved text in it.
+        // E2E caught both: first a Min qty reverting to 1, then an operation
+        // edit of 5 min/unit saving as the original 2. This is the
+        // section-isolation invariant (interaction-standards §2, invariant 1)
+        // reached through a side door: the load effect guards against a
+        // refreshKey bump, but an automatic write that CAUSES the bump walks
+        // straight around that guard.
+        //
+        // The user is never the one who asked for this write, so it waits.
+        if (dirtyRef.current) {
+          starterNotifyPendingRef.current = true;
+          return;
         }
-        // Fires either way — the part IS priceable now, and the workspace
-        // banner should stop saying otherwise.
+        await loadAll({ showSpinner: false });
         onPricingChanged?.();
       } catch (err) {
         // Non-fatal and non-retrying: the card still works, the user types a
@@ -762,6 +773,21 @@ export default function PartPricing({
     setCostingQtyStr(costingBaseline);
     setCostingSaveState('idle');
   };
+
+  /**
+   * Pay off an announcement the starter write deferred.
+   *
+   * Without this the workspace would keep saying "this part isn't ready to
+   * quote" until some other mutation happened to bump refreshKey — stale, and
+   * about the one thing the starter tier exists to fix. Waiting for `dirty` to
+   * clear means the refresh lands when the user has nothing in flight, which is
+   * the only moment it is safe to re-seed the page.
+   */
+  useEffect(() => {
+    if (dirty || loading || saving || !starterNotifyPendingRef.current) return;
+    starterNotifyPendingRef.current = false;
+    void loadAll({ showSpinner: false }).then(() => onPricingChanged?.());
+  }, [dirty, loading, saving, loadAll, onPricingChanged]);
 
   // The single persisted tier the card wrote for itself, still sitting at the
   // shop's starting markup. Not "any tier that matches" — a shop with two breaks

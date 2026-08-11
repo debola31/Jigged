@@ -534,6 +534,42 @@ describe('PartPricing — starter tier from the shop default', () => {
     expect(screen.getByText(/unsaved change/i)).toBeInTheDocument();
   });
 
+  it('does not bump the page refresh while an edit is staged, but does once it clears', async () => {
+    // The second E2E failure: onPricingChanged bumps the workspace refreshKey,
+    // which re-seeds the ROUTING panel — and that panel holds an open row editor
+    // with unsaved text. An operation edited to 5 min/unit saved as the original
+    // 2, because the editor had been re-seeded under it. So the announcement
+    // waits for a moment the user isn't mid-something.
+    let releaseWrite: () => void = () => {};
+    mockReplaceTiersForPart.mockImplementation(
+      () => new Promise<void>((resolve) => { releaseWrite = () => resolve(); }),
+    );
+    const onPricingChanged = vi.fn();
+    render(
+      <PartPricing companyId="c1" part={part} refreshKey={0} onPricingChanged={onPricingChanged} />,
+    );
+    await waitFor(() => expect(mockReplaceTiersForPart).toHaveBeenCalledTimes(1));
+
+    const minQty = (await screen.findAllByRole('textbox'))[0];
+    await user.clear(minQty);
+    await user.type(minQty, '250');
+    await screen.findByText(/unsaved change/i);
+
+    mockGetTiersForPart.mockResolvedValue([
+      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
+    ]);
+    releaseWrite();
+
+    // Staged: the page must not be told anything yet.
+    await waitFor(() => expect(minQty).toHaveValue('250'));
+    expect(onPricingChanged).not.toHaveBeenCalled();
+
+    // Discard, and the owed announcement is paid — the workspace banner must not
+    // be left saying "not ready to quote" forever.
+    await user.click(screen.getByRole('button', { name: /Discard/i }));
+    await waitFor(() => expect(onPricingChanged).toHaveBeenCalled());
+  });
+
   it('does NOT touch a part that already has tiers', async () => {
     mockGetTiersForPart.mockResolvedValue([savedTier]);
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);

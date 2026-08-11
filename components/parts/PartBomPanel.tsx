@@ -32,7 +32,7 @@ import {
   addBomLine,
   updateBomLine,
   checkBomCycle,
-  setChargeBasisForPurchasedMaterials,
+  setChargeBasisForMaterials,
 } from '@/utils/bomAccess';
 import {
   getComputedPartCost,
@@ -354,7 +354,7 @@ export default function PartBomPanel({
     // precedence rule itself is named in types/bom.ts.
     const isAdd = editorState.mode === 'add';
     const chargeBasis: ChargeBasis = isAdd
-      ? chargeBasisForNewLine(value.childPart.source, purchasedBasis, shopBasis)
+      ? chargeBasisForNewLine(materialsBasis, shopBasis)
       : value.charge_basis;
 
     const formData: BomLineFormData = {
@@ -434,11 +434,11 @@ export default function PartBomPanel({
     setBulkSaving(true);
     setError(null);
     try {
-      const changed = await setChargeBasisForPurchasedMaterials(partId, basis);
+      const changed = await setChargeBasisForMaterials(partId, basis);
       posthog.capture('bom line charge basis set', {
         basis,
         bulk: true,
-        child_source: 'bought',
+        child_source: 'all',
       });
       if (changed > 0) {
         await fetchRows();
@@ -467,17 +467,18 @@ export default function PartBomPanel({
   };
 
   const editorOpen = editorState.mode !== 'closed';
-  const purchasedRows = rows.filter((r) => r.child_part.source === 'bought');
-  const purchasedLineCount = purchasedRows.length;
-  // null = mixed. Only reachable by import or by data written before this was a
+  // Every material, made or bought: both carry costs and pricing tiers, and the
+  // rollup has never told them apart.
+  const materialLineCount = rows.length;
+  // null = mixed. Reachable by import, or by lines written before this became a
   // single per-part control; the toggle shows nothing selected rather than
-  // picking one and misreporting the other lines.
-  const purchasedBasis: ChargeBasis | null =
-    purchasedLineCount === 0
+  // picking one and misreporting the rest.
+  const materialsBasis: ChargeBasis | null =
+    materialLineCount === 0
       ? null
-      : purchasedRows.every((r) => r.charge_basis === 'price')
+      : rows.every((r) => r.charge_basis === 'price')
         ? 'price'
-        : purchasedRows.every((r) => r.charge_basis === 'cost')
+        : rows.every((r) => r.charge_basis === 'cost')
           ? 'cost'
           : null;
 
@@ -551,14 +552,14 @@ export default function PartBomPanel({
         </Box>
       )}
 
-      {/* THE control for charge basis — one per part, not one per material.
-          A shop that marks up purchased material marks up all of it, so a
-          per-row select bought nothing but a fourth field on every line.
+      {/* THE control for charge basis — one per part, not one per material,
+          and it covers every material rather than only the purchased ones.
+          "How do we value what goes into this part?" is one question.
 
           It shows state rather than offering two actions: which way this part
           is set is the thing you come here to check. "Mixed" is reachable by
           import, so it renders as neither selected rather than lying. */}
-      {!readOnly && !loading && purchasedLineCount > 0 && (
+      {!readOnly && !loading && materialLineCount > 0 && (
         <Box
           sx={{
             display: 'flex',
@@ -573,13 +574,13 @@ export default function PartBomPanel({
           }}
         >
           <Typography variant="body2" color="text.secondary">
-            Charge the {purchasedLineCount} purchased{' '}
-            {purchasedLineCount === 1 ? 'material' : 'materials'} at:
+            Charge the {materialLineCount}{' '}
+            {materialLineCount === 1 ? 'material' : 'materials'} at:
           </Typography>
           <ToggleButtonGroup
             exclusive
             size="small"
-            value={purchasedBasis}
+            value={materialsBasis}
             disabled={bulkSaving || editorOpen || saving}
             onChange={(_, next: ChargeBasis | null) => {
               // Null is the click that would deselect the active button; a part
@@ -591,9 +592,9 @@ export default function PartBomPanel({
             <ToggleButton value="price">Their marked-up price</ToggleButton>
           </ToggleButtonGroup>
           <Typography variant="caption" color="text.secondary">
-            {purchasedBasis === 'price'
+            {materialsBasis === 'price'
               ? 'How much each is marked up comes from its own Pricing card.'
-              : purchasedBasis === null
+              : materialsBasis === null
                 ? 'These materials are set differently from each other — pick one to align them.'
                 : null}
           </Typography>

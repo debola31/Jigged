@@ -27,6 +27,7 @@ import {
   getPartIdsWithBomLines,
   checkBomCycle,
   deleteBomLine,
+  setChargeBasisForMaterials,
 } from '@/utils/bomAccess';
 
 describe('bomAccess', () => {
@@ -148,6 +149,40 @@ describe('bomAccess', () => {
     it('throws when supabase returns an error', async () => {
       mockQueryBuilder.error = { message: 'boom' };
       await expect(deleteBomLine('b1')).rejects.toBeTruthy();
+    });
+  });
+
+  describe('setChargeBasisForMaterials', () => {
+    // The regression this guards: it used to filter to bought children only, a
+    // leftover from a shop-wide markup rung that no longer exists. Made and
+    // bought children both carry costs and pricing tiers, and the rollup has
+    // never told them apart — so neither may this.
+    it('updates every line on the part, made children included', async () => {
+      mockQueryBuilder.data = [{ id: 'l1' }, { id: 'l2' }, { id: 'l3' }];
+
+      const changed = await setChargeBasisForMaterials('part-1', 'price');
+
+      expect(changed).toBe(3);
+      expect(mockSupabase.from).toHaveBeenCalledWith('parts_bom');
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ charge_basis: 'price' }),
+      );
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('parent_part_id', 'part-1');
+      // No source filter anywhere in the call — the point of the change.
+      const filtered = (mockQueryBuilder.eq as ReturnType<typeof vi.fn>).mock.calls
+        .concat((mockQueryBuilder.in as ReturnType<typeof vi.fn>).mock.calls)
+        .flat();
+      expect(filtered).not.toContain('bought');
+      expect(filtered).not.toContain('source');
+    });
+
+    it('counts only the lines that actually changed', async () => {
+      // `.neq` skips rows already on the target basis, so flipping a part that
+      // is already there reports 0 rather than claiming work it did not do.
+      mockQueryBuilder.data = [];
+
+      expect(await setChargeBasisForMaterials('part-1', 'cost')).toBe(0);
+      expect(mockQueryBuilder.neq).toHaveBeenCalledWith('charge_basis', 'cost');
     });
   });
 });

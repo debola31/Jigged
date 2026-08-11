@@ -42,24 +42,29 @@ export type ChargeBasis = 'cost' | 'price';
 /**
  * What a NEWLY ADDED BOM line is charged at (#727), in precedence order:
  *
- *   1. A made child is always our cost. Marking up in-house work is a
- *      transfer-pricing decision that belongs on that part's own Pricing card,
- *      not something a material picker should do silently.
- *   2. Otherwise, however this part's OTHER purchased materials are already set.
- *      A part with a stance keeps it, so adding one more material can never drop
- *      the panel into "mixed".
- *   3. Otherwise the shop's default, so a shop that always marks up purchased
- *      material says so once instead of on every part.
+ *   1. However this part's OTHER materials are already set. A part with a stance
+ *      keeps it, so adding one more can never drop the panel into "mixed".
+ *   2. Otherwise the shop's default, so a shop that always charges materials one
+ *      way says so once instead of on every part.
  *
- * `partStance` is null when the part has no purchased materials yet, or when its
- * existing ones disagree — in both cases there is no stance to inherit.
+ * `partStance` is null when the part has no materials yet, or when its existing
+ * ones disagree — in both cases there is nothing coherent to inherit.
+ *
+ * **Made and bought children are treated identically, deliberately.** Both carry
+ * costs and pricing tiers, and the rollup has never distinguished them: the price
+ * rung resolves any part with a markup tier. An earlier draft forced made
+ * children to cost, inherited from the read-time shop-wide markup this design no
+ * longer has — where the argument was that a default applied at bought leaves
+ * would double-mark if applied again at a made part above them. With no such
+ * default, that argument has nothing to stand on, and charging a sub-assembly at
+ * its own price is ordinary transfer pricing. Stacking stays visible: the Cost
+ * card's "Material markup / unit" row counts every child charged above cost,
+ * whatever its source.
  */
 export function chargeBasisForNewLine(
-  childSource: 'made' | 'bought',
   partStance: ChargeBasis | null,
   shopDefault: ChargeBasis,
 ): ChargeBasis {
-  if (childSource !== 'bought') return 'cost';
   return partStance ?? shopDefault;
 }
 

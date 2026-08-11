@@ -393,8 +393,8 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
                 Materials
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                What a new part charges for the purchased materials it consumes. Change it
-                per part any time.
+                What a new part charges for the materials it consumes, bought or made.
+                Change it per part any time.
               </Typography>
             </Box>
             <ToggleButtonGroup

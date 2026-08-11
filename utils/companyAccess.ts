@@ -43,8 +43,9 @@ export interface Company {
   default_markup_made_percent?: number;
   default_markup_bought_percent?: number;
   /**
-   * What a NEW purchased-material BOM line is created with. A seed, like the
-   * two markups above: read when the line is written, never by the rollup.
+   * What a NEW BOM line is created with — made or bought child alike. A seed,
+   * like the two markups above: read when the line is written, never by the
+   * rollup.
    */
   default_material_charge_basis?: ChargeBasis;
 }
@@ -617,8 +618,8 @@ export async function setCompanyDefaultPaymentTerms(
 
 /**
  * The shop-wide pricing defaults (#727): the markup a new MADE part and a new
- * BOUGHT part get on their first pricing tier, and whether a new purchased
- * material is charged into its parent at our cost or at its own price.
+ * BOUGHT part get on their first pricing tier, and whether a new material is
+ * charged into its parent at our cost or at its own price.
  *
  * **These are seed values, not a pricing rule.** They are read at exactly one
  * moment — when a part with a cost has no tiers yet — and written into that

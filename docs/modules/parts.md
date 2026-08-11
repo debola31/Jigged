@@ -196,27 +196,38 @@ A `'price'` line makes that false for that edge, so `compute_part_cost_explain` 
 `get_priceable_part_ids` both encode *the root needs a markup, and so does any child charged at
 price* — nothing covers for a missing tier. An agreement test holds the two views together.
 
-**One control, per part, over purchased materials.** The Materials panel carries a single toggle —
-*Charge the N purchased materials at: Our cost | Their marked-up price* — and it shows state rather
-than offering two actions, because which way a part is set is what you come there to check. How much
-each one marks up still comes from its own Pricing card.
+**One control, per part, over every material.** The Materials panel carries a single toggle —
+*Charge the N materials at: Our cost | Their marked-up price* — and it shows state rather than
+offering two actions, because which way a part is set is what you come there to check. How much each
+one marks up still comes from its own Pricing card.
 
 **And a shop-wide default behind it**, `companies.default_material_charge_basis`, so a shop that
-always marks up purchased material says so once instead of on every new part. Precedence for a newly
-added line is named in [`chargeBasisForNewLine`](../../types/bom.ts): a made child is always our cost
-→ otherwise the part's own existing stance → otherwise the shop default. Like the starting markups,
-it is a **seed read at line-creation time**, never by the rollup, so changing it reprices nothing.
+always values materials one way says so once instead of on every new part. Precedence for a newly
+added line is named in [`chargeBasisForNewLine`](../../types/bom.ts): the part's own existing stance
+→ otherwise the shop default. Like the starting markups, it is a **seed read at line-creation
+time**, never by the rollup, so changing it reprices nothing.
 
-⚠ *There was briefly a per-row **Charge at** select in the material editor as well. It was removed:
-a shop that marks up purchased material marks up all of it, so a fourth control on every line bought
-nothing but width. The issue justified per-line granularity with "material at price on customer jobs
-but at cost on internal stock-making work orders" — but that distinction is **per-job**, and a BOM
-line cannot see which job consumes it, so the granularity never served the case that motivated it.*
+**Made and bought children are treated identically**, and that is the whole point of the model: both
+carry costs and pricing tiers, and the rollup has never distinguished them — the price rung resolves
+any part with a markup tier, whatever its source. Charging a sub-assembly at its own price is
+ordinary transfer pricing.
+
+> ⚠ *An earlier draft forced made children to cost. That was inherited from the read-time shop-wide
+> material markup this design no longer has, where the argument was that a default applied at bought
+> leaves would double-mark if applied again at a made part above them. With no such default the
+> argument has nothing to stand on, and the restriction only ever lived in the UI — never in the
+> engine. Stacking stays visible either way: the Cost card's **Material markup / unit** row counts
+> every child charged above cost, whatever its source.*
+
+⚠ *There was also briefly a per-row **Charge at** select in the material editor. It was removed: the
+answer is the same for every line on a part, so a fourth control on every row bought nothing but
+width. The issue justified per-line granularity with "material at price on customer jobs but at cost
+on internal stock-making work orders" — but that distinction is **per-job**, and a BOM line cannot
+see which job consumes it, so the granularity never served the case that motivated it.*
 
 **The column stays per-line**, which is why none of this needed a migration and why an import can
 still set lines individually. A part whose lines disagree renders as "mixed" (neither option
-selected) rather than the toggle picking one and misreporting the rest. Made children stay at cost
-through the UI — marking up in-house work is a decision for that part's own Pricing card.
+selected) rather than the toggle picking one and misreporting the rest.
 
 ### `part_attachments`
 

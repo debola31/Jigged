@@ -352,43 +352,34 @@ export async function updateBomLine(
 }
 
 /**
- * Set the charge basis on every BOM line of `parentPartId` whose child is a
- * BOUGHT part, in one write. Returns how many lines were changed.
+ * Set the charge basis on every BOM line of `parentPartId`, in one write.
+ * Returns how many lines were changed.
  *
- * Setting the basis line by line is fine for a three-line BOM and miserable
- * across a real parts list — a shop that marks up purchased material marks up
- * ALL of it. Storage stays per-line (a shop may still charge material at cost on
- * an internal work order); this is only the gesture.
+ * Setting it line by line is fine for a three-line BOM and miserable across a
+ * real parts list, and the answer is the same for every line anyway: "how do we
+ * value what goes into this part — at what it cost us, or at what we'd sell it
+ * for?" is one question per part, not one per material.
  *
- * Scoped to bought children deliberately: charging a made sub-assembly at price
- * is a transfer-pricing decision about in-house work, and a bulk button is the
- * wrong way to make it.
+ * Made and bought children alike. Both carry costs and pricing tiers, and the
+ * rollup has never told them apart — an earlier version of this function
+ * filtered to bought children only, which was a leftover from a shop-wide
+ * markup rung that no longer exists.
  */
-export async function setChargeBasisForPurchasedMaterials(
+export async function setChargeBasisForMaterials(
   parentPartId: string,
   chargeBasis: ChargeBasis,
 ): Promise<number> {
   const supabase = getSupabase();
 
-  // parts_bom has no `source`, so resolve the bought children first rather than
-  // filtering on an embedded column (PostgREST can't UPDATE through a join).
-  const { data: lines, error: linesError } = await supabase
-    .from('parts_bom')
-    .select('id, child_part:parts!parts_bom_child_part_id_fkey!inner(source)')
-    .eq('parent_part_id', parentPartId)
-    .eq('child_part.source', 'bought');
-  if (linesError) throw toFriendlyError(linesError, { entity: 'BOM line' });
-
-  const ids = ((lines || []) as Array<{ id: string }>).map((l) => l.id);
-  if (ids.length === 0) return 0;
-
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('parts_bom')
     .update({ charge_basis: chargeBasis, updated_at: new Date().toISOString() })
-    .in('id', ids);
+    .eq('parent_part_id', parentPartId)
+    .neq('charge_basis', chargeBasis)
+    .select('id');
   if (error) throw toFriendlyError(error, { entity: 'BOM line' });
 
-  return ids.length;
+  return (data ?? []).length;
 }
 
 export async function deleteBomLine(bomLineId: string): Promise<void> {

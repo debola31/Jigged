@@ -26,6 +26,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from supabase import Client, create_client
 
+import routes.company_auth as company_auth
 import services.accounting as accounting
 import services.quickbooks as qb
 import services.quickbooks_desktop as qbd
@@ -38,12 +39,10 @@ STATE_TTL_SECONDS = 600
 
 
 # ───────────────────────── helpers ─────────────────────────
-def _service_client() -> Client:
-    url = os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise HTTPException(status_code=503, detail="Database not configured")
-    return create_client(url, key)
+# Re-exported under their historical private names so existing call sites and the
+# integration tests' monkeypatching keep resolving after the extraction.
+_service_client = company_auth.service_client
+_verify_company_access = company_auth.verify_company_access
 
 
 def _app_base_url() -> str:
@@ -78,42 +77,6 @@ def _mint_state(company_id: str, user_id: str) -> str:
 
 def _verify_state(state: str) -> dict:
     return jwt.decode(state, _state_secret(), algorithms=["HS256"])
-
-
-async def _verify_company_access(
-    request: Request, company_id: str, require_admin: bool = False
-) -> tuple[str, dict]:
-    """Returns (user_id, access_row) where access_row has the user_company_access id + role."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    client = _service_client()
-    try:
-        user_response = client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        user_id = user_response.user.id
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Token verification failed: %s", exc)
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    access = (
-        client.table("user_company_access")
-        .select("id, role")
-        .eq("user_id", user_id)
-        .eq("company_id", company_id)
-        .limit(1)
-        .execute()
-    )
-    if not access.data:
-        raise HTTPException(status_code=403, detail="No access to this company")
-    row = access.data[0]
-    if require_admin and row.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-    return user_id, row
 
 
 def _map_qb_error(exc: Exception) -> HTTPException:
@@ -253,27 +216,57 @@ class TermsResponse(BaseModel):
 async def terms(company_id: str, request: Request):
     """List the Terms this company already has in QuickBooks.
 
-    Read-only, and deliberately NOT cached in our own table. A cached copy would
-    be a second list of terms that drifts from QuickBooks' — the exact problem
-    this endpoint exists to remove. The query is four rows and this is not an
-    AI call, so live is affordable.
+    THE TWO PROVIDERS ARE SERVED DIFFERENTLY HERE, AND THAT IS NOT AN OVERSIGHT.
+
+    QBO stays LIVE. A cached copy would be a second list of terms drifting from
+    QuickBooks' own — the exact problem this endpoint removes — and the query is
+    four rows against Intuit's REST API, so live is affordable.
+
+    QuickBooks Desktop is served FROM CACHE, because affordability is the whole
+    difference. `PaymentTermsPicker` calls this from a MOUNT effect on every quote
+    form and every customer detail page. Against Desktop, live would mean a
+    multi-second Web Connector round trip on page load, aimed at a PC that may be
+    switched off — precisely the failure mode the "no third-party call from a
+    mount" rule exists to prevent. The cache is refreshed on connect and by an
+    explicit admin action, never by a render.
 
     Never raises for the ordinary "no QuickBooks" cases. A shop that hasn't
-    connected, or an Intuit outage, must not stop anyone from writing a quote:
-    the caller falls back to Jigged's own presets, and `resolve_term_id` still
-    creates whatever term is chosen at push time. Missing options degrade the
-    picker; they never block the quote.
+    connected, an Intuit outage, or a cold cache must not stop anyone from writing
+    a quote: the caller falls back to Jigged's own presets, and `resolve_term_id`
+    still creates whatever term is chosen at push time. Missing options degrade
+    the picker; they never block the quote.
     """
     await _verify_company_access(request, company_id)
     db = _service_client()
+
     conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn) or conn.get("reconnect_required"):
-        return TermsResponse(connected=False)
-    try:
-        return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
-        return TermsResponse(connected=False)
+    if _is_connected(conn) and not conn.get("reconnect_required"):
+        try:
+            return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
+            return TermsResponse(connected=False)
+
+    dconn = qbd.get_connection(db, company_id)
+    if dconn and dconn.get("environment") == qbd._environment():
+        rows = (
+            db.table("quickbooks_terms_cache")
+            .select("qb_term_id, name, due_days")
+            .eq("company_id", company_id)
+            .eq("realm_id", dconn["conductor_end_user_id"])
+            .execute()
+            .data
+            or []
+        )
+        return TermsResponse(
+            connected=True,
+            terms=[
+                {"id": r["qb_term_id"], "name": r["name"], "due_days": r["due_days"]}
+                for r in rows
+            ],
+        )
+
+    return TermsResponse(connected=False)
 
 
 class PoFieldResponse(BaseModel):

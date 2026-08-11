@@ -37,8 +37,15 @@ vi.mock('@/utils/quotePricingResolver', async () => {
   return { ...actual, buildPricingBasisSnapshot: buildPricingBasisSnapshotMock };
 });
 
+// Two rollup reads per line now (#727): the CHARGE base, which markup is applied
+// to and which `base_cost_per_unit` records, and TRUE cost, which the row keeps
+// so it can state its own effective margin. Identical whenever no BOM line
+// charges its child at price, so the shared mock is the honest default here.
 const { getComputedPartCostMock } = vi.hoisted(() => ({ getComputedPartCostMock: vi.fn() }));
-vi.mock('@/utils/partsAccess', () => ({ getComputedPartCost: getComputedPartCostMock }));
+vi.mock('@/utils/partsAccess', () => ({
+  getComputedPartCost: getComputedPartCostMock,
+  getComputedPartChargeBase: getComputedPartCostMock,
+}));
 
 import {
   insertLineItemForPart,

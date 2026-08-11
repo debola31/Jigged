@@ -22,15 +22,63 @@ export interface BomLine {
    * ceiling branch in `compute_part_cost_at_qty` / `calculateRoutingCost`.
    */
   consume_whole_units: boolean;
+  /**
+   * What this child contributes to the parent's rollup (#727).
+   *
+   * `'cost'` (default) — our cost of the child, i.e. its charge base.
+   * `'price'` — the child's marked-up price, from its own pricing tier.
+   *
+   * Per-line, not per-part: a shop may charge material at price on customer
+   * jobs and at cost on internal stock-making work orders.
+   */
+  charge_basis: ChargeBasis;
   created_at: string;
   updated_at: string;
 }
+
+/** What a BOM line contributes to its parent's rollup. */
+export type ChargeBasis = 'cost' | 'price';
+
+/**
+ * What a NEWLY ADDED BOM line is charged at (#727), in precedence order:
+ *
+ *   1. However this part's OTHER materials are already set. A part with a stance
+ *      keeps it, so adding one more can never drop the panel into "mixed".
+ *   2. Otherwise the shop's default, so a shop that always charges materials one
+ *      way says so once instead of on every part.
+ *
+ * `partStance` is null when the part has no materials yet, or when its existing
+ * ones disagree — in both cases there is nothing coherent to inherit.
+ *
+ * **Made and bought children are treated identically, deliberately.** Both carry
+ * costs and pricing tiers, and the rollup has never distinguished them: the price
+ * rung resolves any part with a markup tier. An earlier draft forced made
+ * children to cost, inherited from the read-time shop-wide markup this design no
+ * longer has — where the argument was that a default applied at bought leaves
+ * would double-mark if applied again at a made part above them. With no such
+ * default, that argument has nothing to stand on, and charging a sub-assembly at
+ * its own price is ordinary transfer pricing. Stacking stays visible: the Cost
+ * card's "Material markup / unit" row counts every child charged above cost,
+ * whatever its source.
+ */
+export function chargeBasisForNewLine(
+  partStance: ChargeBasis | null,
+  shopDefault: ChargeBasis,
+): ChargeBasis {
+  return partStance ?? shopDefault;
+}
+
+export const CHARGE_BASIS_LABELS: Record<ChargeBasis, string> = {
+  cost: 'Our cost',
+  price: 'Marked-up price',
+};
 
 export interface BomLineFormData {
   child_part_id: string;
   quantity: string;
   unit: string;
   consume_whole_units: boolean;
+  charge_basis: ChargeBasis;
 }
 
 export interface BomLineWithChildPart extends BomLine {
@@ -68,6 +116,7 @@ export const EMPTY_BOM_FORM: BomLineFormData = {
   quantity: '',
   unit: '',
   consume_whole_units: false,
+  charge_basis: 'cost',
 };
 
 export function bomLineToFormData(bomLine: BomLine): BomLineFormData {
@@ -76,5 +125,6 @@ export function bomLineToFormData(bomLine: BomLine): BomLineFormData {
     quantity: String(bomLine.quantity),
     unit: bomLine.unit,
     consume_whole_units: bomLine.consume_whole_units,
+    charge_basis: bomLine.charge_basis,
   };
 }

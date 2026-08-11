@@ -13,16 +13,11 @@ import type {
   QuoteWithRelations,
   QuoteFormData,
   QuoteFilters,
-  QuoteCostBreakdown,
-  QuoteOperationSnapshot,
-  QuoteMaterialSnapshot,
-  QuotePartCostBreakdown,
   QuoteLineItem,
   CompanyMember,
   PricingBasisSnapshot,
 } from '@/types/quote';
 import { isExpirationDatePast, isQuoteExpired } from '@/types/quote';
-import { calculateRoutingCost } from '@/utils/routingCostCalculation';
 import { getCompanyMembers } from '@/utils/companyAccess';
 import { resolveJobPartUnitPrice, type JobPartPricingBasis } from '@/utils/quotePricingResolver';
 import { getTiersWithComputedPrices } from '@/utils/partPricingTiersAccess';
@@ -368,8 +363,7 @@ export async function getQuoteWithRelations(
 /**
  * Create a new quote with one line item per part. The unit price is auto-resolved
  * from the part's pricing tiers at the chosen order quantity (or hand-entered via
- * an override). Also writes per-part cost snapshots into quote_operations +
- * quote_materials.
+ * an override).
  */
 export async function createQuote(
   companyId: string,
@@ -460,30 +454,6 @@ export async function createQuote(
       block.lead_time_text,
     );
     sequence += 10;
-  }
-
-  // Cost snapshots (quote_operations / quote_materials) are keyed by
-  // (quote_id, part_id), so they're written ONCE per part — never once per
-  // quantity. A price-options quote has no single "the" quantity, so we
-  // snapshot at the lowest quoted quantity (deterministic; the per-unit
-  // material cost depends on qty via procurement tiers).
-  const lowestQtyByPart = new Map<string, number>();
-  for (const block of formData.parts) {
-    const current = lowestQtyByPart.get(block.part_id);
-    if (current === undefined || block.order_quantity < current) {
-      lowestQtyByPart.set(block.part_id, block.order_quantity);
-    }
-  }
-  for (const [partId, qty] of lowestQtyByPart) {
-    try {
-      await writeCostSnapshotsForPart(quote.id, companyId, partId, qty);
-    } catch (snapshotError) {
-      // No `captureException`: every error that can reach here began as a Supabase `{ error }`
-      // that the integration already reported — the inserts below, and `calculateRoutingCost`,
-      // whose only throw is a re-thrown `parts_unit_conversions` select error. Capturing again
-      // would file the same failure twice. (#708)
-      console.warn('Failed to write cost snapshot for part:', partId, snapshotError);
-    }
   }
 
   return { quote: asQuote(quote) };
@@ -913,130 +883,6 @@ export async function bulkDeleteQuotes(quoteIds: string[], companyId: string): P
       });
     }
   }
-}
-
-// ============== Cost Breakdown Snapshots ==============
-
-/**
- * Write (or overwrite) per-op + per-material cost snapshots for a single
- * (quote, part) pair using the live routing. Multi-part quotes call this
- * once per distinct part.
- *
- * `orderQuantity` is passed through to `calculateRoutingCost` so each
- * material's per-unit cost in the snapshot reflects the child's tier at
- * the cumulative qty the parent batch consumes. Without this, a quote at
- * qty=100 would snapshot child costs as if qty were 1.
- */
-async function writeCostSnapshotsForPart(
-  quoteId: string,
-  companyId: string,
-  partId: string,
-  orderQuantity: number,
-): Promise<void> {
-  const supabase = getSupabase();
-
-  const breakdown = await calculateRoutingCost(partId, orderQuantity);
-  if (!breakdown) return;
-
-  // Clear existing snapshot rows for this (quote, part) — idempotent.
-  await supabase.from('quote_operations').delete().eq('quote_id', quoteId).eq('part_id', partId);
-  await supabase.from('quote_materials').delete().eq('quote_id', quoteId).eq('part_id', partId);
-
-  if (breakdown.labor_items.length > 0) {
-    const opRows = breakdown.labor_items.map((item, index) => ({
-      quote_id: quoteId,
-      company_id: companyId,
-      part_id: partId,
-      sequence: index,
-      operation_name: item.operation_name,
-      run_time_minutes: item.run_time_minutes,
-      setup_time_minutes: item.setup_time_minutes,
-      labor_rate: item.labor_rate,
-      run_cost: item.cost,
-      setup_cost: item.setup_cost,
-    }));
-    const { error } = await supabase.from('quote_operations').insert(opRows);
-    if (error) throw toFriendlyError(error, { entity: 'quote' });
-  }
-
-  if (breakdown.material_items.length > 0) {
-    const matRows = breakdown.material_items.map((item, index) => ({
-      quote_id: quoteId,
-      company_id: companyId,
-      part_id: partId,
-      sequence: index,
-      material_part_id: null,
-      item_name: item.item_name,
-      quantity: item.quantity,
-      unit: item.unit,
-      cost_per_unit: item.cost_per_unit,
-      line_cost: item.cost,
-      // Discrete count actually consumed across the order (ceil in whole-unit
-      // mode) so the itemized breakdown can explain a line whose per-part
-      // quantity × cost_per_unit no longer multiplies out to line_cost.
-      units_consumed: item.units_consumed,
-    }));
-    const { error } = await supabase.from('quote_materials').insert(matRows);
-    if (error) throw toFriendlyError(error, { entity: 'quote' });
-  }
-}
-
-/**
- * Read the full cost breakdown for a quote, one section per distinct part
- * plus the snapshotted line items. Snapshot tables are the single source of truth.
- */
-export async function getQuoteCostBreakdown(
-  quoteId: string,
-  _companyId: string,
-): Promise<QuoteCostBreakdown | null> {
-  const supabase = getSupabase();
-
-  const [opsResp, matsResp, lineItems] = await Promise.all([
-    supabase
-      .from('quote_operations')
-      .select('*')
-      .eq('quote_id', quoteId)
-      .order('sequence', { ascending: true }),
-    supabase
-      .from('quote_materials')
-      .select('*')
-      .eq('quote_id', quoteId)
-      .order('sequence', { ascending: true }),
-    getLineItemsForQuote(quoteId),
-  ]);
-
-  if (opsResp.error) throw opsResp.error;
-  if (matsResp.error) throw matsResp.error;
-
-  const operations = (opsResp.data || []) as QuoteOperationSnapshot[];
-  const materials = (matsResp.data || []) as QuoteMaterialSnapshot[];
-
-  const partIds = new Set<string>();
-  for (const o of operations) partIds.add(o.part_id);
-  for (const m of materials) partIds.add(m.part_id);
-  for (const li of lineItems) partIds.add(li.part_id);
-
-  const parts: QuotePartCostBreakdown[] = [];
-  for (const partId of partIds) {
-    const partOps = operations.filter((o) => o.part_id === partId);
-    const partMats = materials.filter((m) => m.part_id === partId);
-
-    const totalRunCost = partOps.reduce((sum, o) => sum + (o.run_cost ?? 0), 0);
-    const totalSetupCost = partOps.reduce((sum, o) => sum + (o.setup_cost ?? 0), 0);
-    const totalMaterialCost = partMats.reduce((sum, m) => sum + (m.line_cost ?? 0), 0);
-
-    parts.push({
-      part_id: partId,
-      operations: partOps,
-      materials: partMats,
-      total_run_cost: Math.round(totalRunCost * 100) / 100,
-      total_setup_cost: Math.round(totalSetupCost * 100) / 100,
-      total_labor_cost: Math.round((totalRunCost + totalSetupCost) * 100) / 100,
-      total_material_cost: Math.round(totalMaterialCost * 100) / 100,
-    });
-  }
-
-  return { parts, line_items: lineItems };
 }
 
 // ============== Manual expire ==============

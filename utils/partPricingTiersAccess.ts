@@ -6,7 +6,14 @@ import type {
   PartPricingTierInput,
   ComputedPartPricingTier,
 } from '@/types/partPricing';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import {
+  getComputedPartChargeBase,
+  getComputedPartCost,
+  addPartPricingNote,
+} from '@/utils/partsAccess';
+import { calculateRoutingCost } from '@/utils/routingCostCalculation';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
+import { getCurrentMember } from '@/utils/operatorAccess';
 import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
 
 /**
@@ -32,13 +39,18 @@ export async function getTiersForPart(partId: string): Promise<PartPricingTier[]
  * The price of a part at a specific quantity — the SINGLE SOURCE OF TRUTH the
  * Pricing card, the quote form, and the persisted quote line all use.
  *
- * `base_cost` comes from the ONE canonical engine `compute_part_cost_at_qty`
- * (via `getComputedPartCost`) at the ACTUAL qty; the markup is the tier that
+ * `base_cost` comes from the ONE canonical engine (via
+ * `getComputedPartChargeBase`) at the ACTUAL qty; the markup is the tier that
  * applies at that qty; `unit_price = base × (1 + markup/100)`. Because base is
  * computed at the exact qty (not read off a step-function tier ladder), the
  * number is exact at every qty and identical wherever it's shown. A caller that
  * already has the tier list passes it in to skip the extra fetch; otherwise the
  * tiers are loaded here.
+ *
+ * **The base is the CHARGE base, not the true cost** (#727): markup applies to
+ * what we charge ourselves for the materials, so a BOM line set to charge its
+ * child at price is already inside `base_cost`. The two are the same number
+ * until someone sets that toggle.
  */
 export interface PartPriceAtQty {
   base_cost: number | null;
@@ -56,7 +68,7 @@ export async function getPartPriceAtQty(
   const ladder = tiers ?? (await getTiersForPart(partId));
   const [resolved, base] = await Promise.all([
     Promise.resolve(resolveMarkupAtQty(ladder, qty)),
-    getComputedPartCost(partId, qty).catch(() => null),
+    getComputedPartChargeBase(partId, qty).catch(() => null),
   ]);
   const unit_price = resolved ? unitPriceFromBase(base, resolved.markup_percent) : null;
   return {
@@ -70,8 +82,8 @@ export async function getPartPriceAtQty(
 
 /**
  * The tier ladder with each tier's `unit_price` computed AT THAT TIER'S OWN
- * QUANTITY, all through the one canonical engine (`getComputedPartCost` — the
- * same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
+ * QUANTITY, all through the one canonical engine (`getComputedPartChargeBase` —
+ * the same one `getPartPriceAtQty` uses, so no TS/SQL split can make two screens
  * disagree). Drives the quote-form tier ladder, the drift snapshot, and the
  * Pricing card's tier table. A null markup or an unresolvable base yields
  * `unit_price = null` so the "no usable tier" check still fires.
@@ -89,7 +101,7 @@ export async function getTiersWithComputedPrices(
 
   return Promise.all(
     tiers.map(async (t) => {
-      const base = await getComputedPartCost(partId, t.quantity).catch(() => null);
+      const base = await getComputedPartChargeBase(partId, t.quantity).catch(() => null);
       return { ...t, unit_price: unitPriceFromBase(base, t.markup_percent) };
     }),
   );
@@ -219,4 +231,79 @@ export async function getPriceablePartIds(companyId: string): Promise<Set<string
     throw error;
   }
   return new Set((data ?? []) as string[]);
+}
+
+/**
+ * Give a part its first pricing tier, at the shop's starting markup, the moment
+ * it first has a cost — so "costed" and "quotable" happen together (#727).
+ *
+ * **Why this is not in the Pricing card.** It used to be, as an effect that
+ * noticed a cost had appeared and wrote a tier. Two problems, both real:
+ *
+ *   1. It ran AFTER the routing/BOM save had already refreshed the page, so the
+ *      workspace re-derived priceability in the gap and flashed "this part can't
+ *      be quoted yet" for a second before correcting itself. The user watched
+ *      the app change its mind.
+ *   2. An automatic write inside an explicit-Save card kept reaching around that
+ *      card's own guards — it ate a staged Min qty once and a staged operation
+ *      edit once, both caught by E2E.
+ *
+ * Called from the workspace's post-mutation refresh instead, BEFORE the refresh
+ * lands: the tier exists by the time anything re-reads priceability, so there is
+ * one transition rather than two.
+ *
+ * Returns true when it wrote a tier. No-ops (cheaply, in this order) when the
+ * part already has tiers, or has no cost to mark up yet.
+ */
+export async function ensureStarterPricingTier(
+  companyId: string,
+  partId: string,
+  source: 'made' | 'bought',
+): Promise<boolean> {
+  const existing = await getTiersForPart(partId);
+  if (existing.length > 0) return false;
+
+  // "Is there a cost", not "is there a routing". A made part whose operations
+  // were all deleted still HAS a routing row and rolls up to $0; a markup there
+  // would make it quotable for nothing, which is worse than not being quotable.
+  if (source === 'bought') {
+    const cost = await getComputedPartCost(partId, 1).catch(() => null);
+    if (cost === null) return false;
+  } else {
+    const breakdown = await calculateRoutingCost(partId, 1).catch(() => null);
+    const hasPricedWork =
+      !!breakdown &&
+      (breakdown.labor_items.length > 0 || breakdown.material_items.length > 0);
+    if (!hasPricedWork) return false;
+  }
+
+  const company = await getCompany(companyId);
+  // No company row, no starting markup to apply — writing 0 would be inventing a
+  // number the shop never chose.
+  if (!company) return false;
+  const starters = readCompanyPricingDefaults(company);
+  const markup = source === 'bought' ? starters.bought : starters.made;
+
+  await replaceTiersForPart(companyId, partId, [
+    { sequence: 10, quantity: 1, markup_percent: markup },
+  ]);
+
+  // Audit trail: a pricing row that appears with no trace is what the notes feed
+  // exists to prevent.
+  try {
+    const operator = await getCurrentMember(companyId);
+    if (operator) {
+      await addPartPricingNote(
+        partId,
+        companyId,
+        operator.id,
+        `Pricing started automatically at ${markup}% markup — your shop default for ${
+          source === 'bought' ? 'parts you buy' : 'parts you make'
+        } — so this part can be quoted. Adjust it any time.`,
+      );
+    }
+  } catch (noteErr) {
+    console.error('Failed to log starter pricing note:', noteErr);
+  }
+  return true;
 }

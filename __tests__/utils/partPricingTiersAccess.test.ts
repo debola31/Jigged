@@ -18,17 +18,21 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => mockSupabase,
 }));
 
-// The one canonical cost engine — every price (made or bought) derives from it,
-// so a tier's price and a quote at that qty can't disagree.
+// The one canonical engine — every price (made or bought) derives from it, so a
+// tier's price and a quote at that qty can't disagree. Price paths read the
+// CHARGE base, not true cost (#727): markup applies to what materials are
+// charged into the part at, so a BOM line set to charge its child at price is
+// already inside the number. The two are equal until someone sets that toggle.
 vi.mock('@/utils/partsAccess', () => ({
   getComputedPartCost: vi.fn(),
+  getComputedPartChargeBase: vi.fn(),
   getPartCostExplain: vi.fn(),
 }));
 
 import { getTiersWithComputedPrices, getPartPriceAtQty } from '@/utils/partPricingTiersAccess';
-import { getComputedPartCost } from '@/utils/partsAccess';
+import { getComputedPartChargeBase } from '@/utils/partsAccess';
 
-const mockComputedPartCost = vi.mocked(getComputedPartCost);
+const mockComputedPartCost = vi.mocked(getComputedPartChargeBase);
 
 function tierRow(partial: { id: string; quantity: number; markup_percent: number | null }) {
   return {

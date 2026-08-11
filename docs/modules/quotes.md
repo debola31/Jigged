@@ -1,7 +1,7 @@
 # Quotes Module
 
 **Priority:** Must Have · **Depends on:** Customers, Parts (quotes price against a part's tiers) ·
-**Tables:** `quotes`, `quote_line_items`, `quote_operations`, `quote_materials`
+**Tables:** `quotes`, `quote_line_items`
 
 > **Condensed 2026-08-03: 9,341 → ~4,460 words (−52%), for [#634](https://github.com/debola31/Jigged/issues/634).**
 > What went: two sections describing one inline-create feature, an ASCII modal mockup, a
@@ -129,19 +129,37 @@ only uniqueness rule is `(quote_id, sequence)`.
 | `quote_id`, `company_id`, `part_id`, `sequence` | `sequence` (10, 20, 30 …) drives detail/PDF order |
 | `quantity` | > 0, and **fractional** — parts sold by the dozen, ounce, pound or length |
 | `unit_price` | Snapshotted. **Frozen by default** — never silently repriced when the source tier moves |
-| `total_price`, `markup_percent`, `base_cost_per_unit` | Snapshots; base cost supports internal cost-vs-sell reporting |
+| `total_price`, `markup_percent`, `base_cost_per_unit` | Snapshots. `base_cost_per_unit` is the **charge base** the markup was applied to, so the row's own arithmetic holds |
+| `true_cost_per_unit` | What the part actually costs us at the same quantity, every BOM charge basis ignored ([#727]). Effective margin = `(unit_price − true_cost_per_unit) / unit_price`. Equal to `base_cost_per_unit` unless a material is charged at price |
 | `source_tier_id` | Soft reference; set null if the tier is later deleted |
 | `pricing_basis_snapshot` | jsonb — the frozen tier curve. This is what drift compares against |
 | `basis_unknown` | `true` on rows predating the snapshot migration |
 | `is_quote_override` | `true` when the salesperson typed a one-off price; drives the green "✏ adjusted for this quote" chip |
 | `lead_time_text` | Optional **per-part** override; NULL ⇒ use the quote-level value |
 
-### Cost snapshots and the reverse link
+### The reverse link
 
-`quote_operations` / `quote_materials` snapshot the part's routing at quote creation, written
-once per **distinct part** by `writeCostSnapshotsForPart` and captured **at the lowest quoted
-quantity** (a price-options quote has no single "the" quantity). Immutable — later routing edits
-don't touch them.
+**Withdrawn: per-quote cost snapshots.** `quote_operations` and `quote_materials` froze the cost
+build-up behind a quote — every operation and material, written once per part at quote creation by
+`writeCostSnapshotsForPart` — and a cost-breakdown accordion rendered them. The reasoning was sound:
+a part's routing and BOM keep changing, so the build-up behind an old quote cannot be reconstructed
+from the live part.
+
+`db33416d` (2026-04-30, "quotes done") rewrote this page and removed the accordion. Nobody removed
+the writer, so both tables kept filling on every quote for three and a half months with nothing able
+to read them. The components, the reader and the tables were all deleted in the #727 branch once
+that was noticed
+([`20260811010948`](../../supabase/migrations/20260811010948_drop_quote_cost_snapshots.sql)).
+
+**What survives is the outcome, not the itemisation.** `quote_line_items` still freezes
+`unit_price`, `markup_percent`, `base_cost_per_unit` (the charge base), `true_cost_per_unit` (the
+same figure at true cost, so effective margin stays computable) and the full tier curve in
+`pricing_basis_snapshot`. A quote still knows what it charged and why; what it no longer knows is
+which operations and materials made up the base.
+
+**Rebuilding a breakdown means re-adding the capture, not just a screen** — those numbers only exist
+at quote time. That is the price of the deletion, taken deliberately rather than by leaving two
+tables filling in the dark.
 
 Jobs point back via `jobs.source_quote_line_item_id`; follow `quote_line_items.id →` it to list
 every job from a quote.
@@ -303,7 +321,10 @@ that flag:
 | Fully converted | View PDF, Delete |
 
 Expired quotes still show convert; the expired-price warning surfaces in the modal rather than
-gating the button. **Email was descoped** — there is no Email action, and no server send.
+gating the button. **Email was descoped** — there is no Email action, and no server send. The
+Resend-backed `POST /api/quotes/{id}/email` that the removed dialog used outlived its caller by two
+months and has now been deleted too, along with `api/services/email.py` (its only consumer) and the
+`resend` / `python-multipart` dependencies.
 
 ### Convert to Job modal
 
@@ -366,7 +387,8 @@ The math lives on the part's tiers; the quote is a snapshot. On the part (see
 ```
 total_setup_cost  = Σ (setup_min / 60 × labor_rate)
 run_per_unit      = Σ (run_min   / 60 × labor_rate)
-material_per_unit = Σ (qty × cost_per_unit)
+material_per_unit = Σ (qty × charged_rate)   -- cost, or the child's price on a
+                                             -- charge-at-price BOM line (#727)
 
 base_cost_per_unit (at tier qty Q) = run_per_unit + material_per_unit + (total_setup_cost / Q)
 unit_price                         = base_cost_per_unit × (1 + markup_percent / 100)
@@ -378,7 +400,7 @@ procurement tiers via `compute_part_cost_at_qty`, so they resolve a real tier pr
 need a manual per-line override.
 
 On the quote, `createQuote` inserts one row per (part, quantity), with `unit_price` from
-`resolveTier`, `base_cost_per_unit` from `getComputedPartCost` **at the matched break's quantity**
+`resolveTier`, `base_cost_per_unit` from `getComputedPartChargeBase` **at the matched break's quantity**
 — not the order quantity, so the row's own `unit_price = base_cost_per_unit × (1 + markup/100)`
 still holds — `source_tier_id` as a soft reference, and `pricing_basis_snapshot` as the frozen
 tier table. A
@@ -544,7 +566,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** the quote form, **when** submitting, **then** it blocks until every part block has a part and at least one valid quantity row, quantities unique within a part — *automation-pending (#367)*.
 - [ ] **Given** an existing active, unconverted quote, **when** a part is added, a quantity edited and a part removed, **then** all three persist across reload — *verified by `e2e/quote-edit.spec.ts` > `Quote edit — reload contract`*.
 - [ ] **Given** `updateQuote`, **when** it saves, **then** it reconciles line items by id — insert / update / delete — *verified by `__tests__/utils/quotesAccess.test.ts` > `updateQuote — reconcile (Issue #324 / #317 policy)`*.
-- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** the cost breakdown renders, **then** it appears with `run_cost = 0` and a non-zero setup cost — regression for **#224** — *automation-pending (#367)*.
+- [ ] **Given** a setup-only operation (run 0, setup > 0), **when** the part's cost is rolled up, **then** it contributes `run_cost = 0` and a non-zero setup cost — regression for **#224**. *(Was written against the cost-breakdown accordion and then its `quote_operations` row; both are gone, so the invariant now lives in `calculateRoutingCost` and the Cost card.)* — *automation-pending (#367)*.
 
 **Frozen pricing and drift**
 
@@ -580,3 +602,5 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   `Collapse`, and the duplicate-code / duplicate-part-name error paths).
 - **`createQuote`'s basis-snapshot write is asserted only through the resolver's unit tests** and
   the column's presence in the schema, not end to end.
+
+[#727]: https://github.com/debola31/Jigged/issues/727

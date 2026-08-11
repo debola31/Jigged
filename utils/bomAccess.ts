@@ -6,10 +6,11 @@ import type {
   BomLineFormData,
   BomLineWithChildPart,
   BomLineWithParentPart,
+  ChargeBasis,
 } from '@/types/bom';
 
 const BOM_COLUMNS =
-  'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, created_at, updated_at';
+  'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, charge_basis, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
   'id, part_name, description, primary_unit, is_stocked, source, costing_batch_quantity';
@@ -61,6 +62,7 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
         unit: row.unit,
         sequence: row.sequence,
         consume_whole_units: Boolean(row.consume_whole_units),
+        charge_basis: row.charge_basis,
         created_at: row.created_at,
         updated_at: row.updated_at,
         child_part: {
@@ -145,6 +147,7 @@ export async function getBomParents(childPartId: string): Promise<BomLineWithPar
         unit: row.unit,
         sequence: row.sequence,
         consume_whole_units: Boolean(row.consume_whole_units),
+        charge_basis: row.charge_basis,
         created_at: row.created_at,
         updated_at: row.updated_at,
         parent_part: parent,
@@ -273,6 +276,7 @@ export async function addBomLine(
       unit: formData.unit.trim(),
       sequence,
       consume_whole_units: formData.consume_whole_units,
+      charge_basis: formData.charge_basis,
     })
     .select(BOM_COLUMNS)
     .single();
@@ -330,6 +334,7 @@ export async function updateBomLine(
       quantity,
       unit: formData.unit.trim(),
       consume_whole_units: formData.consume_whole_units,
+      charge_basis: formData.charge_basis,
       updated_at: new Date().toISOString(),
     })
     .eq('id', bomLineId)
@@ -344,6 +349,37 @@ export async function updateBomLine(
     throw toFriendlyError(error, { entity: 'BOM line' });
   }
   return data as BomLine;
+}
+
+/**
+ * Set the charge basis on every BOM line of `parentPartId`, in one write.
+ * Returns how many lines were changed.
+ *
+ * Setting it line by line is fine for a three-line BOM and miserable across a
+ * real parts list, and the answer is the same for every line anyway: "how do we
+ * value what goes into this part — at what it cost us, or at what we'd sell it
+ * for?" is one question per part, not one per material.
+ *
+ * Made and bought children alike. Both carry costs and pricing tiers, and the
+ * rollup has never told them apart — an earlier version of this function
+ * filtered to bought children only, which was a leftover from a shop-wide
+ * markup rung that no longer exists.
+ */
+export async function setChargeBasisForMaterials(
+  parentPartId: string,
+  chargeBasis: ChargeBasis,
+): Promise<number> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('parts_bom')
+    .update({ charge_basis: chargeBasis, updated_at: new Date().toISOString() })
+    .eq('parent_part_id', parentPartId)
+    .neq('charge_basis', chargeBasis)
+    .select('id');
+  if (error) throw toFriendlyError(error, { entity: 'BOM line' });
+
+  return (data ?? []).length;
 }
 
 export async function deleteBomLine(bomLineId: string): Promise<void> {

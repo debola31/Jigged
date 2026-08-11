@@ -1216,6 +1216,89 @@ async def execute_import(
                 # write failure is logged and the user can re-import or fix
                 # via the UI.
 
+        # ── Starter pricing tiers ──────────────────────────────────────────
+        # A part is not quotable until it carries a pricing tier with a markup:
+        # get_priceable_part_ids requires one, and since #727 the BOM rollup has
+        # no shop-wide fallback to stand in for a missing one. The part page
+        # writes that first tier the moment a part has a cost — but only for a
+        # part somebody opens, and an onboarding import is thousands of parts
+        # nobody will open one at a time. Without this, an imported catalogue
+        # arrives un-quotable.
+        #
+        # Same rule as the part page, at the other entry point: the shop's
+        # starting markup for the part's source, written ONCE into the part's own
+        # tier. Read here, never by the rollup.
+        #
+        # Only for parts that (a) this run created and (b) have a cost to mark up
+        # — which at import time means a bought row that supplied one. A made row
+        # has no routing yet, so it gets its tier from the part page later, and
+        # seeding a markup against a $0 cost would make it quotable for nothing.
+        # Never touches a part that already has tiers: an import must not
+        # overwrite a price somebody chose.
+        newly_created_with_cost = [
+            id_by_part_name[name]
+            for name, _cost in pending_procurement_tiers
+            if name in id_by_part_name and name.lower() not in existing_by_name
+        ]
+        if newly_created_with_cost:
+            try:
+                company = (
+                    supabase.table("companies")
+                    .select("default_markup_bought_percent")
+                    .eq("id", request.company_id)
+                    .single()
+                    .execute()
+                ).data or {}
+                starter_markup = company.get("default_markup_bought_percent") or 0
+
+                # Belt and braces: a part created by THIS run should have no
+                # tiers, but a concurrent import or a revived archived part could
+                # mean otherwise, and silently rewriting a markup is the one
+                # thing this must never do.
+                already_priced: set[str] = set()
+                for batch_start in range(0, len(newly_created_with_cost), BATCH_SIZE):
+                    res = (
+                        supabase.table("part_pricing_tiers")
+                        .select("part_id")
+                        .in_(
+                            "part_id",
+                            newly_created_with_cost[batch_start : batch_start + BATCH_SIZE],
+                        )
+                        .execute()
+                    )
+                    for r in res.data or []:
+                        already_priced.add(r["part_id"])
+
+                starter_rows = [
+                    {
+                        "part_id": part_id,
+                        "company_id": request.company_id,
+                        "sequence": 10,
+                        "quantity": 1,
+                        "markup_percent": starter_markup,
+                    }
+                    for part_id in newly_created_with_cost
+                    if part_id not in already_priced
+                ]
+                for batch_start in range(0, len(starter_rows), BATCH_SIZE):
+                    (
+                        supabase.table("part_pricing_tiers")
+                        .insert(starter_rows[batch_start : batch_start + BATCH_SIZE])
+                        .execute()
+                    )
+                if starter_rows:
+                    logger.info(
+                        f"Parts import: seeded {len(starter_rows)} starter pricing tiers "
+                        f"at {starter_markup}%"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Parts import starter-tier insert error: {str(e)}", exc_info=True
+                )
+                sentry_sdk.capture_exception(e)
+                # Don't fail the import — the parts and their costs are in. The
+                # part page will seed the tier when someone opens it.
+
         logger.info(
             f"Parts import complete: {imported_count} created, {updated_count} updated, {skipped} skipped"
         )

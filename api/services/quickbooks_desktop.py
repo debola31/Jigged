@@ -561,17 +561,42 @@ def create_customer(end_user_id: str, display_name: str, address: dict | None = 
 
 
 def customer_tax_code_id(end_user_id: str, qb_customer_id: str) -> str | None:
-    """The customer's OWN sales-tax code, which every pushed line carries.
+    """The sales-tax code governing this customer, walking up to the parent when
+    the record does not carry its own.
 
-    Verified on Enterprise 24: a line with no salesTaxCodeId defaults to `Non`
-    and is NOT taxed, even for a customer whose record reads `Tax` and an invoice
-    header showing the tax item at 7.75%. Sending the code explicitly produced
-    the tax. So omitting this silently under-bills a taxable sale.
+    Every pushed line gets this code, which reproduces what QuickBooks' own UI
+    does: Intuit documents that on a sales form the CUSTOMER's tax code overrides
+    the item's. The API does NOT apply that defaulting -- verified on Enterprise
+    24, a line sent with no code lands as `Non` and is not taxed even for a
+    customer whose record reads `Tax` beside a header showing 7.75%. Sending it
+    explicitly is what makes an API-created invoice match a hand-typed one.
+
+    THE PARENT WALK IS NOT DEFENSIVE PADDING. A QuickBooks job (`Customer:Job`,
+    the standard way shops track work) carries `salesTaxCode: null` and inherits
+    its parent's, while still inheriting the tax ITEM -- verified, along with the
+    consequence: invoicing such a job without a code produced $0.00 tax under a
+    parent whose code is `Tax`. Reading only the mapped record would therefore
+    silently UNDER-BILL every shop that invoices to jobs, which is most of them.
+
+    Returns None only when nothing in the chain carries a code, leaving
+    QuickBooks to apply its own default.
     """
-    rows = _list("/customers", end_user_id, {"ids": qb_customer_id, "limit": 1})
-    if not rows:
-        return None
-    return (rows[0].get("salesTaxCode") or {}).get("id")
+    seen: set[str] = set()
+    current: str | None = qb_customer_id
+    # Bounded: QuickBooks nests Customer:Job:Sub-job only a few deep, and `seen`
+    # rules out a cycle that should be impossible but costs nothing to exclude.
+    for _ in range(5):
+        if not current or current in seen:
+            return None
+        seen.add(current)
+        rows = _list("/customers", end_user_id, {"ids": current, "limit": 1})
+        if not rows:
+            return None
+        code = (rows[0].get("salesTaxCode") or {}).get("id")
+        if code:
+            return code
+        current = (rows[0].get("parent") or {}).get("id")
+    return None
 
 
 # ───────────────────────── The invoice ─────────────────────────

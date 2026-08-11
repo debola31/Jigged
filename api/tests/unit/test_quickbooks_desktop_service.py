@@ -268,3 +268,44 @@ def test_find_created_invoice_returns_none_when_absent(monkeypatch):
     assert qbd.find_created_invoice("e", qb_customer_id="c",
                                     transaction_date="2026-08-10",
                                     external_id="want") is None
+
+
+# ───────────────────────── customer tax code ─────────────────────────
+def test_tax_code_comes_from_the_customer_when_it_has_one(monkeypatch):
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [
+        {"id": "C1", "salesTaxCode": {"id": "TAX"}, "parent": None},
+    ])
+    assert qbd.customer_tax_code_id("e", "C1") == "TAX"
+
+
+def test_tax_code_walks_up_to_the_parent_for_a_job(monkeypatch):
+    """MEASURED: a QuickBooks job (Customer:Job) carries salesTaxCode null and
+    inherits its parent's, while still inheriting the tax ITEM. Invoicing such a
+    job without a code produced $0.00 tax under a parent whose code is `Tax`, so
+    reading only the mapped record silently UNDER-BILLS every shop that invoices
+    to jobs -- which is most of them."""
+    rows = {
+        "JOB": {"id": "JOB", "salesTaxCode": None, "parent": {"id": "PARENT"}},
+        "PARENT": {"id": "PARENT", "salesTaxCode": {"id": "TAX"}, "parent": None},
+    }
+    monkeypatch.setattr(qbd, "_list", lambda p, e, params: [rows[params["ids"]]])
+    assert qbd.customer_tax_code_id("e", "JOB") == "TAX"
+
+
+def test_tax_code_is_none_when_nothing_in_the_chain_has_one(monkeypatch):
+    """Then QuickBooks applies its own default rather than us inventing one."""
+    rows = {
+        "JOB": {"id": "JOB", "salesTaxCode": None, "parent": {"id": "PARENT"}},
+        "PARENT": {"id": "PARENT", "salesTaxCode": None, "parent": None},
+    }
+    monkeypatch.setattr(qbd, "_list", lambda p, e, params: [rows[params["ids"]]])
+    assert qbd.customer_tax_code_id("e", "JOB") is None
+
+
+def test_tax_code_walk_cannot_spin_on_a_cycle(monkeypatch):
+    rows = {
+        "A": {"id": "A", "salesTaxCode": None, "parent": {"id": "B"}},
+        "B": {"id": "B", "salesTaxCode": None, "parent": {"id": "A"}},
+    }
+    monkeypatch.setattr(qbd, "_list", lambda p, e, params: [rows[params["ids"]]])
+    assert qbd.customer_tax_code_id("e", "A") is None

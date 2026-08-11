@@ -22,11 +22,13 @@
  * page no longer scrolls on selection because there is nothing below to scroll to; the grid holds
  * still and the answer arrives beside it.
  *
- * ## One layer, always
+ * ## One page, one layer
  *
- * Add · Remove · Move · Adjust are **views inside this drawer**, not dialogs over it. A dialog on a
- * drawer is two stacked surfaces with the subject buried under both, which is the failure the sheet
- * was deleted for. {@link PlaceViewHeader} gives every view the same way back.
+ * Add · Remove · Move · Adjust open **in place, under the button that opened them** — not as dialogs
+ * over the drawer (two stacked surfaces with the subject buried under both, which is the failure the
+ * sheet was deleted for) and no longer as views the drawer swaps to either. Swapping was one layer
+ * but still cost the contents list, the history and the other three verbs off screen to type one
+ * quantity. There is room for the form; it only ever holds a part, a quantity and a note.
  *
  * ## On a phone
  *
@@ -158,105 +160,115 @@ function PlaceDrawerBody({
     await onChanged();
   };
 
+  /** The open verb, or none. One at a time — two forms open at once is a form nobody finished. */
+  const openForm = view === 'overview' ? null : view;
+  const toggle = (v: View) => setView((cur) => (cur === v ? 'overview' : v));
+
   return (
     <>
-      {view === 'overview' ? (
-            <>
-              <PlaceViewHeader
-                title={place.name}
-                subtitle={path}
-                action={
-                  <IconButton aria-label="Close" onClick={onClose} sx={{ width: 48, height: 48 }}>
-                    <CloseIcon />
-                  </IconButton>
-                }
-              />
+      <PlaceViewHeader
+        title={place.name}
+        subtitle={path}
+        action={
+          <IconButton aria-label="Close" onClick={onClose} sx={{ width: 48, height: 48 }}>
+            <CloseIcon />
+          </IconButton>
+        }
+      />
 
-              <Box sx={{ p: 2, overflowY: 'auto' }}>
-                <Typography variant="overline" color="text.secondary">
-                  What&apos;s here
-                </Typography>
-                <Box sx={{ mt: 0.5, mb: 2 }}>
-                  <Contents key={`${place.id}:${stamp}`} locationId={place.id} />
-                </Box>
-
-                {/*
-                  The four verbs, in the order fixed across both surfaces — Add, Remove, Move,
-                  Adjust. Each is one kind of ledger row and there are exactly four kinds, so this
-                  row is the whole vocabulary rather than a selection from it.
-                */}
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Button variant="contained" onClick={() => setView('add')}>
-                    Add
-                  </Button>
-                  {/* Disabled rather than hidden: a control that vanishes reads as a bug, and its
-                      absence would not explain itself. */}
-                  <Button variant="outlined" disabled={!hasStock} onClick={() => setView('deplete')}>
-                    Remove
-                  </Button>
-                  <Button variant="outlined" disabled={!hasStock} onClick={() => setView('move')}>
-                    Move
-                  </Button>
-                  <Button variant="outlined" onClick={() => setView('adjust')}>
-                    Adjust
-                  </Button>
-                </Stack>
-
-                <Divider sx={{ my: 2 }} />
-
-                {/* What you do to the PLACE rather than to the stock in it. Text buttons, kept
-                    apart, so the row above reads as one set of four. */}
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Button size="small" variant="text" onClick={() => actions.onPrintQR(place)}>
-                    Print QR
-                  </Button>
-                  <Button size="small" variant="text" onClick={() => actions.onEdit(place)}>
-                    Rename
-                  </Button>
-                  {/* Only on an empty place: `delete_location` refuses a subtree holding stock, so
-                      offering it on a loaded bin promises something the database declines. */}
-                  {!hasStock && (
-                    <Button size="small" variant="text" onClick={() => actions.onDelete(place)}>
-                      Delete
-                    </Button>
-                  )}
-                </Stack>
-
-                <Box sx={{ mt: 2 }}>
-                  <PlaceHistory
-                    key={`${place.id}:${stamp}`}
-                    locationId={place.id}
-                    locationName={place.name}
-                  />
-                </Box>
-              </Box>
-            </>
-      ) : (
-        <Box sx={{ overflowY: 'auto' }}>
-          {view === 'adjust' ? (
-                <PlaceAdjustForm
-                  companyId={companyId}
-                  locationId={place.id}
-                  locationName={place.name}
-                  onCancel={() => setView('overview')}
-                  onDone={afterWrite}
-                />
-              ) : (
-                <PlaceStockActionForm
-                  // Keyed by verb: switching Add → Remove must re-read rather than show the
-                  // previous verb's part list.
-                  key={view}
-                  action={view}
-                  companyId={companyId}
-                  locationId={place.id}
-                  locationName={place.name}
-                  moveDestinations={moveDestinations}
-                  onCancel={() => setView('overview')}
-                  onDone={afterWrite}
-                />
-          )}
+      <Box sx={{ p: 2, overflowY: 'auto' }}>
+        <Typography variant="overline" color="text.secondary">
+          What&apos;s here
+        </Typography>
+        <Box sx={{ mt: 0.5, mb: 2 }}>
+          <Contents key={`${place.id}:${stamp}`} locationId={place.id} />
         </Box>
-      )}
+
+        {/*
+          The four verbs, in the order fixed across both surfaces — Add, Remove, Move, Adjust. Each
+          is one kind of ledger row and there are exactly four kinds, so this row is the whole
+          vocabulary rather than a selection from it.
+
+          They TOGGLE a section open beneath themselves rather than swapping the drawer to another
+          view. One page: what is in the bin stays on screen while you add to it, and cancelling is
+          a collapse rather than a journey back. The pressed one is filled so the open section has a
+          visible owner.
+        */}
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {(
+            [
+              ['add', 'Add', false],
+              ['deplete', 'Remove', true],
+              ['move', 'Move', true],
+              ['adjust', 'Adjust', false],
+            ] as const
+          ).map(([v, label, needsStock]) => (
+            <Button
+              key={v}
+              variant={openForm === v ? 'contained' : 'outlined'}
+              // Disabled rather than hidden: a control that vanishes reads as a bug, and its
+              // absence would not explain itself.
+              disabled={needsStock && !hasStock}
+              aria-expanded={openForm === v}
+              onClick={() => toggle(v)}
+            >
+              {label}
+            </Button>
+          ))}
+        </Stack>
+
+        {/* The form, in place, under the button that opened it. */}
+        {openForm === 'adjust' ? (
+          <PlaceAdjustForm
+            companyId={companyId}
+            locationId={place.id}
+            locationName={place.name}
+            onCancel={() => setView('overview')}
+            onDone={afterWrite}
+          />
+        ) : openForm ? (
+          <PlaceStockActionForm
+            // Keyed by verb: switching Add → Remove must re-read rather than show the previous
+            // verb's part list.
+            key={openForm}
+            action={openForm}
+            companyId={companyId}
+            locationId={place.id}
+            locationName={place.name}
+            moveDestinations={moveDestinations}
+            onCancel={() => setView('overview')}
+            onDone={afterWrite}
+          />
+        ) : null}
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* What you do to the PLACE rather than to the stock in it. Text buttons, kept apart, so
+            the row above reads as one set of four. */}
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Button size="small" variant="text" onClick={() => actions.onPrintQR(place)}>
+            Print QR
+          </Button>
+          <Button size="small" variant="text" onClick={() => actions.onEdit(place)}>
+            Rename
+          </Button>
+          {/* Only on an empty place: `delete_location` refuses a subtree holding stock, so offering
+              it on a loaded bin promises something the database declines. */}
+          {!hasStock && (
+            <Button size="small" variant="text" onClick={() => actions.onDelete(place)}>
+              Delete
+            </Button>
+          )}
+        </Stack>
+
+        <Box sx={{ mt: 2 }}>
+          <PlaceHistory
+            key={`${place.id}:${stamp}`}
+            locationId={place.id}
+            locationName={place.name}
+          />
+        </Box>
+      </Box>
     </>
   );
 }

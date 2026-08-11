@@ -131,7 +131,10 @@ export default function LocationPanel({
               startIcon={<FactCheckOutlinedIcon />}
               onClick={() => actions.onAdjust(unit)}
             >
-              Adjust
+              {/* `Bulk Adjust`, not `Adjust`. A place's own `Adjust` lives in its drawer and does
+                  one bin; this one opens a worksheet over every bin under the unit. Same verb, same
+                  `adjustment` rows — the word that differs is the one that says how many. */}
+              Bulk Adjust
             </Button>
           )}
           <>

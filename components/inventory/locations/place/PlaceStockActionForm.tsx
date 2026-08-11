@@ -3,11 +3,16 @@
 /**
  * Add · Remove · Move, standing at one place. The office half of the operator's four verbs.
  *
- * ## A view inside the place drawer, not a dialog of its own
+ * ## A section inside the place drawer, not a page and not a dialog
  *
- * This was a `Dialog`, and opening it from the drawer would have stacked one surface on another —
- * the exact thing that made `Manage` cover the cabinet you were acting on. The drawer swaps to this
- * view instead and offers its own way back, so there is only ever one layer.
+ * It was a `Dialog` first — which would have stacked a surface on a surface, the exact thing that
+ * made `Manage` cover the cabinet you were acting on. Then it was a *view* the drawer swapped to,
+ * which was one layer but still cost the contents list, the history and the other three verbs off
+ * screen to type one quantity.
+ *
+ * Now it opens **in place, under the button that opened it**. The drawer is one page: what is in
+ * the bin stays visible while you add to it, and cancelling is a collapse rather than a journey
+ * back. There is room — this only ever holds a part, a quantity, and a note.
  *
  * ## Why this exists at all
  *
@@ -58,6 +63,7 @@ import { useMemo, useState } from 'react';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
 import MenuItem from '@mui/material/MenuItem';
@@ -81,7 +87,6 @@ import { useLoad } from '@/hooks/useLoad';
 import type { LocationContent } from '@/types/inventoryLocations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
-import PlaceViewHeader from './PlaceViewHeader';
 
 /** The three verbs that act on one part at one place. `adjust` is the worksheet, not this. */
 export type PlaceStockAction = 'add' | 'deplete' | 'move';
@@ -92,10 +97,17 @@ const TITLES: Record<PlaceStockAction, string> = {
   move: 'Move stock somewhere else',
 };
 
+/**
+ * The submit, named with its noun.
+ *
+ * Bare `Add` collided with the toggle that opened this section — two buttons reading `Add` on one
+ * page, one of which opens a form and one of which writes a ledger row. The noun costs four
+ * characters and removes the question.
+ */
 const SUBMIT: Record<PlaceStockAction, string> = {
-  add: 'Add',
-  deplete: 'Remove',
-  move: 'Move',
+  add: 'Add stock',
+  deplete: 'Remove stock',
+  move: 'Move stock',
 };
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -293,10 +305,23 @@ export default function PlaceStockActionForm({
   // Mount IS entering, now that the drawer owns the switch. Keyed by action upstream, so changing
   // verb remounts and re-reads rather than reusing the previous verb's list.
   return (
-    <Box>
-      <PlaceViewHeader title={TITLES[action]} subtitle={locationName} onBack={onCancel} />
-      <Box sx={{ px: 2, pb: 2 }}>
-        <Stack spacing={2} sx={{ mt: 1 }}>
+    <Box
+      sx={{
+        // Inset and bordered so it reads as belonging to the verb above it rather than as the next
+        // thing on the page.
+        mt: 1.5,
+        p: 1.5,
+        borderRadius: 1,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'action.hover',
+      }}
+    >
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        {TITLES[action]}
+      </Typography>
+      <Box>
+        <Stack spacing={2}>
           {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
           {nothingHere ? (

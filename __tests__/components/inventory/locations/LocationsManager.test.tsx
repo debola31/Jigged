@@ -192,7 +192,7 @@ describe('LocationsManager', () => {
     // The grid: both shelves are drawn as cells with their fill state named.
     expect(await screen.findByRole('button', { name: /^Shelf A/ })).toBeInTheDocument();
     // The three you reach for while working are on the surface…
-    for (const label of [/^adjust$/i, /change layout/i, /print qr/i]) {
+    for (const label of [/^bulk adjust$/i, /change layout/i, /print qr/i]) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     // …and the do-it-once ones are behind a menu, so seven buttons do not wrap to three rows and
@@ -489,17 +489,29 @@ describe('LocationsManager — the four verbs', () => {
    * the `Move` verb now duplicates. A leaf is the same weight as the other three verbs, so it gets
    * what they get — a dialog that leaves the grid where it is.
    */
-  it('adjusts a single place inside the drawer, without leaving the page', async () => {
+  /**
+   * ONE PAGE. The verb opens a section under itself; it does not swap the drawer to another view.
+   * Swapping was one layer, but it still cost the contents list, the history and the other three
+   * verbs off screen to type one quantity.
+   */
+  it('opens Adjust in place, keeping the rest of the drawer on screen', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
     await user.click(await screen.findByRole('button', { name: /^Yard —/ }));
-    await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
+    const adjust = await screen.findByRole('button', { name: /^adjust$/i });
+    await user.click(adjust);
 
-    // A VIEW, not a dialog over the drawer: one layer, with the header's Back as the way out.
-    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
     expect(screen.getByText(/type what you actually counted/i)).toBeInTheDocument();
+    // Still there: what is in the bin, and the other three verbs.
+    expect(screen.getByText(/what's here/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    expect(adjust).toHaveAttribute('aria-expanded', 'true');
     expect(routerMocks.push).not.toHaveBeenCalled();
+
+    // …and the same button closes it again.
+    await user.click(adjust);
+    expect(screen.queryByText(/type what you actually counted/i)).not.toBeInTheDocument();
   });
 
   /**
@@ -515,7 +527,7 @@ describe('LocationsManager — the four verbs', () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await user.click(await screen.findByRole('button', { name: /^adjust$/i }));
+    await user.click(await screen.findByRole('button', { name: /^bulk adjust$/i }));
     expect(routerMocks.push).toHaveBeenCalledWith('/dashboard/co1/inventory/count?location=cab3');
   });
 
@@ -557,7 +569,7 @@ describe('LocationsManager — the four verbs', () => {
   it('offers no stock verbs on a container until a place inside it is picked', async () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
-    await screen.findByRole('button', { name: /^adjust$/i });
+    await screen.findByRole('button', { name: /^bulk adjust$/i });
     for (const verb of [/^add$/i, /^remove$/i, /^move$/i]) {
       expect(screen.queryByRole('button', { name: verb })).not.toBeInTheDocument();
     }
@@ -576,8 +588,8 @@ describe('LocationsManager — the four verbs', () => {
     await user.click(await screen.findByRole('button', { name: /^add$/i }));
     expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();
 
-    // Back returns to the overview WITHIN the drawer — one layer, never a dialog stacked on it.
-    await user.click(screen.getByRole('button', { name: /^back$/i }));
+    // The verb toggles its own section shut — one layer, and never a dialog stacked on it.
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
     expect(screen.queryByText(/add stock here/i)).not.toBeInTheDocument();
 
     // Then close, and pick the other shelf. The drawer is modal, so the grid behind it is inert

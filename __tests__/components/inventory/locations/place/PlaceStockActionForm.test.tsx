@@ -138,7 +138,7 @@ describe('PlaceStockActionForm', () => {
     setup('add');
     await pickPart(user, 'RAW-BRASS-ROD');
     await user.type(screen.getByLabelText(/quantity/i), '5');
-    await user.click(screen.getByRole('button', { name: /^add$/i }));
+    await user.click(screen.getByRole('button', { name: /^add stock$/i }));
 
     expect(addStockAtLocation).toHaveBeenCalledWith(
       'p-brass',
@@ -154,7 +154,7 @@ describe('PlaceStockActionForm', () => {
     setup('deplete');
     await pickPart(user, 'BUY-ORING-214');
     await user.type(screen.getByLabelText(/quantity/i), '2');
-    await user.click(screen.getByRole('button', { name: /^remove$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove stock$/i }));
 
     expect(depleteStockAtLocation).toHaveBeenCalledWith(
       'p-oring',
@@ -174,7 +174,7 @@ describe('PlaceStockActionForm', () => {
 
     await user.click(screen.getByRole('combobox', { name: /move to/i }));
     await user.click(await screen.findByRole('option', { name: /Bin 6/ }));
-    await user.click(screen.getByRole('button', { name: /^move$/i }));
+    await user.click(screen.getByRole('button', { name: /^move stock$/i }));
 
     expect(transferStock).toHaveBeenCalledWith(
       'p-steel',
@@ -191,7 +191,7 @@ describe('PlaceStockActionForm', () => {
     setup('move');
     await pickPart(user, 'RAW-STEEL-BLANK');
     await user.type(screen.getByLabelText(/quantity/i), '3');
-    await user.click(screen.getByRole('button', { name: /^move$/i }));
+    await user.click(screen.getByRole('button', { name: /^move stock$/i }));
 
     expect(await screen.findByText(/choose where it is going/i)).toBeInTheDocument();
     expect(transferStock).not.toHaveBeenCalled();
@@ -202,7 +202,7 @@ describe('PlaceStockActionForm', () => {
     setup('add');
     await pickPart(user, 'RAW-BRASS-ROD');
     await user.type(screen.getByLabelText(/quantity/i), '0');
-    await user.click(screen.getByRole('button', { name: /^add$/i }));
+    await user.click(screen.getByRole('button', { name: /^add stock$/i }));
 
     expect(await screen.findByText(/quantity must be positive/i)).toBeInTheDocument();
     expect(addStockAtLocation).not.toHaveBeenCalled();
@@ -218,7 +218,7 @@ describe('PlaceStockActionForm', () => {
 
     expect(await screen.findByText(/nothing is recorded at Bin 5 yet/i)).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: /part/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^remove$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^remove stock$/i })).toBeDisabled();
   });
 
   /** A bin holding one thing is not a choice — pre-select it so it is quantity-and-go. */
@@ -263,9 +263,13 @@ describe('PlaceStockActionForm', () => {
     expect(await screen.findByText(/showing the 1 largest of 240 parts here/i)).toBeInTheDocument();
   });
 
-  /** The drawer's header names the place; the form no longer repeats it in its own body. */
-  it('names the place it is acting on', async () => {
+  /**
+   * The drawer's header names the place, so the section only names the VERB. It sits under the
+   * button that opened it, with the bin's contents still on screen above — repeating "at Bin 5"
+   * inside it would restate what two other elements already say.
+   */
+  it('says which verb it is', async () => {
     setup('add');
-    expect(await screen.findByText('Bin 5')).toBeInTheDocument();
+    expect(await screen.findByText(/add stock here/i)).toBeInTheDocument();
   });
 });

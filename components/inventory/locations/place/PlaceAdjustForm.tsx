@@ -59,7 +59,6 @@ import { useLoad } from '@/hooks/useLoad';
 import { commitCount } from '@/utils/inventoryCountAccess';
 import type { CountVariance } from '@/types/inventoryCount';
 import type { LocationContent } from '@/types/inventoryLocations';
-import PlaceViewHeader from './PlaceViewHeader';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
@@ -174,10 +173,18 @@ export default function PlaceAdjustForm({
   };
 
   return (
-    <Box>
-      <PlaceViewHeader title="Adjust" subtitle={locationName} onBack={onCancel} />
-      <Box sx={{ px: 2, pb: 2 }}>
-        <Stack spacing={2} sx={{ mt: 1 }}>
+    <Box
+      sx={{
+        mt: 1.5,
+        p: 1.5,
+        borderRadius: 1,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'action.hover',
+      }}
+    >
+      <Box>
+        <Stack spacing={2}>
           <Typography variant="body2" color="text.secondary">
             Type what you actually counted. Anything you leave blank is left alone.
           </Typography>

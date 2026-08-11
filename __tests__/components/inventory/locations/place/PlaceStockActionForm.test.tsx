@@ -237,8 +237,15 @@ describe('PlaceStockActionForm', () => {
     });
     setup('deplete');
 
-    const field = await screen.findByRole('combobox', { name: /part/i });
-    expect(field).toHaveValue('RAW-STEEL-BLANK — 12 ea');
+    /*
+     * Wait for the VALUE, not for the field.
+     *
+     * `findByRole` resolves the moment the combobox exists, which is the first render — before
+     * `useLoad` has resolved the bin's contents, and therefore before there is one part to
+     * pre-select. The assertion then raced the fetch: it usually won locally and lost on a loaded
+     * CI runner, which is how a green PR turned main red and blocked the production deploy.
+     */
+    expect(await screen.findByDisplayValue('RAW-STEEL-BLANK — 12 ea')).toBeInTheDocument();
   });
 
   /**

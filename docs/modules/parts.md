@@ -198,9 +198,14 @@ price* — nothing covers for a missing tier. An agreement test holds the two vi
 
 **One control, per part, over purchased materials.** The Materials panel carries a single toggle —
 *Charge the N purchased materials at: Our cost | Their marked-up price* — and it shows state rather
-than offering two actions, because which way a part is set is what you come there to check. A new
-purchased material follows whatever the part is already set to. How much each one marks up still
-comes from its own Pricing card.
+than offering two actions, because which way a part is set is what you come there to check. How much
+each one marks up still comes from its own Pricing card.
+
+**And a shop-wide default behind it**, `companies.default_material_charge_basis`, so a shop that
+always marks up purchased material says so once instead of on every new part. Precedence for a newly
+added line is named in [`chargeBasisForNewLine`](../../types/bom.ts): a made child is always our cost
+→ otherwise the part's own existing stance → otherwise the shop default. Like the starting markups,
+it is a **seed read at line-creation time**, never by the rollup, so changing it reprices nothing.
 
 ⚠ *There was briefly a per-row **Charge at** select in the material editor as well. It was removed:
 a shop that marks up purchased material marks up all of it, so a fourth control on every line bought

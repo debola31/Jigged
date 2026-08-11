@@ -41,6 +41,8 @@ import {
 } from '@/utils/partsAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
+import { chargeBasisForNewLine } from '@/types/bom';
 import type { BomLineFormData, BomLineWithChildPart, ChargeBasis } from '@/types/bom';
 import MaterialRowEditor, {
   type MaterialEditorValue,
@@ -177,6 +179,23 @@ export default function PartBomPanel({
   const [deleting, setDeleting] = useState(false);
 
   const [bulkSaving, setBulkSaving] = useState(false);
+  // The shop's default for a NEW purchased material. Only consulted when this
+  // part has no purchased materials yet to take a stance from.
+  const [shopBasis, setShopBasis] = useState<ChargeBasis>('cost');
+
+  useEffect(() => {
+    let cancelled = false;
+    getCompany(companyId)
+      .then((c) => {
+        if (!cancelled) setShopBasis(readCompanyPricingDefaults(c).materialChargeBasis);
+      })
+      .catch(() => {
+        // Fall back to 'cost', which is what the column defaults to anyway.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   const {
     data: rowsData,
@@ -331,17 +350,12 @@ export default function PartBomPanel({
   const handleEditorSave = async (value: MaterialEditorValue) => {
     if (!value.childPart) return;
 
-    // A new purchased material follows however this part is already set, so
-    // adding one more doesn't silently drop the panel into "mixed". An edit
-    // keeps whatever the line had. Made children stay at cost: marking up
-    // in-house work is a decision for that part's own Pricing card.
+    // An EDIT keeps whatever the line had; only an ADD resolves a basis. The
+    // precedence rule itself is named in types/bom.ts.
     const isAdd = editorState.mode === 'add';
-    const chargeBasis: ChargeBasis =
-      isAdd && value.childPart.source === 'bought'
-        ? (purchasedBasis ?? 'cost')
-        : isAdd
-          ? 'cost'
-          : value.charge_basis;
+    const chargeBasis: ChargeBasis = isAdd
+      ? chargeBasisForNewLine(value.childPart.source, purchasedBasis, shopBasis)
+      : value.charge_basis;
 
     const formData: BomLineFormData = {
       child_part_id: value.childPart.id,

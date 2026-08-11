@@ -52,7 +52,7 @@ vi.mock('@/utils/routingCostCalculation', () => ({
 }));
 vi.mock('@/utils/companyAccess', () => ({
   getCompany: (...a: unknown[]) => mockGetCompany(...a),
-  readCompanyStarterMarkups: (c: {
+  readCompanyPricingDefaults: (c: {
     default_markup_made_percent?: number;
     default_markup_bought_percent?: number;
   } | null) => ({

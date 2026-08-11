@@ -39,6 +39,30 @@ export interface BomLine {
 /** What a BOM line contributes to its parent's rollup. */
 export type ChargeBasis = 'cost' | 'price';
 
+/**
+ * What a NEWLY ADDED BOM line is charged at (#727), in precedence order:
+ *
+ *   1. A made child is always our cost. Marking up in-house work is a
+ *      transfer-pricing decision that belongs on that part's own Pricing card,
+ *      not something a material picker should do silently.
+ *   2. Otherwise, however this part's OTHER purchased materials are already set.
+ *      A part with a stance keeps it, so adding one more material can never drop
+ *      the panel into "mixed".
+ *   3. Otherwise the shop's default, so a shop that always marks up purchased
+ *      material says so once instead of on every part.
+ *
+ * `partStance` is null when the part has no purchased materials yet, or when its
+ * existing ones disagree — in both cases there is no stance to inherit.
+ */
+export function chargeBasisForNewLine(
+  childSource: 'made' | 'bought',
+  partStance: ChargeBasis | null,
+  shopDefault: ChargeBasis,
+): ChargeBasis {
+  if (childSource !== 'bought') return 'cost';
+  return partStance ?? shopDefault;
+}
+
 export const CHARGE_BASIS_LABELS: Record<ChargeBasis, string> = {
   cost: 'Our cost',
   price: 'Marked-up price',

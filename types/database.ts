@@ -175,6 +175,7 @@ export type Database = {
           created_at: string | null
           default_markup_bought_percent: number
           default_markup_made_percent: number
+          default_material_charge_basis: string
           demo_company_id: string | null
           email: string | null
           id: string
@@ -197,6 +198,7 @@ export type Database = {
           created_at?: string | null
           default_markup_bought_percent?: number
           default_markup_made_percent?: number
+          default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -219,6 +221,7 @@ export type Database = {
           created_at?: string | null
           default_markup_bought_percent?: number
           default_markup_made_percent?: number
+          default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
           id?: string

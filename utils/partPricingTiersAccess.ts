@@ -12,7 +12,7 @@ import {
   addPartPricingNote,
 } from '@/utils/partsAccess';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
-import { getCompany, readCompanyStarterMarkups } from '@/utils/companyAccess';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { resolveMarkupAtQty, unitPriceFromBase } from '@/utils/quotePricingResolver';
 
@@ -281,7 +281,7 @@ export async function ensureStarterPricingTier(
   // No company row, no starting markup to apply — writing 0 would be inventing a
   // number the shop never chose.
   if (!company) return false;
-  const starters = readCompanyStarterMarkups(company);
+  const starters = readCompanyPricingDefaults(company);
   const markup = source === 'bought' ? starters.bought : starters.made;
 
   await replaceTiersForPart(companyId, partId, [

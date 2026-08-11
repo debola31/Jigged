@@ -31,7 +31,7 @@ import {
   updatePartCostingBatchQuantity,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
-import { getCompany, readCompanyStarterMarkups } from '@/utils/companyAccess';
+import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
@@ -278,7 +278,7 @@ export default function PartPricing({
     getCompany(companyId)
       .then((c) => {
         if (cancelled) return;
-        const starters = readCompanyStarterMarkups(c);
+        const starters = readCompanyPricingDefaults(c);
         setStarterMarkup(isBought ? starters.bought : starters.made);
       })
       .catch(() => {

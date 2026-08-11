@@ -12,11 +12,14 @@ import InputAdornment from '@mui/material/InputAdornment';
 import SaveIcon from '@mui/icons-material/Save';
 import Autocomplete from '@mui/material/Autocomplete';
 import posthog from 'posthog-js';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import type { ChargeBasis } from '@/types/bom';
 import {
   getCompany,
   getCustomPaymentTerms,
-  readCompanyStarterMarkups,
-  setCompanyStarterMarkups,
+  readCompanyPricingDefaults,
+  setCompanyPricingDefaults,
   setCompanyDefaultPaymentTerms,
   updateCompanyDefaults,
 } from '@/utils/companyAccess';
@@ -78,7 +81,12 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
   // NOT NULL — 0 is a real value, not "unset".
   const [madeMarkup, setMadeMarkup] = useState('0');
   const [boughtMarkup, setBoughtMarkup] = useState('0');
-  const [markupBaseline, setMarkupBaseline] = useState({ made: '0', bought: '0' });
+  const [materialBasis, setMaterialBasis] = useState<ChargeBasis>('cost');
+  const [pricingBaseline, setPricingBaseline] = useState({
+    made: '0',
+    bought: '0',
+    basis: 'cost' as ChargeBasis,
+  });
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -96,10 +104,15 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
         if (cancelled) return;
         setForm(toFormState(readCompanyDefaults(company)));
         setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
-        const starters = readCompanyStarterMarkups(company);
-        setMadeMarkup(String(starters.made));
-        setBoughtMarkup(String(starters.bought));
-        setMarkupBaseline({ made: String(starters.made), bought: String(starters.bought) });
+        const defaults = readCompanyPricingDefaults(company);
+        setMadeMarkup(String(defaults.made));
+        setBoughtMarkup(String(defaults.bought));
+        setMaterialBasis(defaults.materialChargeBasis);
+        setPricingBaseline({
+          made: String(defaults.made),
+          bought: String(defaults.bought),
+          basis: defaults.materialChargeBasis,
+        });
         setSavedTerms(customTerms);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
@@ -162,18 +175,25 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       // read-modify-write to serialize against.
       const nextMade = madeMarkup.trim();
       const nextBought = boughtMarkup.trim();
-      if (nextMade !== markupBaseline.made || nextBought !== markupBaseline.bought) {
-        await setCompanyStarterMarkups(companyId, {
+      if (
+        nextMade !== pricingBaseline.made ||
+        nextBought !== pricingBaseline.bought ||
+        materialBasis !== pricingBaseline.basis
+      ) {
+        await setCompanyPricingDefaults(companyId, {
           made: Number(nextMade),
           bought: Number(nextBought),
+          materialChargeBasis: materialBasis,
         });
-        posthog.capture('starter markups set', {
-          made_changed: nextMade !== markupBaseline.made,
-          bought_changed: nextBought !== markupBaseline.bought,
+        posthog.capture('pricing defaults set', {
+          made_changed: nextMade !== pricingBaseline.made,
+          bought_changed: nextBought !== pricingBaseline.bought,
+          material_basis_changed: materialBasis !== pricingBaseline.basis,
           made_is_zero: Number(nextMade) === 0,
           bought_is_zero: Number(nextBought) === 0,
+          material_basis: materialBasis,
         });
-        setMarkupBaseline({ made: nextMade, bought: nextBought });
+        setPricingBaseline({ made: nextMade, bought: nextBought, basis: materialBasis });
       }
       setSuccess(true);
     } catch (err) {
@@ -289,13 +309,11 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
 
           <Divider sx={{ my: 2 }} />
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Starting markup on a new part
+            Part pricing markups
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-            When a part first has a cost, its Pricing card creates a tier for it at this
-            markup, so the part can be quoted straight away. It is a starting point, not a
-            rule: each part&apos;s Pricing card owns its price from then on, and changing
-            these never reprices a part you have already set up. Use 0 to start at cost.
+            What a new part starts at. Changing these never reprices a part you have
+            already set up.
           </Typography>
 
           {(
@@ -303,7 +321,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               {
                 key: 'made' as const,
                 label: 'Parts you make',
-                help: 'Applied to a made part’s first tier.',
                 value: madeMarkup,
                 setValue: setMadeMarkup,
                 error: madeMarkupError,
@@ -311,7 +328,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               {
                 key: 'bought' as const,
                 label: 'Parts you buy',
-                help: 'Applied to a bought part’s first tier — including a purchased material a BOM line charges at its marked-up price.',
                 value: boughtMarkup,
                 setValue: setBoughtMarkup,
                 error: boughtMarkupError,
@@ -332,9 +348,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
                 <Typography variant="body2" sx={{ fontWeight: 500 }}>
                   {f.label}
-                </Typography>
-                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                  {f.help}
                 </Typography>
               </Box>
               <TextField
@@ -360,6 +373,47 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               />
             </Box>
           ))}
+
+          {/* The third default is a CHOICE, not a percentage, so it gets the same
+              two-option control the Materials panel uses — and the same two
+              words. A setting that renames the thing it defaults is a setting
+              nobody connects to the screen it governs. */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              flexWrap: 'wrap',
+              mb: 1.5,
+            }}
+          >
+            <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                Materials
+              </Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                What a new part charges for the purchased materials it consumes. Change it
+                per part any time.
+              </Typography>
+            </Box>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={materialBasis}
+              onChange={(_, next: ChargeBasis | null) => {
+                // Null is the click that would deselect the active option; there
+                // is no third state.
+                if (!next) return;
+                setMaterialBasis(next);
+                setSuccess(false);
+              }}
+              aria-label="Materials charge basis"
+            >
+              <ToggleButton value="cost">Our cost</ToggleButton>
+              <ToggleButton value="price">Their marked-up price</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
             <Button

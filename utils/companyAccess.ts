@@ -1,6 +1,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import type { ChargeBasis } from '@/types/bom';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
 import {
@@ -37,10 +38,15 @@ export interface Company {
    * changing either never reprices a part that already has tiers.
    *
    * Both default to 0 — price = cost — which is what every company had before
-   * the setting existed. See `setCompanyStarterMarkups`.
+   * the setting existed. See `setCompanyPricingDefaults`.
    */
   default_markup_made_percent?: number;
   default_markup_bought_percent?: number;
+  /**
+   * What a NEW purchased-material BOM line is created with. A seed, like the
+   * two markups above: read when the line is written, never by the rollup.
+   */
+  default_material_charge_basis?: ChargeBasis;
 }
 
 /**
@@ -344,7 +350,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_markup_made_percent, default_markup_bought_percent'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_markup_made_percent, default_markup_bought_percent, default_material_charge_basis'
     )
     .eq('id', companyId)
     .single();
@@ -610,8 +616,9 @@ export async function setCompanyDefaultPaymentTerms(
 }
 
 /**
- * The two shop-wide starter markups: what a MADE part and a BOUGHT part get on
- * their first pricing tier when that tier is created for them (#727).
+ * The shop-wide pricing defaults (#727): the markup a new MADE part and a new
+ * BOUGHT part get on their first pricing tier, and whether a new purchased
+ * material is charged into its parent at our cost or at its own price.
  *
  * **These are seed values, not a pricing rule.** They are read at exactly one
  * moment — when a part with a cost has no tiers yet — and written into that
@@ -631,46 +638,61 @@ export async function setCompanyDefaultPaymentTerms(
  * registry's `coerceInt` rounds to a whole number, and a markup is
  * numeric(10,6): a shop selling at 22.5% must not be seeded at 23%.
  */
-export interface CompanyStarterMarkups {
+export interface CompanyPricingDefaults {
+  /** Markup a new MADE part's first pricing tier is created with. */
   made: number;
+  /** The same, for a new BOUGHT part. */
   bought: number;
+  /** What a new purchased-material BOM line is created with. */
+  materialChargeBasis: ChargeBasis;
 }
 
-export function readCompanyStarterMarkups(
-  company: Pick<Company, 'default_markup_made_percent' | 'default_markup_bought_percent'> | null | undefined,
-): CompanyStarterMarkups {
+export function readCompanyPricingDefaults(
+  company:
+    | Pick<
+        Company,
+        | 'default_markup_made_percent'
+        | 'default_markup_bought_percent'
+        | 'default_material_charge_basis'
+      >
+    | null
+    | undefined,
+): CompanyPricingDefaults {
   return {
     made: company?.default_markup_made_percent ?? 0,
     bought: company?.default_markup_bought_percent ?? 0,
+    materialChargeBasis: company?.default_material_charge_basis ?? 'cost',
   };
 }
 
-export async function setCompanyStarterMarkups(
+export async function setCompanyPricingDefaults(
   companyId: string,
-  markups: CompanyStarterMarkups,
-): Promise<CompanyStarterMarkups> {
-  for (const [label, value] of Object.entries(markups)) {
+  defaults: CompanyPricingDefaults,
+): Promise<CompanyPricingDefaults> {
+  for (const key of ['made', 'bought'] as const) {
+    const value = defaults[key];
     if (!Number.isFinite(value) || value < 0) {
-      throw new Error(`The ${label}-part starter markup must be zero or greater.`);
+      throw new Error(`The ${key}-part starting markup must be zero or greater.`);
     }
   }
   const supabase = getSupabase();
   const { error } = await supabase
     .from('companies')
     .update({
-      default_markup_made_percent: markups.made,
-      default_markup_bought_percent: markups.bought,
+      default_markup_made_percent: defaults.made,
+      default_markup_bought_percent: defaults.bought,
+      default_material_charge_basis: defaults.materialChargeBasis,
       updated_at: new Date().toISOString(),
     })
     .eq('id', companyId);
   if (error) {
-    console.error('Error updating starter markups:', error);
+    console.error('Error updating pricing defaults:', error);
     throw toFriendlyError(error, {
-      entity: 'starter markup',
-      fallback: 'Failed to save the default markups.',
+      entity: 'pricing default',
+      fallback: 'Failed to save the pricing defaults.',
     });
   }
-  return markups;
+  return defaults;
 }
 
 /**

@@ -61,8 +61,16 @@ const setup = (unit: InventoryLocationNode | null = CABINET) =>
     <UnitAdjustDrawer unit={unit} companyId="co1" onClose={onClose} onChanged={vi.fn()} />,
   );
 
+/**
+ * Wait for the ROW, not for the drawer.
+ *
+ * The header renders on the first frame; the rows arrive when `loadCountCandidatesForPlaces`
+ * resolves. Waiting on the heading and then querying synchronously raced that read — it won
+ * locally and lost on a loaded CI runner, which is precisely the flake that once turned main red
+ * and blocked a production deploy.
+ */
 const countedFor = (part: string, place: string) =>
-  screen.getByLabelText(`Counted ${part} at ${place}`);
+  screen.findByLabelText(`Counted ${part} at ${place}`);
 
 /**
  * Re-established every test, not merely cleared.
@@ -113,7 +121,7 @@ describe('UnitAdjustDrawer', () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });
 
-    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '550');
+    await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '550');
     await user.click(screen.getByRole('button', { name: /save 1 count/i }));
 
     const [variances] = vi.mocked(commitCount).mock.calls[0];
@@ -145,7 +153,7 @@ describe('UnitAdjustDrawer', () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });
 
-    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '550');
+    await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '550');
     await user.type(screen.getByPlaceholderText(/filter by part or place/i), 'WIDGET-3');
 
     // Narrowed…
@@ -153,7 +161,7 @@ describe('UnitAdjustDrawer', () => {
     expect(screen.queryByText('BUY-WIDGET-5')).not.toBeInTheDocument();
     // …but never past the thing that is about to be saved.
     expect(screen.getByText('BUY-ORING-214')).toBeInTheDocument();
-    expect(countedFor('BUY-ORING-214', 'Shelf B')).toHaveValue(550);
+    expect(await countedFor('BUY-ORING-214', 'Shelf B')).toHaveValue(550);
     expect(screen.getByRole('button', { name: /save 1 count/i })).toBeEnabled();
     expect(screen.getByText(/including 1 you have counted/i)).toBeInTheDocument();
   });
@@ -177,7 +185,7 @@ describe('UnitAdjustDrawer', () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });
 
-    await user.type(countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580');
+    await user.type(await countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580');
     await user.click(screen.getByRole('button', { name: /save 1 count/i }));
 
     expect(commitCount).not.toHaveBeenCalled();
@@ -189,8 +197,8 @@ describe('UnitAdjustDrawer', () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });
 
-    await user.type(countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580'); // unchanged
-    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '550'); // −2
+    await user.type(await countedFor('BUY-BEARING-608ZZ', 'Shelf A'), '580'); // unchanged
+    await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '550'); // −2
     await user.click(screen.getByRole('button', { name: /save 2 counts/i }));
 
     const [variances] = vi.mocked(commitCount).mock.calls[0];
@@ -219,8 +227,8 @@ describe('UnitAdjustDrawer', () => {
       total: 3,
     });
 
-    await user.type(countedFor('BUY-ORING-214', 'Shelf A'), '828');
-    await user.type(countedFor('BUY-ORING-214', 'Shelf B'), '552');
+    await user.type(await countedFor('BUY-ORING-214', 'Shelf A'), '828');
+    await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '552');
     await user.click(screen.getByRole('button', { name: /save 2 counts/i }));
 
     expect(await screen.findByText(/stock moved between these places/i)).toBeInTheDocument();

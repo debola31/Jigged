@@ -22,6 +22,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 
 import { getAllJobs } from '@/utils/jobsAccess';
+import { getSupabase } from '@/lib/supabase';
 import type { JobWithRelations, ProductionStatus } from '@/types/job';
 
 /** Jobs that could still be consuming material. */
@@ -40,12 +41,80 @@ export const jobPartsLabel = (j: JobWithRelations): string =>
  * Takes just the rows off the page envelope: this never searches, so nothing
  * is capped and there is no truncation for the caller to report.
  */
+/**
+ * The active jobs, most recently touched first.
+ *
+ * `updated_at` rather than `created_at`: you are tagging material to whatever is moving through the
+ * shop right now, and the job you touched an hour ago is far likelier than one opened in March.
+ */
 export async function loadTaggableJobs(companyId: string): Promise<JobWithRelations[]> {
   try {
-    return (await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES })).jobs;
+    return (
+      await getAllJobs(companyId, { productionStatus: ACTIVE_STATUSES }, 'updated_at', 'desc')
+    ).jobs;
   } catch {
     return [];
   }
+}
+
+/**
+ * The active jobs that this part could plausibly have gone to.
+ *
+ * ## What "could" means, and why it stops at one level
+ *
+ * A job is expected to consume a part when the part is either **what the job makes**
+ * (`job_parts.part_id`) or a **direct child in the bill of materials** of something the job makes
+ * (`parts_bom.child_part_id`).
+ *
+ * One level, matching the decision the material check already records: *"A pump job reads 'needs 1
+ * pump core', not the aluminium inside it."* Going deeper here would disagree with what the rest of
+ * the product calls a job's materials, and two definitions of "what this job needs" is worse than
+ * one that is narrow and stated.
+ *
+ * Material genuinely consumed outside this set is a real thing — a substitution at the machine, a
+ * BOM nobody built, a level further down. That is not this function's problem to solve: it returns
+ * what the data expects, and the caller ranks rather than restricts.
+ *
+ * ## It THROWS rather than returning nothing
+ *
+ * An empty array means "no job lists this part", which is a claim. A dropped query is not that
+ * claim, and swallowing one into `[]` made the picker say *"No active job uses this part"* about a
+ * network failure — **"couldn't check" rendered as "denied"**, which CLAUDE.md names as its own
+ * rule. The caller catches and falls back to the unranked list.
+ */
+export async function loadJobsForPart(
+  companyId: string,
+  partId: string,
+): Promise<JobWithRelations[]> {
+  const supabase = getSupabase();
+
+  // The parts whose BOM names this one as a child — i.e. things that consume it directly.
+  const { data: parents, error: bomError } = await supabase
+    .from('parts_bom')
+    .select('parent_part_id')
+    .eq('child_part_id', partId);
+  if (bomError) throw bomError;
+
+  const consumingPartIds = Array.from(
+    new Set([partId, ...(parents ?? []).map((r) => r.parent_part_id)]),
+  );
+
+  const { data: jobParts, error: jpError } = await supabase
+    .from('job_parts')
+    .select('job_id')
+    .eq('company_id', companyId)
+    .in('part_id', consumingPartIds);
+  if (jpError) throw jpError;
+
+  const jobIds = Array.from(new Set((jobParts ?? []).map((r) => r.job_id)));
+  if (jobIds.length === 0) return [];
+
+  // Filtered in memory rather than by another `in()`: the active-job set is small, this reuses
+  // the one loader that knows how to build a `JobWithRelations`, and it keeps the ordering rule
+  // in exactly one place.
+  const all = await loadTaggableJobs(companyId);
+  const wanted = new Set(jobIds);
+  return all.filter((j) => wanted.has(j.id));
 }
 
 interface JobTagPickerProps {
@@ -54,6 +123,26 @@ interface JobTagPickerProps {
   value: JobWithRelations | null;
   onChange: (job: JobWithRelations | null) => void;
   label?: string;
+  /** Why this list is the length it is — said, so a short list does not read as a broken one. */
+  helperText?: string;
+  /**
+   * The jobs the data expects to consume this material, listed FIRST under their own heading.
+   *
+   * ## Rank, do not restrict
+   *
+   * Material genuinely goes to jobs the data does not predict: a substitution at the machine, a BOM
+   * nobody built, a level further down than the one this product calls a job's materials. Hiding
+   * those jobs would make the honest answer unrecordable, and the count sheet's own lesson is that
+   * *the discovery the software refuses to record is the one worth the most*.
+   *
+   * So there is no escape hatch to find. The way past the filter is on screen from the first tap —
+   * it is the second group, and its heading is its name. The common case pays **nothing**: the
+   * expected jobs are at the top, where the thumb already is.
+   *
+   * Empty or omitted and the list renders flat with no headings at all, so an unbuilt BOM never
+   * produces an empty section for someone to interpret.
+   */
+  expectedIds?: string[];
 }
 
 export default function JobTagPicker({
@@ -61,11 +150,24 @@ export default function JobTagPicker({
   loading,
   value,
   onChange,
+  helperText,
+  expectedIds,
   label = 'Tag to a job (optional)',
 }: JobTagPickerProps) {
+  const expected = new Set(expectedIds ?? []);
+  /*
+   * Grouped only when there is something in both groups. MUI renders a group header per contiguous
+   * run, so the options must be ordered by group — expected first, the rest after, each already in
+   * most-recently-updated order.
+   */
+  const grouped = expected.size > 0 && jobs.some((j) => !expected.has(j.id));
+  const ordered = grouped
+    ? [...jobs.filter((j) => expected.has(j.id)), ...jobs.filter((j) => !expected.has(j.id))]
+    : jobs;
+
   return (
     <Autocomplete
-      options={jobs}
+      options={ordered}
       loading={loading}
       value={value}
       onChange={(_, v) => onChange(v)}
@@ -86,8 +188,18 @@ export default function JobTagPicker({
           </Box>
         );
       }}
-      renderInput={(params) => <TextField {...params} label={label} />}
-      noOptionsText="No active jobs"
+      groupBy={
+        grouped
+          ? (j) => (expected.has(j.id) ? 'Jobs that use this part' : 'All other active jobs')
+          : undefined
+      }
+      renderInput={(params) => (
+        <TextField {...params} label={label} helperText={helperText} />
+      )}
+      /* Every active job is reachable, so "none" can only mean the TYPED filter matched nothing.
+         The earlier wording — "No active job uses this part" — was a claim the list no longer
+         makes, and it was also what a failed lookup used to say. */
+      noOptionsText="No matching active jobs"
       loadingText="Loading jobs…"
     />
   );

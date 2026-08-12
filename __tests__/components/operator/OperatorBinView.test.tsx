@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
 import OperatorBinViewPage from '@/app/operator/[companyId]/inventory/locations/[locationId]/page';
 import {
+  getLocationContents,
   resolveScan,
   depleteStockAtLocation,
   getLocations,
@@ -34,6 +35,9 @@ vi.mock('@/utils/inventoryLocationsAccess', async () => ({
   )).buildLocationTree,
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
+  // The shared forms read the bin themselves rather than being handed its contents — the one
+  // about to WRITE is the one that must be current. Defaults to empty; tests that act set it.
+  getLocationContents: vi.fn(async () => ({ contents: [], total: 0 })),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
 }));
@@ -144,17 +148,25 @@ describe('OperatorBinViewPage', () => {
     expect(screen.getByText(/stock goes in the sub-locations above/i)).toBeInTheDocument();
   });
 
-  it('still offers Stock a part on a bin with no sub-locations', async () => {
+  it('still offers a way to put stock in, on a bin with no sub-locations', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(scanWith([], []));
     renderPage();
 
-    expect(await screen.findByRole('button', { name: /stock a part/i })).toBeInTheDocument();
+    // `Stock a part` and its dialog are gone: the shop floor now uses the same four verbs and the
+    // same forms as the office, so putting a delivery away is one form rather than six dialogs.
+    expect(await screen.findByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    for (const verb of [/^remove$/i, /^move$/i, /^adjust$/i]) {
+      expect(screen.getByRole('button', { name: verb })).toBeInTheDocument();
+    }
   });
 
   it('shows an empty state when nothing is stored here', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(scanWith([], []));
     renderPage();
-    expect(await screen.findByText('Nothing stored here yet.')).toBeInTheDocument();
+    expect(await screen.findByText(/no parts recorded here/i)).toBeInTheDocument();
+    // Nothing to take out of an empty bin, but you can always put something in.
+    expect(screen.getByRole('button', { name: /^remove$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^add$/i })).toBeEnabled();
   });
 
   it('Remove depletes gracefully and stamps the operator', async () => {
@@ -162,13 +174,19 @@ describe('OperatorBinViewPage', () => {
       scanWith([], [{ part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12 }]),
     );
     (depleteStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ location_balance: 7, part_quantity: 7 });
+    (getLocationContents as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contents: [
+        { part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12, location_id: 'loc1' },
+      ],
+      total: 1,
+    });
     renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: /^remove$/i }));
 
-    const dialog = await screen.findByRole('dialog');
-    await userEvent.type(within(dialog).getByLabelText(/quantity/i), '5');
-    await userEvent.click(within(dialog).getByRole('button', { name: /^remove$/i }));
+    // The shared form, expanded in place — no dialog, and the rows are the bin's contents.
+    await userEvent.type(await screen.findByLabelText(/quantity for Steel Rod/i), '5');
+    await userEvent.click(screen.getByRole('button', { name: /^remove stock$/i }));
 
     await waitFor(() =>
       expect(depleteStockAtLocation).toHaveBeenCalledWith(
@@ -176,7 +194,9 @@ describe('OperatorBinViewPage', () => {
         'loc1',
         5,
         'ea',
-        expect.objectContaining({ graceful: true, operatorId: 'op1' }),
+        // GRACEFUL SURVIVES THE REWRITE. The material is already off the shelf, so a stale count
+        // must not refuse the write; the RPC floors at zero and records the shortfall in the note.
+        expect.objectContaining({ graceful: true }),
       ),
     );
   });

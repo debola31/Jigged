@@ -106,7 +106,7 @@ import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 
 import ErrorAlert from '@/components/common/ErrorAlert';
-import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import JobTagPicker, { loadJobsForPart, loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -177,6 +177,20 @@ export interface PlaceStockActionFormProps {
    * disarm-what-landed rule.
    */
   restrictTo?: { partId: string; partName: string; primaryUnit: string | null };
+  /**
+   * Let a removal exceed what the system thinks is there, instead of refusing it.
+   *
+   * **True on the shop floor, false in the office**, which is a decision this product already made
+   * and this form has to carry rather than flatten. `deplete_stock_at_location` floors the balance
+   * at zero and appends `[DISCREPANCY: Confirmed 12 ea, but only 7 ea was available…]` to the
+   * ledger row — so the material that physically left is recorded, and the fact that the count was
+   * wrong is recorded with it.
+   *
+   * A machinist holding the part has already taken it; refusing the write would be refusing to
+   * record reality, and would teach him the software is an obstacle. An owner at a desk correcting
+   * numbers is better served by the error, because they can go and look.
+   */
+  graceful?: boolean;
   /** Back to the place overview. The drawer stays open. */
   onCancel: () => void;
   onDone: () => void | Promise<void>;
@@ -189,6 +203,7 @@ export default function PlaceStockActionForm({
   locationName,
   moveDestinations,
   restrictTo,
+  graceful = false,
   onCancel,
   onDone,
 }: PlaceStockActionFormProps) {
@@ -256,10 +271,6 @@ export default function PlaceStockActionForm({
   const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
   const operatorId = member?.id ?? null;
 
-  const { data: jobs, loading: loadingJobs } = useLoad(
-    () => (action === 'deplete' ? loadTaggableJobs(companyId).catch(() => []) : Promise.resolve([])),
-    [action, companyId],
-  );
 
   /** Everything that could be picked for an `add`, minus what is already a row. */
   const addable = useMemo(() => {
@@ -337,6 +348,47 @@ export default function PlaceStockActionForm({
     setUnitFor((u) => ({ ...u, [row.partId]: row.primaryUnit }));
   };
 
+  /*
+   * EVERY ACTIVE JOB, WITH THE PLAUSIBLE ONES FIRST.
+   *
+   * Rank rather than restrict. Material genuinely goes to jobs the data does not predict — a
+   * substitution at the machine, a BOM nobody built, a level below the one this product calls a
+   * job's materials — and hiding those would make the honest answer unrecordable. The expected
+   * jobs sit at the top under their own heading, so the ordinary removal gets faster and the
+   * unusual one stays possible, at a cost of nothing.
+   *
+   * Keyed by the SET of parts, not the quantities: typing `1` → `12` → `120` re-queries nothing,
+   * adding a second part to the batch does. The tag is one per batch, so expectation is the UNION
+   * across the filled rows — issuing a shaft and an o-ring to one job, a job consuming either is a
+   * plausible answer, where an intersection would be stricter and mostly empty.
+   */
+  const partKey = useMemo(
+    () => lines.map((l) => l.row.partId).sort().join(','),
+    [lines],
+  );
+
+  const { data: jobData, loading: loadingJobs } = useLoad(async () => {
+    if (action !== 'deplete') return { all: [] as JobWithRelations[], expectedIds: [], failed: false };
+
+    const all = await loadTaggableJobs(companyId);
+    const ids = partKey ? partKey.split(',') : [];
+    if (ids.length === 0) return { all, expectedIds: [], failed: false };
+
+    try {
+      const perPart = await Promise.all(ids.map((id) => loadJobsForPart(companyId, id)));
+      return { all, expectedIds: [...new Set(perPart.flat().map((j) => j.id))], failed: false };
+    } catch {
+      /*
+       * "Couldn't check" is never "denied."
+       *
+       * A dropped lookup must not render as "no job uses this part" — that is a claim about the
+       * shop's data, not about the network. Every job stays offered, unranked, and the helper text
+       * says the ranking is missing rather than implying there was nothing to rank.
+       */
+      return { all, expectedIds: [], failed: true };
+    }
+  }, [action, companyId, partKey]);
+
   /** Filtered rows — with every line exempt, so nothing about to be written can be off screen. */
   const filled = useMemo(() => new Set(lines.map((l) => l.row.partId)), [lines]);
   const visible = useMemo(() => {
@@ -393,6 +445,7 @@ export default function PlaceStockActionForm({
           });
         } else if (action === 'deplete') {
           await depleteStockAtLocation(row.partId, locationId, value, unit, {
+            graceful,
             notes: notes || undefined,
             operatorId: operatorId || undefined,
             jobId: job?.id,
@@ -672,7 +725,22 @@ export default function PlaceStockActionForm({
 
         {/* One job for the batch: you are issuing this handful of material to one job. */}
         {action === 'deplete' && rows.length > 0 && (
-          <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
+          <JobTagPicker
+            jobs={jobData?.all ?? []}
+            expectedIds={jobData?.expectedIds}
+            loading={loadingJobs}
+            value={job}
+            onChange={setJob}
+            helperText={
+              jobData?.failed
+                ? 'Showing all active jobs.'
+                : (jobData?.expectedIds.length ?? 0) > 0
+                  ? 'Jobs that use what you are removing are first. You can pick any active job.'
+                  : lines.length > 0
+                    ? 'No job lists these parts yet. You can still pick any active job.'
+                    : undefined
+            }
+          />
         )}
 
         {rows.length > 0 && (

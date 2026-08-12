@@ -828,6 +828,80 @@ export async function getContentsPageForLocations(
 
 /** Resolve a scanned location id into node + ancestor path + children +
  * contents, so the bin view can render drill-down (parent) vs actions (leaf). */
+/** One place a searched-for part is sitting, with how much of it is there. */
+export interface PartPlacement {
+  partId: string;
+  partName: string;
+  primaryUnit: string | null;
+  locationId: string;
+  quantity: number;
+}
+
+/**
+ * "Where is my o-ring?" — every place a part matching this name is stocked.
+ *
+ * ## Why this exists
+ *
+ * Storage is place-first by design: you pick a cabinet, then a bin. That is the right default and
+ * it leaves one question unanswerable from the page — the one where you know the PART and not the
+ * place. The only search on the screen matched storage-unit names, so typing a part number into it
+ * returned "Nothing matches", which is a dead end wearing the clothes of an answer.
+ *
+ * ## Rows are (part, place), never (part)
+ *
+ * The same part in three bins is three rows. Rolling them into one total would answer a question
+ * nobody asked — you are not trying to learn how many you own, you are trying to learn which shelf
+ * to walk to. Ordered by quantity so the shelf holding most of it leads.
+ *
+ * Scoped by `company_id` on the stock row rather than through the part, so the filter is on the
+ * table being scanned. RLS enforces the same boundary; this keeps the query narrow as well as safe.
+ */
+export async function searchPartPlacements(
+  companyId: string,
+  query: string,
+  limit = 20,
+): Promise<PartPlacement[]> {
+  const q = query.trim();
+  // Two characters is where a match stops meaning "most of the catalogue". Below that the caller
+  // gets nothing rather than a list it would have to explain.
+  if (q.length < 2) return [];
+
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('part_location_stock')
+    .select(
+      'location_id, quantity, part:parts!part_location_stock_part_fkey!inner(id, part_name, primary_unit, deleted_at)',
+    )
+    .eq('company_id', companyId)
+    // `%` and `_` are wildcards in `ilike`; a part number containing one would otherwise match far
+    // more than it looks like it should.
+    .ilike('part.part_name', `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`)
+    .is('part.deleted_at', null)
+    .order('quantity', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('Error searching part placements:', error);
+    throw error;
+  }
+
+  type Row = {
+    location_id: string;
+    quantity: number;
+    part: { id: string; part_name: string; primary_unit: string | null } | null;
+  };
+
+  return ((data ?? []) as unknown as Row[])
+    .filter((r): r is Row & { part: NonNullable<Row['part']> } => r.part !== null)
+    .map((r) => ({
+      partId: r.part.id,
+      partName: r.part.part_name,
+      primaryUnit: r.part.primary_unit,
+      locationId: r.location_id,
+      quantity: Number(r.quantity),
+    }));
+}
+
 export async function resolveScan(locationId: string): Promise<ResolvedScan> {
   const node = await getLocation(locationId);
   if (!node) throw new Error('Location not found');

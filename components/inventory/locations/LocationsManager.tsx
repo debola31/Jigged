@@ -11,15 +11,12 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import TextField from '@mui/material/TextField';
-import InputAdornment from '@mui/material/InputAdornment';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
-import SearchIcon from '@mui/icons-material/Search';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
@@ -39,11 +36,27 @@ import LocationFormModal, { type LocationFormValues } from './LocationFormModal'
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
+import StorageSearch, { type StorageHit } from './StorageSearch';
+import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer from './place/PlaceDrawer';
 import UnitAdjustDrawer from './place/UnitAdjustDrawer';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
+
+/** The top-level unit a location belongs to — the same walk as `computePath`, keeping the root. */
+function rootOf(id: string, byId: Map<string, InventoryLocation>): string {
+  let cursor: string | null = id;
+  let root = id;
+  const guard = new Set<string>();
+  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocation = byId.get(cursor)!;
+    root = node.id;
+    cursor = node.parent_id;
+  }
+  return root;
+}
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -146,7 +159,6 @@ export default function LocationsManager({
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
   const [placeId, setPlaceId] = useState<string | null>(null);
   /** Filters the unit list. Held here because the field lives in the page header. */
-  const [query, setQuery] = useState('');
 
 
 
@@ -230,6 +242,9 @@ export default function LocationsManager({
    */
   const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
 
+  /** The part whose places are showing, if the search found one. */
+  const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
+
   /** The unit being bulk-adjusted, if any. Resolved from the tree so a rename lands in its header. */
   const [adjustUnitId, setAdjustUnitId] = useState<string | null>(null);
   const adjustUnit = adjustUnitId ? byNodeId.get(adjustUnitId) ?? null : null;
@@ -262,6 +277,38 @@ export default function LocationsManager({
       existingSiblingNames: [],
       startSortOrder: tree.reduce((max, n) => Math.max(max, n.sort_order), -1) + 1,
     });
+
+  /**
+   * A search hit.
+   *
+   * A place selects its unit. A part opens a drawer listing everywhere it is — the dropdown picks
+   * the PART, and where it lives is the answer, which belongs on a surface that stays rather than
+   * in a menu that closes.
+   */
+  const onSearchPick = (hit: StorageHit) => {
+    if (hit.kind === 'place') {
+      setPlaceId(null);
+      setDrawerPlaceId(null);
+      setSearchPart(null);
+      showUnit(hit.id);
+      return;
+    }
+    setSearchPart({ id: hit.id, name: hit.label, unit: hit.unit });
+  };
+
+  /**
+   * Walking from a part to one of its places.
+   *
+   * Selects the unit the bin belongs to and opens that bin, and closes the part drawer — two
+   * drawers stacked would bury the thing just chosen under the thing that found it.
+   */
+  const openPlaceFromPart = (locationId: string) => {
+    const unitId = rootOf(locationId, byId);
+    setSearchPart(null);
+    setPlaceId(locationId);
+    setDrawerPlaceId(locationId);
+    showUnit(unitId);
+  };
 
   const openUnit_ = (node: InventoryLocationNode) => {
     // Clearing the place matters: keeping it would carry a bin from the last cabinet into this
@@ -428,14 +475,19 @@ export default function LocationsManager({
   return (
     <Box>
       {/*
-        One header row, and the order is by scope: the two controls that act on the LIST sit above
-        the list's own column, and the two that act on the WHOLE SHOP sit right.
+        THREE SCOPES, THREE PLACES — and the top row now holds only one of them.
 
-        It has been three separate arrangements. Five setup controls — Scan · Print all labels ·
-        New top-level location · Build visually, plus a Board|List toggle — on a page whose own
-        spec section is titled "Design for the sustain, not the setup". Then three in a toolbar
-        aimed at three different scopes. Then a search box stranded inside the list column while
-        the page's own buttons floated above it. Same row now, grouped by what they touch.
+        It has been four arrangements. Five setup controls on a page whose own spec section is
+        titled "Design for the sustain, not the setup"; then three aimed at three different scopes;
+        then a search box stranded inside the list column while the page's buttons floated above it;
+        then one row grouping list-scope and shop-scope controls side by side. That last one still
+        straddled two scopes, which is why the page read flat: `Find a place` and `Add storage` act
+        on the LIST, `Print all labels` acts on the SHOP, and the unit's own actions were already
+        down in the pane.
+
+        Now: the page bar holds only what belongs to neither column — the search, which answers
+        about anything in storage, and `Print all labels`, which prints all of them. `Add storage`
+        moved into the list's own header, beside the thing it adds to.
       */}
       {tree.length > 0 && (
         <Box
@@ -447,41 +499,7 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          {/*
-            Goes with the list, so it goes when the list goes. On a phone a unit takes the whole
-            screen, and a search field that filters a list you cannot see — beside a button that
-            adds to it — is two controls acting on something off-screen.
-          */}
-          <Box
-            sx={{
-              display: { xs: openUnit ? 'none' : 'flex', md: 'flex' },
-              gap: 1,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              flex: { xs: '1 1 100%', sm: '0 0 auto' },
-            }}
-          >
-            <TextField
-              size="small"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find a place"
-              type="search"
-              sx={{ width: { xs: '100%', sm: 260 } }}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon fontSize="small" />
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openAddStorage}>
-              Add storage
-            </Button>
-          </Box>
+          <StorageSearch companyId={companyId} tree={tree} onPick={onSearchPick} />
 
           <Box sx={{ flex: 1 }} />
 
@@ -490,9 +508,9 @@ export default function LocationsManager({
 
             It opened the company-wide count sheet — every stocked part across the shop in one
             list. Nobody audits a shop that way: you audit one cabinet, walking bin to bin, which
-            is what `Adjust` on a unit now does (the worksheet resolves a container to every leaf
-            under it). A shop-wide sheet still exists for whoever wants one; it is `Count
-            Inventory` on the Parts toolbar, where the noun is the items rather than the places.
+            is what `Bulk Adjust` on a unit does. A shop-wide sheet still exists for whoever wants
+            one; it is `Count Inventory` on the Parts toolbar, where the noun is the items rather
+            than the places.
           */}
           <Button
             variant="outlined"
@@ -579,11 +597,43 @@ export default function LocationsManager({
                 pr: { md: 1 },
               }}
             >
+              {/*
+                The list's own header, so the column reads as a thing rather than as the left half
+                of a page. `Add storage` lives here because this is what it adds to — it was in the
+                page bar, one row away from `Print all labels`, which acts on the whole shop.
+              */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 1,
+                  mb: 1,
+                }}
+              >
+                <Typography variant="overline" color="text.secondary">
+                  Storage
+                </Typography>
+                {/*
+                  Shows `Add`, because the heading beside it already says Storage and a 320px
+                  column has no room to say it twice. Named in full for anything that cannot see
+                  the heading — a bare "Add" would also collide with the drawer's `Add` verb, which
+                  is a different action on a different thing.
+                */}
+                <Button
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={openAddStorage}
+                  aria-label="Add storage"
+                >
+                  Add
+                </Button>
+              </Box>
+
               <StorageUnitList
                 tree={tree}
                 occupancy={occupancy}
                 selectedId={openUnit?.id ?? null}
-                query={query}
                 onOpen={openUnit_}
               />
             </Box>
@@ -680,6 +730,17 @@ export default function LocationsManager({
         rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
         buried under both, which is the failure the old detail sheet was deleted for.
       */}
+      {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
+      <PartPlacesDrawer
+        part={searchPart}
+        companyId={companyId}
+        // Leaves only, never the put-away pile. The form excludes the place being moved FROM.
+        moveDestinations={stockDestinationOptions(locations)}
+        onClose={() => setSearchPart(null)}
+        onOpenPlace={openPlaceFromPart}
+        onChanged={reload}
+      />
+
       <PlaceDrawer
         place={drawerPlace}
         companyId={companyId}

@@ -68,6 +68,8 @@ export interface PlaceAdjustFormProps {
   locationId: string;
   /** The bare name. This dialog only ever spans one place, so a full path would repeat itself. */
   locationName: string;
+  /** Narrow to ONE part — set when this is opened from a part rather than from a place. */
+  restrictToPartId?: string;
   /** Back to the place overview. The drawer stays open. */
   onCancel: () => void;
   onDone: () => void | Promise<void>;
@@ -77,6 +79,7 @@ export default function PlaceAdjustForm({
   companyId,
   locationId,
   locationName,
+  restrictToPartId,
   onCancel,
   onDone,
 }: PlaceAdjustFormProps) {
@@ -95,7 +98,10 @@ export default function PlaceAdjustForm({
     () => getLocationContents(locationId),
     [locationId],
   );
-  const rows: LocationContent[] = useMemo(() => data?.contents ?? [], [data]);
+  const rows: LocationContent[] = useMemo(() => {
+    const all = data?.contents ?? [];
+    return restrictToPartId ? all.filter((c) => c.part_id === restrictToPartId) : all;
+  }, [data, restrictToPartId]);
   /** Set when the bin holds more than one read returns, so the cap is said rather than hidden. */
   const clipped = data ? Math.max(0, data.total - data.contents.length) : 0;
 

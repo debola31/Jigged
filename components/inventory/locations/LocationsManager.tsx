@@ -37,10 +37,25 @@ import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
 import StorageUnitList from './StorageUnitList';
 import StorageSearch, { type StorageHit } from './StorageSearch';
+import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer from './place/PlaceDrawer';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
+
+/** The top-level unit a location belongs to — the same walk as `computePath`, keeping the root. */
+function rootOf(id: string, byId: Map<string, InventoryLocation>): string {
+  let cursor: string | null = id;
+  let root = id;
+  const guard = new Set<string>();
+  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocation = byId.get(cursor)!;
+    root = node.id;
+    cursor = node.parent_id;
+  }
+  return root;
+}
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -226,6 +241,9 @@ export default function LocationsManager({
    */
   const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
 
+  /** The part whose places are showing, if the search found one. */
+  const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
+
   /**
    * The node the drawer is showing.
    *
@@ -258,20 +276,33 @@ export default function LocationsManager({
   /**
    * A search hit.
    *
-   * A place selects its unit. A part selects the unit it is in AND opens the bin it is in, because
-   * "where is my o-ring" is not answered by the cabinet — it is answered by the shelf, and landing
-   * on the cabinet would leave the last step to be guessed from a grid.
+   * A place selects its unit. A part opens a drawer listing everywhere it is — the dropdown picks
+   * the PART, and where it lives is the answer, which belongs on a surface that stays rather than
+   * in a menu that closes.
    */
   const onSearchPick = (hit: StorageHit) => {
     if (hit.kind === 'place') {
       setPlaceId(null);
       setDrawerPlaceId(null);
+      setSearchPart(null);
       showUnit(hit.id);
       return;
     }
-    setPlaceId(hit.locationId);
-    setDrawerPlaceId(hit.locationId);
-    showUnit(hit.unitId);
+    setSearchPart({ id: hit.id, name: hit.label, unit: hit.unit });
+  };
+
+  /**
+   * Walking from a part to one of its places.
+   *
+   * Selects the unit the bin belongs to and opens that bin, and closes the part drawer — two
+   * drawers stacked would bury the thing just chosen under the thing that found it.
+   */
+  const openPlaceFromPart = (locationId: string) => {
+    const unitId = rootOf(locationId, byId);
+    setSearchPart(null);
+    setPlaceId(locationId);
+    setDrawerPlaceId(locationId);
+    showUnit(unitId);
   };
 
   const openUnit_ = (node: InventoryLocationNode) => {
@@ -460,7 +491,7 @@ export default function LocationsManager({
             alignItems: 'center',
           }}
         >
-          <StorageSearch companyId={companyId} tree={tree} byId={byId} onPick={onSearchPick} />
+          <StorageSearch companyId={companyId} tree={tree} onPick={onSearchPick} />
 
           <Box sx={{ flex: 1 }} />
 
@@ -683,6 +714,13 @@ export default function LocationsManager({
         rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
         buried under both, which is the failure the old detail sheet was deleted for.
       */}
+      {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
+      <PartPlacesDrawer
+        part={searchPart}
+        onClose={() => setSearchPart(null)}
+        onOpenPlace={openPlaceFromPart}
+      />
+
       <PlaceDrawer
         place={drawerPlace}
         companyId={companyId}

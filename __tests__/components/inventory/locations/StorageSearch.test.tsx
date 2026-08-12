@@ -21,6 +21,7 @@ import StorageSearch from '@/components/inventory/locations/StorageSearch';
 import { searchPartPlacements } from '@/utils/inventoryLocationsAccess';
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 
+/** The tree is all this needs now — paths and roots are the part drawer's job, not the box's. */
 const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocation => ({
   company_id: 'co1',
   parent_id: null,
@@ -32,14 +33,6 @@ const loc = (over: Partial<InventoryLocation> & { id: string }): InventoryLocati
   ...over,
 });
 
-const LOCATIONS = [
-  loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet' }),
-  loc({ id: 'shelf-a', name: 'Shelf A', parent_id: 'cab3' }),
-  loc({ id: 'yard', name: 'Yard' }),
-];
-
-const BY_ID = new Map(LOCATIONS.map((l) => [l.id, l] as const));
-
 const node = (id: string, name: string, children: InventoryLocationNode[] = []) =>
   ({ ...loc({ id, name }), children }) as unknown as InventoryLocationNode;
 
@@ -47,8 +40,7 @@ const TREE = [node('cab3', 'Cabinet 3', [node('shelf-a', 'Shelf A')]), node('yar
 
 const onPick = vi.fn();
 
-const setup = () =>
-  render(<StorageSearch companyId="co1" tree={TREE} byId={BY_ID} onPick={onPick} />);
+const setup = () => render(<StorageSearch companyId="co1" tree={TREE} onPick={onPick} />);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -66,7 +58,7 @@ describe('StorageSearch', () => {
   });
 
   /** The dead end, closed: a part number typed into the only box now answers. */
-  it('finds a part, and says which shelf it is on', async () => {
+  it('finds a part', async () => {
     const user = userEvent.setup();
     vi.mocked(searchPartPlacements).mockResolvedValue([
       {
@@ -80,17 +72,14 @@ describe('StorageSearch', () => {
     setup();
 
     await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
-
     expect(await screen.findByRole('option', { name: /BUY-ORING-214/ })).toBeInTheDocument();
-    // The PATH is the answer, so it is on the row rather than a click away.
-    expect(screen.getByText(/Cabinet 3 › Shelf A · 828 ea/)).toBeInTheDocument();
   });
 
   /**
-   * A part hit resolves to the BIN and to the unit that owns it. Landing on the cabinet would
-   * leave the last step — which of its shelves — to be guessed off a grid.
+   * The dropdown picks the PART. Where it lives is the answer, and it belongs on a surface that
+   * stays rather than in a menu that closes the moment you look away from it.
    */
-  it('hands back the bin and its unit when a part is picked', async () => {
+  it('hands back the part, not a place', async () => {
     const user = userEvent.setup();
     vi.mocked(searchPartPlacements).mockResolvedValue([
       {
@@ -106,9 +95,12 @@ describe('StorageSearch', () => {
     await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
     await user.click(await screen.findByRole('option', { name: /BUY-ORING-214/ }));
 
-    expect(onPick).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'part', locationId: 'shelf-a', unitId: 'cab3' }),
-    );
+    expect(onPick).toHaveBeenCalledWith({
+      kind: 'part',
+      id: 'p-oring',
+      label: 'BUY-ORING-214',
+      unit: 'ea',
+    });
   });
 
   it('hands back the unit when a place is picked', async () => {
@@ -121,8 +113,14 @@ describe('StorageSearch', () => {
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: 'place', id: 'yard' }));
   });
 
-  /** The same part in three bins is three rows — you want the shelf, not the total. */
-  it('lists a part once per place it is in', async () => {
+  /**
+   * ONE ROW PER PART.
+   *
+   * The read returns a row per (part, place) because that is what stock is — the same part on three
+   * shelves is three rows. Listing them as three options made you choose a shelf before you had
+   * seen what the choices were, and showed the part's name three times over.
+   */
+  it('lists a part once however many places it is in', async () => {
     const user = userEvent.setup();
     vi.mocked(searchPartPlacements).mockResolvedValue([
       { partId: 'p1', partName: 'BUY-ORING-214', primaryUnit: 'ea', locationId: 'shelf-a', quantity: 828 },
@@ -132,7 +130,7 @@ describe('StorageSearch', () => {
 
     await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
 
-    expect(await screen.findAllByRole('option', { name: /BUY-ORING-214/ })).toHaveLength(2);
+    expect(await screen.findAllByRole('option', { name: /BUY-ORING-214/ })).toHaveLength(1);
   });
 
   /** One character matches most of a catalogue; the server is not asked until it means something. */

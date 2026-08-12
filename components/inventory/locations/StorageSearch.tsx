@@ -20,13 +20,15 @@
  *
  * Results are grouped, because a place and a part are different things to have found:
  *
- *   PLACES   Cabinet 3                    → selects the unit
- *   PARTS    BUY-ORING-214                → selects the unit AND opens that bin
- *              Cabinet 3 › Shelf A · 828 ea
+ *   PLACES   Cabinet 3        → selects the unit
+ *   PARTS    BUY-ORING-214    → opens a drawer listing every place it is
  *
- * A part in three bins is **three rows**, not one total. You are not trying to learn how many you
- * own — Parts answers that — you are trying to learn which shelf to walk to, and a sum tells you
- * nothing about which. Ordered by quantity so the shelf holding most of it leads.
+ * **One row per part, not per place.** The first cut listed a row per (part, place) — the same
+ * part repeated once per shelf, each carrying a path and a quantity — which answered the question
+ * inside a menu. That made you choose a shelf before you had seen what the choices were, and put
+ * the answer somewhere that vanishes the moment you look away. A dropdown is for picking a thing;
+ * the thing here is the part. Where it lives is what you came to find out, so it goes on a surface
+ * that stays: {@link PartPlacesDrawer}, the same kind of surface a place opens into.
  *
  * ## Where it sits, and why that matters
  *
@@ -46,55 +48,23 @@ import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 
 import { searchPartPlacements, type PartPlacement } from '@/utils/inventoryLocationsAccess';
-import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
+import type { InventoryLocationNode } from '@/types/inventoryLocations';
 import { orderUnits } from '@/lib/locationGrid';
 
-const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
-
-/** A hit: either a unit to select, or a part sitting in one specific place. */
+/** A hit: a unit to select, or a part to locate. */
 export type StorageHit =
   | { kind: 'place'; id: string; label: string }
-  | {
-      kind: 'part';
-      id: string;
-      label: string;
-      partName: string;
-      /** The full path of the bin it is in — the answer, and the row's second line. */
-      where: string;
-      qty: string;
-      /** The bin itself, so the caller can open it rather than leave the last step to be guessed. */
-      locationId: string;
-      /** The root unit that bin belongs to, so the grid beside it is the right one. */
-      unitId: string;
-    };
+  | { kind: 'part'; id: string; label: string; unit: string | null };
 
 export interface StorageSearchProps {
   companyId: string;
   /** Roots, for matching unit names without another read. */
   tree: InventoryLocationNode[];
-  /** Every location, so a part's `location_id` can be turned into a path and its owning unit. */
-  byId: Map<string, InventoryLocation>;
   /** A place hit selects the unit; a part hit selects its unit and opens that place. */
   onPick: (hit: StorageHit) => void;
 }
 
-/** Root → leaf names for a location, and the root it belongs to. */
-function trail(locationId: string, byId: Map<string, InventoryLocation>) {
-  const names: string[] = [];
-  let cursor: string | null = locationId;
-  let root = locationId;
-  const guard = new Set<string>();
-  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
-    guard.add(cursor);
-    const node: InventoryLocation = byId.get(cursor)!;
-    names.unshift(node.name);
-    root = node.id;
-    cursor = node.parent_id;
-  }
-  return { path: names.join(' › '), unitId: root };
-}
-
-export default function StorageSearch({ companyId, tree, byId, onPick }: StorageSearchProps) {
+export default function StorageSearch({ companyId, tree, onPick }: StorageSearchProps) {
   const [text, setText] = useState('');
   const [placements, setPlacements] = useState<PartPlacement[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,23 +115,22 @@ export default function StorageSearch({ companyId, tree, byId, onPick }: Storage
       .filter((u) => u.name.toLowerCase().includes(q))
       .map((u) => ({ kind: 'place' as const, id: u.id, label: u.name }));
 
-    const parts: StorageHit[] = placements.map((p) => {
-      const { path, unitId } = trail(p.locationId, byId);
-      return {
-        kind: 'part' as const,
-        // A part in three bins is three rows, so the key has to carry the place too.
-        id: `${p.partId}::${p.locationId}`,
-        label: p.partName,
-        partName: p.partName,
-        where: path || 'Unknown place',
-        qty: `${num(p.quantity)} ${p.primaryUnit ?? ''}`.trim(),
-        locationId: p.locationId,
-        unitId,
-      };
-    });
+    /*
+     * ONE ROW PER PART. The read returns one row per (part, place), because that is what stock is,
+     * and several of those rows are the same part on different shelves. Collapsing them here also
+     * makes the list immune to a duplicate row arriving from anywhere — the same part cannot appear
+     * twice under a key that is its own id.
+     */
+    const seen = new Set<string>();
+    const parts: StorageHit[] = [];
+    for (const p of placements) {
+      if (seen.has(p.partId)) continue;
+      seen.add(p.partId);
+      parts.push({ kind: 'part', id: p.partId, label: p.partName, unit: p.primaryUnit });
+    }
 
     return [...places, ...parts];
-  }, [text, tree, placements, byId]);
+  }, [text, tree, placements]);
 
   return (
     <Autocomplete
@@ -189,16 +158,18 @@ export default function StorageSearch({ companyId, tree, byId, onPick }: Storage
       renderOption={(props, o) => {
         const { key, ...rest } = props;
         return (
-          <Box component="li" key={key} {...rest} sx={{ display: 'block' }}>
-            <Typography variant="body2" noWrap>
+          <Box component="li" key={key} {...rest}>
+            {/*
+              A plain string child, not a stack of Typography.
+
+              The option `li` carries MUI's own `display: flex`, so two block children laid
+              themselves out side by side and rendered as `BUY-ORING-214Cabinet 3 › Shelf A` — one
+              run-on line with no separator. Nothing on this row needs a second line any more: the
+              part name IS the row, and where it lives is what the drawer is for.
+            */}
+            <Typography variant="body2" noWrap sx={{ minWidth: 0 }}>
               {o.label}
             </Typography>
-            {o.kind === 'part' && (
-              // The place IS the answer here, so it is on the row rather than a hover away.
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {o.where} · {o.qty}
-              </Typography>
-            )}
           </Box>
         );
       }}

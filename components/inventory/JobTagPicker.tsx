@@ -73,45 +73,48 @@ export async function loadTaggableJobs(companyId: string): Promise<JobWithRelati
  *
  * Material genuinely consumed outside this set is a real thing — a substitution at the machine, a
  * BOM nobody built, a level further down. That is not this function's problem to solve: it returns
- * what the data expects, and the caller offers a way past it.
+ * what the data expects, and the caller ranks rather than restricts.
+ *
+ * ## It THROWS rather than returning nothing
+ *
+ * An empty array means "no job lists this part", which is a claim. A dropped query is not that
+ * claim, and swallowing one into `[]` made the picker say *"No active job uses this part"* about a
+ * network failure — **"couldn't check" rendered as "denied"**, which CLAUDE.md names as its own
+ * rule. The caller catches and falls back to the unranked list.
  */
 export async function loadJobsForPart(
   companyId: string,
   partId: string,
 ): Promise<JobWithRelations[]> {
-  try {
-    const supabase = getSupabase();
+  const supabase = getSupabase();
 
-    // The parts whose BOM names this one as a child — i.e. things that consume it directly.
-    const { data: parents, error: bomError } = await supabase
-      .from('parts_bom')
-      .select('parent_part_id')
-      .eq('child_part_id', partId);
-    if (bomError) throw bomError;
+  // The parts whose BOM names this one as a child — i.e. things that consume it directly.
+  const { data: parents, error: bomError } = await supabase
+    .from('parts_bom')
+    .select('parent_part_id')
+    .eq('child_part_id', partId);
+  if (bomError) throw bomError;
 
-    const consumingPartIds = Array.from(
-      new Set([partId, ...(parents ?? []).map((r) => r.parent_part_id)]),
-    );
+  const consumingPartIds = Array.from(
+    new Set([partId, ...(parents ?? []).map((r) => r.parent_part_id)]),
+  );
 
-    const { data: jobParts, error: jpError } = await supabase
-      .from('job_parts')
-      .select('job_id')
-      .eq('company_id', companyId)
-      .in('part_id', consumingPartIds);
-    if (jpError) throw jpError;
+  const { data: jobParts, error: jpError } = await supabase
+    .from('job_parts')
+    .select('job_id')
+    .eq('company_id', companyId)
+    .in('part_id', consumingPartIds);
+  if (jpError) throw jpError;
 
-    const jobIds = Array.from(new Set((jobParts ?? []).map((r) => r.job_id)));
-    if (jobIds.length === 0) return [];
+  const jobIds = Array.from(new Set((jobParts ?? []).map((r) => r.job_id)));
+  if (jobIds.length === 0) return [];
 
-    // Filtered in memory rather than by another `in()`: the active-job set is small, this reuses
-    // the one loader that knows how to build a `JobWithRelations`, and it keeps the ordering rule
-    // in exactly one place.
-    const all = await loadTaggableJobs(companyId);
-    const wanted = new Set(jobIds);
-    return all.filter((j) => wanted.has(j.id));
-  } catch {
-    return [];
-  }
+  // Filtered in memory rather than by another `in()`: the active-job set is small, this reuses
+  // the one loader that knows how to build a `JobWithRelations`, and it keeps the ordering rule
+  // in exactly one place.
+  const all = await loadTaggableJobs(companyId);
+  const wanted = new Set(jobIds);
+  return all.filter((j) => wanted.has(j.id));
 }
 
 interface JobTagPickerProps {
@@ -122,6 +125,24 @@ interface JobTagPickerProps {
   label?: string;
   /** Why this list is the length it is — said, so a short list does not read as a broken one. */
   helperText?: string;
+  /**
+   * The jobs the data expects to consume this material, listed FIRST under their own heading.
+   *
+   * ## Rank, do not restrict
+   *
+   * Material genuinely goes to jobs the data does not predict: a substitution at the machine, a BOM
+   * nobody built, a level further down than the one this product calls a job's materials. Hiding
+   * those jobs would make the honest answer unrecordable, and the count sheet's own lesson is that
+   * *the discovery the software refuses to record is the one worth the most*.
+   *
+   * So there is no escape hatch to find. The way past the filter is on screen from the first tap —
+   * it is the second group, and its heading is its name. The common case pays **nothing**: the
+   * expected jobs are at the top, where the thumb already is.
+   *
+   * Empty or omitted and the list renders flat with no headings at all, so an unbuilt BOM never
+   * produces an empty section for someone to interpret.
+   */
+  expectedIds?: string[];
 }
 
 export default function JobTagPicker({
@@ -130,11 +151,23 @@ export default function JobTagPicker({
   value,
   onChange,
   helperText,
+  expectedIds,
   label = 'Tag to a job (optional)',
 }: JobTagPickerProps) {
+  const expected = new Set(expectedIds ?? []);
+  /*
+   * Grouped only when there is something in both groups. MUI renders a group header per contiguous
+   * run, so the options must be ordered by group — expected first, the rest after, each already in
+   * most-recently-updated order.
+   */
+  const grouped = expected.size > 0 && jobs.some((j) => !expected.has(j.id));
+  const ordered = grouped
+    ? [...jobs.filter((j) => expected.has(j.id)), ...jobs.filter((j) => !expected.has(j.id))]
+    : jobs;
+
   return (
     <Autocomplete
-      options={jobs}
+      options={ordered}
       loading={loading}
       value={value}
       onChange={(_, v) => onChange(v)}
@@ -155,12 +188,18 @@ export default function JobTagPicker({
           </Box>
         );
       }}
+      groupBy={
+        grouped
+          ? (j) => (expected.has(j.id) ? 'Jobs that use this part' : 'All other active jobs')
+          : undefined
+      }
       renderInput={(params) => (
         <TextField {...params} label={label} helperText={helperText} />
       )}
-      /* The list is filtered to the parts being removed, so "none" means "none that use this" —
-         not "no jobs". Saying the wrong one would send someone looking for a job that is open. */
-      noOptionsText="No active job uses this part"
+      /* Every active job is reachable, so "none" can only mean the TYPED filter matched nothing.
+         The earlier wording — "No active job uses this part" — was a claim the list no longer
+         makes, and it was also what a failed lookup used to say. */
+      noOptionsText="No matching active jobs"
       loadingText="Loading jobs…"
     />
   );

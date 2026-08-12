@@ -96,21 +96,23 @@ describe('loadJobsForPart', () => {
     expect(jobs.map((j) => j.id)).toEqual(['a', 'c']);
   });
 
-  /**
-   * No relationship at all means an EMPTY list, not every job.
-   *
-   * Falling back to everything would make the filter decorative — the whole point is that a short
-   * list is information, and the caller is what offers a way past it.
-   */
+  /** No relationship at all is an empty EXPECTED set — the caller still offers every job. */
   it('returns nothing when no job could use the part', async () => {
     stubTables([], []);
     await expect(loadJobsForPart('co1', 'p-orphan')).resolves.toEqual([]);
   });
 
-  it('swallows a failed read rather than breaking the form', async () => {
+  /**
+   * "COULDN'T CHECK" IS NEVER "DENIED" (CLAUDE.md).
+   *
+   * An empty array is a claim — "no job lists this part". A dropped query is not that claim, and
+   * swallowing one into `[]` made the picker assert it about a network failure. It throws, and the
+   * caller falls back to the unranked list.
+   */
+  it('throws on a failed read rather than reporting "none"', async () => {
     from.mockImplementation(() => {
       throw new Error('boom');
     });
-    await expect(loadJobsForPart('co1', 'p-steel')).resolves.toEqual([]);
+    await expect(loadJobsForPart('co1', 'p-steel')).rejects.toThrow();
   });
 });

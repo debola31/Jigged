@@ -14,11 +14,12 @@ import ArrowRightAltIcon from '@mui/icons-material/ArrowRightAlt';
 /**
  * The money behind a metric's count.
  *
- * `label` is a verb, not a noun — "past due", "queued", "shipped this week" —
- * because the three tiles that carry money carry three different KINDS of it:
- * committed work not yet earned, and revenue already earned. A bare dollar
- * figure on each would flatten those into one apparent pot, and the first thing
- * an owner does with four dollar figures is add them up.
+ * `label` says which KIND of money this is, not which slice of work it belongs
+ * to — the card title already does that. It reads as one axis across the row:
+ * "not yet shipped" for money committed but not earned, "shipped this week" for
+ * money earned. A bare dollar figure on each card would flatten the two into one
+ * apparent pot, and the first thing anyone does with several dollar figures on
+ * one screen is add them up.
  */
 export interface ScorecardMoney {
   amount: number;
@@ -37,7 +38,7 @@ export interface MetricScorecardProps {
    * (Open Quotes) or when the viewer is not a company admin.
    */
   money?: ScorecardMoney;
-  /** Third line, e.g. Open Jobs' "51 queued · 12 running". */
+  /** Third line, e.g. Open Jobs' "51 Not Started · 12 In Progress". */
   detail?: string;
   /** Rendered in the card's corner — the Completed card's period toggle. */
   action?: ReactNode;

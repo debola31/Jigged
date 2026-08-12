@@ -6,6 +6,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ToggleButton from '@mui/material/ToggleButton';
 import { useLoad } from '@/hooks/useLoad';
 import { useUserRole } from '@/hooks/useUserRole';
+import { PRODUCTION_STATUS_CONFIG } from '@/types/job';
 import MetricScorecard from './MetricScorecard';
 import {
   DASHBOARD_METRICS,
@@ -43,13 +44,23 @@ function drillDownHref(companyId: string, key: MetricKey): string | undefined {
   }
 }
 
-/** The verb that says WHICH KIND of money this is. See ScorecardMoney.label. */
+/**
+ * What KIND of money this is — not which slice of work it belongs to.
+ *
+ * The card title already says which slice (Overdue, Open Jobs, Completed); the
+ * label says whether the money has been earned yet. So Overdue and Open Jobs
+ * share one, and deliberately: overdue money is a SLICE of open-jobs money, not
+ * a separate pot, and giving it its own word would imply otherwise.
+ *
+ * The pair reads as one axis — `not yet shipped` → `shipped this week` — which
+ * is the whole distinction these labels exist to draw. Both are the product's
+ * existing fulfilment vocabulary rather than terms coined for this card.
+ */
 function moneyLabel(key: MetricKey, period: MetricTimePeriod): string | null {
   switch (key) {
     case 'overdue_jobs':
-      return 'past due';
     case 'open_jobs':
-      return 'in hand';
+      return 'not yet shipped';
     case 'completed_jobs':
       return period === 'today' ? 'shipped today' : 'shipped this week';
     default:
@@ -149,10 +160,15 @@ export default function DashboardMetrics({ companyId }: DashboardMetricsProps) {
 
         // The merged tile would otherwise hide whether work is flowing or
         // piling up, which is the one thing the old two-card split was good for.
+        //
+        // Named from PRODUCTION_STATUS_CONFIG rather than spelled out here, so
+        // the split says exactly what the jobs list and its status chips say. A
+        // synonym invented for this one card ("queued", "running") makes a
+        // reader wonder whether it means something different.
         const detail =
           def.key === 'open_jobs' && v?.split
-            ? `${v.split.notStarted.count.toLocaleString()} queued · ` +
-              `${v.split.inProgress.count.toLocaleString()} running`
+            ? `${v.split.notStarted.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.not_started.label} · ` +
+              `${v.split.inProgress.count.toLocaleString()} ${PRODUCTION_STATUS_CONFIG.in_progress.label}`
             : undefined;
 
         return (

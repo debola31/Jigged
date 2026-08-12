@@ -71,10 +71,10 @@ describe('DashboardMetrics', () => {
 
     await waitFor(() => expect(screen.getByText('$9,766')).toBeInTheDocument());
 
-    // A verb per card, so committed work and earned revenue never read alike.
-    expect(screen.getByText('past due')).toBeInTheDocument();
+    // Overdue and Open Jobs share a label on purpose: overdue money is a SLICE
+    // of open-jobs money, so a distinct word would imply a separate pot.
+    expect(screen.getAllByText('not yet shipped')).toHaveLength(2);
     expect(screen.getByText('$85,293')).toBeInTheDocument();
-    expect(screen.getByText('in hand')).toBeInTheDocument();
     expect(screen.getByText('$12,480')).toBeInTheDocument();
     expect(screen.getByText('shipped this week')).toBeInTheDocument();
   });
@@ -91,15 +91,15 @@ describe('DashboardMetrics', () => {
     expect(screen.queryByText('$9,766')).not.toBeInTheDocument();
     expect(screen.queryByText('$85,293')).not.toBeInTheDocument();
     expect(screen.queryByText('$12,480')).not.toBeInTheDocument();
-    expect(screen.queryByText('past due')).not.toBeInTheDocument();
+    expect(screen.queryByText('not yet shipped')).not.toBeInTheDocument();
   });
 
-  it('keeps the queued/running split visible on the merged tile', async () => {
+  it('names the split with the same labels the jobs list uses', async () => {
     render(<DashboardMetrics companyId="c1" />);
 
     // The one thing the old two-card split was good for: whether work is
     // flowing or piling up.
-    await waitFor(() => expect(screen.getByText('51 queued · 12 running')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('51 Not Started · 12 In Progress')).toBeInTheDocument());
   });
 
   it('shows the split to a non-admin too — it carries no money', async () => {
@@ -107,7 +107,7 @@ describe('DashboardMetrics', () => {
 
     render(<DashboardMetrics companyId="c1" />);
 
-    await waitFor(() => expect(screen.getByText('51 queued · 12 running')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('51 Not Started · 12 In Progress')).toBeInTheDocument());
   });
 
   it('puts the period toggle on Completed and nowhere else', async () => {
@@ -133,7 +133,7 @@ describe('DashboardMetrics', () => {
   });
 
   it('drops the money line when the count is zero', async () => {
-    // "0" over "$0 past due" says one thing twice, and undoes the reason the
+    // "0" over "$0 not yet shipped" says one thing twice, and undoes the reason the
     // count leads: a bare 0 is the cleanest all-clear there is.
     mockGetDashboardMetrics.mockResolvedValue({
       ...VALUES,
@@ -143,7 +143,8 @@ describe('DashboardMetrics', () => {
     render(<DashboardMetrics companyId="c1" />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
-    expect(screen.queryByText('past due')).not.toBeInTheDocument();
+    // Open Jobs still has its label; Overdue's is gone with its money.
+    expect(screen.getAllByText('not yet shipped')).toHaveLength(1);
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
   });
 

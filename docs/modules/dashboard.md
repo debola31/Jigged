@@ -17,7 +17,7 @@ drill-downs are the way out.
 ## Metric scorecards
 
 Four fixed cards, one row, no picker and no pager. They read left to right as an alert followed by the flow of
-work — what is late, what is in hand, what went out, what might come in.
+work — what is late, what is on the floor, what went out, what might come in.
 
 See [`DashboardMetrics.tsx`](../../components/dashboard/DashboardMetrics.tsx), `MetricScorecard.tsx`, and
 `getDashboardMetrics` in [`utils/dashboardAccess.ts`](../../utils/dashboardAccess.ts). Every drill-down href
@@ -25,8 +25,8 @@ is prefixed `/dashboard/{companyId}`.
 
 | Key | Label | Count | Money | Drill-down |
 |---|---|---|---|---|
-| `overdue_jobs` | Overdue | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "past due" | `/jobs?overdue=true` |
-| `open_jobs` | Open Jobs | `jobs.production_status IN ('not_started','in_progress')` | "in hand" | `/jobs?status=not_started` |
+| `overdue_jobs` | Overdue | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "not yet shipped" | `/jobs?overdue=true` |
+| `open_jobs` | Open Jobs | `jobs.production_status IN ('not_started','in_progress')` | "not yet shipped" | `/jobs?status=not_started` |
 | `completed_jobs` | Completed | `jobs.fulfillment_status = 'fully_shipped'` in the period | "shipped this week" / "shipped today", with a period-over-period delta | `/jobs?status=completed` |
 | `open_quotes` | Open Quotes | `quotes.status = 'active'` | none — see below | `/quotes?status=active` |
 
@@ -38,13 +38,18 @@ A shop owner acts on jobs, not on dollars, so the count stays the big number and
 also keeps `0` as the all-clear on Overdue, which is a stronger signal than `$0`. Overdue renders in an
 `alert` (red) tone when > 0.
 
-### Three kinds of money, and why each label is a verb
+### Two kinds of money, and what the labels are for
 
-The money on these cards is not one pot. **Open Jobs is committed work not yet earned; Completed is revenue
-already earned.** A bare dollar figure on each would flatten that distinction, and the first thing anyone does
-with several dollar figures on one screen is add them up. The labels — *past due*, *in hand*, *shipped this
-week* — carry the distinction without a legend, and survive both bright shop lighting and colour blindness in
-a way a colour code would not.
+The money on these cards is not one pot. **Overdue and Open Jobs are committed work not yet earned; Completed
+is revenue already earned.** A bare dollar figure on each would flatten that distinction, and the first thing
+anyone does with several dollar figures on one screen is add them up.
+
+The label says which KIND of money it is; the card title already says which slice of work it belongs to. So
+the row reads as one axis — *not yet shipped* → *shipped this week* — and **Overdue and Open Jobs deliberately
+share a label**, because overdue money is a slice of open-jobs money rather than a separate pot and a distinct
+word would imply otherwise. Both phrases are the product's existing fulfilment vocabulary, not terms coined
+for this card. Words rather than a colour code, so the distinction survives bright shop lighting and colour
+blindness.
 
 **Overdue's money is a slice of Open Jobs', not a fifth pot.** `applyOverdueJobsFilter` restricts to
 `production_status IN ('not_started','in_progress')`, so every overdue job is also counted in Open Jobs.
@@ -68,9 +73,13 @@ itself is stated once in [AI Insights](ai-insights.md).
 
 ### The Open Jobs split
 
-The merged tile shows `51 queued · 12 running` beneath the money. The total answers *how much work is on the
-books*; the split answers *is it flowing or piling up*, which a single number would hide. The split is visible
-to everyone — it carries no money.
+The merged tile shows `51 Not Started · 12 In Progress` beneath the money. The total answers *how much work is
+on the books*; the split answers *is it flowing or piling up*, which a single number would hide. The split is
+visible to everyone — it carries no money.
+
+The two state names come from `PRODUCTION_STATUS_CONFIG` rather than being spelled out in the card, so they
+are the same words the jobs list and its status chips use. A synonym invented for one card ("queued",
+"running") makes a reader wonder whether it means something different.
 
 ### Money is admin-only
 
@@ -177,12 +186,12 @@ Also wanted: a wider period range for Completed (Month / Year / All Time).
 |---|---|
 | Exactly four metrics in flow order; only Completed is period-scoped | `__tests__/utils/dashboardMetrics.test.ts` — 2 its |
 | Revenue reads `job_parts` and never the quote; a shipped job with no quote still counts; `unit_price × quantity` fallback; the prior period is carried for the delta | same file — 4 its |
-| Open Jobs merges the two states, keeps the queued/running split, and its two halves sum to its total | same file — 1 it |
+| Open Jobs merges the two states, keeps the Not Started / In Progress split, and its two halves sum to its total | same file — 1 it |
 | Open Quotes has a count and a `null` money — absent, not zero | same file — 1 it |
 | Overdue is built from the shared predicate rather than a local copy | same file — 1 it |
 | Every metric filters `deleted_at`; a failed metric is absent rather than `0` | same file — 2 its |
 | Four cards render with no picker and no pager; the period toggle appears once, on Completed | `__tests__/components/dashboard/DashboardMetrics.test.tsx` — 2 its |
-| An admin sees the money with its verb label; a non-admin sees no dollar figure anywhere, but still sees counts and the split | same file — 3 its |
+| An admin sees the money, with Overdue and Open Jobs sharing one label; a non-admin sees no dollar figure anywhere, but still sees counts and the split named as the jobs list names it | same file — 3 its |
 | Open Quotes shows no money even for an admin; changing the period refetches and persists | same file — 2 its |
 | The overdue count uses one canonical clause set on the same builder as the jobs list, so tile and list agree | `__tests__/utils/jobsAccess.test.ts` — `describe('applyOverdueJobsFilter')`, 1 it |
 | The card returns only business milestones — never notes/photos/operations — newest-first, capped to the requested limit | `__tests__/utils/dashboardAccess.test.ts` — `describe('getDashboardActivity')`, 2 its |

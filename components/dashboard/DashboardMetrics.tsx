@@ -128,8 +128,12 @@ export default function DashboardMetrics({ companyId }: DashboardMetricsProps) {
         // shop's whole book totalled up. This is a DISPLAY choice, not a
         // security boundary: RLS is company-scoped, not column-scoped, so the
         // figures remain readable through the API.
+        // Nothing to show when the count is zero: the money is necessarily zero
+        // too, so the line adds no information the count did not already give.
+        // It also protects the reason the count leads in the first place —
+        // "0" is a cleaner all-clear on Overdue than "0" above "$0 past due".
         const money =
-          isAdmin && v && v.money !== null && label
+          isAdmin && v && v.count > 0 && v.money !== null && label
             ? {
                 amount: v.money,
                 label,

@@ -73,7 +73,10 @@ export default function MetricScorecard({
 }: MetricScorecardProps) {
   const isAlert = severity === 'alert';
 
-  const hasDelta = money?.previousAmount !== undefined;
+  // A delta against a zero prior period is not a comparison: the percentage is
+  // undefined, and the absolute change just restates the headline figure — the
+  // card ends up printing the same number twice, which reads as a bug.
+  const hasDelta = money?.previousAmount !== undefined && money.previousAmount > 0;
   const delta = hasDelta ? money.amount - (money.previousAmount as number) : 0;
   const pct =
     hasDelta && (money.previousAmount as number) !== 0

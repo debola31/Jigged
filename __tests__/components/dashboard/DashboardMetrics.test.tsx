@@ -132,6 +132,37 @@ describe('DashboardMetrics', () => {
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
   });
 
+  it('drops the money line when the count is zero', async () => {
+    // "0" over "$0 past due" says one thing twice, and undoes the reason the
+    // count leads: a bare 0 is the cleanest all-clear there is.
+    mockGetDashboardMetrics.mockResolvedValue({
+      ...VALUES,
+      overdue_jobs: { count: 0, money: 0 },
+    });
+
+    render(<DashboardMetrics companyId="c1" />);
+
+    await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
+    expect(screen.queryByText('past due')).not.toBeInTheDocument();
+    expect(screen.queryByText('$0')).not.toBeInTheDocument();
+  });
+
+  it('drops the delta when nothing shipped in the prior period', async () => {
+    // A delta against zero is not a comparison — the percentage is undefined
+    // and the absolute change just repeats the headline, so the card would
+    // print the same figure twice.
+    mockGetDashboardMetrics.mockResolvedValue({
+      ...VALUES,
+      completed_jobs: { count: 3, money: 15080, previousMoney: 0 },
+    });
+
+    render(<DashboardMetrics companyId="c1" />);
+
+    await waitFor(() => expect(screen.getByText('$15,080')).toBeInTheDocument());
+    expect(screen.getAllByText('$15,080')).toHaveLength(1);
+    expect(screen.queryByText('vs last week')).not.toBeInTheDocument();
+  });
+
   it('refetches and persists when the period changes', async () => {
     const user = userEvent.setup();
     render(<DashboardMetrics companyId="c1" />);

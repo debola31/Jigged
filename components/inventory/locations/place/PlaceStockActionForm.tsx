@@ -106,7 +106,7 @@ import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
 
 import ErrorAlert from '@/components/common/ErrorAlert';
-import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
+import JobTagPicker, { loadJobsForPart, loadTaggableJobs } from '@/components/inventory/JobTagPicker';
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
@@ -256,10 +256,6 @@ export default function PlaceStockActionForm({
   const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
   const operatorId = member?.id ?? null;
 
-  const { data: jobs, loading: loadingJobs } = useLoad(
-    () => (action === 'deplete' ? loadTaggableJobs(companyId).catch(() => []) : Promise.resolve([])),
-    [action, companyId],
-  );
 
   /** Everything that could be picked for an `add`, minus what is already a row. */
   const addable = useMemo(() => {
@@ -336,6 +332,36 @@ export default function PlaceStockActionForm({
     setQty((q) => ({ ...q, [row.partId]: String(row.onHand) }));
     setUnitFor((u) => ({ ...u, [row.partId]: row.primaryUnit }));
   };
+
+  /*
+   * THE JOBS THIS MATERIAL COULD PLAUSIBLY HAVE GONE TO.
+   *
+   * Keyed by the SET of parts being removed, not by the quantities — so typing `1`, `12`, `120`
+   * into a box re-queries nothing, and adding a second part to the batch does.
+   *
+   * The tag is one per batch, so the set is the UNION across the filled rows: issuing a shaft and
+   * an o-ring to one job, a job that consumes either is a plausible answer. Intersection would be
+   * stricter and mostly empty — few jobs list every loose item that goes out with them.
+   *
+   * With nothing filled in yet there is nothing to narrow by, so every active job is offered. The
+   * list narrows as the batch takes shape rather than starting empty, which would read as broken.
+   */
+  const partKey = useMemo(
+    () => lines.map((l) => l.row.partId).sort().join(','),
+    [lines],
+  );
+
+  const { data: jobs, loading: loadingJobs } = useLoad(async () => {
+    if (action !== 'deplete') return [];
+    const ids = partKey ? partKey.split(',') : [];
+    if (ids.length === 0) return loadTaggableJobs(companyId).catch(() => []);
+    const perPart = await Promise.all(ids.map((id) => loadJobsForPart(companyId, id)));
+    const byId = new Map<string, (typeof perPart)[number][number]>();
+    for (const list of perPart) for (const j of list) byId.set(j.id, j);
+    // `loadJobsForPart` already returns most-recently-updated first; the map preserves the order
+    // the first list arrived in, so re-sorting here would only undo that.
+    return [...byId.values()];
+  }, [action, companyId, partKey]);
 
   /** Filtered rows — with every line exempt, so nothing about to be written can be off screen. */
   const filled = useMemo(() => new Set(lines.map((l) => l.row.partId)), [lines]);
@@ -672,7 +698,17 @@ export default function PlaceStockActionForm({
 
         {/* One job for the batch: you are issuing this handful of material to one job. */}
         {action === 'deplete' && rows.length > 0 && (
-          <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
+          <JobTagPicker
+            jobs={jobs ?? []}
+            loading={loadingJobs}
+            value={job}
+            onChange={setJob}
+            helperText={
+              lines.length > 0
+                ? 'Jobs that use what you are removing.'
+                : undefined
+            }
+          />
         )}
 
         {rows.length > 0 && (

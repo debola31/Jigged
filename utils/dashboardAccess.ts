@@ -309,15 +309,22 @@ async function getRevenueInRange(
   // "Revenue in range" used to filter jobs.shipped_at — but shipped_at is
   // gone in the dual-status model. Re-anchor on fulfillment_status =
   // fully_shipped and use updated_at as the in-range proxy (same shape as
-  // getCompletedJobsInRange below). We sum quote_line_items.total_price and
-  // don't need a per-job ship date here — job_last_ship_date exists only as a
-  // job_last_ship_date(uuid) function, not a jobs-row computed column, so
-  // selecting it as a computed column made PostgREST reject the query with 400.
+  // getCompletedJobsInRange below). We don't need a per-job ship date here —
+  // job_last_ship_date exists only as a job_last_ship_date(uuid) function, not
+  // a jobs-row computed column, so selecting it as a computed column made
+  // PostgREST reject the query with 400.
+  //
+  // Revenue is the job's OWN job_parts line totals, never the source quote's.
+  // This card read quote_line_items until 2026-08-11 and was wrong three ways:
+  // a job created without a quote counted as zero revenue (37 of 128 jobs in
+  // production, and effectively every job in a demo company — those dashboards
+  // showed Revenue $0 while the same data reported five figures through
+  // Insights); a post-conversion quantity edit never reached it; and a
+  // price-options quote counted every option, not the one that was ordered.
+  // insights_service._job_part_revenue is the same rule on the backend.
   const { data, error } = await supabase
     .from('jobs')
-    .select(
-      'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))',
-    )
+    .select('id, job_parts(total_price, unit_price, quantity)')
     .eq('company_id', companyId)
     .is('deleted_at', null)
     .eq('fulfillment_status', 'fully_shipped')
@@ -327,12 +334,25 @@ async function getRevenueInRange(
   if (error) throw error;
 
   type Row = {
-    quotes: { quote_line_items: { total_price: number | null }[] | null } | null;
+    job_parts:
+      | { total_price: number | null; unit_price: number | null; quantity: number | null }[]
+      | null;
   };
 
   return ((data || []) as unknown as Row[]).reduce((sum, job) => {
-    const lines = job.quotes?.quote_line_items ?? [];
-    return sum + lines.reduce((s, li) => s + (li.total_price || 0), 0);
+    const parts = job.job_parts ?? [];
+    return (
+      sum +
+      parts.reduce((s, jp) => {
+        // total_price is the agreed line total; fall back to unit × qty for a
+        // row written before totals were denormalised.
+        if (jp.total_price !== null) return s + jp.total_price;
+        if (jp.unit_price !== null && jp.quantity !== null) {
+          return s + jp.unit_price * jp.quantity;
+        }
+        return s;
+      }, 0)
+    );
   }, 0);
 }
 

@@ -444,65 +444,127 @@ def get_customer_revenue_breakdown(
     }
 
 
+def _job_part_labor_cost(jp: dict, quantity: float) -> float:
+    """Labour cost for one job_part, from the rates FROZEN on its operations.
+
+    The minutes were already frozen at conversion (estimated_setup_minutes,
+    estimated_run_minutes_per_unit); migration 20260811233748 froze the rates
+    beside them, so nothing here reads a live work_centers.labor_rate.
+
+      internal: (setup + run × qty) / 60 × labor_rate_snapshot
+      external: external_unit_price_snapshot × qty
+
+    An operation missing its rate contributes 0. That is safe rather than
+    silent: the job_part's authoritative cost is job_parts.true_cost_per_unit,
+    so an under-counted labour split only shifts money into the materials
+    remainder — it can never inflate profit.
+    """
+    ops = jp.get("job_operations") or []
+    if not isinstance(ops, list):
+        ops = [ops] if ops else []
+
+    total = 0.0
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+
+        if op.get("work_center_kind_snapshot") == "external":
+            price = op.get("external_unit_price_snapshot")
+            if price is not None:
+                total += float(price) * quantity
+            continue
+
+        rate = op.get("labor_rate_snapshot")
+        if rate is None:
+            continue
+        setup = float(op.get("estimated_setup_minutes") or 0)
+        run = float(op.get("estimated_run_minutes_per_unit") or 0)
+        total += (setup + run * quantity) / 60.0 * float(rate)
+
+    return total
+
+
 def get_part_profitability(company_id: str, limit: int = 10) -> dict:
     """
-    Get part profitability analysis on the unified parts schema.
+    Get part profitability analysis from the job's own frozen cost snapshot.
 
-    Walks shipped jobs → job_parts → parts and aggregates per part:
-      - revenue: SUM(job_parts.total_price) per part — the agreed line total on
-        the job_part, which is the post-conversion source of truth and reflects
-        any quantity edited after the job was created.
-      - labor_cost: SUM over each job_operation belonging to that job_part:
-          * For internal work centers (work_centers.kind = 'internal'):
-              labor_rate = COALESCE(routing_operations.labor_rate_override,
-                                    work_centers.labor_rate)
-              cost = (estimated_setup_minutes
-                      + estimated_run_minutes_per_unit * job_part.quantity)
-                     / 60.0 * labor_rate
-              If both override and default are NULL we cannot price the op
-              and RAISE — matching compute_part_cost_at_qty's
-              no-silent-fallback behavior.
-          * For external work centers (kind = 'external'):
-              cost = external_unit_price * quantity + external_setup_cost
-              Read from routing_operations (the immutable source); job_operations
-              don't carry external pricing snapshots.
+    Walks shipped jobs -> job_parts -> parts and aggregates per part:
+
+      - revenue: SUM(job_parts.total_price) — the agreed line total on the
+        job_part, the post-conversion source of truth (see _job_part_revenue).
+      - cost: SUM(job_parts.true_cost_per_unit x quantity) — the all-in TRUE
+        cost (labour + materials + the whole nested BOM) frozen when the job was
+        created, by the trigger in migration 20260811233748.
+      - the labour/materials split: labour is rebuilt from the RATES frozen on
+        job_operations against the minutes already frozen there; materials are
+        the remainder. Materials are deliberately not snapshot per BOM line —
+        costing one line needs the unit conversion, the whole-unit ceiling and
+        the made-vs-bought valuation rule, all of which live inside
+        part_rollup_at_qty. See that migration's header.
+
+    Nothing here reads a live rate. Raising a work-centre rate today does not
+    move the profit of a job that shipped last year — which is the whole point,
+    and was not true before: this function used to recompute labour from
+    work_centers.labor_rate every call, and had no way to charge materials at
+    all, so every bought part was free.
+
+    A job_part whose true_cost_per_unit is NULL could not be costed when it was
+    created (incomplete part costing). It is EXCLUDED and reported in
+    `excluded_job_parts`, never folded in at zero cost — that would silently
+    overstate profit, which is worse than admitting a gap.
+
+    Uses estimated time, not actual: nothing records how long an operation
+    really took (job_operation_completions carries quantity_good and a
+    timestamp, no duration). Estimated-vs-actual is a separate question.
     """
     supabase = _get_supabase_service_role()
 
-    # Walk jobs → job_parts → parts → job_operations → work_centers.
-    # job_operations.routing_operation_id lets us read the override / external
-    # pricing fields the operator never sees but the cost contract requires.
+    # Snapshots only — no work_centers or routing_operations embed. Besides
+    # being the point of the change, that embed is why this function returned
+    # HTTP 400 from 2026-06-23 (when routing_operations.external_setup_cost was
+    # dropped by migration 20260623022617) until this rewrite: PostgREST rejects
+    # a select naming a column that no longer exists.
     response = (
         supabase.table("jobs")
         .select(
             "id, "
             "job_parts(id, part_id, quantity, total_price, unit_price, "
+            "true_cost_per_unit, "
             "parts!job_parts_part_id_fkey(part_name, description), "
             "job_operations(estimated_setup_minutes, estimated_run_minutes_per_unit, "
-            "work_centers!left(kind, labor_rate), "
-            "routing_operations!left(labor_rate_override, external_unit_price, "
-            "external_setup_cost)))"
+            "work_center_kind_snapshot, labor_rate_snapshot, "
+            "external_unit_price_snapshot))"
         )
         .eq("company_id", company_id)
+        .is_("deleted_at", "null")
         .eq("fulfillment_status", "fully_shipped")
         .execute()
     )
 
     jobs = response.data or []
 
-    # Aggregate by part_id
     part_data: dict[str, dict] = {}
+    excluded_job_parts = 0
+
     for job in jobs:
         job_parts = job.get("job_parts") or []
         if not isinstance(job_parts, list):
             job_parts = [job_parts]
 
         for jp in job_parts:
+            if not isinstance(jp, dict):
+                continue
             part_id = jp.get("part_id")
             if not part_id:
                 continue
 
-            quantity = int(jp.get("quantity", 1) or 1)
+            true_cost_per_unit = jp.get("true_cost_per_unit")
+            if true_cost_per_unit is None:
+                # "We could not tell" is not "it was free."
+                excluded_job_parts += 1
+                continue
+
+            quantity = float(jp.get("quantity") or 0)
 
             if part_id not in part_data:
                 part_info = jp.get("parts") or {}
@@ -512,85 +574,25 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
                     "part_name": part_info.get("part_name", "Unknown"),
                     "description": part_info.get("description", ""),
                     "total_revenue": 0.0,
+                    "total_cost": 0.0,
                     "total_labor_cost": 0.0,
                     "job_part_count": 0,
                 }
 
-            # Revenue: the job_part's agreed line total (post-conversion source
-            # of truth; reflects quantity edits). Unlinked/manual job_parts with
-            # no price contribute 0. See _job_part_revenue.
-            part_data[part_id]["total_revenue"] += _job_part_revenue(jp)
+            data = part_data[part_id]
+            data["total_revenue"] += _job_part_revenue(jp)
+            data["total_cost"] += float(true_cost_per_unit) * quantity
+            data["total_labor_cost"] += _job_part_labor_cost(jp, quantity)
+            data["job_part_count"] += 1
 
-            # Labor cost: per-operation rollup using the cost contract.
-            operations = jp.get("job_operations") or []
-            if isinstance(operations, list):
-                for op in operations:
-                    wc = op.get("work_centers") or {}
-                    if isinstance(wc, list) and wc:
-                        wc = wc[0]
-                    ro = op.get("routing_operations") or {}
-                    if isinstance(ro, list) and ro:
-                        ro = ro[0]
-
-                    kind = wc.get("kind") if isinstance(wc, dict) else None
-
-                    if kind == "external":
-                        # External op: priced from the routing_operation row
-                        # (the source-of-truth for external pricing). Treat
-                        # missing pricing as zero contribution from this op
-                        # rather than raising — a job that shipped is history,
-                        # not a cost recalc context.
-                        unit_price = float(
-                            (ro.get("external_unit_price") if isinstance(ro, dict) else 0)
-                            or 0
-                        )
-                        setup_cost = float(
-                            (ro.get("external_setup_cost") if isinstance(ro, dict) else 0)
-                            or 0
-                        )
-                        op_cost = unit_price * quantity + setup_cost
-                    else:
-                        # Internal op (or unknown — treat as internal).
-                        # estimated_setup_minutes + estimated_run_minutes_per_unit * qty
-                        # are minutes; divide by 60 before multiplying by the
-                        # per-hour labor rate.
-                        setup_minutes = float(
-                            op.get("estimated_setup_minutes", 0) or 0
-                        )
-                        run_minutes_per_unit = float(
-                            op.get("estimated_run_minutes_per_unit", 0) or 0
-                        )
-                        total_minutes = setup_minutes + (run_minutes_per_unit * quantity)
-                        total_hours = total_minutes / 60.0
-
-                        # Cost contract: COALESCE(labor_rate_override, wc.labor_rate).
-                        # Both NULL = no rate available for this op; raise rather
-                        # than silently treating as $0.
-                        override = (
-                            ro.get("labor_rate_override")
-                            if isinstance(ro, dict)
-                            else None
-                        )
-                        wc_rate = wc.get("labor_rate") if isinstance(wc, dict) else None
-                        if override is None and wc_rate is None:
-                            raise RuntimeError(
-                                f"Cannot compute labor cost for job_part {jp.get('id')}: "
-                                f"routing op has no labor rate (neither override nor "
-                                f"work_center default). Set a rate before re-running "
-                                f"profitability."
-                            )
-                        labor_rate = float(override if override is not None else wc_rate)
-                        op_cost = total_hours * labor_rate
-
-                    part_data[part_id]["total_labor_cost"] += op_cost
-
-            part_data[part_id]["job_part_count"] += 1
-
-    # Calculate profit margin and sort
     parts_list = []
-    for part_id, data in part_data.items():
+    for data in part_data.values():
         revenue = data["total_revenue"]
-        cost = data["total_labor_cost"]
+        cost = data["total_cost"]
+        labor_cost = data["total_labor_cost"]
+        # Materials by subtraction from the authoritative total. Exact by
+        # construction, and impossible to drift from the rollup.
+        material_cost = cost - labor_cost
         profit = revenue - cost
         margin = (profit / revenue * 100) if revenue > 0 else 0.0
 
@@ -598,7 +600,9 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
             "part_name": data["part_name"],
             "description": data["description"],
             "revenue": round(revenue, 2),
-            "labor_cost": round(cost, 2),
+            "cost": round(cost, 2),
+            "labor_cost": round(labor_cost, 2),
+            "material_cost": round(material_cost, 2),
             "profit": round(profit, 2),
             "margin_pct": round(margin, 1),
             "job_count": data["job_part_count"],
@@ -609,6 +613,7 @@ def get_part_profitability(company_id: str, limit: int = 10) -> dict:
     return {
         "parts": parts_list[:limit],
         "total_parts_analyzed": len(parts_list),
+        "excluded_job_parts": excluded_job_parts,
     }
 
 

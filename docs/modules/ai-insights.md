@@ -240,6 +240,29 @@ quote's unchosen lines.** `get_revenue_forecast` is the deliberate exception: it
 `quote_line_items.total_price`, because it values the **open, unconverted** pipeline where no job
 exists yet. The same rule is encoded in the NL→SQL guidance in `schema_context.py`.
 
+**Cost source of truth — the same discipline, on the other side of the margin.** `get_part_profitability`
+costs a job from **`job_parts.true_cost_per_unit`**, the all-in TRUE cost (labour + materials + the whole
+nested BOM) frozen when the job_part was created and re-taken only when its quantity changes
+([`20260811233748`](../../supabase/migrations/20260811233748_job_cost_snapshot.sql)). It must **never**
+recompute cost from the part's current routing or rates: a job that shipped is history, and re-costing it
+against today's numbers means last year's profit moves whenever someone re-rates a work centre. The
+labour/materials split comes from the rates frozen on `job_operations` (`labor_rate_snapshot`,
+`external_unit_price_snapshot`) with materials as the remainder — materials are deliberately not stored per
+BOM line, because costing one line needs the unit conversion, whole-unit ceiling and made-vs-bought
+valuation rules that live inside `part_rollup_at_qty`.
+
+A `true_cost_per_unit` of NULL means the cost could not be determined when the job was created. Those
+job_parts are **excluded** and counted in `excluded_job_parts`; folding them in at zero would overstate
+profit, which is the one direction a shop must not be misled in. Costs use **estimated** time — no actual
+duration per operation is recorded anywhere.
+
+**This function returned HTTP 400 from 2026-06-23 to 2026-08-11.** It selected
+`routing_operations.external_setup_cost` after [`20260623022617`](../../supabase/migrations/20260623022617_drop_external_setup_cost.sql)
+dropped that column, and nothing executed the real select string — the predefined metric tools are not
+offered to the model (see above), so no call path reached it and no test covered it.
+`test_job_cost_snapshot.py::test_get_part_profitability_runs_and_charges_materials` now calls the real
+function against a real PostgREST, which is the only thing that would have caught it.
+
 ---
 
 ## Acceptance Criteria

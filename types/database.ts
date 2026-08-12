@@ -1092,10 +1092,12 @@ export type Database = {
           created_at: string | null
           estimated_run_minutes_per_unit: number | null
           estimated_setup_minutes: number | null
+          external_unit_price_snapshot: number | null
           id: string
           instructions: string | null
           job_id: string
           job_part_id: string
+          labor_rate_snapshot: number | null
           notes: string | null
           operation_name: string
           routing_operation_id: string | null
@@ -1105,6 +1107,7 @@ export type Database = {
           status: string
           updated_at: string | null
           work_center_id: string | null
+          work_center_kind_snapshot: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -1112,10 +1115,12 @@ export type Database = {
           created_at?: string | null
           estimated_run_minutes_per_unit?: number | null
           estimated_setup_minutes?: number | null
+          external_unit_price_snapshot?: number | null
           id?: string
           instructions?: string | null
           job_id: string
           job_part_id: string
+          labor_rate_snapshot?: number | null
           notes?: string | null
           operation_name: string
           routing_operation_id?: string | null
@@ -1125,6 +1130,7 @@ export type Database = {
           status?: string
           updated_at?: string | null
           work_center_id?: string | null
+          work_center_kind_snapshot?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -1132,10 +1138,12 @@ export type Database = {
           created_at?: string | null
           estimated_run_minutes_per_unit?: number | null
           estimated_setup_minutes?: number | null
+          external_unit_price_snapshot?: number | null
           id?: string
           instructions?: string | null
           job_id?: string
           job_part_id?: string
+          labor_rate_snapshot?: number | null
           notes?: string | null
           operation_name?: string
           routing_operation_id?: string | null
@@ -1145,6 +1153,7 @@ export type Database = {
           status?: string
           updated_at?: string | null
           work_center_id?: string | null
+          work_center_kind_snapshot?: string | null
         }
         Relationships: [
           {
@@ -1195,6 +1204,7 @@ export type Database = {
           started_at: string | null
           status_changed_at: string | null
           total_price: number | null
+          true_cost_per_unit: number | null
           unit_price: number | null
           updated_at: string
         }
@@ -1215,6 +1225,7 @@ export type Database = {
           started_at?: string | null
           status_changed_at?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number | null
           updated_at?: string
         }
@@ -1235,6 +1246,7 @@ export type Database = {
           started_at?: string | null
           status_changed_at?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number | null
           updated_at?: string
         }

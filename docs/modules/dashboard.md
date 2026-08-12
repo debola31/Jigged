@@ -47,7 +47,7 @@ prefixed `/dashboard/{companyId}` — *(⚠ this doc previously listed them with
 | `open_quotes` | Open Quotes | count `quotes.status = 'active'` | `/quotes?status=active` |
 | `not_started_jobs` | Jobs Not Started | count `jobs.production_status = 'not_started'` | `/jobs?status=not_started` |
 | `in_progress_jobs` | Jobs In Progress | count `jobs.production_status = 'in_progress'` | `/jobs?status=in_progress` |
-| `revenue` | Revenue (currency) | sum of related `quote_line_items.total_price` for jobs `fulfillment_status = 'fully_shipped'`, bucketed by `updated_at` in the period | `/jobs?status=shipped` |
+| `revenue` | Revenue (currency) | sum of `job_parts.total_price` for jobs `fulfillment_status = 'fully_shipped'`, bucketed by `updated_at` in the period | `/jobs?status=shipped` |
 | `completed_jobs` | Completed Jobs | count `jobs.fulfillment_status = 'fully_shipped'` in the period | `/jobs?status=completed` |
 | `overdue_jobs` | Overdue Jobs | the shared `applyOverdueJobsFilter` predicate — same one the jobs list uses | `/jobs?overdue=true` |
 

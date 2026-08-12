@@ -40,6 +40,7 @@ import StorageSearch, { type StorageHit } from './StorageSearch';
 import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
 import PlaceDrawer from './place/PlaceDrawer';
+import UnitAdjustDrawer from './place/UnitAdjustDrawer';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
 
@@ -244,6 +245,10 @@ export default function LocationsManager({
   /** The part whose places are showing, if the search found one. */
   const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
 
+  /** The unit being bulk-adjusted, if any. Resolved from the tree so a rename lands in its header. */
+  const [adjustUnitId, setAdjustUnitId] = useState<string | null>(null);
+  const adjustUnit = adjustUnitId ? byNodeId.get(adjustUnitId) ?? null : null;
+
   /**
    * The node the drawer is showing.
    *
@@ -368,9 +373,12 @@ export default function LocationsManager({
      * are identical and the split is only in the surface.
      */
     onAdjust: (node: InventoryLocationNode) => {
-      setPlaceId(null);
+      // A DRAWER, not a page. It was the last control on Storage that navigated, and it did it for
+      // the operation you are most likely to run while looking at the cabinet. The shop-wide
+      // worksheet still exists and is still reached from Parts as `Count Inventory`; what moved
+      // here is its place-scoped half.
       setDrawerPlaceId(null);
-      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
+      setAdjustUnitId(node.id);
     },
     onAddChild: (node: InventoryLocationNode) => {
       setPlaceId(null);
@@ -707,6 +715,14 @@ export default function LocationsManager({
           void reload();
           setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
         }}
+      />
+
+      {/* A whole unit, bin by bin, without leaving the page it belongs to. */}
+      <UnitAdjustDrawer
+        unit={adjustUnit}
+        companyId={companyId}
+        onClose={() => setAdjustUnitId(null)}
+        onChanged={reload}
       />
 
       {/*

@@ -1,18 +1,22 @@
 'use client';
 
 /**
- * Add · Remove · Move, standing at one place. The office half of the operator's four verbs.
+ * Add · Remove · Move, standing at one place — several parts at a time.
  *
  * ## A section inside the place drawer, not a page and not a dialog
  *
  * It was a `Dialog` first — which would have stacked a surface on a surface, the exact thing that
  * made `Manage` cover the cabinet you were acting on. Then it was a *view* the drawer swapped to,
  * which was one layer but still cost the contents list, the history and the other three verbs off
- * screen to type one quantity.
+ * screen to type one quantity. It opens **in place, under the button that opened it**.
  *
- * Now it opens **in place, under the button that opened it**. The drawer is one page: what is in
- * the bin stays visible while you add to it, and cancelling is a collapse rather than a journey
- * back. There is room — this only ever holds a part, a quantity, and a note.
+ * ## Several rows, because one at a time was the wrong unit of work
+ *
+ * `Adjust` had always taken a number per part — you walk to a shelf and count what is on it, not
+ * one item on it. The other three were single-part, so putting a delivery of six things away meant
+ * six openings of the same form, and emptying the put-away pile meant one part per trip. They now
+ * take **a quantity per row**, exactly like Adjust: same table, same rule that a blank row is not
+ * an instruction.
  *
  * ## Why this exists at all
  *
@@ -33,42 +37,73 @@
  * | Adjust   | `adjust_stock_at_location`  | `adjustment` |
  *
  * Nothing else exists. **`Count` and `Put away` were never separate actions** — a count commits one
- * `adjustStockAtLocation` per line (`commitCount`), and put-away is `bulk_put_away` writing
- * ordinary transfer pairs. They are batch *forms* of Adjust and Move, so they are not buttons here;
- * Adjust is the worksheet, reached from the panel.
+ * `adjustStockAtLocation` per line (`commitCount`), and put-away is `bulk_put_away` writing ordinary
+ * transfer pairs. They are batch *forms* of two of the four.
  *
- * That is why this modal handles three verbs and not four: Adjust at a place is inherently
- * multi-part (you are auditing a shelf, not correcting one number), and it already has a screen.
+ * ## One transfer per row, and why that does not break the atomicity rule
  *
- * ## Part-first vs place-first
+ * The count worksheet's put-away is deliberately **one atomic RPC** — `bulk_put_away` — and records
+ * its reason: *"a half-moved pile is worse than no move, because you can't tell what you already
+ * did."* That objection is about **not knowing**, and it is answered here rather than ignored: this
+ * commits row by row and names every row that failed, beside the count that landed. Each
+ * `transfer_stock` is itself atomic, so no single part is ever left half-moved; the only partial
+ * state is "these four went, this one did not", which is stated on screen.
  *
- * Deliberately a sibling of [`PartLocationActionModal`](../../parts/PartLocationActionModal.tsx)
- * rather than a generalisation of it. That one fixes the part and picks a location; this fixes the
- * location and picks a part. Merging them would mean one component whose every field is
- * conditional on which of its two axes is pinned, on the two screens where a mistake writes to a
- * stock ledger. The duplicated parts — quantity, unit, notes, attribution — are small and stable;
- * the axis is what differs, and it differs all the way down.
+ * It also cannot use `bulk_put_away`, which moves **whole balances** by part id and has nowhere to
+ * put a quantity. Taking three of the twelve on a shelf is the ordinary case here. The worksheet
+ * keeps the atomic whole-balance version for the job it was built for.
+ *
+ * ## When the bin holds a lot
+ *
+ * `Remove` and `Move` list everything at the place, which is right for the three-part bin that is
+ * the normal case and wrong for the put-away pile — measured at 57 rows at one real shop. Above
+ * eight rows a filter appears, and **a row you have typed into is exempt from it**. That exemption
+ * is the whole safety of the feature: `lines` is derived from every row, because the blank-row rule
+ * requires it, so a filter that could hide a typed row would be a way to write something you cannot
+ * see. Nothing reorders either — a row stays where it loaded whether you type in it or not, because
+ * a list that rearranges under a person mid-count is a second way to lose your place.
+ *
+ * ## `All`, and why only two verbs get it
+ *
+ * Emptying a bin should not mean typing `2,099` correctly. `Remove` and `Move` get an **All** on
+ * every row, and an `Everything here` above the list for the whole-bin case — because for those two
+ * "all" is a number the system already knows: the amount on hand.
+ *
+ * **`Adjust` deliberately gets neither.** Its equivalent value is `0`, and calling zero "all" is the
+ * opposite word for the same button. It would also save nothing — `0` is one character where
+ * `2,099` is five and has to match — and a one-tap way to zero an entire shelf is the most
+ * destructive thing in this module, which is not what a convenience button should be. The audit's
+ * other reading, *"everything matches what we thought"*, is not worth a button either: the worksheet
+ * drops zero-delta lines, so it would be a control that writes nothing.
+ *
+ * **`All` fills the field; it is not a mode.** No "everything" flag reaches the write path — the
+ * number lands in the input where you can see it, change it, and read it back before submitting.
+ * One write path, and the quantity you are about to commit is always on screen as a number.
  *
  * ## Which parts each verb offers
  *
- * `Remove` and `Move` can only touch what is **here**, so they list the bin's contents with the
- * quantity on hand: you cannot take out what is not in the drawer, and offering the whole catalogue
- * would invite a removal that fails at the RPC. `Add` offers **every** stocked part, including ones
- * already here — the operator's receive flow excludes those because a phone user tops up from the
- * part's own card, but here there is no card to tap and excluding them would make the common case
- * (more of what is already in the bin) the one thing the button cannot do.
+ * `Remove` and `Move` can only touch what is **here**, so their rows ARE the bin's contents: you
+ * cannot take out what is not in the drawer. `Add` has no such list — the catalogue is unbounded —
+ * so its rows are built by picking parts, including ones already here. The operator's receive flow
+ * excludes those because a phone user tops up from the part's own card; here there is no card to
+ * tap, and excluding them would make the common case (more of what is already in the bin) the one
+ * thing the button cannot do.
  */
 
 import { useMemo, useState } from 'react';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
-import Box from '@mui/material/Box';
-import Typography from '@mui/material/Typography';
 import Autocomplete from '@mui/material/Autocomplete';
+import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import LinearProgress from '@mui/material/LinearProgress';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
+import CloseIcon from '@mui/icons-material/Close';
 
 import ErrorAlert from '@/components/common/ErrorAlert';
 import JobTagPicker, { loadTaggableJobs } from '@/components/inventory/JobTagPicker';
@@ -84,11 +119,10 @@ import {
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
 import { useLoad } from '@/hooks/useLoad';
-import type { LocationContent } from '@/types/inventoryLocations';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import type { JobWithRelations } from '@/types/job';
 
-/** The three verbs that act on one part at one place. `adjust` is the worksheet, not this. */
+/** The three verbs that act on stock at one place. `adjust` has its own form. */
 export type PlaceStockAction = 'add' | 'deplete' | 'move';
 
 const TITLES: Record<PlaceStockAction, string> = {
@@ -111,6 +145,17 @@ const SUBMIT: Record<PlaceStockAction, string> = {
 };
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+/** Rows above which a filter earns its place. Matches the unit-level drawer's own threshold. */
+const FILTER_FROM = 8;
+
+/** One line of the form: a part, and how much of it. `onHand` is null when it is not here yet. */
+interface Row {
+  partId: string;
+  partName: string;
+  primaryUnit: string;
+  onHand: number | null;
+}
 
 export interface PlaceStockActionFormProps {
   action: PlaceStockAction;
@@ -136,30 +181,44 @@ export default function PlaceStockActionForm({
 }: PlaceStockActionFormProps) {
   const fromHere = action !== 'add';
 
-  const [partId, setPartId] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState('');
+  /** part id → what was typed, verbatim. Strings, so a half-typed "1." is not yet a number. */
+  const [qty, setQty] = useState<Record<string, string>>({});
+  /** part id → unit, only where the person changed it away from the part's own. */
+  const [unitFor, setUnitFor] = useState<Record<string, string>>({});
+  /** `add` only: the rows built by picking. The catalogue is unbounded, so rows are chosen. */
+  const [picked, setPicked] = useState<Row[]>([]);
   /**
-   * The unit, overridable.
+   * The picker's text, controlled so it can be CLEARED on every pick.
    *
-   * Held as an override rather than as the value itself because the selected part can change
-   * underneath it — including by being auto-selected as the bin's only occupant. A plain state
-   * would still read `ea` while the picker showed a part measured in feet, and a `Select` whose
-   * value is absent from its options renders blank.
+   * Left uncontrolled, MUI keeps the chosen label in the box while `value` resets to null — so the
+   * list stays filtered to the thing you just added and the next part appears to be missing.
    */
-  const [unitOverride, setUnitOverride] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
+  const [pickText, setPickText] = useState('');
   const [destination, setDestination] = useState<LocationPickerOption | null>(null);
+  /** Only rendered above `FILTER_FROM` rows; a three-part bin needs no search box. */
+  const [filter, setFilter] = useState('');
+  const [job, setJob] = useState<JobWithRelations | null>(null);
+  /**
+   * One note for the batch.
+   *
+   * The single-part form had this and the batch rewrite dropped it — a silent capability loss, and
+   * the note is often the only record of WHY ("scrapped, bad heat"). Per batch rather than per row
+   * because the reason is the same for everything you are carrying in one trip; a per-row note
+   * would be a second column on a row already carrying three controls.
+   */
+  const [notes, setNotes] = useState('');
+
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [failures, setFailures] = useState<Array<{ partName: string; message: string }>>([]);
+  /** How many lines landed in the last partial save — captured, not recomputed from live state. */
+  const [saved, setSaved] = useState(0);
   /**
    * The caught error object, not a formatted string: `ErrorAlert` needs the object to tell a
    * billing block from an ordinary failure. Validation messages stay plain strings, which it
    * renders as-is.
    */
   const [error, setError] = useState<unknown>(null);
-
-  /** Job tag on a removal — the same affordance the operator and part paths already offer. */
-  const [job, setJob] = useState<JobWithRelations | null>(null);
-
 
   /*
    * One read, chosen by verb.
@@ -170,7 +229,7 @@ export default function PlaceStockActionForm({
    * drawer's contents list and this form cannot disagree about what is in the drawer — one of them
    * is reading a snapshot either way, and the one about to WRITE is the one that must be current.
    */
-  const { data, loading: loadingParts, error: loadError } = useLoad(
+  const { data, loading, error: loadError } = useLoad(
     async () =>
       action === 'add'
         ? ({ kind: 'parts', parts: await getStockedParts(companyId) } as const)
@@ -178,16 +237,7 @@ export default function PlaceStockActionForm({
     [action, companyId, locationId],
   );
 
-  const contents: LocationContent[] = data?.kind === 'contents' ? data.page.contents : [];
-  const clipped =
-    data?.kind === 'contents' ? Math.max(0, data.page.total - data.page.contents.length) : 0;
-
-  /*
-   * Two side loads that are not the part list: who is doing this, and the jobs a removal may be
-   * tagged to. Both are fire-and-forget and neither gates the form, so they hang off `useLoad`
-   * rather than an effect that would setState synchronously — the author is best-effort by design
-   * (a failed lookup writes no author rather than blocking a stock correction on a name).
-   */
+  /** Best-effort author: a failed lookup writes no name rather than blocking a stock correction. */
   const { data: member } = useLoad(() => getCurrentMember(companyId).catch(() => null), [companyId]);
   const operatorId = member?.id ?? null;
 
@@ -196,60 +246,82 @@ export default function PlaceStockActionForm({
     [action, companyId],
   );
 
-  /** One shape for the picker whichever list feeds it, so the render below has no branch. */
-  const options = useMemo(
+  /** Everything that could be picked for an `add`, minus what is already a row. */
+  const addable = useMemo(() => {
+    if (data?.kind !== 'parts') return [];
+    const already = new Set(picked.map((r) => r.partId));
+    return data.parts
+      .filter((p) => !already.has(p.id))
+      .map((p) => ({
+        partId: p.id,
+        partName: p.part_name,
+        primaryUnit: p.primary_unit || 'ea',
+        onHand: null as number | null,
+      }));
+  }, [data, picked]);
+
+  /** The rows on screen. The bin's contents for Remove and Move; whatever was picked for Add. */
+  const rows: Row[] = useMemo(() => {
+    if (action === 'add') return picked;
+    if (data?.kind !== 'contents') return [];
+    return data.page.contents.map((c) => ({
+      partId: c.part_id,
+      partName: c.part_name,
+      primaryUnit: c.primary_unit || 'ea',
+      onHand: c.quantity,
+    }));
+  }, [action, picked, data]);
+
+  const clipped =
+    data?.kind === 'contents' ? Math.max(0, data.page.total - data.page.contents.length) : 0;
+
+  const unitsFor = (row: Row) =>
+    Array.from(new Set([row.primaryUnit, ...getStandardUnitsForUnit(row.primaryUnit)])).filter(
+      Boolean,
+    );
+
+  const unitOf = (row: Row) => unitFor[row.partId] ?? row.primaryUnit;
+
+  /** Rows carrying a usable quantity. A blank, a stray minus, a half-typed decimal are not lines. */
+  const lines = useMemo(
     () =>
-      // Derived inside the memo: a `?:` outside it produces a fresh array every render, which makes
-      // the memo's dependency change every render and the memo pointless.
-      data?.kind === 'contents'
-        ? data.page.contents.map((c) => ({
-            id: c.part_id,
-            name: c.part_name,
-            primaryUnit: c.primary_unit || 'ea',
-            onHand: c.quantity,
-          }))
-        : (data?.parts ?? []).map((p) => ({
-            id: p.id,
-            name: p.part_name,
-            primaryUnit: p.primary_unit || 'ea',
-            onHand: null as number | null,
-          })),
-    [data],
+      rows
+        .map((row) => ({ row, value: parseFloat(qty[row.partId] ?? '') }))
+        .filter((l) => Number.isFinite(l.value) && l.value > 0),
+    [rows, qty],
   );
 
-  /**
-   * A bin holding exactly one part is not a choice, so it counts as chosen until you choose
-   * otherwise. Derived rather than written during the load: setting state from a fetch is what the
-   * cascading-render rule is about, and this needs no state to be true.
-   */
-  const only = fromHere && options.length === 1 ? options[0] : null;
-  const selected = options.find((o) => o.id === partId) ?? only;
+  /** Put this row's whole on-hand in its quantity box, in the part's own unit. */
+  const fillRow = (row: Row) => {
+    if (row.onHand == null) return;
+    setQty((q) => ({ ...q, [row.partId]: String(row.onHand) }));
+    setUnitFor((u) => ({ ...u, [row.partId]: row.primaryUnit }));
+  };
 
-  const unitOptions = useMemo(() => {
-    const pu = selected?.primaryUnit || 'ea';
-    return Array.from(new Set([pu, ...getStandardUnitsForUnit(pu)])).filter(Boolean);
-  }, [selected]);
+  /** Filtered rows — with every line exempt, so nothing about to be written can be off screen. */
+  const filled = useMemo(() => new Set(lines.map((l) => l.row.partId)), [lines]);
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => filled.has(r.partId) || r.partName.toLowerCase().includes(q));
+  }, [rows, filter, filled]);
 
-  const unit = unitOverride && unitOptions.includes(unitOverride)
-    ? unitOverride
-    : selected?.primaryUnit || 'ea';
-
-  const pickPart = (o: (typeof options)[number] | null) => {
-    setPartId(o?.id ?? null);
-    setUnitOverride(null);
+  /** Every row on screen, filled with its whole on-hand. The empty-the-bin case. */
+  const fillAllVisible = () => {
+    setQty((q) => {
+      const next = { ...q };
+      for (const row of visible) if (row.onHand != null) next[row.partId] = String(row.onHand);
+      return next;
+    });
+    setUnitFor((u) => {
+      const next = { ...u };
+      for (const row of visible) if (row.onHand != null) next[row.partId] = row.primaryUnit;
+      return next;
+    });
   };
 
   const submit = async () => {
-    const partId = selected?.id ?? null;
-    if (!partId) {
-      setError('Choose a part.');
-      return;
-    }
-    const qty = parseFloat(quantity);
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setError('Quantity must be positive.');
-      return;
-    }
+    if (lines.length === 0) return;
     if (action === 'move' && !destination) {
       setError('Choose where it is going.');
       return;
@@ -257,53 +329,97 @@ export default function PlaceStockActionForm({
 
     setSaving(true);
     setError(null);
-    try {
-      if (action === 'add') {
-        await addStockAtLocation(partId, locationId, qty, unit, {
-          notes: notes || undefined,
-          operatorId: operatorId || undefined,
+    setFailures([]);
+    setProgress({ done: 0, total: lines.length });
+
+    /*
+     * Row by row, and every failure named.
+     *
+     * `transfer_stock` and its siblings are each atomic, so no ONE part is ever left half-done. The
+     * only partial state is "these four went, this one did not" — which is reported below rather
+     * than left to be discovered, and that is the whole of the objection the worksheet's atomic
+     * put-away was protecting against.
+     */
+    const failed: Array<{ partName: string; message: string }> = [];
+    const succeeded: string[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const { row, value } = lines[i];
+      setProgress({ done: i, total: lines.length });
+      const unit = unitOf(row);
+      try {
+        if (action === 'add') {
+          await addStockAtLocation(row.partId, locationId, value, unit, {
+            notes: notes || undefined,
+            operatorId: operatorId || undefined,
+          });
+        } else if (action === 'deplete') {
+          await depleteStockAtLocation(row.partId, locationId, value, unit, {
+            notes: notes || undefined,
+            operatorId: operatorId || undefined,
+            jobId: job?.id,
+          });
+        } else {
+          await transferStock(row.partId, locationId, destination!.id, value, unit, {
+            notes: notes || undefined,
+            operatorId: operatorId || undefined,
+          });
+        }
+        /*
+         * One event per WRITE, not one per batch. `stock updated` has always meant "a stock write
+         * happened" and carries the part and quantity; collapsing a batch into one event would
+         * make those two properties describe an arbitrary member of it.
+         */
+        posthog.capture('stock updated', {
+          surface: 'storage',
+          action,
+          part_id: row.partId,
+          quantity: value,
+          unit,
+          location_id: locationId,
         });
-      } else if (action === 'deplete') {
-        await depleteStockAtLocation(partId, locationId, qty, unit, {
-          notes: notes || undefined,
-          operatorId: operatorId || undefined,
-          jobId: job?.id,
-        });
-      } else {
-        await transferStock(partId, locationId, destination!.id, qty, unit, {
-          notes: notes || undefined,
-          operatorId: operatorId || undefined,
+        succeeded.push(row.partId);
+      } catch (e) {
+        failed.push({
+          partName: row.partName,
+          message: e instanceof Error ? e.message : 'Could not save this line.',
         });
       }
-
-      /*
-       * One `stock updated` event for every surface — the surface is a property, never part of the
-       * name (telemetry.md). `location_id` is sent because on this surface the place is the thing
-       * you were looking at when you acted, which is exactly the question Storage exists to answer.
-       */
-      posthog.capture('stock updated', {
-        surface: 'storage',
-        action,
-        part_id: partId,
-        quantity: qty,
-        unit,
-        location_id: locationId,
-      });
-      await onDone();
-      onCancel();
-    } catch (e) {
-      setError(e);
-    } finally {
-      setSaving(false);
     }
+
+    setProgress(null);
+    setSaving(false);
+    await onDone();
+
+    if (failed.length > 0) {
+      /*
+       * DISARM WHAT LANDED, or retrying doubles it.
+       *
+       * The form stays open so a failed line can be fixed without re-typing the others — and until
+       * this ran, the quantities of the lines that SUCCEEDED were still in the boxes, so the button
+       * still read `Remove stock (5)` and pressing it, the single most obvious next move, ran those
+       * four again. `add_stock_at_location` is a delta, not a set, so adding 12 twice leaves 24 in
+       * the bin and nothing to undo it with.
+       *
+       * The comment that used to sit here described exactly this hazard as the reason the form stays
+       * open. It stayed open and stayed armed.
+       */
+      setQty((q) => {
+        const next = { ...q };
+        for (const id of succeeded) delete next[id];
+        return next;
+      });
+      // A picked `add` row that landed is done with; leaving it would put a zero-quantity row back
+      // in a list whose whole purpose is the parts you are still adding.
+      if (action === 'add') setPicked((p) => p.filter((r) => !succeeded.includes(r.partId)));
+      setSaved(succeeded.length);
+      setFailures(failed);
+      return;
+    }
+    onCancel();
   };
 
-  // Only after the read has finished — before that, an empty list means "not loaded yet", and
-  // saying "nothing is here" while the fetch is in flight is a wrong answer with a confident face.
-  const nothingHere = fromHere && !loadingParts && contents.length === 0;
+  const nothingHere = fromHere && !loading && rows.length === 0;
 
-  // Mount IS entering, now that the drawer owns the switch. Keyed by action upstream, so changing
-  // verb remounts and re-reads rather than reusing the previous verb's list.
   return (
     <Box
       sx={{
@@ -320,106 +436,238 @@ export default function PlaceStockActionForm({
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
         {TITLES[action]}
       </Typography>
-      <Box>
-        <Stack spacing={2}>
-          {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
-          {nothingHere ? (
-            // Not an error — an empty bin is an ordinary state, and the honest answer is that
-            // there is nothing to take out of it rather than a picker with no options in it.
-            <Alert severity="info">
-              Nothing is recorded at {locationName} yet, so there is nothing to{' '}
-              {action === 'deplete' ? 'remove' : 'move'}. Add stock here first.
-            </Alert>
-          ) : (
-            <>
-              {clipped > 0 && (
-                <Alert severity="info">
-                  Showing the {contents.length} largest of {num(contents.length + clipped)} parts
-                  here. Search for one by name if it is not listed.
-                </Alert>
-              )}
-              <Autocomplete
-                options={options}
-                loading={loadingParts}
-                value={selected}
-                onChange={(_, v) => pickPart(v)}
-                getOptionLabel={(o) =>
-                  o.onHand == null ? o.name : `${o.name} — ${num(o.onHand)} ${o.primaryUnit}`
-                }
-                isOptionEqualToValue={(a, b) => a.id === b.id}
-                renderInput={(params) => <TextField {...params} label="Part" required />}
-              />
+      <Stack spacing={2}>
+        {(error ?? loadError) != null && <ErrorAlert error={error ?? loadError} />}
 
-              <Stack direction="row" spacing={2}>
-                <TextField
-                  label="Quantity"
-                  type="number"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  required
-                  fullWidth
-                  slotProps={{ htmlInput: { min: 0, step: 'any' } }}
-                  // What is on hand, where the number is being typed — so "remove 40" from a bin
-                  // holding 12 is caught by the person, not by an RPC error afterwards.
-                  helperText={
-                    selected?.onHand != null
-                      ? `${num(selected.onHand)} ${selected.primaryUnit} here now`
-                      : ' '
-                  }
-                />
-                <TextField
-                  select
-                  label="Unit"
-                  value={unit}
-                  onChange={(e) => setUnitOverride(e.target.value)}
-                  sx={{ minWidth: 120 }}
-                >
-                  {unitOptions.map((u) => (
-                    <MenuItem key={u} value={u}>
-                      {u}
-                    </MenuItem>
-                  ))}
-                </TextField>
+        {failures.length > 0 && (
+          <Alert severity="warning">
+            {/* The captured count, not `lines.length - failures.length` — the lines that landed have
+                just been cleared out of `lines`, so recomputing it would report zero. */}
+            {saved} saved and cleared from this list. These did not:{' '}
+            {failures.map((f) => `${f.partName} (${f.message})`).join('; ')}
+          </Alert>
+        )}
+
+        {clipped > 0 && (
+          <Alert severity="info">
+            Showing the {rows.length} largest of {num(rows.length + clipped)} parts here.
+          </Alert>
+        )}
+
+        {/* `Add` builds its own rows: the catalogue is unbounded, so there is nothing to list. */}
+        {action === 'add' && (
+          <Autocomplete
+            options={addable}
+            loading={loading}
+            value={null}
+            inputValue={pickText}
+            onInputChange={(_, v, reason) => setPickText(reason === 'reset' ? '' : v)}
+            // Cleared on every pick so the field is ready for the next one — this is a row builder,
+            // not a selection that stays selected.
+            onChange={(_, v) => {
+              if (v) setPicked((p) => [...p, v]);
+              setPickText('');
+            }}
+            getOptionLabel={(o) => o.partName}
+            isOptionEqualToValue={(a, b) => a.partId === b.partId}
+            renderInput={(params) => (
+              <TextField {...params} label="Add a part to this list" size="small" />
+            )}
+          />
+        )}
+
+        {loading && rows.length === 0 ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+            <CircularProgress size={22} />
+          </Box>
+        ) : nothingHere ? (
+          // Not an error — an empty bin is an ordinary state, and the honest answer is that there
+          // is nothing to take out of it rather than a list with no rows in it.
+          <Alert severity="info">
+            Nothing is recorded at {locationName} yet, so there is nothing to{' '}
+            {action === 'deplete' ? 'remove' : 'move'}. Add stock here first.
+          </Alert>
+        ) : rows.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Pick a part above to start the list.
+          </Typography>
+        ) : (
+          <Stack spacing={1}>
+            {/*
+              The whole-bin case: emptying a shelf, or putting the entire pile away.
+
+              Fills what is ON SCREEN, so a filtered list fills only what it is showing — and since
+              a filled row is exempt from the filter, everything it just filled stays visible. The
+              set you are about to write is never larger than the set you can see.
+            */}
+            {fromHere && rows.length > 1 && (
+              <Stack direction="row" justifyContent="flex-end">
+                <Button size="small" onClick={fillAllVisible}>
+                  Everything here
+                </Button>
               </Stack>
+            )}
 
-              {action === 'move' && (
-                <LocationPicker
-                  label="Move to"
-                  options={moveDestinations}
-                  value={destination}
-                  onChange={setDestination}
-                  // Cannot move something to where it already is, and the put-away pile is a
-                  // holding area rather than a destination you would choose on purpose.
-                  excludeId={locationId}
-                  excludeSystem
-                  required
-                />
-              )}
-
-              {action === 'deplete' && (
-                <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
-              )}
-
+            {/* A search box on a three-row bin is a control that costs more than it saves. */}
+            {rows.length > FILTER_FROM && (
               <TextField
-                label="Notes (optional)"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                multiline
-                minRows={2}
+                size="small"
+                placeholder="Filter by part…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                helperText={
+                  filter.trim() && lines.length > 0
+                    ? `Showing ${visible.length} of ${rows.length} — including ${lines.length} you have filled in.`
+                    : ' '
+                }
               />
-            </>
-          )}
-          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
-            <Button onClick={onCancel} disabled={saving}>
-              Cancel
-            </Button>
-            <Button variant="contained" onClick={submit} disabled={saving || nothingHere}>
-              {saving ? 'Saving…' : SUBMIT[action]}
-            </Button>
+            )}
+            {visible.map((row) => {
+              const typed = qty[row.partId] ?? '';
+              const value = parseFloat(typed);
+              const over = row.onHand != null && Number.isFinite(value) && value > row.onHand;
+              return (
+                <Stack
+                  key={row.partId}
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={{ xs: 0.5, sm: 1.5 }}
+                  alignItems={{ xs: 'stretch', sm: 'center' }}
+                  sx={{ minHeight: 48, py: { xs: 0.5, sm: 0 } }}
+                >
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" noWrap title={row.partName}>
+                      {row.partName}
+                    </Typography>
+                    {/* What is on hand, on the row the quantity is typed into — so "remove 40"
+                        from a bin holding 12 is caught by the person, not by an RPC afterwards. */}
+                    <Typography variant="caption" color={over ? 'error.main' : 'text.secondary'}>
+                      {row.onHand == null
+                        ? row.primaryUnit
+                        : `${num(row.onHand)} ${row.primaryUnit} here${over ? ' — more than that' : ''}`}
+                    </Typography>
+                  </Box>
+
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <TextField
+                      size="small"
+                      type="number"
+                      value={typed}
+                      onChange={(e) => setQty((s) => ({ ...s, [row.partId]: e.target.value }))}
+                      sx={{ width: 96 }}
+                      error={over}
+                      slotProps={{
+                        htmlInput: {
+                          min: 0,
+                          step: 'any',
+                          // The heading is a column away on a phone, and forty rows sharing the
+                          // name "Quantity" name none of them.
+                          'aria-label': `Quantity for ${row.partName}`,
+                        },
+                      }}
+                    />
+                    <TextField
+                      select
+                      size="small"
+                      value={unitOf(row)}
+                      onChange={(e) =>
+                        setUnitFor((s) => ({ ...s, [row.partId]: e.target.value }))
+                      }
+                      sx={{ width: 92 }}
+                      slotProps={{ htmlInput: { 'aria-label': `Unit for ${row.partName}` } }}
+                    >
+                      {unitsFor(row).map((u) => (
+                        <MenuItem key={u} value={u}>
+                          {u}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    {row.onHand != null && (
+                      <Button
+                        size="small"
+                        onClick={() => fillRow(row)}
+                        // The amount as of when this drawer opened. If someone empties the bin
+                        // meanwhile the RPC refuses the line and says so by name — a safe failure,
+                        // and the same one you would get having typed the number by hand.
+                        aria-label={`Use all ${num(row.onHand)} ${row.primaryUnit} of ${row.partName}`}
+                        sx={{ minWidth: 48 }}
+                      >
+                        All
+                      </Button>
+                    )}
+                    {action === 'add' && (
+                      <IconButton
+                        aria-label={`Remove ${row.partName} from this list`}
+                        onClick={() =>
+                          setPicked((p) => p.filter((r) => r.partId !== row.partId))
+                        }
+                        sx={{ width: 40, height: 40 }}
+                      >
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Stack>
+                </Stack>
+              );
+            })}
           </Stack>
+        )}
+
+        {/* One destination for the batch. Carrying a handful of things to one shelf is the act
+            this models; a per-row destination would be a different feature and a longer row. */}
+        {action === 'move' && rows.length > 0 && (
+          <LocationPicker
+            label="Move to"
+            options={moveDestinations}
+            value={destination}
+            onChange={setDestination}
+            size="small"
+            // Cannot move something to where it already is, and the put-away pile is a holding
+            // area rather than a destination you would choose on purpose.
+            excludeId={locationId}
+            excludeSystem
+            required
+          />
+        )}
+
+        {/* One job for the batch: you are issuing this handful of material to one job. */}
+        {action === 'deplete' && rows.length > 0 && (
+          <JobTagPicker jobs={jobs ?? []} loading={loadingJobs} value={job} onChange={setJob} />
+        )}
+
+        {rows.length > 0 && (
+          <TextField
+            label="Notes (optional)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            size="small"
+            multiline
+            minRows={2}
+          />
+        )}
+
+        {progress && progress.total > 0 && (
+          <Box>
+            <LinearProgress variant="determinate" value={(progress.done / progress.total) * 100} />
+            <Typography variant="caption" color="text.secondary">
+              Saving {progress.done} of {progress.total}…
+            </Typography>
+          </Box>
+        )}
+
+        <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ pt: 1 }}>
+          <Button onClick={onCancel} disabled={saving}>
+            {failures.length > 0 ? 'Close' : 'Cancel'}
+          </Button>
+          <Button variant="contained" onClick={submit} disabled={saving || lines.length === 0}>
+            {saving
+              ? 'Saving…'
+              : lines.length > 1
+                ? `${SUBMIT[action]} (${lines.length})`
+                : SUBMIT[action]}
+          </Button>
         </Stack>
-      </Box>
+      </Stack>
     </Box>
   );
 }

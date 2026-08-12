@@ -733,8 +733,12 @@ export default function LocationsManager({
       {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
       <PartPlacesDrawer
         part={searchPart}
+        companyId={companyId}
+        // Leaves only, never the put-away pile. The form excludes the place being moved FROM.
+        moveDestinations={stockDestinationOptions(locations)}
         onClose={() => setSearchPart(null)}
         onOpenPlace={openPlaceFromPart}
+        onChanged={reload}
       />
 
       <PlaceDrawer

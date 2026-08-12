@@ -21,6 +21,21 @@
  * have shown a short list with nothing saying it was short. This asks the one question it is here
  * to answer, unbounded.
  *
+ * ## Finish the job here, rather than being sent somewhere to redo half of it
+ *
+ * A row expands into the four verbs, scoped to **this part at this place**. That scope is the whole
+ * point: you arrived holding two facts, and every other surface discards one of them — the place
+ * drawer makes you re-find the part among everything in the bin, the part page makes you re-pick
+ * the place you already knew.
+ *
+ * It is the same expand-in-place rule the place drawer follows one level up, and it reuses the very
+ * same forms with their rows narrowed to one part. A separate part-and-place form would have been a
+ * third code path to the same four RPCs, each with its own drift in what a blank row means.
+ *
+ * `Open bin` sits INSIDE the expanded section rather than on the row. Two hit targets on one 48px
+ * row — expand here, navigate there — is the ambiguity this module removed from the grid; the bin
+ * stays one click away without competing with the thing you came to do.
+ *
  * ## The put-away pile is not a shelf
  *
  * `Unassigned` is where stock with no home lands. It is listed — leaving it out would answer
@@ -40,27 +55,56 @@ import ButtonBase from '@mui/material/ButtonBase';
 import CloseIcon from '@mui/icons-material/Close';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
+import { useState } from 'react';
+import Button from '@mui/material/Button';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+
 import { useLoad } from '@/hooks/useLoad';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
+import type { LocationPickerOption } from '@/components/inventory/locations/LocationPicker';
 import PlaceViewHeader from './PlaceViewHeader';
+import PlaceStockActionForm, { type PlaceStockAction } from './PlaceStockActionForm';
+import PlaceAdjustForm from './PlaceAdjustForm';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 export interface PartPlacesDrawerProps {
   /** The part being located. `null` closes the drawer. */
   part: { id: string; name: string; unit: string | null } | null;
+  companyId: string;
+  /** Everywhere a `move` may land, minus the place being moved from. */
+  moveDestinations: LocationPickerOption[];
   onClose: () => void;
   /** Walk to a place: select its unit and open its own drawer. */
   onOpenPlace: (locationId: string) => void;
+  /** A write landed — the board and this list both re-read. */
+  onChanged: () => void | Promise<void>;
 }
+
+/** Which verb is open, on which place. One at a time across the whole list. */
+type OpenAction = { locationId: string; action: PlaceStockAction | 'adjust' } | null;
 
 function PartPlacesBody({
   part,
+  companyId,
+  moveDestinations,
   onClose,
   onOpenPlace,
+  onChanged,
 }: PartPlacesDrawerProps & { part: NonNullable<PartPlacesDrawerProps['part']> }) {
-  const { data, loading, error } = useLoad(() => getBalancesForPart(part.id), [part.id]);
+  const [open, setOpen] = useState<OpenAction>(null);
+  /** Bumped after a write so the places re-read without losing the drawer. */
+  const [stamp, setStamp] = useState(0);
+  const { data, loading, error } = useLoad(
+    () => getBalancesForPart(part.id),
+    [part.id, stamp],
+  );
+
+  const afterWrite = async () => {
+    setStamp((n) => n + 1);
+    await onChanged();
+  };
 
   const rows = data ?? [];
   // Safe to add: balances are stored in the part's primary unit, so these are the same unit by
@@ -106,41 +150,111 @@ function PartPlacesBody({
           <Stack spacing={0.5} sx={{ mt: 0.5 }}>
             {rows.map((r) => {
               const isPile = r.kind === SYSTEM_KIND;
+              const here = open?.locationId === r.location_id ? open.action : null;
+              const path = r.path.join(' › ') || r.location_name;
               return (
-                <ButtonBase
-                  key={r.location_id}
-                  onClick={() => onOpenPlace(r.location_id)}
-                  aria-label={`Open ${r.path.join(' › ') || r.location_name}`}
-                  sx={{
-                    width: '100%',
-                    minHeight: 48,
-                    px: 1,
-                    py: 1,
-                    gap: 1,
-                    borderRadius: 1,
-                    justifyContent: 'space-between',
-                    textAlign: 'left',
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography variant="body2" noWrap>
-                      {r.path.join(' › ') || r.location_name}
-                    </Typography>
-                    {/* Said, not hidden: a part sitting in the pile has not been put away, and
-                        showing it as a shelf would send someone looking for a shelf. */}
-                    {isPile && (
-                      <Chip size="small" label="Not put away yet" variant="outlined" sx={{ mt: 0.5 }} />
-                    )}
-                  </Box>
-                  <Typography
-                    variant="body2"
-                    sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+                <Box key={r.location_id}>
+                  <ButtonBase
+                    onClick={() => setOpen(here ? null : { locationId: r.location_id, action: 'deplete' })}
+                    aria-expanded={Boolean(here)}
+                    aria-label={`${path} — ${num(r.quantity)} ${part.unit ?? ''}`.trim()}
+                    sx={{
+                      width: '100%',
+                      minHeight: 48,
+                      px: 1,
+                      py: 1,
+                      gap: 1,
+                      borderRadius: 1,
+                      justifyContent: 'space-between',
+                      textAlign: 'left',
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
                   >
-                    {num(r.quantity)} {part.unit ?? ''}
-                  </Typography>
-                  <KeyboardArrowRightIcon fontSize="small" color="action" />
-                </ButtonBase>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" noWrap>
+                        {path}
+                      </Typography>
+                      {/* Said, not hidden: a part sitting in the pile has not been put away, and
+                          showing it as a shelf would send someone looking for a shelf. */}
+                      {isPile && (
+                        <Chip size="small" label="Not put away yet" variant="outlined" sx={{ mt: 0.5 }} />
+                      )}
+                    </Box>
+                    <Typography
+                      variant="body2"
+                      sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+                    >
+                      {num(r.quantity)} {part.unit ?? ''}
+                    </Typography>
+                    {here ? (
+                      <KeyboardArrowDownIcon fontSize="small" color="action" />
+                    ) : (
+                      <KeyboardArrowRightIcon fontSize="small" color="action" />
+                    )}
+                  </ButtonBase>
+
+                  {here && (
+                    <Box sx={{ pl: 1, pb: 1 }}>
+                      {/*
+                        The four verbs, in the order fixed everywhere else — and scoped to THIS part
+                        at THIS place, which is the pair you arrived holding.
+                      */}
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                        {(
+                          [
+                            ['add', 'Add'],
+                            ['deplete', 'Remove'],
+                            ['move', 'Move'],
+                            ['adjust', 'Adjust'],
+                          ] as const
+                        ).map(([v, label]) => (
+                          <Button
+                            key={v}
+                            size="small"
+                            variant={here === v ? 'contained' : 'outlined'}
+                            onClick={() => setOpen({ locationId: r.location_id, action: v })}
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </Stack>
+
+                      {here === 'adjust' ? (
+                        <PlaceAdjustForm
+                          key={`${r.location_id}:adjust`}
+                          companyId={companyId}
+                          locationId={r.location_id}
+                          locationName={path}
+                          restrictToPartId={part.id}
+                          onCancel={() => setOpen(null)}
+                          onDone={afterWrite}
+                        />
+                      ) : (
+                        <PlaceStockActionForm
+                          key={`${r.location_id}:${here}`}
+                          action={here}
+                          companyId={companyId}
+                          locationId={r.location_id}
+                          locationName={path}
+                          moveDestinations={moveDestinations}
+                          restrictTo={{
+                            partId: part.id,
+                            partName: part.name,
+                            primaryUnit: part.unit,
+                          }}
+                          onCancel={() => setOpen(null)}
+                          onDone={afterWrite}
+                        />
+                      )}
+
+                      {/* Inside the section, not a second target on the row — the bin stays one
+                          click away without competing with the thing you came here to do. */}
+                      <Button size="small" variant="text" onClick={() => onOpenPlace(r.location_id)}>
+                        Open bin
+                      </Button>
+                    </Box>
+                  )}
+                </Box>
               );
             })}
           </Stack>

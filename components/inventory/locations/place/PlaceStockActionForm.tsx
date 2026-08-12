@@ -165,6 +165,18 @@ export interface PlaceStockActionFormProps {
   locationName: string;
   /** Everywhere a `move` may land. Excludes this place — see the picker below. */
   moveDestinations: LocationPickerOption[];
+  /**
+   * Narrow the whole form to ONE part.
+   *
+   * Set when this is opened from a part rather than from a place — you searched for an o-ring,
+   * found which shelf it is on, and want to take five off it. The rows collapse to that part and
+   * `Add` stops offering the catalogue, because the part is not in question; only the number is.
+   *
+   * The same component either way. A separate part-and-place form would be a third code path to
+   * the same four RPCs, with its own drift in what a blank row means and its own version of the
+   * disarm-what-landed rule.
+   */
+  restrictTo?: { partId: string; partName: string; primaryUnit: string | null };
   /** Back to the place overview. The drawer stays open. */
   onCancel: () => void;
   onDone: () => void | Promise<void>;
@@ -176,6 +188,7 @@ export default function PlaceStockActionForm({
   locationId,
   locationName,
   moveDestinations,
+  restrictTo,
   onCancel,
   onDone,
 }: PlaceStockActionFormProps) {
@@ -231,10 +244,12 @@ export default function PlaceStockActionForm({
    */
   const { data, loading, error: loadError } = useLoad(
     async () =>
-      action === 'add'
+      // Restricted to one part, even `Add` reads the BIN — it needs how much is already here to
+      // show on the row, and it has no picker to fill from the catalogue.
+      action === 'add' && !restrictTo
         ? ({ kind: 'parts', parts: await getStockedParts(companyId) } as const)
         : ({ kind: 'contents', page: await getLocationContents(locationId) } as const),
-    [action, companyId, locationId],
+    [action, companyId, locationId, restrictTo],
   );
 
   /** Best-effort author: a failed lookup writes no name rather than blocking a stock correction. */
@@ -262,15 +277,39 @@ export default function PlaceStockActionForm({
 
   /** The rows on screen. The bin's contents for Remove and Move; whatever was picked for Add. */
   const rows: Row[] = useMemo(() => {
+    const here =
+      data?.kind === 'contents'
+        ? data.page.contents.map((c) => ({
+            partId: c.part_id,
+            partName: c.part_name,
+            primaryUnit: c.primary_unit || 'ea',
+            onHand: c.quantity as number | null,
+          }))
+        : [];
+
+    if (restrictTo) {
+      /*
+       * One row, and it exists even when the bin holds none of this part.
+       *
+       * `Add` is the case that needs it: you are putting something on a shelf that does not have
+       * any yet, so there is nothing in the contents read to build a row from. Falling back to the
+       * part itself with a null `onHand` is what makes the row appear at all — and null is the
+       * right value, since "we have no record here" is not the same as "there are zero".
+       */
+      const found = here.find((r) => r.partId === restrictTo.partId);
+      return [
+        found ?? {
+          partId: restrictTo.partId,
+          partName: restrictTo.partName,
+          primaryUnit: restrictTo.primaryUnit || 'ea',
+          onHand: null,
+        },
+      ];
+    }
+
     if (action === 'add') return picked;
-    if (data?.kind !== 'contents') return [];
-    return data.page.contents.map((c) => ({
-      partId: c.part_id,
-      partName: c.part_name,
-      primaryUnit: c.primary_unit || 'ea',
-      onHand: c.quantity,
-    }));
-  }, [action, picked, data]);
+    return here;
+  }, [action, picked, data, restrictTo]);
 
   const clipped =
     data?.kind === 'contents' ? Math.max(0, data.page.total - data.page.contents.length) : 0;
@@ -418,7 +457,8 @@ export default function PlaceStockActionForm({
     onCancel();
   };
 
-  const nothingHere = fromHere && !loading && rows.length === 0;
+  // Restricted, the row always exists — the part is the subject, so there is nothing to refuse.
+  const nothingHere = !restrictTo && fromHere && !loading && rows.length === 0;
 
   return (
     <Box
@@ -456,7 +496,7 @@ export default function PlaceStockActionForm({
         )}
 
         {/* `Add` builds its own rows: the catalogue is unbounded, so there is nothing to list. */}
-        {action === 'add' && (
+        {action === 'add' && !restrictTo && (
           <Autocomplete
             options={addable}
             loading={loading}
@@ -501,7 +541,7 @@ export default function PlaceStockActionForm({
               a filled row is exempt from the filter, everything it just filled stays visible. The
               set you are about to write is never larger than the set you can see.
             */}
-            {fromHere && rows.length > 1 && (
+            {fromHere && !restrictTo && rows.length > 1 && (
               <Stack direction="row" justifyContent="flex-end">
                 <Button size="small" onClick={fillAllVisible}>
                   Everything here
@@ -510,7 +550,7 @@ export default function PlaceStockActionForm({
             )}
 
             {/* A search box on a three-row bin is a control that costs more than it saves. */}
-            {rows.length > FILTER_FROM && (
+            {!restrictTo && rows.length > FILTER_FROM && (
               <TextField
                 size="small"
                 placeholder="Filter by part…"

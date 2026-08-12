@@ -25,7 +25,20 @@ const onOpenPlace = vi.fn();
 const onClose = vi.fn();
 
 const setup = (part: typeof PART | null = PART) =>
-  render(<PartPlacesDrawer part={part} onClose={onClose} onOpenPlace={onOpenPlace} />);
+  render(
+    <PartPlacesDrawer
+      part={part}
+      companyId="co1"
+      moveDestinations={[{ id: 'bin6', label: 'Cabinet 3 › Bin 6' }]}
+      onClose={onClose}
+      onOpenPlace={onOpenPlace}
+      onChanged={vi.fn()}
+    />,
+  );
+
+/** The row is the toggle now; opening a bin lives inside the section it opens. */
+const expandRow = async (user: ReturnType<typeof userEvent.setup>, path: string) =>
+  user.click(await screen.findByRole('button', { name: new RegExp(`^${path}`) }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,12 +75,42 @@ describe('PartPlacesDrawer', () => {
     expect(await screen.findByText(/1,380 ea across 2 places/i)).toBeInTheDocument();
   });
 
-  it('walks to a place', async () => {
+  /**
+   * The row EXPANDS rather than navigating. You arrived holding a part and a place; being sent to
+   * a bin makes you re-find the part among everything in it.
+   */
+  it('expands a place into the four verbs instead of navigating', async () => {
     const user = userEvent.setup();
     setup();
 
-    await user.click(await screen.findByRole('button', { name: /open Cabinet 3 › Shelf B/i }));
+    await expandRow(user, 'Cabinet 3 › Shelf B');
+
+    for (const verb of [/^add$/i, /^remove$/i, /^move$/i, /^adjust$/i]) {
+      expect(screen.getByRole('button', { name: verb })).toBeInTheDocument();
+    }
+    expect(onOpenPlace).not.toHaveBeenCalled();
+  });
+
+  /** Inside the section, not a second target on the row — that ambiguity was removed elsewhere. */
+  it('still offers the bin, from inside the expanded section', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await expandRow(user, 'Cabinet 3 › Shelf B');
+    await user.click(screen.getByRole('button', { name: /open bin/i }));
     expect(onOpenPlace).toHaveBeenCalledWith('shelf-b');
+  });
+
+  it('opens one place at a time', async () => {
+    const user = userEvent.setup();
+    setup();
+
+    await expandRow(user, 'Cabinet 3 › Shelf A');
+    expect(screen.getByRole('button', { name: /open bin/i })).toBeInTheDocument();
+
+    await expandRow(user, 'Cabinet 3 › Shelf B');
+    // Still exactly one section open — two forms at once is a form nobody finished.
+    expect(screen.getAllByRole('button', { name: /open bin/i })).toHaveLength(1);
   });
 
   /**

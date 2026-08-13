@@ -85,6 +85,21 @@ def _set_role(admin, company_id: str, user_id: str, role: str) -> None:
     ).eq("user_id", user_id).execute()
 
 
+def _set_flag(admin, company_id: str, on: bool) -> None:
+    """QuickBooks Desktop is opt-in per tenant, stored at
+    companies.settings.features — the same place lib/featureFlags.ts reads."""
+    row = admin.table("companies").select("settings").eq(
+        "id", company_id).limit(1).execute().data[0]
+    settings = row.get("settings") or {}
+    features = dict(settings.get("features") or {})
+    if on:
+        features["quickbooks_desktop"] = True
+    else:
+        features.pop("quickbooks_desktop", None)
+    settings["features"] = features
+    admin.table("companies").update({"settings": settings}).eq("id", company_id).execute()
+
+
 # ───────────────────────── connect ─────────────────────────
 async def test_connect_requires_admin(supabase_admin, seeded_user_a, monkeypatch):
     cid = seeded_user_a["company_id"]
@@ -110,6 +125,7 @@ async def test_connect_refuses_when_quickbooks_online_is_connected(
     surface as an opaque 500."""
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
+    _set_flag(supabase_admin, cid, True)
     supabase_admin.table("quickbooks_connections").insert(
         {"company_id": cid, "realm_id": "realm-x", "environment": "sandbox",
          "access_token": "AT", "access_expires_at": "2030-01-01T00:00:00Z",
@@ -123,12 +139,14 @@ async def test_connect_refuses_when_quickbooks_online_is_connected(
         assert resp.status_code == 409
         assert "QuickBooks Online" in resp.json()["detail"]
     finally:
+        _set_flag(supabase_admin, cid, False)
         _cleanup(supabase_admin, cid)
 
 
 async def test_connect_persists_the_end_user(supabase_admin, seeded_user_a, monkeypatch):
     cid = seeded_user_a["company_id"]
     _cleanup(supabase_admin, cid)
+    _set_flag(supabase_admin, cid, True)
     monkeypatch.setattr(qbdservice, "ensure_end_user", lambda *a, **k: {"id": "end_usr_new"})
     monkeypatch.setattr(
         qbdservice, "create_auth_session",
@@ -144,6 +162,7 @@ async def test_connect_persists_the_end_user(supabase_admin, seeded_user_a, monk
             "company_id", cid).execute().data[0]
         assert row["conductor_end_user_id"] == "end_usr_new"
     finally:
+        _set_flag(supabase_admin, cid, False)
         _cleanup(supabase_admin, cid)
 
 
@@ -328,4 +347,44 @@ async def test_terms_refresh_writes_the_cache_and_drops_deleted_terms(
             "company_id", cid).execute().data
         assert {r["qb_term_id"] for r in rows} == {"T1", "T2"}
     finally:
+        _cleanup(supabase_admin, cid)
+
+
+# ───────────────────────── the billing gate ─────────────────────────
+async def test_connect_is_refused_when_the_feature_is_off(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    """Gated on the BACKEND, not merely in the UI: Conductor bills per connected
+    company file, so a flag-off tenant reaching this endpoint by URL would spend
+    real money. Every other flag in this repo gates an affordance; this one gates
+    a bill."""
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _set_flag(supabase_admin, cid, False)
+    monkeypatch.setattr(qbdservice, "ensure_end_user",
+                        lambda *a, **k: pytest.fail("must not reach Conductor when flag is off"))
+    try:
+        resp = await _post(seeded_user_a["access_token"],
+                           f"/api/quickbooks-desktop/{cid}/connect", {})
+        assert resp.status_code == 403
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_connect_is_allowed_once_the_feature_is_on(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _set_flag(supabase_admin, cid, True)
+    monkeypatch.setattr(qbdservice, "ensure_end_user", lambda *a, **k: {"id": "end_usr_flagged"})
+    monkeypatch.setattr(qbdservice, "create_auth_session",
+                        lambda *a, **k: {"auth_flow_url": "https://connect.conductor.is/qbd/x",
+                                         "expires_at": None})
+    try:
+        resp = await _post(seeded_user_a["access_token"],
+                           f"/api/quickbooks-desktop/{cid}/connect", {})
+        assert resp.status_code == 200, resp.text
+    finally:
+        _set_flag(supabase_admin, cid, False)
         _cleanup(supabase_admin, cid)

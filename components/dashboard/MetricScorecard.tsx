@@ -145,18 +145,38 @@ export default function MetricScorecard({
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {money.label}
             </Typography>
+            {/*
+              Ordinary INLINE flow, not flex, and one flex item rather than
+              several. Both halves of that matter:
+
+              A nested flex container takes its baseline from its first item —
+              here an SVG arrow, which has no text baseline, so the browser
+              synthesises one from the icon's bottom edge and lifted the whole
+              delta a few pixels above "$9,197". An inline element takes its
+              baseline from its text, which is what we want it to sit on; the
+              arrow is a glyph, not text, so it aligns itself against the line.
+
+              Keeping it as ONE item stops the row breaking between "-37%" and
+              "vs last week" — the card is a quarter of the width at 4-across,
+              so this row does wrap, and it has to wrap as a phrase.
+            */}
             {hasDelta && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, color: deltaColor }}>
-                <DeltaIcon sx={{ fontSize: 14 }} />
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                  {pct !== null && delta !== 0 ? formatPercent(pct) : formatMoney(delta)}
-                </Typography>
+              <Typography
+                variant="caption"
+                component="span"
+                sx={{ fontWeight: 600, color: deltaColor, whiteSpace: 'nowrap' }}
+              >
+                <DeltaIcon sx={{ fontSize: 14, verticalAlign: 'text-bottom', mr: 0.25 }} />
+                {pct !== null && delta !== 0 ? formatPercent(pct) : formatMoney(delta)}
                 {money.comparisonLabel && (
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  <Box
+                    component="span"
+                    sx={{ color: 'text.secondary', fontWeight: 400, ml: 0.5 }}
+                  >
                     {money.comparisonLabel}
-                  </Typography>
+                  </Box>
                 )}
-              </Box>
+              </Typography>
             )}
           </Box>
         )}

@@ -15,6 +15,11 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   refreshQuickBooksPoField: (...args: unknown[]) => mockRefreshPoField(...args),
 }));
 
+const mockFeatures = vi.fn();
+vi.mock('@/hooks/useCompanyFeatures', () => ({
+  useCompanyFeatures: () => ({ features: mockFeatures(), loading: false }),
+}));
+
 const mockGetDesktopStatus = vi.fn();
 vi.mock('@/utils/quickbooksDesktop', () => ({
   getQuickBooksDesktopStatus: (...args: unknown[]) => mockGetDesktopStatus(...args),
@@ -49,6 +54,9 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     resetRouterMocks();
     mockGetStatus.mockResolvedValue(CONNECTED);
     mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
+    // QuickBooks Desktop is opt-in, so the option only renders for a tenant with
+    // the flag on. Default it on here; the test below covers the off case.
+    mockFeatures.mockReturnValue({ quickbooks_desktop: true });
     mockRefreshPoField.mockResolvedValue(NOT_FOUND);
   });
 
@@ -135,6 +143,22 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     expect(
       screen.getByRole('button', { name: /Connect QuickBooks Desktop/i }),
     ).toBeInTheDocument();
+  });
+
+  it('hides QuickBooks Desktop for a tenant without the flag', async () => {
+    // The backend refuses /connect for a flag-off tenant, so showing the button
+    // would offer an action that can only fail. Conductor bills per connected
+    // company file, which is why the flag exists at all.
+    mockFeatures.mockReturnValue({});
+    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    expect(
+      await screen.findByRole('button', { name: /Connect QuickBooks Online/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect QuickBooks Desktop/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('does not offer to connect when the status check itself failed', async () => {

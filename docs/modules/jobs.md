@@ -116,18 +116,44 @@ through `applyOverdueJobsFilter` in `utils/dashboardAccess.ts`.)*
 
 `job_id`, `part_id`, `source_quote_line_item_id`, `sequence` (10, 20, 30…), `quantity` (numeric,
 CHECK `> 0`, fractional allowed), `unit_price` / `total_price` `numeric(12,4)` (the single source
-of price for invoicing and revenue), the three status columns, `current_operation_sequence`,
-`started_at` / `completed_at`.
+of price for invoicing and revenue), `true_cost_per_unit` (the single source of **cost** — see below),
+the three status columns, `current_operation_sequence`, `started_at` / `completed_at`.
 
 A partial unique index — `job_parts_one_active_per_quote_line` on `source_quote_line_item_id`
 WHERE not cancelled — stops one quote line spawning two live job parts.
+
+#### The cost snapshot
+
+`true_cost_per_unit` is the all-in TRUE cost of one unit — labour + materials + the whole nested BOM —
+taken from `compute_part_cost_at_qty` by a `BEFORE INSERT OR UPDATE OF quantity` trigger
+([`20260811233748`](../../supabase/migrations/20260811233748_job_cost_snapshot.sql)). Revenue has been
+denormalised onto the job since 20260621162024; this is the same move on the cost side, and for the same
+reason: **a job that shipped is history.** Re-deriving its cost from the part's current routing means last
+year's profit changes whenever someone re-rates a work centre.
+
+- **A trigger, not a step in the conversion path**, because job_parts arrive by several roads — quote
+  conversion, a job built by hand with no quote at all, the importer — and the routing-clone RPC only runs
+  for *made* parts, so a bought part would never be costed.
+- **Re-taken on a quantity change**, because cost genuinely depends on quantity (amortised setup,
+  procurement tiers). Deliberately **not** symmetric with price, which `updateJobPartQuantity` keeps sticky:
+  a price is an agreement with the customer, a cost is a measurement of us.
+- **NULL means "could not be determined"**, never zero. The rollup raises on an incomplete part rather than
+  costing an unpriced operation at $0; the trigger catches that so an incomplete part can still go on a job.
+  Readers must exclude those rows and say so — see [ai-insights.md](ai-insights.md).
 
 ### `job_operations`
 
 `job_id`, `job_part_id`, `sequence`, `operation_name` (snapshot, immune to work-centre renames),
 `work_center_id`, `routing_operation_id`, `estimated_setup_minutes`,
-`estimated_run_minutes_per_unit`, `status`, `completed_at` / `completed_by`, `sent_at` / `sent_by`,
+`estimated_run_minutes_per_unit`, `work_center_kind_snapshot` / `labor_rate_snapshot` /
+`external_unit_price_snapshot` (the rates frozen beside the minutes, so labour stays itemisable without
+reading a live `work_centers` row), `status`, `completed_at` / `completed_by`, `sent_at` / `sent_by`,
 `instructions`, `notes`.
+
+**Materials are not costed per line anywhere.** `job_materials` freezes quantities only. Per-unit material
+cost is `job_parts.true_cost_per_unit` minus the labour summed from the rates above — costing one BOM line
+would mean re-deriving the unit conversion, whole-unit ceiling and made-vs-bought valuation rules that live
+inside `part_rollup_at_qty`, which is a second copy of a money rule.
 
 `(job_part_id, sequence)` is unique — each part has its own independent sequence.
 
@@ -404,7 +430,10 @@ Out-of-order work is **warned, not blocked** (`predecessors_incomplete`) — see
    `created_at`), assigning fresh sequences 10, 20, 30…, carrying `work_center_id`, the work
    centre's name as `operation_name`, `instructions`, `setup_minutes` →
    `estimated_setup_minutes`, `cycle_minutes_per_unit` → `estimated_run_minutes_per_unit`, and
-   `routing_operation_id`. Idempotent on `(job_part_id, routing_operation_id)`.
+   `routing_operation_id` — plus the **rates** the operation will be costed at:
+   `work_center_kind_snapshot`, and either `labor_rate_snapshot`
+   (`COALESCE(labor_rate_override, work_centers.labor_rate)`, internal) or
+   `external_unit_price_snapshot` (external). Idempotent on `(job_part_id, routing_operation_id)`.
 2. Copies the **part's BOM** into `job_materials`, one row per `parts_bom` edge, idempotent on
    `parts_bom_id`.
 3. Sets **`job_parts.current_operation_sequence` = `MIN(sequence)`** of the rows it wrote.

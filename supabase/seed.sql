@@ -7,8 +7,20 @@
 --
 -- Design:
 --   * FIXED UUIDs        → deterministic identities, clean git diffs.
---   * DYNAMIC dates      → `now() - interval '…'` so jobs/quotes are always
---                          current (no perpetually-overdue jobs / expired quotes).
+--   * DYNAMIC dates      → `now() - interval '…'`, so the shop is always in the
+--                          same state relative to today however long ago the
+--                          file was written. Late work and expired quotes are
+--                          therefore INTENTIONALLY late rather than drifting
+--                          there: seven jobs are overdue by design, spanning one
+--                          day to five weeks, because the Overdue tile, the jobs
+--                          list's overdue filter and the alert tone are all
+--                          unreachable otherwise.
+--   * REAL updated_at    → `jobs_updated_at` / `quotes_updated_at` stamp now()
+--                          on every write, so everything here would otherwise
+--                          read as "touched today" and the dashboard's Completed
+--                          card would count the whole year as this week. One
+--                          pass near the end suspends those triggers and stamps
+--                          each row with its newest real event.
 --   * App RPCs+triggers  → derived state (quote/job numbers, party snapshots,
 --                          job operations, fulfillment cascade, status rollups)
 --                          is produced by the same DB logic the app uses, so the
@@ -259,6 +271,33 @@ insert into public.customer_carrier_accounts
    'UPS','third_party','4A72W9','53202','US','Ground only. They query anything air-freighted.'),
   ('54000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','50000000-0000-0000-0000-000000000003',
    'R+L Carriers','recipient',null,null,'US','LTL — billed to them on the BOL, no account number needed.')
+on conflict (id) do nothing;
+
+-- ── Three more customers, so the book is not concentrated in six names ───────
+-- No standing terms and no carrier accounts on any of them: that is the state
+-- most customers are actually in, and the six above already cover the filled-in
+-- branches. Ironclad and Summit both carry a separate ship-to.
+insert into public.customers (id, company_id, name, default_payment_terms, credit_status, credit_hold_note) values
+  ('50000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','Ironclad Fabrication',null,'open',null),
+  ('50000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','Summit Instruments','Net 60','open',null),
+  ('50000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','Delta Marine Systems','Net 30','open',null)
+on conflict (id) do nothing;
+
+insert into public.customer_addresses (id, customer_id, address_line1, city, state, postal_code, country, default_billing, default_shipping, attention_to) values
+  ('51000000-0000-0000-0000-000000000007','50000000-0000-0000-0000-000000000007','2200 Forge Rd','Erie','PA','00000','USA',true,false,'Accounts Payable'),
+  ('51000000-0000-0000-0000-000000000008','50000000-0000-0000-0000-000000000008','14 Summit Ridge','Boulder','CO','00000','USA',true,false,'Accounts Payable'),
+  ('51000000-0000-0000-0000-000000000009','50000000-0000-0000-0000-000000000009','700 Harbor Blvd','Mobile','AL','00000','USA',true,true,'Accounts Payable')
+on conflict (id) do nothing;
+
+insert into public.customer_addresses (id, customer_id, address_line1, city, state, postal_code, country, default_billing, default_shipping, attention_to) values
+  ('52000000-0000-0000-0000-000000000007','50000000-0000-0000-0000-000000000007','Gate 3, 2260 Forge Rd','Erie','PA','00000','USA',false,true,'Receiving'),
+  ('52000000-0000-0000-0000-000000000008','50000000-0000-0000-0000-000000000008','Dock A, 18 Summit Ridge','Boulder','CO','00000','USA',false,true,'Receiving')
+on conflict (id) do nothing;
+
+insert into public.customer_contacts (id, customer_id, name, role, email, phone, is_primary) values
+  ('53000000-0000-0000-0000-000000000007','50000000-0000-0000-0000-000000000007','Ruth Kelleher','buyer','ruth@ironclad.example','555-0123',true),
+  ('53000000-0000-0000-0000-000000000008','50000000-0000-0000-0000-000000000008','Ben Osei','engineering','ben@summitinst.example','555-0123',true),
+  ('53000000-0000-0000-0000-000000000009','50000000-0000-0000-0000-000000000009','Carla Nunes','buyer','carla@deltamarine.example','555-0123',true)
 on conflict (id) do nothing;
 
 -- ── Parts ────────────────────────────────────────────────────────────────────
@@ -1093,6 +1132,191 @@ begin
     on conflict do nothing;
   end loop;
 end $$;
+
+
+-- =============================================================================
+-- Volume: a shop mid-year, not a demo with four jobs.
+--
+-- The eight scenarios above each exist to make ONE path reachable by hand — a
+-- voided shipment, a credit hold, a cancelled job, a fractional direct job. They
+-- are deliberate and hand-written. What they do not give you is a shop: four
+-- open jobs and three shipped ones make every list fit on one screen, every
+-- total look like a rounding error, and half the surfaces impossible to judge
+-- (does the jobs list sort sensibly? does the revenue trend have a shape? is
+-- the dashboard's money legible at four figures or six?).
+--
+-- This block is the bulk, generated from a table rather than written out, so
+-- adding a row is one line. Nothing here is load-bearing for a specific
+-- feature — delete any row and only the volume changes.
+--
+-- Two things it fixes beyond count:
+--
+--   OVERDUE WORK EXISTS. There was none, so the Overdue tile, the jobs list's
+--   overdue filter and the alert tone were all unreachable without editing a
+--   due date by hand. Dates stay `now()`-relative, so these are permanently and
+--   INTENTIONALLY late rather than drifting there.
+--
+--   HISTORY IS BACKDATED. Every seeded job used to carry updated_at = the seed
+--   run, because that is what the row was last written. The dashboard's
+--   Completed card buckets on updated_at, so all-time revenue landed in "this
+--   week" and the Today / This Week toggle could not differ. Each job below is
+--   stamped to when it actually last moved.
+-- =============================================================================
+
+do $$
+declare
+  s record;
+  rt public.part_pricing_tiers;
+  q uuid;
+  j uuid;
+  v_ship_at int;
+  v_unit numeric;
+begin
+  for s in
+    select * from (values
+      -- customer, part, qty, due(+future/-late), created, status, ship, last_moved, po
+      -- ── Overdue: late, unshipped, both production states, 1 to 34 days over ──
+      ('50000000-0000-0000-0000-000000000001'::uuid,'60000000-0000-0000-0000-000000000015'::uuid, 6::numeric,  -3, 41,'in_progress',0::numeric, 4,'PO-NW-44231'),
+      ('50000000-0000-0000-0000-000000000003'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,12::numeric,  -1, 24,'not_started',0::numeric,21,'PO-MER-7781'),
+      ('50000000-0000-0000-0000-000000000002'::uuid,'60000000-0000-0000-0000-000000000016'::uuid, 8::numeric, -12, 58,'in_progress',0::numeric, 9,'PO-CR-3390'),
+      ('50000000-0000-0000-0000-000000000004'::uuid,'60000000-0000-0000-0000-000000000018'::uuid,96::numeric, -22, 66,'not_started',0::numeric,60,'PO-GRA-1188'),
+      ('50000000-0000-0000-0000-000000000006'::uuid,'60000000-0000-0000-0000-000000000015'::uuid, 4::numeric,  -6, 35,'in_progress',0::numeric, 7,'PO-SPV-2044'),
+      ('50000000-0000-0000-0000-000000000007'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,15::numeric, -34, 79,'not_started',0::numeric,72,'PO-IRN-5510'),
+
+      -- ── On time and open: the healthy majority ───────────────────────────────
+      ('50000000-0000-0000-0000-000000000008'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,10::numeric,   4, 18,'in_progress',0::numeric, 2,'PO-SUM-0912'),
+      ('50000000-0000-0000-0000-000000000009'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,20::numeric,  11, 26,'in_progress',0::numeric, 3,'PO-DMS-4417'),
+      ('50000000-0000-0000-0000-000000000001'::uuid,'60000000-0000-0000-0000-000000000017'::uuid, 8::numeric,  17, 12,'not_started',0::numeric,12,'PO-NW-44248'),
+      ('50000000-0000-0000-0000-000000000002'::uuid,'60000000-0000-0000-0000-000000000018'::uuid,48::numeric,  23, 9,'not_started',0::numeric, 9,'PO-CR-3402'),
+      ('50000000-0000-0000-0000-000000000005'::uuid,'60000000-0000-0000-0000-000000000016'::uuid, 5::numeric,  30, 7,'not_started',0::numeric, 7,'PO-BRM-8801'),
+      ('50000000-0000-0000-0000-000000000003'::uuid,'60000000-0000-0000-0000-000000000014'::uuid, 3::numeric,  38, 5,'not_started',0::numeric, 5,'PO-MER-7802'),
+      ('50000000-0000-0000-0000-000000000008'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,14::numeric,  45, 4,'not_started',0::numeric, 4,'PO-SUM-0925'),
+
+      -- ── Shipped, spread across the year so a revenue trend has a shape ───────
+      ('50000000-0000-0000-0000-000000000001'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,12::numeric, -140,158,'completed',1::numeric,141,'PO-NW-43880'),
+      ('50000000-0000-0000-0000-000000000003'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,30::numeric, -118,134,'completed',1::numeric,119,'PO-MER-7602'),
+      ('50000000-0000-0000-0000-000000000002'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,16::numeric,  -96,112,'completed',1::numeric, 97,'PO-CR-3201'),
+      ('50000000-0000-0000-0000-000000000009'::uuid,'60000000-0000-0000-0000-000000000015'::uuid, 8::numeric,  -82, 97,'completed',1::numeric, 83,'PO-DMS-4302'),
+      ('50000000-0000-0000-0000-000000000004'::uuid,'60000000-0000-0000-0000-000000000018'::uuid,120::numeric, -74, 88,'completed',1::numeric, 75,'PO-GRA-1102'),
+      ('50000000-0000-0000-0000-000000000006'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,22::numeric,  -61, 74,'completed',1::numeric, 62,'PO-SPV-1988'),
+      ('50000000-0000-0000-0000-000000000007'::uuid,'60000000-0000-0000-0000-000000000015'::uuid, 9::numeric,  -47, 60,'completed',1::numeric, 48,'PO-IRN-5402'),
+      ('50000000-0000-0000-0000-000000000005'::uuid,'60000000-0000-0000-0000-000000000016'::uuid, 6::numeric,  -33, 45,'completed',1::numeric, 34,'PO-BRM-8702'),
+      ('50000000-0000-0000-0000-000000000008'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,18::numeric,  -19, 31,'completed',1::numeric, 20,'PO-SUM-0844'),
+      ('50000000-0000-0000-0000-000000000002'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,10::numeric,  -11, 22,'completed',1::numeric, 12,'PO-CR-3355'),
+      ('50000000-0000-0000-0000-000000000001'::uuid,'60000000-0000-0000-0000-000000000016'::uuid, 7::numeric,   -5, 16,'completed',1::numeric,  5,'PO-NW-44190'),
+      -- Two inside the current week, so Completed and its delta are non-zero and
+      -- Today / This Week actually differ.
+      ('50000000-0000-0000-0000-000000000003'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,11::numeric,   -2, 13,'completed',1::numeric,  2,'PO-MER-7790'),
+      ('50000000-0000-0000-0000-000000000009'::uuid,'60000000-0000-0000-0000-000000000017'::uuid, 9::numeric,   -1, 10,'completed',1::numeric,  0,'PO-DMS-4460'),
+
+      -- ── Part-shipped, so partially_shipped is not a one-off ──────────────────
+      ('50000000-0000-0000-0000-000000000006'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,24::numeric,   6, 29,'in_progress',0.5::numeric, 6,'PO-SPV-2051'),
+      ('50000000-0000-0000-0000-000000000007'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,16::numeric,  -8, 37,'in_progress',0.5::numeric, 9,'PO-IRN-5488')
+    ) as t(customer, part, qty, due_days, created_days, status, ship_fraction, moved_days, po)
+  loop
+    -- Ironclad and Delta Marine send a PO without asking for a quote first, so
+    -- their jobs have no quote_id at all. Not a curiosity: 37 of 128 jobs in
+    -- production have none, and a job that never had a quote is the case every
+    -- quote-derived read has to survive.
+    if s.customer in ('50000000-0000-0000-0000-000000000007',
+                      '50000000-0000-0000-0000-000000000009') then
+      j := pg_temp.direct_job(s.customer, s.po, s.due_days, s.created_days);
+      rt := pg_temp.resolve_tier(s.part, s.qty);
+      v_unit := round(public.compute_part_cost_at_qty(s.part, rt.quantity)
+                      * (1 + rt.markup_percent / 100.0), 2);
+      perform pg_temp.add_job_part(j, s.part, 10, s.qty, v_unit, null,
+                                   now() - (s.created_days||' days')::interval);
+    else
+      -- Quoted a week before the job, on the terms the rest of the seed uses.
+      q := pg_temp.new_quote(s.customer, s.created_days + 7, 'active', 30, 21);
+      perform pg_temp.add_quote_line(q, s.part, 10, s.qty);
+      j := pg_temp.convert_job(q, s.po, s.due_days, s.created_days);
+    end if;
+
+    if s.status <> 'not_started' then
+      -- Anchor the run a few days after the job opened; progress_job walks the
+      -- operations backwards from there.
+      perform pg_temp.progress_job(j, s.status, greatest(s.created_days - 6, 1));
+    end if;
+
+    if s.ship_fraction > 0 then
+      v_ship_at := greatest(s.moved_days, 1);
+      perform pg_temp.deplete_job(j, least(s.created_days - 2, v_ship_at + 3));
+      perform pg_temp.ship_job(j, s.customer, s.ship_fraction, v_ship_at);
+    end if;
+
+  end loop;
+end $$;
+
+
+
+-- ── More quotes, so the pipeline is not six rows ─────────────────────────────
+-- A mix of live opportunities and expired ones, on parts and customers that
+-- already exist. Two carry a second line so multi-line quotes are represented.
+do $$
+declare
+  s record;
+  q uuid;
+begin
+  for s in
+    select * from (values
+      ('50000000-0000-0000-0000-000000000007'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,18::numeric,'active',  3, 24),
+      ('50000000-0000-0000-0000-000000000008'::uuid,'60000000-0000-0000-0000-000000000017'::uuid,40::numeric,'active',  6, 30),
+      ('50000000-0000-0000-0000-000000000009'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,12::numeric,'active', 11, 19),
+      ('50000000-0000-0000-0000-000000000001'::uuid,'60000000-0000-0000-0000-000000000018'::uuid,240::numeric,'active',14, 16),
+      ('50000000-0000-0000-0000-000000000002'::uuid,'60000000-0000-0000-0000-000000000014'::uuid, 5::numeric,'active', 18, 45),
+      ('50000000-0000-0000-0000-000000000003'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,25::numeric,'active', 22, 12),
+      ('50000000-0000-0000-0000-000000000005'::uuid,'60000000-0000-0000-0000-000000000017'::uuid, 9::numeric,'active', 27, 8),
+      ('50000000-0000-0000-0000-000000000006'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,14::numeric,'active', 33, 5),
+      ('50000000-0000-0000-0000-000000000004'::uuid,'60000000-0000-0000-0000-000000000015'::uuid, 7::numeric,'expired',-9, 68),
+      ('50000000-0000-0000-0000-000000000007'::uuid,'60000000-0000-0000-0000-000000000016'::uuid,11::numeric,'expired',-21, 92),
+      ('50000000-0000-0000-0000-000000000009'::uuid,'60000000-0000-0000-0000-000000000018'::uuid,60::numeric,'expired',-40,124),
+      ('50000000-0000-0000-0000-000000000008'::uuid,'60000000-0000-0000-0000-000000000015'::uuid,13::numeric,'expired',-57,151)
+    ) as t(customer, part, qty, status, exp_days, created_days)
+  loop
+    q := pg_temp.new_quote(s.customer, s.created_days, s.status, s.exp_days, 21);
+    perform pg_temp.add_quote_line(q, s.part, 10, s.qty);
+    -- Two of them quote a second part on the same sheet.
+    if s.qty > 20 then
+      perform pg_temp.add_quote_line(q, '60000000-0000-0000-0000-000000000016', 20, 4);
+    end if;
+  end loop;
+end $$;
+
+-- ── When each job and quote last actually moved ──────────────────────────────
+--
+-- Every seeded row carried updated_at = the seed run, and not by oversight: the
+-- `jobs_updated_at` / `quotes_updated_at` triggers stamp now() on every write,
+-- which is exactly what they are for. So a job created in February, run in
+-- March and shipped in April still read as "touched today".
+--
+-- That is not cosmetic. The dashboard's Completed card buckets on updated_at, so
+-- ALL-TIME revenue landed inside "this week" and the Today / This Week toggle
+-- could not differ no matter what the data said. Anything else that reasons
+-- about recency was reading the same lie.
+--
+-- Suspend the triggers for one pass and stamp each row with its newest real
+-- event: the last shipment, else the last completed operation, else creation.
+-- Derived rather than assigned, so it stays true if the scenarios above change.
+-- This runs for the whole company, so the eight hand-written scenarios are
+-- corrected along with the generated ones.
+alter table public.jobs   disable trigger jobs_updated_at;
+alter table public.quotes disable trigger quotes_updated_at;
+
+update public.jobs j
+   set updated_at = greatest(
+         j.created_at,
+         coalesce((select max(s.ship_date::timestamptz) from public.shipments s where s.job_id = j.id), j.created_at),
+         coalesce((select max(o.completed_at) from public.job_operations o where o.job_id = j.id), j.created_at))
+ where j.company_id = '22222222-2222-2222-2222-222222222222';
+
+-- A quote last moved when it converted, else when it was raised.
+update public.quotes q
+   set updated_at = coalesce(q.converted_at, q.created_at)
+ where q.company_id = '22222222-2222-2222-2222-222222222222';
+
+alter table public.jobs   enable trigger jobs_updated_at;
+alter table public.quotes enable trigger quotes_updated_at;
 
 -- ── Recognition cursor: some of the praise has already been read ─────────────
 -- Without this every member's reactions_seen_at is NULL, which the read path treats as

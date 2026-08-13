@@ -173,6 +173,13 @@ SCHEMA_CONTEXT = """
 - quantity: NUMERIC (>0) -- editable after job creation; fractional allowed
 - unit_price: NUMERIC(12,4) -- agreed price per unit (the per-part revenue source)
 - total_price: NUMERIC(12,4) -- agreed line total (quantity * unit_price); USE THIS for job revenue
+- true_cost_per_unit: NUMERIC (nullable) -- USE THIS for job cost. The all-in TRUE cost of
+  one unit (labor + materials + the whole nested BOM), FROZEN when the job_part was created
+  and re-taken only when its quantity changes. Cost of the line = true_cost_per_unit *
+  quantity; profit = total_price - that. Never recompute cost from the part's current
+  routing or rates — that would make a shipped job's profit move when a rate changes.
+  NULL means the cost could not be determined at snapshot time: EXCLUDE that job_part from
+  profit answers and say so. Never treat NULL as zero cost.
 - production_status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'cancelled'
 - fulfillment_status: TEXT -- one of: 'unshipped', 'partially_shipped', 'fully_shipped'
 - status_changed_at: TIMESTAMPTZ
@@ -192,6 +199,16 @@ SCHEMA_CONTEXT = """
 - routing_operation_id: UUID (FK -> routing_operations.id, nullable; the source row)
 - estimated_setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES, not hours
 - estimated_run_minutes_per_unit: NUMERIC(8,4) (default 0) -- MINUTES per unit
+- work_center_kind_snapshot: TEXT ('internal'|'external', nullable) -- the kind as of cloning
+- labor_rate_snapshot: NUMERIC(10,2) (nullable) -- internal ops: the per-hour rate FROZEN at
+  cloning. Use this, not work_centers.labor_rate, for anything historical.
+- external_unit_price_snapshot: NUMERIC(12,4) (nullable) -- external ops: price per unit, frozen
+- NOTE: these three make LABOR itemisable per operation without reading a live rate:
+    internal: (estimated_setup_minutes + estimated_run_minutes_per_unit * job_parts.quantity)
+              / 60 * labor_rate_snapshot
+    external: external_unit_price_snapshot * job_parts.quantity
+  MATERIALS are not itemised per line anywhere. Get them by subtraction:
+  material cost = job_parts.true_cost_per_unit * quantity - (labor summed as above).
 - status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
 - started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
 - assigned_to: UUID, completed_by: UUID
@@ -233,14 +250,14 @@ SCHEMA_CONTEXT = """
 - cycle_minutes_per_unit: NUMERIC(8,4) -- MINUTES per unit (internal only)
 - labor_rate_override: NUMERIC(10,2) -- per-op override of work_centers.labor_rate (internal only)
 - external_unit_price: NUMERIC(12,4) -- price per output unit (external only)
-- external_setup_cost: NUMERIC(12,4) -- one-time per job (external only)
 - instructions: TEXT, metadata: JSONB
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: external_setup_cost was DROPPED (migration 20260623022617). Do not reference it.
 - COST CONTRACT (mirrors compute_part_cost_at_qty, migration 20260514):
     * internal: cost = (setup_minutes/qty + cycle_minutes_per_unit)
                        * COALESCE(labor_rate_override, work_centers.labor_rate)
                        / 60.0
-    * external: cost = external_unit_price + external_setup_cost / qty
+    * external: cost = external_unit_price
   Setup amortization for sub-assemblies follows from bom_qty * sub_cost_at(
   cumulative_qty): one sub-assembly setup spread across the whole parent
   batch run, contributing sub_setup / parent_order_qty per parent unit.

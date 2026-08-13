@@ -4,11 +4,11 @@ import { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 
-import { InsightsSection, PinnedMetrics, RecentActivity } from '@/components/dashboard';
+import { InsightsSection, DashboardMetrics, RecentActivity } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
-import { getMetricValue, getDashboardActivity, type ActivityItem } from '@/utils/dashboardAccess';
+import { isDashboardEmpty, getDashboardActivity, type ActivityItem } from '@/utils/dashboardAccess';
 
 export default function DashboardPage() {
   const params = useParams();
@@ -25,14 +25,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!companyId) return;
-    Promise.all([
-      getMetricValue(companyId, 'open_quotes'),
-      getMetricValue(companyId, 'not_started_jobs'),
-      getMetricValue(companyId, 'in_progress_jobs'),
-      getMetricValue(companyId, 'revenue'),
-    ]).then(([quotes, notStarted, inProgress, revenue]) => {
-      setIsEmpty(quotes === 0 && notStarted === 0 && inProgress === 0 && revenue === 0);
-    }).catch(() => {});
+    isDashboardEmpty(companyId)
+      .then(setIsEmpty)
+      .catch(() => {});
   }, [companyId]);
 
   // Recent Activity card — a plain Supabase read (no AI on mount). Async-only
@@ -57,9 +52,9 @@ export default function DashboardPage() {
       {/* Onboarding Card — shown when dashboard is empty and no demo exists */}
       <OnboardingCard companyId={companyId} isEmpty={isEmpty} />
 
-      {/* Pinned Metrics */}
+      {/* Scorecard row — four fixed metrics */}
       <Box sx={{ mb: 4 }}>
-        <PinnedMetrics companyId={companyId} />
+        <DashboardMetrics companyId={companyId} />
       </Box>
 
       {/* Recent Activity — compact business-milestone feed + "View all" hop */}

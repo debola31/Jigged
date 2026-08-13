@@ -874,7 +874,7 @@ export default function PartBomPanel({
                           display: 'flex',
                           alignItems: 'center',
                           gap: 0.5,
-                          color: 'error.main',
+                          color: 'error.light',
                           mt: 0.25,
                         }}
                       >
@@ -892,7 +892,7 @@ export default function PartBomPanel({
                         display: 'flex',
                         alignItems: 'center',
                         gap: 0.5,
-                        color: 'error.main',
+                        color: 'error.light',
                         mt: 0.25,
                       }}
                     >

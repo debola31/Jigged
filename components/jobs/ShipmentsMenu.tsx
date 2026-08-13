@@ -87,7 +87,7 @@ export default function ShipmentsMenu({
                   <Box component="span">
                     {s.packing_slip_number}
                     {s.voided_at && (
-                      <Typography component="span" variant="caption" color="error" sx={{ ml: 1 }}>
+                      <Typography component="span" variant="caption" color="error.light" sx={{ ml: 1 }}>
                         VOIDED
                       </Typography>
                     )}

@@ -70,9 +70,9 @@ export interface MetricDefinition {
 }
 
 export const DASHBOARD_METRICS: readonly MetricDefinition[] = [
-  { key: 'overdue_jobs', label: 'Overdue' },
+  { key: 'overdue_jobs', label: 'Overdue Jobs' },
   { key: 'open_jobs', label: 'Open Jobs' },
-  { key: 'completed_jobs', label: 'Completed', supportsTimePeriod: true },
+  { key: 'completed_jobs', label: 'Completed Jobs', supportsTimePeriod: true },
   { key: 'open_quotes', label: 'Open Quotes' },
 ];
 
@@ -238,7 +238,20 @@ async function getCompletedInRange(
   };
 }
 
-/** Quotes still live. Count only — see `MetricValue.money`. */
+/**
+ * Quotes still live — active AND never converted. Count only, see
+ * `MetricValue.money`.
+ *
+ * `converted_at IS NULL` is the whole fix. `quotes.status` only ever holds
+ * `active | expired`; winning a quote sets `converted_at` and leaves the status
+ * alone, so a quote that became a job stays "active" forever and this tile
+ * counted work already won as pipeline still to win. On the pilot shop it read
+ * 25 when 11 were live; on demo companies it read 9 against 1, because nearly
+ * every demo quote is converted.
+ *
+ * The drill-down goes to `?status=open`, which the quotes list resolves through
+ * the same two conditions — the tile and the list it opens must never disagree.
+ */
 async function getOpenQuotes(companyId: string): Promise<MetricValue> {
   const supabase = getSupabase();
   const { count, error } = await supabase
@@ -246,7 +259,8 @@ async function getOpenQuotes(companyId: string): Promise<MetricValue> {
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .is('converted_at', null);
 
   if (error) throw error;
   return { count: count || 0, money: null };

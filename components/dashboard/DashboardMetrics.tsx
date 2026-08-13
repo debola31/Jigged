@@ -38,7 +38,7 @@ function drillDownHref(companyId: string, key: MetricKey): string | undefined {
     case 'completed_jobs':
       return `/dashboard/${companyId}/jobs?status=completed`;
     case 'open_quotes':
-      return `/dashboard/${companyId}/quotes?status=active`;
+      return `/dashboard/${companyId}/quotes?status=open`;
     default:
       return undefined;
   }

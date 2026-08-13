@@ -58,7 +58,7 @@ describe('DashboardMetrics', () => {
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
 
-    for (const label of ['Overdue', 'Open Jobs', 'Completed', 'Open Quotes']) {
+    for (const label of ['Overdue Jobs', 'Open Jobs', 'Completed Jobs', 'Open Quotes']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText(/Edit metrics/i)).not.toBeInTheDocument();

@@ -438,7 +438,7 @@ export default function PartProcurementPricingPanel({
                 alignItems: 'center',
                 gap: 0.5,
                 mb: 1,
-                color: 'error.main',
+                color: 'error.light',
               }}
             >
               <WarningAmberIcon fontSize="small" />

@@ -102,13 +102,27 @@ const jiggedTheme = createTheme({
   components: {
     MuiButton: {
       styleOverrides: {
-        root: {
+        /**
+         * `color="error"` on a TEXT or OUTLINED button paints the label in
+         * `error.main`, which measures 3.70:1 on a card and 4.47:1 on a dialog —
+         * both under the 4.5:1 body floor. Only the raw page canvas passes, and
+         * a destructive button almost never sits on the raw canvas.
+         *
+         * `contained` is deliberately untouched: it paints white on an
+         * error.main FILL, which is a different calculation and already fine.
+         * Lightening it would wash out the one affordance that should look
+         * unmistakably dangerous.
+         */
+        root: ({ ownerState, theme }) => ({
           textTransform: 'none',
           fontWeight: 500,
           padding: '10px 20px',
           minHeight: 48, // Touch target size for shop floor
           transition: 'all 0.2s ease',
-        },
+          ...(ownerState.color === 'error' && ownerState.variant !== 'contained'
+            ? { color: theme.palette.error.light }
+            : {}),
+        }),
         contained: {
           boxShadow: '0 4px 12px rgba(70, 130, 180, 0.3)',
           '&:hover': {

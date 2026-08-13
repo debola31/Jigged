@@ -34,6 +34,7 @@ const STATE: {
   quoteCount: number;
   selects: string[];
   overdueFilters: string[];
+  quoteFilters: string[];
 } = {
   openJobs: [],
   overdue: [],
@@ -41,6 +42,7 @@ const STATE: {
   quoteCount: 0,
   selects: [],
   overdueFilters: [],
+  quoteFilters: [],
 };
 
 /**
@@ -56,8 +58,14 @@ function makeBuilder(table: string) {
     if (opts?.head) seen.head = true;
     return builder;
   });
-  builder.eq = vi.fn(() => builder);
-  builder.is = vi.fn(() => builder);
+  builder.eq = vi.fn((col: string, val: unknown) => {
+    if (table === 'quotes') STATE.quoteFilters.push(`${col}=${String(val)}`);
+    return builder;
+  });
+  builder.is = vi.fn((col: string, val: unknown) => {
+    if (table === 'quotes') STATE.quoteFilters.push(`${col} is ${String(val)}`);
+    return builder;
+  });
   builder.lt = vi.fn(() => builder);
   builder.in = vi.fn((col: string) => {
     if (col === 'production_status') seen.in = true;
@@ -109,6 +117,7 @@ describe('dashboard metrics', () => {
     STATE.quoteCount = 0;
     STATE.selects = [];
     STATE.overdueFilters = [];
+    STATE.quoteFilters = [];
   });
 
   it('is exactly four metrics, in flow order', () => {
@@ -191,6 +200,20 @@ describe('dashboard metrics', () => {
     // figure on the dashboard.
     const { notStarted, inProgress } = m.open_jobs!.split!;
     expect(notStarted.money + inProgress.money).toBe(m.open_jobs?.money);
+  });
+
+  it('counts only quotes that are still live, not ones already won', async () => {
+    // quotes.status holds active|expired and NOTHING else — winning a quote sets
+    // converted_at and leaves the status alone, so a quote that became a job
+    // stays "active" forever. Counting status alone read 25 on the pilot shop
+    // when 11 were live, and 9 against 1 on demo companies.
+    STATE.quoteCount = 11;
+
+    const m = await getDashboardMetrics('c1', 'this_week');
+
+    expect(m.open_quotes?.count).toBe(11);
+    expect(STATE.quoteFilters).toContain('status=active');
+    expect(STATE.quoteFilters).toContain('converted_at is null');
   });
 
   it('gives Open Quotes a count and no money at all', async () => {

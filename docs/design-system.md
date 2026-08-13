@@ -224,6 +224,32 @@ What the shell enforces, all in
 as a *floor*, measured against a 500–1000 lux shop floor rather than an office monitor, and treated
 as a hard limit rather than a number to squeak past. Every ratio in this file was measured by hand.
 
+### `error.main` is not a text colour on a lifted surface
+
+`#ef4444` is fine as a border, an icon or a fill. As **text** it clears the body floor only on the raw
+page canvas — and text almost never sits on the raw canvas. Measured against the surfaces as painted
+(sampled from the running app, because the cards are translucent over a gradient and a value derived
+from `background.default` comes out darker than reality and flatters the result):
+
+| Surface | `error.main` #ef4444 | `error.light` #fca5a5 |
+|---|---|---|
+| Page canvas `#111439` | 4.72:1 ✓ | 9.35:1 ✓ |
+| Dialog paper | **4.47:1 ✗** | 8.87:1 ✓ |
+| Card / paper | **3.70:1 ✗** | 7.33:1 ✓ |
+| Alert-tinted card | **2.98:1 ✗** | 5.90:1 ✓ |
+
+**So: `error.light` for error TEXT, `error.main` for everything else.** `error.light` passes on every
+surface, so no per-site analysis is needed — you never have to work out which panel a message lands on.
+
+Three usages are measured exempt and should stay on `error.main`: **icons** (non-text, SC 1.4.11 asks
+3:1 and 3.70:1 clears it), **filled** error chips and **contained** error buttons (white on a red fill —
+a different calculation, and lightening them would wash out the one affordance that should look
+dangerous). A `MuiButton` override in [`lib/theme.ts`](../lib/theme.ts) handles text and outlined error
+buttons automatically; `contained` is deliberately excluded.
+
+Pinned by [`__tests__/lib/alertContrast.test.ts`](../__tests__/lib/alertContrast.test.ts), which computes
+real WCAG ratios from the theme's own values against each surface above.
+
 **Withdrawn:** the heading "Accessibility (WCAG 2.1 **Level A**)" — wrong twice. Level A imposes no
 contrast requirement at all; 4.5:1 body / 3:1 large text are Level **AA** (SC 1.4.3). And 48px is not
 a WCAG number in any version — WCAG 2.2 asks 24×24 CSS px at AA (SC 2.5.8) and 44×44 at AAA

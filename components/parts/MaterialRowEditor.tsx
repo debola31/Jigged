@@ -284,7 +284,7 @@ export default function MaterialRowEditor({
       </Box>
 
       {error && (
-        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
+        <Typography variant="caption" color="error.light" sx={{ display: 'block', mt: 0.75, ml: 1 }}>
           {error}
         </Typography>
       )}

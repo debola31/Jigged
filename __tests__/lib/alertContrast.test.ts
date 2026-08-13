@@ -41,9 +41,21 @@ function hexToRgb(hex: string): number[] {
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
 }
 
-/** Sampled from the running app at 1440×900. */
-const ALERT_CARD_BG = [57, 55, 92];
+/**
+ * Sampled from the running app at 1440×900, except the page canvas which is
+ * opaque and therefore exact.
+ */
+const PAGE_CANVAS_BG = [17, 20, 57]; // background.default #111439
+const DIALOG_PAPER_BG = [21, 25, 65]; // MuiDialog paper, mid-gradient
 const NORMAL_CARD_BG = [33, 41, 84];
+const ALERT_CARD_BG = [57, 55, 92];
+
+const SURFACES: Array<[string, number[]]> = [
+  ['page canvas', PAGE_CANVAS_BG],
+  ['dialog paper', DIALOG_PAPER_BG],
+  ['card / paper', NORMAL_CARD_BG],
+  ['alert-tinted card', ALERT_CARD_BG],
+];
 
 const BODY_FLOOR = 4.5;
 const LARGE_FLOOR = 3;
@@ -81,5 +93,43 @@ describe('alert-card contrast', () => {
   it('leaves the upward delta alone, because green already passes', () => {
     const ratio = contrast(hexToRgb(theme.palette.success.main), NORMAL_CARD_BG);
     expect(ratio).toBeGreaterThanOrEqual(BODY_FLOOR);
+  });
+
+  it('is readable as text on EVERY surface, so no per-site analysis is needed', () => {
+    // The reason the rule can be "error.light for error text" full stop, rather
+    // than "it depends which panel it lands on".
+    for (const [name, bg] of SURFACES) {
+      const ratio = contrast(hexToRgb(theme.palette.error.light), bg);
+      expect(ratio, `error.light on ${name}`).toBeGreaterThanOrEqual(BODY_FLOOR);
+    }
+  });
+
+  it('records that error.main is text-safe ONLY on the raw canvas', () => {
+    // Which is where text almost never sits. This is the measurement behind the
+    // sweep; if a future palette change makes error.main readable on a card,
+    // this fails and the rule gets revisited rather than silently outliving it.
+    const [, ...lifted] = SURFACES; // everything above the canvas
+    expect(contrast(hexToRgb(theme.palette.error.main), PAGE_CANVAS_BG)).toBeGreaterThanOrEqual(
+      BODY_FLOOR,
+    );
+    for (const [name, bg] of lifted) {
+      const ratio = contrast(hexToRgb(theme.palette.error.main), bg);
+      expect(ratio, `error.main on ${name} should still be failing`).toBeLessThan(BODY_FLOOR);
+    }
+  });
+
+  it('keeps error.main usable for icons, which answer to 3:1 not 4.5:1', () => {
+    // SC 1.4.11 non-text contrast. This is why the 15 error-coloured icons were
+    // measured and left alone rather than swept along with the text.
+    //
+    // The alert tint is excluded and the exclusion is the interesting part:
+    // error.main is 2.98:1 there, under even the non-text bar. It is safe only
+    // because nothing renders an icon on that surface — the sole alert-tinted
+    // thing in the app is the Overdue scorecard, which has none. Put an icon on
+    // one and it needs error.light like the text does.
+    for (const [name, bg] of SURFACES.filter(([n]) => n !== 'alert-tinted card')) {
+      const ratio = contrast(hexToRgb(theme.palette.error.main), bg);
+      expect(ratio, `error.main icon on ${name}`).toBeGreaterThanOrEqual(LARGE_FLOOR);
+    }
   });
 });

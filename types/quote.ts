@@ -313,10 +313,30 @@ export interface QuoteFormData {
 }
 
 /**
+ * What a quote LOOKS like to a shop, which is not what `quotes.status` stores.
+ *
+ * The column holds only `active | expired`; winning a quote is recorded by
+ * `converted_at`, not by a status change. So a quote that became a job stays
+ * `active` forever, and "active" is really the union of *still chasing it* and
+ * *already won it* — a set nobody asks to see.
+ *
+ * These are the three questions people actually ask, and they partition the
+ * list cleanly:
+ *
+ *   open       still live: active AND never converted
+ *   converted  became a job (converted_at set), whatever the status column says
+ *   expired    lapsed
+ *
+ * `active` remains accepted so older links and bookmarks keep resolving; it is
+ * the raw column value and is deliberately not offered in the UI.
+ */
+export type QuoteListStatus = QuoteStatus | 'all' | 'open' | 'converted';
+
+/**
  * Filters for quotes list
  */
 export interface QuoteFilters {
-  status?: QuoteStatus | 'all';
+  status?: QuoteListStatus;
   customerId?: string;
   createdBy?: string;
   search?: string;
@@ -484,7 +504,10 @@ export const QUOTE_STATUS_CONFIG: Record<
   QuoteStatus,
   { label: string; color: 'default' | 'primary' | 'success' | 'error' | 'warning' }
 > = {
-  active: { label: 'Active', color: 'primary' },
+  // 'Open' rather than 'Active': QuoteStatusChip renders converted quotes as
+  // 'Converted' before consulting this map, so a chip reaching here is
+  // active AND unconverted — the set the list's Status filter calls Open.
+  active: { label: 'Open', color: 'primary' },
   expired: { label: 'Expired', color: 'warning' },
 };
 

@@ -282,7 +282,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               {desktopEnabled && (
               <ProviderOption
                 title="QuickBooks Desktop"
-                detail="QuickBooks is installed on a computer in the shop — Pro, Premier or Enterprise."
+                detail="QuickBooks is installed on a computer in the shop â€” Pro, Premier or Enterprise."
                 actionLabel="Connect QuickBooks Desktop"
                 onConnect={handleConnectDesktop}
                 busy={busy}

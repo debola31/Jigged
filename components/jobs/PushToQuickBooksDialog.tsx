@@ -263,7 +263,7 @@ export default function PushToQuickBooksDialog({
           <Alert severity="warning" sx={{ mb: 2 }}>
             <AlertTitle>We couldn&apos;t confirm that invoice</AlertTitle>
             {unverified} It may already exist in QuickBooks, so Jigged will not try again on its
-            own — creating a second one is the risk we refuse to take.
+            own â€” creating a second one is the risk we refuse to take.
           </Alert>
         )}
         {preflight?.blocked && (
@@ -277,8 +277,8 @@ export default function PushToQuickBooksDialog({
             <LinearProgress />
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }} aria-live="polite">
               {preflight?.provider === 'qbd'
-                ? 'Sending to QuickBooks on the shop computer — this can take a few seconds.'
-                : 'Sending to QuickBooks…'}
+                ? 'Sending to QuickBooks on the shop computer â€” this can take a few seconds.'
+                : 'Sending to QuickBooksâ€¦'}
             </Typography>
           </Box>
         )}

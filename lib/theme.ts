@@ -67,7 +67,21 @@ const jiggedTheme = createTheme({
     },
     success: { main: '#10b981' },
     warning: { main: '#f59e0b' },
-    error: { main: '#ef4444' },
+    /**
+     * `main` is for BORDERS, ICONS and FILLS — not for text on a tinted panel.
+     *
+     * #ef4444 on the alert-tinted card background (which composites to about
+     * rgb(57,55,92)) measures 2.98:1. The bar is 4.5:1 body / 3:1 large
+     * (design-system.md, "Contrast, keyboard, semantics"), so it fails even the
+     * easier large-text clause. `light` is the same alert red raised until it
+     * clears the body-text floor with room to spare — 5.90:1 — rather than
+     * squeaking past it, since the standard is measured against a 500–1000 lux
+     * shop floor and treated as a hard limit.
+     *
+     * Use `error.light` for error TEXT on any tinted surface; `error.main`
+     * still reads fine as a border or icon against the darker page canvas.
+     */
+    error: { main: '#ef4444', light: '#fca5a5' },
     info: { main: '#3b82f6' },
   },
   typography: {

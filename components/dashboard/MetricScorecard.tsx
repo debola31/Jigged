@@ -84,8 +84,11 @@ export default function MetricScorecard({
       ? (delta / (money.previousAmount as number)) * 100
       : null;
   const direction: 'up' | 'down' | 'flat' = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  // error.light, not error.main: a falling delta is TEXT, and #ef4444 measures
+  // 3.70:1 on the card background — under the 4.5:1 body floor. success.main
+  // clears it at 5.48:1, so only the red needed raising.
   const deltaColor =
-    direction === 'flat' ? 'text.secondary' : direction === 'up' ? 'success.main' : 'error.main';
+    direction === 'flat' ? 'text.secondary' : direction === 'up' ? 'success.main' : 'error.light';
   const DeltaIcon =
     direction === 'flat' ? ArrowRightAltIcon : direction === 'up' ? ArrowUpwardIcon : ArrowDownwardIcon;
 
@@ -102,7 +105,7 @@ export default function MetricScorecard({
         variant="body2"
         sx={{
           fontWeight: 500,
-          color: isAlert ? 'error.main' : 'text.secondary',
+          color: isAlert ? 'error.light' : 'text.secondary',
           textTransform: 'uppercase',
           letterSpacing: 0.4,
           fontSize: '0.7rem',
@@ -122,7 +125,7 @@ export default function MetricScorecard({
           sx={{
             fontWeight: 600,
             lineHeight: 1.1,
-            color: isAlert ? 'error.main' : 'text.primary',
+            color: isAlert ? 'error.light' : 'text.primary',
             mt: 0.25,
           }}
         >
@@ -135,7 +138,7 @@ export default function MetricScorecard({
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexWrap: 'wrap' }}>
             <Typography
               variant="body2"
-              sx={{ fontWeight: 600, color: isAlert ? 'error.main' : 'text.primary' }}
+              sx={{ fontWeight: 600, color: isAlert ? 'error.light' : 'text.primary' }}
             >
               {formatMoney(money.amount)}
             </Typography>

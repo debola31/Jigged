@@ -10,20 +10,26 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import CheckIcon from '@mui/icons-material/Check';
+import ComputerIcon from '@mui/icons-material/Computer';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 /**
- * Handing the QuickBooks Desktop setup link to the shop.
+ * Handing the QuickBooks Desktop setup over to whoever is at the shop computer.
  *
- * This is the step that has no equivalent in the QuickBooks Online flow. There is
- * no OAuth redirect: the link must be opened in a browser ON THE WINDOWS COMPUTER
- * THAT RUNS QUICKBOOKS, which is usually not the computer the admin is sitting
- * at. So the screen's whole job is to get a URL onto another machine and explain
- * what happens when it lands there.
+ * The step with no QuickBooks Online equivalent. There is no OAuth redirect: the
+ * setup has to happen in a browser ON THE WINDOWS COMPUTER THAT RUNS QUICKBOOKS,
+ * which may or may not be the one the admin is sitting at.
+ *
+ * So the screen ASKS FIRST rather than assuming. Someone already at the shop PC
+ * -- the common case for a small shop, where the office machine IS the QuickBooks
+ * machine -- should never have to copy a URL to themselves; we just open it. Only
+ * the genuinely remote case gets the copy-and-send treatment.
  */
 
 const PREREQS: string[] = [
@@ -53,6 +59,26 @@ function useCountdown(expiresAt: string | null): string | null {
   return label;
 }
 
+function Checklist({ heading }: { heading: string }) {
+  return (
+    <>
+      <Typography variant="subtitle2" fontWeight={600} sx={{ mt: 2 }}>
+        {heading}
+      </Typography>
+      <List dense disablePadding sx={{ mb: 2 }}>
+        {PREREQS.map((text) => (
+          <ListItem key={text} disableGutters sx={{ alignItems: 'flex-start' }}>
+            <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
+              <CheckCircleOutlineIcon fontSize="small" color="disabled" />
+            </ListItemIcon>
+            <ListItemText primary={text} slotProps={{ primary: { variant: 'body2' } }} />
+          </ListItem>
+        ))}
+      </List>
+    </>
+  );
+}
+
 export default function DesktopAuthHandoff({
   authFlowUrl,
   expiresAt,
@@ -66,9 +92,27 @@ export default function DesktopAuthHandoff({
   onNewLink: () => void;
   checking?: boolean;
 }) {
+  /** null = not asked yet. 'here' = at the QuickBooks PC. 'other' = send it on. */
+  const [where, setWhere] = useState<null | 'here' | 'other'>(null);
   const [copied, setCopied] = useState(false);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const remaining = useCountdown(expiresAt);
   const expired = remaining === 'expired';
+
+  const openSetupPage = () => {
+    setWhere('here');
+    // Opened inside the click so the popup blocker allows it. If it is blocked
+    // anyway we fall back to showing the link rather than leaving a dead end.
+    //
+    // Deliberately WITHOUT the 'noopener' feature: with it, window.open returns
+    // null by specification even on success, so the blocked-detection below would
+    // fire every time and tell the user a tab was blocked while it sat open in
+    // front of them. The opener is nulled straight after instead, which is the
+    // same reverse-tabnabbing guard the push dialog uses.
+    const win = window.open(authFlowUrl, '_blank');
+    if (win) win.opener = null;
+    setPopupBlocked(!win);
+  };
 
   const handleCopy = async () => {
     try {
@@ -105,12 +149,81 @@ export default function DesktopAuthHandoff({
     );
   }
 
+  // ── Step 1: which computer is this? ──
+  if (where === null) {
+    return (
+      <Box>
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          Setup has to run on the computer where QuickBooks Desktop is installed.
+        </Typography>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+          <Button variant="contained" startIcon={<ComputerIcon />} onClick={openSetupPage}>
+            I&apos;m on that computer
+          </Button>
+          <Button variant="outlined" onClick={() => setWhere('other')}>
+            It&apos;s a different computer
+          </Button>
+        </Stack>
+      </Box>
+    );
+  }
+
+  // ── Step 2a: they are here — the page is already open ──
+  if (where === 'here') {
+    return (
+      <Box>
+        {popupBlocked ? (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Your browser blocked the new tab.{' '}
+            <a href={authFlowUrl} target="_blank" rel="noopener noreferrer">
+              Open the setup page
+            </a>
+            .
+          </Alert>
+        ) : (
+          <Alert
+            severity="info"
+            sx={{ mb: 2 }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                startIcon={<OpenInNewIcon />}
+                onClick={openSetupPage}
+              >
+                Reopen
+              </Button>
+            }
+          >
+            The QuickBooks setup page opened in a new tab. Follow it through, then come back here.
+          </Alert>
+        )}
+
+        <Checklist heading="What it will ask for" />
+
+        {remaining && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This setup link stops working in {remaining}.
+          </Typography>
+        )}
+
+        <Stack direction="row" spacing={2}>
+          <Button variant="contained" onClick={onCheckNow} disabled={checking}>
+            {checking ? 'Checking…' : "I've finished — check now"}
+          </Button>
+          <Button variant="text" onClick={() => setWhere('other')}>
+            Send it to another computer instead
+          </Button>
+        </Stack>
+      </Box>
+    );
+  }
+
+  // ── Step 2b: it is another machine — hand the link over ──
   return (
     <Box>
       <Alert severity="info" sx={{ mb: 2 }}>
         <strong>Open this link on the computer that runs QuickBooks Desktop.</strong>
-        <br />
-        That&apos;s usually not the computer you&apos;re on now.
       </Alert>
 
       <TextField
@@ -133,27 +246,14 @@ export default function DesktopAuthHandoff({
         }}
       />
       {/* Persistent, not a timed toast: the audience is a 50-60 year old shop
-          owner mid-task, and a confirmation that vanishes is a confirmation
-          nobody saw. */}
+          owner mid-task, and a confirmation that vanishes is one nobody saw. */}
       {copied && (
         <Typography variant="caption" color="success.main" display="block" sx={{ mb: 2 }}>
           Copied — now paste it into a browser on the QuickBooks computer.
         </Typography>
       )}
 
-      <Typography variant="subtitle2" fontWeight={600} sx={{ mt: 2 }}>
-        What happens on that computer
-      </Typography>
-      <List dense disablePadding sx={{ mb: 2 }}>
-        {PREREQS.map((text) => (
-          <ListItem key={text} disableGutters sx={{ alignItems: 'flex-start' }}>
-            <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
-              <CheckCircleOutlineIcon fontSize="small" color="disabled" />
-            </ListItemIcon>
-            <ListItemText primary={text} slotProps={{ primary: { variant: 'body2' } }} />
-          </ListItem>
-        ))}
-      </List>
+      <Checklist heading="What happens on that computer" />
 
       {remaining && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -161,9 +261,14 @@ export default function DesktopAuthHandoff({
         </Typography>
       )}
 
-      <Button variant="contained" onClick={onCheckNow} disabled={checking}>
-        {checking ? 'Checking…' : "I've done it — check now"}
-      </Button>
+      <Stack direction="row" spacing={2}>
+        <Button variant="contained" onClick={onCheckNow} disabled={checking}>
+          {checking ? 'Checking…' : "They've finished — check now"}
+        </Button>
+        <Button variant="text" onClick={openSetupPage}>
+          Actually, I&apos;m on that computer
+        </Button>
+      </Stack>
     </Box>
   );
 }

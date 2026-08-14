@@ -188,9 +188,8 @@ this is the first flag in the repo with a direct per-use bill attached.
 |---|---|
 | Conductor HTTP, payload transform, recovery probe | [api/services/quickbooks_desktop.py](../../api/services/quickbooks_desktop.py) |
 | Provider seam (protocol + both adapters) | [api/services/accounting/](../../api/services/accounting) |
-| Connection lifecycle, customer mapping, terms refresh | [api/routes/quickbooks_desktop_routes.py](../../api/routes/quickbooks_desktop_routes.py) |
-| Invoice push (shared with QBO) | [api/routes/quickbooks_routes.py](../../api/routes/quickbooks_routes.py) |
+| Connection lifecycle and terms refresh | [api/routes/quickbooks_desktop_routes.py](../../api/routes/quickbooks_desktop_routes.py) |
+| Invoice push, including customer resolution (shared with QBO) | [api/routes/quickbooks_routes.py](../../api/routes/quickbooks_routes.py) |
 | Schema | [20260810235000_quickbooks_desktop_provider.sql](../../supabase/migrations/20260810235000_quickbooks_desktop_provider.sql) |
 | Settings UI | [QuickBooksIntegrationCard.tsx](../../components/settings/QuickBooksIntegrationCard.tsx) |
-| Customer matching | [lib/quickbooksNameMatch.ts](../../lib/quickbooksNameMatch.ts) |
 | Frontend client | [utils/quickbooksDesktop.ts](../../utils/quickbooksDesktop.ts) |

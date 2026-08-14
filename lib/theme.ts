@@ -66,7 +66,19 @@ const jiggedTheme = createTheme({
       secondary: '#C8CCD4',
     },
     success: { main: '#10b981' },
-    warning: { main: '#f59e0b' },
+    /**
+     * Amber is the shop-floor colour for *needs attention*, and the andon
+     * convention your operators already read off the machines: green running,
+     * amber behind, red stopped. Overdue work is behind, not broken — red every
+     * day spends the loudest signal on an ordinary Tuesday and leaves nothing
+     * for a genuine failure.
+     *
+     * Same split as `error`: `main` for borders, icons and tints, `light` for
+     * TEXT. `main` does technically clear the body floor on a warning-tinted
+     * card (4.89:1) where error.main does not, but 0.39 above a limit measured
+     * against a 500–1000 lux shop floor is squeaking past it. `light` is 6.29:1.
+     */
+    warning: { main: '#f59e0b', light: '#fbbf24' },
     /**
      * `main` is for BORDERS, ICONS and FILLS — not for text on a tinted panel.
      *
@@ -102,13 +114,27 @@ const jiggedTheme = createTheme({
   components: {
     MuiButton: {
       styleOverrides: {
-        root: {
+        /**
+         * `color="error"` on a TEXT or OUTLINED button paints the label in
+         * `error.main`, which measures 3.70:1 on a card and 4.47:1 on a dialog —
+         * both under the 4.5:1 body floor. Only the raw page canvas passes, and
+         * a destructive button almost never sits on the raw canvas.
+         *
+         * `contained` is deliberately untouched: it paints white on an
+         * error.main FILL, which is a different calculation and already fine.
+         * Lightening it would wash out the one affordance that should look
+         * unmistakably dangerous.
+         */
+        root: ({ ownerState, theme }) => ({
           textTransform: 'none',
           fontWeight: 500,
           padding: '10px 20px',
           minHeight: 48, // Touch target size for shop floor
           transition: 'all 0.2s ease',
-        },
+          ...(ownerState.color === 'error' && ownerState.variant !== 'contained'
+            ? { color: theme.palette.error.light }
+            : {}),
+        }),
         contained: {
           boxShadow: '0 4px 12px rgba(70, 130, 180, 0.3)',
           '&:hover': {

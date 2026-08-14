@@ -51,6 +51,10 @@ export default function StatusCards({
                   size="small"
                   color="error"
                   variant="outlined"
+                  // An OUTLINED chip draws its label in error.main, which is
+                  // under the 4.5:1 body floor on a card. A filled error chip
+                  // needs no such treatment — that one is white on red.
+                  sx={{ color: 'error.light', borderColor: 'error.light' }}
                 />
               ))}
             </Box>

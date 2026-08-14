@@ -460,7 +460,11 @@ export default function QuoteDetailPage() {
             {quote.quote_number || 'Quote'}
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <QuoteStatusChip status={quote.status} size="medium" />
+            <QuoteStatusChip
+              status={quote.status}
+              convertedAt={quote.converted_at}
+              size="medium"
+            />
             <Typography variant="body2" color="text.secondary">
               Created {formatDate(quote.created_at)}
             </Typography>

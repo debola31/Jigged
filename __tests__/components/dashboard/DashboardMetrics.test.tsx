@@ -58,7 +58,7 @@ describe('DashboardMetrics', () => {
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
 
-    for (const label of ['Overdue', 'Open Jobs', 'Completed', 'Open Quotes']) {
+    for (const label of ['Overdue Jobs', 'Open Jobs', 'Completed Jobs', 'Open Quotes']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText(/Edit metrics/i)).not.toBeInTheDocument();
@@ -146,6 +146,22 @@ describe('DashboardMetrics', () => {
     // Open Jobs still has its label; Overdue's is gone with its money.
     expect(screen.getAllByText('not yet shipped')).toHaveLength(1);
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
+  });
+
+  it('keeps the delta and its comparison in one element, so they wrap as a phrase', async () => {
+    // jsdom cannot measure a baseline, but it can hold the shape that broke it.
+    // The delta used to be a nested flex box: a flex container takes its
+    // baseline from its first item, which here is an SVG arrow with no text
+    // baseline, so the whole group floated a few pixels above "$12,480".
+    // Splitting it into separate flex items fixed the baseline and introduced a
+    // worse bug — the row could then break between "+12%" and "vs last week".
+    // One inline element solves both, and this is the half a test can hold.
+    render(<DashboardMetrics companyId="c1" />);
+
+    await waitFor(() => expect(screen.getByText(/12%/)).toBeInTheDocument());
+
+    const delta = screen.getByText(/12%/);
+    expect(delta.textContent).toContain('vs last week');
   });
 
   it('drops the delta when nothing shipped in the prior period', async () => {

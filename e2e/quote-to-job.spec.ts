@@ -102,8 +102,11 @@ test.describe('Quote to Job workflow', () => {
     // Verify the quote was created — quote number should be visible
     await expect(page.getByText(/Q-\d+/)).toBeVisible();
 
-    // Quote is created as "Active" — verify status
-    await expect(page.getByText(/^Active$/i)).toBeVisible({ timeout: 10_000 });
+    // A new quote reads "Open", not "Active". `quotes.status` still stores
+    // `active`, but the chip says Open for an unconverted one and Converted
+    // once it becomes a job — the column cannot distinguish those, and calling
+    // a won quote "Active" is what let the dashboard count it as pipeline.
+    await expect(page.getByText(/^Open$/i)).toBeVisible({ timeout: 10_000 });
 
     // ── Step 2: Convert to job (approval step is gone) ──
 

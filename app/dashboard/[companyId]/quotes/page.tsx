@@ -46,13 +46,21 @@ import { getCompanyMembers } from '@/utils/companyAccess';
 import QuoteStatusChip from '@/components/quotes/QuoteStatusChip';
 import SearchableSelect, { type SelectOption } from '@/components/common/SearchableSelect';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
-import type { QuoteWithRelations, QuoteStatus, QuoteFilters, CompanyMember } from '@/types/quote';
+import type {
+  QuoteWithRelations,
+  QuoteListStatus,
+  QuoteFilters,
+  CompanyMember,
+} from '@/types/quote';
 import type { Customer } from '@/types/customer';
 
-const VALID_QUOTE_STATUSES: Array<QuoteStatus | 'all'> = ['all', 'active', 'expired'];
+// 'active' stays parseable so older links keep resolving, but it is not offered
+// in the dropdown: it is the raw column value and means "open OR converted",
+// which is not a question anyone asks. See QuoteListStatus.
+const VALID_QUOTE_STATUSES: QuoteListStatus[] = ['all', 'open', 'converted', 'active', 'expired'];
 
-function parseQuoteStatusParam(v: string | null): QuoteStatus | 'all' {
-  if (v && (VALID_QUOTE_STATUSES as string[]).includes(v)) return v as QuoteStatus | 'all';
+function parseQuoteStatusParam(v: string | null): QuoteListStatus {
+  if (v && (VALID_QUOTE_STATUSES as string[]).includes(v)) return v as QuoteListStatus;
   return 'all';
 }
 
@@ -68,7 +76,7 @@ export default function QuotesPage() {
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [statusFilter, setStatusFilter] = useState<QuoteStatus | 'all'>(() =>
+  const [statusFilter, setStatusFilter] = useState<QuoteListStatus>(() =>
     parseQuoteStatusParam(searchParams.get('status'))
   );
   // Seeded from ?customer=<uuid> so the Related-card count on a customer page
@@ -291,7 +299,12 @@ export default function QuotesPage() {
       width: 110,
       cellRenderer: (params: ICellRendererParams<QuoteWithRelations>) => {
         if (!params.data) return null;
-        return <QuoteStatusChip status={params.data.status} />;
+        return (
+          <QuoteStatusChip
+            status={params.data.status}
+            convertedAt={params.data.converted_at}
+          />
+        );
       },
     },
     {
@@ -397,12 +410,13 @@ export default function QuotesPage() {
         <Box sx={{ minWidth: 160 }}>
           <SearchableSelect
             options={[
-              { id: 'active', label: 'Active' },
+              { id: 'open', label: 'Open' },
+              { id: 'converted', label: 'Converted' },
               { id: 'expired', label: 'Expired' },
             ]}
             value={statusFilter === 'all' ? '' : statusFilter}
             onChange={(value) => {
-              setStatusFilter((value || 'all') as QuoteStatus | 'all');
+              setStatusFilter((value || 'all') as QuoteListStatus);
               clearSelection();
             }}
             label="Status"

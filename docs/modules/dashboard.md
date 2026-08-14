@@ -25,9 +25,9 @@ is prefixed `/dashboard/{companyId}`.
 
 | Key | Label | Count | Money | Drill-down |
 |---|---|---|---|---|
-| `overdue_jobs` | Overdue | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "not yet shipped" | `/jobs?overdue=true` |
-| `open_jobs` | Open Jobs | `jobs.production_status IN ('not_started','in_progress')` | "not yet shipped" | `/jobs?status=not_started` |
-| `completed_jobs` | Completed | `jobs.fulfillment_status = 'fully_shipped'` in the period | "shipped this week" / "shipped today", with a period-over-period delta | `/jobs?status=completed` |
+| `overdue_jobs` | Overdue Jobs | the shared `applyOverdueJobsFilter` predicate — the same one the jobs list uses | "not yet shipped" | `/jobs?overdue=true` |
+| `open_jobs` | Open Jobs | `production_status IN ('not_started','in_progress')` AND not `fully_shipped` | ordered **minus already shipped** — "not yet shipped" | `/jobs?status=not_started` |
+| `completed_jobs` | Completed Jobs | distinct jobs **shipped from** in the period | value shipped in the period — "shipped this week" / "shipped today", with a period-over-period delta | `/jobs?status=completed` |
 | `open_quotes` | Open Quotes | `quotes.status = 'active'` | none — see below | `/quotes?status=active` |
 
 Never `jobs.status`; that column was removed (the May 2026 prod regression).
@@ -35,8 +35,10 @@ Never `jobs.status`; that column was removed (the May 2026 prod regression).
 ### The count is primary; the money is the second line
 
 A shop owner acts on jobs, not on dollars, so the count stays the big number and the money sits under it. It
-also keeps `0` as the all-clear on Overdue, which is a stronger signal than `$0`. Overdue renders in an
-`alert` (red) tone when > 0.
+also keeps `0` as the all-clear on Overdue, which is a stronger signal than `$0`. Overdue renders in a
+`warning` (amber) tone when > 0 — amber because a late job is *behind*, not broken, which is the
+andon convention the floor already reads; red stays for things that are actually wrong. See
+[design-system.md](../design-system.md#red-means-broken-amber-means-behind).
 
 ### Two kinds of money, and what the labels are for
 
@@ -94,22 +96,52 @@ remain readable through the API by anyone who can reach the company. Do not desc
 ### Time period
 
 Only Completed is scoped to a period, so the Today / This Week toggle sits **on that card** rather than over
-the row. The other three are a snapshot of right now — "12 jobs in progress this week" is not a thing, and a
+the row. "Today" is midnight to midnight and "This Week" opens on Sunday, both in the **browser's**
+timezone — the device's clock, not a stored company setting, so a laptop carried across a timezone
+shifts the window with it. The other three are a snapshot of right now — "12 jobs in progress this week" is not a thing, and a
 control that three of four cards ignored would read as broken. Weeks run Sunday 00:00 local → next Sunday
 00:00. The choice persists in `user_preferences.preferences.dashboard_completed_period`.
 
 Completed carries a period-over-period delta on its **money**, which is the sentence an owner wants; a count
 delta is the less interesting half. The other three cards get no delta — that would need historical snapshots.
 
-### Constraints on the range query
+### Revenue is what shipped, not what a job is worth
 
-`updated_at` is the in-range proxy for "shipped in this window". `jobs.shipped_at` does not exist in the
-dual-status model, and `job_last_ship_date` is a `(uuid)` function rather than a jobs-row column, so selecting
-it as a computed column makes PostgREST answer 400. A consequence worth knowing: editing an old shipped job
-pulls it into the current window.
+Money on the Completed card is **shipped quantity x the agreed unit price, dated by
+`shipments.ship_date`** — summed over `shipment_line_items`, voided shipments excluded. The count
+follows the money: distinct jobs *shipped from* in the window, not jobs that reached `fully_shipped`.
+Both halves then describe the same act, so "6 · $12,480 shipped this week" is one statement.
 
-"Completed" counts the fulfillment half (`fully_shipped`) of the FR-18 done predicate rather than both — a
-fully-shipped job is by definition done, so that clause is the tighter one.
+This replaced a proxy that was wrong three ways. There is no ship date on a job — `jobs.shipped_at`
+is not in the dual-status model, and `job_last_ship_date` is a `(uuid)` function rather than a column,
+so PostgREST answers 400 if you select it — and the card used `jobs.updated_at` instead. That meant:
+
+- **"Last written", not "shipped".** Editing a PO number on a job shipped in March pulled it into
+  this week, and rows only ever drifted *into* the current window, never out.
+- **A partial shipment earned nothing.** A job 60% shipped had 60% of its money in the customer's
+  hands, contributed $0 here, and had its *full* value sitting in Open Jobs as backlog.
+- **A job landed at its whole value** the moment it went `fully_shipped`, even if it shipped across
+  two months.
+
+Reading the shipment fixes all three at once, and removes a double count: Open Jobs now excludes
+fully-shipped work and counts only what a job still **owes** (ordered minus shipped), so a
+part-shipped job's delivered half is revenue exactly once. On the pilot shop that moved Open Jobs
+from 65 jobs / $85,955 to 26 / $43,987 — the earlier figure counted $37,769 of already-delivered work
+as backlog while the same money also counted as revenue.
+
+**Both axes, or neither.** `production_status` and `fulfillment_status` are independent: a shop that
+ships without operators closing out operations leaves jobs `not_started` **and** `fully_shipped` at
+the same time, which is 39 jobs on the pilot shop. Filtering on production alone is what put
+delivered work under the words "not yet shipped". `applyOverdueJobsFilter` always excluded
+fully-shipped; the other tiles now agree with it.
+
+`ship_date` is a **DATE**, so the window is a calendar comparison with nothing to smear — unlike the
+old `updated_at` timestamp, where a Saturday-evening ship could land in Sunday because the office is
+west of UTC.
+
+**Known limit:** `job_parts.unit_price` is read live rather than snapshotted per shipment, so
+repricing a line retrospectively moves historical revenue. In practice a part's price locks once any
+quantity of it is invoiced ([jobs.md](jobs.md)), which covers the case that matters.
 
 ### Failure and archived rows
 

@@ -13,6 +13,7 @@ import type {
   QuoteWithRelations,
   QuoteFormData,
   QuoteFilters,
+  QuoteListStatus,
   QuoteLineItem,
   CompanyMember,
   PricingBasisSnapshot,
@@ -137,6 +138,42 @@ const QUOTE_DETAIL_SELECT = `
 `;
 
 /**
+ * Apply the list's status filter, translating the three questions people ask
+ * into the two columns that answer them.
+ *
+ * `open` and `converted` are not values of `quotes.status` — the column only
+ * holds `active | expired`, and winning a quote sets `converted_at` instead. A
+ * converted quote therefore stays `active` forever, which is why counting
+ * `status = 'active'` overstated the live pipeline everywhere it was done.
+ *
+ * Shared by all three list queries so the page, its count and its CSV export
+ * can never answer differently.
+ */
+function applyQuoteStatusFilter<
+  Q extends {
+    eq(column: string, value: unknown): Q;
+    is(column: string, value: unknown): Q;
+    not(column: string, operator: string, value: unknown): Q;
+  },
+>(query: Q, status: QuoteListStatus | undefined): Q {
+  switch (status) {
+    case undefined:
+    case 'all':
+      return query;
+    case 'open':
+      return query.eq('status', 'active').is('converted_at', null);
+    case 'converted':
+      return query.not('converted_at', 'is', null);
+    default:
+      // Any other value is a raw `quotes.status` and passes straight through.
+      // Deliberately a pass-through rather than an allowlist: an unrecognised
+      // status must not silently widen the query to "everything", which is the
+      // failure mode where a typo returns the whole table and looks like data.
+      return query.eq('status', status);
+  }
+}
+
+/**
  * Get paginated list of quotes for a company
  */
 export async function getQuotes(
@@ -158,7 +195,7 @@ export async function getQuotes(
     .order(sortField, { ascending: sortDirection === 'asc' })
     .range(offset, offset + limit - 1);
 
-  if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+  query = applyQuoteStatusFilter(query, filters.status);
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
   if (filters.search?.trim()) {
@@ -208,7 +245,7 @@ export async function getAllQuotes(
       .order(sortField, { ascending: sortDirection === 'asc' })
       .range(offset, offset + BATCH_SIZE - 1);
 
-    if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+    query = applyQuoteStatusFilter(query, filters.status);
     if (filters.customerId) query = query.eq('customer_id', filters.customerId);
     if (filters.createdBy) query = query.eq('created_by', filters.createdBy);
     if (filters.search?.trim()) {
@@ -249,7 +286,7 @@ export async function getQuotesCount(
     .eq('company_id', companyId)
     .is('deleted_at', null);
 
-  if (filters.status && filters.status !== 'all') query = query.eq('status', filters.status);
+  query = applyQuoteStatusFilter(query, filters.status);
   if (filters.customerId) query = query.eq('customer_id', filters.customerId);
   if (filters.search?.trim()) {
     const sanitized = escapeIlikePattern(filters.search.trim());

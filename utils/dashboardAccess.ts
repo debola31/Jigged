@@ -70,9 +70,9 @@ export interface MetricDefinition {
 }
 
 export const DASHBOARD_METRICS: readonly MetricDefinition[] = [
-  { key: 'overdue_jobs', label: 'Overdue' },
+  { key: 'overdue_jobs', label: 'Overdue Jobs' },
   { key: 'open_jobs', label: 'Open Jobs' },
-  { key: 'completed_jobs', label: 'Completed', supportsTimePeriod: true },
+  { key: 'completed_jobs', label: 'Completed Jobs', supportsTimePeriod: true },
   { key: 'open_quotes', label: 'Open Quotes' },
 ];
 
@@ -104,13 +104,16 @@ export interface MetricValue {
 
 /** The shape every job-money query selects. */
 type JobValueRow = {
+  id: string;
   production_status: string | null;
+  fulfillment_status: string | null;
   job_parts:
     | { total_price: number | null; unit_price: number | null; quantity: number | null }[]
     | null;
 };
 
-const JOB_VALUE_SELECT = 'id, production_status, job_parts(total_price, unit_price, quantity)';
+const JOB_VALUE_SELECT =
+  'id, production_status, fulfillment_status, job_parts(total_price, unit_price, quantity)';
 
 /**
  * The agreed money on a job: its OWN job_parts line totals, never the source
@@ -128,30 +131,22 @@ function jobValue(row: JobValueRow): number {
   }, 0);
 }
 
-/**
- * Return [currentPeriodStart, nextPeriodStart] as ISO strings.
- * "today" → midnight today → midnight tomorrow.
- * "this_week" → Sunday 00:00 → next Sunday 00:00.
- */
-function periodBounds(period: MetricTimePeriod, offsetPeriods = 0): { start: string; end: string } {
-  const now = new Date();
-  if (period === 'today') {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() + offsetPeriods);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 1);
-    return { start: start.toISOString(), end: end.toISOString() };
-  }
-  const start = new Date(now);
-  start.setDate(now.getDate() - now.getDay() + offsetPeriods * 7);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 7);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
 
-/** Jobs not yet begun plus jobs on the floor, with the money and the split. */
+/**
+ * Work still owed: jobs not finished on the floor AND not fully out the door.
+ *
+ * Both axes, deliberately. `production_status` and `fulfillment_status` are
+ * independent — a shop that ships without operators closing out operations
+ * leaves jobs `not_started` and `fully_shipped` at the same time, and there are
+ * 39 such jobs on the pilot shop. Filtering on production alone put $37,769 of
+ * already-delivered work in this tile under the words "not yet shipped", while
+ * the same money also counted as revenue in Completed Jobs. `applyOverdueJobsFilter`
+ * always excluded fully-shipped; this now agrees with it.
+ *
+ * The money is what is still OWED — ordered minus already shipped — so a
+ * part-shipped job contributes only the remainder. Its shipped half is revenue
+ * and is counted once, in Completed Jobs. Nothing on the row is double counted.
+ */
 async function getOpenJobs(companyId: string): Promise<MetricValue> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -159,17 +154,47 @@ async function getOpenJobs(companyId: string): Promise<MetricValue> {
     .select(JOB_VALUE_SELECT)
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .in('production_status', ['not_started', 'in_progress']);
+    .in('production_status', ['not_started', 'in_progress'])
+    .not('fulfillment_status', 'eq', 'fully_shipped');
 
   if (error) throw error;
+
+  const rows = (data || []) as unknown as JobValueRow[];
+
+  // Only a part-shipped job has anything to subtract, and there are few of
+  // them, so the second query stays small rather than pulling every shipment
+  // the company has ever made.
+  const partIds = rows
+    .filter((r) => r.fulfillment_status === 'partially_shipped')
+    .map((r) => r.id);
+
+  const shippedByJob = new Map<string, number>();
+  if (partIds.length > 0) {
+    const { data: shipments, error: shipErr } = await supabase
+      .from('shipments')
+      .select(SHIPMENT_VALUE_SELECT)
+      .eq('company_id', companyId)
+      .is('voided_at', null)
+      .is('jobs.deleted_at', null)
+      .in('job_id', partIds);
+
+    if (shipErr) throw shipErr;
+
+    for (const row of (shipments || []) as unknown as ShipmentValueRow[]) {
+      if (!row.job_id) continue;
+      shippedByJob.set(row.job_id, (shippedByJob.get(row.job_id) ?? 0) + shipmentValue(row));
+    }
+  }
 
   const notStarted = { count: 0, money: 0 };
   const inProgress = { count: 0, money: 0 };
 
-  for (const row of (data || []) as unknown as JobValueRow[]) {
+  for (const row of rows) {
     const bucket = row.production_status === 'in_progress' ? inProgress : notStarted;
     bucket.count += 1;
-    bucket.money += jobValue(row);
+    // Never below zero: shipping more than was ordered is a data problem, not a
+    // negative amount of backlog.
+    bucket.money += Math.max(0, jobValue(row) - (shippedByJob.get(row.id) ?? 0));
   }
 
   // These two states are disjoint, so this is the one figure on the dashboard
@@ -209,36 +234,134 @@ async function getOverdueJobs(companyId: string): Promise<MetricValue> {
   };
 }
 
-/** Shipped in the window, with the money — this is realized revenue. */
+/**
+ * Local calendar bounds for the period, as `YYYY-MM-DD`.
+ *
+ * `shipments.ship_date` is a DATE, not a timestamp — it is the calendar day the
+ * shop says the truck left, carrying no time and no zone. So the window is
+ * compared date-to-date and there is nothing to smear: a Saturday-evening ship
+ * cannot land in Sunday because the office is west of UTC, which is exactly
+ * what the old `updated_at` timestamp comparison could do.
+ *
+ * The day still starts at midnight in the BROWSER's timezone, and the week on
+ * the local Sunday. That is the device's clock rather than a stored company
+ * setting, so a laptop travelling across a timezone shifts the window with it.
+ */
+function periodDateBounds(
+  period: MetricTimePeriod,
+  offsetPeriods = 0,
+): { start: string; end: string } {
+  const localDate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const now = new Date();
+  const start = new Date(now);
+  if (period === 'today') {
+    start.setDate(start.getDate() + offsetPeriods);
+  } else {
+    // getDay() is 0 on Sunday, so this lands on the week's opening Sunday.
+    start.setDate(now.getDate() - now.getDay() + offsetPeriods * 7);
+  }
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + (period === 'today' ? 1 : 7));
+
+  return { start: localDate(start), end: localDate(end) };
+}
+
+/** A shipment with enough on it to price what left the building. */
+type ShipmentValueRow = {
+  job_id: string | null;
+  shipment_line_items:
+    | { quantity: number | null; job_parts: { unit_price: number | null } | null }[]
+    | null;
+};
+
+// `jobs!inner(deleted_at)` is a filter, not data: shipments carry no deleted_at
+// of their own (they are voided, not archived), so without the inner join an
+// archived job's shipments keep counting as revenue while every other tile has
+// already dropped that job. Soft-delete standard, CLAUDE.md.
+const SHIPMENT_VALUE_SELECT =
+  'id, job_id, ship_date, jobs!inner(deleted_at), shipment_line_items(quantity, job_parts(unit_price))';
+
+/** What one shipment was worth: each line's shipped quantity at its agreed price. */
+function shipmentValue(row: ShipmentValueRow): number {
+  const lines = row.shipment_line_items ?? [];
+  return lines.reduce((sum, li) => {
+    const price = li.job_parts?.unit_price;
+    if (li.quantity === null || price === null || price === undefined) return sum;
+    return sum + li.quantity * price;
+  }, 0);
+}
+
+/**
+ * Revenue is what SHIPPED, priced per shipped unit, dated by the shipment.
+ *
+ * This used to count whole jobs at their full value, bucketed by
+ * `jobs.updated_at` because no ship date exists on a job — `jobs.shipped_at` is
+ * not in the dual-status model and `job_last_ship_date` is a `(uuid)` function
+ * rather than a column, so PostgREST answers 400 if you select it. That proxy
+ * was wrong in three ways at once, and all three fall out of reading the
+ * shipment instead:
+ *
+ *   * `updated_at` meant "last written", not "shipped". Editing a PO number on a
+ *     job shipped in March pulled it into this week, and rows only ever drifted
+ *     INTO the current window, never out of it.
+ *   * A PARTIAL shipment earned nothing. A job 60% shipped had 60% of its money
+ *     in the customer's hands and contributed $0 here, while its full value sat
+ *     in Open Jobs as backlog.
+ *   * A job counted at its whole value the moment it went `fully_shipped`, even
+ *     if that happened across two months.
+ *
+ * Voided shipments are excluded — that is the point of voiding one.
+ *
+ * The count follows the money: jobs SHIPPED FROM in the window, not jobs that
+ * reached `fully_shipped`. Both halves of the card then describe the same act,
+ * so "6 · $12,480 shipped this week" is one statement rather than two
+ * measurements that happen to share a tile.
+ */
 async function getCompletedInRange(
   companyId: string,
-  startIso: string,
-  endIso: string,
+  startDate: string,
+  endDate: string,
 ): Promise<{ count: number; money: number }> {
   const supabase = getSupabase();
-  // `updated_at` is the in-range proxy: `jobs.shipped_at` does not exist in the
-  // dual-status model, and `job_last_ship_date` is a `(uuid)` function rather
-  // than a jobs-row column, so selecting it as a computed column makes PostgREST
-  // answer 400.
   const { data, error } = await supabase
-    .from('jobs')
-    .select(JOB_VALUE_SELECT)
+    .from('shipments')
+    .select(SHIPMENT_VALUE_SELECT)
     .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .eq('fulfillment_status', 'fully_shipped')
-    .gte('updated_at', startIso)
-    .lt('updated_at', endIso);
+    .is('voided_at', null)
+    .is('jobs.deleted_at', null)
+    .gte('ship_date', startDate)
+    .lt('ship_date', endDate);
 
   if (error) throw error;
 
-  const rows = (data || []) as unknown as JobValueRow[];
-  return {
-    count: rows.length,
-    money: rows.reduce((sum, row) => sum + jobValue(row), 0),
-  };
+  const rows = (data || []) as unknown as ShipmentValueRow[];
+  const jobs = new Set<string>();
+  let money = 0;
+  for (const row of rows) {
+    if (row.job_id) jobs.add(row.job_id);
+    money += shipmentValue(row);
+  }
+  return { count: jobs.size, money };
 }
 
-/** Quotes still live. Count only — see `MetricValue.money`. */
+/**
+ * Quotes still live — active AND never converted. Count only, see
+ * `MetricValue.money`.
+ *
+ * `converted_at IS NULL` is the whole fix. `quotes.status` only ever holds
+ * `active | expired`; winning a quote sets `converted_at` and leaves the status
+ * alone, so a quote that became a job stays "active" forever and this tile
+ * counted work already won as pipeline still to win. On the pilot shop it read
+ * 25 when 11 were live; on demo companies it read 9 against 1, because nearly
+ * every demo quote is converted.
+ *
+ * The drill-down goes to `?status=open`, which the quotes list resolves through
+ * the same two conditions — the tile and the list it opens must never disagree.
+ */
 async function getOpenQuotes(companyId: string): Promise<MetricValue> {
   const supabase = getSupabase();
   const { count, error } = await supabase
@@ -246,7 +369,8 @@ async function getOpenQuotes(companyId: string): Promise<MetricValue> {
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .is('converted_at', null);
 
   if (error) throw error;
   return { count: count || 0, money: null };
@@ -264,8 +388,8 @@ export async function getDashboardMetrics(
   companyId: string,
   completedPeriod: MetricTimePeriod,
 ): Promise<Partial<Record<MetricKey, MetricValue>>> {
-  const current = periodBounds(completedPeriod, 0);
-  const previous = periodBounds(completedPeriod, -1);
+  const current = periodDateBounds(completedPeriod, 0);
+  const previous = periodDateBounds(completedPeriod, -1);
 
   const [overdue, openJobs, completedNow, completedPrev, openQuotes] = await Promise.allSettled([
     getOverdueJobs(companyId),

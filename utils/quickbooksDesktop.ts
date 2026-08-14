@@ -68,30 +68,12 @@ export interface DesktopStatus {
    *  push is refused until they do — a wrong revenue account is invisible until
    *  month end. */
   needs_income_account: boolean;
-  /** Matching is optional — anything unlinked is created at push time — but the
-   *  counts let setup say so with a number instead of a shrug. */
-  customers_total: number;
-  customers_linked: number;
 }
 
 export interface DesktopHealth {
   ok: boolean;
   code: string | null;
   message: string | null;
-}
-
-export interface DesktopCustomer {
-  qb_id: string;
-  /** `Parent:Child` for sub-customers — what we display. */
-  full_name: string | null;
-  /** Leaf name, subject to QuickBooks' 41-character cap — what we match on. */
-  name: string | null;
-  company_name: string | null;
-}
-
-export interface DesktopCustomerPage {
-  customers: DesktopCustomer[];
-  next_cursor: string | null;
 }
 
 export interface DesktopIncomeAccount {
@@ -139,62 +121,8 @@ export function setQuickBooksDesktopIncomeAccount(
   });
 }
 
-/** One page of QuickBooks customers. Explicitly requested by a click, never on
- *  mount: this is a Web Connector round trip against a PC that may be off. */
-export function listQuickBooksDesktopCustomers(
-  companyId: string,
-  opts?: { cursor?: string; limit?: number },
-): Promise<DesktopCustomerPage> {
-  const params = new URLSearchParams();
-  if (opts?.cursor) params.set('cursor', opts.cursor);
-  if (opts?.limit) params.set('limit', String(opts.limit));
-  const qs = params.toString();
-  return qbdRequest<DesktopCustomerPage>(`/${companyId}/customers${qs ? `?${qs}` : ''}`);
-}
-
-export interface CustomerLinkChange {
-  customer_id: string;
-  /** Null unlinks. */
-  qb_customer_id: string | null;
-  qb_display_name?: string | null;
-}
-
-export function saveQuickBooksCustomerLinks(
-  companyId: string,
-  links: CustomerLinkChange[],
-): Promise<{ linked: number; unlinked: number }> {
-  return qbdRequest(`/${companyId}/customer-map`, { method: 'POST', body: { links } });
-}
-
 export function refreshQuickBooksDesktopTerms(
   companyId: string,
 ): Promise<{ terms: number }> {
   return qbdRequest(`/${companyId}/terms/refresh`, { method: 'POST', body: {} });
-}
-
-export interface CustomerLinkRow {
-  customerId: string;
-  qbCustomerId: string;
-  qbDisplayName: string | null;
-}
-
-/** Existing links, read straight through PostgREST under RLS.
- *
- *  quickbooks_customer_map is member-readable (writes are service-role only), so
- *  this needs no backend round trip and is safe on mount — unlike the QuickBooks
- *  customer list above. */
-export async function listQuickBooksCustomerLinks(
-  companyId: string,
-): Promise<CustomerLinkRow[]> {
-  const { getSupabase } = await import('@/lib/supabase');
-  const { data, error } = await getSupabase()
-    .from('quickbooks_customer_map')
-    .select('customer_id, qb_customer_id, qb_display_name')
-    .eq('company_id', companyId);
-  if (error) throw new Error('Failed to load customer links.');
-  return (data ?? []).map((r) => ({
-    customerId: r.customer_id,
-    qbCustomerId: r.qb_customer_id,
-    qbDisplayName: r.qb_display_name,
-  }));
 }

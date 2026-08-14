@@ -159,7 +159,6 @@ fails, and so does a listed property nothing passes.
 | `accounting connect started` | An admin picks an accounting system and starts connecting. `provider` is `qbo` (an Intuit OAuth redirect) or `qbd` (a setup link created for the shop computer) | `provider` | [QuickBooksIntegrationCard.tsx](../components/settings/QuickBooksIntegrationCard.tsx) |
 | `accounting connection tested` | An explicit "Test connection" returns. `ok` false is the ordinary "QuickBooks isn't open right now" case, not an error — it is the denominator for how often a shop PC is actually reachable | `provider`, `ok`, `ms_elapsed` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
 | `accounting disconnected` | An admin disconnects the accounting system | `provider` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
-| `customer links saved` | A bulk customer-link save succeeds on the matching screen | `provider`, `linked_count`, `unlinked_count` | [customers/page.tsx](../app/dashboard/[companyId]/settings/quickbooks/customers/page.tsx) |
 | `invoice pushed` | An invoice is created in QuickBooks from the job push dialog. `has_deep_link` is false for QuickBooks Desktop, which has no web page to link to | `provider`, `line_count`, `already_existed`, `has_deep_link` | [PushToQuickBooksDialog.tsx](../components/jobs/PushToQuickBooksDialog.tsx) |
 
 <!-- registry:end -->

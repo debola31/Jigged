@@ -15,10 +15,13 @@ deliberately are not:
     being called back. Forcing that through an endpoint named /authorize, which
     returns a consent URL to redirect to, would be a lie about what it does.
 
-Auth: every endpoint is company-scoped. Connect/disconnect/config require the
-'admin' role. Customer LINKING does not -- the invoice push already lets any
-member create the same mapping implicitly at push time, so requiring admin here
-would make the bulk screen stricter than the one-off it replaces.
+Auth: every endpoint is company-scoped, and connect/disconnect/config require the
+'admin' role.
+
+There is deliberately NO bulk customer-matching endpoint. Customers are resolved
+on the invoice being sent -- link to an existing one or create it -- exactly as
+the QuickBooks Online path does. A matching chore before anyone has invoiced
+anything is work without a reason.
 """
 from __future__ import annotations
 
@@ -35,12 +38,6 @@ from routes.quickbooks_routes import _map_qb_error
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/quickbooks-desktop", tags=["quickbooks-desktop"])
-
-# A bulk link is a form submission, not an import. Anything approaching this many
-# rows means the screen is being used wrongly, and an unbounded body is a way to
-# hold a serverless function open.
-MAX_BULK_LINKS = 500
-
 
 def _require_feature(db, company_id: str) -> None:
     """QuickBooks Desktop is opt-in per tenant.
@@ -162,11 +159,6 @@ class DesktopStatusResponse(BaseModel):
     qb_company_name: str | None = None
     last_successful_request_at: str | None = None
     needs_income_account: bool = False
-    #: How many Jigged customers are linked to a QuickBooks customer, out of how
-    #: many exist. Matching is OPTIONAL -- anything unlinked is created at push
-    #: time -- but the counts let setup say so with a number rather than a shrug.
-    customers_total: int = 0
-    customers_linked: int = 0
 
 
 @router.get("/{company_id}/status", response_model=DesktopStatusResponse)
@@ -200,26 +192,12 @@ async def status(company_id: str, request: Request):
             # the card offer a retry rather than asserting a negative.
             logger.warning("QuickBooks Desktop status probe failed: %s", exc)
 
-    # Plain Postgres counts -- no QuickBooks round trip, so /status stays cheap
-    # enough for the connect screen to poll.
-    total = (
-        db.table("customers").select("id", count="exact")
-        .eq("company_id", company_id).is_("deleted_at", "null").execute()
-    )
-    linked_rows = (
-        db.table("quickbooks_customer_map").select("id", count="exact")
-        .eq("company_id", company_id)
-        .eq("realm_id", conn["conductor_end_user_id"]).execute()
-    )
-
     return DesktopStatusResponse(
         connected=True,
         linked=linked,
         qb_company_name=conn.get("qb_company_name"),
         last_successful_request_at=conn.get("last_successful_request_at"),
         needs_income_account=not conn.get("default_income_account_id"),
-        customers_total=total.count or 0,
-        customers_linked=linked_rows.count or 0,
     )
 
 
@@ -369,100 +347,3 @@ async def set_income_account(company_id: str, request: Request, body: IncomeAcco
         }
     ).eq("company_id", company_id).execute()
     return {"saved": True}
-
-
-# ───────────────────────── customer mapping ─────────────────────────
-@router.get("/{company_id}/customers")
-async def customers(company_id: str, request: Request, cursor: str | None = None,
-                    limit: int = 100):
-    """One page of QuickBooks customers, for the mapping screen.
-
-    Explicitly requested by a click, never on mount: this is a Web Connector round
-    trip against a PC that may be switched off.
-    """
-    await company_auth.verify_company_access(request, company_id)
-    db = company_auth.service_client()
-    conn = _conn_or_409(db, company_id)
-    try:
-        return qbd.list_customers(
-            conn["conductor_end_user_id"], cursor=cursor, limit=min(limit, 150)
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise _map_qb_error(exc)
-
-
-class CustomerLink(BaseModel):
-    customer_id: str
-    qb_customer_id: str | None = None
-    qb_display_name: str | None = None
-
-
-class BulkLinkBody(BaseModel):
-    links: list[CustomerLink] = []
-
-
-@router.post("/{company_id}/customer-map")
-async def bulk_link_customers(company_id: str, request: Request, body: BulkLinkBody):
-    """Bulk link/unlink Jigged customers to QuickBooks customers.
-
-    This is a FastAPI endpoint rather than Supabase CRUD for two of the four
-    reasons in architecture.md 8.1: quickbooks_customer_map has INSERT/UPDATE/
-    DELETE revoked from `authenticated` (writes are service-role only), and the
-    QuickBooks customer ids being linked are only readable with the Conductor
-    secret key.
-    """
-    _, access = await company_auth.verify_company_access(request, company_id)
-    db = company_auth.service_client()
-    conn = _conn_or_409(db, company_id)
-    realm = conn["conductor_end_user_id"]
-
-    if len(body.links) > MAX_BULK_LINKS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Too many customers at once (max {MAX_BULK_LINKS}).",
-        )
-    if not body.links:
-        return {"linked": 0, "unlinked": 0}
-
-    # Every customer_id must belong to THIS company. One query, not one per row:
-    # a client-supplied id is untrusted, and an unchecked one would link another
-    # tenant's customer into this company's map.
-    ids = [l.customer_id for l in body.links]
-    owned = {
-        r["id"]
-        for r in db.table("customers").select("id").eq("company_id", company_id)
-        .in_("id", ids).execute().data or []
-    }
-    unknown = [i for i in ids if i not in owned]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{len(unknown)} customer(s) do not belong to this company.",
-        )
-
-    to_link = [l for l in body.links if l.qb_customer_id]
-    to_unlink = [l.customer_id for l in body.links if not l.qb_customer_id]
-
-    if to_link:
-        db.table("quickbooks_customer_map").upsert(
-            [
-                {
-                    "company_id": company_id,
-                    "customer_id": l.customer_id,
-                    "realm_id": realm,
-                    "provider": "qbd",
-                    "qb_customer_id": l.qb_customer_id,
-                    "qb_display_name": l.qb_display_name,
-                    "linked_by": access["id"],
-                }
-                for l in to_link
-            ],
-            on_conflict="company_id,customer_id,realm_id",
-        ).execute()
-
-    if to_unlink:
-        db.table("quickbooks_customer_map").delete().eq("company_id", company_id).eq(
-            "realm_id", realm
-        ).in_("customer_id", to_unlink).execute()
-
-    return {"linked": len(to_link), "unlinked": len(to_unlink)}

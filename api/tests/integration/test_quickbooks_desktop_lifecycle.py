@@ -1,9 +1,9 @@
-"""Connection lifecycle, customer mapping and the terms cache for QuickBooks
+"""Connection lifecycle and the terms cache for QuickBooks
 Desktop.
 
 Split from test_quickbooks_desktop_routes.py, which owns the invoice push. These
-exercise the endpoints a shop touches while SETTING UP -- connect, status, bulk
-customer linking -- plus the terms cache, which exists for one reason:
+exercise the endpoints a shop touches while SETTING UP -- connect, status --
+plus the terms cache, which exists for one reason:
 PaymentTermsPicker calls the terms endpoint from a MOUNT effect on every quote
 form and customer page, and against Desktop a live read would be a Web Connector
 round trip on page load aimed at a PC that may be switched off.
@@ -46,7 +46,6 @@ def _route_env(monkeypatch):
 def _cleanup(admin, company_id: str) -> None:
     for table in (
         "quickbooks_terms_cache",
-        "quickbooks_customer_map",
         "quickbooks_desktop_connections",
         "quickbooks_connections",
         "customers",
@@ -202,80 +201,6 @@ async def test_status_does_not_assert_disconnected_when_the_probe_fails(
                           f"/api/quickbooks-desktop/{cid}/status")
         assert resp.status_code == 200
         assert resp.json()["connected"] is True
-    finally:
-        _cleanup(supabase_admin, cid)
-
-
-# ───────────────────────── customer mapping ─────────────────────────
-async def test_bulk_link_rejects_a_customer_from_another_company(
-    supabase_admin, seeded_user_a, seeded_user_b
-):
-    """A client-supplied customer id is untrusted. Unchecked, it would link
-    another tenant's customer into this company's map."""
-    cid = seeded_user_a["company_id"]
-    other = seeded_user_b["company_id"]
-    _cleanup(supabase_admin, cid)
-    _seed_connection(supabase_admin, cid)
-    foreign = supabase_admin.table("customers").insert(
-        {"company_id": other, "name": "Other Tenant Customer"}
-    ).execute().data[0]
-    try:
-        resp = await _post(seeded_user_a["access_token"],
-                           f"/api/quickbooks-desktop/{cid}/customer-map",
-                           {"links": [{"customer_id": foreign["id"],
-                                       "qb_customer_id": "QBD-9"}]})
-        assert resp.status_code == 400
-        assert supabase_admin.table("quickbooks_customer_map").select("id").eq(
-            "company_id", cid).execute().data == []
-    finally:
-        supabase_admin.table("customers").delete().eq("id", foreign["id"]).execute()
-        _cleanup(supabase_admin, cid)
-
-
-async def test_bulk_link_then_unlink(supabase_admin, seeded_user_a):
-    cid = seeded_user_a["company_id"]
-    _cleanup(supabase_admin, cid)
-    _seed_connection(supabase_admin, cid)
-    cust = supabase_admin.table("customers").insert(
-        {"company_id": cid, "name": "Linkable Customer"}
-    ).execute().data[0]
-    try:
-        linked = await _post(seeded_user_a["access_token"],
-                             f"/api/quickbooks-desktop/{cid}/customer-map",
-                             {"links": [{"customer_id": cust["id"],
-                                         "qb_customer_id": "QBD-7",
-                                         "qb_display_name": "Linkable"}]})
-        assert linked.status_code == 200 and linked.json()["linked"] == 1
-        rows = supabase_admin.table("quickbooks_customer_map").select("*").eq(
-            "company_id", cid).execute().data
-        assert len(rows) == 1
-        assert rows[0]["provider"] == "qbd"
-        assert rows[0]["realm_id"] == END_USER
-
-        unlinked = await _post(seeded_user_a["access_token"],
-                               f"/api/quickbooks-desktop/{cid}/customer-map",
-                               {"links": [{"customer_id": cust["id"],
-                                           "qb_customer_id": None}]})
-        assert unlinked.status_code == 200 and unlinked.json()["unlinked"] == 1
-        assert supabase_admin.table("quickbooks_customer_map").select("id").eq(
-            "company_id", cid).execute().data == []
-    finally:
-        _cleanup(supabase_admin, cid)
-
-
-async def test_bulk_link_is_bounded(supabase_admin, seeded_user_a):
-    """An unbounded body is a way to hold a serverless function open."""
-    cid = seeded_user_a["company_id"]
-    _cleanup(supabase_admin, cid)
-    _seed_connection(supabase_admin, cid)
-    try:
-        resp = await _post(
-            seeded_user_a["access_token"],
-            f"/api/quickbooks-desktop/{cid}/customer-map",
-            {"links": [{"customer_id": str(uuid4()), "qb_customer_id": "X"}
-                       for _ in range(501)]},
-        )
-        assert resp.status_code == 400
     finally:
         _cleanup(supabase_admin, cid)
 

@@ -96,9 +96,14 @@ surface may claim to show "the invoice total"**.
 - **`memo` does not print** — it is the Desktop analogue of QBO's `PrivateNote`.
 - **No deep link.** There is no web app, so `qb_invoice_url` is null and the Invoices menu renders a
   non-link row.
-- **The income account is chosen by an admin, never guessed.** QBO's path takes the first income
-  account it finds; wrong revenue accounts are invisible until month end, so the first push is
-  refused until someone picks one.
+- **The income account is chosen by an admin, never guessed** — the one required setup step, and
+  the first push is refused until it is done, because wrong revenue accounts are invisible until
+  month end. When the company file has exactly one income account it is selected automatically:
+  that is not a guess, it is a question with a single possible answer.
+- **There is no bulk customer-matching step.** Customers are resolved on the invoice being sent —
+  link to an existing one or create it — exactly as the QuickBooks Online path does. Asking a shop
+  to reconcile their whole customer list before they have invoiced anything is work without a
+  reason, and an unmatched customer was never a problem: it is created at push time.
 - **A customer name over 41 characters is refused, not truncated.** Two customers can share their
   first 41 characters, and a collision would invoice the wrong company. Terms *are* truncated — a
   term is a label, a customer is an identity.

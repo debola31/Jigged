@@ -162,6 +162,11 @@ class DesktopStatusResponse(BaseModel):
     qb_company_name: str | None = None
     last_successful_request_at: str | None = None
     needs_income_account: bool = False
+    #: How many Jigged customers are linked to a QuickBooks customer, out of how
+    #: many exist. Matching is OPTIONAL -- anything unlinked is created at push
+    #: time -- but the counts let setup say so with a number rather than a shrug.
+    customers_total: int = 0
+    customers_linked: int = 0
 
 
 @router.get("/{company_id}/status", response_model=DesktopStatusResponse)
@@ -195,12 +200,26 @@ async def status(company_id: str, request: Request):
             # the card offer a retry rather than asserting a negative.
             logger.warning("QuickBooks Desktop status probe failed: %s", exc)
 
+    # Plain Postgres counts -- no QuickBooks round trip, so /status stays cheap
+    # enough for the connect screen to poll.
+    total = (
+        db.table("customers").select("id", count="exact")
+        .eq("company_id", company_id).is_("deleted_at", "null").execute()
+    )
+    linked_rows = (
+        db.table("quickbooks_customer_map").select("id", count="exact")
+        .eq("company_id", company_id)
+        .eq("realm_id", conn["conductor_end_user_id"]).execute()
+    )
+
     return DesktopStatusResponse(
         connected=True,
         linked=linked,
         qb_company_name=conn.get("qb_company_name"),
         last_successful_request_at=conn.get("last_successful_request_at"),
         needs_income_account=not conn.get("default_income_account_id"),
+        customers_total=total.count or 0,
+        customers_linked=linked_rows.count or 0,
     )
 
 

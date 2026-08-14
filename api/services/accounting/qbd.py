@@ -43,7 +43,11 @@ class QbdProvider:
         return qbd.find_customer_candidates(self._end_user_id, name)
 
     def create_customer(self, display_name: str, address: dict | None) -> str:
-        return qbd.create_customer(self._end_user_id, display_name, address)
+        # Raw row in, QuickBooks Desktop's shape out. Passing the QuickBooks
+        # ONLINE shape here was rejected with 'Unrecognized keys: "Line1", ...'.
+        return qbd.create_customer(
+            self._end_user_id, display_name, qbd.to_qbd_address(address)
+        )
 
     def customer_tax_code_id(self, qb_customer_id: str) -> str | None:
         return qbd.customer_tax_code_id(self._end_user_id, qb_customer_id)

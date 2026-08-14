@@ -309,3 +309,69 @@ def test_tax_code_walk_cannot_spin_on_a_cycle(monkeypatch):
     }
     monkeypatch.setattr(qbd, "_list", lambda p, e, params: [rows[params["ids"]]])
     assert qbd.customer_tax_code_id("e", "A") is None
+
+
+# ───────────────────────── customer lookup ─────────────────────────
+def test_customer_search_never_uses_the_fullNames_filter(monkeypatch):
+    """MEASURED: `fullNames` is a LOOKUP, not a filter. QuickBooks treats a name it
+    cannot find as a missing required element and fails the whole request with
+    "The query request has not been fully completed. There was a required element
+    (...) that could not be found in QuickBooks." So a brand-new customer turned
+    the invoice dialog into a 500 instead of the create-it path. nameContains
+    returns an empty list for a miss, which is what a search should do."""
+    seen = {}
+
+    def _fake_list(path, end_user_id, params):
+        seen.update(params)
+        return []
+
+    monkeypatch.setattr(qbd, "_list", _fake_list)
+    qbd.find_customer_candidates("e", "Granite Equipment Co")
+    assert "fullNames" not in seen
+    assert seen.get("nameContains") == "Granite Equipment Co"
+
+
+def test_unknown_customer_is_unmatched_not_an_error(monkeypatch):
+    """The ordinary first-invoice path, and it must mirror QuickBooks Online:
+    nobody matched, so the push creates the customer."""
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [])
+    assert qbd.find_customer_candidates("e", "Brand New Co") == {
+        "status": "unmatched", "qb_customer_id": None, "candidates": [],
+    }
+
+
+def test_exact_match_is_found_among_contains_results(monkeypatch):
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [
+        {"id": "A", "fullName": "Acme Machining and Sons", "name": "Acme Machining and Sons"},
+        {"id": "B", "fullName": "Acme Machining", "name": "Acme Machining"},
+    ])
+    r = qbd.find_customer_candidates("e", "acme machining")
+    assert r["status"] == "exact_match" and r["qb_customer_id"] == "B"
+
+
+def test_partial_matches_are_offered_as_candidates(monkeypatch):
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [
+        {"id": "A", "fullName": "Acme Machining and Sons", "name": "Acme Machining and Sons"},
+    ])
+    r = qbd.find_customer_candidates("e", "Acme")
+    assert r["status"] == "candidates" and r["qb_customer_id"] is None
+
+
+# ───────────────────────── addresses ─────────────────────────
+def test_address_uses_quickbooks_desktop_key_names():
+    """The QuickBooks ONLINE shape (Line1 / CountrySubDivisionCode) is rejected
+    outright: 'Unrecognized keys: "Line1", "City", ... at "billingAddress"'. It bit
+    twice -- once on the invoice, once on customer creation -- so each provider now
+    shapes the raw row itself."""
+    out = qbd.to_qbd_address({
+        "address_line1": "310 Quarry St", "address_line2": None,
+        "city": "Manchester", "state": "NH", "postal_code": "03101", "country": "USA",
+    })
+    assert out == {"line1": "310 Quarry St", "city": "Manchester", "state": "NH",
+                   "postalCode": "03101", "country": "USA"}
+    assert "Line1" not in out and "CountrySubDivisionCode" not in out
+
+
+def test_address_is_none_when_there_is_nothing_to_send():
+    assert qbd.to_qbd_address(None) is None
+    assert qbd.to_qbd_address({}) is None

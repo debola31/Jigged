@@ -517,19 +517,52 @@ def list_customers(end_user_id: str, *, cursor: str | None = None,
     }
 
 
-def find_customer_candidates(end_user_id: str, name: str) -> dict:
-    """Exact fullName match, then a contains search. Mirrors the QBO contract so
-    the push dialog needs no provider branch."""
+def _find_customers_by_name(end_user_id: str, name: str, limit: int = 10) -> list[dict]:
+    """Search customers by name WITHOUT using the `fullNames` filter.
+
+    `fullNames` is a LOOKUP, not a filter: QuickBooks treats a name it cannot find
+    as a missing required element and fails the whole request with
+    "The query request has not been fully completed. There was a required element
+    (\"<name>\") that could not be found in QuickBooks." Verified on Enterprise 24 --
+    a brand-new customer therefore turned the invoice dialog into a 500 instead of
+    the "we'll create it" path it is supposed to take.
+
+    `nameContains` returns an empty list for a miss, which is what a search should
+    do, so exact matching happens here on the results.
+    """
     wanted = (name or "").strip()
-    exact = _list("/customers", end_user_id, {"fullNames": wanted, "limit": 5})
+    if not wanted:
+        return []
+    return _list(
+        "/customers", end_user_id,
+        {"nameContains": wanted, "status": "active", "limit": limit},
+    )
+
+
+def _exact_customer(rows: list[dict], name: str) -> Optional[dict]:
+    wanted = (name or "").strip().casefold()
+    for c in rows:
+        for candidate in (c.get("fullName"), c.get("name")):
+            if (candidate or "").strip().casefold() == wanted:
+                return c
+    return None
+
+
+def find_customer_candidates(end_user_id: str, name: str) -> dict:
+    """Mirrors the QBO contract so the push dialog needs no provider branch.
+
+    Never raises for "no such customer": an unmatched name is the ordinary path
+    that ends in creating the customer at push time, exactly as QuickBooks Online
+    behaves.
+    """
+    rows = _find_customers_by_name(end_user_id, name)
+    exact = _exact_customer(rows, name)
     if exact:
-        return {"status": "exact_match", "qb_customer_id": exact[0]["id"],
-                "candidates": [_customer_summary(exact[0])]}
-    fuzzy = _list("/customers", end_user_id,
-                  {"nameContains": wanted, "status": "active", "limit": 10})
-    if fuzzy:
+        return {"status": "exact_match", "qb_customer_id": exact["id"],
+                "candidates": [_customer_summary(exact)]}
+    if rows:
         return {"status": "candidates", "qb_customer_id": None,
-                "candidates": [_customer_summary(c) for c in fuzzy]}
+                "candidates": [_customer_summary(c) for c in rows]}
     return {"status": "unmatched", "qb_customer_id": None, "candidates": []}
 
 
@@ -554,9 +587,9 @@ def create_customer(end_user_id: str, display_name: str, address: dict | None = 
     except QbdApiError as exc:
         # Race or pre-existing: re-resolve by name rather than creating a second.
         if re.search(r"already|duplicate|in use", str(exc), re.IGNORECASE):
-            existing = _list("/customers", end_user_id, {"fullNames": name, "limit": 1})
+            existing = _exact_customer(_find_customers_by_name(end_user_id, name), name)
             if existing:
-                return existing[0]["id"]
+                return existing["id"]
         raise
 
 

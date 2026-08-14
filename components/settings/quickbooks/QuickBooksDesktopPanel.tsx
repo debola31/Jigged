@@ -7,6 +7,8 @@ import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import Divider from '@mui/material/Divider';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
@@ -183,56 +185,96 @@ export default function QuickBooksDesktopPanel({
 
       <Divider sx={{ my: 2 }} />
 
-      {/* The income account is CHOSEN, never guessed. QuickBooks Online's path
-          takes the first income account it finds; revenue landing in the wrong
-          account is invisible until month end, so the first push here is refused
-          until an admin has picked one. */}
+      {/* Setup as a checklist rather than two loose sections.
+          Step 1 is REQUIRED and the server enforces it -- invoices are refused
+          until an income account is chosen, because revenue landing in the wrong
+          account is invisible until month end.
+          Step 2 is genuinely OPTIONAL and says so: anything unmatched is created
+          in QuickBooks at push time, exactly as the QuickBooks Online path
+          behaves. Presenting it as a chore people must finish would be a lie. */}
       <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-        Income account
+        Finish setup
       </Typography>
-      {status.needs_income_account && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Choose which QuickBooks income account Jigged&apos;s invoices should post to. Invoices
-          can&apos;t be created until you do.
-        </Alert>
-      )}
-      {accounts === null ? (
-        <Button variant="outlined" size="small" onClick={handleLoadAccounts} disabled={busy}>
-          Load accounts from QuickBooks
-        </Button>
-      ) : (
-        <TextField
-          select
-          fullWidth
-          size="small"
-          label="Post invoices to"
-          defaultValue=""
-          onChange={(e) => void handlePickAccount(e.target.value)}
-          disabled={busy}
-        >
-          {accounts.map((a) => (
-            <MenuItem key={a.id} value={a.id}>
-              {a.full_name ?? a.id}
-            </MenuItem>
-          ))}
-        </TextField>
-      )}
 
-      <Divider sx={{ my: 3 }} />
+      <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ mb: 2 }}>
+        {status.needs_income_account ? (
+          <RadioButtonUncheckedIcon fontSize="small" color="warning" sx={{ mt: 0.4 }} />
+        ) : (
+          <CheckCircleIcon fontSize="small" color="success" sx={{ mt: 0.4 }} />
+        )}
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="body2" fontWeight={500}>
+            1. Choose the income account invoices post to
+            {status.needs_income_account && (
+              <Typography component="span" variant="body2" color="warning.main">
+                {' '}— required
+              </Typography>
+            )}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {status.needs_income_account
+              ? "Invoices can't be created until you pick one."
+              : 'Done. Change it any time.'}
+          </Typography>
+          {accounts === null ? (
+            <Button
+              variant={status.needs_income_account ? 'contained' : 'outlined'}
+              size="small"
+              onClick={handleLoadAccounts}
+              disabled={busy}
+            >
+              {status.needs_income_account ? 'Choose account' : 'Change account'}
+            </Button>
+          ) : (
+            <TextField
+              select
+              fullWidth
+              size="small"
+              label="Post invoices to"
+              defaultValue=""
+              onChange={(e) => void handlePickAccount(e.target.value)}
+              disabled={busy}
+            >
+              {accounts.map((a) => (
+                <MenuItem key={a.id} value={a.id}>
+                  {a.full_name ?? a.id}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+        </Box>
+      </Stack>
 
-      <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-        Customer links
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Match your Jigged customers to the ones already in QuickBooks. Anything you don&apos;t link
-        is created in QuickBooks the first time you invoice it.
-      </Typography>
-      <Button
-        variant="outlined"
-        onClick={() => router.push(`/dashboard/${companyId}/settings/quickbooks/customers`)}
-      >
-        Match customers
-      </Button>
+      <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ mb: 2 }}>
+        {status.customers_linked > 0 ? (
+          <CheckCircleIcon fontSize="small" color="success" sx={{ mt: 0.4 }} />
+        ) : (
+          <RadioButtonUncheckedIcon fontSize="small" color="disabled" sx={{ mt: 0.4 }} />
+        )}
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="body2" fontWeight={500}>
+            2. Match your customers to QuickBooks
+            <Typography component="span" variant="body2" color="text.secondary">
+              {' '}— optional
+            </Typography>
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {status.customers_linked > 0
+              ? `${status.customers_linked} of ${status.customers_total} matched.`
+              : `You have ${status.customers_total} customers.`}{' '}
+            Anything you don&apos;t match is created in QuickBooks the first time you
+            invoice it — matching now just avoids ending up with two records for one
+            customer.
+          </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => router.push(`/dashboard/${companyId}/settings/quickbooks/customers`)}
+          >
+            {status.customers_linked > 0 ? 'Review matches' : 'Match customers'}
+          </Button>
+        </Box>
+      </Stack>
 
       <Divider sx={{ my: 3 }} />
 

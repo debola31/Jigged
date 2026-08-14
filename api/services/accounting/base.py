@@ -71,7 +71,14 @@ class AccountingProvider(Protocol):
                "candidates": [{"qb_id", "display_name"}]}"""
         ...
 
-    def create_customer(self, display_name: str, address: dict | None) -> str: ...
+    def create_customer(self, display_name: str, address: dict | None) -> str:
+        """`address` is the RAW customer_addresses row, not a provider-shaped one.
+
+        QuickBooks Online and Desktop use different address key names, and passing
+        one to the other is rejected outright. Shaping it inside each provider is
+        what stops that being possible.
+        """
+        ...
 
     def customer_tax_code_id(self, qb_customer_id: str) -> str | None:
         """The customer's OWN sales-tax code in the accounting system, or None.

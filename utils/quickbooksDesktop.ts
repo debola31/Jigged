@@ -68,6 +68,10 @@ export interface DesktopStatus {
    *  push is refused until they do — a wrong revenue account is invisible until
    *  month end. */
   needs_income_account: boolean;
+  /** Matching is optional — anything unlinked is created at push time — but the
+   *  counts let setup say so with a number instead of a shrug. */
+  customers_total: number;
+  customers_linked: number;
 }
 
 export interface DesktopHealth {

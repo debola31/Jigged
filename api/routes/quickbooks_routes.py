@@ -428,7 +428,21 @@ async def preflight(company_id: str, job_id: str, request: Request):
                 "candidates": [],
             }
         else:
-            customer_res = provider.find_customer_candidates(customer["name"])
+            # A customer lookup must never block the dialog. Not finding one is the
+            # ORDINARY path -- it ends in creating the customer at push time, which
+            # is exactly how QuickBooks Online behaves -- so a failure here degrades
+            # to "unmatched" rather than turning a routine first invoice into an
+            # error the user cannot act on.
+            try:
+                customer_res = provider.find_customer_candidates(customer["name"])
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "QuickBooks customer lookup failed for %s; offering to create",
+                    customer["name"], exc_info=True,
+                )
+                customer_res = {
+                    "status": "unmatched", "qb_customer_id": None, "candidates": [],
+                }
         # Per-part billing context (ordered / shipped / invoiced / invoiceable + price)
         # for the quantity picker. Replaces the old whole-job "lines_preview": a job now
         # has many invoices, each billing a chosen quantity of shipped-but-unbilled parts.
@@ -851,7 +865,7 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
                 db, company_id, customer["id"], realm, customer_ref, customer["name"], access["id"]
             )
         else:
-            customer_ref = provider.create_customer(customer["name"], bill_addr)
+            customer_ref = provider.create_customer(customer["name"], raw_bill_addr)
             _upsert_customer_map(
                 db, company_id, customer["id"], realm, customer_ref, customer["name"], access["id"]
             )

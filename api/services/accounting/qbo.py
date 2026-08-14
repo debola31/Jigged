@@ -43,7 +43,10 @@ class QboProvider:
         return qb.find_customer_candidates(self._db, self._company_id, name)
 
     def create_customer(self, display_name: str, address: dict | None) -> str:
-        return qb.create_customer(self._db, self._company_id, display_name, address)
+        # Raw row in, Intuit's shape out.
+        return qb.create_customer(
+            self._db, self._company_id, display_name, qb._to_qb_addr(address or {})
+        )
 
     def customer_tax_code_id(self, qb_customer_id: str) -> str | None:
         """Always None -- and that is not a stub.

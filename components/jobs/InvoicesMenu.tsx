@@ -11,8 +11,11 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import AddIcon from '@mui/icons-material/Add';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CheckIcon from '@mui/icons-material/Check';
 
 import { getQuickBooksInvoiceLinksForJob, type QuickBooksInvoiceView } from '@/utils/quickbooksAccess';
+import { copyText } from '@/utils/clipboard';
 
 const EMPTY: QuickBooksInvoiceView[] = [];
 
@@ -35,12 +38,18 @@ export default function InvoicesMenu({
   disabled?: boolean;
 }) {
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
+  const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null);
   const { data } = useLoad(
     () => getQuickBooksInvoiceLinksForJob(companyId, jobId),
     [companyId, jobId, refreshKey],
     { onError: (err) => console.warn('InvoicesMenu load failed', err) },
   );
   const invoices = data ?? EMPTY;
+
+  const handleCopy = async (inv: QuickBooksInvoiceView) => {
+    if (!inv.docNumber) return;
+    setCopied({ id: inv.id, ok: await copyText(inv.docNumber) });
+  };
 
   return (
     <>
@@ -76,11 +85,38 @@ export default function InvoicesMenu({
                 <OpenInNewIcon fontSize="small" sx={{ ml: 2, color: 'text.secondary' }} />
               </MenuItem>
             ) : (
-              <MenuItem key={inv.id} onClick={() => setAnchor(null)}>
+              // No url means QuickBooks Desktop, which has no web page to open --
+              // so the row copies the invoice number instead of navigating. That
+              // number is the only handle a human has for finding the transaction
+              // in QuickBooks, and retyping it from the screen is where the digit
+              // gets transposed. The menu deliberately stays open afterwards so
+              // the confirmation is seen.
+              <MenuItem
+                key={inv.id}
+                onClick={() => handleCopy(inv)}
+                disabled={!inv.docNumber}
+                aria-label={inv.docNumber ? `Copy invoice number ${inv.docNumber}` : undefined}
+              >
                 <ListItemText
                   primary={`#${inv.docNumber ?? '—'} · ${formatCurrency(inv.total)}`}
-                  secondary={formatDate(inv.createdAt)}
+                  secondary={
+                    copied?.id === inv.id
+                      ? copied.ok
+                        ? 'Copied'
+                        : 'Press Ctrl+C to copy'
+                      : formatDate(inv.createdAt)
+                  }
+                  slotProps={
+                    copied?.id === inv.id
+                      ? { secondary: { color: copied.ok ? 'success.main' : 'warning.main' } }
+                      : undefined
+                  }
                 />
+                {copied?.id === inv.id && copied.ok ? (
+                  <CheckIcon fontSize="small" sx={{ ml: 2, color: 'success.main' }} />
+                ) : (
+                  <ContentCopyIcon fontSize="small" sx={{ ml: 2, color: 'text.secondary' }} />
+                )}
               </MenuItem>
             ),
           )
@@ -88,7 +124,7 @@ export default function InvoicesMenu({
         {invoices.length > 0 && invoices.every((i) => !i.url) && (
           <MenuItem disabled sx={{ whiteSpace: 'normal', maxWidth: 320 }}>
             <ListItemText
-              secondary="QuickBooks Desktop has no web page to link to — open the invoice in QuickBooks on the shop computer."
+              secondary="QuickBooks Desktop has no web page to link to. Copy an invoice number, then in QuickBooks press Ctrl+F, paste it into Invoice #, and press Enter."
               slotProps={{ secondary: { variant: 'caption' } }}
             />
           </MenuItem>

@@ -94,8 +94,22 @@ surface may claim to show "the invoice total"**.
 - **`transactionDate` is required** (QBO derives its own). It comes from the browser, which knows the
   shop's timezone, bounded server-side to ±1 day so nobody can backdate into a closed period.
 - **`memo` does not print** — it is the Desktop analogue of QBO's `PrivateNote`.
-- **No deep link.** There is no web app, so `qb_invoice_url` is null and the Invoices menu renders a
-  non-link row.
+- **No deep link, and this was checked properly — do not re-investigate.** There is no web app, so
+  `qb_invoice_url` is null. Nor is there any local mechanism: Intuit publishes no URL scheme,
+  command-line switch or qbXML request that navigates the QuickBooks UI to a transaction, and the
+  one `QuickBooks:` protocol handler registered on a Windows box with Enterprise 24 installed
+  belongs to `ConnectedServicesProtocolHandler.exe` (sign-in and entitlements), not to
+  transactions. The Desktop SDK is data-only — Add/Mod/Query/Del — and its UI Extensions run the
+  other way, putting a menu item *inside* QuickBooks that launches an external app. Anything that
+  did work would mean shipping a signed Windows helper to every shop PC to drive QuickBooks by
+  synthetic keystrokes, which breaks on any version change and is not worth it.
+- **So the Invoices menu copies the number instead of navigating.** For a Desktop row the invoice
+  number is the only handle a human has, and retyping it off the screen is where the digit gets
+  transposed; clicking the row copies it and the menu stays open so the confirmation is seen. The
+  matching gesture in QuickBooks is Ctrl+F → paste into **Invoice #** → Enter, and the menu says
+  so. `copyText` ([utils/clipboard.ts](../../utils/clipboard.ts)) carries the `execCommand`
+  fallback that plain-http localhost needs, and reports failure rather than claiming a copy that
+  did not happen.
 - **The income account is chosen by an admin, never guessed** — the one required setup step, and
   the first push is refused until it is done, because wrong revenue accounts are invisible until
   month end. When the company file has exactly one income account it is selected automatically:

@@ -22,6 +22,11 @@ const eslintConfig = defineConfig([
     // OTHER branches whose (older) source would otherwise be linted and inflate
     // the warning count vs CI (which never has this dir). Gitignored.
     ".claude/**",
+    // Written by `supabase start` — a bundled, minified copy of the edge
+    // runtime. It is vendor output, not our source, and it lands 154 errors
+    // (prefer-const on single-letter minifier names) that make `pnpm lint`
+    // unusable for anyone who has run the local stack. Gitignored; absent in CI.
+    "supabase/.temp/**",
   ]),
   {
     // ESLint 9 flat config: rules from a plugin need the plugin registered

@@ -19,6 +19,8 @@ import ComputerIcon from '@mui/icons-material/Computer';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
+import { copyText } from '@/utils/clipboard';
+
 /**
  * Handing the QuickBooks Desktop setup over to whoever is at the shop computer.
  *
@@ -114,25 +116,9 @@ export default function DesktopAuthHandoff({
     setPopupBlocked(!win);
   };
 
-  const handleCopy = async () => {
-    try {
-      // navigator.clipboard is undefined outside a secure context, and local
-      // development runs on plain http — so the fallback is not hypothetical.
-      await navigator.clipboard.writeText(authFlowUrl);
-      setCopied(true);
-    } catch {
-      const el = document.getElementById('qbd-setup-link') as HTMLInputElement | null;
-      if (el) {
-        el.select();
-        try {
-          document.execCommand('copy');
-          setCopied(true);
-        } catch {
-          setCopied(false);
-        }
-      }
-    }
-  };
+  // The secure-context fallback lives in copyText, shared with the invoice menu
+  // so the two cannot drift into handling http://localhost differently.
+  const handleCopy = async () => setCopied(await copyText(authFlowUrl));
 
   if (expired) {
     return (

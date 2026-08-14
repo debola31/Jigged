@@ -54,6 +54,7 @@ export default function QuickBooksDesktopPanel({
   const loadFailed = Boolean(loadError);
   const [busy, setBusy] = useState(false);
   const [unreachable, setUnreachable] = useState<string | null>(null);
+  const [unreachableCode, setUnreachableCode] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<DesktopIncomeAccount[] | null>(null);
 
@@ -74,6 +75,7 @@ export default function QuickBooksDesktopPanel({
         await load();
       } else {
         setUnreachable(result.message);
+        setUnreachableCode(result.code);
       }
     } catch (err) {
       setUnreachable(err instanceof Error ? err.message : null);
@@ -143,7 +145,12 @@ export default function QuickBooksDesktopPanel({
   return (
     <Box>
       {unreachable !== null && (
-        <QuickBooksUnreachableAlert message={unreachable} onRetry={handleTest} busy={busy} />
+        <QuickBooksUnreachableAlert
+          message={unreachable}
+          code={unreachableCode}
+          onRetry={handleTest}
+          busy={busy}
+        />
       )}
       {note && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setNote(null)}>

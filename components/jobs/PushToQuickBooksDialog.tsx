@@ -25,6 +25,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import {
+  QuickBooksError,
   isQuickBooksUnreachable,
   isQuickBooksUnverified,
   preflightJobPush,
@@ -69,6 +70,7 @@ export default function PushToQuickBooksDialog({
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unreachable, setUnreachable] = useState<string | null>(null);
+  const [unreachableCode, setUnreachableCode] = useState<string | null>(null);
   const [unverified, setUnverified] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [choice, setChoice] = useState<string>(CREATE_SENTINEL);
@@ -104,7 +106,15 @@ export default function PushToQuickBooksDialog({
       }
       setQtyById(initial);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to prepare the QuickBooks push.');
+      // Classify exactly as the push path does. The same condition rendering as
+      // an amber warning in Settings and a red error here teaches people that the
+      // colour means nothing.
+      if (isQuickBooksUnreachable(err) || isQuickBooksUnverified(err)) {
+        setUnreachable(err instanceof Error ? err.message : null);
+        setUnreachableCode(err instanceof QuickBooksError ? (err.code ?? null) : null);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to prepare the QuickBooks push.');
+      }
     } finally {
       setLoading(false);
     }
@@ -221,6 +231,7 @@ export default function PushToQuickBooksDialog({
       // the bug.
       if (isQuickBooksUnreachable(err)) {
         setUnreachable(err instanceof Error ? err.message : null);
+        setUnreachableCode(err instanceof QuickBooksError ? (err.code ?? null) : null);
       } else if (isQuickBooksUnverified(err)) {
         setUnverified(err instanceof Error ? err.message : 'Check QuickBooks before retrying.');
       } else {
@@ -252,11 +263,16 @@ export default function PushToQuickBooksDialog({
         {unreachable !== null && (
           <QuickBooksUnreachableAlert
             message={unreachable}
+            code={unreachableCode}
             onRetry={() => {
               setUnreachable(null);
-              void handlePush();
+              setUnreachableCode(null);
+              // Preflight has not produced billable lines yet, so retry the step
+              // that failed rather than blindly attempting a push.
+              if (!preflight?.parts?.length) void runPreflight();
+              else void handlePush();
             }}
-            busy={pushing}
+            busy={pushing || loading}
           />
         )}
         {unverified !== null && (

@@ -17,6 +17,7 @@ import Button from '@mui/material/Button';
  */
 export default function QuickBooksUnreachableAlert({
   message,
+  code,
   onRetry,
   busy,
   sx,
@@ -24,10 +25,15 @@ export default function QuickBooksUnreachableAlert({
   /** Conductor's own userFacingMessage when we have one — it names the shop PC
    *  and the Web Connector better than we would. */
   message?: string | null;
+  /** Distinguishes "the PC isn't answering" from "setup was never finished".
+   *  Both are warnings with a retry, but they ask for different actions, and a
+   *  heading that contradicts its own body teaches people to ignore the heading. */
+  code?: string | null;
   onRetry?: () => void;
   busy?: boolean;
   sx?: object;
 }) {
+  const notSetUp = code === 'qbd_not_connected';
   return (
     <Alert
       severity="warning"
@@ -40,10 +46,16 @@ export default function QuickBooksUnreachableAlert({
         ) : undefined
       }
     >
-      <AlertTitle>QuickBooks isn&apos;t answering right now</AlertTitle>
+      <AlertTitle>
+        {notSetUp
+          ? "Setup isn't finished yet"
+          : "QuickBooks isn't answering right now"}
+      </AlertTitle>
       {message ??
         'Open QuickBooks Desktop on the shop computer, make sure that computer is on and online, then try again.'}{' '}
-      Nothing is broken — your connection is still set up.
+      {notSetUp
+        ? 'Finish the steps on the setup page, then check again.'
+        : 'Nothing is broken — your connection is still set up.'}
     </Alert>
   );
 }

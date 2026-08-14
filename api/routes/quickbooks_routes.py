@@ -100,7 +100,15 @@ def _map_qb_error(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=409, detail={"code": "qbd_verify", "message": str(exc)}
         )
-    if isinstance(exc, (qb.QuickBooksNotConnected, qbd.QbdNotConnected)):
+    if isinstance(exc, qbd.QbdNotConnected):
+        # Structured, unlike the QBO twin below: the browser branches on this code
+        # to render a warning with a retry rather than a red error. Returned as a
+        # bare string it was indistinguishable from a generic failure, so the same
+        # condition showed amber in Settings and red in the push dialog.
+        return HTTPException(
+            status_code=409, detail={"code": "qbd_not_connected", "message": str(exc)}
+        )
+    if isinstance(exc, qb.QuickBooksNotConnected):
         return HTTPException(status_code=409, detail=str(exc))
 
     if isinstance(exc, qbd.QbdApiError):

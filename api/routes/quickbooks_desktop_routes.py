@@ -110,9 +110,25 @@ async def connect(company_id: str, request: Request):
     )
     company_name = (company[0]["name"] if company else None) or "Jigged company"
 
+    # Conductor REQUIRES a real email on an end user and rejects an empty string
+    # with "Invalid email address". Use the admin who is connecting: they are the
+    # person Conductor would contact about this connection, and the value shows
+    # beside the company in their dashboard.
+    email = None
+    try:
+        auth_user = db.auth.admin.get_user_by_id(user_id)
+        email = getattr(getattr(auth_user, "user", None), "email", None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read the connecting admin's email: %s", exc)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Your Jigged account needs an email address before connecting QuickBooks.",
+        )
+
     try:
         end_user = qbd.ensure_end_user(
-            company_id, company_name=company_name, email=None
+            company_id, company_name=company_name, email=email
         )
         session = qbd.create_auth_session(end_user["id"])
     except Exception as exc:  # noqa: BLE001

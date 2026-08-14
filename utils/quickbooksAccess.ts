@@ -33,6 +33,9 @@ export const QB_ERROR = {
   desktopVerify: 'qbd_verify',
   /** This job holds an unconfirmed invoice, so a new one is refused. */
   desktopBlocked: 'qbd_blocked_unverified',
+  /** The shop started the setup but never finished it on the QuickBooks
+   *  computer. Also a warning with a retry — the action differs, not the tone. */
+  desktopNotConnected: 'qbd_not_connected',
 } as const;
 
 /** True when QuickBooks Desktop simply is not reachable right now.
@@ -41,7 +44,11 @@ export const QB_ERROR = {
  *  being switched off is the expected path, not a defect — which is also why this
  *  module reports nothing to Sentry. */
 export function isQuickBooksUnreachable(err: unknown): boolean {
-  return err instanceof QuickBooksError && err.code === QB_ERROR.desktopUnreachable;
+  return (
+    err instanceof QuickBooksError &&
+    (err.code === QB_ERROR.desktopUnreachable ||
+      err.code === QB_ERROR.desktopNotConnected)
+  );
 }
 
 /** True when an invoice's fate is unknown and a human must check QuickBooks. */

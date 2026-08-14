@@ -217,7 +217,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
       }
       statusChip={statusChip}
-      description="Connect QuickBooks Online to push converted quotes as invoices. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
+      description="Push invoices from Jigged into QuickBooks. Jigged only sends to QuickBooks — it never changes your QuickBooks data on its own."
     >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

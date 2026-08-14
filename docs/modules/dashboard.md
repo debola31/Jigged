@@ -35,8 +35,10 @@ Never `jobs.status`; that column was removed (the May 2026 prod regression).
 ### The count is primary; the money is the second line
 
 A shop owner acts on jobs, not on dollars, so the count stays the big number and the money sits under it. It
-also keeps `0` as the all-clear on Overdue, which is a stronger signal than `$0`. Overdue renders in an
-`alert` (red) tone when > 0.
+also keeps `0` as the all-clear on Overdue, which is a stronger signal than `$0`. Overdue renders in a
+`warning` (amber) tone when > 0 — amber because a late job is *behind*, not broken, which is the
+andon convention the floor already reads; red stays for things that are actually wrong. See
+[design-system.md](../design-system.md#red-means-broken-amber-means-behind).
 
 ### Two kinds of money, and what the labels are for
 

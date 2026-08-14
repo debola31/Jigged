@@ -66,7 +66,19 @@ const jiggedTheme = createTheme({
       secondary: '#C8CCD4',
     },
     success: { main: '#10b981' },
-    warning: { main: '#f59e0b' },
+    /**
+     * Amber is the shop-floor colour for *needs attention*, and the andon
+     * convention your operators already read off the machines: green running,
+     * amber behind, red stopped. Overdue work is behind, not broken — red every
+     * day spends the loudest signal on an ordinary Tuesday and leaves nothing
+     * for a genuine failure.
+     *
+     * Same split as `error`: `main` for borders, icons and tints, `light` for
+     * TEXT. `main` does technically clear the body floor on a warning-tinted
+     * card (4.89:1) where error.main does not, but 0.39 above a limit measured
+     * against a 500–1000 lux shop floor is squeaking past it. `light` is 6.29:1.
+     */
+    warning: { main: '#f59e0b', light: '#fbbf24' },
     /**
      * `main` is for BORDERS, ICONS and FILLS — not for text on a tinted panel.
      *

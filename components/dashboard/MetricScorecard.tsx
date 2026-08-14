@@ -43,8 +43,15 @@ export interface MetricScorecardProps {
   /** Rendered in the card's corner — the Completed card's period toggle. */
   action?: ReactNode;
   href?: string;
-  /** Alert tone — red-tinted; used for overdue > 0. */
-  severity?: 'normal' | 'alert';
+  /**
+   * Attention tone — amber-tinted; used for overdue > 0.
+   *
+   * Amber rather than red on purpose. Andon is the convention the shop floor
+   * already runs on — green running, amber behind, red stopped — and an overdue
+   * job is behind, not broken. Red is kept for things that are actually wrong,
+   * so that it still means something on the day one happens.
+   */
+  severity?: 'normal' | 'warning';
   loading?: boolean;
 }
 
@@ -72,7 +79,7 @@ export default function MetricScorecard({
   severity = 'normal',
   loading = false,
 }: MetricScorecardProps) {
-  const isAlert = severity === 'alert';
+  const isAlert = severity === 'warning';
 
   // A delta against a zero prior period is not a comparison: the percentage is
   // undefined, and the absolute change just restates the headline figure — the
@@ -95,8 +102,10 @@ export default function MetricScorecard({
   const cardSx = {
     height: '100%',
     borderLeft: isAlert ? 3 : 0,
-    borderColor: isAlert ? 'error.main' : 'transparent',
-    bgcolor: isAlert ? 'rgba(239, 68, 68, 0.08)' : 'background.paper',
+    borderColor: isAlert ? 'warning.main' : 'transparent',
+    // 8% amber over the canvas. The red tint this replaced went muddy purple
+    // over deep indigo — neither red nor navy; amber stays neutral.
+    bgcolor: isAlert ? 'rgba(245, 158, 11, 0.08)' : 'background.paper',
   };
 
   const inner = (
@@ -105,7 +114,7 @@ export default function MetricScorecard({
         variant="body2"
         sx={{
           fontWeight: 500,
-          color: isAlert ? 'error.light' : 'text.secondary',
+          color: isAlert ? 'warning.light' : 'text.secondary',
           textTransform: 'uppercase',
           letterSpacing: 0.4,
           fontSize: '0.7rem',
@@ -125,7 +134,7 @@ export default function MetricScorecard({
           sx={{
             fontWeight: 600,
             lineHeight: 1.1,
-            color: isAlert ? 'error.light' : 'text.primary',
+            color: isAlert ? 'warning.light' : 'text.primary',
             mt: 0.25,
           }}
         >
@@ -138,7 +147,7 @@ export default function MetricScorecard({
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexWrap: 'wrap' }}>
             <Typography
               variant="body2"
-              sx={{ fontWeight: 600, color: isAlert ? 'error.light' : 'text.primary' }}
+              sx={{ fontWeight: 600, color: isAlert ? 'warning.light' : 'text.primary' }}
             >
               {formatMoney(money.amount)}
             </Typography>

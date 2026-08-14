@@ -180,7 +180,7 @@ export default function DashboardMetrics({ companyId }: DashboardMetricsProps) {
             detail={detail}
             action={def.supportsTimePeriod ? periodToggle : undefined}
             href={drillDownHref(companyId, def.key)}
-            severity={def.key === 'overdue_jobs' && (v?.count ?? 0) > 0 ? 'alert' : 'normal'}
+            severity={def.key === 'overdue_jobs' && (v?.count ?? 0) > 0 ? 'warning' : 'normal'}
             loading={loading}
           />
         );

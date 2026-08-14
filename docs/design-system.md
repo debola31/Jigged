@@ -236,7 +236,7 @@ from `background.default` comes out darker than reality and flatters the result)
 | Page canvas `#111439` | 4.72:1 ✓ | 9.35:1 ✓ |
 | Dialog paper | **4.47:1 ✗** | 8.87:1 ✓ |
 | Card / paper | **3.70:1 ✗** | 7.33:1 ✓ |
-| Alert-tinted card | **2.98:1 ✗** | 5.90:1 ✓ |
+| Warning-tinted card (Overdue) | **2.98:1 ✗** | 5.90:1 ✓ — but see below |
 
 **So: `error.light` for error TEXT, `error.main` for everything else.** `error.light` passes on every
 surface, so no per-site analysis is needed — you never have to work out which panel a message lands on.
@@ -246,6 +246,28 @@ Three usages are measured exempt and should stay on `error.main`: **icons** (non
 a different calculation, and lightening them would wash out the one affordance that should look
 dangerous). A `MuiButton` override in [`lib/theme.ts`](../lib/theme.ts) handles text and outlined error
 buttons automatically; `contained` is deliberately excluded.
+
+### Red means broken; amber means behind
+
+`warning` carries the same `main` / `light` split, and for the same reason — but the choice of *which*
+status colour a surface uses is a separate decision from whether it is readable.
+
+**Overdue work is amber, not red.** Andon is the convention a shop floor already runs on — green
+running, amber needs attention, red stopped — and an overdue job is behind, not broken. Every shop has
+late jobs; painting the dashboard red on an ordinary Tuesday spends the loudest signal on a normal
+state and leaves nothing for a genuine failure. Red is kept for things that are actually wrong.
+
+A practical bonus found while rendering it: `rgba(239,68,68,0.08)` over deep indigo goes muddy purple —
+neither red nor navy. The amber tint stays neutral.
+
+| On the Overdue card's amber tint | |
+|---|---|
+| `warning.main` #f59e0b | 4.89:1 — *passes*, unlike error.main, but 0.39 above a hard limit |
+| `warning.light` #fbbf24 | **6.28:1**, measured as painted |
+
+So `warning.light` for the text and `warning.main` for the rule and the tint. Note the asymmetry with
+`error`: amber's `main` is readable as text and red's is not, because #ef4444 is unusually dark for its
+hue — which is exactly why the rule is per-colour and measured rather than assumed.
 
 Pinned by [`__tests__/lib/alertContrast.test.ts`](../__tests__/lib/alertContrast.test.ts), which computes
 real WCAG ratios from the theme's own values against each surface above.

@@ -51,7 +51,7 @@
  * they can get one, and it stops promising a location hunt that would find nothing.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -66,6 +66,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';
 import type { InventoryLocation } from '@/types/inventoryLocations';
@@ -76,7 +77,7 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 
 export interface OperatorPartLookupProps {
   companyId: string;
-  /** Tapping a place navigates there — the whole point is to end up at the shelf. */
+  /** Tapping a location navigates there — the whole point is to end up in front of it. */
   onOpenLocation: (locationId: string) => void;
   /**
    * Fires whenever a part is chosen or cleared, so the page can put itself in one mode or the
@@ -84,12 +85,22 @@ export interface OperatorPartLookupProps {
    * noise at that moment, and hiding it is what keeps this screen from becoming a wall.
    */
   onSelectionChange?: (part: PartSelectOption | null) => void;
+  /**
+   * Rebuild the selection from `?part=` on mount.
+   *
+   * This is what makes Back land where you came from. Tapping a location navigates away, and
+   * coming back re-mounts this component — with the selection in local state only, the answer you
+   * had just found was gone and you searched for it again. Read once: the URL is the initial value,
+   * not a controlled input, so typing in the field is never fighting a query param.
+   */
+  initialPartId?: string | null;
 }
 
 export default function OperatorPartLookup({
   companyId,
   onOpenLocation,
   onSelectionChange,
+  initialPartId = null,
 }: OperatorPartLookupProps) {
   const [selected, setSelected] = useState<PartSelectOption | null>(null);
   const [balances, setBalances] = useState<PartLocationBalanceWithLocation[] | null>(null);
@@ -111,6 +122,35 @@ export default function OperatorPartLookup({
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not read where this is.'))
       .finally(() => setLoadingBalances(false));
   };
+
+  /**
+   * Restore `?part=` once, on mount.
+   *
+   * `getPartsForSelectByIds` exists for exactly this — its own doc calls it "hydrate
+   * selection-state for an autocomplete that uses `searchPartsForSelect`" — so the restored row is
+   * byte-identical to one the picker would have produced, and the field shows a label rather than
+   * an id. A ref rather than a dependency on `initialPartId`: the page writes that param back on
+   * every selection, so depending on it would re-run this on every pick and fight the user.
+   *
+   * A failure is silent by design. The param is a convenience for a Back press, and an alert about
+   * a part id nobody typed would be noise in front of a working search box.
+   */
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || !initialPartId) return;
+    hydrated.current = true;
+    let cancelled = false;
+    getPartsForSelectByIds([initialPartId])
+      .then(([part]) => {
+        if (!cancelled && part) pick(part);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only, guarded by the ref above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPartId]);
 
   /**
    * Three different answers, which the first version collapsed into one and got wrong.

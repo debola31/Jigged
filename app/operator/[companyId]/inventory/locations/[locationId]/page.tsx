@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -20,7 +20,7 @@ import {
 import { rollUpOccupancy } from '@/utils/locationOccupancy';
 import UnitGridView from '@/components/inventory/locations/UnitGridView';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import { useOperatorNav, useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
 import PlaceStockActionForm, {
   type PlaceStockAction,
 } from '@/components/inventory/locations/place/PlaceStockActionForm';
@@ -31,7 +31,7 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 
 export default function OperatorBinViewPage() {
   const params = useParams();
-  const router = useRouter();
+  const nav = useOperatorNav();
   const companyId = params.companyId as string;
   const locationId = params.locationId as string;
 
@@ -60,8 +60,18 @@ export default function OperatorBinViewPage() {
   const path = scan?.path ?? [];
   const parent = path.length > 1 ? path[path.length - 2] : null;
 
-  // Header back drills UP the location tree (to the parent bin, or the inventory
-  // root at the top level). Re-registers as the parent resolves from the scan.
+  /**
+   * The DEEP-LINK fallback, and only that.
+   *
+   * This used to be described — and to behave — as though back always climbed the location tree.
+   * It did, but not by design: nothing on this branch went through `nav.push`, so the chrome's
+   * depth counter never left zero and `goBack()` always took its no-history branch. Searching for
+   * a part, tapping a location it was in, then pressing Back therefore landed on that location's
+   * PARENT rather than back on the part.
+   *
+   * With the forward navigations fixed, this is what it was always meant to be: where to go when a
+   * printed QR dropped someone straight here with nothing to pop. Climbing the tree is right then.
+   */
   useSetOperatorChrome(
     {
       back: {
@@ -186,9 +196,9 @@ export default function OperatorBinViewPage() {
             <UnitGridView
               unit={gridUnit}
               occupancy={gridOccupancy}
-              onOpenCell={(id) =>
-                router.push(`/operator/${companyId}/inventory/locations/${id}`)
-              }
+              // `nav.push`, so drilling in and pressing Back retraces the taps you made rather
+              // than climbing to whatever this cell's parent happens to be.
+              onOpenCell={(id) => nav.push(`/operator/${companyId}/inventory/locations/${id}`)}
             />
           </Box>
         </Box>

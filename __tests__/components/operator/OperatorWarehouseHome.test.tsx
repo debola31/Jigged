@@ -8,10 +8,23 @@ import type { PartSelectOption } from '@/utils/partsAccess';
 import type { LocationHistoryEntry } from '@/types/inventoryLocations';
 
 const mockPush = vi.fn();
+const mockNavPush = vi.fn();
+const mockReplace = vi.fn();
+let searchParams = new URLSearchParams();
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ companyId: 'co1' }),
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  useSearchParams: () => searchParams,
+}));
+
+/**
+ * The chrome's `push` is what tells the header back button there is in-app history to pop. Mocked
+ * separately from the raw router so a test can prove which one a navigation went through — the
+ * whole bug was that this branch used the raw one, leaving the depth counter at zero.
+ */
+vi.mock('@/components/operator/OperatorChromeContext', () => ({
+  useOperatorNav: () => ({ push: mockNavPush, goBack: vi.fn() }),
 }));
 
 /**
@@ -29,30 +42,53 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
   getLocations: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('@/utils/partsAccess', () => ({
+  getPartsForSelectByIds: vi.fn(async () => [
+    {
+      id: 'p1',
+      part_name: 'RAW-AL6061-BLANK',
+      description: null,
+      has_routing: false,
+      is_stocked: true,
+      source: 'bought',
+      primary_unit: 'ea',
+      quantity: 240,
+    },
+  ]),
+}));
+
 /**
  * Stub the shared picker, as `OperatorPartLookup.test.tsx` does — what matters on THIS page is
  * which of the two modes is showing, not MUI's Autocomplete.
  */
+const PART: PartSelectOption = {
+  id: 'p1',
+  part_name: 'RAW-AL6061-BLANK',
+  description: null,
+  has_routing: false,
+  is_stocked: true,
+  source: 'bought',
+  primary_unit: 'ea',
+  quantity: 240,
+};
+
 vi.mock('@/components/parts/PartAutocomplete', () => ({
   __esModule: true,
-  default: (props: { onChange: (o: PartSelectOption | null) => void }) => (
-    <button
-      type="button"
-      onClick={() =>
-        props.onChange({
-          id: 'p1',
-          part_name: 'RAW-AL6061-BLANK',
-          description: null,
-          has_routing: false,
-          is_stocked: true,
-          source: 'bought',
-          primary_unit: 'ea',
-          quantity: 240,
-        })
-      }
-    >
-      pick-part
-    </button>
+  // Renders its `value`, so a test can tell "the field shows this part" from "the field is empty"
+  // — which is the whole difference between a Back that worked and one that did not.
+  default: (props: {
+    value: PartSelectOption | null;
+    onChange: (o: PartSelectOption | null) => void;
+  }) => (
+    <div>
+      <span data-testid="picked">{props.value?.part_name ?? ''}</span>
+      <button type="button" onClick={() => props.onChange(PART)}>
+        pick-part
+      </button>
+      <button type="button" onClick={() => props.onChange(null)}>
+        clear-part
+      </button>
+    </div>
   ),
 }));
 
@@ -82,6 +118,7 @@ const renderPage = () =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchParams = new URLSearchParams();
   vi.mocked(getRecentActivity).mockResolvedValue([]);
 });
 
@@ -102,7 +139,10 @@ describe('OperatorWarehouseHomePage — item-first Inventory tab', () => {
 
     // The whole card is the target, not a caption-height link — under 20px in a bright shop.
     await user.click(await screen.findByRole('button', { name: 'Open Shelf A' }));
-    expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/l1');
+    // Through the CHROME's push, not the raw router: that is what lets the header back button
+    // pop real history instead of climbing to whatever this bin's parent happens to be.
+    expect(mockNavPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/l1');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   /** Mid-lookup the shop-wide feed is noise — this is what keeps the page from becoming a wall. */
@@ -132,6 +172,45 @@ describe('OperatorWarehouseHomePage — item-first Inventory tab', () => {
    */
   it('tells a new shop what to do instead of showing an empty board', async () => {
     renderPage();
-    expect(await screen.findByText(/scan a shelf label to put something away/i)).toBeInTheDocument();
+    expect(await screen.findByText(/scan a label to store something/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Back has to land on the part you came from, and a page is only "where you came from" if it can
+ * be rebuilt. The selection used to live in local state alone, so returning here after tapping a
+ * location showed an empty search box and the answer had to be found again.
+ */
+describe('OperatorWarehouseHomePage — the selection survives a Back', () => {
+  it('writes the chosen part into the URL, with replace so Back does not step through them', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(/no stock has moved yet/i);
+
+    await user.click(screen.getByRole('button', { name: 'pick-part' }));
+
+    expect(mockReplace).toHaveBeenCalledWith('/operator/co1/inventory?part=p1', { scroll: false });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('strips the param when the part is cleared', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText(/no stock has moved yet/i);
+
+    await user.click(screen.getByRole('button', { name: 'pick-part' }));
+    await user.click(screen.getByRole('button', { name: 'clear-part' }));
+
+    expect(mockReplace).toHaveBeenLastCalledWith('/operator/co1/inventory', { scroll: false });
+  });
+
+  it('rebuilds the part view from ?part= instead of showing the feed', async () => {
+    searchParams = new URLSearchParams('part=p1');
+    vi.mocked(getRecentActivity).mockResolvedValue([entry({ itemName: 'SOMETHING-ELSE' })]);
+    renderPage();
+
+    expect(await screen.findByTestId('picked')).toHaveTextContent('RAW-AL6061-BLANK');
+    // Part selected means the shop-wide feed stays hidden, exactly as if you had just picked it.
+    expect(screen.queryByText('SOMETHING-ELSE')).not.toBeInTheDocument();
   });
 });

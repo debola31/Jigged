@@ -86,8 +86,9 @@ export default function ReshapeImpactDialog({
               cannot give on its own. */}
           {untouched > 0 && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              The other {untouched.toLocaleString()} location{untouched === 1 ? '' : 's'} keep what
-              {untouched === 1 ? ' it holds' : ' they hold'}.
+              {untouched === 1
+                ? 'The other location keeps what it holds.'
+                : `The other ${untouched.toLocaleString()} locations keep what they hold.`}
             </Typography>
           )}
 

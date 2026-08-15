@@ -307,25 +307,54 @@ BEGIN
     SET CONSTRAINTS public.location_children_hold_no_stock DEFERRED;
 
     -- ─────────────────────────────────────────────────────────────────────────
-    -- 4. Park every name that is about to move out of the way
+    -- 4. Park ONLY the names somebody else is about to take
     -- ─────────────────────────────────────────────────────────────────────────
-    -- Renamed and re-parented rows park for the swap reason in the header. REMOVED rows park too,
-    -- and that is not tidiness: a removal's name has to be free before a create or a rename can take
-    -- it, and the removal itself cannot happen yet, because its stock has to leave first and the
-    -- destinations do not all exist yet.
-    SELECT array_agg(l.id) INTO v_park
+    -- ## Why this set, and not "everything that changes"
+    --
+    -- The first version parked every renamed, re-parented or removed row. It was correct and it
+    -- leaked: `transfer_stock` reads the SOURCE location's name to write its ledger note, and
+    -- `snapshot_transaction_location_name` snapshots the path — so moving stock out of a bin that
+    -- had been parked wrote `Transfer from ~reshaping~<uuid>` into the ledger PERMANENTLY, where
+    -- `location_name` is immutable by design. Parking is reversible inside the transaction; the
+    -- history it poisons on the way past is not. Caught by looking at the operator's activity feed
+    -- after a real reshape, which no test asserted on.
+    --
+    -- Parking exists for exactly one reason: a row is sitting on a name that a DIFFERENT row wants
+    -- in the final state. That is the whole set. A rename with nobody waiting for the old name, and
+    -- a removal whose name nobody reclaims — the ordinary cases — never park at all, so the ledger
+    -- records the shelf the operator actually took the stock from.
+    --
+    -- A final node whose parent is NEW cannot contest anything: its parent does not exist yet, so
+    -- no current row can share its (parent, name). Hence the `parent_id` resolution below yields
+    -- NULL for those and the join drops them.
+    --
+    -- ## Residual, stated plainly
+    --
+    -- If a reshape genuinely REUSES a removed location's name for a different location, that
+    -- removal still parks and its ledger note still carries the sentinel. There is no ordering that
+    -- avoids it — the stock cannot leave before its destination exists, and the destination cannot
+    -- take the name while the old row holds it. It is also the case where the old name has
+    -- genuinely stopped meaning that shelf.
+    WITH final AS (
+        SELECT n.node ->> 'ref' AS ref,
+               CASE WHEN n.node ->> 'parent_ref' IS NULL THEN p_parent_id
+                    WHEN n.node ->> 'parent_ref' LIKE 'id:%'
+                         THEN substring(n.node ->> 'parent_ref' from 4)::uuid
+                    ELSE NULL
+               END AS parent_id,
+               lower(btrim(n.node ->> 'name')) AS folded
+          FROM jsonb_array_elements(p_nodes) AS n(node)
+    )
+    SELECT array_agg(DISTINCT l.id) INTO v_park
       FROM public.inventory_locations l
-      JOIN jsonb_array_elements(p_nodes) AS n(node)
-        ON n.node ->> 'ref' = 'id:' || l.id::text
-     WHERE l.name IS DISTINCT FROM (n.node ->> 'name')
-        OR l.parent_id IS DISTINCT FROM (
-             CASE WHEN n.node ->> 'parent_ref' IS NULL THEN p_parent_id
-                  WHEN n.node ->> 'parent_ref' LIKE 'id:%'
-                       THEN substring(n.node ->> 'parent_ref' from 4)::uuid
-                  ELSE NULL   -- a new parent: the row is moving under something that does not exist yet
-             END
-           );
-    v_park := COALESCE(v_park, '{}') || COALESCE(p_removals, '{}');
+      JOIN final f
+        ON f.parent_id = l.parent_id
+       AND f.folded = lower(btrim(l.name))
+       -- somebody ELSE wants it. A row keeping its own name matches itself and must not park.
+       AND f.ref IS DISTINCT FROM 'id:' || l.id::text
+     WHERE l.id = ANY(v_sub)
+       AND l.id <> p_parent_id;
+    v_park := COALESCE(v_park, '{}');
 
     -- Snapshot the names first — see the declaration.
     SELECT COALESCE(jsonb_object_agg(id::text, name), '{}'::jsonb) INTO v_names

@@ -384,17 +384,24 @@ export default function VisualLocationBuilder({
       final_depth: plan.finalDepth,
     });
 
-    const created = plan.created.filter((c) => c.isLeaf).length;
-    const removed = plan.removed.filter((r) => r.isLeaf).length;
+    /*
+     * "Cabinet 3: 1 location removed." / "Cabinet 3: 4 locations added, 2 removed, 1 renamed."
+     *
+     * The noun rides on the FIRST clause and agrees with its number, which is how anyone would say
+     * it out loud. An earlier version composed `Removed 1 in Cabinet 3.` — grammatical, and it
+     * never said WHAT was removed.
+     */
+    const counts: Array<[number, string]> = [
+      [plan.created.filter((c) => c.isLeaf).length, 'added'],
+      [plan.removed.filter((r) => r.isLeaf).length, 'removed'],
+      [plan.renamed.length, 'renamed'],
+    ];
+    const clauses = counts.filter(([n]) => n > 0);
+    const noun = clauses[0]?.[0] === 1 ? 'location' : 'locations';
     onDone(
-      [
-        created > 0 && `added ${created}`,
-        removed > 0 && `removed ${removed}`,
-        plan.renamed.length > 0 && `renamed ${plan.renamed.length}`,
-      ]
-        .filter(Boolean)
-        .join(', ')
-        .replace(/^./, (c) => c.toUpperCase()) + ` in ${unit.name}.`,
+      `${unit.name}: ${clauses
+        .map(([n, verb], i) => (i === 0 ? `${n} ${noun} ${verb}` : `${n} ${verb}`))
+        .join(', ')}.`,
     );
   };
 

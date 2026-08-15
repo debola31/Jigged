@@ -307,6 +307,40 @@ def test_stock_moves_out_of_a_removed_row_into_the_survivor(db, shop):
     assert ledger[0][1] == ledger[1][1]
 
 
+def test_the_ledger_records_the_shelf_the_stock_actually_left(db, shop):
+    """The parking sentinel must never reach `inventory_transactions`.
+
+    `transfer_stock` reads the SOURCE's name for its note, and `location_name` is snapshotted and
+    then immutable — so parking a bin before moving its stock out wrote `Transfer from
+    ~reshaping~<uuid>` into history permanently. Parking is reversible inside the transaction; the
+    history it poisons on the way past is not. Found by reading the operator's activity feed after
+    a real reshape, which is the only place it was visible.
+    """
+    r1, _, r3 = shop["rows"]
+    place_stock(shop, r3, 7)
+
+    with user_session(shop["user"]) as (conn, cur):
+        apply_layout(
+            cur, shop["cabinet"],
+            [keep(r1, "Row 1", 0), keep(shop["rows"][1], "Row 2", 1)],
+            moves=[move(shop["part"], r3, f"id:{r1}", 7)],
+            removals=[r3],
+        )
+        conn.commit()
+
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT notes, location_name FROM inventory_transactions "
+            "WHERE part_id = %s AND transfer_group_id IS NOT NULL",
+            (shop["part"],),
+        )
+        rows = cur.fetchall()
+    assert rows, "the move wrote no ledger rows"
+    blob = " ".join(f"{n} {ln}" for n, ln in rows)
+    assert "~reshaping~" not in blob, blob
+    assert "Row 3" in blob, blob
+
+
 def test_a_loaded_leaf_can_gain_children_and_its_stock_moves_down(db, shop):
     """The deferral, inherited from subdivide_location. Illegal at statement time, legal at COMMIT."""
     r1, _, _ = shop["rows"]

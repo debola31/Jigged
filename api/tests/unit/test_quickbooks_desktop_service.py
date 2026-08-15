@@ -188,14 +188,28 @@ def test_success_does_not_raise():
 
 
 # ───────────────────────── config ─────────────────────────
-def test_production_requires_its_own_keys_with_no_fallback(monkeypatch):
-    """The testing and production Conductor projects mint DIFFERENT end-user ids,
-    so falling back would address an end user that does not exist there -- or the
-    wrong company's books."""
-    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "production")
-    monkeypatch.delenv("CONDUCTOR_PROD_API_KEY", raising=False)
-    with pytest.raises(qbd.QbdServiceUnavailable, match="CONDUCTOR_PROD_API_KEY"):
+@pytest.mark.parametrize("environment", ["sandbox", "production"])
+def test_missing_key_fails_loudly_in_every_environment(monkeypatch, environment):
+    """One variable name whose VALUE differs per deployment environment, so an
+    unset key is a loud failure rather than a quiet fallback to another
+    Conductor project's books. Naming it per-environment would not add safety --
+    the QBO path next door has the two names AND falls back between them."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", environment)
+    monkeypatch.delenv("CONDUCTOR_API_KEY", raising=False)
+    with pytest.raises(qbd.QbdServiceUnavailable, match="CONDUCTOR_API_KEY"):
         qbd._secret_key()
+
+
+@pytest.mark.parametrize("environment", ["sandbox", "production"])
+def test_the_same_variable_name_is_read_in_every_environment(monkeypatch, environment):
+    """Guards the actual regression risk of this design: a future edit that
+    reintroduces a CONDUCTOR_PROD_* name would silently stop reading the value
+    Vercel holds for production."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", environment)
+    monkeypatch.setenv("CONDUCTOR_API_KEY", "key-for-this-environment")
+    monkeypatch.setenv("CONDUCTOR_PUBLISHABLE_KEY", "pub-for-this-environment")
+    assert qbd._secret_key() == "key-for-this-environment"
+    assert qbd._publishable_key() == "pub-for-this-environment"
 
 
 def test_fake_mode_is_disabled_in_production(monkeypatch):

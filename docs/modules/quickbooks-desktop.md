@@ -196,6 +196,32 @@ this is the first flag in the repo with a direct per-use bill attached.
 
 ---
 
+## Configuration
+
+Two backend-only variables, and **one name each whose value differs per deployment environment** —
+the Stripe/Supabase/Anthropic convention here, and what Vercel's per-environment scoping is for.
+
+| Variable | Value |
+|---|---|
+| `CONDUCTOR_API_KEY` | The secret key of the Conductor **project** for that environment — testing for local and preview, production for production |
+| `CONDUCTOR_PUBLISHABLE_KEY` | That project's publishable key. Returned by the connect endpoint, never exposed as `NEXT_PUBLIC_*`, which is inlined at build time |
+
+**Scope each variable to one Vercel environment.** Setting a single value for "All Environments"
+points production at the testing project's books — the one misconfiguration worth guarding against,
+and Vercel's scoping is what guards it.
+
+**There is deliberately no `CONDUCTOR_PROD_*` variant.** The QBO block next door has one, and it
+demonstrates the cost rather than the benefit: `_client_credentials` reads `QUICKBOOKS_PROD_CLIENT_ID`
+in production but **falls back to the sandbox name** when it is unset
+([quickbooks.py](../../api/services/quickbooks.py)), so the second name buys no safety and adds a
+second thing to keep in sync — while spelling the prefix two ways (`QUICK_BOOKS_` and
+`QUICKBOOKS_`). Do not copy that shape. What actually prevents a testing-project key from touching
+production books is `quickbooks_desktop_connections.environment`, which pins every connection row to
+the environment it was created under; a mismatch makes the row stop resolving rather than silently
+address the wrong company file.
+
+---
+
 ## Where the code lives
 
 | Concern | File |

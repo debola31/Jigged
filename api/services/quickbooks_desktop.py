@@ -121,17 +121,26 @@ def _environment() -> str:
 
 
 def _secret_key() -> str:
-    """No fallback between environments, deliberately.
+    """ONE name, whose VALUE differs per deployment environment -- the Stripe,
+    Supabase and Anthropic convention in this repo, and what Vercel's
+    per-environment variable scoping exists to do.
 
-    The testing and production Conductor projects mint DIFFERENT end-user ids, so
-    falling back to the testing key in production would address an end user that
-    does not exist there -- or, worse, the wrong company's books. Same reasoning
-    as STRIPE_RESTRICTED_KEY having no fallback to STRIPE_SECRET_KEY.
+    Deliberately NOT the QBO shape next door, which reads
+    QUICKBOOKS_PROD_CLIENT_ID in production but FALLS BACK to the sandbox name
+    when it is unset (quickbooks.py `_client_credentials`). That fallback is the
+    exact hazard a separate prod name is supposed to prevent, so the split there
+    buys nothing and costs a second name to keep in sync. It is legacy, not a
+    pattern to copy -- note it also spells the prefix two ways.
+
+    There is no fallback here BY CONSTRUCTION: one name, so an unset value is a
+    loud failure rather than a quiet wrong-project key. What stops a testing-
+    project key from being used against production books is not the variable
+    name but `quickbooks_desktop_connections.environment`, which pins every
+    connection row to the environment it was created under -- see get_provider.
     """
-    var = "CONDUCTOR_PROD_API_KEY" if _environment() == "production" else "CONDUCTOR_API_KEY"
-    key = os.getenv(var)
+    key = os.getenv("CONDUCTOR_API_KEY")
     if not key:
-        raise QbdServiceUnavailable(f"QuickBooks Desktop is not configured ({var}).")
+        raise QbdServiceUnavailable("QuickBooks Desktop is not configured (CONDUCTOR_API_KEY).")
     return key
 
 
@@ -140,15 +149,14 @@ def _publishable_key() -> str:
     running QuickBooks -- that is what 'publishable' means. It is returned by the
     connect endpoint rather than exposed as NEXT_PUBLIC_*, because a
     NEXT_PUBLIC_* var is inlined at BUILD time and a preview build that outran
-    provisioning once baked in an empty value (see the local-dev runbook)."""
-    var = (
-        "CONDUCTOR_PROD_PUBLISHABLE_KEY"
-        if _environment() == "production"
-        else "CONDUCTOR_PUBLISHABLE_KEY"
-    )
-    key = os.getenv(var)
+    provisioning once baked in an empty value (see the local-dev runbook).
+
+    One name across environments, for the reasons in _secret_key."""
+    key = os.getenv("CONDUCTOR_PUBLISHABLE_KEY")
     if not key:
-        raise QbdServiceUnavailable(f"QuickBooks Desktop is not configured ({var}).")
+        raise QbdServiceUnavailable(
+            "QuickBooks Desktop is not configured (CONDUCTOR_PUBLISHABLE_KEY)."
+        )
     return key
 
 

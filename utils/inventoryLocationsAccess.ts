@@ -9,14 +9,16 @@
  * the caller's (quantity, unit) to the part's primary unit and hand the RPC
  * both the display values and the converted quantity.
  */
+import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
-import { toFriendlyError } from '@/lib/supabaseErrors';
+import { toError, toFriendlyError } from '@/lib/supabaseErrors';
 import { ID_CHUNK } from '@/lib/queryLimits';
 import { convertToBaseUnit } from '@/lib/unitPresets';
 import { isReservedKind, RESERVED_KIND_MESSAGE } from '@/lib/locationKinds';
 import { compareLocationNames, computePathNames } from '@/lib/locationTree';
 import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { duplicateSubtreeAsSibling } from '@/utils/locationSpec';
+import type { ReshapePayload } from '@/utils/locationReshape';
 import type {
   CreateLocationInput,
   DepleteOptions,
@@ -388,10 +390,15 @@ export async function materializeLocationSpec(
   return (data ?? []) as InventoryLocation[];
 }
 
-/** One part's stock moving into one of the sub-locations about to be created. */
-export interface SubdivideMove {
+/** One part's stock moving out of a location a reshape is about to empty or divide up. */
+export interface ReshapeMove {
   partId: string;
-  /** `LocationSpecNode.key` of the destination — a leaf of the spec, which does not exist yet. */
+  /**
+   * Where it is now — an id, not a ref, because a move always STARTS somewhere that already
+   * exists. (Its `toRef` may not: the destination is often a location this same call is creating.)
+   */
+  fromLocationId: string;
+  /** A spec key, `id:<uuid>` for a surviving location, or `PARENT_REF` when the unit flattens. */
   toRef: string;
   quantity: number;
   unit: string;
@@ -421,29 +428,36 @@ function flattenSpec(
 }
 
 /**
- * Subdivide a place, moving whatever it holds down into the new sub-locations.
+ * Reshape a storage unit — create, rename, re-parent and remove locations inside it, and move the
+ * stock out of whatever is disappearing or being divided up — in ONE transaction.
  *
- * ## Why this is an RPC and not `materializeLocationSpec` plus some transfers
+ * ## Why this is an RPC and not a sequence of calls from here
  *
- * Since 20260806160053 a place with sub-locations cannot hold stock, and the two halves of this
- * operation each break that rule on their own: creating the children first makes the parent a
- * container while its stock is still in it, and moving the stock first has nowhere to move it to.
- * Only doing both in one transaction is legal, so `subdivide_location` defers the constraint and
- * the whole thing either happens or does not.
+ * Three reasons, of which the first alone settles it.
  *
- * It also fixes what `materializeLocationSpec` documents about itself two functions up: that path
- * is sequential and not transactional, so a failure partway leaves the nodes created before it.
+ * 1. **Two of the steps are illegal outside a deferring transaction.** Since 20260806160053 a
+ *    location with sub-locations cannot hold stock, and a surviving leaf that gains children breaks
+ *    that on its own: creating the children first makes it a container while its stock is still in
+ *    it, and moving the stock first has nowhere to move it to.
+ * 2. **A name swap has no valid ordering.** The sibling-name index is an EXPRESSION index
+ *    (20260729221603), so it is not deferrable and cannot be made deferrable — and Postgres checks
+ *    a unique index per tuple even inside one statement. The RPC parks the touched names and puts
+ *    them back, which is only safe somewhere that can roll back: a browser that parked `Row 1` and
+ *    then died would leave a location literally called `~reshaping~<uuid>` on a shop's shelf.
+ * 3. **A partial apply here can already have deleted bins** — strictly worse than the partial tree
+ *    `materializeLocationSpec` documents two functions up (#618).
+ *
+ * Replaced `subdivideLocation`, which this is a strict superset of (all-creates plus moves).
  *
  * Conversion happens here, per part, exactly as it does for `transferStock` — the RPC delegates
  * each move to `transfer_stock`, which wants both the display values and the converted quantity.
  * One `loadConversionContext` per distinct part rather than per move, since splitting one part
  * across three bins is three moves against one part.
  */
-export async function subdivideLocation(
+export async function applyLocationLayout(
   parentId: string,
-  nodes: LocationSpecNode[],
-  moves: SubdivideMove[],
-  startSortOrder = 0,
+  payload: ReshapePayload,
+  moves: ReshapeMove[],
 ): Promise<InventoryLocation[]> {
   const contexts = new Map<string, Awaited<ReturnType<typeof loadConversionContext>>>();
   for (const partId of new Set(moves.map((m) => m.partId))) {
@@ -451,24 +465,31 @@ export async function subdivideLocation(
   }
 
   const supabase = getSupabase();
-  const { data, error } = await supabase.rpc('subdivide_location', {
+  const { data, error } = await supabase.rpc('apply_location_layout', {
     p_parent_id: parentId,
-    p_nodes: flattenSpec(nodes, null, startSortOrder),
+    p_nodes: payload.nodes,
     p_moves: moves.map((m) => {
       const { primaryUnit, conversions } = contexts.get(m.partId)!;
       return {
         part_id: m.partId,
+        from_location_id: m.fromLocationId,
         to_ref: m.toRef,
         quantity: m.quantity,
         unit: m.unit,
         converted_quantity: convertToBaseUnit(m.quantity, m.unit, primaryUnit, conversions),
       };
     }),
+    p_removals: payload.removals,
   });
 
   if (error) {
-    console.error('Error subdividing location:', error);
-    throw toFriendlyError(error, { entity: 'location' });
+    console.error('Error applying location layout:', error);
+    // `.rpc()` is deliberately outside the Supabase Sentry integration — only the call site can
+    // tell a raise meant for the user from a bug — so this one is reported by hand.
+    Sentry.captureException(toError(error), { tags: { area: 'inventory-locations' } });
+    // A duplicate sibling name is the one failure a user can act on, and the client checks for it
+    // live; this is the backstop, and it must not surface as a raw 23505.
+    throw mapLocationWriteError(error, undefined);
   }
   return (data ?? []) as InventoryLocation[];
 }

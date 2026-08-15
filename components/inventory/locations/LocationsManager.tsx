@@ -132,23 +132,22 @@ export default function LocationsManager({
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /**
-   * The builder, aimed either at the top level or at an existing unit.
+   * The builder, in one of its two modes.
    *
-   * A non-null `parentId` is what makes it "Subdivide this unit" — the nested-create path was
-   * fully built and had no caller until now.
+   * A non-null `unitId` is what makes it a RESHAPE — the dialog seeds from that unit's real layout
+   * and writes a diff. Null builds a new unit at the top level.
+   *
+   * An id rather than the node, so a reload re-resolves the subtree the dialog is editing rather
+   * than leaving it pointed at a stale copy of it.
+   *
+   * **Was `parentId` + `existingSiblingNames` + `startSortOrder`.** Those last two existed to make
+   * the generated names continue past what the unit already held and sort after it — i.e. they were
+   * the append behaviour, expressed as props. There is nothing to carry now: reshape reconciles
+   * against reality instead.
    */
-  const [builder, setBuilder] = useState<{
-    open: boolean;
-    parentId: string | null;
-    parentPath: string[];
-    existingSiblingNames: string[];
-    startSortOrder: number;
-  }>({
+  const [builder, setBuilder] = useState<{ open: boolean; unitId: string | null }>({
     open: false,
-    parentId: null,
-    parentPath: [],
-    existingSiblingNames: [],
-    startSortOrder: 0,
+    unitId: null,
   });
 
   // `openTopLevelBuilder` is gone with the toolbar's "Build visually". The builder itself
@@ -269,14 +268,7 @@ export default function LocationsManager({
   const showUnit = (id: string | null) =>
     router.replace(id ? `${listHref}?unit=${id}` : listHref, { scroll: false });
 
-  const openAddStorage = () =>
-    setBuilder({
-      open: true,
-      parentId: null,
-      parentPath: [],
-      existingSiblingNames: [],
-      startSortOrder: tree.reduce((max, n) => Math.max(max, n.sort_order), -1) + 1,
-    });
+  const openAddStorage = () => setBuilder({ open: true, unitId: null });
 
   /**
    * A search hit.
@@ -384,19 +376,16 @@ export default function LocationsManager({
       setPlaceId(null);
       setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
     },
+    /**
+     * `Change layout`, which now changes the layout.
+     *
+     * It used to hand the builder the unit's existing child names and a `startSortOrder` past
+     * them, so a second pass generated Row 4–6 beside Row 1–3 — the append bug, expressed as two
+     * props. The builder resolves the unit from `byNodeId` itself and diffs against it.
+     */
     onSubdivide: (node: InventoryLocationNode) => {
       setPlaceId(null);
-      setBuilder({
-        open: true,
-        parentId: node.id,
-        parentPath: computePath(node.id, byId),
-        // What's already inside, so a second subdivide continues the run (Row 4–6) rather than
-        // regenerating Row 1–3 and colliding partway through the sequential inserts.
-        existingSiblingNames: node.children.map((c) => c.name),
-        // …and sort the new children AFTER them, or they interleave: subdividing a cabinet that
-        // holds Shelf A/B into Rows drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`.
-        startSortOrder: node.children.reduce((max, c) => Math.max(max, c.sort_order), -1) + 1,
-      });
+      setBuilder({ open: true, unitId: node.id });
     },
     onEdit: (node: InventoryLocationNode) => {
       setPlaceId(null);
@@ -705,15 +694,18 @@ export default function LocationsManager({
       <VisualLocationBuilder
         open={builder.open}
         companyId={companyId}
-        parentId={builder.parentId}
-        parentPath={builder.parentPath}
+        // Resolved from the live tree rather than captured when the button was pressed, so a
+        // reload behind the dialog cannot leave it editing a stale copy of the cabinet.
+        unit={builder.unitId ? byNodeId.get(builder.unitId) ?? null : null}
+        parentPath={builder.unitId ? computePath(builder.unitId, byId) : []}
         siblingNames={tree.map((n) => n.name)}
-        existingSiblingNames={builder.existingSiblingNames}
-        startSortOrder={builder.startSortOrder}
+        // Already rolled up for the grid. Handing it over is what lets the dialog say "3 of these
+        // hold stock" as you type, with no request of its own.
+        occupancy={occupancy}
         onClose={() => setBuilder((s) => ({ ...s, open: false }))}
-        onCreated={(n) => {
+        onDone={(message) => {
           void reload();
-          setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
+          setToast(message);
         }}
       />
 

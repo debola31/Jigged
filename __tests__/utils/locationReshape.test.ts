@@ -120,6 +120,19 @@ describe('planReshape', () => {
     expect(p.renamed).toHaveLength(0);
   });
 
+  it('re-ordering alone is not a change', () => {
+    // `sort_order` defaults to 0, so a unit built one location at a time through the form has
+    // every child at 0 while the spec's positions are 0,1,2. Counting that would make merely
+    // OPENING the dialog report an edit it could not then describe.
+    const unit = node('cab', 'Cabinet 3', [
+      node('a', 'Shelf A', [], { sort_order: 0 }),
+      node('b', 'Shelf B', [], { sort_order: 0 }),
+    ]);
+    const p = plan(unit);
+    expect(p.reordered).toEqual([{ id: 'b', from: 0, to: 1 }]);
+    expect(p.isNoop).toBe(true);
+  });
+
   it('a rename keeps the id — it is not a remove plus a create', () => {
     const unit = rowsOnly(3);
     const spec = renameSpecNode(readSubtreeAsSpec(unit), existingKey('row2'), 'Shelf B');

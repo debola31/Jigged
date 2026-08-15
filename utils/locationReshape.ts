@@ -438,11 +438,23 @@ export function planReshape({ unit, spec, occupancy }: ReshapePlanInput): Reshap
     });
   }
 
+  /**
+   * Re-ordering alone is NOT a change, deliberately.
+   *
+   * `sort_order` defaults to 0, so a unit whose locations were added one at a time through the
+   * form has every child at 0 — and the spec's positions are 0, 1, 2… Counting that difference
+   * would mean **opening** the dialog on such a unit reported it as edited and offered to apply
+   * something, while the summary said nothing, because re-ordering is not reported as an impact
+   * (nobody reads "re-ordering 12 locations" as information). A dialog that claims a change it
+   * cannot describe is worse than one that claims none.
+   *
+   * `reordered` still rides along in the payload, so positions get normalised whenever a real
+   * change is applied.
+   */
   const isNoop =
     created.length === 0 &&
     renamed.length === 0 &&
     moved.length === 0 &&
-    reordered.length === 0 &&
     removed.length === 0;
 
   return {
@@ -465,13 +477,21 @@ export function planReshape({ unit, spec, occupancy }: ReshapePlanInput): Reshap
 // The payload
 // ===========================================================================
 
-export interface ReshapeNodePayload {
+/**
+ * A `type`, not an `interface`, and that is load-bearing.
+ *
+ * This goes straight into `supabase.rpc(...)`, whose generated `Args` type is `Json`. TypeScript
+ * gives an anonymous object type an implicit index signature and an **interface none**, so an
+ * interface here fails to assign with `Index signature for type 'string' is missing` — the same
+ * reason `flattenSpec` returns an inline shape rather than a named one.
+ */
+export type ReshapeNodePayload = {
   ref: string;
   parent_ref: string | null;
   name: string;
   kind: string | null;
   sort_order: number;
-}
+};
 
 export interface ReshapePayload {
   /** The FINAL subtree, flat, parent always before child — the order the RPC requires. */

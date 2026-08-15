@@ -61,6 +61,53 @@ function collectLeafParents(
   return out;
 }
 
+/**
+ * One editable spot.
+ *
+ * A read-only `Chip` when there is no rename to offer (the create path — a name that does not
+ * exist yet is edited by changing the pattern that generates it), and a compact field when there
+ * is. Reshape needs the field: it opens on the unit's REAL layout, which is where you would go to
+ * fix `Rght` or to call Left "Outer", and the numbers editor cannot do it without also flattening
+ * a ragged unit to uniform.
+ */
+function LeafChip({
+  node,
+  onRemove,
+  onRename,
+  collides,
+}: {
+  node: LocationSpecNode;
+  onRemove: (key: string) => void;
+  onRename?: (key: string, name: string) => void;
+  collides: boolean;
+}) {
+  if (!onRename) {
+    return (
+      <Chip size="small" label={node.name} variant="outlined" onDelete={() => onRemove(node.key)} />
+    );
+  }
+  return (
+    <Stack direction="row" alignItems="center" spacing={0.25}>
+      <TextField
+        value={node.name}
+        onChange={(e) => onRename(node.key, e.target.value)}
+        size="small"
+        variant="outlined"
+        error={collides}
+        inputProps={{ 'aria-label': `Name of ${node.name}`, style: { padding: '6px 8px' } }}
+        sx={{ width: 120 }}
+      />
+      <IconButton
+        size="small"
+        aria-label={`Remove ${node.name}`}
+        onClick={() => onRemove(node.key)}
+      >
+        <DeleteOutlineIcon fontSize="small" />
+      </IconButton>
+    </Stack>
+  );
+}
+
 interface LevelConfigStepProps {
   levels: LevelSpec[];
   onChange: (levels: LevelSpec[]) => void;
@@ -72,8 +119,21 @@ interface LevelConfigStepProps {
   onAdd: (parentKey: string) => void;
   onDuplicate: (key: string) => void;
   onStartOver: () => void;
+  /**
+   * Rename one node in place.
+   *
+   * Reshape is half about renaming — the whole reason the key is preserved through
+   * `renameSpecNode` is that a rename must not read as a remove-then-create — and the customized
+   * branch was read-only chips with a delete. Absent on the create path, where a name that does
+   * not exist yet is edited by changing the pattern that generates it.
+   */
+  onRename?: (key: string, name: string) => void;
   /** Names the parent already holds, so the top level's hint continues rather than restarting. */
   existingSiblingNames?: string[];
+  /** Spec keys the plan says collide, so the offending chips can say so where you can point at them. */
+  duplicateKeys?: string[];
+  /** Reshape says "Reshape by the numbers…"; a fresh build says "Start over". */
+  startOverLabel?: string;
 }
 
 export default function LevelConfigStep({
@@ -87,8 +147,13 @@ export default function LevelConfigStep({
   onAdd,
   onDuplicate,
   onStartOver,
+  onRename,
   existingSiblingNames = [],
+  duplicateKeys = [],
+  startOverLabel = 'Start over',
 }: LevelConfigStepProps) {
+  const collides = (key: string) => duplicateKeys.includes(key);
+
   // ----- Customized: reflect the real per-branch structure as editable chips ---
   if (customized) {
     const leafParents = collectLeafParents(tree);
@@ -98,7 +163,7 @@ export default function LevelConfigStep({
           severity="info"
           action={
             <Button color="inherit" size="small" startIcon={<ReplayIcon />} onClick={onStartOver}>
-              Start over
+              {startOverLabel}
             </Button>
           }
           sx={{ mb: 2 }}
@@ -114,9 +179,21 @@ export default function LevelConfigStep({
           <Stack spacing={0.5}>
             {tree.map((container) => (
               <Stack key={container.key} direction="row" alignItems="center" spacing={0.5}>
-                <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
-                  {container.name}
-                </Typography>
+                {onRename ? (
+                  <TextField
+                    value={container.name}
+                    onChange={(e) => onRename(container.key, e.target.value)}
+                    size="small"
+                    variant="standard"
+                    error={collides(container.key)}
+                    inputProps={{ 'aria-label': `Name of ${container.name}` }}
+                    sx={{ flex: 1, minWidth: 0 }}
+                  />
+                ) : (
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                    {container.name}
+                  </Typography>
+                )}
                 <IconButton
                   size="small"
                   aria-label={`Duplicate ${container.name}`}
@@ -136,13 +213,16 @@ export default function LevelConfigStep({
           </Stack>
         </Box>
 
-        {leafParents.length === 0 ? (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {tree.map((n) => (
-              <Chip key={n.key} size="small" label={n.name} onDelete={() => onRemove(n.key)} />
-            ))}
-          </Box>
-        ) : (
+        {/*
+          A flat unit gets the `Top-level` list ABOVE and nothing here.
+
+          This used to render `tree` a second time as chips, which on a flat unit is the same set
+          of nodes with a second delete button each. Harmless while one was a label and the other a
+          chip; not harmless once reshape made both of them editable name fields, at which point a
+          three-row cabinet showed six inputs for three rows. The list above already carries
+          rename, duplicate and remove, which is every action a top-level entry has.
+        */}
+        {leafParents.length > 0 && (
           <Stack spacing={1.5}>
             {leafParents.map(({ node, path }) => (
               <Box key={node.key}>
@@ -151,12 +231,12 @@ export default function LevelConfigStep({
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
                   {node.children.map((leaf) => (
-                    <Chip
+                    <LeafChip
                       key={leaf.key}
-                      size="small"
-                      label={leaf.name}
-                      variant="outlined"
-                      onDelete={() => onRemove(leaf.key)}
+                      node={leaf}
+                      onRemove={onRemove}
+                      onRename={onRename}
+                      collides={collides(leaf.key)}
                     />
                   ))}
                   <Chip

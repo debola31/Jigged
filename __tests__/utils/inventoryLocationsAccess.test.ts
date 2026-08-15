@@ -85,6 +85,7 @@ import {
   LOCATION_CONTENTS_LIMIT,
   LOCATION_PAGE_SIZE,
   bulkPutAway,
+  applyLocationLayout,
   resolveScan,
   getRecentActivity,
   getLocationHistory,
@@ -399,7 +400,15 @@ describe('materializeLocationSpec', () => {
     expect(args[1].p_parent_id).toBeUndefined();
   });
 
-  it('offsets the top level by startSortOrder, so a repeat subdivide appends', async () => {
+  /**
+   * `startSortOrder` survives on this path only.
+   *
+   * It used to serve `Change layout` too, so a second pass sorted its new rows after the existing
+   * ones instead of interleaving — i.e. it was half of the append behaviour. Reshape reconciles
+   * positions against reality instead. What is left is `duplicateLocation`, where sorting the copy
+   * after its siblings is genuinely what "duplicate" means.
+   */
+  it('offsets the top level by startSortOrder, so a duplicate sorts after its siblings', async () => {
     state.rpc = { data: [], error: null };
 
     await materializeLocationSpec('co1', 'cab', spec, 3);
@@ -425,6 +434,71 @@ describe('materializeLocationSpec', () => {
     };
     await expect(materializeLocationSpec('co1', 'cab', spec)).rejects.toThrow(/already/i);
   });
+});
+
+// ---------------------------------------------------------------------------
+describe('applyLocationLayout', () => {
+  const payload = {
+    nodes: [
+      { ref: 'id:row1', parent_ref: null, name: 'Row 1', kind: null, sort_order: 0 },
+      { ref: 'new:/1', parent_ref: null, name: 'Row 2', kind: null, sort_order: 1 },
+    ],
+    removals: ['row3'],
+  };
+
+  it('sends the diff whole — nodes, removals and moves in one call', async () => {
+    queueFrom({ data: { primary_unit: 'ea', parts_unit_conversions: [] }, error: null });
+    state.rpc = { data: [loc({ id: 'row1' })], error: null };
+
+    await applyLocationLayout('cab', payload, [
+      { partId: 'p1', fromLocationId: 'row3', toRef: 'new:/1', quantity: 4, unit: 'ea' },
+    ]);
+
+    const args = vi.mocked(mockSupabase.rpc).mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(args[0]).toBe('apply_location_layout');
+    expect(args[1].p_parent_id).toBe('cab');
+    expect(args[1].p_nodes).toEqual(payload.nodes);
+    expect(args[1].p_removals).toEqual(['row3']);
+    expect(args[1].p_moves).toEqual([
+      {
+        part_id: 'p1',
+        from_location_id: 'row3',
+        to_ref: 'new:/1',
+        quantity: 4,
+        unit: 'ea',
+        converted_quantity: 4,
+      },
+    ]);
+  });
+
+  /**
+   * One conversion read per PART, not per move.
+   *
+   * Splitting one part across three bins is three moves against one part, and the conversion
+   * context is a property of the part. Reading it per move would make a split cost N extra
+   * requests for one answer.
+   */
+  it('reads a part’s conversion context once however many bins it is split across', async () => {
+    queueFrom({ data: { primary_unit: 'ea', parts_unit_conversions: [] }, error: null });
+    state.rpc = { data: [], error: null };
+
+    await applyLocationLayout('cab', payload, [
+      { partId: 'p1', fromLocationId: 'row3', toRef: 'id:row1', quantity: 4, unit: 'ea' },
+      { partId: 'p1', fromLocationId: 'row3', toRef: 'new:/1', quantity: 6, unit: 'ea' },
+    ]);
+
+    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
+    expect(mockSupabase.from).toHaveBeenCalledWith('parts');
+  });
+
+  it('surfaces a duplicate sibling name as a sentence rather than a raw 23505', async () => {
+    state.rpc = {
+      data: null,
+      error: { code: '23505', message: 'duplicate key value violates unique constraint' },
+    };
+    await expect(applyLocationLayout('cab', payload, [])).rejects.toThrow(/already/i);
+  });
+
 });
 
 describe('duplicateLocation', () => {

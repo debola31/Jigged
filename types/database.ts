@@ -3410,6 +3410,30 @@ export type Database = {
         Args: { p_table: unknown }
         Returns: undefined
       }
+      apply_location_layout: {
+        Args: {
+          p_moves?: Json
+          p_nodes: Json
+          p_parent_id: string
+          p_removals?: string[]
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          id: string
+          kind: string | null
+          name: string
+          parent_id: string | null
+          sort_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "inventory_locations"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       apply_stripe_subscription: {
         Args: {
           p_cancel_at: string
@@ -3774,25 +3798,6 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
-      subdivide_location: {
-        Args: { p_moves?: Json; p_nodes: Json; p_parent_id: string }
-        Returns: {
-          company_id: string
-          created_at: string
-          id: string
-          kind: string | null
-          name: string
-          parent_id: string | null
-          sort_order: number
-          updated_at: string
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "inventory_locations"
-          isOneToOne: false
-          isSetofReturn: true
-        }
-      }
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined

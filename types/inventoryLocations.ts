@@ -51,10 +51,22 @@ export interface LevelSpec {
 /**
  * In-memory location tree the visual builder assembles entirely client-side,
  * before any DB write. `materializeLocationSpec` inserts it into
- * inventory_locations on Create. `key` is a stable client id for board
- * rendering / prune (NOT the DB id). Every location can hold stock and be printed, so no
+ * inventory_locations on Create. Every location can hold stock and be printed, so no
  * per-node stockable/QR flags — and no `code`: that column went in 20260803034616, along with the
  * whole parent-prefixed zero-padded scheme that existed to fill it.
+ *
+ * ## `key` — a client id, which on a reshape may *carry* a DB id
+ *
+ * On the create path a key is purely a stable handle for React and for prune, and is never a
+ * location id. On the **reshape** path it has to be more than that: telling "this is Row 3,
+ * renamed" apart from "this is a new location that happens to be called Row 3" is the entire
+ * difference between a rename and a remove-then-create, and only the key can carry it.
+ *
+ * So [`locationReshape`](../utils/locationReshape.ts) owns one encoding — `id:<uuid>` for a node
+ * that already exists, anything else for one that does not — and `isExistingKey` is the only
+ * decoder. A prefix rather than a bare uuid, because the other minters here emit `0/1` and `e3`,
+ * and "does this look like a uuid?" is a guess where a prefix is a fact. **Nothing outside that
+ * module may parse a key.**
  */
 export interface LocationSpecNode {
   key: string;

@@ -123,20 +123,20 @@ def _environment() -> str:
 def _secret_key() -> str:
     """ONE name, whose VALUE differs per deployment environment -- the Stripe,
     Supabase and Anthropic convention in this repo, and what Vercel's
-    per-environment variable scoping exists to do.
+    per-environment variable scoping exists to do. The QBO path next door reads
+    QUICK_BOOKS_CLIENT_ID the same way.
 
-    Deliberately NOT the QBO shape next door, which reads
-    QUICKBOOKS_PROD_CLIENT_ID in production but FALLS BACK to the sandbox name
-    when it is unset (quickbooks.py `_client_credentials`). That fallback is the
-    exact hazard a separate prod name is supposed to prevent, so the split there
-    buys nothing and costs a second name to keep in sync. It is legacy, not a
-    pattern to copy -- note it also spells the prefix two ways.
+    (It did not always: until 2026-08-15 it read QUICKBOOKS_PROD_CLIENT_ID in
+    production and FELL BACK to the sandbox name, four names for two values. The
+    prod pair was never set, so the fallback was the live path -- meaning the
+    extra name bought no safety and offered a way to be silently wrong. Do not
+    reintroduce that shape here.)
 
-    There is no fallback here BY CONSTRUCTION: one name, so an unset value is a
-    loud failure rather than a quiet wrong-project key. What stops a testing-
-    project key from being used against production books is not the variable
-    name but `quickbooks_desktop_connections.environment`, which pins every
-    connection row to the environment it was created under -- see get_provider.
+    There is no fallback BY CONSTRUCTION: one name, so an unset value is a loud
+    failure rather than a quiet wrong-project key. What stops a testing-project
+    key from being used against production books is not the variable name but
+    `quickbooks_desktop_connections.environment`, which pins every connection row
+    to the environment it was created under -- see get_provider.
     """
     key = os.getenv("CONDUCTOR_API_KEY")
     if not key:

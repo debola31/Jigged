@@ -210,15 +210,19 @@ the Stripe/Supabase/Anthropic convention here, and what Vercel's per-environment
 points production at the testing project's books — the one misconfiguration worth guarding against,
 and Vercel's scoping is what guards it.
 
-**There is deliberately no `CONDUCTOR_PROD_*` variant.** The QBO block next door has one, and it
-demonstrates the cost rather than the benefit: `_client_credentials` reads `QUICKBOOKS_PROD_CLIENT_ID`
-in production but **falls back to the sandbox name** when it is unset
-([quickbooks.py](../../api/services/quickbooks.py)), so the second name buys no safety and adds a
-second thing to keep in sync — while spelling the prefix two ways (`QUICK_BOOKS_` and
-`QUICKBOOKS_`). Do not copy that shape. What actually prevents a testing-project key from touching
-production books is `quickbooks_desktop_connections.environment`, which pins every connection row to
-the environment it was created under; a mismatch makes the row stop resolving rather than silently
-address the wrong company file.
+**There is deliberately no `CONDUCTOR_PROD_*` variant**, and QuickBooks Online reads
+`QUICK_BOOKS_CLIENT_ID` the same single-name way. It did not always: until **2026-08-15**
+`_client_credentials` read `QUICKBOOKS_PROD_CLIENT_ID` in production and **fell back to the sandbox
+name** when unset ([quickbooks.py](../../api/services/quickbooks.py)) — four names for two values,
+spelling the prefix two ways. The prod pair was never set in Vercel, so the fallback *was* the live
+path: the extra name bought no safety and offered a way to be silently wrong, which is the opposite
+of what a separate production name is for. Both integrations now raise on an unset credential
+instead.
+
+What actually prevents a testing-project key from touching production books is
+`quickbooks_desktop_connections.environment`, which pins every connection row to the environment it
+was created under; a mismatch makes the row stop resolving rather than silently address the wrong
+company file.
 
 ---
 

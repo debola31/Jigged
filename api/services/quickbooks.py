@@ -97,12 +97,25 @@ def _minor_version() -> str:
 
 
 def _client_credentials() -> tuple[str, str]:
-    if _environment() == "production":
-        cid = os.getenv("QUICKBOOKS_PROD_CLIENT_ID") or os.getenv("QUICK_BOOKS_CLIENT_ID")
-        secret = os.getenv("QUICKBOOKS_PROD_CLIENT_SECRET") or os.getenv("QUICK_BOOKS_CLIENT_SECRET")
-    else:
-        cid = os.getenv("QUICK_BOOKS_CLIENT_ID") or os.getenv("QUICKBOOKS_CLIENT_ID")
-        secret = os.getenv("QUICK_BOOKS_CLIENT_SECRET") or os.getenv("QUICKBOOKS_CLIENT_SECRET")
+    """ONE name per credential, whose VALUE differs per deployment environment --
+    held by Vercel's per-environment scoping, as Stripe, Supabase, Anthropic and
+    the Conductor keys all are here.
+
+    This used to read QUICKBOOKS_PROD_CLIENT_ID in production and FALL BACK to
+    QUICK_BOOKS_CLIENT_ID, with a second fallback to QUICKBOOKS_CLIENT_ID outside
+    it -- four names for two values, spelling the prefix two ways. The prod pair
+    was never set, so the fallback was the live path and the extra names bought
+    nothing but a way to be wrong: a production deployment missing the prod name
+    silently used whatever the other name held, which is the hazard a separate
+    production name exists to prevent. Removed 2026-08-15.
+
+    Now an unset value raises instead, which is the safe direction: a loud
+    misconfiguration at connect time rather than tokens minted against the wrong
+    Intuit app. `quickbooks_connections.environment` remains what actually keeps
+    a sandbox connection from resolving in production.
+    """
+    cid = os.getenv("QUICK_BOOKS_CLIENT_ID")
+    secret = os.getenv("QUICK_BOOKS_CLIENT_SECRET")
     if not cid or not secret:
         raise QuickBooksServiceUnavailable(
             "QuickBooks is not configured (set QUICK_BOOKS_CLIENT_ID and "

@@ -178,10 +178,30 @@ def test_environment_and_api_base(monkeypatch):
     assert qb._api_base() == qb.PROD_API_BASE
 
 
-def test_client_credentials_missing_raises(monkeypatch):
+@pytest.mark.parametrize("environment", ["sandbox", "production"])
+def test_client_credentials_missing_raises(monkeypatch, environment):
+    """Raises in production too. Until 2026-08-15 production read
+    QUICKBOOKS_PROD_CLIENT_ID and fell back to this name, so a production
+    deployment missing its own credential quietly used another environment's
+    Intuit app instead of saying so."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", environment)
     monkeypatch.delenv("QUICK_BOOKS_CLIENT_ID", raising=False)
     with pytest.raises(qb.QuickBooksServiceUnavailable):
         qb._client_credentials()
+
+
+@pytest.mark.parametrize("environment", ["sandbox", "production"])
+def test_client_credentials_read_one_name_in_every_environment(monkeypatch, environment):
+    """The regression guard for the 2026-08-15 simplification: reintroducing a
+    QUICKBOOKS_PROD_* name would stop production reading the value Vercel holds
+    for it, and the old fallback would hide that until token refresh."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", environment)
+    monkeypatch.setenv("QUICK_BOOKS_CLIENT_ID", "cid-for-this-environment")
+    monkeypatch.setenv("QUICK_BOOKS_CLIENT_SECRET", "secret-for-this-environment")
+    # Set the retired names to values that would be visibly wrong if read.
+    monkeypatch.setenv("QUICKBOOKS_PROD_CLIENT_ID", "retired-prod-name")
+    monkeypatch.setenv("QUICKBOOKS_CLIENT_ID", "retired-alt-name")
+    assert qb._client_credentials() == ("cid-for-this-environment", "secret-for-this-environment")
 
 
 def test_minor_version_default_and_override(monkeypatch):

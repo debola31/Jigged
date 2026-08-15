@@ -132,8 +132,12 @@ interface LevelConfigStepProps {
   existingSiblingNames?: string[];
   /** Spec keys the plan says collide, so the offending chips can say so where you can point at them. */
   duplicateKeys?: string[];
-  /** Reshape says "Reshape by the numbers…"; a fresh build says "Start over". */
+  /** Reshape says "Use rows and bins instead…"; a fresh build says "Start over". */
   startOverLabel?: string;
+  /** Replaces the mode note above the per-location editor, so a reshape can say why it is here. */
+  customizedNote?: string;
+  /** "Customize individual spots" on a fresh build; a reshape names the locations it already has. */
+  customizeLabel?: string;
 }
 
 export default function LevelConfigStep({
@@ -151,6 +155,8 @@ export default function LevelConfigStep({
   existingSiblingNames = [],
   duplicateKeys = [],
   startOverLabel = 'Start over',
+  customizedNote,
+  customizeLabel = 'Customize individual spots',
 }: LevelConfigStepProps) {
   const collides = (key: string) => duplicateKeys.includes(key);
 
@@ -168,7 +174,9 @@ export default function LevelConfigStep({
           }
           sx={{ mb: 2 }}
         >
-          Fine-tuning individual spots. Branches can differ now.
+          {/* Says what you are looking at, not what mode you are in. "Fine-tuning individual spots.
+              Branches can differ now." described the software's state; this describes the unit. */}
+          {customizedNote ?? 'Editing each location on its own. Rows can differ from each other.'}
         </Alert>
 
         {/* Top-level entries: duplicate one to make another like it, or remove it. */}
@@ -385,10 +393,10 @@ export default function LevelConfigStep({
         disabled={total === 0}
         sx={{ mt: 2 }}
       >
-        Customize individual spots
+        {customizeLabel}
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
-        Give specific branches different bins (e.g. a gap, or one extra).
+        Rename one, or give a single row a different number of bins.
       </Typography>
     </Box>
   );

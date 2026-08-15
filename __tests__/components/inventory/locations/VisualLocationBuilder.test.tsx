@@ -92,23 +92,67 @@ const create = () =>
 
 beforeEach(() => vi.clearAllMocks());
 
+/** Into the per-location editor, which reshape no longer opens on by default. */
+const intoDetail = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(await screen.findByRole('button', { name: /edit locations one by one/i }));
+};
+
 // ── Reshape ──────────────────────────────────────────────────────────────────
 
-describe('reshape mode', () => {
-  it('opens on the unit’s REAL layout, not on a default shape', async () => {
+/**
+ * **It opens on the numbers, pre-filled with what the unit already is.**
+ *
+ * The first version opened on the per-location editor. The founder, on seeing it: *"I was expecting
+ * that it would bring up the same modal you use when creating a storage unit and just let you change
+ * it. So let's say you created something that was 5x5, you could just change it to 4x4."* The tests
+ * below are that sentence.
+ */
+describe('reshape mode — the numbers, pre-filled', () => {
+  it('opens on the same controls that BUILT the unit, showing its current shape', async () => {
     reshape();
 
-    // Three real rows, editable by name. The old dialog opened on 5 rows x Left/Right regardless
-    // of what the cabinet actually was, which is how it could only ever append.
-    expect(await screen.findByDisplayValue('Row 1')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Row 2')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Row 3')).toBeInTheDocument();
-    expect(screen.queryByDisplayValue('Left')).not.toBeInTheDocument();
+    // "Call them: Row" and "How many: 3" — read back off the cabinet, not a 5-row default.
+    expect(await screen.findByDisplayValue('Row')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton')).toHaveValue(3);
+    // Not the per-location editor.
+    expect(screen.queryByRole('textbox', { name: /^name of/i })).not.toBeInTheDocument();
   });
 
-  it('says nothing has changed yet, and refuses to write nothing', async () => {
+  it('changes 3 rows to 2 by turning the number down — the 5x5 → 4x4 case', async () => {
+    const user = userEvent.setup();
     reshape();
-    expect(await screen.findByText(/unchanged so far/i)).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: /fewer/i }));
+
+    expect(await screen.findByText(/Removing 1 location, all of them empty/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /review changes/i })).toBeEnabled();
+  });
+
+  it('keeps the surviving rows’ ids, so the change is a removal and not a rebuild', async () => {
+    const user = userEvent.setup();
+    reshape();
+
+    await user.click(await screen.findByRole('button', { name: /fewer/i }));
+    await user.click(screen.getByRole('button', { name: /review changes/i }));
+    await user.click(await screen.findByRole('button', { name: /apply changes/i }));
+
+    const [unitId, payload] = (applyLocationLayout as Mock).mock.calls[0];
+    expect(unitId).toBe('cab-3');
+    expect(payload.removals).toEqual(['row3']);
+    // Rows 1 and 2 ride along by id — their stock and their printed labels survive.
+    expect(payload.nodes.map((n: { ref: string }) => n.ref)).toEqual(['id:row1', 'id:row2']);
+  });
+
+  it('says nothing at all until something changes', async () => {
+    // It used to open with "test is unchanged so far. Edit the names, add or remove locations, or
+    // reshape it by the numbers." above a SECOND info alert about the editing mode — two boxes of
+    // prose before one number had been touched.
+    reshape();
+    await screen.findByDisplayValue('Row');
+
+    expect(screen.queryByText(/unchanged so far/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The disabled button is what says nothing has changed.
     expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
   });
 
@@ -117,10 +161,64 @@ describe('reshape mode', () => {
     expect(screen.getByText('Change the layout of Cabinet 3')).toBeInTheDocument();
   });
 
-  it('REMOVES rather than appends, and says so before anything is written', async () => {
-    // THE BUG, at the surface a user touches. Removing Row 3 must read as a removal.
+  it('adds a level, which is how a flat unit gains bins', async () => {
     const user = userEvent.setup();
     reshape();
+
+    await user.click(await screen.findByRole('button', { name: /add a deeper level/i }));
+
+    expect(await screen.findByText(/Creating \d+ locations/i)).toBeInTheDocument();
+    expect(screen.getByText(/Dividing up 3 locations/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * A unit the numbers cannot describe — production has one: rows 1–5 bare, rows 6–10 split three
+ * ways. Opening THAT on the numbers would greet you with "Creating 15 locations" before you had
+ * touched anything, and accepting it would quietly even the unit out.
+ */
+describe('reshape mode — a unit the numbers cannot describe', () => {
+  const ragged = () =>
+    node('cab-3', 'Cabinet 3', [
+      node('row1', 'Row 1', [node('r1l', 'Left', [], 0), node('r1r', 'Right', [], 1)], 0),
+      node('row2', 'Row 2', [], 1),
+    ]);
+
+  it('opens on the locations themselves, and says why', async () => {
+    reshape(ragged());
+
+    expect(await screen.findByText(/regular grid/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Row 1')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Left')).toBeInTheDocument();
+  });
+
+  it('still claims no change on open — the fallback exists to prevent exactly that', async () => {
+    reshape(ragged());
+    await screen.findByDisplayValue('Row 1');
+
+    expect(screen.getByRole('button', { name: /review changes/i })).toBeDisabled();
+    expect(screen.queryByText(/creating/i)).not.toBeInTheDocument();
+  });
+
+  it('offers the numbers as a deliberate choice, warning that it evens the unit out', async () => {
+    const user = userEvent.setup();
+    reshape(ragged());
+
+    await user.click(await screen.findByRole('button', { name: /use rows and bins instead/i }));
+
+    expect(await screen.findByText(/every row of Cabinet 3 would end up divided the same way/i))
+      .toBeInTheDocument();
+  });
+});
+
+// ── Reshape: editing individual locations ────────────────────────────────────
+
+describe('reshape mode — editing locations one by one', () => {
+  it('REMOVES rather than appends, and says so before anything is written', async () => {
+    // THE ORIGINAL BUG, at the surface a user touches.
+    const user = userEvent.setup();
+    reshape();
+    await intoDetail(user);
 
     await user.click(await screen.findByRole('button', { name: /remove row 3/i }));
 
@@ -131,6 +229,7 @@ describe('reshape mode', () => {
   it('sends a rename as a rename — the location keeps its id', async () => {
     const user = userEvent.setup();
     reshape();
+    await intoDetail(user);
 
     const field = await screen.findByDisplayValue('Row 2');
     await user.clear(field);
@@ -148,12 +247,14 @@ describe('reshape mode', () => {
 
   it('names every removed descendant in the payload, not just the subtree root', async () => {
     const user = userEvent.setup();
-    const unit = node('cab-3', 'Cabinet 3', [
-      node('row1', 'Row 1', [node('r1l', 'Left', [], 0), node('r1r', 'Right', [], 1)], 0),
-      node('row2', 'Row 2', [], 1),
-    ]);
-    reshape(unit);
+    reshape(
+      node('cab-3', 'Cabinet 3', [
+        node('row1', 'Row 1', [node('r1l', 'Left', [], 0), node('r1r', 'Right', [], 1)], 0),
+        node('row2', 'Row 2', [], 1),
+      ]),
+    );
 
+    // Ragged, so it already opens on the locations.
     await user.click(await screen.findByRole('button', { name: /remove row 1/i }));
     await user.click(screen.getByRole('button', { name: /review changes/i }));
     await user.click(await screen.findByRole('button', { name: /apply changes/i }));
@@ -165,6 +266,7 @@ describe('reshape mode', () => {
   it('warns in error colour when something is going away, and not otherwise', async () => {
     const user = userEvent.setup();
     reshape();
+    await intoDetail(user);
 
     // Purely additive: an ordinary primary, because dressing it red teaches people to click red.
     await user.click(screen.getAllByRole('button', { name: /duplicate row 1/i })[0]);
@@ -184,6 +286,7 @@ describe('reshape mode', () => {
     // docs/interaction-standards.md forbids outright.
     const user = userEvent.setup();
     reshape();
+    await intoDetail(user);
 
     const field = await screen.findByDisplayValue('Row 2');
     await user.clear(field);
@@ -195,7 +298,6 @@ describe('reshape mode', () => {
 
   it('withholds nothing on a unit with no children — that is still a plain build', async () => {
     reshape(node('yard', 'The Yard', []));
-    // Nothing to seed from, so it falls back to the generator, exactly as the old subdivide did.
     expect((await screen.findAllByText('Call them')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('textbox', { name: /^name of/i })).not.toBeInTheDocument();
   });
@@ -220,9 +322,13 @@ describe('a reshape that empties a loaded location', () => {
     (getContentsPageForLocations as Mock).mockResolvedValue({ contents: CONTENTS, total: 2 });
   });
 
+  /**
+   * Through the NUMBERS, which is how someone would actually reach this: turn 3 rows down to 2,
+   * and the row that goes is the one holding stock.
+   */
   const removeLoadedRow = async (user: ReturnType<typeof userEvent.setup>) => {
     reshape(cabinet(), { row3: 2 });
-    await user.click(await screen.findByRole('button', { name: /remove row 3/i }));
+    await user.click(await screen.findByRole('button', { name: /fewer/i }));
   };
 
   it('asks where the stock goes before it will apply anything', async () => {

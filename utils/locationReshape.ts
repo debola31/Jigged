@@ -139,6 +139,30 @@ export function inferLevelsFromSubtree(unit: InventoryLocationNode): LevelSpec[]
 }
 
 /**
+ * Can the numbers describe this unit exactly?
+ *
+ * `Change layout` opens on the numbers — "5 rows, 2 each", the same form that built the unit — and
+ * the founder's expectation is precisely that: *"you created something that was 5x5, you could just
+ * change it to 4x4."* But a ragged unit has no `(rows × bins)` that describes it (production has
+ * one: rows 1–5 bare, rows 6–10 split three ways). Opening THAT on the numbers would show
+ * "Creating 15 locations" before anyone had touched a control, and accepting it would even the unit
+ * out — a destructive change nobody asked for, presented as the starting state.
+ *
+ * So the question is answered by asking it: infer the levels, reconcile them back, and see whether
+ * the result is the tree you started with. Self-verifying — it uses the same two functions the
+ * editor uses, so it cannot drift from them.
+ */
+export function numbersCanDescribe(unit: InventoryLocationNode): boolean {
+  if (unit.children.length === 0) return true;
+  const existing = readSubtreeAsSpec(unit);
+  const round = reconcileLevelsWithExisting(existing, inferLevelsFromSubtree(unit));
+  const sameShape = (a: LocationSpecNode[], b: LocationSpecNode[]): boolean =>
+    a.length === b.length &&
+    a.every((n, i) => n.key === b[i].key && n.name === b[i].name && sameShape(n.children, b[i].children));
+  return sameShape(existing, round);
+}
+
+/**
  * Apply a set of levels to the unit's real children **positionally**, keeping ids.
  *
  * This is the function the append bug was missing. `buildSpecFromLevels` generates a fresh forest

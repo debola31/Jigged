@@ -334,17 +334,17 @@ describe('LocationsManager', () => {
    * got Row 1–5 *beside* them and one already holding Row 1–3 got Row 4–8. That was the bug — the
    * button is titled `Change the layout of Cabinet 3` and could only ever add to it.
    */
-  it('opens Change layout on what the unit actually holds', async () => {
+  it('opens Change layout on the same controls that built the unit', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
 
     expect(await screen.findByText('Change the layout of Cabinet 3')).toBeInTheDocument();
-    // Cabinet 3 holds Shelf A and Shelf B. It opens on those, not on a generated default.
-    expect(await screen.findByDisplayValue('Shelf A')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Shelf B')).toBeInTheDocument();
-    expect(screen.getByText(/unchanged so far/i)).toBeInTheDocument();
+    // Cabinet 3 holds Shelf A and Shelf B — unnumbered, so the numbers editor reads them back as a
+    // names list rather than inventing "Shelf {n}". Either way it is the CREATE modal, pre-filled.
+    expect(await screen.findByDisplayValue('Shelf A, Shelf B')).toBeInTheDocument();
+    expect(screen.queryByText(/unchanged so far/i)).not.toBeInTheDocument();
   });
 
   it('removes a location instead of appending beside it, and says what that costs', async () => {
@@ -352,7 +352,11 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
-    await user.click(await screen.findByRole('button', { name: /remove shelf b/i }));
+
+    // Drop Shelf B by editing the list — the numbers path, which is what opens by default.
+    const names = await screen.findByLabelText('Names');
+    await user.clear(names);
+    await user.type(names, 'Shelf A');
 
     // Shelf B holds one part in the fixture, so this cannot just be applied.
     expect(await screen.findByText(/Removing 1 location, 1 of which holds stock/i)).toBeInTheDocument();
@@ -366,6 +370,7 @@ describe('LocationsManager', () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
+    await user.click(await screen.findByRole('button', { name: /edit locations one by one/i }));
 
     const field = await screen.findByDisplayValue('Shelf A');
     await user.clear(field);

@@ -34,6 +34,7 @@ import {
   inferLevelsFromSubtree,
   isExistingKey,
   locationIdOf,
+  numbersCanDescribe,
   planReshape,
   readSubtreeAsSpec,
   reconcileLevelsWithExisting,
@@ -136,8 +137,8 @@ export default function VisualLocationBuilder({
   const [levels, setLevels] = useState<LevelSpec[]>(() => cloneLevels(DEFAULT_LEVELS));
   /**
    * Once a branch is fine-tuned the tree is hand-edited directly and no longer regenerated from
-   * `levels`. **Reshape starts here**, seeded from reality: a real cabinet is rarely uniform, and
-   * the numeric editor cannot express the ragged shapes production actually has.
+   * `levels`. Both modes start seeded from reality on a reshape; which one you land in is decided
+   * by `numbersCanDescribe` — see `reset`.
    */
   const [customized, setCustomized] = useState(false);
   const [editedTree, setEditedTree] = useState<LocationSpecNode[]>([]);
@@ -164,18 +165,31 @@ export default function VisualLocationBuilder({
     setStep('layout');
     setLoadingContents(false);
 
-    if (unit && unit.children.length > 0) {
-      // Reality first. Everything the dialog offers is an edit to this.
-      setCustomized(true);
-      setEditedTree(readSubtreeAsSpec(unit));
-      setLevels(inferLevelsFromSubtree(unit));
-    } else {
-      // A unit with nothing inside it (the Yard, a bench) has no shape to seed from, so it gets
-      // the generator — which is exactly how the old subdivide behaved, unchanged.
+    if (!unit || unit.children.length === 0) {
+      // Nothing to seed from — a new unit, or one that is a single location (the Yard, a bench).
       setCustomized(false);
       setEditedTree([]);
       setLevels(cloneLevels(DEFAULT_LEVELS));
+      return;
     }
+
+    /*
+     * **The numbers, pre-filled with what this unit already is.**
+     *
+     * The first version opened on the per-location editor, reasoning that a real cabinet is rarely
+     * uniform. That buried the case people actually have. The founder, on seeing it: *"I was
+     * expecting that it would bring up the same modal you use when creating a storage unit and just
+     * let you change it. So let's say you created something that was 5x5, you could just change it
+     * to 4x4."* Which is right — and it is what `inferLevelsFromSubtree` was written for.
+     *
+     * A unit the numbers cannot describe falls back to the per-location editor, because opening
+     * THAT on the numbers would greet you with "Creating 15 locations" before you touched anything.
+     * `numbersCanDescribe` decides by round-tripping through the same two functions the editor
+     * uses, so the fallback cannot disagree with what the editor would actually do.
+     */
+    setEditedTree(readSubtreeAsSpec(unit));
+    setLevels(inferLevelsFromSubtree(unit));
+    setCustomized(!numbersCanDescribe(unit));
   };
 
   const uniformTree = useMemo(
@@ -516,7 +530,15 @@ export default function VisualLocationBuilder({
               duplicateKeys={
                 plan?.blockers.find((b) => b.code === 'duplicate-sibling-name')?.keys ?? []
               }
-              startOverLabel={reshaping ? 'Reshape by the numbers…' : 'Start over'}
+              startOverLabel={reshaping ? 'Use rows and bins instead…' : 'Start over'}
+              customizeLabel={
+                reshaping ? 'Edit locations one by one…' : 'Customize individual spots'
+              }
+              customizedNote={
+                reshaping
+                  ? `${unit?.name} isn't a regular grid — its rows don't all divide the same way — so it is shown location by location.`
+                  : undefined
+              }
             />
           </Box>
 
@@ -570,18 +592,18 @@ export default function VisualLocationBuilder({
       </DialogActions>
 
       <Dialog open={startOverOpen} onClose={() => setStartOverOpen(false)}>
-        <DialogTitle>{reshaping ? 'Reshape by the numbers?' : 'Start over?'}</DialogTitle>
+        <DialogTitle>{reshaping ? 'Use rows and bins instead?' : 'Start over?'}</DialogTitle>
         <DialogContent>
           <DialogContentText>
             {reshaping
-              ? 'This goes back to editing by the numbers, which makes every row the same shape. Rows that are currently divided differently will be evened out — the summary above will say what that costs before anything is saved.'
+              ? `Rows and bins describe a regular grid, so every row of ${unit?.name} would end up divided the same way. Rows that differ now will be evened out — you will see exactly how many locations that adds or removes before anything is saved.`
               : 'This clears your individual tweaks and goes back to editing the layout by the numbers.'}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setStartOverOpen(false)}>Keep editing</Button>
           <Button onClick={confirmStartOver} color="error" variant="contained">
-            {reshaping ? 'Use the numbers' : 'Start over'}
+            {reshaping ? 'Use rows and bins' : 'Start over'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -618,14 +640,16 @@ function ImpactStrip({
   unit: InventoryLocationNode;
   occupancy?: OccupancyMap;
 }) {
-  if (plan.isNoop) {
-    return (
-      <Alert severity="info" sx={{ mb: 2 }}>
-        {unit.name} is unchanged so far. Edit the names, add or remove locations, or reshape it by
-        the numbers.
-      </Alert>
-    );
-  }
+  /*
+   * Nothing at all until something changes.
+   *
+   * This used to open with "test is unchanged so far. Edit the names, add or remove locations, or
+   * reshape it by the numbers." — an instruction nobody needs beside controls that are already on
+   * screen, sitting above a SECOND info alert about the editing mode. Two boxes of prose before
+   * one number had been touched. The disabled `Review changes` button already says nothing has
+   * changed, and the live location count already says what the numbers add up to.
+   */
+  if (plan.isNoop) return null;
 
   const lines = describeReshape(plan, unit.name);
   const stocked = plan.stockSources.reduce(

@@ -19,6 +19,7 @@ import {
   inferLevelsFromSubtree,
   isExistingKey,
   locationIdOf,
+  numbersCanDescribe,
   planReshape,
   readSubtreeAsSpec,
   reconcileLevelsWithExisting,
@@ -325,6 +326,46 @@ describe('reconcileLevelsWithExisting', () => {
 
     expect(p.removed.map((r) => r.id).sort()).toEqual(['row1-r', 'row2-r']);
     expect(p.created).toHaveLength(0);
+  });
+});
+
+/**
+ * Which editor `Change layout` opens on.
+ *
+ * The numbers are the default — "you created something that was 5x5, you could just change it to
+ * 4x4" — but a ragged unit has no (rows × bins) that describes it, and opening one on the numbers
+ * would show a destructive diff before the user had touched anything. The question is answered by
+ * asking it: infer, reconcile, compare.
+ */
+describe('numbersCanDescribe', () => {
+  it('says yes to a uniform run of rows', () => {
+    expect(numbersCanDescribe(rowsOnly(5))).toBe(true);
+  });
+
+  it('says yes to a uniform grid', () => {
+    expect(numbersCanDescribe(rowsAndSides(3))).toBe(true);
+  });
+
+  it('says yes to unnumbered names, which are a list rather than a series', () => {
+    const unit = node('cab', 'Cabinet 3', [
+      node('a', 'Shelf A', [], { sort_order: 0 }),
+      node('b', 'Shelf B', [], { sort_order: 1 }),
+    ]);
+    expect(numbersCanDescribe(unit)).toBe(true);
+  });
+
+  it('says NO to the shape production actually has — some rows split, some bare', () => {
+    // `Metal Shelf By Welder`: rows 1–5 bare, rows 6–10 split three ways. There is no pair of
+    // numbers that describes it, so the numbers editor would silently even it out.
+    const unit = node('cab', 'Cabinet 3', [
+      node('row1', 'Row 1', [node('l', 'Left', [], { sort_order: 0 })], { sort_order: 0 }),
+      node('row2', 'Row 2', [], { sort_order: 1 }),
+    ]);
+    expect(numbersCanDescribe(unit)).toBe(false);
+  });
+
+  it('says yes to a unit with nothing inside it — there is nothing to contradict', () => {
+    expect(numbersCanDescribe(node('yard', 'The Yard', []))).toBe(true);
   });
 });
 

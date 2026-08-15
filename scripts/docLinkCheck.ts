@@ -421,7 +421,13 @@ export function docFiles(repoRoot: string): string[] {
   } catch {
     /* docs/ may be absent in a partial checkout */
   }
-  const rel = abs.map((f) => path.relative(repoRoot, f)).sort();
+  // Forward slashes ALWAYS, including on Windows. These strings are half of the
+  // ALLOWLIST key (`${docRelPath}::${citation}`), and path.relative yields
+  // `docs\README.md` on win32 — which matches no entry, so on a Windows machine
+  // every allowlisted citation reported as a missing path AND every allowlist
+  // entry reported as stale. CI runs on Linux and was green throughout, so the
+  // check simply lied to anyone developing on Windows.
+  const rel = abs.map((f) => path.relative(repoRoot, f).split(path.sep).join('/')).sort();
   if (existsSync(path.join(repoRoot, 'CLAUDE.md'))) rel.unshift('CLAUDE.md');
   return rel;
 }

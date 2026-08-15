@@ -192,12 +192,53 @@ describe('a 4-level cabinet', () => {
   });
 });
 
-describe('shapes it declines to draw', () => {
-  it('falls back to a list past four levels instead of inventing a projection', () => {
-    const deep = node('Warehouse', [
-      node('Aisle', [node('Bay', [node('Shelf', [node('Bin')])])]),
+/**
+ * The deepest thing the wizard can build, and — since 20260815224349 — the deepest anything may be.
+ *
+ * This used to fall through to `list`, so a cabinet the wizard had just built came back captioned
+ * "this one nests deeper than the grid draws", and clicking a row of that list made the row the
+ * pane's subject with no path back. The editor's cap and this file's ceiling are now the same
+ * number on purpose.
+ */
+describe('five levels — two choosers, then the grid', () => {
+  // Grid Cabinet › Row › Bin › Side › slot — four levels under the unit, which is the shape the
+  // wizard builds at its own maximum.
+  const deep = () =>
+    node('Grid Cabinet', [
+      node('Row 1', [
+        node('Bin 1', [node('Left', [node('1')]), node('Right', [node('2')])]),
+        node('Bin 2', [node('Left', [node('3')])]),
+      ]),
+      node('Row 2', [node('Bin 9', [node('Left', [node('4')])])]),
     ]);
-    expect(depthBelow(deep)).toBe(4);
+
+  it('draws it rather than giving up', () => {
+    const unit = deep();
+    expect(depthBelow(unit)).toBe(4);
+    const layout = readUnitLayout(unit, noStock());
+    expect(layout.kind).toBe('nested');
+  });
+
+  it('groups by the top level and sections by the one below it', () => {
+    const layout = readUnitLayout(deep(), noStock()) as {
+      kind: 'nested';
+      groups: Array<{ name: string; sections: Array<{ name: string; bands: unknown[] }> }>;
+    };
+    expect(layout.groups.map((g) => g.name)).toEqual(['Row 1', 'Row 2']);
+    expect(layout.groups[0].sections.map((s) => s.name)).toEqual(['Bin 1', 'Bin 2']);
+    // The deepest two levels are the grid itself, exactly as at three and four levels.
+    expect(layout.groups[0].sections[0].bands).toHaveLength(2);
+    expect(layout.groups[1].sections.map((s) => s.name)).toEqual(['Bin 9']);
+  });
+});
+
+describe('shapes it declines to draw', () => {
+  it('falls back to a list past the cap instead of inventing a projection', () => {
+    // Only reachable by data that predates the cap — the trigger refuses to create one now.
+    const deep = node('Warehouse', [
+      node('Aisle', [node('Bay', [node('Shelf', [node('Rack', [node('Bin')])])])]),
+    ]);
+    expect(depthBelow(deep)).toBe(5);
     const layout = readUnitLayout(deep, noStock());
     expect(layout.kind).toBe('list');
     expect((layout as { kind: 'list'; cells: Array<{ name: string }> }).cells).toHaveLength(1);

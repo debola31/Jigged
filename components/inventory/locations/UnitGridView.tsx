@@ -313,6 +313,8 @@ export default function UnitGridView({
 }: UnitGridViewProps) {
   const layout: UnitLayout = readUnitLayout(unit, occupancy);
   const [section, setSection] = useState(0);
+  /** Only used by the five-level case: which top-level group the inner chooser belongs to. */
+  const [group, setGroup] = useState(0);
 
   if (layout.kind === 'list') {
     if (layout.cells.length === 0) {
@@ -369,6 +371,71 @@ export default function UnitGridView({
           onOpenCell={onOpenCell}
           onOpenBand={onOpenBand}
         />
+      </Box>
+    );
+  }
+
+  /*
+   * Five levels: two choosers, then the grid. Both stay on screen.
+   *
+   * This case used to render as a flat list of the top level, and clicking one made it the pane's
+   * new subject — which on a wide screen had no path back, so reaching the second row meant leaving
+   * the cabinet entirely and coming back. Two tab rows are denser than one, and they are the whole
+   * cabinet at once instead of a place you can get lost inside.
+   *
+   * The inner row is deliberately quieter than the outer one: same 48px target, smaller type, no
+   * bottom rule. Two identical tab bars stacked read as one confusing control.
+   */
+  if (layout.kind === 'nested') {
+    const g = Math.min(group, layout.groups.length - 1);
+    const activeGroup = layout.groups[g];
+    const s = Math.min(section, activeGroup.sections.length - 1);
+    const activeSection = activeGroup.sections[s];
+
+    return (
+      <Box>
+        <Tabs
+          value={g}
+          onChange={(_, v: number) => {
+            setGroup(v);
+            // The new group's sections are a different set; keeping an index into the old one
+            // would land the reader somewhere they did not pick.
+            setSection(0);
+          }}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ minHeight: 48 }}
+        >
+          {layout.groups.map((gr) => (
+            <Tab key={gr.id} label={gr.name} sx={{ minHeight: 48 }} />
+          ))}
+        </Tabs>
+        <Tabs
+          value={s}
+          onChange={(_, v: number) => setSection(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          textColor="inherit"
+          sx={{
+            mb: 1.5,
+            minHeight: 48,
+            borderBottom: 0,
+            '& .MuiTab-root': { minHeight: 48, fontSize: '0.8125rem', fontWeight: 500 },
+            '& .MuiTabs-indicator': { height: 2, opacity: 0.6 },
+          }}
+        >
+          {activeSection
+            ? activeGroup.sections.map((sec) => <Tab key={sec.id} label={sec.name} />)
+            : null}
+        </Tabs>
+        {activeSection && (
+          <GridBody
+            shape={activeSection}
+            selectedId={selectedId}
+            onOpenCell={onOpenCell}
+            onOpenBand={onOpenBand}
+          />
+        )}
       </Box>
     );
   }

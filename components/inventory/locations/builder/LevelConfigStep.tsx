@@ -62,13 +62,12 @@ function collectLeafParents(
 }
 
 /**
- * One editable spot.
+ * One editable location.
  *
- * A read-only `Chip` when there is no rename to offer (the create path — a name that does not
- * exist yet is edited by changing the pattern that generates it), and a compact field when there
- * is. Reshape needs the field: it opens on the unit's REAL layout, which is where you would go to
- * fix `Rght` or to call Left "Outer", and the numbers editor cannot do it without also flattening
- * a ragged unit to uniform.
+ * A read-only `Chip` on the CREATE path, where a name that does not exist yet is edited by
+ * changing the pattern that generates it — there is nothing to rename. An editable field on a
+ * RESHAPE, where every one of these is a location that already exists: this is where you fix
+ * `Rght`, or call Left "Outer", without the numbers editor evening the unit out to do it.
  */
 function LeafChip({
   node,

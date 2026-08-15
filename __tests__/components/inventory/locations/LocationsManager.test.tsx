@@ -390,6 +390,46 @@ describe('LocationsManager', () => {
   });
 
   /**
+   * Drilling into a container used to be a one-way trip.
+   *
+   * Clicking a container makes it the pane's subject (`openCell` → `showUnit`), and a container is
+   * not in the list beside it — so on a wide screen, where the "All storage" button is hidden,
+   * there was no way back. The report: *"once you click row 1 and then the tabs and their cells,
+   * you can't go back anywhere to click row 2 unless you first click on another root storage
+   * unit."*
+   */
+  it('gives a drilled-into container a path back to the unit it came from', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLocationBoard).mockResolvedValue(
+      board([
+        loc({ id: 'cab', name: 'Grid Cabinet', kind: 'cabinet' }),
+        loc({ id: 'row1', name: 'Row 1', parent_id: 'cab' }),
+        loc({ id: 'bin1', name: 'Bin 1', parent_id: 'row1' }),
+      ]),
+    );
+    render(<LocationsManager companyId="co1" unitId="row1" />);
+
+    // The subject is Row 1, which the list does not contain.
+    expect(await screen.findByRole('heading', { name: 'Row 1' })).toBeInTheDocument();
+
+    const crumbs = screen.getByLabelText('Where this is');
+    expect(within(crumbs).getByRole('button', { name: 'Grid Cabinet' })).toBeInTheDocument();
+    await user.click(within(crumbs).getByRole('button', { name: 'Storage' }));
+
+    // `showUnit(null)` — back to the whole list.
+    expect(routerMocks.replace).toHaveBeenCalledWith(
+      '/dashboard/co1/inventory/locations',
+      expect.anything(),
+    );
+  });
+
+  it('shows no path on a root unit — the list beside it is already the way back', async () => {
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+    await screen.findByRole('heading', { name: 'Cabinet 3' });
+    expect(screen.queryByLabelText('Where this is')).not.toBeInTheDocument();
+  });
+
+  /**
    * The `Unassigned` system bucket is not a place anyone can stick a label on, so printing one for
    * it would waste a sticker and put a QR on a shelf that does not exist.
    */

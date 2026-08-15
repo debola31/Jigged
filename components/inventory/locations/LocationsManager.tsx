@@ -39,7 +39,7 @@ import StorageUnitList from './StorageUnitList';
 import StorageSearch, { type StorageHit } from './StorageSearch';
 import PartPlacesDrawer from './place/PartPlacesDrawer';
 import LocationPanel from './LocationPanel';
-import PlaceDrawer from './place/PlaceDrawer';
+import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
 import UnitAdjustDrawer from './place/UnitAdjustDrawer';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 
@@ -56,6 +56,28 @@ function rootOf(id: string, byId: Map<string, InventoryLocation>): string {
     cursor = node.parent_id;
   }
   return root;
+}
+
+/**
+ * Every ancestor of `id`, outermost first, EXCLUDING the node itself.
+ *
+ * `computePath` returns names for display; a breadcrumb has to navigate, so it needs the ids too.
+ * Same walk, same cycle guard.
+ */
+function ancestorsOf(
+  id: string,
+  byId: Map<string, InventoryLocation>,
+): Array<{ id: string; name: string }> {
+  const out: Array<{ id: string; name: string }> = [];
+  let cursor: string | null = byId.get(id)?.parent_id ?? null;
+  const guard = new Set<string>();
+  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocation = byId.get(cursor)!;
+    out.unshift({ id: node.id, name: node.name });
+    cursor = node.parent_id;
+  }
+  return out;
 }
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
@@ -462,7 +484,27 @@ export default function LocationsManager({
   };
 
   return (
-    <Box>
+    <Box
+      sx={{
+        /*
+         * MAKE ROOM FOR THE DRAWER instead of letting it sit on top of the pane.
+         *
+         * The place drawer is `persistent` from `sm` up — it has to be, because a modal one made
+         * the grid and its section tabs inert, which is the dead end this all started from. A
+         * persistent drawer overlays rather than reflows, so `Print QR` and the hint under the grid
+         * were sliced in half by it. Reserving the width when it is open is the other half of that
+         * pattern; the transition matches MUI's own so the pane slides rather than jumps.
+         *
+         * Not on a phone: there the drawer is full width and covering the page is the point.
+         */
+        transition: (t) =>
+          t.transitions.create('padding-right', {
+            easing: t.transitions.easing.sharp,
+            duration: t.transitions.duration.enteringScreen,
+          }),
+        pr: { xs: 0, sm: drawerPlace ? `${PLACE_DRAWER_WIDTH}px` : 0 },
+      }}
+    >
       {/*
         THREE SCOPES, THREE PLACES — and the top row now holds only one of them.
 
@@ -583,7 +625,24 @@ export default function LocationsManager({
                 minWidth: 0,
                 maxHeight: { md: 'calc(100vh - 260px)' },
                 overflowY: { md: 'auto' },
-                pr: { md: 1 },
+                /*
+                 * ITS OWN SURFACE, from `md` up.
+                 *
+                 * The list, the unit pane and the page were one flat colour, so a master–detail
+                 * layout read as a single column of stuff with a gap in it. A slightly raised
+                 * ground and a rule down the right edge is the least that says "these are two
+                 * panes" — no new palette entry, just the theme's own `action.hover` and
+                 * `divider`, so it holds in whatever the theme does next.
+                 *
+                 * Not applied on a phone: there the list is the entire screen, and a surface that
+                 * differs from nothing is just a tint.
+                 */
+                bgcolor: { md: 'action.hover' },
+                borderRight: { md: '1px solid' },
+                borderColor: { md: 'divider' },
+                borderRadius: { md: 1 },
+                p: { md: 1.5 },
+                pr: { md: 1.5 },
               }}
             >
               {/*
@@ -609,8 +668,17 @@ export default function LocationsManager({
                   the heading — a bare "Add" would also collide with the drawer's `Add` verb, which
                   is a different action on a different thing.
                 */}
+                {/*
+                  CONTAINED, matching `Bulk Adjust` in the pane beside it.
+                  
+                  It was a text button — the lowest emphasis the design system has — for the one
+                  thing this column is for. The decision log records why the LABEL is `Add` and not
+                  `Add storage`; nothing ever argued for the emphasis. The two live in different
+                  columns and act on different scopes, so they do not compete.
+                */}
                 <Button
                   size="small"
+                  variant="contained"
                   startIcon={<AddIcon />}
                   onClick={openAddStorage}
                   aria-label="Add storage"
@@ -637,6 +705,10 @@ export default function LocationsManager({
                   occupancy={occupancy}
                   onSelectPlace={openCell}
                   actions={sheetActions}
+                  // Everything above the pane's subject, so drilling into a container is never a
+                  // one-way trip. `computePath` includes the node itself, hence the slice.
+                  ancestors={ancestorsOf(openUnit.id, byId)}
+                  onSelectAncestor={showUnit}
                   backSlot={
                     <Button
                       startIcon={<ArrowBackIcon />}

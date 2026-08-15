@@ -645,3 +645,90 @@ def test_a_used_then_emptied_location_can_be_deleted(db, shop):
         location_id, location_name = cur.fetchone()
     assert location_id is None
     assert "Row 1" in location_name
+
+
+# ── The depth cap ────────────────────────────────────────────────────────────
+
+
+def test_storage_cannot_be_built_deeper_than_the_grid_can_draw(db, shop):
+    """`LevelConfigStep.MAX_LEVELS` was a disabled button and nothing else.
+
+    The wizard allowed four levels under a unit; `readUnitLayout` drew three and rendered the rest
+    as a flat list captioned "this one nests deeper than the grid draws" — whose rows navigated the
+    pane away with no path back on a wide screen. So a 320-location cabinet could be built at
+    exactly the depth the wizard offered and then be neither drawable nor navigable.
+
+    The grid now draws four levels under a unit, and this refuses a fifth. The two numbers are the
+    same number on purpose.
+    """
+    r1, _, _ = shop["rows"]
+    with db.cursor() as cur:
+        # cabinet(1) › Row 1(2) › a(3) › b(4) › c(5) is the cap.
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'a') RETURNING id",
+            (shop["company"], r1),
+        )
+        a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'b') RETURNING id",
+            (shop["company"], a),
+        )
+        b = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'c') RETURNING id",
+            (shop["company"], b),
+        )
+        c = cur.fetchone()[0]
+
+        with pytest.raises(errors.CheckViolation) as exc:
+            cur.execute(
+                "INSERT INTO inventory_locations (company_id, parent_id, name) "
+                "VALUES (%s, %s, 'too deep')",
+                (shop["company"], c),
+            )
+    assert "5 levels deep at most" in str(exc.value)
+
+
+def test_the_cap_also_refuses_a_reshape_that_would_break_it(db, shop):
+    """Through the RPC, since that is the path a client actually takes."""
+    r1, r2, r3 = shop["rows"]
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'a') RETURNING id",
+            (shop["company"], r1),
+        )
+        a = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'b') RETURNING id",
+            (shop["company"], a),
+        )
+        b = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO inventory_locations (company_id, parent_id, name) "
+            "VALUES (%s, %s, 'c') RETURNING id",
+            (shop["company"], b),
+        )
+        c = cur.fetchone()[0]
+
+    with user_session(shop["user"]) as (conn, cur):
+        with pytest.raises(errors.CheckViolation):
+            apply_layout(
+                cur,
+                shop["cabinet"],
+                [
+                    keep(r1, "Row 1", 0),
+                    keep(a, "a", 0, f"id:{r1}"),
+                    keep(b, "b", 0, f"id:{a}"),
+                    keep(c, "c", 0, f"id:{b}"),
+                    # cabinet(1) › Row 1(2) › a(3) › b(4) › c(5) › NEW is level 6.
+                    create("new:deep", "too deep", 0, f"id:{c}"),
+                    keep(r2, "Row 2", 1),
+                    keep(r3, "Row 3", 2),
+                ],
+            )
+        conn.rollback()

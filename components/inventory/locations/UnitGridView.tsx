@@ -319,7 +319,7 @@ export default function UnitGridView({
       return (
         <Paper elevation={0} sx={{ p: 3, textAlign: 'center', bgcolor: 'action.hover' }}>
           <Typography color="text.secondary">
-            Nothing inside {unit.name} yet — change its layout to add places.
+            Nothing inside {unit.name} yet — change its layout to add locations.
           </Typography>
         </Paper>
       );

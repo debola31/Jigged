@@ -149,7 +149,7 @@ export default function StorageSearch({ companyId, tree, onPick }: StorageSearch
       // own filter would then re-filter the server's results by their LABEL, hiding a part whose
       // match was on something the label does not show.
       filterOptions={(o) => o}
-      groupBy={(o) => (o.kind === 'place' ? 'Places' : 'Parts')}
+      groupBy={(o) => (o.kind === 'place' ? 'Locations' : 'Parts')}
       getOptionLabel={(o) => o.label}
       isOptionEqualToValue={(a, b) => a.id === b.id}
       noOptionsText={
@@ -178,7 +178,7 @@ export default function StorageSearch({ companyId, tree, onPick }: StorageSearch
         <TextField
           {...params}
           size="small"
-          placeholder="Find a part or a place…"
+          placeholder="Find a part or a location…"
           slotProps={{
             input: {
               ...params.InputProps,

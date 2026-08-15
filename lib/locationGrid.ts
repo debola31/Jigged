@@ -204,11 +204,11 @@ export function readUnitLayout(
 /** What the unit card on the storage list says about shape, in the shop's own words. */
 export function describeShape(unit: InventoryLocationNode): string {
   const depth = depthBelow(unit);
-  if (depth === 0) return 'One place';
+  if (depth === 0) return 'One location';
 
   const children = unit.children;
   if (depth === 1) {
-    return `${children.length} ${children.length === 1 ? 'place' : 'places'}`;
+    return `${children.length} ${children.length === 1 ? 'location' : 'locations'}`;
   }
 
   const widths = children.filter((c) => c.children.length > 0).map((c) => c.children.length);
@@ -218,7 +218,7 @@ export function describeShape(unit: InventoryLocationNode): string {
     // exists mostly for this: the operator built 15 wide and wanted 12, and nothing ever said so.
     return `${children.length} rows × ${widths[0]} each`;
   }
-  return `${countStockablePlaces(unit)} places`;
+  return `${countStockablePlaces(unit)} locations`;
 }
 
 /** Every node under `unit`, including itself. Structure, not capacity. */

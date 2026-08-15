@@ -108,10 +108,10 @@ export default function LocationPanel({
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
         {isSystem
-          ? 'Parts with no recorded place yet — your put-away list, not a shelf.'
+          ? 'Parts with no recorded location yet.'
           : structured
-            ? `${describeShape(unit)} · ${used} of ${places} places in use`
-            : 'One place'}
+            ? `${describeShape(unit)} · ${used} of ${places} locations in use`
+            : 'One location'}
       </Typography>
 
       {/*
@@ -208,7 +208,7 @@ export default function LocationPanel({
       */}
       {structured && (
         <Typography variant="body2" color="text.secondary">
-          Pick a place to see what is in it and act on it. Stock lives in the places, not in{' '}
+          Pick a location to see what is in it and act on it. Stock lives in the locations, not in{' '}
           {unit.name} itself.
         </Typography>
       )}

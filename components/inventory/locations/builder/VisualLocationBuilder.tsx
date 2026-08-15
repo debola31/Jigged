@@ -469,7 +469,11 @@ export default function VisualLocationBuilder({
                     <TextField
                       {...params}
                       label="What is it called?"
-                      placeholder="Cabinet 1, the rack by the welder, the yard…"
+                      // `shelf` survives HERE and in the empty state, and nowhere else. Naming one
+                      // as an example of furniture a shop owns is doing work; using it as the
+                      // generic word for a location is what was wrong — a bin inside Cabinet 3 is
+                      // not a shelf, and neither is the yard.
+                      placeholder="Cabinet 1, the shelf by the welder, the yard…"
                       autoFocus
                       required
                       error={Boolean(duplicateName)}

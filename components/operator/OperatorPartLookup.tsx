@@ -68,7 +68,7 @@ import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
-import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';
+import AddToLocationDialog from '@/components/operator/AddToLocationDialog';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
@@ -106,7 +106,7 @@ export default function OperatorPartLookup({
   const [balances, setBalances] = useState<PartLocationBalanceWithLocation[] | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [putAwayOpen, setPutAwayOpen] = useState(false);
+  const [addToLocationOpen, setAddToLocationOpen] = useState(false);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
 
@@ -188,17 +188,17 @@ export default function OperatorPartLookup({
    * empty picker on screen for as long as the request took and then snatched it away. The wait
    * belongs on the button, where a spinner explains it.
    */
-  const openPutAway = async () => {
+  const openAddToLocation = async () => {
     if (locations.length > 0) {
-      setPutAwayOpen(true);
+      setAddToLocationOpen(true);
       return;
     }
     setLoadingPlaces(true);
     try {
       setLocations(await getLocations(companyId));
-      setPutAwayOpen(true);
+      setAddToLocationOpen(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the places.');
+      setError(e instanceof Error ? e.message : 'Could not load the locations.');
     } finally {
       setLoadingPlaces(false);
     }
@@ -245,13 +245,15 @@ export default function OperatorPartLookup({
                   <strong>
                     {num(unassigned.quantity)} {selected.primary_unit ?? ''}
                   </strong>{' '}
-                  not put away yet.
+                  not stored yet.
                 </Alert>
               )}
               {places.length > 0 && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  {num(total)} {selected.primary_unit ?? ''} on{' '}
-                  {places.length === 1 ? '1 shelf' : `${places.length} shelves`}
+                  {/* "on 1 shelf" was wrong for most of this shop's storage: a bin inside
+                      Cabinet 3 is not a shelf, and neither is the yard. */}
+                  {num(total)} {selected.primary_unit ?? ''} in{' '}
+                  {places.length === 1 ? '1 location' : `${places.length} locations`}
                 </Typography>
               )}
               <Stack spacing={1}>
@@ -292,24 +294,24 @@ export default function OperatorPartLookup({
               startIcon={
                 loadingPlaces ? <CircularProgress size={18} color="inherit" /> : <PlaceOutlinedIcon />
               }
-              onClick={openPutAway}
+              onClick={openAddToLocation}
               disabled={loadingPlaces}
               sx={{ mt: 1.5, minHeight: 48 }}
             >
-              Put it away&hellip;
+              Add to new location&hellip;
             </Button>
           )}
         </Box>
       )}
 
       {selected && (
-        <PutAwayPickerDialog
-          open={putAwayOpen}
+        <AddToLocationDialog
+          open={addToLocationOpen}
           partName={selected.part_name}
           unit={selected.primary_unit}
           locations={locations}
           balances={balances ?? []}
-          onClose={() => setPutAwayOpen(false)}
+          onClose={() => setAddToLocationOpen(false)}
           onChoose={onOpenLocation}
         />
       )}

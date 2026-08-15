@@ -261,7 +261,7 @@ function UnitAdjustBody({
     <>
       <PlaceViewHeader
         title={`Bulk Adjust ${unit.name}`}
-        subtitle={`${places.length} ${places.length === 1 ? 'place' : 'places'}`}
+        subtitle={`${places.length} ${places.length === 1 ? 'location' : 'locations'}`}
         // Disabled mid-commit. It was not, so closing while lines were still being written let the
         // remaining writes land with the "which ones failed" report thrown away.
         action={
@@ -302,7 +302,7 @@ function UnitAdjustBody({
                 </Stack>
               }
             >
-              Stock moved between these places while you were counting:{' '}
+              Stock moved between these locations while you were counting:{' '}
               {pending.contested
                 .map((rows) => `${rows[0].candidate.partName} (${rows.map((r) => r.candidate.target.locationPath).join(' and ')})`)
                 .join('; ')}
@@ -329,7 +329,7 @@ function UnitAdjustBody({
           {rows.length > 8 && (
             <TextField
               size="small"
-              placeholder="Filter by part or place…"
+              placeholder="Filter by part or location…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               helperText={

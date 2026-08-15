@@ -61,7 +61,7 @@ beforeEach(() => {
 });
 
 describe('PartPlacesDrawer', () => {
-  it('lists every place the part is, with full paths', async () => {
+  it('lists every location the part is in, with full paths', async () => {
     setup();
 
     expect(await screen.findByRole('heading', { name: 'BUY-ORING-214' })).toBeInTheDocument();
@@ -70,16 +70,16 @@ describe('PartPlacesDrawer', () => {
   });
 
   /** The one sum on the screen, and it is safe: balances are stored in the part's primary unit. */
-  it('totals across places', async () => {
+  it('totals across locations', async () => {
     setup();
-    expect(await screen.findByText(/1,380 ea across 2 places/i)).toBeInTheDocument();
+    expect(await screen.findByText(/1,380 ea across 2 locations/i)).toBeInTheDocument();
   });
 
   /**
    * The row EXPANDS rather than navigating. You arrived holding a part and a place; being sent to
    * a bin makes you re-find the part among everything in it.
    */
-  it('expands a place into the four verbs instead of navigating', async () => {
+  it('expands a location into the four verbs instead of navigating', async () => {
     const user = userEvent.setup();
     setup();
 
@@ -101,7 +101,7 @@ describe('PartPlacesDrawer', () => {
     expect(onOpenPlace).toHaveBeenCalledWith('shelf-b');
   });
 
-  it('opens one place at a time', async () => {
+  it('opens one location at a time', async () => {
     const user = userEvent.setup();
     setup();
 
@@ -117,7 +117,7 @@ describe('PartPlacesDrawer', () => {
    * The pile is listed — leaving it out would answer "nowhere" for a part sitting in it — but it is
    * marked, because walking to `Unassigned` is not a thing anyone can do.
    */
-  it('marks the put-away pile rather than showing it as a shelf', async () => {
+  it('marks the pile rather than showing it as a location the part lives in', async () => {
     vi.mocked(getBalancesForPart).mockResolvedValue([
       {
         location_id: 'un',
@@ -130,15 +130,15 @@ describe('PartPlacesDrawer', () => {
     setup();
 
     expect(await screen.findByText('Unassigned')).toBeInTheDocument();
-    expect(screen.getByText(/not put away yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/not stored yet/i)).toBeInTheDocument();
   });
 
-  it('says plainly when a part is in no place at all', async () => {
+  it('says plainly when a part is in no location at all', async () => {
     vi.mocked(getBalancesForPart).mockResolvedValue([]);
     setup();
 
-    expect(await screen.findByText(/is not recorded in any place/i)).toBeInTheDocument();
-    expect(screen.getByText(/not in any place/i)).toBeInTheDocument();
+    expect(await screen.findByText(/is not recorded in any location/i)).toBeInTheDocument();
+    expect(screen.getByText(/not in any location/i)).toBeInTheDocument();
   });
 
   /** Authoritative: it asks its own question rather than reusing the search's capped rows. */

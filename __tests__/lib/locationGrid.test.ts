@@ -153,7 +153,7 @@ describe('Cabinet by Mill/Lathe — 10 flat rows', () => {
   });
 
   it('describes itself by count, not as a grid it is not', () => {
-    expect(describeShape(cabinet)).toBe('10 places');
+    expect(describeShape(cabinet)).toBe('10 locations');
   });
 });
 

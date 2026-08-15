@@ -131,12 +131,12 @@ export default function StorageUnitList({
                       <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
                         {unit.name}
                       </Typography>
-                      {isSystem && <Chip size="small" label="Put-away pile" variant="outlined" />}
+                      {isSystem && <Chip size="small" label="Not stored yet" variant="outlined" />}
                     </Stack>
 
                     {isSystem ? (
                       <Typography variant="body2" color="text.secondary" noWrap>
-                        Parts with no place yet
+                        Parts with no location yet
                       </Typography>
                     ) : (
                       <Stack direction="row" alignItems="center" spacing={1}>

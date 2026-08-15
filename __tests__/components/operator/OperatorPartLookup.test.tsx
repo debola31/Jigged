@@ -76,7 +76,7 @@ beforeEach(() => {
 });
 
 describe('OperatorPartLookup — J11, "is this part in storage, and where?"', () => {
-  it('shows every place the part sits, with the full path', async () => {
+  it('shows every location the part sits in, with the full path', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       { location_id: 'l1', location_name: 'Left', location_code: 'CAB1-R3-L', path: ['Cabinet 1', 'Row 3', 'Left'], quantity: 40, kind: 'shelf' },
@@ -90,7 +90,7 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     expect(screen.getByText('Cabinet 1 › Row 3 › Left')).toBeInTheDocument();
     expect(screen.getByText('40 ea')).toBeInTheDocument();
     expect(screen.getByText('200 ea')).toBeInTheDocument();
-    expect(screen.getByText(/240 ea on 2 shelves/)).toBeInTheDocument();
+    expect(screen.getByText(/240 ea in 2 locations/)).toBeInTheDocument();
   });
 
   it('navigates to the place, which is the point of looking it up', async () => {
@@ -124,7 +124,7 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     await pick(user);
 
     expect(await screen.findByText('None available')).toBeInTheDocument();
-    expect(screen.queryByText(/not put away yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not stored yet/i)).not.toBeInTheDocument();
   });
 
   it('surfaces a failed read instead of showing an empty answer', async () => {
@@ -190,19 +190,19 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     ...{},
   });
 
-  it('calls the put-away pile what it is, never a place the part lives', async () => {
+  it('calls the pile what it is, never a location the part lives in', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([pile(240)]);
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText(/not put away yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/not stored yet/i)).toBeInTheDocument();
     // The old copy. "Unassigned" must never be presented as a shelf to walk to.
     expect(screen.queryByText(/across 1 place/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/on 1 shelf/i)).not.toBeInTheDocument();
   });
 
-  it('counts only shelves in the total, so nobody is sent to an empty one', async () => {
+  it('counts only real locations in the total, so nobody is sent to an empty one', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       shelf({ quantity: 40 }),
@@ -213,11 +213,11 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByText(/40 ea on 1 shelf/i)).toBeInTheDocument();
+    expect(await screen.findByText(/40 ea in 1 location/i)).toBeInTheDocument();
     expect(screen.getByText('Shelf A')).toBeInTheDocument();
     expect(screen.queryByText('Yard')).not.toBeInTheDocument();
     // Both states shown, not merged: 40 shelved AND 200 still to put away.
-    expect(screen.getByText(/not put away yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/not stored yet/i)).toBeInTheDocument();
   });
 
   it('still says not available when every row is a zero', async () => {
@@ -238,28 +238,30 @@ describe('OperatorPartLookup — where it lives vs where it is piled', () => {
  * or no usable camera. Scanning stays the default because it is the only destination signal that
  * is physically self-verifying: you can only scan a label you are standing at.
  */
-describe('OperatorPartLookup — the put-away picker', () => {
+describe('OperatorPartLookup — the add-to-location picker', () => {
   const openPicker = async (user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(await screen.findByRole('button', { name: /put it away/i }));
+    await user.click(await screen.findByRole('button', { name: /add to new location/i }));
   };
 
-  it('loads the places only when asked, not on every lookup', async () => {
+  it('loads the locations only when asked, not on every lookup', async () => {
     const user = userEvent.setup();
     mockLocations.mockResolvedValue([
       { id: 'l1', company_id: 'co1', parent_id: null, name: 'Shelf A', kind: 'shelf', sort_order: 0, created_at: '', updated_at: '' },
     ]);
     renderLookup();
     await pick(user);
-    // Most lookups end at a shelf card; paying for the whole location table every time is waste.
+    // Most lookups end at a location card; paying for the whole table every time is waste.
     expect(mockLocations).not.toHaveBeenCalled();
 
     await openPicker(user);
     expect(mockLocations).toHaveBeenCalledWith('co1');
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Put away RAW-AL6061-BLANK');
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Add RAW-AL6061-BLANK to a new location',
+    );
   });
 
-  /** Offered on every tracked part, because a missing label is as good a reason as a missing shelf. */
-  it('is offered even when the part is already shelved', async () => {
+  /** Offered on every tracked part: a missing label is as good a reason as having nowhere yet. */
+  it('is offered even when the part is already somewhere', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       { location_id: 'l1', location_name: 'Shelf A', location_code: null, path: ['Shelf A'], quantity: 40, kind: 'shelf' },
@@ -267,11 +269,11 @@ describe('OperatorPartLookup — the put-away picker', () => {
     renderLookup();
     await pick(user);
 
-    expect(await screen.findByRole('button', { name: /put it away/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /add to new location/i })).toBeInTheDocument();
   });
 
 
-  it('reports a failed places load instead of opening an empty picker', async () => {
+  it('reports a failed location load instead of opening an empty picker', async () => {
     const user = userEvent.setup();
     mockLocations.mockRejectedValue(new Error('no places for you'));
     renderLookup();

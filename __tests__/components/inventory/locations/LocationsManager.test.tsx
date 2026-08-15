@@ -218,11 +218,11 @@ describe('LocationsManager', () => {
    * swapped the page — the seam that made this read as two products. Now every unit lands in the
    * same pane, which simply has no grid to draw for this one.
    */
-  it('shows a single-place unit in the same pane, drawn as one square', async () => {
+  it('shows a single-location unit in the same pane, drawn as one square', async () => {
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
     // Twice, deliberately: on its card in the list and again in the pane beside it.
-    expect(await screen.findAllByText('One place')).toHaveLength(2);
+    expect(await screen.findAllByText('One location')).toHaveLength(2);
     // Drawn, not a bare contents list — the same shape as every other unit, with one cell.
     expect(screen.getByRole('button', { name: /^Yard —/ })).toBeInTheDocument();
   });
@@ -439,7 +439,7 @@ describe('LocationsManager — the four verbs', () => {
 
     expect(screen.queryByText(/Adding and removing stock happens on the part itself/i))
       .not.toBeInTheDocument();
-    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
+    expect(screen.getByText(/pick a location to see what is in it/i)).toBeInTheDocument();
   });
 
   /**
@@ -534,7 +534,7 @@ describe('LocationsManager — the four verbs', () => {
     const heading = await screen.findByRole('heading', { name: /bulk adjust Cabinet 3/i });
     // Both shelves are in scope — a container is audited through its bins. Scoped to the drawer,
     // because the unit's own card in the list says "2 places" too.
-    expect(within(heading.parentElement!).getByText(/2 places/i)).toBeInTheDocument();
+    expect(within(heading.parentElement!).getByText(/2 locations/i)).toBeInTheDocument();
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
@@ -573,14 +573,14 @@ describe('LocationsManager — the four verbs', () => {
    * The four verbs appear once a place inside it is selected — which is also the only point at
    * which "add what, where" has an answer.
    */
-  it('offers no stock verbs on a container until a place inside it is picked', async () => {
+  it('offers no stock verbs on a container until a location inside it is picked', async () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await screen.findByRole('button', { name: /^bulk adjust$/i });
     for (const verb of [/^add$/i, /^remove$/i, /^move$/i]) {
       expect(screen.queryByRole('button', { name: verb })).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
+    expect(screen.getByText(/pick a location to see what is in it/i)).toBeInTheDocument();
   });
 
   /**

@@ -522,7 +522,7 @@ export default function LocationsManager({
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              No storage yet. Name the places you already have — a cabinet, a shelf, the
+              No storage yet. Name the locations you already have — a cabinet, a shelf, the
               yard — then print QR labels to scan from the shop floor.
             </Typography>
             <Button variant="contained" startIcon={<AddIcon />} onClick={openAddStorage}>
@@ -663,7 +663,7 @@ export default function LocationsManager({
                   textAlign: 'center',
                 }}
               >
-                <Typography color="text.secondary">Pick a place to see what is in it.</Typography>
+                <Typography color="text.secondary">Pick a location to see what is in it.</Typography>
               </Box>
             )}
           </Box>

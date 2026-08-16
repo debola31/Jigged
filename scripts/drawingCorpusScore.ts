@@ -1,0 +1,217 @@
+/**
+ * Scores Arm A against Arm B and writes results.md.
+ *
+ * Deliberately does NOT invent a ground truth it cannot defend. Hand-checking
+ * 96 drawings x 7 fields is 672 judgements, so instead this reports the things
+ * that are objectively checkable and isolates the small set that genuinely needs
+ * a human eye:
+ *
+ *   - part/drawing number on the customer package, where the FILENAME encodes
+ *     the answer independently of anything either arm did.
+ *   - whether a returned value is verbatim from the drawing — the false-positive
+ *     proxy, and the one that matters most, since the whole design rests on
+ *     "empty rather than wrong".
+ *   - agreement classes. Both-null is almost certainly absent; agreement is
+ *     almost certainly right; the disagreements and the B-only finds are the
+ *     interesting minority, and they get listed for inspection.
+ *
+ * Run: pnpm dlx tsx scripts/drawingCorpusScore.ts
+ */
+
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+const CORPUS = join(homedir(), 'Downloads', 'jigged-drawing-corpus');
+const ROLES = [
+  'part_number', 'drawing_number', 'description', 'material',
+  'finish', 'revision', 'weight',
+] as const;
+type Role = (typeof ROLES)[number];
+
+interface ARow {
+  source: string; tuned: boolean; file: string; structure: string;
+  fields: Partial<Record<Role, { value: string }>>;
+}
+interface BRow {
+  source: string; tuned: boolean; file: string;
+  fields: Record<string, { value: string | null; caption: string | null; verbatim: boolean }>;
+  usage?: { input: number; output: number };
+  error?: string;
+}
+
+const A: ARow[] = JSON.parse(readFileSync(join(CORPUS, 'armA.json'), 'utf8'));
+if (!existsSync(join(CORPUS, 'armB.json'))) throw new Error('armB.json missing — run Arm B first');
+const B: BRow[] = JSON.parse(readFileSync(join(CORPUS, 'armB.json'), 'utf8'));
+
+const bByFile = new Map(B.map((r) => [`${r.source}/${r.file}`, r]));
+const norm = (v: string | null | undefined) => (v ?? '').trim().replace(/\s+/g, ' ');
+
+type Klass = 'both_null' | 'agree' | 'a_only' | 'b_only' | 'disagree';
+interface Cell { row: ARow; role: Role; a: string; b: string; klass: Klass; verbatim: boolean }
+
+const cells: Cell[] = [];
+for (const row of A) {
+  const b = bByFile.get(`${row.source}/${row.file}`);
+  if (!b || b.error) continue;
+  for (const role of ROLES) {
+    const av = norm(row.fields[role]?.value);
+    const bv = norm(b.fields[role]?.value);
+    const klass: Klass =
+      !av && !bv ? 'both_null'
+      : av && bv ? (av === bv ? 'agree' : 'disagree')
+      : av ? 'a_only'
+      : 'b_only';
+    cells.push({ row, role, a: av, b: bv, klass, verbatim: b.fields[role]?.verbatim ?? true });
+  }
+}
+
+const of = (tuned: boolean, k?: Klass) =>
+  cells.filter((c) => c.row.tuned === tuned && (!k || c.klass === k));
+
+/** Filenames on the customer package encode both identifiers, so this is objective. */
+function customerIdentityScore() {
+  const rows = A.filter((r) => r.tuned);
+  let aPn = 0, bPn = 0, aDn = 0, bDn = 0;
+  for (const r of rows) {
+    const stem = r.file.replace(/\.dxf$/i, '');
+    const pn = stem.split('-_')[0];
+    const dn = stem.replace(/^[^-]*-_/, '').replace(/-0000$/, '');
+    const b = bByFile.get(`${r.source}/${r.file}`);
+    if (norm(r.fields.part_number?.value) === pn) aPn += 1;
+    if (norm(b?.fields.part_number?.value) === pn) bPn += 1;
+    if (norm(r.fields.drawing_number?.value) === dn) aDn += 1;
+    if (norm(b?.fields.drawing_number?.value) === dn) bDn += 1;
+  }
+  return { n: rows.length, aPn, bPn, aDn, bDn };
+}
+
+const id = customerIdentityScore();
+/**
+ * Coverage is derived from what Arm B actually PRODUCED, not from error rows —
+ * a resumed run drops the failures, and counting those would make a partial run
+ * look complete.
+ */
+const covered = new Set(
+  B.filter((r) => !r.error).map((r) => `${r.source}/${r.file}`),
+);
+const missing = A.filter((r) => !covered.has(`${r.source}/${r.file}`));
+const missingUntuned = missing.filter((r) => !r.tuned);
+const nonVerbatim = cells.filter((c) => c.b && !c.verbatim);
+const inTok = B.reduce((a, r) => a + (r.usage?.input ?? 0), 0);
+const outTok = B.reduce((a, r) => a + (r.usage?.output ?? 0), 0);
+
+const byStructure = (s: string) => {
+  const sub = cells.filter((c) => c.row.structure === s && !c.row.tuned);
+  const files = new Set(sub.map((c) => c.row.file)).size;
+  return {
+    files,
+    a: sub.filter((c) => c.a).length,
+    b: sub.filter((c) => c.b).length,
+    bOnly: sub.filter((c) => c.klass === 'b_only').length,
+    aOnly: sub.filter((c) => c.klass === 'a_only').length,
+    dis: sub.filter((c) => c.klass === 'disagree').length,
+  };
+};
+
+const line = (label: string, n: number, d: number) =>
+  `| ${label} | ${n} | ${d ? Math.round((100 * n) / d) : 0}% |`;
+
+const untunedFields = of(false).length;
+const md = `# Drawing extraction — Arm A vs Arm B
+
+Generated by \`scripts/drawingCorpusScore.ts\`. Arm A is deterministic only. Arm B is the same
+deterministic pass feeding a model the drawing's literal strings plus the PDF, asking it to *assign*
+strings to fields rather than transcribe.
+
+- Drawings in Arm A: **${A.length}** (${A.filter((r) => r.tuned).length} tuned customer package, ${A.filter((r) => !r.tuned).length} untuned)
+- Drawings Arm B covered: **${covered.size}** — of which ${cells.length / ROLES.length} compared here
+- **Not yet covered by Arm B: ${missing.length}** (${missingUntuned.length} of them untuned)
+- Arm B cost so far: ~$${((inTok / 1e6) * 5 + (outTok / 1e6) * 25).toFixed(2)} (${inTok} in / ${outTok} out at Opus 5 rates)
+${
+  missing.length
+    ? `\n> **This comparison is PARTIAL.** The untuned half is what the decision rule turns on, and\n> ${missingUntuned.length} untuned drawings are missing — including every \`named_tags\` drawing and every\n> drawing with an uncaptioned title strip. Do not read section 3 as a verdict.\n> Missing sources: ${[...new Set(missing.map((r) => r.source))].join(', ')}.`
+    : ''
+}
+
+## 1. Objective check — identifiers on the customer package
+
+The filenames encode both numbers, so this needs no hand-checking.
+
+| | Arm A | Arm B |
+|---|---|---|
+| part_number correct | ${id.aPn}/${id.n} | ${id.bPn}/${id.n} |
+| drawing_number correct | ${id.aDn}/${id.n} | ${id.bDn}/${id.n} |
+
+## 2. Hallucination check
+
+Every Arm B value is compared against the set of strings actually present in the DXF.
+
+**Values Arm B returned that are NOT on the drawing: ${nonVerbatim.length}**
+${nonVerbatim.length ? nonVerbatim.slice(0, 20).map((c) => `- \`${c.row.file}\` ${c.role} = \`${c.b}\``).join('\n') : '\n_None. Every value the model returned was a literal string from the file._'}
+
+## 2b. Per-field agreement on the tuned customer package
+
+Not a verdict — the tuned set is where Arm A's dictionary was built, so it flatters Arm A by
+construction. It is here because it is the only place with enough non-null fields to compare at all.
+
+| field | both null | agree | A only | B only | disagree |
+|---|---|---|---|---|---|
+${ROLES.map((r) => {
+  const sub = cells.filter((c) => c.row.tuned && c.role === r);
+  const k = (x: Klass) => sub.filter((c) => c.klass === x).length;
+  return `| ${r} | ${k('both_null')} | ${k('agree')} | ${k('a_only')} | ${k('b_only')} | ${k('disagree')} |`;
+}).join('\n')}
+
+## 3. Agreement — untuned drawings only (${untunedFields} field slots)
+
+| class | count | share |
+|---|---|---|
+${line('both null (field absent)', of(false, 'both_null').length, untunedFields)}
+${line('agree', of(false, 'agree').length, untunedFields)}
+${line('Arm B only — AI found what determinism missed', of(false, 'b_only').length, untunedFields)}
+${line('Arm A only — AI missed what determinism found', of(false, 'a_only').length, untunedFields)}
+${line('disagree', of(false, 'disagree').length, untunedFields)}
+
+## 4. By title-block structure (untuned)
+
+| structure | drawings | Arm A filled | Arm B filled | B-only | A-only | disagree |
+|---|---|---|---|---|---|---|
+${['named_tags', 'auto_tags', 'exploded']
+  .map((s) => {
+    const r = byStructure(s);
+    return r.files ? `| ${s} | ${r.files} | ${r.a} | ${r.b} | ${r.bOnly} | ${r.aOnly} | ${r.dis} |` : '';
+  })
+  .filter(Boolean)
+  .join('\n')}
+
+## 5. Every field Arm B found that Arm A did not
+
+These are the wins that would justify the AI arm. **Each needs eyeballing against the PDF** — a
+plausible-looking value that is verbatim from the drawing can still be assigned to the wrong field.
+
+| drawing | field | value | caption read |
+|---|---|---|---|
+${cells
+  .filter((c) => c.klass === 'b_only' && !c.row.tuned)
+  .slice(0, 80)
+  .map((c) => {
+    const b = bByFile.get(`${c.row.source}/${c.row.file}`);
+    return `| \`${c.row.source}/${c.row.file}\` | ${c.role} | ${c.b} | ${b?.fields[c.role]?.caption ?? '—'} |`;
+  })
+  .join('\n')}
+
+## 6. Every disagreement
+
+| drawing | field | Arm A | Arm B |
+|---|---|---|---|
+${cells
+  .filter((c) => c.klass === 'disagree')
+  .slice(0, 60)
+  .map((c) => `| \`${c.row.source}/${c.row.file}\` | ${c.role} | ${c.a} | ${c.b} |`)
+  .join('\n') || '| _none_ | | | |'}
+`;
+
+writeFileSync(join(CORPUS, 'results.md'), md);
+console.log(md.split('## 5.')[0]);
+console.log(`Wrote ${join(CORPUS, 'results.md')}`);

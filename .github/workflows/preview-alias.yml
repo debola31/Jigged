@@ -24,9 +24,9 @@ name: Preview Alias
 # (environment_url). The commit STATUS Vercel also posts points at the vercel.com
 # dashboard, not at the site, so it cannot drive this.
 #
-# THIS DOES NOTHING UNTIL IT IS ON main. GitHub reads deployment_status workflow
-# files from the DEFAULT BRANCH only, so the branch adding this file cannot test
-# it — verify on the first preview after merge.
+# GitHub's docs say deployment_status workflows are read from the default branch
+# only. That is NOT what happened here — this ran on its own PR branch, before it
+# had ever been on main. Trust the Actions tab over either claim.
 on: deployment_status
 
 env:
@@ -64,14 +64,26 @@ jobs:
           # silently invalidates every URL built from it. The ID does not move.
           VERCEL_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
           TARGET_URL: ${{ github.event.deployment_status.environment_url }}
+        # NEVER fails the run, deliberately. This is a convenience alias for
+        # QuickBooks Online OAuth testing, not a correctness gate — and this job
+        # attaches to the commit, so a hard failure paints a red X on every
+        # unrelated PR. A check that is red for a reason nobody needs to act on
+        # is how people learn to ignore red checks. The outcome is reported in
+        # the step summary and as a warning annotation instead.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           if [ -z "${TARGET_URL}" ]; then
-            echo "::error::deployment_status carried no environment_url; nothing to alias."
-            exit 1
+            echo "::warning::deployment_status carried no environment_url; nothing to alias."
+            exit 0
           fi
-          # Pinned to a major. An alias that silently stops working is worse than
-          # one that fails loudly on an upgrade we chose.
-          npx --yes vercel@59 alias set "${TARGET_URL}" "${ALIAS_DOMAIN}" \
-            --token "${VERCEL_TOKEN}" --scope "${VERCEL_SCOPE}"
-          echo "[${ALIAS_DOMAIN}](https://${ALIAS_DOMAIN}) → ${TARGET_URL}" >> "${GITHUB_STEP_SUMMARY}"
+          # Pinned to a major, so an upstream break is one we chose to take.
+          if npx --yes vercel@59 alias set "${TARGET_URL}" "${ALIAS_DOMAIN}" \
+               --token "${VERCEL_TOKEN}" --scope "${VERCEL_SCOPE}"; then
+            echo "${ALIAS_DOMAIN} → ${TARGET_URL}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            # The expected first failure is certificate issuance, which means the
+            # domain does not exist yet: jigged.app runs on third-party
+            # nameservers, so Vercel cannot create the subdomain itself.
+            echo "::warning::Could not point ${ALIAS_DOMAIN} at ${TARGET_URL}. If the log ends at 'Issuing a certificate', the domain is not set up: add CNAME preview -> cname.vercel-dns.com at the DNS provider, then add ${ALIAS_DOMAIN} to the Vercel project."
+            echo "Alias FAILED — ${ALIAS_DOMAIN} unchanged. See the job log." >> "${GITHUB_STEP_SUMMARY}"
+          fi

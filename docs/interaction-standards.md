@@ -455,3 +455,78 @@ Two details generalise beyond billing:
   it loads. Otherwise every healthy shop sees a subscription warning flash on every
   page load, which is the "couldn't check is never denied" rule from
   [CLAUDE.md](../CLAUDE.md) in UI form.
+
+---
+
+## 5. Waiting (added 2026-08-16)
+
+**Added after three separate bug reports from one shop, all the same shape:** a
+button that only greys out during a multi-second round trip reads as a dropped
+click. §4 already forbade a disabled control with no visible reason — a busy
+button is exactly that — but §4 is framed around *unavailable* actions, so
+nothing named the *in-progress* case. Before this rule the entire app contained
+**zero** buttons that showed progress; the convention did not exist to be
+followed.
+
+### The threshold decides, and the threshold is the call
+
+Feedback is keyed to how long the wait actually is, per
+[NN/g — Response Time Limits](https://www.nngroup.com/articles/response-times-3-important-limits/):
+
+| Wait | What the control does | Why |
+|---|---|---|
+| **< 1s** — local state, Supabase CRUD | Disable to stop a double-submit. **No spinner.** | Under 1s the user's flow of thought is unbroken; NN/g: *"no special feedback is necessary."* A spinner here is noise that makes a fast app feel busy. |
+| **1–10s** — any third-party hop: Conductor's Web Connector, Intuit, Stripe, Anthropic, FedEx | The **pressed** control shows a spinner and its label names what it is waiting for | Past 1s the user notices; past ~3s with no signal they assume the click was lost |
+| **> 10s** — Web Connector cold, or QuickBooks closed | Also say **where** the wait is and that it may run long | 10s is the limit of attention. "Reading your accounts from QuickBooks on the shop computer" makes a 30s pause legible; "Loading…" does not |
+
+Measured, not guessed: a Conductor round trip is ~0.5s warm, **3–10s cold**, and
+~30s longer when QuickBooks is shut ([quickbooks-desktop.md](modules/quickbooks-desktop.md)).
+
+### Four invariants, each learned from a real defect
+
+1. **Only the pressed control speaks.** `pending` is per-button, never a shared
+   `busy`. A neighbour that greys out *and* claims to be working is a worse lie
+   than silence. Callers pass `disabled={busy} pending={which === 'mine'}`.
+2. **The label names the wait**, because "Loading…" hides the one fact that makes
+   a long pause make sense. Shipped: *"Creating setup link…"*, *"Reading
+   accounts…"*, *"Opening QuickBooks…"*.
+3. **A hand-off keeps spinning.** When success navigates away — the QBO OAuth
+   redirect — do **not** clear the indicator; an idle button mid-redirect looks
+   like the click was lost. Everything else clears on success.
+4. **Always clear on failure.** A spinner left running after an error makes retry
+   impossible. Asserted in
+   [`QuickBooksIntegrationCard.test.tsx`](../__tests__/components/settings/QuickBooksIntegrationCard.test.tsx)
+   → *"restores the button when starting the connection fails"*.
+
+### Accessibility is a conformance requirement here, not polish
+
+[WCAG 2.2 SC 4.1.3 Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html)
+is **Level AA** and covers exactly this — status messages *"on the waiting state
+of an application, on the progress of a process"* must be programmatically
+determinable **without receiving focus**. A silent spinner is an AA gap.
+`BusyButton` sets `aria-busy` and renders `pendingDetail` in a `role="status"`
+region, so following the rule satisfies the criterion by construction.
+
+### Use the shared component
+
+[`components/common/BusyButton`](../components/common/BusyButton.tsx) makes
+`pendingLabel` **required**, so the label cannot be forgotten — the same trick as
+`DeleteIconButton` making the destructive colour unsettable.
+
+**Enforced**, by rule 4 of
+[`interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts): inside
+a QuickBooks surface, a `<Button disabled={…busy…}>` fails the build.
+
+The check is **deliberately narrow**, and the scoping is the interesting part.
+`disabled={busy}` appears ~260 times across ~77 files, nearly all sub-second
+Supabase writes where a spinner would be wrong — flagging those yields a check
+nobody trusts and an allowlist that swallows the rule. The first draft scoped by
+*import* and flagged nine buttons on the job page, which imports `quickbooksAccess`
+merely to list invoice links. Scoping by **path** to the integration surfaces is
+the closest honest proxy for "this control calls out". Buttons that only flip
+local state (`onClick={() => setDialogOpen(true)}`) are skipped: opening a dialog
+waits for nothing.
+
+**So the rule is prose beyond those surfaces.** Widen `THIRD_PARTY_SURFACES` when
+another integration grows a UI; until then, this is a rule you apply rather than
+one you will be caught violating.

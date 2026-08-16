@@ -2,7 +2,7 @@
 
 import Alert from '@mui/material/Alert';
 import AlertTitle from '@mui/material/AlertTitle';
-import Button from '@mui/material/Button';
+import BusyButton from '@/components/common/BusyButton';
 
 /**
  * QuickBooks Desktop is not answering right now.
@@ -20,6 +20,7 @@ export default function QuickBooksUnreachableAlert({
   code,
   onRetry,
   busy,
+  retrying,
   sx,
 }: {
   /** Conductor's own userFacingMessage when we have one — it names the shop PC
@@ -31,6 +32,10 @@ export default function QuickBooksUnreachableAlert({
   code?: string | null;
   onRetry?: () => void;
   busy?: boolean;
+  /** True only while THIS retry is the work in flight. Distinct from `busy`,
+   *  which is true for any of the surface's actions — a retry button that spins
+   *  because something else is running would be reporting someone else's work. */
+  retrying?: boolean;
   sx?: object;
 }) {
   const notSetUp = code === 'qbd_not_connected';
@@ -40,9 +45,16 @@ export default function QuickBooksUnreachableAlert({
       sx={{ mb: 2, ...sx }}
       action={
         onRetry ? (
-          <Button color="inherit" size="small" onClick={onRetry} disabled={busy}>
+          <BusyButton
+            color="inherit"
+            size="small"
+            onClick={onRetry}
+            disabled={busy}
+            pending={retrying}
+            pendingLabel="Asking QuickBooks…"
+          >
             Try again
-          </Button>
+          </BusyButton>
         ) : undefined
       }
     >

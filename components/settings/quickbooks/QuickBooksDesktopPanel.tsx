@@ -13,6 +13,7 @@ import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import BusyButton from '@/components/common/BusyButton';
 import QuickBooksUnreachableAlert from '@/components/quickbooks/QuickBooksUnreachableAlert';
 import { useLoad } from '@/hooks/useLoad';
 import {
@@ -65,7 +66,7 @@ export default function QuickBooksDesktopPanel({
    * seconds -- which a shop reported as "something is wrong". Naming the action
    * lets the pressed button, and only that button, say what it is waiting for.
    */
-  const [pending, setPending] = useState<null | 'test' | 'accounts'>(null);
+  const [pending, setPending] = useState<null | 'test' | 'accounts' | 'disconnect'>(null);
 
   const handleTest = async () => {
     setBusy(true);
@@ -127,12 +128,14 @@ export default function QuickBooksDesktopPanel({
 
   const handleDisconnect = async () => {
     setBusy(true);
+    setPending('disconnect');
     try {
       await disconnectQuickBooksDesktop(companyId);
       posthog.capture('accounting disconnected', { provider: 'qbd' });
       onDisconnected();
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
@@ -167,6 +170,7 @@ export default function QuickBooksDesktopPanel({
           code={unreachableCode}
           onRetry={handleTest}
           busy={busy}
+          retrying={pending === 'test'}
         />
       )}
       {note && (
@@ -193,16 +197,15 @@ export default function QuickBooksDesktopPanel({
               ).toLocaleString()}.`
             : 'Not yet used.'}
         </Typography>
-        <Button
+        <BusyButton
           size="small"
           onClick={handleTest}
           disabled={busy}
-          startIcon={
-            pending === 'test' ? <CircularProgress size={14} color="inherit" /> : undefined
-          }
+          pending={pending === 'test'}
+          pendingLabel="Asking QuickBooks…"
         >
-          {pending === 'test' ? 'Asking QuickBooks…' : 'Test connection'}
-        </Button>
+          Test connection
+        </BusyButton>
       </Stack>
 
       <Divider sx={{ my: 2 }} />
@@ -236,42 +239,20 @@ export default function QuickBooksDesktopPanel({
               : 'Done. Change it any time.'}
           </Typography>
           {accounts === null ? (
-            <>
-              <Button
-                variant={status.needs_income_account ? 'contained' : 'outlined'}
-                size="small"
-                onClick={handleLoadAccounts}
-                disabled={busy}
-                startIcon={
-                  pending === 'accounts' ? (
-                    <CircularProgress size={14} color="inherit" />
-                  ) : undefined
-                }
-              >
-                {pending === 'accounts'
-                  ? 'Reading accounts…'
-                  : status.needs_income_account
-                    ? 'Choose account'
-                    : 'Change account'}
-              </Button>
-              {/* Says WHERE the wait is, not just that there is one. The round
-                  trip is to the shop's PC, so "a few seconds" is normal and a
-                  closed QuickBooks makes it much longer -- naming that is what
-                  stops the pause reading as a fault. aria-live because the text
-                  appears after the press, not with it. */}
-              {pending === 'accounts' && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  display="block"
-                  sx={{ mt: 1 }}
-                  aria-live="polite"
-                >
-                  Reading your accounts from QuickBooks on the shop computer. This takes a few
-                  seconds, and longer if QuickBooks was closed.
-                </Typography>
-              )}
-            </>
+            <BusyButton
+              variant={status.needs_income_account ? 'contained' : 'outlined'}
+              size="small"
+              onClick={handleLoadAccounts}
+              disabled={busy}
+              pending={pending === 'accounts'}
+              pendingLabel="Reading accounts…"
+              // Says WHERE the wait is, not just that there is one: the round trip
+              // is to the shop's PC, so seconds are normal and a closed QuickBooks
+              // makes it much longer. Naming that stops the pause reading as a fault.
+              pendingDetail="Reading your accounts from QuickBooks on the shop computer. This takes a few seconds, and longer if QuickBooks was closed."
+            >
+              {status.needs_income_account ? 'Choose account' : 'Change account'}
+            </BusyButton>
           ) : (
             <TextField
               select
@@ -294,9 +275,16 @@ export default function QuickBooksDesktopPanel({
 
       <Divider sx={{ my: 3 }} />
 
-      <Button variant="outlined" color="error" onClick={handleDisconnect} disabled={busy}>
+      <BusyButton
+        variant="outlined"
+        color="error"
+        onClick={handleDisconnect}
+        disabled={busy}
+        pending={pending === 'disconnect'}
+        pendingLabel="Disconnecting…"
+      >
         Disconnect QuickBooks Desktop
-      </Button>
+      </BusyButton>
     </Box>
   );
 }

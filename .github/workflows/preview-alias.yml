@@ -81,9 +81,14 @@ jobs:
                --token "${VERCEL_TOKEN}" --scope "${VERCEL_SCOPE}"; then
             echo "${ALIAS_DOMAIN} → ${TARGET_URL}" >> "${GITHUB_STEP_SUMMARY}"
           else
-            # The expected first failure is certificate issuance, which means the
-            # domain does not exist yet: jigged.app runs on third-party
-            # nameservers, so Vercel cannot create the subdomain itself.
-            echo "::warning::Could not point ${ALIAS_DOMAIN} at ${TARGET_URL}. If the log ends at 'Issuing a certificate', the domain is not set up: add CNAME preview -> cname.vercel-dns.com at the DNS provider, then add ${ALIAS_DOMAIN} to the Vercel project."
+            # The expected first failure is certificate issuance, which means DNS
+            # is not answering for the subdomain yet: jigged.app runs on
+            # third-party nameservers, so Vercel cannot create the record itself.
+            #
+            # Deliberately does NOT name a CNAME target. The generic
+            # cname.vercel-dns.com from Vercel's docs is NOT what this project
+            # uses -- it is issued a per-project host, and pasting the generic one
+            # leaves the domain unverifiable while looking correct. Ask Vercel.
+            echo "::warning::Could not point ${ALIAS_DOMAIN} at ${TARGET_URL}. If the log ends at 'Issuing a certificate', DNS is not answering for it yet. Run 'vercel domains verify ${ALIAS_DOMAIN}' for the exact record to create -- the CNAME target is project-specific, not the generic one in Vercel's docs."
             echo "Alias FAILED — ${ALIAS_DOMAIN} unchanged. See the job log." >> "${GITHUB_STEP_SUMMARY}"
           fi

@@ -51,7 +51,7 @@
  * they can get one, and it stops promising a location hunt that would find nothing.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -63,11 +63,18 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
-import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';
+import AddToLocationDialog from '@/components/operator/AddToLocationDialog';
+import PlaceStockActionForm, {
+  type PlaceStockAction,
+} from '@/components/inventory/locations/place/PlaceStockActionForm';
+import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
@@ -76,7 +83,7 @@ const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 
 export interface OperatorPartLookupProps {
   companyId: string;
-  /** Tapping a place navigates there — the whole point is to end up at the shelf. */
+  /** Tapping a location navigates there — the whole point is to end up in front of it. */
   onOpenLocation: (locationId: string) => void;
   /**
    * Fires whenever a part is chosen or cleared, so the page can put itself in one mode or the
@@ -84,25 +91,40 @@ export interface OperatorPartLookupProps {
    * noise at that moment, and hiding it is what keeps this screen from becoming a wall.
    */
   onSelectionChange?: (part: PartSelectOption | null) => void;
+  /**
+   * Rebuild the selection from `?part=` on mount.
+   *
+   * This is what makes Back land where you came from. Tapping a location navigates away, and
+   * coming back re-mounts this component — with the selection in local state only, the answer you
+   * had just found was gone and you searched for it again. Read once: the URL is the initial value,
+   * not a controlled input, so typing in the field is never fighting a query param.
+   */
+  initialPartId?: string | null;
 }
 
 export default function OperatorPartLookup({
   companyId,
   onOpenLocation,
   onSelectionChange,
+  initialPartId = null,
 }: OperatorPartLookupProps) {
   const [selected, setSelected] = useState<PartSelectOption | null>(null);
   const [balances, setBalances] = useState<PartLocationBalanceWithLocation[] | null>(null);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [putAwayOpen, setPutAwayOpen] = useState(false);
+  const [addToLocationOpen, setAddToLocationOpen] = useState(false);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
+  /** Which location's verbs are open, and which verb. One at a time. */
+  const [open, setOpen] = useState<{ locationId: string; action: PlaceStockAction | 'adjust' } | null>(
+    null,
+  );
 
   const pick = (part: PartSelectOption | null) => {
     setSelected(part);
     setBalances(null);
     setError(null);
+    setOpen(null);
     onSelectionChange?.(part);
     if (!part) return;
     setLoadingBalances(true);
@@ -111,6 +133,66 @@ export default function OperatorPartLookup({
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not read where this is.'))
       .finally(() => setLoadingBalances(false));
   };
+
+  /**
+   * Open a location's verbs, closing whichever was open.
+   *
+   * Loads the location tree on the way in — `Move` needs somewhere to move to, and most lookups
+   * never expand a row at all, so paying for the whole tree on every part would be waste. Failing
+   * that read does not block the other three verbs; only Move's destination list comes up empty.
+   */
+  const toggleLocation = (locationId: string) => {
+    setOpen((cur) => (cur?.locationId === locationId ? null : { locationId, action: 'deplete' }));
+    if (locations.length > 0 || loadingPlaces) return;
+    setLoadingPlaces(true);
+    getLocations(companyId)
+      .then(setLocations)
+      .catch(() => {})
+      .finally(() => setLoadingPlaces(false));
+  };
+
+  /** Leaves only, never the pile, never the location the stock is already in. */
+  const moveDestinationsFor = (locationId: string) =>
+    stockDestinationOptions(locations, { excludeId: locationId });
+
+  /** A write landed: re-read where the part is, so the quantities on screen are the new ones. */
+  const afterWrite = async () => {
+    if (!selected) return;
+    try {
+      setBalances(await getBalancesForPart(selected.id));
+    } catch {
+      /* The write succeeded; a failed refresh is not worth an error over the form that did it. */
+    }
+  };
+
+  /**
+   * Restore `?part=` once, on mount.
+   *
+   * `getPartsForSelectByIds` exists for exactly this — its own doc calls it "hydrate
+   * selection-state for an autocomplete that uses `searchPartsForSelect`" — so the restored row is
+   * byte-identical to one the picker would have produced, and the field shows a label rather than
+   * an id. A ref rather than a dependency on `initialPartId`: the page writes that param back on
+   * every selection, so depending on it would re-run this on every pick and fight the user.
+   *
+   * A failure is silent by design. The param is a convenience for a Back press, and an alert about
+   * a part id nobody typed would be noise in front of a working search box.
+   */
+  const hydrated = useRef(false);
+  useEffect(() => {
+    if (hydrated.current || !initialPartId) return;
+    hydrated.current = true;
+    let cancelled = false;
+    getPartsForSelectByIds([initialPartId])
+      .then(([part]) => {
+        if (!cancelled && part) pick(part);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only, guarded by the ref above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPartId]);
 
   /**
    * Three different answers, which the first version collapsed into one and got wrong.
@@ -148,17 +230,17 @@ export default function OperatorPartLookup({
    * empty picker on screen for as long as the request took and then snatched it away. The wait
    * belongs on the button, where a spinner explains it.
    */
-  const openPutAway = async () => {
+  const openAddToLocation = async () => {
     if (locations.length > 0) {
-      setPutAwayOpen(true);
+      setAddToLocationOpen(true);
       return;
     }
     setLoadingPlaces(true);
     try {
       setLocations(await getLocations(companyId));
-      setPutAwayOpen(true);
+      setAddToLocationOpen(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the places.');
+      setError(e instanceof Error ? e.message : 'Could not load the locations.');
     } finally {
       setLoadingPlaces(false);
     }
@@ -205,41 +287,132 @@ export default function OperatorPartLookup({
                   <strong>
                     {num(unassigned.quantity)} {selected.primary_unit ?? ''}
                   </strong>{' '}
-                  not put away yet.
+                  not stored yet.
                 </Alert>
               )}
               {places.length > 0 && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                  {num(total)} {selected.primary_unit ?? ''} on{' '}
-                  {places.length === 1 ? '1 shelf' : `${places.length} shelves`}
+                  {/* "on 1 shelf" was wrong for most of this shop's storage: a bin inside
+                      Cabinet 3 is not a shelf, and neither is the yard. */}
+                  {num(total)} {selected.primary_unit ?? ''} in{' '}
+                  {places.length === 1 ? '1 location' : `${places.length} locations`}
                 </Typography>
               )}
+              {/*
+                ACT ON THE PART WHERE YOU FOUND IT — the same rule the office side already follows.
+
+                Tapping a location used to navigate to that bin, which throws away half of what you
+                arrived with: you hold a PART and a PLACE, and the bin view keeps only the place, so
+                you re-find your part among everything else in it. `PartPlacesDrawer` fixed that in
+                the office on 2026-08-12 and the shop floor kept the old behaviour, which is exactly
+                how the two surfaces drifted apart the first time.
+
+                Same components, not a copy: `PlaceStockActionForm` and `PlaceAdjustForm` narrowed
+                by `restrictTo` / `restrictToPartId`, so the blank-row rule, the disarm-what-landed
+                rule and the job-list narrowing are fixed in one place for both surfaces.
+              */}
               <Stack spacing={1}>
-                {places.map((b) => (
-                  <Card key={b.location_id} elevation={2}>
-                    <CardActionArea
-                      onClick={() => onOpenLocation(b.location_id)}
-                      sx={{ minHeight: 56 }}
-                    >
-                      <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
-                          {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
-                          {b.path.length > 1 && (
-                            <Typography variant="caption" color="text.secondary">
-                              {b.path.join(' › ')}
-                            </Typography>
+                {places.map((b) => {
+                  const path = b.path.join(' › ') || b.location_name;
+                  const here = open?.locationId === b.location_id ? open.action : null;
+                  return (
+                    <Card key={b.location_id} elevation={2}>
+                      <CardActionArea
+                        onClick={() => toggleLocation(b.location_id)}
+                        aria-expanded={Boolean(here)}
+                        sx={{ minHeight: 56 }}
+                      >
+                        <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
+                            {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
+                            {b.path.length > 1 && (
+                              <Typography variant="caption" color="text.secondary">
+                                {path}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Chip
+                            size="small"
+                            label={`${num(b.quantity)} ${selected.primary_unit ?? ''}`.trim()}
+                          />
+                          {here ? (
+                            <KeyboardArrowDownIcon color="action" />
+                          ) : (
+                            <KeyboardArrowRightIcon color="action" />
                           )}
+                        </CardContent>
+                      </CardActionArea>
+
+                      {here && (
+                        <Box sx={{ px: 1.5, pb: 1.5 }}>
+                          {/* The four verbs, in the order fixed across both surfaces, scoped to
+                              THIS part at THIS location — the pair you arrived holding. */}
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {(
+                              [
+                                ['add', 'Add'],
+                                ['deplete', 'Remove'],
+                                ['move', 'Move'],
+                                ['adjust', 'Adjust'],
+                              ] as const
+                            ).map(([v, label]) => (
+                              <Button
+                                key={v}
+                                variant={here === v ? 'contained' : 'outlined'}
+                                onClick={() => setOpen({ locationId: b.location_id, action: v })}
+                                sx={{ minHeight: 48 }}
+                              >
+                                {label}
+                              </Button>
+                            ))}
+                          </Stack>
+
+                          {here === 'adjust' ? (
+                            <PlaceAdjustForm
+                              key={`${b.location_id}:adjust`}
+                              companyId={companyId}
+                              locationId={b.location_id}
+                              locationName={path}
+                              restrictToPartId={selected.id}
+                              onCancel={() => setOpen(null)}
+                              onDone={afterWrite}
+                            />
+                          ) : (
+                            <PlaceStockActionForm
+                              key={`${b.location_id}:${here}`}
+                              action={here}
+                              companyId={companyId}
+                              locationId={b.location_id}
+                              locationName={path}
+                              moveDestinations={moveDestinationsFor(b.location_id)}
+                              restrictTo={{
+                                partId: selected.id,
+                                partName: selected.part_name,
+                                primaryUnit: selected.primary_unit,
+                              }}
+                              // The shop floor's removal has always been graceful: the material is
+                              // already off the shelf, so a stale count must not refuse the write.
+                              graceful
+                              onCancel={() => setOpen(null)}
+                              onDone={afterWrite}
+                            />
+                          )}
+
+                          {/* Inside the section, never a second target on the row: two hit targets
+                              on one 48px row is the ambiguity this module removed from the grid. */}
+                          <Button
+                            variant="text"
+                            onClick={() => onOpenLocation(b.location_id)}
+                            sx={{ minHeight: 48, mt: 0.5 }}
+                          >
+                            Open this location
+                          </Button>
                         </Box>
-                        <Chip
-                          size="small"
-                          label={`${num(b.quantity)} ${selected.primary_unit ?? ''}`.trim()}
-                        />
-                        <KeyboardArrowRightIcon color="action" />
-                      </CardContent>
-                    </CardActionArea>
-                  </Card>
-                ))}
+                      )}
+                    </Card>
+                  );
+                })}
               </Stack>
             </>
           )}
@@ -252,24 +425,24 @@ export default function OperatorPartLookup({
               startIcon={
                 loadingPlaces ? <CircularProgress size={18} color="inherit" /> : <PlaceOutlinedIcon />
               }
-              onClick={openPutAway}
+              onClick={openAddToLocation}
               disabled={loadingPlaces}
               sx={{ mt: 1.5, minHeight: 48 }}
             >
-              Put it away&hellip;
+              Add to new location&hellip;
             </Button>
           )}
         </Box>
       )}
 
       {selected && (
-        <PutAwayPickerDialog
-          open={putAwayOpen}
+        <AddToLocationDialog
+          open={addToLocationOpen}
           partName={selected.part_name}
           unit={selected.primary_unit}
           locations={locations}
           balances={balances ?? []}
-          onClose={() => setPutAwayOpen(false)}
+          onClose={() => setAddToLocationOpen(false)}
           onChoose={onOpenLocation}
         />
       )}

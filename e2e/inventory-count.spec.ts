@@ -42,18 +42,18 @@ async function countSheet(page: Page): Promise<string> {
 const inputFor = (page: Page, place: string) =>
   page.getByRole('spinbutton', { name: new RegExp(`counted quantity for ${PART} in ${place}`, 'i') });
 
-test.describe('Inventory count — a part in two places', () => {
+test.describe('Inventory count — a part in two locations', () => {
   /**
    * The picker must not multiply. This is the half of the design that keeps a 20-part shop from
    * reading "Count 40 parts", and it is the first thing to look at if the sheet ever feels long.
    */
-  test('lists the part once in the picker, saying it is in two places', async ({ page }) => {
+  test('lists the part once in the picker, saying it is in two locations', async ({ page }) => {
     await countSheet(page);
 
     const row = page.getByText(PART, { exact: true });
     await expect(row).toHaveCount(1);
     // 52 = 40 + 12: the group header carries the shop-wide total, not one shelf's figure.
-    await expect(page.getByText('2 places')).toBeVisible();
+    await expect(page.getByText('2 locations')).toBeVisible();
   });
 
   /** The founder's complaint, as an assertion: no notice, and the part is on the sheet. */
@@ -73,8 +73,8 @@ test.describe('Inventory count — a part in two places', () => {
   test('writes the counted shelf and leaves the other one alone', async ({ page }) => {
     await countSheet(page);
 
-    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 places`) }).click();
-    await page.getByRole('button', { name: /^Count 1 part in 2 places$/i }).click();
+    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 locations`) }).click();
+    await page.getByRole('button', { name: /^Count 1 part in 2 locations$/i }).click();
 
     // Both shelves get their own input, told apart by name rather than by position.
     await expect(inputFor(page, SHELF_A)).toBeVisible();
@@ -86,8 +86,8 @@ test.describe('Inventory count — a part in two places', () => {
 
     // Back on the sheet: Shelf A now reads 43, Shelf B still reads 12.
     await countSheet(page);
-    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 places`) }).click();
-    await page.getByRole('button', { name: /^Count 1 part in 2 places$/i }).click();
+    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 locations`) }).click();
+    await page.getByRole('button', { name: /^Count 1 part in 2 locations$/i }).click();
 
     const rows = page.getByRole('row').filter({ hasText: SHELF_A });
     await expect(rows.first()).toContainText('43');
@@ -102,8 +102,8 @@ test.describe('Inventory count — a part in two places', () => {
   test('offers an input per place and none on the part itself', async ({ page }) => {
     await countSheet(page);
 
-    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 places`) }).click();
-    await page.getByRole('button', { name: /^Count 1 part in 2 places$/i }).click();
+    await page.getByRole('checkbox', { name: new RegExp(`^Count ${PART} in 2 locations`) }).click();
+    await page.getByRole('button', { name: /^Count 1 part in 2 locations$/i }).click();
 
     await expect(page.getByRole('spinbutton')).toHaveCount(2);
     await expect(

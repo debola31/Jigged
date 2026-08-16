@@ -36,6 +36,9 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
     getLocationHistory: vi.fn(async () => []),
     // Subdivide runs the real builder, so its write has to be stubbed here too.
     materializeLocationSpec: vi.fn(async () => [{ id: 'new' }]),
+    // `Change layout` writes through this now — the reshape path, which can also remove and rename.
+    applyLocationLayout: vi.fn(async () => [{ id: 'cab3' }]),
+    getContentsPageForLocations: vi.fn(async () => ({ contents: [], total: 0 })),
     // The three verbs that write. Unmocked they are `undefined` and only fail on submit, which is
     // the failure mode most likely to be mistaken for a UI bug.
     addStockAtLocation: vi.fn(async () => ({})),
@@ -67,6 +70,7 @@ import {
   getLocationBoard,
   deleteLocation,
   materializeLocationSpec,
+  applyLocationLayout,
   createLocation,
 } from '@/utils/inventoryLocationsAccess';
 import { generateLocationLabelSheet } from '@/utils/locationLabelPdf';
@@ -214,11 +218,11 @@ describe('LocationsManager', () => {
    * swapped the page — the seam that made this read as two products. Now every unit lands in the
    * same pane, which simply has no grid to draw for this one.
    */
-  it('shows a single-place unit in the same pane, drawn as one square', async () => {
+  it('shows a single-location unit in the same pane, drawn as one square', async () => {
     render(<LocationsManager companyId="co1" unitId="yard" />);
 
     // Twice, deliberately: on its card in the list and again in the pane beside it.
-    expect(await screen.findAllByText('One place')).toHaveLength(2);
+    expect(await screen.findAllByText('One location')).toHaveLength(2);
     // Drawn, not a bare contents list — the same shape as every other unit, with one cell.
     expect(screen.getByRole('button', { name: /^Yard —/ })).toBeInTheDocument();
   });
@@ -323,73 +327,106 @@ describe('LocationsManager', () => {
   });
 
   /**
-   * The sheet is the only launcher for Subdivide, and it has to hand over what's already inside
-   * so a second subdivide continues the numbering rather than colliding mid-insert.
+   * `Change layout` opens on the unit's REAL layout.
+   *
+   * The three tests this replaces asserted the opposite and passed: they pinned the builder being
+   * handed `existingSiblingNames` and a `startSortOrder` past them, so a cabinet holding Shelf A/B
+   * got Row 1–5 *beside* them and one already holding Row 1–3 got Row 4–8. That was the bug — the
+   * button is titled `Change the layout of Cabinet 3` and could only ever add to it.
    */
-  it('launches Subdivide aimed at the unit, carrying its code and existing children', async () => {
+  it('opens Change layout on the same controls that built the unit', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
 
-    // Title proves parentPath. There is no palette step to click through any more.
     expect(await screen.findByText('Change the layout of Cabinet 3')).toBeInTheDocument();
-
-    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
-
-    const [, parentId, spec] = vi.mocked(materializeLocationSpec).mock.calls[0];
-    expect(parentId).toBe('cab3');
-    // Cabinet 3 already holds Shelf A/B — a different series, so Rows start at 1.
-    expect(spec.map((n) => n.name)).toEqual(['Row 1', 'Row 2', 'Row 3', 'Row 4', 'Row 5']);
+    // Cabinet 3 holds Shelf A and Shelf B — unnumbered, so the numbers editor reads them back as a
+    // names list rather than inventing "Shelf {n}". Either way it is the CREATE modal, pre-filled.
+    expect(await screen.findByDisplayValue('Shelf A, Shelf B')).toBeInTheDocument();
+    expect(screen.queryByText(/unchanged so far/i)).not.toBeInTheDocument();
   });
 
-  /**
-   * Found in the browser, not by a test: subdividing Cabinet 3 (holding Shelf A/B) into three Rows
-   * drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`, because `getLocations` orders by
-   * `sort_order` then `name` and new children defaulted to `sort_order = 0`.
-   */
-  it('sorts new children after the ones already inside, not interleaved with them', async () => {
+  it('removes a location instead of appending beside it, and says what that costs', async () => {
     const user = userEvent.setup();
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await user.click(await screen.findByRole('button', { name: /change layout/i }));
-    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
 
-    // Shelf A and Shelf B carry sort_order 0 in the fixture, so the run must start at 1.
-    const startSortOrder = vi.mocked(materializeLocationSpec).mock.calls[0][3];
-    expect(startSortOrder).toBe(1);
+    // Drop Shelf B by editing the list — the numbers path, which is what opens by default.
+    const names = await screen.findByLabelText('Names');
+    await user.clear(names);
+    await user.type(names, 'Shelf A');
+
+    // Shelf B holds one part in the fixture, so this cannot just be applied.
+    expect(await screen.findByText(/Removing 1 location, 1 of which holds stock/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /where does the stock go/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hands the reshape to apply_location_layout, never to the create path', async () => {
+    const user = userEvent.setup();
+    render(<LocationsManager companyId="co1" unitId="cab3" />);
+
+    await user.click(await screen.findByRole('button', { name: /change layout/i }));
+    await user.click(await screen.findByRole('button', { name: /edit locations one by one/i }));
+
+    const field = await screen.findByDisplayValue('Shelf A');
+    await user.clear(field);
+    await user.type(field, 'Top Shelf');
+
+    await user.click(screen.getByRole('button', { name: /review changes/i }));
+    await user.click(await screen.findByRole('button', { name: /apply changes/i }));
+
+    expect(applyLocationLayout).toHaveBeenCalledTimes(1);
+    expect(materializeLocationSpec).not.toHaveBeenCalled();
+    const [unitId, payload] = vi.mocked(applyLocationLayout).mock.calls[0];
+    expect(unitId).toBe('cab3');
+    expect(payload.removals).toEqual([]);
+    expect(
+      payload.nodes.find((n) => n.ref === 'id:shelf-a')?.name,
+    ).toBe('Top Shelf');
   });
 
   /**
-   * Removed: "starts a top-level build at zero — there is nothing to sort after".
+   * Drilling into a container used to be a one-way trip.
    *
-   * There is no top-level build any more. The multi-level builder is reachable only from
-   * Subdivide on a unit that already exists (§5.5 decision 3's original intent), so its
-   * `parentId` is never null and there is no top-level path to test. 118 of Contour's 121
-   * legacy locations were flat in a system that supported nesting, which is why a wizard
-   * was the wrong primary way to create a place.
-   *
-   * The subdivide paths — aimed at the unit, carrying its code, and continuing the
-   * numbering on a repeat — are covered by the tests either side of this comment.
+   * Clicking a container makes it the pane's subject (`openCell` → `showUnit`), and a container is
+   * not in the list beside it — so on a wide screen, where the "All storage" button is hidden,
+   * there was no way back. The report: *"once you click row 1 and then the tabs and their cells,
+   * you can't go back anywhere to click row 2 unless you first click on another root storage
+   * unit."*
    */
-
-  it('continues the numbering on a repeat subdivide', async () => {
+  it('gives a drilled-into container a path back to the unit it came from', async () => {
     const user = userEvent.setup();
     vi.mocked(getLocationBoard).mockResolvedValue(
       board([
-        loc({ id: 'cab3', name: 'Cabinet 3', kind: 'cabinet' }),
-        loc({ id: 'r1', name: 'Row 1', parent_id: 'cab3' }),
-        loc({ id: 'r2', name: 'Row 2', parent_id: 'cab3' }),
-        loc({ id: 'r3', name: 'Row 3', parent_id: 'cab3' }),
+        loc({ id: 'cab', name: 'Grid Cabinet', kind: 'cabinet' }),
+        loc({ id: 'row1', name: 'Row 1', parent_id: 'cab' }),
+        loc({ id: 'bin1', name: 'Bin 1', parent_id: 'row1' }),
       ]),
     );
+    render(<LocationsManager companyId="co1" unitId="row1" />);
+
+    // The subject is Row 1, which the list does not contain.
+    expect(await screen.findByRole('heading', { name: 'Row 1' })).toBeInTheDocument();
+
+    const crumbs = screen.getByLabelText('Where this is');
+    expect(within(crumbs).getByRole('button', { name: 'Grid Cabinet' })).toBeInTheDocument();
+    await user.click(within(crumbs).getByRole('button', { name: 'Storage' }));
+
+    // `showUnit(null)` — back to the whole list.
+    expect(routerMocks.replace).toHaveBeenCalledWith(
+      '/dashboard/co1/inventory/locations',
+      expect.anything(),
+    );
+  });
+
+  it('shows no path on a root unit — the list beside it is already the way back', async () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
-
-    await user.click(await screen.findByRole('button', { name: /change layout/i }));
-    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
-
-    const spec = vi.mocked(materializeLocationSpec).mock.calls[0][2];
-    expect(spec.map((n) => n.name)).toEqual(['Row 4', 'Row 5', 'Row 6', 'Row 7', 'Row 8']);
+    await screen.findByRole('heading', { name: 'Cabinet 3' });
+    expect(screen.queryByLabelText('Where this is')).not.toBeInTheDocument();
   });
 
   /**
@@ -447,7 +484,7 @@ describe('LocationsManager — the four verbs', () => {
 
     expect(screen.queryByText(/Adding and removing stock happens on the part itself/i))
       .not.toBeInTheDocument();
-    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
+    expect(screen.getByText(/pick a location to see what is in it/i)).toBeInTheDocument();
   });
 
   /**
@@ -542,7 +579,7 @@ describe('LocationsManager — the four verbs', () => {
     const heading = await screen.findByRole('heading', { name: /bulk adjust Cabinet 3/i });
     // Both shelves are in scope — a container is audited through its bins. Scoped to the drawer,
     // because the unit's own card in the list says "2 places" too.
-    expect(within(heading.parentElement!).getByText(/2 places/i)).toBeInTheDocument();
+    expect(within(heading.parentElement!).getByText(/2 locations/i)).toBeInTheDocument();
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
@@ -581,14 +618,14 @@ describe('LocationsManager — the four verbs', () => {
    * The four verbs appear once a place inside it is selected — which is also the only point at
    * which "add what, where" has an answer.
    */
-  it('offers no stock verbs on a container until a place inside it is picked', async () => {
+  it('offers no stock verbs on a container until a location inside it is picked', async () => {
     render(<LocationsManager companyId="co1" unitId="cab3" />);
 
     await screen.findByRole('button', { name: /^bulk adjust$/i });
     for (const verb of [/^add$/i, /^remove$/i, /^move$/i]) {
       expect(screen.queryByRole('button', { name: verb })).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/pick a place to see what is in it/i)).toBeInTheDocument();
+    expect(screen.getByText(/pick a location to see what is in it/i)).toBeInTheDocument();
   });
 
   /**
@@ -666,7 +703,7 @@ describe('LocationsManager — the four verbs', () => {
 
     await user.click(screen.getByRole('button', { name: /add storage/i }));
     await user.type(await screen.findByLabelText(/what is it called/i), 'New Cabinet');
-    await user.click(await screen.findByRole('button', { name: /create 10 places/i }));
+    await user.click(await screen.findByRole('button', { name: /create 10 locations/i }));
 
     // ONE call, and the unit is the ROOT of the spec rather than a separate create beforehand.
     expect(materializeLocationSpec).toHaveBeenCalledTimes(1);
@@ -687,7 +724,7 @@ describe('LocationsManager — the four verbs', () => {
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
     await user.click(screen.getByRole('button', { name: /add storage/i }));
-    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /create 10 locations/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /15 locations/i })).not.toBeInTheDocument();
   });
 
@@ -698,10 +735,10 @@ describe('LocationsManager — the four verbs', () => {
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 
     await user.click(screen.getByRole('button', { name: /add storage/i }));
-    expect(await screen.findByRole('button', { name: /create 10 places/i })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /create 10 locations/i })).toBeDisabled();
 
     await user.type(screen.getByLabelText(/what is it called/i), 'Cabinet 3');
     expect(await screen.findByText(/you already have a cabinet 3/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /create 10 places/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /create 10 locations/i })).toBeDisabled();
   });
 });

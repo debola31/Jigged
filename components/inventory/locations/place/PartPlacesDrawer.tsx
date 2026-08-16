@@ -119,8 +119,8 @@ function PartPlacesBody({
           loading
             ? 'Looking…'
             : rows.length === 0
-              ? 'Not in any place'
-              : `${num(total)} ${part.unit ?? ''} across ${rows.length} ${rows.length === 1 ? 'place' : 'places'}`.trim()
+              ? 'Not in any location'
+              : `${num(total)} ${part.unit ?? ''} across ${rows.length} ${rows.length === 1 ? 'location' : 'locations'}`.trim()
         }
         action={
           <IconButton aria-label="Close" onClick={onClose} sx={{ width: 48, height: 48 }}>
@@ -144,7 +144,7 @@ function PartPlacesBody({
           </Alert>
         ) : rows.length === 0 ? (
           <Alert severity="info" sx={{ mt: 1 }}>
-            {part.name} is not recorded in any place. It may not be stocked yet.
+            {part.name} is not recorded in any location. It may not be stocked yet.
           </Alert>
         ) : (
           <Stack spacing={0.5} sx={{ mt: 0.5 }}>
@@ -177,7 +177,7 @@ function PartPlacesBody({
                       {/* Said, not hidden: a part sitting in the pile has not been put away, and
                           showing it as a shelf would send someone looking for a shelf. */}
                       {isPile && (
-                        <Chip size="small" label="Not put away yet" variant="outlined" sx={{ mt: 0.5 }} />
+                        <Chip size="small" label="Not stored yet" variant="outlined" sx={{ mt: 0.5 }} />
                       )}
                     </Box>
                     <Typography

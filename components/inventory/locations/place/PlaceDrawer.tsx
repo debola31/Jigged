@@ -44,6 +44,8 @@ import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import type { Theme } from '@mui/material/styles';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -59,6 +61,16 @@ import PlaceStockActionForm, { type PlaceStockAction } from './PlaceStockActionF
 import PlaceAdjustForm from './PlaceAdjustForm';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+/**
+ * How wide the drawer is from `sm` up, in px.
+ *
+ * Exported because the Storage page reserves exactly this much room while the drawer is open — a
+ * `persistent` drawer overlays rather than reflows, so the two numbers have to be the same number.
+ * Wide enough for the adjust view's four columns without them colliding, narrow enough to leave
+ * the cabinet visible beside it.
+ */
+export const PLACE_DRAWER_WIDTH = 520;
 
 /** The drawer's body. `overview` is the root; the rest are the four verbs. */
 type View = 'overview' | PlaceStockAction | 'adjust';
@@ -290,19 +302,59 @@ function PlaceDrawerBody({
 
 export default function PlaceDrawer(props: PlaceDrawerProps) {
   const { place, onClose } = props;
+  /*
+   * NOT MODAL on a wide screen, and that is the fix for a reported dead end.
+   *
+   * A modal drawer makes everything behind it inert. The pane behind this one IS the navigation —
+   * the grid, and on a deep unit the row of section tabs — so opening one location disabled the
+   * only route to any other. The report: *"once you click row 1 and then the tabs and their cells,
+   * you can't go back anywhere to click row 2 unless you first click on another root storage
+   * unit."* The tabs were on screen the whole time, greyed out and unclickable.
+   *
+   * This pane is master–detail, and a detail that blocks the master is not master–detail. On `sm`
+   * and up the drawer keeps its backdrop out of the way and stops trapping focus, so the grid goes
+   * on taking clicks and picking another cell just moves the drawer to it.
+   *
+   * It STAYS modal on a phone, where the drawer is full width: there is nothing behind it to
+   * interact with, and the backdrop is what makes tapping away close it.
+   *
+   * ## Why `useMediaQuery` here, when this module avoids it elsewhere
+   *
+   * `LocationsManager` uses CSS breakpoints and says why: a JS media query resolves false on the
+   * server and true after mount, and jsdom has no `matchMedia` at all, so a layout branch behind
+   * one cannot be exercised by a test. Neither objection bites here. The drawer is CLOSED on first
+   * paint, so the server/client disagreement is never visible; and the jsdom fallback is `false`,
+   * which is the modal behaviour every existing test already asserts. The wide branch gets its own
+   * test that stubs `matchMedia` rather than going uncovered.
+   */
+  const wide = useMediaQuery((t: Theme) => t.breakpoints.up('sm'), { noSsr: false });
+
   return (
     <Drawer
       anchor="right"
       open={Boolean(place)}
       onClose={onClose}
+      /*
+       * `persistent`, which is the only variant that does not go through `Modal`.
+       *
+       * `temporary` + `hideBackdrop` was tried first and does not work: `Modal` puts
+       * `aria-hidden="true"` on everything behind it whatever the backdrop is doing, so the grid
+       * and its two rows of section tabs stayed unreachable — measured, not assumed. `persistent`
+       * has no backdrop, no focus trap and no aria-hiding at all.
+       */
+      variant={wide ? 'persistent' : 'temporary'}
       sx={{
+        // `persistent` renders in the document flow, which would shove the pane sideways. Taking
+        // the paper out of flow keeps it an overlay while the page beneath stays live.
+        ...(wide ? { position: 'fixed', inset: 'auto 0 auto auto', zIndex: (t) => t.zIndex.drawer } : {}),
         '& .MuiDrawer-paper': {
           // Full width on a phone, a column beside the grid above it. Wide enough for the adjust
           // view's four columns without them colliding, narrow enough to leave the cabinet visible.
-          width: { xs: '100%', sm: 520 },
+          width: { xs: '100%', sm: PLACE_DRAWER_WIDTH },
           maxWidth: '100%',
           display: 'flex',
           flexDirection: 'column',
+          ...(wide ? { position: 'fixed', top: 0, right: 0, height: '100%' } : {}),
         },
       }}
     >

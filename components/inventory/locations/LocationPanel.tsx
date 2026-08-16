@@ -36,6 +36,8 @@ import MenuItem from '@mui/material/MenuItem';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import Breadcrumbs from '@mui/material/Breadcrumbs';
+import Link from '@mui/material/Link';
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import ViewQuiltOutlinedIcon from '@mui/icons-material/ViewQuiltOutlined';
@@ -73,6 +75,18 @@ export interface LocationPanelProps {
   actions: LocationPanelActions;
   /** Rendered above the name when the list is not on screen beside this. */
   backSlot?: React.ReactNode;
+  /**
+   * Ancestors of `unit`, outermost first — empty when the unit is a root.
+   *
+   * The pane's subject is usually a root, and the list beside it is how you change subject. But
+   * clicking a CONTAINER makes that container the subject (`openCell` → `showUnit`), and a
+   * container is not in the list — so on a wide screen, where the "All storage" button is hidden,
+   * there was no way back at all. Reaching the second row of a five-level cabinet meant leaving
+   * storage entirely and coming back. This is the way back.
+   */
+  ancestors?: Array<{ id: string; name: string }>;
+  /** Select an ancestor, or the whole list when given null. */
+  onSelectAncestor?: (locationId: string | null) => void;
 }
 
 export default function LocationPanel({
@@ -82,6 +96,8 @@ export default function LocationPanel({
   onSelectPlace,
   actions,
   backSlot,
+  ancestors = [],
+  onSelectAncestor,
 }: LocationPanelProps) {
   const isSystem = unit.kind === SYSTEM_KIND;
   const structured = unit.children.length > 0;
@@ -103,15 +119,49 @@ export default function LocationPanel({
     <Box sx={{ minWidth: 0 }}>
       {backSlot}
 
+      {/* Where you are, and every step of it is a way back. Only rendered when the subject is not
+          a root — a root's way back is the list, which is already beside it. */}
+      {ancestors.length > 0 && onSelectAncestor && (
+        <Breadcrumbs
+          separator="›"
+          sx={{ mb: 0.5, '& .MuiBreadcrumbs-li': { minWidth: 0 } }}
+          aria-label="Where this is"
+        >
+          <Link
+            component="button"
+            type="button"
+            underline="hover"
+            color="text.secondary"
+            variant="body2"
+            onClick={() => onSelectAncestor(null)}
+          >
+            Storage
+          </Link>
+          {ancestors.map((a) => (
+            <Link
+              key={a.id}
+              component="button"
+              type="button"
+              underline="hover"
+              color="text.secondary"
+              variant="body2"
+              onClick={() => onSelectAncestor(a.id)}
+            >
+              {a.name}
+            </Link>
+          ))}
+        </Breadcrumbs>
+      )}
+
       <Typography variant="h6" sx={{ fontWeight: 700, lineHeight: 1.25 }}>
         {unit.name}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
         {isSystem
-          ? 'Parts with no recorded place yet — your put-away list, not a shelf.'
+          ? 'Parts with no recorded location yet.'
           : structured
-            ? `${describeShape(unit)} · ${used} of ${places} places in use`
-            : 'One place'}
+            ? `${describeShape(unit)} · ${used} of ${places} locations in use`
+            : 'One location'}
       </Typography>
 
       {/*
@@ -197,7 +247,6 @@ export default function LocationPanel({
           occupancy={occupancy}
           selectedId={place.id}
           onOpenCell={onSelectPlace}
-          onOpenBand={onSelectPlace}
         />
       </Box>
 
@@ -208,7 +257,7 @@ export default function LocationPanel({
       */}
       {structured && (
         <Typography variant="body2" color="text.secondary">
-          Pick a place to see what is in it and act on it. Stock lives in the places, not in{' '}
+          Pick a location to see what is in it and act on it. Stock lives in the locations, not in{' '}
           {unit.name} itself.
         </Typography>
       )}

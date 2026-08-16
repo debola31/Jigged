@@ -172,8 +172,49 @@ describe('UnitGridView — the shapes', () => {
     expect(screen.queryByText('Row A')).not.toBeInTheDocument();
   });
 
-  it('declines to draw past four levels rather than inventing a projection', () => {
-    const deep = node('Warehouse', [node('Aisle', [node('Bay', [node('Shelf', [node('Bin')])])])]);
+  /**
+   * Five levels — the deepest the wizard builds and the deepest the database allows. Both choosers
+   * stay on screen, which is the point: the old fallback turned the top level into a list whose
+   * rows navigated away, and on a wide screen there was no path back to pick the second one.
+   */
+  it('draws five levels as two choosers over one grid, with nothing navigating', async () => {
+    const user = userEvent.setup();
+    // Grid Cabinet › Row › Bin › Side › slot — four levels under the unit.
+    const deep = node('Grid Cabinet', [
+      node(
+        'Row 1',
+        [
+          node('Bin 1', [node('Left', [node('L1')])], { sort_order: 0 }),
+          node('Bin 2', [node('Left', [node('L2')])], { sort_order: 1 }),
+        ],
+        { sort_order: 0 },
+      ),
+      node('Row 2', [node('Bin 9', [node('Left', [node('Z')])], { sort_order: 0 })], {
+        sort_order: 1,
+      }),
+    ]);
+    renderGrid(deep);
+
+    expect(screen.queryByText(/nests deeper than the grid draws/i)).not.toBeInTheDocument();
+    // Outer chooser: the rows. Inner chooser: that row's bins. Both present at once.
+    expect(screen.getByRole('tab', { name: 'Row 1' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Bin 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^L1/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Bin 2' }));
+    expect(screen.getByRole('button', { name: /^L2/ })).toBeInTheDocument();
+
+    // Switching row switches the inner chooser with it, and resets to that row's first section
+    // rather than holding an index into the row you left.
+    await user.click(screen.getByRole('tab', { name: 'Row 2' }));
+    expect(screen.getByRole('tab', { name: 'Bin 9' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Z/ })).toBeInTheDocument();
+  });
+
+  it('declines to draw past the cap rather than inventing a projection', () => {
+    const deep = node('Warehouse', [
+      node('Aisle', [node('Bay', [node('Shelf', [node('Rack', [node('Bin')])])])]),
+    ]);
     renderGrid(deep);
     expect(screen.getByText(/nests deeper than the grid draws/i)).toBeInTheDocument();
   });

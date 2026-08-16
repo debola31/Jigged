@@ -90,7 +90,7 @@ describe('StorageUnitList', () => {
    * dressed as one: three parts in a single bin is one place in use, and saying "3 of 4" for it
    * would be a straightforward lie about how full the cabinet is.
    */
-  it('reports places in use, not parts, and never a percentage', () => {
+  it('reports locations in use, not parts, and never a percentage', () => {
     const cabinet = node('Cabinet', run('Row', 2, () => run('Bin', 2))); // 4 bins
     const bin = cabinet.children[0].children[0].id;
     renderList([cabinet], [[bin, 3]]); // three distinct parts, all in ONE bin
@@ -100,15 +100,15 @@ describe('StorageUnitList', () => {
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
-  it('names the put-away pile as what it is, and sorts it last', () => {
+  it('names the pile as what it is, and sorts it last', () => {
     const tree = [
       node('Unassigned', [], { kind: 'system', sort_order: 0 }),
       node('Cabinet 1', run('Row', 2), { sort_order: 1 }),
     ];
     renderList(tree);
 
-    expect(screen.getByText('Put-away pile')).toBeInTheDocument();
-    expect(screen.getByText(/parts with no place yet/i)).toBeInTheDocument();
+    expect(screen.getByText('Not stored yet')).toBeInTheDocument();
+    expect(screen.getByText(/parts with no location yet/i)).toBeInTheDocument();
 
     const names = screen.getAllByText(/Unassigned|Cabinet 1/).map((n) => n.textContent);
     expect(names[names.length - 1]).toBe('Unassigned');

@@ -154,7 +154,7 @@ describe('UnitAdjustDrawer', () => {
     await screen.findByRole('heading', { name: /bulk adjust/i });
 
     await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '550');
-    await user.type(screen.getByPlaceholderText(/filter by part or place/i), 'WIDGET-3');
+    await user.type(screen.getByPlaceholderText(/filter by part or location/i), 'WIDGET-3');
 
     // Narrowed…
     expect(screen.getByText('BUY-WIDGET-3')).toBeInTheDocument();
@@ -231,7 +231,7 @@ describe('UnitAdjustDrawer', () => {
     await user.type(await countedFor('BUY-ORING-214', 'Shelf B'), '552');
     await user.click(screen.getByRole('button', { name: /save 2 counts/i }));
 
-    expect(await screen.findByText(/stock moved between these places/i)).toBeInTheDocument();
+    expect(await screen.findByText(/stock moved between these locations/i)).toBeInTheDocument();
     expect(commitCount).not.toHaveBeenCalled();
 
     // …and it is a gate, not a refusal.
@@ -250,7 +250,7 @@ describe('UnitAdjustDrawer', () => {
   it('offers no filter on a short sheet', async () => {
     setup();
     await screen.findByRole('heading', { name: /bulk adjust/i });
-    expect(screen.queryByPlaceholderText(/filter by part or place/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/filter by part or location/i)).not.toBeInTheDocument();
   });
 
   it('says so when the unit holds nothing', async () => {

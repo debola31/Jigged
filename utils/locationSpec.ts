@@ -18,11 +18,17 @@ export interface BuildSpecOptions {
   /**
    * Names the parent ALREADY contains, so a repeat subdivide continues rather than collides.
    *
-   * Subdivide Cabinet 3 into Rows, then do it again: without this the second run regenerates
-   * "Row 1" and — once the sibling-name unique index exists — dies partway through
-   * `materializeLocationSpec`'s sequential inserts, leaving a partial tree behind an opaque
-   * `23505`. Continuing the numbering is also what the operator meant: subdividing twice means
-   * *more rows*, not a duplicate set.
+   * Add a unit at the root beside an existing `Cabinet 1`, or duplicate a subtree: without this the
+   * new names collide with what is already there and die on the sibling-name unique index as an
+   * opaque `23505`.
+   *
+   * **Scope, narrowed 2026-08-15.** This used to serve `Change layout` too, where "subdivide
+   * Cabinet 3 into Rows, then do it again" was read as meaning *more rows* — so a second pass
+   * generated Row 4–6 beside Row 1–3. That was the append bug: the button says change, and
+   * continuing the run is the one thing that cannot change anything. Reshape now goes through
+   * [`reconcileLevelsWithExisting`](./locationReshape.ts), which diffs the numbers against reality
+   * instead, and passes `[]` here. What survives is the two paths where "beside" really is the
+   * intent: `Add storage` at the root, and `duplicateSubtreeAsSibling`.
    *
    * Applies to the TOP level only. Deeper levels sit under containers this spec is creating
    * fresh, so they have no pre-existing siblings by construction.
@@ -30,14 +36,20 @@ export interface BuildSpecOptions {
   existingSiblingNames?: string[];
 }
 
-/** The numeric suffix of a name, or 0 — "Row 12" → 12, "Left" → 0. */
-function trailingNumber(name: string): number {
+/**
+ * The numeric suffix of a name, or 0 — "Row 12" → 12, "Left" → 0.
+ *
+ * Exported for `locationReshape`, which infers a `{n}` pattern back out of a real subtree so the
+ * numbers in "Reshape by the numbers…" describe the cabinet you are looking at. It has to split a
+ * name exactly the way this file does, or the inferred pattern and the regenerated names disagree.
+ */
+export function trailingNumber(name: string): number {
   const m = name.match(/(\d+)\s*$/);
   return m ? parseInt(m[1], 10) : 0;
 }
 
 /** A name with its numeric suffix stripped — "Row 12" → "Row", "Left" → "Left". */
-function nameBase(name: string): string {
+export function nameBase(name: string): string {
   return name.replace(/\s*\d+\s*$/, '').trim();
 }
 
@@ -157,6 +169,22 @@ export function removeSpecNode(nodes: LocationSpecNode[], key: string): Location
   return nodes
     .filter((n) => n.key !== key)
     .map((n) => ({ ...n, children: removeSpecNode(n.children, key) }));
+}
+
+/**
+ * Rename one node in place, keeping its key and its children.
+ *
+ * Keeping the key is the whole point: on a reshape a key can carry a real location id
+ * (`locationReshape`'s `id:` prefix), so a rename that minted a fresh key would read as
+ * remove-then-create — which would strand the location's stock and invalidate its printed label
+ * to change one word.
+ */
+export function renameSpecNode(
+  nodes: LocationSpecNode[],
+  key: string,
+  name: string,
+): LocationSpecNode[] {
+  return mapNode(nodes, key, (n) => ({ ...n, name }));
 }
 
 // ---- Per-branch (non-uniform) hand edits -------------------------------------

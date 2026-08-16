@@ -14,10 +14,21 @@ import {
 import { getCurrentMember } from '@/utils/operatorAccess';
 
 const mockPush = vi.fn();
+const mockNavPush = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ companyId: 'co1', locationId: 'loc1' }),
   useRouter: () => ({ push: mockPush }),
+}));
+
+/**
+ * The chrome's `push` is what tells the header back button there is in-app history to pop. Mocked
+ * apart from the raw router so a test can prove which one a navigation went through — this branch
+ * used the raw one, which left the depth counter at zero and made every Back climb the tree.
+ */
+vi.mock('@/components/operator/OperatorChromeContext', () => ({
+  useOperatorNav: () => ({ push: mockNavPush, goBack: vi.fn() }),
+  useSetOperatorChrome: vi.fn(),
 }));
 
 vi.mock('@/utils/inventoryLocationsAccess', async () => ({
@@ -123,7 +134,10 @@ describe('OperatorBinViewPage', () => {
     // rather than leaving occupancy to colour alone.
     const cell = await screen.findByRole('button', { name: /^Sub A/ });
     await userEvent.click(cell);
-    expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
+    // Through the CHROME's push, so drilling in and pressing Back retraces the taps rather than
+    // climbing to whichever location happens to be this cell's parent.
+    expect(mockNavPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   /**

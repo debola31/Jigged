@@ -75,14 +75,6 @@ export interface UnitGridViewProps {
   onOpenCell: (locationId: string) => void;
   /** The place currently being shown below the grid, marked so you can see where you are. */
   selectedId?: string | null;
-  /**
-   * Tapping a row's label.
-   *
-   * A row is a real location — it can be renamed, printed, deleted — and until this existed the
-   * grid gave it no action path at all: the old accordion could open any node, and the first cut
-   * of the grid could only open leaves. Omit it and the label is inert text.
-   */
-  onOpenBand?: (locationId: string) => void;
 }
 
 function CellButton({
@@ -182,12 +174,10 @@ function GridBody({
   shape,
   selectedId,
   onOpenCell,
-  onOpenBand,
 }: {
   shape: GridShape;
   selectedId?: string | null;
   onOpenCell: (id: string) => void;
-  onOpenBand?: (id: string) => void;
 }) {
   return (
     <Paper
@@ -248,32 +238,25 @@ function GridBody({
                 pr: 1,
               }}
             >
-              {onOpenBand && !band.isLeafItself ? (
-                <Typography
-                  component="button"
-                  variant="body2"
-                  noWrap
-                  title={`Open ${band.name}`}
-                  onClick={() => onOpenBand(band.id)}
-                  sx={{
-                    background: 'none',
-                    border: 0,
-                    p: 0,
-                    font: 'inherit',
-                    fontWeight: 600,
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    '&:hover': { textDecoration: 'underline' },
-                  }}
-                >
-                  {band.name}
-                </Typography>
-              ) : (
-                <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
-                  {band.name}
-                </Typography>
-              )}
+              {/*
+                A row's LABEL IS NOT A CONTROL — removed 2026-08-15.
+
+                It used to open the row, and opening a container makes it the pane's subject, so a
+                mis-aimed click on "Sector 3" replaced the cabinet you were reading with one row of
+                it. The founder: *"clicking on 'sector' in this view take you to the view for that
+                row from where the only way back available is through the hierarchy on the top which
+                is easy to miss. We should simply not make that clickable since every thing can be
+                viewed on the grid."*
+
+                Nothing is orphaned by that. A row is renamed and removed in `Change layout` →
+                `Edit locations one by one…`, and its printed label is already collected by the
+                unit's `Print QR` (`collectLabels` walks the whole subtree). A row that IS a
+                location — `isLeafItself` — was never this branch: it is the full-width cell below,
+                and still opens.
+              */}
+              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
+                {band.name}
+              </Typography>
             </Box>
 
             {band.isLeafItself ? (
@@ -308,18 +291,19 @@ export default function UnitGridView({
   unit,
   occupancy,
   onOpenCell,
-  onOpenBand,
   selectedId,
 }: UnitGridViewProps) {
   const layout: UnitLayout = readUnitLayout(unit, occupancy);
   const [section, setSection] = useState(0);
+  /** Only used by the five-level case: which top-level group the inner chooser belongs to. */
+  const [group, setGroup] = useState(0);
 
   if (layout.kind === 'list') {
     if (layout.cells.length === 0) {
       return (
         <Paper elevation={0} sx={{ p: 3, textAlign: 'center', bgcolor: 'action.hover' }}>
           <Typography color="text.secondary">
-            Nothing inside {unit.name} yet — change its layout to add places.
+            Nothing inside {unit.name} yet — change its layout to add locations.
           </Typography>
         </Paper>
       );
@@ -367,8 +351,71 @@ export default function UnitGridView({
           shape={active}
           selectedId={selectedId}
           onOpenCell={onOpenCell}
-          onOpenBand={onOpenBand}
         />
+      </Box>
+    );
+  }
+
+  /*
+   * Five levels: two choosers, then the grid. Both stay on screen.
+   *
+   * This case used to render as a flat list of the top level, and clicking one made it the pane's
+   * new subject — which on a wide screen had no path back, so reaching the second row meant leaving
+   * the cabinet entirely and coming back. Two tab rows are denser than one, and they are the whole
+   * cabinet at once instead of a place you can get lost inside.
+   *
+   * The inner row is deliberately quieter than the outer one: same 48px target, smaller type, no
+   * bottom rule. Two identical tab bars stacked read as one confusing control.
+   */
+  if (layout.kind === 'nested') {
+    const g = Math.min(group, layout.groups.length - 1);
+    const activeGroup = layout.groups[g];
+    const s = Math.min(section, activeGroup.sections.length - 1);
+    const activeSection = activeGroup.sections[s];
+
+    return (
+      <Box>
+        <Tabs
+          value={g}
+          onChange={(_, v: number) => {
+            setGroup(v);
+            // The new group's sections are a different set; keeping an index into the old one
+            // would land the reader somewhere they did not pick.
+            setSection(0);
+          }}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ minHeight: 48 }}
+        >
+          {layout.groups.map((gr) => (
+            <Tab key={gr.id} label={gr.name} sx={{ minHeight: 48 }} />
+          ))}
+        </Tabs>
+        <Tabs
+          value={s}
+          onChange={(_, v: number) => setSection(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          textColor="inherit"
+          sx={{
+            mb: 1.5,
+            minHeight: 48,
+            borderBottom: 0,
+            '& .MuiTab-root': { minHeight: 48, fontSize: '0.8125rem', fontWeight: 500 },
+            '& .MuiTabs-indicator': { height: 2, opacity: 0.6 },
+          }}
+        >
+          {activeSection
+            ? activeGroup.sections.map((sec) => <Tab key={sec.id} label={sec.name} />)
+            : null}
+        </Tabs>
+        {activeSection && (
+          <GridBody
+            shape={activeSection}
+            selectedId={selectedId}
+            onOpenCell={onOpenCell}
+          />
+        )}
       </Box>
     );
   }
@@ -384,7 +431,6 @@ export default function UnitGridView({
         shape={layout}
         selectedId={selectedId}
         onOpenCell={onOpenCell}
-        onOpenBand={onOpenBand}
       />
     </Box>
   );

@@ -89,12 +89,30 @@ export interface GridSection extends GridShape {
   name: string;
 }
 
+/** A group of sections — the outer chooser when a unit is deep enough to need two. */
+export interface GridGroup {
+  id: string;
+  name: string;
+  sections: GridSection[];
+}
+
 export type UnitLayout =
   /** The ordinary case: draw it. */
   | ({ kind: 'grid' } & GridShape)
   /** Four levels: choose a section (a side, a bay), then the identical grid. */
   | { kind: 'sections'; sections: GridSection[] }
-  /** Too deep, or nothing inside. Offer the children and let the reader drill. */
+  /**
+   * Five levels: choose a group, then a section, then the identical grid.
+   *
+   * This is the deepest the builder can make (`MAX_LEVELS` = 4 levels under the unit) and, since
+   * 2026-08-15, the deepest anything may be — `assert_location_depth` refuses more. The two are the
+   * same number on purpose: the editor used to allow exactly one level more than this file would
+   * draw, so the wizard could build a cabinet that then rendered as a flat list saying "this one
+   * nests deeper than the grid draws", and clicking into it stranded you (there was no way back on
+   * a wide screen). Drawing it is what closes that.
+   */
+  | { kind: 'nested'; groups: GridGroup[] }
+  /** Nothing inside. Offer the children and let the reader drill. */
   | { kind: 'list'; cells: GridCell[] };
 
 /** Levels of nesting below a node: 0 for a leaf, 1 for a node whose children are all leaves. */
@@ -196,19 +214,44 @@ export function readUnitLayout(
     };
   }
 
-  // Five levels or more. Nothing has ever built one; if something does, say so by drawing a list
-  // rather than inventing a projection nobody can check.
+  /*
+   * Four levels below the unit — the deepest the builder can build and the deepest anything is
+   * allowed to be. Two choosers and then the grid: pick the row, pick the bin, read the shelf.
+   *
+   * It used to fall through to `list` here, which is how a cabinet the wizard had just built came
+   * back as "this one nests deeper than the grid draws". Nothing navigates in this module — a unit
+   * is a selection, a location is a drawer — and the list was the one thing that did, by turning a
+   * container into the pane's new subject with no path back to the one you came from.
+   */
+  if (depth === 4) {
+    return {
+      kind: 'nested',
+      groups: ordered(unit.children).map((child) => ({
+        id: child.id,
+        name: child.name,
+        sections: ordered(child.children).map((section) => ({
+          id: section.id,
+          name: section.name,
+          ...toShape(section, occupancy),
+        })),
+      })),
+    };
+  }
+
+  // Deeper than the cap. `assert_location_depth` refuses to create one, so this is only reachable
+  // by data that predates the cap — say so by drawing a list rather than inventing a projection
+  // nobody can check.
   return { kind: 'list', cells: ordered(unit.children).map((c) => toCell(c, occupancy)) };
 }
 
 /** What the unit card on the storage list says about shape, in the shop's own words. */
 export function describeShape(unit: InventoryLocationNode): string {
   const depth = depthBelow(unit);
-  if (depth === 0) return 'One place';
+  if (depth === 0) return 'One location';
 
   const children = unit.children;
   if (depth === 1) {
-    return `${children.length} ${children.length === 1 ? 'place' : 'places'}`;
+    return `${children.length} ${children.length === 1 ? 'location' : 'locations'}`;
   }
 
   const widths = children.filter((c) => c.children.length > 0).map((c) => c.children.length);
@@ -218,7 +261,7 @@ export function describeShape(unit: InventoryLocationNode): string {
     // exists mostly for this: the operator built 15 wide and wanted 12, and nothing ever said so.
     return `${children.length} rows × ${widths[0]} each`;
   }
-  return `${countStockablePlaces(unit)} places`;
+  return `${countStockablePlaces(unit)} locations`;
 }
 
 /** Every node under `unit`, including itself. Structure, not capacity. */

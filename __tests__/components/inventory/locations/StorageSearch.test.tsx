@@ -48,11 +48,11 @@ beforeEach(() => {
 });
 
 describe('StorageSearch', () => {
-  it('offers matching places', async () => {
+  it('offers matching locations', async () => {
     const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'cab');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'cab');
     expect(await screen.findByRole('option', { name: /Cabinet 3/ })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /Yard/ })).not.toBeInTheDocument();
   });
@@ -71,7 +71,7 @@ describe('StorageSearch', () => {
     ]);
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
     expect(await screen.findByRole('option', { name: /BUY-ORING-214/ })).toBeInTheDocument();
   });
 
@@ -79,7 +79,7 @@ describe('StorageSearch', () => {
    * The dropdown picks the PART. Where it lives is the answer, and it belongs on a surface that
    * stays rather than in a menu that closes the moment you look away from it.
    */
-  it('hands back the part, not a place', async () => {
+  it('hands back the part, not a location', async () => {
     const user = userEvent.setup();
     vi.mocked(searchPartPlacements).mockResolvedValue([
       {
@@ -92,7 +92,7 @@ describe('StorageSearch', () => {
     ]);
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
     await user.click(await screen.findByRole('option', { name: /BUY-ORING-214/ }));
 
     expect(onPick).toHaveBeenCalledWith({
@@ -103,11 +103,11 @@ describe('StorageSearch', () => {
     });
   });
 
-  it('hands back the unit when a place is picked', async () => {
+  it('hands back the unit when a location is picked', async () => {
     const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'yard');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'yard');
     await user.click(await screen.findByRole('option', { name: /Yard/ }));
 
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ kind: 'place', id: 'yard' }));
@@ -120,7 +120,7 @@ describe('StorageSearch', () => {
    * shelves is three rows. Listing them as three options made you choose a shelf before you had
    * seen what the choices were, and showed the part's name three times over.
    */
-  it('lists a part once however many places it is in', async () => {
+  it('lists a part once however many locations it is in', async () => {
     const user = userEvent.setup();
     vi.mocked(searchPartPlacements).mockResolvedValue([
       { partId: 'p1', partName: 'BUY-ORING-214', primaryUnit: 'ea', locationId: 'shelf-a', quantity: 828 },
@@ -128,7 +128,7 @@ describe('StorageSearch', () => {
     ]);
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'oring');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'oring');
 
     expect(await screen.findAllByRole('option', { name: /BUY-ORING-214/ })).toHaveLength(1);
   });
@@ -138,7 +138,7 @@ describe('StorageSearch', () => {
     const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'o');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'o');
     await waitFor(() => expect(searchPartPlacements).not.toHaveBeenCalled());
   });
 
@@ -146,7 +146,7 @@ describe('StorageSearch', () => {
     const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByPlaceholderText(/find a part or a place/i), 'zzzz');
+    await user.type(screen.getByPlaceholderText(/find a part or a location/i), 'zzzz');
     expect(await screen.findByText(/nothing in storage matches/i)).toBeInTheDocument();
   });
 });

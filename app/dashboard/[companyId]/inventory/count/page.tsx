@@ -708,7 +708,7 @@ export default function InventoryCountPage() {
     const target = countingSubtree ? addTo : { id: locationId, label: locationName };
     if (!target) {
       setSnack({
-        msg: `Choose which place ${option.part_name} is in — a cabinet holds no stock itself.`,
+        msg: `Choose which location ${option.part_name} is in — a cabinet holds no stock itself.`,
         severity: 'error',
       });
       return;
@@ -965,7 +965,7 @@ export default function InventoryCountPage() {
 
       setSnack({
         msg:
-          `Put ${res.moved} ${res.moved === 1 ? 'part' : 'parts'} away in ${moveTo.label}.` +
+          `Moved ${res.moved} ${res.moved === 1 ? 'part' : 'parts'} to ${moveTo.label}.` +
           // Skipped means "nothing here to move" — a zero balance, which every stocked part has at
           // Unassigned whether or not it holds anything. Worth saying, not worth alarm.
           (res.skipped > 0 ? ` ${res.skipped} had nothing here to move.` : ''),
@@ -1021,7 +1021,7 @@ export default function InventoryCountPage() {
       rememberOpenedWith([c]);
     } catch (e) {
       setSnack({
-        msg: e instanceof Error ? e.message : 'Could not add that place.',
+        msg: e instanceof Error ? e.message : 'Could not add that location.',
         severity: 'error',
       });
     }
@@ -1194,7 +1194,7 @@ export default function InventoryCountPage() {
                 {locationMode && countingSubtree && (
                   <Box sx={{ width: 300 }}>
                     <LocationPicker
-                      label="…into which place?"
+                      label="…into which location?"
                       options={leafOptions}
                       value={addTo}
                       onChange={setAddTo}
@@ -1237,7 +1237,7 @@ export default function InventoryCountPage() {
                   {selectedParts === 0
                     ? 'Count'
                     : `Count ${selectedParts} ${selectedParts === 1 ? 'part' : 'parts'}` +
-                      (selected.size > selectedParts ? ` in ${selected.size} places` : '')}
+                      (selected.size > selectedParts ? ` in ${selected.size} locations` : '')}
                 </Button>
               </Box>
 
@@ -1295,8 +1295,8 @@ export default function InventoryCountPage() {
                       onClick={putAway}
                     >
                       {moving
-                        ? 'Putting away…'
-                        : `Put ${selected.size || ''} away`.replace('  ', ' ')}
+                        ? 'Moving…'
+                        : `Move ${selected.size || ''} to…`.replace('  ', ' ')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -1378,7 +1378,7 @@ export default function InventoryCountPage() {
                   {groups.map((g) => {
                     const allOn = g.rows.every((r) => selected.has(countRowKey(r)));
                     const places =
-                      g.rows.length === 1 ? g.rows[0].target.locationPath : `${g.rows.length} places`;
+                      g.rows.length === 1 ? g.rows[0].target.locationPath : `${g.rows.length} locations`;
                     return (
                       <Box
                         key={g.partId}
@@ -1404,7 +1404,7 @@ export default function InventoryCountPage() {
                             'aria-label':
                               g.rows.length === 1
                                 ? `Count ${g.partName}`
-                                : `Count ${g.partName} in ${g.rows.length} places`,
+                                : `Count ${g.partName} in ${g.rows.length} locations`,
                           }}
                         />
                         <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -1611,7 +1611,7 @@ export default function InventoryCountPage() {
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                                 {g.partName}
                               </Typography>
-                              <Chip size="small" label={`${g.rows.length} places`} />
+                              <Chip size="small" label={`${g.rows.length} locations`} />
                             </Stack>
                             {g.description && (
                               <Typography variant="caption" color="text.secondary">
@@ -1645,7 +1645,7 @@ export default function InventoryCountPage() {
                                   {groupDelta === 0 ? 'No change' : signed(groupDelta)}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  {countedHere} of {g.rows.length} places counted
+                                  {countedHere} of {g.rows.length} locations counted
                                 </Typography>
                               </>
                             )}
@@ -1747,7 +1747,7 @@ export default function InventoryCountPage() {
         number is already committed and the counter has walked away.
       */}
       <Dialog open={pending !== null} onClose={() => setPending(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Stock moved between places you counted</DialogTitle>
+        <DialogTitle>Stock moved between locations you counted</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
             Both numbers were right when you wrote them, but something moved between the shelves
@@ -1774,7 +1774,7 @@ export default function InventoryCountPage() {
             </Box>
           ))}
           <Typography variant="body2" color="text.secondary">
-            The figures above have been refreshed. Recount the places that changed, or save anyway
+            The figures above have been refreshed. Recount the locations that changed, or save anyway
             if you know these numbers are right.
           </Typography>
         </DialogContent>

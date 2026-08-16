@@ -97,7 +97,7 @@ export function formatActivityText(item: ActivityItem): string {
     case 'inventory': {
       const where = item.locationName ? ` at ${item.locationName}` : '';
       const qty = item.quantityLabel ?? '';
-      if (item.action === 'moved') return `${qty} moved to ${item.locationName ?? 'another place'}`;
+      if (item.action === 'moved') return `${qty} moved to ${item.locationName ?? 'another location'}`;
       if (item.action === 'stock_in') return `${qty} added${where}`;
       if (item.action === 'stock_out') return `${qty} taken${where}`;
       return `Counted — set to ${qty}${where}`;

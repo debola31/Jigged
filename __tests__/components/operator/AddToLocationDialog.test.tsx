@@ -11,7 +11,7 @@ vi.mock('@/lib/supabase', () => ({
   getSupabase: () => ({}),
 }));
 
-import PutAwayPickerDialog from '@/components/operator/PutAwayPickerDialog';
+import AddToLocationDialog from '@/components/operator/AddToLocationDialog';
 import type {
   InventoryLocation,
   PartLocationBalanceWithLocation,
@@ -49,7 +49,7 @@ const renderDialog = (
   balances: PartLocationBalanceWithLocation[] = [],
 ) =>
   render(
-    <PutAwayPickerDialog
+    <AddToLocationDialog
       open
       partName="RAW-AL6061-BLANK"
       unit="ea"
@@ -68,7 +68,7 @@ const openList = async (user: ReturnType<typeof userEvent.setup>) => {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe('PutAwayPickerDialog — the fallback when you cannot scan the shelf', () => {
+describe('AddToLocationDialog — the fallback when you cannot scan the label', () => {
   /**
    * The quantities are most of what makes the choice an informed one — `LocationPicker` has
    * rendered them all along behind a `unit` prop that nothing was passing.
@@ -98,7 +98,7 @@ describe('PutAwayPickerDialog — the fallback when you cannot scan the shelf', 
   });
 
   /** `Unassigned` is the pile you are emptying, never a destination. */
-  it('never offers the put-away pile', async () => {
+  it('never offers the pile it is emptying', async () => {
     const user = userEvent.setup();
     renderDialog([
       loc({ id: 'l1', name: 'Shelf A' }),

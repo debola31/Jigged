@@ -69,6 +69,13 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const [statusFailed, setStatusFailed] = useState(false);
   const [desktop, setDesktop] = useState<DesktopStatus | null>(null);
   const [pendingLink, setPendingLink] = useState<DesktopLink | null>(null);
+  /** WHICH provider is being connected, not merely that something is. Both
+   *  connects are multi-second: QuickBooks Online round-trips our API for an
+   *  Intuit authorize URL and then navigates away, and Desktop makes two
+   *  Conductor calls (create the end user, mint an auth session). `busy` only
+   *  greys both cards out, which reads as a dead button rather than work in
+   *  progress -- the same complaint raised about the panel's buttons. */
+  const [connecting, setConnecting] = useState<null | 'qbo' | 'qbd'>(null);
 
   const handleCheckPoField = async () => {
     setError(null);
@@ -152,13 +159,18 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const handleConnect = async () => {
     setError(null);
     setBusy(true);
+    setConnecting('qbo');
     posthog.capture('accounting connect started', { provider: 'qbo' });
     try {
       const url = await startQuickBooksConnect(companyId);
+      // Deliberately does NOT clear the spinner: the browser is leaving for
+      // Intuit, and a button that goes idle during that hand-off looks like the
+      // click was dropped.
       window.location.href = url;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the QuickBooks connection.');
       setBusy(false);
+      setConnecting(null);
     }
   };
 
@@ -199,6 +211,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const handleConnectDesktop = async () => {
     setError(null);
     setBusy(true);
+    setConnecting('qbd');
     posthog.capture('accounting connect started', { provider: 'qbd' });
     try {
       setPendingLink(await startQuickBooksDesktopConnect(companyId));
@@ -208,6 +221,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
       );
     } finally {
       setBusy(false);
+      setConnecting(null);
     }
   };
 
@@ -300,16 +314,20 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 title="QuickBooks Online"
                 detail="You open QuickBooks in a web browser and sign in at qbo.intuit.com."
                 actionLabel="Connect QuickBooks Online"
+                pendingLabel="Opening QuickBooks…"
                 onConnect={handleConnect}
                 busy={busy}
+                pending={connecting === 'qbo'}
               />
               {desktopEnabled && (
               <ProviderOption
                 title="QuickBooks Desktop"
                 detail="QuickBooks is installed on a computer in the shop — Pro, Premier or Enterprise."
                 actionLabel="Connect QuickBooks Desktop"
+                pendingLabel="Creating setup link…"
                 onConnect={handleConnectDesktop}
                 busy={busy}
+                pending={connecting === 'qbd'}
               />
               )}
             </Stack>
@@ -422,14 +440,24 @@ function ProviderOption({
   title,
   detail,
   actionLabel,
+  pendingLabel,
   onConnect,
   busy,
+  pending,
 }: {
   title: string;
   detail: string;
   actionLabel: string;
+  /** What this button is actually waiting for. The two providers wait on
+   *  different things, so a shared "Connecting…" would be vague for one of them
+   *  and wrong for the other — Desktop is not connecting to anything yet, it is
+   *  minting a setup link. */
+  pendingLabel: string;
   onConnect: () => void;
   busy?: boolean;
+  /** THIS button is the one working. `busy` disables both, so without this the
+   *  unpressed card would also claim to be doing something. */
+  pending?: boolean;
 }) {
   return (
     <Card variant="outlined" sx={{ flex: 1, p: 2 }}>
@@ -439,8 +467,13 @@ function ProviderOption({
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {detail}
       </Typography>
-      <Button variant="contained" onClick={onConnect} disabled={busy}>
-        {actionLabel}
+      <Button
+        variant="contained"
+        onClick={onConnect}
+        disabled={busy}
+        startIcon={pending ? <CircularProgress size={16} color="inherit" /> : undefined}
+      >
+        {pending ? pendingLabel : actionLabel}
       </Button>
     </Card>
   );

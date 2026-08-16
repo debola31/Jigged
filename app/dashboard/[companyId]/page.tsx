@@ -7,6 +7,7 @@ import Box from '@mui/material/Box';
 import { InsightsSection, DashboardMetrics, RecentActivity } from '@/components/dashboard';
 import { InsightsChat } from '@/components/insights';
 import OnboardingCard from '@/components/demo/OnboardingCard';
+import StillRunningCard from '@/components/dashboard/StillRunningCard';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { isDashboardEmpty, getDashboardActivity, type ActivityItem } from '@/utils/dashboardAccess';
 
@@ -55,6 +56,13 @@ export default function DashboardPage() {
       {/* Scorecard row — four fixed metrics */}
       <Box sx={{ mb: 4 }}>
         <DashboardMetrics companyId={companyId} />
+      </Box>
+
+      {/* Still running — open time intervals, and the only route to one whose
+          owner has gone home. Renders nothing on the normal day when everything
+          has been closed, so it costs no space until it matters. */}
+      <Box sx={{ mb: 4 }}>
+        <StillRunningCard companyId={companyId} />
       </Box>
 
       {/* Recent Activity — compact business-milestone feed + "View all" hop */}

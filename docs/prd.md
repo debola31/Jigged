@@ -155,8 +155,18 @@ ready job's step → records how many good pieces they finished. No shift, no cl
 > *quantity* entry, not a single tap; the traveler carries *one* QR, not one per operation row;
 > and the station guard *warns*, it does not block.
 
-**Decision.** Operators record work with a single **finish** trigger — no start, pause, resume or
-exit, and no on-job timer.
+**Decision.** Operators record work with a single **finish** trigger — no pause, resume or exit.
+
+**Amended 2026-08-16 — "no start, and no on-job timer" is withdrawn.**
+[`20260816203641`](../supabase/migrations/20260816203641_job_operation_intervals.sql) adds recorded
+start/stop time. **The evidence below is not withdrawn with it, and it is what shapes the
+replacement.** Those sources say that a *lifecycle the operator must maintain across interruptions*
+is unreliable — not that elapsed time cannot be captured. So the model that shipped asks the
+operator to maintain nothing: intervals are **chained on the work centre**, the next start closes
+the previous one, there is no Stop on the happy path, and nothing is ever auto-closed. Finish
+remains the trigger that matters; the clock rides on taps the operator was already making. Full
+shape and the decisions behind it:
+[operator-view.md § Recording time](modules/operator-view.md#recording-time).
 
 - **Record how many good pieces you finished.** The operator enters a quantity and taps
   `RECORD COMPLETION`; each entry is an append-only `job_operation_completions` row (who, when,
@@ -189,10 +199,15 @@ exit, and no on-job timer.
   column. See FR-6a and [jobs.md](modules/jobs.md#outside-external-vendor-operations).
 
 This is operation-level **milestone confirmation / labor backflush**: confirm the finish, infer
-the rest, and never ask an operator to maintain timer state across interruptions. Per-operation
-**actual time is not tracked** — `operator_sessions` and `job_operations.actual_*` were removed.
-**Costing and quoting are unaffected**: they use only the estimated fields
-(`estimated_setup_minutes`, `estimated_run_minutes_per_unit`, `work_centers.labor_rate`).
+the rest, and **never ask an operator to maintain timer state across interruptions** — the last
+clause still binds, and is exactly why the chain has no pause and no Stop.
+
+**Corrected 2026-08-16:** *"Per-operation actual time is not tracked."* It is, in
+`job_operation_intervals`. `operator_sessions` and `job_operations.actual_*` stay removed — the new
+table is a different shape, not a restoration. **Costing and quoting remain unaffected and that is
+still true**: they use only the estimated fields (`estimated_setup_minutes`,
+`estimated_run_minutes_per_unit`, `work_centers.labor_rate`), and actuals are reported beside the
+estimate rather than substituted into it.
 
 **Rationale and evidence.** Operators reliably handle a completion trigger but not a
 start/pause/resume lifecycle; manual real-time tracking is well documented as unreliable, and

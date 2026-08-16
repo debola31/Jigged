@@ -39,6 +39,8 @@ import OperatorDemoBar, {
   DEMO_BAR_HEIGHT,
 } from '@/components/operator/OperatorDemoBar';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import { OperatorIntervalProvider } from '@/components/operator/OperatorIntervalContext';
+import RunningIntervalStrip from '@/components/operator/RunningIntervalStrip';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
@@ -370,6 +372,12 @@ export default function OperatorLayout({
     // own copy of the same request.
     <OperatorCompanyProvider>
       <OperatorStationProvider>
+        {/* Inside the station provider and outside the shell: the strip renders
+            inside the shell's content column, but the step screen consumes the
+            same state to decide between START and the running card. Two
+            independent fetches would disagree for a paint after every action,
+            which on this surface reads as the timer losing track. */}
+        <OperatorIntervalProvider>
         <OperatorChromeProvider>
           <OperatorShell
             userRole={userRole}
@@ -403,6 +411,7 @@ export default function OperatorLayout({
             surface="operator_tabbar"
           />
         </OperatorChromeProvider>
+        </OperatorIntervalProvider>
       </OperatorStationProvider>
     </OperatorCompanyProvider>
   );
@@ -703,7 +712,13 @@ function OperatorShell({
           Applies to every operator screen, deliberately — Jobs and Me had the same problem and
           nobody had noticed because nobody opens them on a monitor.
         */}
-        <Box sx={{ maxWidth: 680, mx: 'auto' }}>{children}</Box>
+        <Box sx={{ maxWidth: 680, mx: 'auto' }}>
+          {/* Inside the phone-width column and above the page, so "you are on
+              OP 30" is the first thing rendered on every screen while anything
+              is running. Renders nothing when nothing is open. */}
+          <RunningIntervalStrip />
+          {children}
+        </Box>
       </Box>
 
       {/* Bottom Navigation — hidden only on the bare station-selection screen */}

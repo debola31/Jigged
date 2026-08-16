@@ -24,10 +24,13 @@ import {
   revertOperationCompletion,
 } from '@/utils/operatorAccess';
 import { getOperationCompletionSummaries } from '@/utils/operationCompletionsAccess';
+import { getOperationActuals } from '@/utils/operationIntervalsAccess';
+import type { OperationActuals } from '@/types/operationInterval';
 import OperationCard from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
 
 const EMPTY_SUMMARY_MAP: Map<string, OperationCompletionSummary> = new Map();
+const EMPTY_ACTUALS_MAP: Map<string, OperationActuals> = new Map();
 
 interface OperationsPanelProps {
   job: Job;
@@ -72,6 +75,21 @@ export default function OperationsPanel({
     return next;
   }, [partIdsKey]);
   const summaryByOp = summaryData ?? EMPTY_SUMMARY_MAP;
+
+  // Recorded time per op, keyed the same way. AGGREGATE AND WITHOUT OPERATOR
+  // IDENTITY — `get_operation_actuals` cannot return it, because a row-returning
+  // SELECT policy exposing operator_id would BE a per-person report. Resolving
+  // time to a named person goes through get_operator_time_detail, which is
+  // admin-gated and writes an audit row.
+  //
+  // Reloaded alongside the summaries: an operator's RECORD COMPLETION closes
+  // their interval, so the two move together.
+  const opIdsKey = operations.map((op) => op.id).sort().join(',');
+  const { data: actualsData, reload: reloadActuals } = useLoad(
+    () => getOperationActuals(opIdsKey ? opIdsKey.split(',') : []),
+    [opIdsKey],
+  );
+  const actualsByOp = actualsData ?? EMPTY_ACTUALS_MAP;
 
   // Calculate progress
   const completedCount = operations.filter((op) => op.status === 'completed').length;
@@ -135,7 +153,7 @@ export default function OperationsPanel({
         showSnackbar('Completion recorded', 'success');
       }
       setDialogOp(null);
-      await reloadSummaries();
+      await Promise.all([reloadSummaries(), reloadActuals()]);
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to complete operation', 'error');
@@ -156,7 +174,7 @@ export default function OperationsPanel({
         await undoJobOperation(operationId);
       }
       showSnackbar('Operation reverted', 'info');
-      await reloadSummaries();
+      await Promise.all([reloadSummaries(), reloadActuals()]);
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to undo operation', 'error');
@@ -173,7 +191,7 @@ export default function OperationsPanel({
     try {
       await markOperationSent(operationId);
       showSnackbar('Marked sent out to the vendor.', 'info');
-      await reloadSummaries();
+      await Promise.all([reloadSummaries(), reloadActuals()]);
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to mark sent', 'error');
@@ -191,7 +209,7 @@ export default function OperationsPanel({
       } else {
         showSnackbar('Marked received from the vendor.', 'success');
       }
-      await reloadSummaries();
+      await Promise.all([reloadSummaries(), reloadActuals()]);
       onOperationUpdate();
     } catch (err) {
       showSnackbar(err instanceof Error ? err.message : 'Failed to mark received', 'error');
@@ -257,8 +275,10 @@ export default function OperationsPanel({
                 onUndo={handleUndo}
                 onSend={handleSend}
                 onReceive={handleReceive}
+                actuals={actualsByOp.get(operation.id)}
                 onCompletionsChanged={() => {
                   reloadSummaries();
+                  reloadActuals();
                   onOperationUpdate();
                 }}
               />

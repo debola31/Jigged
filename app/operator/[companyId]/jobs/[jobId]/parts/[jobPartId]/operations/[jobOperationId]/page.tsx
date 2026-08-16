@@ -19,6 +19,7 @@ import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import NoteAddIcon from '@mui/icons-material/NoteAdd';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -48,6 +49,9 @@ import JobFeed from '@/components/operator/JobFeed';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
+import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
+import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
+import { elapsedMs, formatClockTime, formatDuration } from '@/lib/duration';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
@@ -84,6 +88,26 @@ export default function OperatorOperationActionPage() {
 
   const { stationId, stationName, initializing } = useStationContext();
   const nav = useOperatorNav();
+
+  // Shared with the header strip, so the two can never disagree about whether
+  // this step is running. See OperatorIntervalContext.
+  const {
+    intervalFor,
+    start: startInterval,
+    close: closeInterval,
+    serverSkewMs,
+  } = useIntervalContext();
+  const running = intervalFor(jobOperationId);
+
+  // Times the operator is about to record, editable before RECORD COMPLETION
+  // commits them. Null until they touch Adjust — an untouched interval writes no
+  // adjusted values at all, so `adjusted_at` stays NULL and the row does not
+  // claim to have been corrected when it was not.
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [pendingAdjust, setPendingAdjust] = useState<{
+    startedAt: string;
+    endedAt: string | null;
+  } | null>(null);
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -251,6 +275,27 @@ export default function OperatorOperationActionPage() {
         is_partial: qty < remaining,
       });
 
+      // THE INTERVAL CLOSES SECOND, AND ALSO NOT ATOMICALLY — same rule as the
+      // note below, for the same reason. The completion is the durable
+      // production fact and it has already landed. If this close then fails, the
+      // interval simply stays OPEN and turns up on the office's Still-running
+      // list, which is precisely what that list exists to catch. Wrapping the
+      // two in a transaction would roll back real finished work because a timing
+      // row failed, which is the trade this page already refused once.
+      if (running) {
+        try {
+          await closeInterval(running.id, 'completed', {
+            adjustedStartedAt: pendingAdjust?.startedAt ?? null,
+            adjustedEndedAt: pendingAdjust?.endedAt ?? null,
+          });
+          setPendingAdjust(null);
+        } catch {
+          // Deliberately swallowed at page level: "the completion worked, the
+          // timer did not stop" is not something an operator can act on from
+          // here, and it is already visible to the office.
+        }
+      }
+
       // ORDER IS LOAD-BEARING, AND DELIBERATELY NOT ATOMIC.
       //
       // The completion is already durable by the time we get here. The note is
@@ -273,6 +318,25 @@ export default function OperatorOperationActionPage() {
       }
 
       await reloadAll();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Open an interval on this step.
+  //
+  // An explicit tap and NOT an effect on page view. Operators open a step to
+  // read the instructions and look at the drawing as often as to work it, so
+  // auto-starting on render would manufacture time nobody spent — and this page
+  // is also the landing target of a printed QR, which people scan to find out
+  // what a job is.
+  const handleStart = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await startInterval(jobOperationId);
     } catch (err) {
       setError(err);
     } finally {
@@ -549,7 +613,16 @@ export default function OperatorOperationActionPage() {
           )}
 
 
-          {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
+          {/* THE ESTIMATE IS HIDDEN WHILE A TIMER IS RUNNING, and that is a
+              guardrail rather than a layout choice. On its own the quoted figure
+              is the engineer's input to the job and the printed traveler carries
+              the same number. Beside a live elapsed counter it becomes a target,
+              and a number about the operator's own output sitting next to a
+              standard is exactly the adjacent comparison that turns informational
+              feedback into controlling feedback. The office still sees
+              estimate-vs-actual; the person doing the work does not.
+              See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable. */}
+          {!isCompleted && !running && job.estimated_minutes != null && job.estimated_minutes > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Estimated:{' '}
               {job.estimated_minutes < 60
@@ -732,6 +805,59 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
+          {/* TIME. Two states, and neither is a stopwatch screen the operator has
+              to remember to visit — starting is one tap on the step they were
+              going to open anyway, and stopping is a side effect of recording
+              the completion they were going to record anyway. */}
+          {!isExternal &&
+            (running ? (
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  px: 1.5,
+                  py: 1,
+                  borderRadius: 1,
+                  bgcolor: 'rgba(26, 31, 74, 0.55)',
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  {/* The FACT leads. The elapsed figure trails it, in the same
+                      size and the same colour — it is here so the operator can
+                      see the thing is live, not so they can watch it climb. */}
+                  <Typography variant="body2">
+                    On this step since {formatClockTime(running.effective_started_at)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatDuration(elapsedMs(running.effective_started_at, serverSkewMs))} so far
+                    {pendingAdjust && ' · times adjusted'}
+                  </Typography>
+                </Box>
+                <Button
+                  onClick={() => setAdjustOpen(true)}
+                  disabled={actionLoading}
+                  sx={{ minHeight: 44, flexShrink: 0 }}
+                >
+                  Adjust
+                </Button>
+              </Box>
+            ) : (
+              <Button
+                fullWidth
+                variant="outlined"
+                color="primary"
+                onClick={handleStart}
+                disabled={actionLoading}
+                startIcon={<PlayArrowIcon />}
+                // OUTLINED, not contained: RECORD COMPLETION is the primary
+                // action on this screen and must stay the only filled button.
+                // interactionStandardsCheck would also reject a green one.
+                sx={{ minHeight: 56 }}
+              >
+                Start timing this step
+              </Button>
+            ))}
 
           {/* CAPTURE, MERGED INTO COMPLETION.
               Finishing a step and writing down what you learned are one act, one
@@ -804,6 +930,27 @@ export default function OperatorOperationActionPage() {
             </Button>
           )}
         </Box>
+      )}
+
+      {/* Correcting the times BEFORE they are committed. The adjustment is held
+          in page state and written by RECORD COMPLETION, so an operator who
+          opens this and cancels leaves no `adjusted_at` behind — the row must
+          not claim to have been corrected when it was not. */}
+      {/* Mounted only while open, so its state is seeded at mount and reopening
+          is a fresh seed — see the note in AdjustTimesDialog. */}
+      {running && adjustOpen && (
+        <AdjustTimesDialog
+          open
+          onClose={() => setAdjustOpen(false)}
+          onSave={(next) => {
+            setPendingAdjust(next);
+            setAdjustOpen(false);
+          }}
+          rawStartedAt={running.started_at}
+          rawEndedAt={null}
+          effectiveStartedAt={pendingAdjust?.startedAt ?? running.effective_started_at}
+          effectiveEndedAt={null}
+        />
       )}
 
       {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read

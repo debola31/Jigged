@@ -87,18 +87,34 @@ async function openIdleStep(page: Page): Promise<void> {
   await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
 
   // Heal a timer left running by an earlier aborted run.
+  await expect(startButton(page).or(runningOnStep(page))).toBeVisible({ timeout: 30_000 });
   if (await runningOnStep(page).isVisible()) {
-    await page.getByRole('button', { name: /stop timing/i }).first().click();
-    await page.getByRole('menuitem', { name: /done for the day/i }).click();
-    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+    await stopTimer(page);
   }
+  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * Close whatever is running on the current step.
+ *
+ * EVERY TEST THAT STARTS A TIMER ENDS BY CALLING THIS. Leaving one open would
+ * leak into the next test through the chain — and worse, through the LAYOUT,
+ * since the strip renders on every screen and its buttons then collide with the
+ * dispatch rows the station helper is trying to click. The first version of this
+ * spec leaked exactly that way and the failure surfaced as an unrelated
+ * strict-mode violation inside a shared helper.
+ */
+async function stopTimer(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /stop timing/i }).first().click();
+  await page.getByRole('menuitem', { name: /done for the day/i }).click();
+  await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
 }
 
 test.describe.configure({ mode: 'serial' });
 
 test.describe('operator time capture', () => {
   test('starts a timer, shows it in the shell, and hides the estimate', async ({ page }) => {
-    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    const companyId = await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
 
     // Precondition: the estimate IS shown when nothing is running. Asserting
@@ -106,7 +122,6 @@ test.describe('operator time capture', () => {
     // selector that never matched anything.
     const hadEstimate = await estimateLine(page).isVisible();
 
-    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
     await startButton(page).click();
 
     // Leads with the fact, not the counter.
@@ -119,16 +134,26 @@ test.describe('operator time capture', () => {
       await expect(estimateLine(page)).toBeHidden();
     }
 
-    // The strip is rendered by the LAYOUT, so it must survive navigation away
-    // from the step — that is the whole reason it lives in the shell.
-    await page.getByRole('link', { name: /jobs/i }).first().click().catch(() => {});
+    // The strip is rendered by the LAYOUT, so it shows on screens that know
+    // nothing about this step — that is the whole reason it lives in the shell,
+    // and an operator who walks away with a timer running has to see it. An
+    // explicit goto rather than clicking the nav and going back: the assertion
+    // is about the layout, and routing it through two navigations only adds ways
+    // to be flaky.
+    await page.goto(`/operator/${companyId}/jobs`);
+    await expect(runningOnStep(page).or(page.getByText(/since \d/i))).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Leave nothing running. See stopTimer.
     await page.goBack();
-    await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
+    await stopTimer(page);
   });
 
   test('adjusting the start time keeps the recorded one', async ({ page }) => {
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
-    await page.getByRole('button', { name: new RegExp(WC_INTERNAL) }).first().click();
+    await openIdleStep(page);
+    await startButton(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
     await adjustButton(page).click();
@@ -144,13 +169,16 @@ test.describe('operator time capture', () => {
 
     await page.getByRole('button', { name: /^save$/i }).click();
     await expect(page.getByText(/times adjusted/i)).toBeVisible({ timeout: 30_000 });
+
+    await stopTimer(page);
   });
 
   test('recording a completion stops the timer', async ({ page }) => {
     // Stopping is a SIDE EFFECT of the action the operator was already taking.
     // There is no Stop button on the happy path, and this is why.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
-    await page.getByRole('button', { name: new RegExp(WC_INTERNAL) }).first().click();
+    await openIdleStep(page);
+    await startButton(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
     await qtyField(page).fill('1');
@@ -159,6 +187,11 @@ test.describe('operator time capture', () => {
     // The completion landed AND the interval closed with it.
     await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
     await expect(page.getByText(/1 of 5 good so far/)).toBeVisible({ timeout: 30_000 });
+
+    // Undo the completion so the shared job is left as this file found it —
+    // the completion spec asserts exact quantities against the same seed.
+    await page.getByRole('button', { name: /undo all/i }).click();
+    await expect(page.getByText(/1 of 5 good so far/)).toBeHidden({ timeout: 30_000 });
   });
 
   test('the Me tab journal carries no aggregate figure', async ({ page }) => {

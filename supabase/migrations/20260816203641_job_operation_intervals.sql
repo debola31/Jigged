@@ -303,7 +303,24 @@ CREATE POLICY job_op_intervals_update_own ON public.job_operation_intervals
 -- call company_can_write() THEMSELVES, because SECURITY DEFINER bypasses RLS and
 -- would otherwise bypass this gate silently.
 SELECT public.apply_billing_write_gate('public.job_operation_intervals');
-SELECT public.apply_billing_write_gate('public.operator_time_access_log');
+
+-- operator_time_access_log is DELIBERATELY NOT GATED, and the distinction is the
+-- one 20260801150944 drew when it REMOVED part_location_stock from the exempt
+-- list. That table holds tenant data — stock levels, the thing the shop pays for
+-- — written from the browser through a definer RPC, so exempting it hid #645.
+--
+-- This one is an AUDIT RECORD with no browser write path at all: the grants below
+-- give INSERT to service_role only, so the gate would never be evaluated. Same
+-- family as note_views and operator_events, which are exempt for exactly this
+-- reason.
+--
+-- And gating it would be actively harmful rather than merely useless. The write
+-- is incidental to a READ, and reads stay open when billing lapses. A gate here
+-- would mean a lapsed shop either cannot look at all, or looks WITHOUT the look
+-- being recorded — and an audit log that stops writing precisely when the
+-- account is in trouble is the worst version of this table.
+--
+-- It is added to the exempt list below rather than left to fail the CI guard.
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- 5. THE GUARD TRIGGER
@@ -832,6 +849,56 @@ COMMENT ON FUNCTION public.function_execute_leaks() IS
 REVOKE EXECUTE ON FUNCTION public.function_execute_leaks()
   FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.function_execute_leaks() TO service_role;
+
+-- ── The tenant-gate exempt list ──────────────────────────────────────────────
+-- Restated from the LIVE definition (not from 20260726033616, which created it —
+-- six migrations have amended the list since, and rebuilding from the original
+-- would silently drop every later entry; see the warning above
+-- function_execute_leaks). Only `operator_time_access_log` is added.
+CREATE OR REPLACE FUNCTION public.tenant_tables_missing_write_gate()
+RETURNS TABLE(table_name text)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT c.relname::text
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a
+    ON a.attrelid = c.oid AND a.attname = 'company_id' AND NOT a.attisdropped
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+    AND c.relname NOT IN (
+      -- identity / bootstrap (gating would block signup / team / preferences)
+      'companies', 'user_company_access', 'user_preferences', 'system_admins',
+      'invitations', 'demo_data_templates', 'waitlist', 'saved_insights', 'feedback',
+      'company_billing',
+      -- service-role-only / SELECT-only (writes never come from the browser).
+      -- `part_location_stock` was removed from this list in 20260801150944: its
+      -- writes DO come from the browser, through SECURITY DEFINER RPCs, and the
+      -- exemption was what hid issue #645.
+      'auth_audit_log', 'job_fulfillment_audit',
+      'company_order_counters', 'quickbooks_connections', 'quickbooks_customer_map',
+      'quickbooks_invoice_links', 'quickbooks_invoice_line_items',
+      'quickbooks_desktop_connections', 'quickbooks_terms_cache',
+      -- SECURITY DEFINER-only writers; see 20260728040701
+      'note_views', 'operator_events',
+      -- Added HERE. An audit record of who looked at whose recorded time, written
+      -- only by get_operator_time_detail and granted to service_role alone. The
+      -- write is incidental to a read, and reads stay open when billing lapses —
+      -- gating it would mean a lapsed shop either cannot look, or looks unlogged.
+      -- NOTE the contrast with job_operation_intervals, which IS gated and whose
+      -- two definer writers call company_can_write by hand: that one is tenant
+      -- data, which is the line 20260801150944 drew.
+      'operator_time_access_log'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_policies p
+      WHERE p.schemaname = 'public'
+        AND p.tablename = c.relname
+        AND p.policyname = 'billing_gate_insert'
+    )
+  ORDER BY 1;
+$$;
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- 8. COMMENTS

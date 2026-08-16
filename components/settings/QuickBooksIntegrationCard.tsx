@@ -32,6 +32,7 @@ import QuickBooksDesktopPanel from '@/components/settings/quickbooks/QuickBooksD
 import LoadFailedState from '@/components/common/LoadFailedState';
 import posthog from 'posthog-js';
 import {
+  disconnectQuickBooksDesktop,
   getQuickBooksDesktopStatus,
   startQuickBooksDesktopConnect,
   type DesktopLink,
@@ -176,6 +177,25 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     }
   };
 
+  /** Abandon an unfinished Desktop setup and go back to picking a provider.
+   *  Deletes the half-made connection row, which is what makes the choice screen
+   *  render again — without it the card has no exit once /connect has run.
+   *  No confirm dialog on purpose: nothing is connected yet, so there is nothing
+   *  to lose. Disconnecting a LIVE connection still confirms, in the panel. */
+  const handleCancelDesktopSetup = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await disconnectQuickBooksDesktop(companyId);
+      setPendingLink(null);
+      await loadStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not cancel the setup.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleConnectDesktop = async () => {
     setError(null);
     setBusy(true);
@@ -256,6 +276,8 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               checking={busy}
               onCheckNow={() => void loadStatus()}
               onNewLink={handleConnectDesktop}
+              onCancel={handleCancelDesktopSetup}
+              cancelling={busy}
             />
           )
         ) : pendingLink ? (
@@ -265,6 +287,8 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
             checking={busy}
             onCheckNow={() => void loadStatus()}
             onNewLink={handleConnectDesktop}
+            onCancel={handleCancelDesktopSetup}
+            cancelling={busy}
           />
         ) : !connected ? (
           <Box>

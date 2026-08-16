@@ -86,13 +86,21 @@ export default function DesktopAuthHandoff({
   expiresAt,
   onCheckNow,
   onNewLink,
+  onCancel,
   checking,
+  cancelling,
 }: {
   authFlowUrl: string;
   expiresAt: string | null;
   onCheckNow: () => void;
   onNewLink: () => void;
+  /** Abandon setup and go back to picking a provider. Without this the card has
+   *  no exit: once a connection row exists the choice screen stops rendering, so
+   *  a shop that started Desktop setup by mistake — or wants to start over — is
+   *  stuck on this screen with no way back. */
+  onCancel?: () => void;
   checking?: boolean;
+  cancelling?: boolean;
 }) {
   /** null = not asked yet. 'here' = at the QuickBooks PC. 'other' = send it on. */
   const [where, setWhere] = useState<null | 'here' | 'other'>(null);
@@ -100,8 +108,17 @@ export default function DesktopAuthHandoff({
   const [popupBlocked, setPopupBlocked] = useState(false);
   const remaining = useCountdown(expiresAt);
   const expired = remaining === 'expired';
+  // The URL lives only in the /connect RESPONSE — nothing persists it. So on any
+  // fresh load of Settings while setup is half-finished, the card still renders
+  // this component (status says connected-but-not-linked) with an empty string.
+  // Opening that navigates the new tab to about:blank, which is how this shipped
+  // to production looking like Conductor was broken.
+  const noLink = !authFlowUrl;
 
   const openSetupPage = () => {
+    // Never window.open('') — that IS the about:blank bug, and a guard here is
+    // what keeps it fixed if some future caller forgets again.
+    if (noLink) return;
     setWhere('here');
     // Opened inside the click so the popup blocker allows it. If it is blocked
     // anyway we fall back to showing the link rather than leaving a dead end.
@@ -120,18 +137,37 @@ export default function DesktopAuthHandoff({
   // so the two cannot drift into handling http://localhost differently.
   const handleCopy = async () => setCopied(await copyText(authFlowUrl));
 
-  if (expired) {
+  /** Rendered in EVERY branch below, because every branch is otherwise a dead
+   *  end. No confirm dialog: nothing has been connected yet, so there is nothing
+   *  to lose — unlike disconnecting a live connection, which does confirm. */
+  const cancelRow = onCancel ? (
+    <Box sx={{ mt: 2 }}>
+      <Button variant="text" size="small" color="inherit" onClick={onCancel} disabled={cancelling}>
+        {cancelling ? 'Cancelling…' : 'Cancel setup'}
+      </Button>
+    </Box>
+  ) : null;
+
+  // Both states mean the same thing to the user — there is no usable link right
+  // now — and both are fixed by the same button, so they share a branch rather
+  // than one of them silently rendering a dead "I'm on that computer".
+  if (noLink || expired) {
     return (
-      <Alert
-        severity="info"
-        action={
-          <Button color="inherit" size="small" onClick={onNewLink}>
-            Get a new link
-          </Button>
-        }
-      >
-        That setup link has expired.
-      </Alert>
+      <Box>
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" onClick={onNewLink}>
+              Get a new link
+            </Button>
+          }
+        >
+          {noLink
+            ? 'Setup was started but not finished. Get a fresh link to open on the computer that runs QuickBooks.'
+            : 'That setup link has expired.'}
+        </Alert>
+        {cancelRow}
+      </Box>
     );
   }
 
@@ -150,6 +186,7 @@ export default function DesktopAuthHandoff({
             It&apos;s a different computer
           </Button>
         </Stack>
+        {cancelRow}
       </Box>
     );
   }
@@ -201,6 +238,7 @@ export default function DesktopAuthHandoff({
             Send it to another computer instead
           </Button>
         </Stack>
+        {cancelRow}
       </Box>
     );
   }
@@ -255,6 +293,7 @@ export default function DesktopAuthHandoff({
           Actually, I&apos;m on that computer
         </Button>
       </Stack>
+      {cancelRow}
     </Box>
   );
 }

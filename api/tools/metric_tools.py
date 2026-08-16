@@ -10,7 +10,9 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_revenue_by_period",
         "description": (
             "Get revenue from shipped jobs grouped by time period. "
-            "Revenue is derived from linked quote total_price for jobs with fulfillment_status='fully_shipped'. "
+            "Revenue is the sum of job_parts.total_price (the agreed line total on the "
+            "job, which reflects any post-conversion quantity edit) for jobs with "
+            "fulfillment_status='fully_shipped'. "
             "Returns data suitable for an area or bar chart."
         ),
         "input_schema": {
@@ -99,7 +101,8 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_customer_revenue_breakdown",
         "description": (
             "Get revenue breakdown by customer for shipped jobs. "
-            "Shows top customers by total revenue (from linked quote total_price). "
+            "Shows top customers by total revenue (from job_parts.total_price, the "
+            "agreed line total on the job). "
             "Returns data suitable for a horizontal bar chart or pie chart."
         ),
         "input_schema": {
@@ -128,12 +131,15 @@ METRIC_TOOLS: list[dict] = [
         "name": "get_part_profitability",
         "description": (
             "Get part profitability analysis. Walks shipped jobs -> job_parts -> parts. "
-            "Revenue per part comes from the linked quote_line_items.total_price. "
-            "Estimated labor cost rolls up job_operations: for internal work_centers, "
-            "(estimated_setup_minutes + estimated_run_minutes_per_unit * quantity) / 60 "
-            "* COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate); "
-            "for external work_centers, external_unit_price * quantity + external_setup_cost. "
-            "Returns top parts by profit, suitable for a bar chart."
+            "Revenue per part is job_parts.total_price (the agreed line total on the job). "
+            "Cost is job_parts.true_cost_per_unit * quantity — the all-in TRUE cost "
+            "(labor + materials + nested BOM) frozen when the job was created, so a "
+            "shipped job's profit does not change when a labor rate or material cost "
+            "changes later. Also returns the split: labor_cost, rebuilt from the rates "
+            "frozen on job_operations, and material_cost, the remainder. Costs use "
+            "ESTIMATED time — actual time per operation is not recorded. Job parts that "
+            "could not be costed are excluded and counted in excluded_job_parts, never "
+            "counted as free. Returns top parts by profit, suitable for a bar chart."
         ),
         "input_schema": {
             "type": "object",

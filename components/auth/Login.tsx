@@ -223,7 +223,7 @@ export default function Login({ expired, returnTo, reason }: LoginProps) {
               </Typography>
             )}
             {resendError && (
-              <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+              <Typography variant="body2" color="error.light" sx={{ mt: 1 }}>
                 {resendError}
               </Typography>
             )}

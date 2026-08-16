@@ -21,6 +21,28 @@ import type { DependencyList, ReactNode } from 'react';
  * The depth ref lives in the provider, which sits in the operator layout and
  * stays mounted across client navigations, so it survives jobs → traveler →
  * hub → … and resets to 0 only on a fresh load (i.e. a real deep-link entry).
+ *
+ * ## Every forward navigation on a page with a back button MUST use `push`
+ *
+ * The Inventory branch used `router.push` directly for all of its — the part
+ * card, the activity row, the sub-location grid — so the counter never left 0
+ * and `goBack()` always took its no-history branch. Searching for a part,
+ * tapping a location it was in, then pressing Back therefore climbed to that
+ * location's PARENT instead of returning to the part. Nothing failed loudly;
+ * the fallback is a legitimate destination, just not the one behind you.
+ *
+ * ## Why the tab bar and the scanner deliberately do NOT bump it
+ *
+ * Both `router.push` from the layout, which is outside this provider — and both
+ * are right to. The counter only has to be an UNDER-estimate of real in-app
+ * history: under-counting makes `goBack` fall back to a declared parent, while
+ * over-counting would make `router.back()` leave the app entirely. Since the
+ * only screens with a back button are ones this counter does track, an
+ * un-bumped tab switch is invisible.
+ *
+ * The scanner is a stronger case: scanning a shelf label IS a deep link — it is
+ * the printed QR's own route, minus the camera round trip — so climbing the
+ * tree from it is the intended behaviour rather than an accident of counting.
  */
 export interface OperatorChromeConfig {
   /**

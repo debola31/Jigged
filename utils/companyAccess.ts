@@ -1,6 +1,7 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 10 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
+import type { ChargeBasis } from '@/types/bom';
 import type { CompanyMember } from '@/types/quote';
 import type { Json } from '@/types/database';
 import {
@@ -31,6 +32,22 @@ export interface Company {
   demo_company_id?: string | null;
   // Free-form per-tenant settings (feature flags, defaults). Schema: jsonb.
   settings?: Record<string, unknown> | null;
+  /**
+   * The markup % a part's FIRST pricing tier is created with, split by source
+   * (#727). Read once, when that tier is written; never by the cost rollup, so
+   * changing either never reprices a part that already has tiers.
+   *
+   * Both default to 0 — price = cost — which is what every company had before
+   * the setting existed. See `setCompanyPricingDefaults`.
+   */
+  default_markup_made_percent?: number;
+  default_markup_bought_percent?: number;
+  /**
+   * What a NEW BOM line is created with — made or bought child alike. A seed,
+   * like the two markups above: read when the line is written, never by the
+   * rollup.
+   */
+  default_material_charge_basis?: ChargeBasis;
 }
 
 /**
@@ -334,7 +351,7 @@ export async function getCompany(companyId: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from('companies')
     .select(
-      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings'
+      'id, name, logo_url, phone, email, website, address_line1, address_line2, city, state, postal_code, country, is_demo, demo_company_id, settings, default_markup_made_percent, default_markup_bought_percent, default_material_charge_basis'
     )
     .eq('id', companyId)
     .single();
@@ -597,6 +614,86 @@ export async function setCompanyDefaultPaymentTerms(
     });
   }
   return next;
+}
+
+/**
+ * The shop-wide pricing defaults (#727): the markup a new MADE part and a new
+ * BOUGHT part get on their first pricing tier, and whether a new material is
+ * charged into its parent at our cost or at its own price.
+ *
+ * **These are seed values, not a pricing rule.** They are read at exactly one
+ * moment — when a part with a cost has no tiers yet — and written into that
+ * part's own tier row. Nothing reads them afterwards, so raising the made markup
+ * to 30% reprices nothing that already exists; it changes what the next part
+ * starts at. A part's price lives on its own Pricing page, which is the only
+ * place the rollup looks.
+ *
+ * That write-time boundary is deliberate and load-bearing. `lib/companyDefaults`
+ * records why shop-wide payment terms are safe — resolved once into the quote's
+ * own column, with the form naming where the value came from — and calls that
+ * "the whole difference from the markup_rates module deleted in July 2026, where
+ * a shared default resolved at READ time with nothing on screen to say where the
+ * number came from." An earlier draft of #727 had exactly that read-time shape.
+ *
+ * Real columns rather than `settings.defaults` / KNOWN_DEFAULTS because that
+ * registry's `coerceInt` rounds to a whole number, and a markup is
+ * numeric(10,6): a shop selling at 22.5% must not be seeded at 23%.
+ */
+export interface CompanyPricingDefaults {
+  /** Markup a new MADE part's first pricing tier is created with. */
+  made: number;
+  /** The same, for a new BOUGHT part. */
+  bought: number;
+  /** What a new purchased-material BOM line is created with. */
+  materialChargeBasis: ChargeBasis;
+}
+
+export function readCompanyPricingDefaults(
+  company:
+    | Pick<
+        Company,
+        | 'default_markup_made_percent'
+        | 'default_markup_bought_percent'
+        | 'default_material_charge_basis'
+      >
+    | null
+    | undefined,
+): CompanyPricingDefaults {
+  return {
+    made: company?.default_markup_made_percent ?? 0,
+    bought: company?.default_markup_bought_percent ?? 0,
+    materialChargeBasis: company?.default_material_charge_basis ?? 'cost',
+  };
+}
+
+export async function setCompanyPricingDefaults(
+  companyId: string,
+  defaults: CompanyPricingDefaults,
+): Promise<CompanyPricingDefaults> {
+  for (const key of ['made', 'bought'] as const) {
+    const value = defaults[key];
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`The ${key}-part starting markup must be zero or greater.`);
+    }
+  }
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('companies')
+    .update({
+      default_markup_made_percent: defaults.made,
+      default_markup_bought_percent: defaults.bought,
+      default_material_charge_basis: defaults.materialChargeBasis,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', companyId);
+  if (error) {
+    console.error('Error updating pricing defaults:', error);
+    throw toFriendlyError(error, {
+      entity: 'pricing default',
+      fallback: 'Failed to save the pricing defaults.',
+    });
+  }
+  return defaults;
 }
 
 /**

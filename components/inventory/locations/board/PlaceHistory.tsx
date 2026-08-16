@@ -79,7 +79,7 @@ function PlaceHistoryBody({ locationId, locationName }: PlaceHistoryProps) {
     <BinHistory
       entries={data}
       loading={loading}
-      error={error ? (error instanceof Error ? error.message : 'Could not load this place’s history.') : null}
+      error={error ? (error instanceof Error ? error.message : 'Could not load this location’s history.') : null}
       // No place line and no tap-through: you are already looking at this one place, and the
       // sheet has nowhere further to go.
       emptyText={`Nothing has moved in ${locationName} yet.`}

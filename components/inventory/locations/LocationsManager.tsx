@@ -18,7 +18,7 @@ import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import AddIcon from '@mui/icons-material/Add';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
-import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import type { InventoryLocation, InventoryLocationNode } from '@/types/inventoryLocations';
 import {
@@ -28,20 +28,57 @@ import {
   updateLocation,
   duplicateLocation,
   deleteLocation,
-  moveLocation,
 } from '@/utils/inventoryLocationsAccess';
 import { rollUpOccupancy, occupancyFor } from '@/utils/locationOccupancy';
-import { locationParentOptions } from '@/utils/locationDestinations';
+import { orderUnits } from '@/lib/locationGrid';
 import { generateLocationLabelSheet, type LocationLabel } from '@/utils/locationLabelPdf';
 import LocationFormModal, { type LocationFormValues } from './LocationFormModal';
-import LocationPicker, { type LocationPickerOption } from './LocationPicker';
 import LocationQRModal from './LocationQRModal';
 import VisualLocationBuilder from './builder/VisualLocationBuilder';
-import LocationTable, { placeOrder } from './LocationTable';
-import LocationDetailSheet from './board/LocationDetailSheet';
+import StorageUnitList from './StorageUnitList';
+import StorageSearch, { type StorageHit } from './StorageSearch';
+import PartPlacesDrawer from './place/PartPlacesDrawer';
+import LocationPanel from './LocationPanel';
+import PlaceDrawer, { PLACE_DRAWER_WIDTH } from './place/PlaceDrawer';
+import UnitAdjustDrawer from './place/UnitAdjustDrawer';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 
-/** Sentinel for "no parent". A picker option needs an id, and `null` is not one. */
-const TOP_LEVEL = '__top__';
+
+/** The top-level unit a location belongs to — the same walk as `computePath`, keeping the root. */
+function rootOf(id: string, byId: Map<string, InventoryLocation>): string {
+  let cursor: string | null = id;
+  let root = id;
+  const guard = new Set<string>();
+  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocation = byId.get(cursor)!;
+    root = node.id;
+    cursor = node.parent_id;
+  }
+  return root;
+}
+
+/**
+ * Every ancestor of `id`, outermost first, EXCLUDING the node itself.
+ *
+ * `computePath` returns names for display; a breadcrumb has to navigate, so it needs the ids too.
+ * Same walk, same cycle guard.
+ */
+function ancestorsOf(
+  id: string,
+  byId: Map<string, InventoryLocation>,
+): Array<{ id: string; name: string }> {
+  const out: Array<{ id: string; name: string }> = [];
+  let cursor: string | null = byId.get(id)?.parent_id ?? null;
+  const guard = new Set<string>();
+  while (cursor && byId.has(cursor) && !guard.has(cursor)) {
+    guard.add(cursor);
+    const node: InventoryLocation = byId.get(cursor)!;
+    out.unshift({ id: node.id, name: node.name });
+    cursor = node.parent_id;
+  }
+  return out;
+}
 
 function computePath(id: string, byId: Map<string, InventoryLocation>): string[] {
   const names: string[] = [];
@@ -69,22 +106,6 @@ function collectLabels(node: InventoryLocationNode, byId: Map<string, InventoryL
   return out;
 }
 
-/** Ancestors of a node, root → node inclusive, as tree nodes (the sheet's breadcrumb). */
-function nodePath(
-  id: string,
-  byNodeId: Map<string, InventoryLocationNode>,
-): InventoryLocationNode[] {
-  const out: InventoryLocationNode[] = [];
-  let cursor: string | null = id;
-  const guard = new Set<string>();
-  while (cursor && byNodeId.has(cursor) && !guard.has(cursor)) {
-    guard.add(cursor);
-    const node: InventoryLocationNode = byNodeId.get(cursor)!;
-    out.unshift(node);
-    cursor = node.parent_id;
-  }
-  return out;
-}
 
 /** Flatten a tree into id → node so the sheet can re-resolve its node after a reload. */
 function indexTree(roots: InventoryLocationNode[]): Map<string, InventoryLocationNode> {
@@ -103,30 +124,52 @@ const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 
 interface LocationsManagerProps {
   companyId: string;
+  /**
+   * The unit being shown, from `?unit=` on the URL.
+   *
+   * A **query param on one page**, not a nested route. It was `/locations/{unitId}` for a day, and
+   * that is the wrong model for a workspace: picking a cabinet is a selection within one screen,
+   * not a journey to another, and Next treated each pick as a page transition — the whole thing
+   * blanked and reloaded to change one pane. A search param still gives a shareable link and a
+   * working back button, without pretending the pane is a destination.
+   */
+  unitId?: string;
 }
 
-export default function LocationsManager({ companyId }: LocationsManagerProps) {
+export default function LocationsManager({
+  companyId,
+  unitId,
+}: LocationsManagerProps) {
   const router = useRouter();
+  /*
+   * Master–detail only survives where there is room for both, so below `md` the list and the unit
+   * are separate screens — the unit gets the whole width and its own back link, which is what the
+   * operator surface has always done. One design, expressed responsively.
+   *
+   * Done in CSS rather than `useMediaQuery`, for two reasons that both bit. A JS media query
+   * resolves false on the server and true after mount, so the first frame is the wrong layout —
+   * and `window.matchMedia` does not exist in jsdom, so every test saw the narrow branch and the
+   * two-pane layout could not be exercised at all. Breakpoints in `sx` have neither problem.
+   */
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /**
-   * The builder, aimed either at the top level or at an existing unit.
+   * The builder, in one of its two modes.
    *
-   * A non-null `parentId` is what makes it "Subdivide this unit" — the nested-create path was
-   * fully built and had no caller until now.
+   * A non-null `unitId` is what makes it a RESHAPE — the dialog seeds from that unit's real layout
+   * and writes a diff. Null builds a new unit at the top level.
+   *
+   * An id rather than the node, so a reload re-resolves the subtree the dialog is editing rather
+   * than leaving it pointed at a stale copy of it.
+   *
+   * **Was `parentId` + `existingSiblingNames` + `startSortOrder`.** Those last two existed to make
+   * the generated names continue past what the unit already held and sort after it — i.e. they were
+   * the append behaviour, expressed as props. There is nothing to carry now: reshape reconciles
+   * against reality instead.
    */
-  const [builder, setBuilder] = useState<{
-    open: boolean;
-    parentId: string | null;
-    parentPath: string[];
-    existingSiblingNames: string[];
-    startSortOrder: number;
-  }>({
+  const [builder, setBuilder] = useState<{ open: boolean; unitId: string | null }>({
     open: false,
-    parentId: null,
-    parentPath: [],
-    existingSiblingNames: [],
-    startSortOrder: 0,
+    unitId: null,
   });
 
   // `openTopLevelBuilder` is gone with the toolbar's "Build visually". The builder itself
@@ -135,7 +178,10 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   // path rather than a dormant second one.
 
   /** Which node the sheet shows. An id, not a node, so a reload re-resolves fresh children. */
-  const [sheetId, setSheetId] = useState<string | null>(null);
+  const [placeId, setPlaceId] = useState<string | null>(null);
+  /** Filters the unit list. Held here because the field lives in the page header. */
+
+
 
   const [formState, setFormState] = useState<{
     open: boolean;
@@ -172,13 +218,137 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   // Sorted once here so the board and the list agree — `Unassigned` last in both. Sorting only
   // inside the board left the list leading with the put-away pile, which is the impression the
   // board's ordering exists to avoid.
-  const tree = useMemo(() => buildLocationTree(locations).sort(placeOrder), [locations]);
+  const tree = useMemo(() => orderUnits(buildLocationTree(locations)), [locations]);
   const byNodeId = useMemo(() => indexTree(tree), [tree]);
   const occupancy = useMemo(() => rollUpOccupancy(tree, directPartCounts), [tree, directPartCounts]);
   const allLabels = useMemo(() => tree.flatMap((n) => collectLabels(n, byId)), [tree, byId]);
 
-  const sheetNode = sheetId ? byNodeId.get(sheetId) ?? null : null;
-  const sheetPath = useMemo(() => (sheetId ? nodePath(sheetId, byNodeId) : []), [sheetId, byNodeId]);
+
+  const openUnit = unitId ? byNodeId.get(unitId) ?? null : null;
+
+  /**
+   * The place whose contents show below the grid.
+   *
+   * Deliberately NOT navigation: clicking a bin leaves the grid where it is and opens what is in
+   * it underneath, so working through a cabinet costs no page loads and never loses your position.
+   * Falls back to the unit, which is right in both directions — a single-place unit IS the place,
+   * and a structured one starts by saying stock lives in the places rather than in the cabinet.
+   */
+  const selectedPlace =
+    (placeId ? byNodeId.get(placeId) : null) ?? openUnit ?? null;
+
+  /**
+   * Opening a unit from the list.
+   *
+   * Only something with structure gets drawn. A unit with nothing inside it — the Yard, a bench,
+   * the `Unassigned` pile — IS one place, so it opens its sheet: there is no grid, and drawing an
+   * empty one to say "change its layout" would answer a question nobody asked. The pile needs no
+   * special case of its own; having no children is what it has in common with the Yard, and its
+   * sheet already leads with "Put these away" rather than a count.
+   */
+  /**
+   * Adding storage is ONE step now: name it and say how it is divided, together.
+   *
+   * It used to be two — create a bare place here, then find `Divide it up…` inside its detail
+   * sheet. Nobody making a cabinet wants an empty cabinet, and the second half was behind a
+   * drawer, so a shop could easily end up with named furniture and no places in it. Naming and
+   * shaping are one decision, and since `create_location_tree` they are also one transaction.
+   */
+  /**
+   * The place the drawer is showing, if any.
+   *
+   * Deliberately separate from `placeId`, which is what the grid draws as selected. Closing the
+   * drawer should not un-highlight the cell you were just looking at — you closed a panel, you did
+   * not change your mind about which bin you are at.
+   */
+  const [drawerPlaceId, setDrawerPlaceId] = useState<string | null>(null);
+
+  /** The part whose places are showing, if the search found one. */
+  const [searchPart, setSearchPart] = useState<{ id: string; name: string; unit: string | null } | null>(null);
+
+  /** The unit being bulk-adjusted, if any. Resolved from the tree so a rename lands in its header. */
+  const [adjustUnitId, setAdjustUnitId] = useState<string | null>(null);
+  const adjustUnit = adjustUnitId ? byNodeId.get(adjustUnitId) ?? null : null;
+
+  /**
+   * The node the drawer is showing.
+   *
+   * Resolved from the tree rather than stored, so a rename or a write that reloads the board is
+   * reflected in the drawer's own header instead of showing the name it had when you opened it.
+   */
+  const drawerPlace = drawerPlaceId ? byNodeId.get(drawerPlaceId) ?? null : null;
+
+  const listHref = `/dashboard/${companyId}/inventory/locations`;
+  /**
+   * `replace`, not `push`, and `scroll: false`.
+   *
+   * Replace because clicking through six cabinets should not bury the page you arrived from under
+   * six history entries — back means "leave storage", which is what someone pressing it wants.
+   * `scroll: false` because the default scrolls to the top on every navigation, which would throw
+   * away the position you had in a 12-row grid.
+   */
+  const showUnit = (id: string | null) =>
+    router.replace(id ? `${listHref}?unit=${id}` : listHref, { scroll: false });
+
+  const openAddStorage = () => setBuilder({ open: true, unitId: null });
+
+  /**
+   * A search hit.
+   *
+   * A place selects its unit. A part opens a drawer listing everywhere it is — the dropdown picks
+   * the PART, and where it lives is the answer, which belongs on a surface that stays rather than
+   * in a menu that closes.
+   */
+  const onSearchPick = (hit: StorageHit) => {
+    if (hit.kind === 'place') {
+      setPlaceId(null);
+      setDrawerPlaceId(null);
+      setSearchPart(null);
+      showUnit(hit.id);
+      return;
+    }
+    setSearchPart({ id: hit.id, name: hit.label, unit: hit.unit });
+  };
+
+  /**
+   * Walking from a part to one of its places.
+   *
+   * Selects the unit the bin belongs to and opens that bin, and closes the part drawer — two
+   * drawers stacked would bury the thing just chosen under the thing that found it.
+   */
+  const openPlaceFromPart = (locationId: string) => {
+    const unitId = rootOf(locationId, byId);
+    setSearchPart(null);
+    setPlaceId(locationId);
+    setDrawerPlaceId(locationId);
+    showUnit(unitId);
+  };
+
+  const openUnit_ = (node: InventoryLocationNode) => {
+    // Clearing the place matters: keeping it would carry a bin from the last cabinet into this
+    // one, where it is not on the grid and its contents are simply wrong.
+    setPlaceId(null);
+    showUnit(node.id);
+  };
+
+  /**
+   * Tapping a cell in the grid.
+   *
+   * A container drills in — its stock lives in its children, so acting on it directly is exactly
+   * what the container/bin invariant refuses. A leaf selects the cell AND opens the drawer beside
+   * it, which is where a place's contents and its four verbs live.
+   */
+  const openCell = (locationId: string) => {
+    const node = byNodeId.get(locationId);
+    if (node && node.children.length > 0) {
+      setPlaceId(null);
+      setDrawerPlaceId(null);
+      showUnit(locationId);
+      return;
+    }
+    setPlaceId(locationId);
+    setDrawerPlaceId(locationId);
+  };
 
   /**
    * Names already taken beside whatever the form is about to write.
@@ -204,39 +374,47 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
    */
   const noRealStorage = tree.length > 0 && tree.every((n) => n.kind === 'system');
 
-  const openSheet = (node: InventoryLocationNode) => setSheetId(node.id);
 
-  // Every action closes the sheet first: they all open a modal of their own, and two stacked
-  // surfaces on a tablet leaves nothing legible underneath.
+  // A unit's own actions. Everything that belongs to a PLACE lives in the drawer instead, so this
+  // list is short and none of it competes with the four verbs.
   const sheetActions = {
-    onCountHere: (node: InventoryLocationNode) => {
-      setSheetId(null);
-      router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`);
+    /*
+     * The audit of a whole unit.
+     *
+     * `?location=` resolves a container to every leaf under it, so this means "audit this cabinet,
+     * bin by bin" — which is the scale an audit actually happens at. A single place is audited in
+     * the drawer instead; see `PlaceAdjustForm`. Both ends call `commitCount`, so the rows written
+     * are identical and the split is only in the surface.
+     */
+    onAdjust: (node: InventoryLocationNode) => {
+      // A DRAWER, not a page. It was the last control on Storage that navigated, and it did it for
+      // the operation you are most likely to run while looking at the cabinet. The shop-wide
+      // worksheet still exists and is still reached from Parts as `Count Inventory`; what moved
+      // here is its place-scoped half.
+      setDrawerPlaceId(null);
+      setAdjustUnitId(node.id);
     },
     onAddChild: (node: InventoryLocationNode) => {
-      setSheetId(null);
+      setPlaceId(null);
       setFormState({ open: true, location: null, parentId: node.id, parentPath: computePath(node.id, byId) });
     },
+    /**
+     * `Change layout`, which now changes the layout.
+     *
+     * It used to hand the builder the unit's existing child names and a `startSortOrder` past
+     * them, so a second pass generated Row 4–6 beside Row 1–3 — the append bug, expressed as two
+     * props. The builder resolves the unit from `byNodeId` itself and diffs against it.
+     */
     onSubdivide: (node: InventoryLocationNode) => {
-      setSheetId(null);
-      setBuilder({
-        open: true,
-        parentId: node.id,
-        parentPath: computePath(node.id, byId),
-        // What's already inside, so a second subdivide continues the run (Row 4–6) rather than
-        // regenerating Row 1–3 and colliding partway through the sequential inserts.
-        existingSiblingNames: node.children.map((c) => c.name),
-        // …and sort the new children AFTER them, or they interleave: subdividing a cabinet that
-        // holds Shelf A/B into Rows drew `Row 1 · Row 2 · Shelf A · Row 3 · Shelf B`.
-        startSortOrder: node.children.reduce((max, c) => Math.max(max, c.sort_order), -1) + 1,
-      });
+      setPlaceId(null);
+      setBuilder({ open: true, unitId: node.id });
     },
     onEdit: (node: InventoryLocationNode) => {
-      setSheetId(null);
+      setPlaceId(null);
       setFormState({ open: true, location: node, parentId: node.parent_id, parentPath: [] });
     },
     onPrintQR: (node: InventoryLocationNode) => {
-      setSheetId(null);
+      setPlaceId(null);
       setQrState({
         open: true,
         node,
@@ -245,7 +423,7 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       });
     },
     onDuplicate: async (node: InventoryLocationNode) => {
-      setSheetId(null);
+      setPlaceId(null);
       try {
         const created = await duplicateLocation(companyId, node.id);
         await reload();
@@ -254,67 +432,14 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
         setToast(e instanceof Error ? e.message : 'Failed to duplicate location.');
       }
     },
-    onMove: (node: InventoryLocationNode) => {
-      setSheetId(null);
-      setMoveState({ open: true, node });
-    },
     onDelete: (node: InventoryLocationNode) => {
-      setSheetId(null);
+      setPlaceId(null);
       setDeleteState({ open: true, node });
     },
   };
 
-  /**
-   * Re-parent a place.
-   *
-   * `moveLocation` shipped with the first locations migration, complete with cycle detection and
-   * tests, and never had a caller — so a cabinet created under the wrong parent was permanent and
-   * the only remedy was deleting the subtree and rebuilding it. Drag-to-reparent stays cut
-   * (§5.5); this is the same picker the rest of the app uses.
-   *
-   * The options exclude the node itself AND its descendants. `moveLocation` refuses a cycle
-   * anyway, but offering a destination that will be rejected is a worse experience than not
-   * offering it — the guard is the backstop, not the interface.
-   *
-   * Same reasoning now excludes any place holding stock DIRECTLY. Since 20260806160053 a location
-   * that holds stock cannot become a container, and unlike "Divide it up…" a Move has no
-   * distribution step to hang on it — so the database simply refuses. A cabinet whose *shelves*
-   * are full is still a fine destination, which is why `locationParentOptions` reads `directParts`
-   * rather than the rolled-up `hasStock`: the latter would exclude every populated cabinet in the
-   * shop and quietly empty this list.
-   */
-  const [moveState, setMoveState] = useState<{ open: boolean; node: InventoryLocationNode | null }>({
-    open: false,
-    node: null,
-  });
-  const [moveTo, setMoveTo] = useState<LocationPickerOption | null>(null);
-  const [moving, setMoving] = useState(false);
 
-  const moveOptions = useMemo<LocationPickerOption[]>(() => {
-    const node = moveState.node;
-    if (!node) return [];
-    return [
-      { id: TOP_LEVEL, label: 'Top level (not inside anything)', kind: null },
-      ...locationParentOptions(locations, { nodeId: node.id, occupancy }),
-    ];
-  }, [moveState.node, locations, occupancy]);
 
-  const confirmMove = async () => {
-    const node = moveState.node;
-    if (!node || !moveTo) return;
-    setMoving(true);
-    try {
-      await moveLocation(node.id, moveTo.id === TOP_LEVEL ? null : moveTo.id, companyId);
-      await reload();
-      setToast(`Moved ${node.name}.`);
-      setMoveState({ open: false, node: null });
-      setMoveTo(null);
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Failed to move location.');
-    } finally {
-      setMoving(false);
-    }
-  };
 
   const submitForm = async (values: LocationFormValues) => {
     if (formState.location) {
@@ -359,68 +484,75 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
   };
 
   return (
-    <Box>
+    <Box
+      sx={{
+        /*
+         * MAKE ROOM FOR THE DRAWER instead of letting it sit on top of the pane.
+         *
+         * The place drawer is `persistent` from `sm` up — it has to be, because a modal one made
+         * the grid and its section tabs inert, which is the dead end this all started from. A
+         * persistent drawer overlays rather than reflows, so `Print QR` and the hint under the grid
+         * were sliced in half by it. Reserving the width when it is open is the other half of that
+         * pattern; the transition matches MUI's own so the pane slides rather than jumps.
+         *
+         * Not on a phone: there the drawer is full width and covering the page is the point.
+         */
+        transition: (t) =>
+          t.transitions.create('padding-right', {
+            easing: t.transitions.easing.sharp,
+            duration: t.transitions.duration.enteringScreen,
+          }),
+        pr: { xs: 0, sm: drawerPlace ? `${PLACE_DRAWER_WIDTH}px` : 0 },
+      }}
+    >
       {/*
-        Toolbar.
+        THREE SCOPES, THREE PLACES — and the top row now holds only one of them.
 
-        It once held five setup controls — Scan · Print all labels · New top-level location ·
-        Build visually, plus a Board|List toggle — on a page whose own spec section is titled
-        "Design for the sustain, not the setup". Scan left because scanning a printed label is
-        something you do standing at a shelf, so it belongs to the operator. `Build visually`
-        left because it called the identical function as the in-grid Add tile.
+        It has been four arrangements. Five setup controls on a page whose own spec section is
+        titled "Design for the sustain, not the setup"; then three aimed at three different scopes;
+        then a search box stranded inside the list column while the page's buttons floated above it;
+        then one row grouping list-scope and shop-scope controls side by side. That last one still
+        straddled two scopes, which is why the page read flat: `Find a place` and `Add storage` act
+        on the LIST, `Print all labels` acts on the SHOP, and the unit's own actions were already
+        down in the pane.
 
-        **The Board|List toggle is worth a correction.** It was removed on the reasoning that
-        "an indented text tree is the opposite of the map the research asks for, and Cabinet 1
-        alone exploded into 15 rows". The second half was an artefact of the WIZARD, not of
-        lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in one pass. And the map it
-        was protecting turned out to draw nothing for a flat shop. The list won in the end —
-        see the note at the top of `LocationTable`. There is no toggle now because there is
-        nothing to toggle between.
-
-        `Add storage` moved here from the board's in-grid tile: a table has no grid to hold a
-        tile, and a toolbar button is where every other "new thing" in this product lives.
+        Now: the page bar holds only what belongs to neither column — the search, which answers
+        about anything in storage, and `Print all labels`, which prints all of them. `Add storage`
+        moved into the list's own header, beside the thing it adds to.
       */}
-      {/* Hidden entirely with no places: `Print all labels` has nothing to print, `Count
-          everything` has nothing to count, and a second `Add storage` would sit a few hundred
-          pixels above the one in the empty-state card. One screen, one call to action. */}
       {tree.length > 0 && (
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Box sx={{ flex: 1 }} />
-        <Button
-          variant="outlined"
-          startIcon={<QrCode2Icon />}
-          onClick={printAllLabels}
-          disabled={loading || allLabels.length === 0}
+        <Box
+          sx={{
+            display: 'flex',
+            gap: 1,
+            mb: 2,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
         >
-          Print all labels
-        </Button>
-        {/* Was an in-grid tile on the board. A table has no grid to put a tile in, and a toolbar
-            button is where every other "new thing" on this product lives. */}
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => setFormState({ open: true, location: null, parentId: null, parentPath: [] })}
-        >
-          Add storage
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<FactCheckOutlinedIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/inventory/count`)}
-        >
-          Count all parts
-        </Button>
-      </Box>
-      )}
+          <StorageSearch companyId={companyId} tree={tree} onPick={onSearchPick} />
 
-      {/* The page never said what it was for, and a first-time reader could not tell — reasonably,
-          because almost every control on it is one-time setup. Two sentences: what you're looking
-          at, and the one thing here you come back to do. */}
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
-        Your storage, and what&apos;s in it. Click a place to count it, put parts away, print its QR
-        label, or divide it up. Adding and removing stock happens on the part itself, or on the
-        shop floor by scanning a label.
-      </Typography>
+          <Box sx={{ flex: 1 }} />
+
+          {/*
+            `Count all parts` is gone from here, and nothing replaced it.
+
+            It opened the company-wide count sheet — every stocked part across the shop in one
+            list. Nobody audits a shop that way: you audit one cabinet, walking bin to bin, which
+            is what `Bulk Adjust` on a unit does. A shop-wide sheet still exists for whoever wants
+            one; it is `Count Inventory` on the Parts toolbar, where the noun is the items rather
+            than the places.
+          */}
+          <Button
+            variant="outlined"
+            startIcon={<QrCode2Icon />}
+            onClick={printAllLabels}
+            disabled={loading || allLabels.length === 0}
+          >
+            Print all labels
+          </Button>
+        </Box>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -431,25 +563,13 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       ) : tree.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            {/* One button, matching the board's single "Add storage" tile. This offered
-                "Build visually" and "Add manually" side by side — asking someone who has
-                never seen the feature to choose between two flows before they know what
-                either produces. Name one place; subdivide it later if it needs it. */}
             <Typography color="text.secondary" sx={{ mb: 2 }}>
-              No storage yet. Name the places you already have — a cabinet, a shelf, the
+              No storage yet. Name the locations you already have — a cabinet, a shelf, the
               yard — then print QR labels to scan from the shop floor.
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() =>
-                  setFormState({ open: true, location: null, parentId: null, parentPath: [] })
-                }
-              >
-                Add storage
-              </Button>
-            </Box>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openAddStorage}>
+              Add storage
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -459,19 +579,166 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
           {noRealStorage && (
             <Alert severity="info" sx={{ mb: 2 }}>
               {occupancyFor(occupancy, tree[0].id).totalParts.toLocaleString()} parts, nowhere in
-              particular. Build your cabinets, shelving, and bins below, then print QR labels to
-              scan from the shop floor.
+              particular. Build your cabinets, shelving, and bins, then print QR labels to scan
+              from the shop floor.
             </Alert>
           )}
 
-          <LocationTable
-            tree={tree}
-            occupancy={occupancy}
-            onOpen={openSheet}
-            onCountHere={(node) =>
-              router.push(`/dashboard/${companyId}/inventory/count?location=${node.id}`)
-            }
-          />
+          {/*
+            The workspace: pick on the left, work on the right.
+
+            The paragraph of instructions that used to sit above this is gone. It explained a page
+            whose shape did not explain itself — a list you clicked to swap the page out from under
+            you. A list beside the thing it selects needs no caption, and the sentence about stock
+            living on the part was answering a question nobody had asked yet.
+
+            Below `md` these are two screens rather than two panes, which is what the operator
+            surface has always done.
+          */}
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 3,
+              alignItems: 'flex-start',
+              /*
+               * Neither pane scrolls, and the page barely does — the GRID owns the vertical
+               * overflow instead (see `UnitGridView`). Two other approaches were tried in the
+               * browser and both failed for reasons worth recording:
+               *
+               *   - Nested scroll panes: `maxHeight: 100%` on a child resolves against a parent
+               *     with no definite height, so nothing ever scrolled.
+               *   - A sticky list: `main` carries `overflow: auto` but never actually scrolls (the
+               *     window does), and an `overflow` ancestor silently makes sticky a no-op.
+               *
+               * Capping the grid keeps the list on screen without depending on the app shell's
+               * scroll arrangement, which is not this page's to change.
+               */
+            }}
+          >
+            <Box
+              sx={{
+                // On a phone the list IS the screen until you pick something, and then it gets
+                // out of the way entirely.
+                display: { xs: openUnit ? 'none' : 'block', md: 'block' },
+                width: { xs: '100%', md: 320 },
+                flexShrink: 0,
+                minWidth: 0,
+                maxHeight: { md: 'calc(100vh - 260px)' },
+                overflowY: { md: 'auto' },
+                /*
+                 * ITS OWN SURFACE, from `md` up.
+                 *
+                 * The list, the unit pane and the page were one flat colour, so a master–detail
+                 * layout read as a single column of stuff with a gap in it. A slightly raised
+                 * ground and a rule down the right edge is the least that says "these are two
+                 * panes" — no new palette entry, just the theme's own `action.hover` and
+                 * `divider`, so it holds in whatever the theme does next.
+                 *
+                 * Not applied on a phone: there the list is the entire screen, and a surface that
+                 * differs from nothing is just a tint.
+                 */
+                bgcolor: { md: 'action.hover' },
+                borderRight: { md: '1px solid' },
+                borderColor: { md: 'divider' },
+                borderRadius: { md: 1 },
+                p: { md: 1.5 },
+                pr: { md: 1.5 },
+              }}
+            >
+              {/*
+                The list's own header, so the column reads as a thing rather than as the left half
+                of a page. `Add storage` lives here because this is what it adds to — it was in the
+                page bar, one row away from `Print all labels`, which acts on the whole shop.
+              */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 1,
+                  mb: 1,
+                }}
+              >
+                <Typography variant="overline" color="text.secondary">
+                  Storage
+                </Typography>
+                {/*
+                  Shows `Add`, because the heading beside it already says Storage and a 320px
+                  column has no room to say it twice. Named in full for anything that cannot see
+                  the heading — a bare "Add" would also collide with the drawer's `Add` verb, which
+                  is a different action on a different thing.
+                */}
+                {/*
+                  CONTAINED, matching `Bulk Adjust` in the pane beside it.
+                  
+                  It was a text button — the lowest emphasis the design system has — for the one
+                  thing this column is for. The decision log records why the LABEL is `Add` and not
+                  `Add storage`; nothing ever argued for the emphasis. The two live in different
+                  columns and act on different scopes, so they do not compete.
+                */}
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={openAddStorage}
+                  aria-label="Add storage"
+                >
+                  Add
+                </Button>
+              </Box>
+
+              <StorageUnitList
+                tree={tree}
+                occupancy={occupancy}
+                selectedId={openUnit?.id ?? null}
+                onOpen={openUnit_}
+              />
+            </Box>
+
+            {openUnit && selectedPlace ? (
+              <Box
+                sx={{ flex: 1, minWidth: 0 }}
+              >
+                <LocationPanel
+                  unit={openUnit}
+                  place={selectedPlace}
+                  occupancy={occupancy}
+                  onSelectPlace={openCell}
+                  actions={sheetActions}
+                  // Everything above the pane's subject, so drilling into a container is never a
+                  // one-way trip. `computePath` includes the node itself, hence the slice.
+                  ancestors={ancestorsOf(openUnit.id, byId)}
+                  onSelectAncestor={showUnit}
+                  backSlot={
+                    <Button
+                      startIcon={<ArrowBackIcon />}
+                      onClick={() => showUnit(null)}
+                      // Only where the list is not already beside you. On a wide screen it would
+                      // be a back link out of something you can still see.
+                      sx={{ ml: -1, mb: 0.5, display: { xs: 'inline-flex', md: 'none' } }}
+                    >
+                      All storage
+                    </Button>
+                  }
+                />
+              </Box>
+            ) : (
+              /* Nothing picked, on a wide screen. Says what the pane is for rather than leaving
+                 half the page blank and unexplained. Hidden on a phone, where the list is the
+                 whole screen and there is no empty pane to explain. */
+              <Box
+                sx={{
+                  display: { xs: 'none', md: 'block' },
+                  flex: 1,
+                  minWidth: 0,
+                  pt: 6,
+                  textAlign: 'center',
+                }}
+              >
+                <Typography color="text.secondary">Pick a location to see what is in it.</Typography>
+              </Box>
+            )}
+          </Box>
         </>
       )}
 
@@ -479,16 +746,6 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
           standing at a shelf, which is the operator surface, not this admin page. It moved
           to the operator tab bar, where it also resolves job travelers — one scanner for
           every kind of Jigged QR. */}
-
-      <LocationDetailSheet
-        open={sheetNode !== null}
-        node={sheetNode}
-        path={sheetPath}
-        occupancy={occupancy}
-        actions={sheetActions}
-        onNavigate={openSheet}
-        onClose={() => setSheetId(null)}
-      />
 
       <LocationFormModal
         open={formState.open}
@@ -509,53 +766,58 @@ export default function LocationsManager({ companyId }: LocationsManagerProps) {
       <VisualLocationBuilder
         open={builder.open}
         companyId={companyId}
-        parentId={builder.parentId}
-        parentPath={builder.parentPath}
-        existingSiblingNames={builder.existingSiblingNames}
-        startSortOrder={builder.startSortOrder}
+        // Resolved from the live tree rather than captured when the button was pressed, so a
+        // reload behind the dialog cannot leave it editing a stale copy of the cabinet.
+        unit={builder.unitId ? byNodeId.get(builder.unitId) ?? null : null}
+        parentPath={builder.unitId ? computePath(builder.unitId, byId) : []}
+        siblingNames={tree.map((n) => n.name)}
+        // Already rolled up for the grid. Handing it over is what lets the dialog say "3 of these
+        // hold stock" as you type, with no request of its own.
+        occupancy={occupancy}
         onClose={() => setBuilder((s) => ({ ...s, open: false }))}
-        onCreated={(n) => {
+        onDone={(message) => {
           void reload();
-          setToast(`Created ${n} location${n === 1 ? '' : 's'}.`);
+          setToast(message);
         }}
       />
 
-      <Dialog
-        open={moveState.open}
-        onClose={() => {
-          setMoveState({ open: false, node: null });
-          setMoveTo(null);
-        }}
-        fullWidth
-        maxWidth="xs"
-      >
-        <DialogTitle>Move {moveState.node?.name}</DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Everything inside it moves too, and the stock goes with it — this changes where a
-            place sits, not what is in it.
-          </DialogContentText>
-          <LocationPicker
-            label="Move it into"
-            options={moveOptions}
-            value={moveTo}
-            onChange={setMoveTo}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              setMoveState({ open: false, node: null });
-              setMoveTo(null);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button variant="contained" disabled={!moveTo || moving} onClick={confirmMove}>
-            Move
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* A whole unit, bin by bin, without leaving the page it belongs to. */}
+      <UnitAdjustDrawer
+        unit={adjustUnit}
+        companyId={companyId}
+        onClose={() => setAdjustUnitId(null)}
+        onChanged={reload}
+      />
+
+      {/*
+        One place, beside the grid it belongs to. Add · Remove · Move · Adjust are views INSIDE it
+        rather than dialogs over it — a dialog on a drawer is two stacked surfaces with the subject
+        buried under both, which is the failure the old detail sheet was deleted for.
+      */}
+      {/* One part, and everywhere it is — the answer to "where is my o-ring?". */}
+      <PartPlacesDrawer
+        part={searchPart}
+        companyId={companyId}
+        // Leaves only, never the put-away pile. The form excludes the place being moved FROM.
+        moveDestinations={stockDestinationOptions(locations)}
+        onClose={() => setSearchPart(null)}
+        onOpenPlace={openPlaceFromPart}
+        onChanged={reload}
+      />
+
+      <PlaceDrawer
+        place={drawerPlace}
+        companyId={companyId}
+        path={drawerPlace ? computePath(drawerPlace.id, byId).join(' › ') : ''}
+        hasStock={drawerPlace ? occupancyFor(occupancy, drawerPlace.id).hasStock : false}
+        // Leaves only, never the put-away pile, and never back to where it already is.
+        moveDestinations={
+          drawerPlace ? stockDestinationOptions(locations, { excludeId: drawerPlace.id }) : []
+        }
+        actions={sheetActions}
+        onClose={() => setDrawerPlaceId(null)}
+        onChanged={reload}
+      />
 
       <Dialog open={deleteState.open} onClose={() => setDeleteState({ open: false, node: null })}>
         <DialogTitle>Delete location?</DialogTitle>

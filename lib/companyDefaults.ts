@@ -17,6 +17,19 @@
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
  *                               '{defaults,quote_validity_days}', '20')
  *    WHERE id = '<company-uuid>';
+ *
+ * TWO DEFAULTS DELIBERATELY LIVE OUTSIDE ALL OF THIS: the shop's starting
+ * markups for new parts (`companies.default_markup_made_percent` /
+ * `default_markup_bought_percent`, #727). They look exactly like KNOWN_DEFAULTS
+ * entries — bounded per-tenant numbers — and they are real columns anyway
+ * because `coerceInt` below rounds to a whole number, and a markup is
+ * numeric(10,6) precisely because 0.01% moves a price. A shop selling at 22.5%
+ * must not be seeded at 23%. Do not "tidy" them in here.
+ *
+ * They follow the same read-ONCE-at-write-time discipline the payment-terms
+ * note below describes, for the same reason: resolved into a part's own pricing
+ * tier when it is created, never consulted again. Writer + full rationale:
+ * `setCompanyStarterMarkups` in `utils/companyAccess.ts`.
  */
 
 import type { Company } from '@/utils/companyAccess';

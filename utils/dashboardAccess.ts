@@ -44,428 +44,456 @@ export interface ActivityItem {
   quantityLabel?: string;
 }
 
-// ============== Pinned Metrics ==============
+// ============== Dashboard metrics ==============
 
-export type MetricKey =
-  | 'open_quotes'
-  | 'not_started_jobs'
-  | 'in_progress_jobs'
-  | 'revenue'
-  | 'completed_jobs'
-  | 'overdue_jobs';
+/**
+ * Four metrics, fixed, in this order. There is no picker and no second page:
+ * the scorecard row is one screen of four cards and that is the whole of it.
+ *
+ * They read left to right as an alert followed by the flow of work — what is
+ * late, what is in hand, what went out, what might come in.
+ */
+export type MetricKey = 'overdue_jobs' | 'open_jobs' | 'completed_jobs' | 'open_quotes';
 
 export type MetricTimePeriod = 'today' | 'this_week';
 
 export interface MetricDefinition {
   key: MetricKey;
   label: string;
-  format: 'number' | 'currency';
+  /**
+   * Only Completed is scoped to a period. The other three are a snapshot of
+   * right now — "12 jobs in progress this week" is not a thing, and a period
+   * control that three of four cards ignore reads as broken. The Today / This
+   * Week toggle therefore lives ON the Completed card, not over the row.
+   */
   supportsTimePeriod?: boolean;
 }
 
-export const AVAILABLE_METRICS: MetricDefinition[] = [
-  { key: 'open_quotes', label: 'Open Quotes', format: 'number' },
-  { key: 'not_started_jobs', label: 'Jobs Not Started', format: 'number' },
-  { key: 'in_progress_jobs', label: 'Jobs In Progress', format: 'number' },
-  { key: 'revenue', label: 'Revenue', format: 'currency', supportsTimePeriod: true },
-  { key: 'completed_jobs', label: 'Completed Jobs', format: 'number', supportsTimePeriod: true },
-  { key: 'overdue_jobs', label: 'Overdue Jobs', format: 'number' },
+export const DASHBOARD_METRICS: readonly MetricDefinition[] = [
+  { key: 'overdue_jobs', label: 'Overdue Jobs' },
+  { key: 'open_jobs', label: 'Open Jobs' },
+  { key: 'completed_jobs', label: 'Completed Jobs', supportsTimePeriod: true },
+  { key: 'open_quotes', label: 'Open Quotes' },
 ];
 
-// The user pins up to this many metrics; they render as the primary dashboard
-// cards (one page of the scorecard grid). Overdue Jobs is a normal pickable
-// metric — included in the defaults so it shows out of the box, but the user
-// can reorder or remove it like any other.
-export const PINNED_METRIC_SLOTS = 4;
+/**
+ * A metric's count, and the money behind it.
+ *
+ * `money` is `null` where no honest figure exists — which is Open Quotes, and
+ * for a real reason rather than a shortcut. A quote may carry several priced
+ * options for the same part so the customer can choose; summing its lines adds
+ * up alternatives that were never all going to happen. On the pilot shop's live
+ * data that overstates the book by ~8%, and the "right" number is not merely
+ * hard to compute but undefined, because nobody has chosen yet.
+ */
+export interface MetricValue {
+  count: number;
+  money: number | null;
+  /** Prior-period money, for the delta. Only Completed carries one. */
+  previousMoney?: number;
+  /**
+   * Open Jobs only: how the total divides between work that has not begun and
+   * work on the floor. The merged tile would otherwise hide whether the shop is
+   * flowing or piling up.
+   */
+  split?: {
+    notStarted: { count: number; money: number };
+    inProgress: { count: number; money: number };
+  };
+}
 
-export const DEFAULT_PINNED_METRICS: MetricKey[] = [
-  'overdue_jobs',
-  'open_quotes',
-  'not_started_jobs',
-  'in_progress_jobs',
-];
-
-// Metrics the user is allowed to pin — every available metric.
-export const PICKABLE_METRICS: MetricDefinition[] = AVAILABLE_METRICS;
-
-// Legacy key migration map
-const LEGACY_KEY_MAP: Record<string, MetricKey> = {
-  weekly_revenue: 'revenue',
-  monthly_revenue: 'revenue',
-  // active_jobs used to count not_started + in_progress (a union); it has
-  // been split into two separate metrics. Map old user prefs to the
-  // not_started half so existing dashboards keep one tile in roughly the
-  // same conceptual slot.
-  active_jobs: 'not_started_jobs',
+/** The shape every job-money query selects. */
+type JobValueRow = {
+  id: string;
+  production_status: string | null;
+  fulfillment_status: string | null;
+  job_parts:
+    | { total_price: number | null; unit_price: number | null; quantity: number | null }[]
+    | null;
 };
-const REMOVED_KEYS = ['at_risk_count', 'low_inventory_count', 'total_customers', 'total_parts'];
+
+const JOB_VALUE_SELECT =
+  'id, production_status, fulfillment_status, job_parts(total_price, unit_price, quantity)';
 
 /**
- * Get the user's pinned metric keys from user_preferences.
- * Returns defaults if no preference is stored.
- * Automatically migrates legacy keys.
+ * The agreed money on a job: its OWN job_parts line totals, never the source
+ * quote's. The job part is the post-conversion source of truth, so this follows
+ * a quantity edited after conversion and does not over-count a price-options
+ * quote's unchosen lines. `insights_service._job_part_revenue` is the same rule
+ * on the backend, and the two must not drift.
  */
-export async function getPinnedMetricKeys(): Promise<MetricKey[]> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return DEFAULT_PINNED_METRICS;
-
-  const { data, error } = await supabase
-    .from('user_preferences')
-    .select('preferences')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (error || !data) return DEFAULT_PINNED_METRICS;
-
-  const prefs = data.preferences as Record<string, unknown> | null;
-  const pinned = prefs?.dashboard_pinned_metrics;
-  if (Array.isArray(pinned) && pinned.length > 0) {
-    // Migrate legacy keys (rename / drop removed)
-    const migrated = pinned
-      .map((k: string) => LEGACY_KEY_MAP[k] || k)
-      .filter((k: string) => !REMOVED_KEYS.includes(k))
-      .filter((k: string, i: number, arr: string[]) => arr.indexOf(k) === i) as MetricKey[];
-
-    // One-time Overdue migration: Overdue Jobs used to be force-pinned outside
-    // the stored list, so pre-existing prefs never contain it. Now it's a normal
-    // selectable metric — fold it in once (front, capped at the slot count) so it
-    // stays visible on existing dashboards. Gated by a flag (stamped whenever
-    // prefs are saved, see setPinnedMetricKeys) so a later deliberate removal
-    // sticks instead of bouncing back on the next load.
-    const overdueFolded =
-      prefs?.dashboard_overdue_selectable_migrated !== true && !migrated.includes('overdue_jobs');
-    const withOverdue = overdueFolded
-      ? (['overdue_jobs', ...migrated].slice(0, PINNED_METRIC_SLOTS) as MetricKey[])
-      : migrated;
-
-    // Persist if legacy keys changed or we just folded Overdue in (the save also
-    // stamps the migration flag).
-    const changed =
-      withOverdue.length !== pinned.length || withOverdue.some((k, i) => k !== pinned[i]);
-    if (changed || overdueFolded) {
-      // The `.catch` stays so a rejection here can never surface as an unhandled one, but it no
-      // longer captures: `setPinnedMetricKeys` doesn't inspect its own upsert error, and that
-      // upsert is now reported by the Supabase integration (#708). Capturing here as well would
-      // duplicate it.
-      setPinnedMetricKeys(withOverdue).catch(() => {});
-    }
-
-    return withOverdue.length > 0 ? withOverdue : DEFAULT_PINNED_METRICS;
-  }
-  return DEFAULT_PINNED_METRICS;
-}
-
-/**
- * Save the user's pinned metric keys to user_preferences.
- */
-export async function setPinnedMetricKeys(keys: MetricKey[]): Promise<void> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  // Read existing preferences first
-  const { data: existing } = await supabase
-    .from('user_preferences')
-    .select('preferences')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
-  const updatedPrefs = {
-    ...currentPrefs,
-    dashboard_pinned_metrics: keys,
-    // Any explicit save makes the user's list authoritative (including whether
-    // they kept Overdue), so stamp the one-time Overdue migration as done.
-    dashboard_overdue_selectable_migrated: true,
-  };
-
-  await supabase
-    .from('user_preferences')
-    .upsert(
-      {
-        user_id: user.id,
-        preferences: updatedPrefs,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    );
-}
-
-// ============== Time Period Preferences ==============
-
-/**
- * Get the user's saved time period preferences for metrics.
- */
-export async function getMetricTimePeriods(): Promise<Partial<Record<MetricKey, MetricTimePeriod>>> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return {};
-
-  const { data, error } = await supabase
-    .from('user_preferences')
-    .select('preferences')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (error || !data) return {};
-
-  const prefs = data.preferences as Record<string, unknown> | null;
-  const periods = prefs?.dashboard_metric_periods;
-  if (periods && typeof periods === 'object') {
-    return periods as Partial<Record<MetricKey, MetricTimePeriod>>;
-  }
-  return {};
-}
-
-/**
- * Save a single metric's time period preference.
- */
-export async function setMetricTimePeriod(key: MetricKey, period: MetricTimePeriod): Promise<void> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const { data: existing } = await supabase
-    .from('user_preferences')
-    .select('preferences')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
-  const currentPeriods = (currentPrefs.dashboard_metric_periods as Record<string, string>) || {};
-  const updatedPrefs = {
-    ...currentPrefs,
-    dashboard_metric_periods: { ...currentPeriods, [key]: period },
-  };
-
-  await supabase
-    .from('user_preferences')
-    .upsert(
-      {
-        user_id: user.id,
-        preferences: updatedPrefs,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    );
-}
-
-// ============== Metric Value Queries ==============
-
-// The typed client needs a literal table name to resolve column types,
-// so this helper is constrained to the tables it actually counts over.
-// Add to the union if a new caller needs a different table.
-type CountableTable = 'quotes' | 'jobs';
-
-async function getCount(
-  table: CountableTable,
-  companyId: string,
-  filters?: Record<string, string[]>,
-): Promise<number> {
-  const supabase = getSupabase();
-  let query = supabase.from(table).select('*', { count: 'exact', head: true }).eq('company_id', companyId);
-
-  if (filters) {
-    for (const [col, values] of Object.entries(filters)) {
-      query = query.in(col, values);
-    }
-  }
-
-  const { count, error } = await query;
-  if (error) throw error;
-  return count || 0;
-}
-
-/**
- * Return [currentPeriodStart, nextPeriodStart] as ISO strings.
- * "today" → midnight today → midnight tomorrow.
- * "this_week" → Sunday 00:00 → next Sunday 00:00.
- */
-function periodBounds(period: MetricTimePeriod, offsetPeriods = 0): { start: string; end: string } {
-  const now = new Date();
-  if (period === 'today') {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() + offsetPeriods);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 1);
-    return { start: start.toISOString(), end: end.toISOString() };
-  }
-  const start = new Date(now);
-  start.setDate(now.getDate() - now.getDay() + offsetPeriods * 7);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 7);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
-
-async function getRevenueInRange(
-  companyId: string,
-  startIso: string,
-  endIso: string
-): Promise<number> {
-  const supabase = getSupabase();
-  // "Revenue in range" used to filter jobs.shipped_at — but shipped_at is
-  // gone in the dual-status model. Re-anchor on fulfillment_status =
-  // fully_shipped and use updated_at as the in-range proxy (same shape as
-  // getCompletedJobsInRange below). We sum quote_line_items.total_price and
-  // don't need a per-job ship date here — job_last_ship_date exists only as a
-  // job_last_ship_date(uuid) function, not a jobs-row computed column, so
-  // selecting it as a computed column made PostgREST reject the query with 400.
-  const { data, error } = await supabase
-    .from('jobs')
-    .select(
-      'id, quotes!jobs_quote_id_fkey(quote_line_items(total_price))',
-    )
-    .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .eq('fulfillment_status', 'fully_shipped')
-    .gte('updated_at', startIso)
-    .lt('updated_at', endIso);
-
-  if (error) throw error;
-
-  type Row = {
-    quotes: { quote_line_items: { total_price: number | null }[] | null } | null;
-  };
-
-  return ((data || []) as unknown as Row[]).reduce((sum, job) => {
-    const lines = job.quotes?.quote_line_items ?? [];
-    return sum + lines.reduce((s, li) => s + (li.total_price || 0), 0);
+function jobValue(row: JobValueRow): number {
+  const parts = row.job_parts ?? [];
+  return parts.reduce((sum, jp) => {
+    if (jp.total_price !== null) return sum + jp.total_price;
+    if (jp.unit_price !== null && jp.quantity !== null) return sum + jp.unit_price * jp.quantity;
+    return sum;
   }, 0);
 }
 
-async function getCompletedJobsInRange(
-  companyId: string,
-  startIso: string,
-  endIso: string
-): Promise<number> {
+
+/**
+ * Work still owed: jobs not finished on the floor AND not fully out the door.
+ *
+ * Both axes, deliberately. `production_status` and `fulfillment_status` are
+ * independent — a shop that ships without operators closing out operations
+ * leaves jobs `not_started` and `fully_shipped` at the same time, and there are
+ * 39 such jobs on the pilot shop. Filtering on production alone put $37,769 of
+ * already-delivered work in this tile under the words "not yet shipped", while
+ * the same money also counted as revenue in Completed Jobs. `applyOverdueJobsFilter`
+ * always excluded fully-shipped; this now agrees with it.
+ *
+ * The money is what is still OWED — ordered minus already shipped — so a
+ * part-shipped job contributes only the remainder. Its shipped half is revenue
+ * and is counted once, in Completed Jobs. Nothing on the row is double counted.
+ */
+async function getOpenJobs(companyId: string): Promise<MetricValue> {
   const supabase = getSupabase();
-  // "Completed" on the dashboard means the FR-18 done predicate
-  // (production = completed/cancelled AND fulfillment = fully_shipped).
-  // Server-side we approximate with the fulfillment half, which is the
-  // tighter constraint — a fully_shipped job is by definition done.
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from('jobs')
+    .select(JOB_VALUE_SELECT)
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .in('production_status', ['not_started', 'in_progress'])
+    .not('fulfillment_status', 'eq', 'fully_shipped');
+
+  if (error) throw error;
+
+  const rows = (data || []) as unknown as JobValueRow[];
+
+  // Only a part-shipped job has anything to subtract, and there are few of
+  // them, so the second query stays small rather than pulling every shipment
+  // the company has ever made.
+  const partIds = rows
+    .filter((r) => r.fulfillment_status === 'partially_shipped')
+    .map((r) => r.id);
+
+  const shippedByJob = new Map<string, number>();
+  if (partIds.length > 0) {
+    const { data: shipments, error: shipErr } = await supabase
+      .from('shipments')
+      .select(SHIPMENT_VALUE_SELECT)
+      .eq('company_id', companyId)
+      .is('voided_at', null)
+      .is('jobs.deleted_at', null)
+      .in('job_id', partIds);
+
+    if (shipErr) throw shipErr;
+
+    for (const row of (shipments || []) as unknown as ShipmentValueRow[]) {
+      if (!row.job_id) continue;
+      shippedByJob.set(row.job_id, (shippedByJob.get(row.job_id) ?? 0) + shipmentValue(row));
+    }
+  }
+
+  const notStarted = { count: 0, money: 0 };
+  const inProgress = { count: 0, money: 0 };
+
+  for (const row of rows) {
+    const bucket = row.production_status === 'in_progress' ? inProgress : notStarted;
+    bucket.count += 1;
+    // Never below zero: shipping more than was ordered is a data problem, not a
+    // negative amount of backlog.
+    bucket.money += Math.max(0, jobValue(row) - (shippedByJob.get(row.id) ?? 0));
+  }
+
+  // These two states are disjoint, so this is the one figure on the dashboard
+  // that is genuinely additive. Every other pair of cards overlaps or measures
+  // a different kind of money.
+  return {
+    count: notStarted.count + inProgress.count,
+    money: notStarted.money + inProgress.money,
+    split: { notStarted, inProgress },
+  };
+}
+
+/**
+ * Jobs past their due date and not yet shipped.
+ *
+ * Uses the shared `applyOverdueJobsFilter` so this card and the jobs list can
+ * never disagree about what "overdue" means. Note the predicate restricts to
+ * `production_status IN ('not_started','in_progress')` — so every overdue job is
+ * ALSO counted in Open Jobs. Its money is a slice of that tile's, not a separate
+ * pot, which is why the card says "past due" rather than naming a bucket.
+ */
+async function getOverdueJobs(companyId: string): Promise<MetricValue> {
+  const supabase = getSupabase();
+  const query = supabase
+    .from('jobs')
+    .select(JOB_VALUE_SELECT)
+    .eq('company_id', companyId)
+    .is('deleted_at', null);
+
+  const { data, error } = await applyOverdueJobsFilter(query);
+  if (error) throw error;
+
+  const rows = (data || []) as unknown as JobValueRow[];
+  return {
+    count: rows.length,
+    money: rows.reduce((sum, row) => sum + jobValue(row), 0),
+  };
+}
+
+/**
+ * Local calendar bounds for the period, as `YYYY-MM-DD`.
+ *
+ * `shipments.ship_date` is a DATE, not a timestamp — it is the calendar day the
+ * shop says the truck left, carrying no time and no zone. So the window is
+ * compared date-to-date and there is nothing to smear: a Saturday-evening ship
+ * cannot land in Sunday because the office is west of UTC, which is exactly
+ * what the old `updated_at` timestamp comparison could do.
+ *
+ * The day still starts at midnight in the BROWSER's timezone, and the week on
+ * the local Sunday. That is the device's clock rather than a stored company
+ * setting, so a laptop travelling across a timezone shifts the window with it.
+ */
+function periodDateBounds(
+  period: MetricTimePeriod,
+  offsetPeriods = 0,
+): { start: string; end: string } {
+  const localDate = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const now = new Date();
+  const start = new Date(now);
+  if (period === 'today') {
+    start.setDate(start.getDate() + offsetPeriods);
+  } else {
+    // getDay() is 0 on Sunday, so this lands on the week's opening Sunday.
+    start.setDate(now.getDate() - now.getDay() + offsetPeriods * 7);
+  }
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + (period === 'today' ? 1 : 7));
+
+  return { start: localDate(start), end: localDate(end) };
+}
+
+/** A shipment with enough on it to price what left the building. */
+type ShipmentValueRow = {
+  job_id: string | null;
+  shipment_line_items:
+    | { quantity: number | null; job_parts: { unit_price: number | null } | null }[]
+    | null;
+};
+
+// `jobs!inner(deleted_at)` is a filter, not data: shipments carry no deleted_at
+// of their own (they are voided, not archived), so without the inner join an
+// archived job's shipments keep counting as revenue while every other tile has
+// already dropped that job. Soft-delete standard, CLAUDE.md.
+const SHIPMENT_VALUE_SELECT =
+  'id, job_id, ship_date, jobs!inner(deleted_at), shipment_line_items(quantity, job_parts(unit_price))';
+
+/** What one shipment was worth: each line's shipped quantity at its agreed price. */
+function shipmentValue(row: ShipmentValueRow): number {
+  const lines = row.shipment_line_items ?? [];
+  return lines.reduce((sum, li) => {
+    const price = li.job_parts?.unit_price;
+    if (li.quantity === null || price === null || price === undefined) return sum;
+    return sum + li.quantity * price;
+  }, 0);
+}
+
+/**
+ * Revenue is what SHIPPED, priced per shipped unit, dated by the shipment.
+ *
+ * This used to count whole jobs at their full value, bucketed by
+ * `jobs.updated_at` because no ship date exists on a job — `jobs.shipped_at` is
+ * not in the dual-status model and `job_last_ship_date` is a `(uuid)` function
+ * rather than a column, so PostgREST answers 400 if you select it. That proxy
+ * was wrong in three ways at once, and all three fall out of reading the
+ * shipment instead:
+ *
+ *   * `updated_at` meant "last written", not "shipped". Editing a PO number on a
+ *     job shipped in March pulled it into this week, and rows only ever drifted
+ *     INTO the current window, never out of it.
+ *   * A PARTIAL shipment earned nothing. A job 60% shipped had 60% of its money
+ *     in the customer's hands and contributed $0 here, while its full value sat
+ *     in Open Jobs as backlog.
+ *   * A job counted at its whole value the moment it went `fully_shipped`, even
+ *     if that happened across two months.
+ *
+ * Voided shipments are excluded — that is the point of voiding one.
+ *
+ * The count follows the money: jobs SHIPPED FROM in the window, not jobs that
+ * reached `fully_shipped`. Both halves of the card then describe the same act,
+ * so "6 · $12,480 shipped this week" is one statement rather than two
+ * measurements that happen to share a tile.
+ */
+async function getCompletedInRange(
+  companyId: string,
+  startDate: string,
+  endDate: string,
+): Promise<{ count: number; money: number }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('shipments')
+    .select(SHIPMENT_VALUE_SELECT)
+    .eq('company_id', companyId)
+    .is('voided_at', null)
+    .is('jobs.deleted_at', null)
+    .gte('ship_date', startDate)
+    .lt('ship_date', endDate);
+
+  if (error) throw error;
+
+  const rows = (data || []) as unknown as ShipmentValueRow[];
+  const jobs = new Set<string>();
+  let money = 0;
+  for (const row of rows) {
+    if (row.job_id) jobs.add(row.job_id);
+    money += shipmentValue(row);
+  }
+  return { count: jobs.size, money };
+}
+
+/**
+ * Quotes still live — active AND never converted. Count only, see
+ * `MetricValue.money`.
+ *
+ * `converted_at IS NULL` is the whole fix. `quotes.status` only ever holds
+ * `active | expired`; winning a quote sets `converted_at` and leaves the status
+ * alone, so a quote that became a job stays "active" forever and this tile
+ * counted work already won as pipeline still to win. On the pilot shop it read
+ * 25 when 11 were live; on demo companies it read 9 against 1, because nearly
+ * every demo quote is converted.
+ *
+ * The drill-down goes to `?status=open`, which the quotes list resolves through
+ * the same two conditions — the tile and the list it opens must never disagree.
+ */
+async function getOpenQuotes(companyId: string): Promise<MetricValue> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from('quotes')
     .select('*', { count: 'exact', head: true })
     .eq('company_id', companyId)
     .is('deleted_at', null)
-    .eq('fulfillment_status', 'fully_shipped')
-    .gte('updated_at', startIso)
-    .lt('updated_at', endIso);
+    .eq('status', 'active')
+    .is('converted_at', null);
 
   if (error) throw error;
-  return count || 0;
+  return { count: count || 0, money: null };
 }
 
-async function getOverdueJobs(companyId: string): Promise<number> {
-  const supabase = getSupabase();
+/**
+ * Every tile's value in one call.
+ *
+ * Each read is allowed to fail on its own — one broken metric should not blank
+ * the row — but a failure surfaces as `null` rather than as zero. "Couldn't
+ * check" must never render as a confident 0, which is what the old
+ * per-metric `catch → { value: 0 }` did.
+ */
+export async function getDashboardMetrics(
+  companyId: string,
+  completedPeriod: MetricTimePeriod,
+): Promise<Partial<Record<MetricKey, MetricValue>>> {
+  const current = periodDateBounds(completedPeriod, 0);
+  const previous = periodDateBounds(completedPeriod, -1);
 
-  // Overdue predicate is defined once in applyOverdueJobsFilter (shared with the
-  // jobs-list filter), so this count agrees with the list and the row badges —
-  // including on the day boundary (local date, not a UTC timestamp).
-  const { count, error } = await applyOverdueJobsFilter(
+  const [overdue, openJobs, completedNow, completedPrev, openQuotes] = await Promise.allSettled([
+    getOverdueJobs(companyId),
+    getOpenJobs(companyId),
+    getCompletedInRange(companyId, current.start, current.end),
+    getCompletedInRange(companyId, previous.start, previous.end),
+    getOpenQuotes(companyId),
+  ]);
+
+  const out: Partial<Record<MetricKey, MetricValue>> = {};
+
+  if (overdue.status === 'fulfilled') out.overdue_jobs = overdue.value;
+  if (openJobs.status === 'fulfilled') out.open_jobs = openJobs.value;
+  if (openQuotes.status === 'fulfilled') out.open_quotes = openQuotes.value;
+  if (completedNow.status === 'fulfilled') {
+    out.completed_jobs = {
+      count: completedNow.value.count,
+      money: completedNow.value.money,
+      previousMoney:
+        completedPrev.status === 'fulfilled' ? completedPrev.value.money : undefined,
+    };
+  }
+
+  for (const settled of [overdue, openJobs, completedNow, completedPrev, openQuotes]) {
+    if (settled.status === 'rejected') {
+      console.error('Error loading a dashboard metric:', settled.reason);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * True when the company has no quotes and no jobs at all — drives the
+ * onboarding card.
+ *
+ * "Nothing here yet" is about never having started, not about having finished:
+ * a shop whose every job has shipped is not empty. The previous check fired
+ * four metric queries and folded in revenue to reach roughly the same answer.
+ */
+export async function isDashboardEmpty(companyId: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const [quotes, jobs] = await Promise.all([
+    supabase
+      .from('quotes')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .is('deleted_at', null),
     supabase
       .from('jobs')
       .select('*', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .is('deleted_at', null),
+  ]);
+
+  if (quotes.error) throw quotes.error;
+  if (jobs.error) throw jobs.error;
+  return (quotes.count || 0) === 0 && (jobs.count || 0) === 0;
+}
+
+// ============== Completed-card period preference ==============
+
+const COMPLETED_PERIOD_KEY = 'dashboard_completed_period';
+
+/** Which window the Completed card is showing. Defaults to the week. */
+export async function getCompletedPeriod(): Promise<MetricTimePeriod> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return 'this_week';
+
+  const { data, error } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error || !data) return 'this_week';
+
+  const prefs = data.preferences as Record<string, unknown> | null;
+  return prefs?.[COMPLETED_PERIOD_KEY] === 'today' ? 'today' : 'this_week';
+}
+
+export async function setCompletedPeriod(period: MetricTimePeriod): Promise<void> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { data: existing } = await supabase
+    .from('user_preferences')
+    .select('preferences')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  const currentPrefs = (existing?.preferences as Record<string, unknown>) || {};
+
+  await supabase.from('user_preferences').upsert(
+    {
+      user_id: user.id,
+      preferences: { ...currentPrefs, [COMPLETED_PERIOD_KEY]: period },
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' },
   );
-
-  if (error) throw error;
-  return count || 0;
 }
-
-/**
- * Value + optional prior-period value for a metric. `previousValue` is only
- * populated for time-aware metrics (revenue, completed_jobs) where a
- * period-over-period comparison is meaningful. Stateful counts like
- * open_quotes would need historical snapshots to support a delta and are
- * returned without one.
- */
-export interface MetricValue {
-  value: number;
-  previousValue?: number;
-}
-
-async function getMetricValueWithDelta(
-  companyId: string,
-  key: MetricKey,
-  timePeriod?: MetricTimePeriod
-): Promise<MetricValue> {
-  switch (key) {
-    case 'open_quotes':
-      return { value: await getCount('quotes', companyId, { status: ['active'] }) };
-    case 'not_started_jobs':
-      return {
-        value: await getCount('jobs', companyId, { production_status: ['not_started'] }),
-      };
-    case 'in_progress_jobs':
-      return {
-        value: await getCount('jobs', companyId, { production_status: ['in_progress'] }),
-      };
-    case 'overdue_jobs':
-      return { value: await getOverdueJobs(companyId) };
-    case 'revenue': {
-      const period = timePeriod ?? 'this_week';
-      const curr = periodBounds(period, 0);
-      const prev = periodBounds(period, -1);
-      const [value, previousValue] = await Promise.all([
-        getRevenueInRange(companyId, curr.start, curr.end),
-        getRevenueInRange(companyId, prev.start, prev.end),
-      ]);
-      return { value, previousValue };
-    }
-    case 'completed_jobs': {
-      const period = timePeriod ?? 'this_week';
-      const curr = periodBounds(period, 0);
-      const prev = periodBounds(period, -1);
-      const [value, previousValue] = await Promise.all([
-        getCompletedJobsInRange(companyId, curr.start, curr.end),
-        getCompletedJobsInRange(companyId, prev.start, prev.end),
-      ]);
-      return { value, previousValue };
-    }
-    default:
-      return { value: 0 };
-  }
-}
-
-/**
- * Get the value for a single metric key (flat number — no delta).
- * Kept for callers that don't need period-over-period data.
- */
-export async function getMetricValue(
-  companyId: string,
-  key: MetricKey,
-  timePeriod?: MetricTimePeriod
-): Promise<number> {
-  const r = await getMetricValueWithDelta(companyId, key, timePeriod);
-  return r.value;
-}
-
-/**
- * Get values + deltas for all requested metrics in parallel.
- */
-export async function getPinnedMetricValues(
-  companyId: string,
-  keys: MetricKey[],
-  timePeriods?: Partial<Record<MetricKey, MetricTimePeriod>>
-): Promise<Record<MetricKey, MetricValue>> {
-  const results = await Promise.all(
-    keys.map(async (key) => {
-      try {
-        const v = await getMetricValueWithDelta(companyId, key, timePeriods?.[key]);
-        return [key, v] as const;
-      } catch {
-        return [key, { value: 0 } as MetricValue] as const;
-      }
-    })
-  );
-  return Object.fromEntries(results) as Record<MetricKey, MetricValue>;
-}
-
 // ============== Activity feed ==============
 //
 // A cross-module "what happened" stream, built UNION-on-read over the

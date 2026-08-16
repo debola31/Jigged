@@ -53,6 +53,11 @@ decisions they produced, which is the sole way a reader can tell whether a new s
 
 ---
 
+**Count what a person can act on, not what the system writes.** A generator that inserts 4 rows and
+8 bins has created 12 rows in a table and **8 places** someone can put something in; the rows are
+structure and cannot hold stock. "Create 12 locations" followed by eight usable spots overstates a
+shop's storage by every container it owns. Say the number that survives contact with the job.
+
 ## Writing UI
 
 **MUI components, always** — `Button`, `TextField`, `Card`, `Paper`, `Box`, `Typography`, `List` /
@@ -168,14 +173,30 @@ down wrong for as long as it existed.
 | `IconButton`, including [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) — which defaults to `size="small"` | **No.** MUI's own padding leaves it well under the floor |
 | `Checkbox` · `Chip` · `Tab` · `ToggleButton` · a hand-rolled `<Box onClick>` or `CardActionArea` | **No.** Nothing constrains them |
 
-**Named gap: nothing measures a target.**
+**A dense grid of targets SCROLLS; it does not shrink.** When many tap targets have to sit together
+— a cabinet 15 bins across, a calendar, a seat map — the tempting move is to divide the viewport by
+the column count. Fifteen columns on a 390px phone is ~24px a cell, which is the WCAG 2.2 AA
+*minimum* and fails its spacing clause besides. Keep the floor and let the container scroll
+sideways in its own overflow box; the physical thing is wider than your hand too. Two mechanics make
+that hold, and both are easy to get backwards:
+
+- **Shrink disabled is the half that protects the floor.** `flex: 0 0 auto` with a `minWidth`, never
+  `flex: 1` — a growable-and-shrinkable cell quietly fits itself to the phone.
+- **Growth is bounded by content, not by the container.** `flex: 1 0 48px` looks right on a phone and
+  gives each cell half a monitor on a 2-wide unit. Ask for the floor, then let the content decide.
+
+**Named gap: nothing measures a target — and a unit test cannot.** jsdom has no layout engine, so a
+component test can assert the *declaration* and never the rendered box. Every layout claim in this
+section — the floor, the scroll container, a sticky column covering its row — needs a real browser at
+a real width. Three defects in the storage grid (labels not covering their band, a truncated title, a
+cell stretched to 790px) all passed a green suite and were found in ten minutes of driving the app.
 [`interactionStandardsCheck.ts`](../scripts/interactionStandardsCheck.ts) scans for button colour,
 value-shaped placeholders and grey delete icons — not size. An undersized tap target ships green.
 
 **Where the gap is tolerable, and where it isn't.** Undersized `IconButton`s cluster on admin
 surfaces, which are mouse-driven office computers, and a mouse hits a 30px target fine. On the
 operator surface the floor is real and unforgiving — a phone, one-handed, sometimes gloved. That is
-also the whole origin of [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action):
+also the whole origin of [row-and-sheet](#row-and-sheet-one-tap-target-and-a-sheet-for-what-has-no-surface-of-its-own):
 the forcing case was an element drawn ~6px tall that could not be raised to 48px in place.
 
 ### The operator surface is a phone
@@ -203,6 +224,54 @@ What the shell enforces, all in
 as a *floor*, measured against a 500–1000 lux shop floor rather than an office monitor, and treated
 as a hard limit rather than a number to squeak past. Every ratio in this file was measured by hand.
 
+### `error.main` is not a text colour on a lifted surface
+
+`#ef4444` is fine as a border, an icon or a fill. As **text** it clears the body floor only on the raw
+page canvas — and text almost never sits on the raw canvas. Measured against the surfaces as painted
+(sampled from the running app, because the cards are translucent over a gradient and a value derived
+from `background.default` comes out darker than reality and flatters the result):
+
+| Surface | `error.main` #ef4444 | `error.light` #fca5a5 |
+|---|---|---|
+| Page canvas `#111439` | 4.72:1 ✓ | 9.35:1 ✓ |
+| Dialog paper | **4.47:1 ✗** | 8.87:1 ✓ |
+| Card / paper | **3.70:1 ✗** | 7.33:1 ✓ |
+| Warning-tinted card (Overdue) | **2.98:1 ✗** | 5.90:1 ✓ — but see below |
+
+**So: `error.light` for error TEXT, `error.main` for everything else.** `error.light` passes on every
+surface, so no per-site analysis is needed — you never have to work out which panel a message lands on.
+
+Three usages are measured exempt and should stay on `error.main`: **icons** (non-text, SC 1.4.11 asks
+3:1 and 3.70:1 clears it), **filled** error chips and **contained** error buttons (white on a red fill —
+a different calculation, and lightening them would wash out the one affordance that should look
+dangerous). A `MuiButton` override in [`lib/theme.ts`](../lib/theme.ts) handles text and outlined error
+buttons automatically; `contained` is deliberately excluded.
+
+### Red means broken; amber means behind
+
+`warning` carries the same `main` / `light` split, and for the same reason — but the choice of *which*
+status colour a surface uses is a separate decision from whether it is readable.
+
+**Overdue work is amber, not red.** Andon is the convention a shop floor already runs on — green
+running, amber needs attention, red stopped — and an overdue job is behind, not broken. Every shop has
+late jobs; painting the dashboard red on an ordinary Tuesday spends the loudest signal on a normal
+state and leaves nothing for a genuine failure. Red is kept for things that are actually wrong.
+
+A practical bonus found while rendering it: `rgba(239,68,68,0.08)` over deep indigo goes muddy purple —
+neither red nor navy. The amber tint stays neutral.
+
+| On the Overdue card's amber tint | |
+|---|---|
+| `warning.main` #f59e0b | 4.89:1 — *passes*, unlike error.main, but 0.39 above a hard limit |
+| `warning.light` #fbbf24 | **6.28:1**, measured as painted |
+
+So `warning.light` for the text and `warning.main` for the rule and the tint. Note the asymmetry with
+`error`: amber's `main` is readable as text and red's is not, because #ef4444 is unusually dark for its
+hue — which is exactly why the rule is per-colour and measured rather than assumed.
+
+Pinned by [`__tests__/lib/alertContrast.test.ts`](../__tests__/lib/alertContrast.test.ts), which computes
+real WCAG ratios from the theme's own values against each surface above.
+
 **Withdrawn:** the heading "Accessibility (WCAG 2.1 **Level A**)" — wrong twice. Level A imposes no
 contrast requirement at all; 4.5:1 body / 3:1 large text are Level **AA** (SC 1.4.3). And 48px is not
 a WCAG number in any version — WCAG 2.2 asks 24×24 CSS px at AA (SC 2.5.8) and 44×44 at AAA
@@ -212,7 +281,7 @@ keep it. Two standards were live in two files with nothing marking either dead; 
 The rest of that block stands, because it is right and cheap:
 
 - **Keyboard-reachable, with a visible focus indicator.** The
-  [row-and-sheet](#row-and-sheet-one-tap-target-a-sheet-that-owns-every-action) rule that a row's name
+  [row-and-sheet](#row-and-sheet-one-tap-target-and-a-sheet-for-what-has-no-surface-of-its-own) rule that a row's name
   stays a real `<button>` — rather than a `<tr>` pretending to be a control — exists for this.
 - **Semantic HTML and real ARIA labels.** Use MUI's `component` prop for the element, and label every
   icon-only control: [`DeleteIconButton`](../components/common/DeleteIconButton.tsx) makes
@@ -264,7 +333,12 @@ the set by order, weight, an icon, or a count, not by giving one a border and th
   ([`OutsideWorkPanel`](../components/jobs/OutsideWorkPanel.tsx),
   [`OperationCard`](../components/jobs/OperationCard.tsx)).
 - **Fill state** — `success.main` for "has stock", a hollow `text.disabled` outline for "empty"
-  (`FillDot`, a 7px dot). Read as *status*, not good/bad: an empty bin isn't a failure, it's the
+  (`FillDot`, a 7px dot). **Scoped to the dot, and 2026-08-10 is why that scope is written down:**
+  the storage grid took the same rule to a 44px cell and rendered an occupied bin as a solid
+  `success.dark` button with dark text, which is precisely the "reads as *already done*" failure the
+  Buttons section warns about. On anything tap-sized the signal is a **tint plus a solid border**
+  with ordinary text ([`UnitGridView`](../components/inventory/locations/UnitGridView.tsx)) — same
+  hue, so it still scans across 180 cells, without borrowing a button's meaning. Read as *status*, not good/bad: an empty bin isn't a failure, it's the
   [two-bin kanban](https://businessmap.io/blog/two-bin-kanban-system) signal that something needs
   ordering. **Never a percentage or a gauge** — we do not know a shelf's capacity, so "72% full"
   would be an invented number carrying the confidence of a measured one. Binary is the honest
@@ -429,13 +503,14 @@ same switch two different ways across pages.
 
 ---
 
-## Row-and-sheet: one tap target, a sheet that owns every action
+## Row-and-sheet: one tap target, and a sheet for what has no surface of its own
 
-*(Was "Tile-and-sheet". Corrected 2026-08-03: the drawn storage board it described was deleted in
-`db58ae8` for [`LocationTable`](../components/inventory/locations/LocationTable.tsx), an indented
-table. The sheet survives as
-[`LocationDetailSheet`](../components/inventory/locations/board/LocationDetailSheet.tsx) — whose own
-header comment still describes the deleted drawing.)*
+*(Was "Tile-and-sheet". Corrected 2026-08-03 when the drawn storage board was replaced by an
+indented table, and again **2026-08-10** when the table was replaced by
+[`StorageUnitList`](../components/inventory/locations/StorageUnitList.tsx) →
+[`UnitGridView`](../components/inventory/locations/UnitGridView.tsx). The sheet outlived all three and
+was then deleted itself, 2026-08-10, when the pane it kept opening over could simply show the
+thing — see the correction below.)*
 
 **Withdrawn:** the drawn board — wrong because on a real shop it drew almost nothing. A node's `kind`
 only changes the rack border, and the whole tile body was gated behind `children.length > 0` because
@@ -445,14 +520,83 @@ generator permits four.
 
 **Withdrawn:** "a list is out because Cabinet 1 alone exploded into 15 rows" — wrong because that was
 an artefact of the **wizard**, not of lists: the cabinet template generates 1 × 5 × 2 = 16 nodes in
-one pass. Stop defaulting to it and a flat shop's whole table is **12–18 rows**. Twelve of twelve
-surveyed tools present locations as a tree or table, none draws them — convergent evolution, not user
-research, and **no user has ever been observed using any storage UI here**, board or table.
+one pass. Twelve of twelve surveyed tools present locations as a tree or table, none draws them —
+convergent evolution, not user research.
+
+**Withdrawn 2026-08-10 — "stop defaulting to the wizard and a flat shop's whole table is 12–18
+rows".** Wrong by an order of magnitude, and it was the table's founding claim. Contour built **237
+locations, 216 of them leaves and 180 in a single cabinet**, deliberately, by hand. The generator was
+never why storage got big; a shop with real storage is big. **Measuring the default rather than the
+ceiling is the mistake worth carrying forward** — it is the same error in both directions, since the
+board before it was justified on the same 12–18.
+
+Storage is now a list of *units* that opens a *drawn* unit — which is the shape the original board
+argument wanted, and which the flat-shop data of the time genuinely did not justify. The line that
+stayed true throughout: **no user had ever been observed using any storage UI here.** One now has.
 
 **The surviving standard.** Where rows or tiles are dense enough that per-element controls would have
-to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet every
-action. The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
+to shrink below the **48px** floor, make the whole row/tile one tap target and give a sheet its
+actions.
+
+> **Corrected 2026-08-10 — "a sheet that owns EVERY action" is what to avoid.** The rule as written
+> survives a list and breaks the moment anything in that list earns a surface of its own. Storage
+> grew a page per unit, the unit's actions stayed in the shared sheet, and the result read as two
+> products stitched together: opening a cabinet swapped the list in place under a toolbar that still
+> acted on the list, while its own actions sat behind a `Manage` button that opened a drawer *over*
+> the thing you were looking at.
+>
+> **Actions belong to the surface that shows the thing.** A sheet is for what has no surface of its
+> own — a bin inside a cabinet, a row inside a grid. When something earns a page, its actions move
+> onto that page and the sheet keeps only its children. The test is one question: *is the thing I am
+> acting on the thing I am looking at?* The forcing measurement: a compartment drawn ~**6px** tall, raised to 48px, turned a
 5-row × 2-side cabinet into a ~**500px** tile.
+
+> **And then it came back, 2026-08-10 — which the rule above predicted rather than contradicted.**
+> The sheet was deleted because it owned the *cabinet's* actions while the pane showed the cabinet.
+> A **place** has no surface of its own and cannot get one: 180 bins do not each get a section under
+> a grid. So clicking a cell opens a drawer holding that place's contents, its four verbs, and its
+> history — the same rule, applied to the thing that genuinely has nowhere else to live.
+>
+> **The measurement that forced it back:** the contents had been put *under* the grid instead, so
+> selecting a bin near the top of a 12-row cabinet left the answer below the fold — and scrolling
+> the page to it moved the grid up under the cursor by about one row. Click Row 4, the page jumps,
+> click again where Row 4 was, and you select Row 5. Reported as an off-by-one in the grid; the grid
+> was aligned to half a pixel and every single click was correct. **A surface that scrolls the page
+> to answer you will be blamed for the click it moved.**
+>
+> Two corollaries, both learned the same afternoon:
+>
+> - **One layer.** A drawer's own actions are **views inside it**, never dialogs over it. Two stacked
+>   surfaces bury the subject under both, which is the failure the sheet was deleted for in the first
+>   place. Give every view the same header and the same way back.
+> - **A modal surface is opaque.** `background.paper` is `rgba(32, 38, 82, 0.78)` on purpose — a card
+>   is meant to let the lit canvas through. A drawer covers the page, and at 78% the page reads
+>   straight through it; on a 390px screen a full-width drawer over a full-width grid made both
+>   illegible at once. Dialog and Menu already carried solid overrides for exactly this reason and
+>   Drawer did not. Sticky headers inside one need `background.default`, not `paper`, or the rows
+>   scroll through the heading.
+
+**A filter must never hide what is about to be written — 2026-08-11.**
+
+A batch form derives what it will write from **every** row, because the rule that a blank row is not
+an instruction requires it. A filter narrows what is *rendered*. Left alone those two disagree, and
+the disagreement is an invisible write: type a count into an o-ring, filter to "bearing", and the
+button reads `Save 1 count` over a list showing nothing to save. It shipped that way in a drawer and
+was caught in review before anyone used it.
+
+The fix is structural, not a warning. **A row carrying a value is exempt from the filter**, so the
+write set is on screen at the moment the button is pressed, at any filter and any scroll position.
+Say it in the helper text too — *"Showing 2 of 57 — including 1 you have filled in"* — so the
+exemption reads as deliberate rather than as a filter that does not work.
+
+The general form: **whenever a control narrows a list that a submit reads in full, the submit's set
+is the thing that must stay visible.** Filtering, paging and collapsing are all the same hazard.
+
+**And do not paint the same list twice.** The place drawer rendered a read-only *What's here* above a
+form whose rows were a strict superset of it — same names, same quantities, plus a field. On a
+57-part put-away pile that is two full screens of the same information, with the verb you just
+pressed a screen and a half above the rows it applies to. The read-only list now steps aside for the
+verbs that list the same places, and stays only for `Add`, whose rows are the parts going *in*.
 
 **Everywhere else, prefer ordinary rows with buttons — the extra tap is a real cost**, paid here only
 because the alternative was losing the depiction entirely. Reach for a sheet when the row's *value is

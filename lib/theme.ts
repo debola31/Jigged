@@ -66,8 +66,34 @@ const jiggedTheme = createTheme({
       secondary: '#C8CCD4',
     },
     success: { main: '#10b981' },
-    warning: { main: '#f59e0b' },
-    error: { main: '#ef4444' },
+    /**
+     * Amber is the shop-floor colour for *needs attention*, and the andon
+     * convention your operators already read off the machines: green running,
+     * amber behind, red stopped. Overdue work is behind, not broken — red every
+     * day spends the loudest signal on an ordinary Tuesday and leaves nothing
+     * for a genuine failure.
+     *
+     * Same split as `error`: `main` for borders, icons and tints, `light` for
+     * TEXT. `main` does technically clear the body floor on a warning-tinted
+     * card (4.89:1) where error.main does not, but 0.39 above a limit measured
+     * against a 500–1000 lux shop floor is squeaking past it. `light` is 6.29:1.
+     */
+    warning: { main: '#f59e0b', light: '#fbbf24' },
+    /**
+     * `main` is for BORDERS, ICONS and FILLS — not for text on a tinted panel.
+     *
+     * #ef4444 on the alert-tinted card background (which composites to about
+     * rgb(57,55,92)) measures 2.98:1. The bar is 4.5:1 body / 3:1 large
+     * (design-system.md, "Contrast, keyboard, semantics"), so it fails even the
+     * easier large-text clause. `light` is the same alert red raised until it
+     * clears the body-text floor with room to spare — 5.90:1 — rather than
+     * squeaking past it, since the standard is measured against a 500–1000 lux
+     * shop floor and treated as a hard limit.
+     *
+     * Use `error.light` for error TEXT on any tinted surface; `error.main`
+     * still reads fine as a border or icon against the darker page canvas.
+     */
+    error: { main: '#ef4444', light: '#fca5a5' },
     info: { main: '#3b82f6' },
   },
   typography: {
@@ -88,13 +114,27 @@ const jiggedTheme = createTheme({
   components: {
     MuiButton: {
       styleOverrides: {
-        root: {
+        /**
+         * `color="error"` on a TEXT or OUTLINED button paints the label in
+         * `error.main`, which measures 3.70:1 on a card and 4.47:1 on a dialog —
+         * both under the 4.5:1 body floor. Only the raw page canvas passes, and
+         * a destructive button almost never sits on the raw canvas.
+         *
+         * `contained` is deliberately untouched: it paints white on an
+         * error.main FILL, which is a different calculation and already fine.
+         * Lightening it would wash out the one affordance that should look
+         * unmistakably dangerous.
+         */
+        root: ({ ownerState, theme }) => ({
           textTransform: 'none',
           fontWeight: 500,
           padding: '10px 20px',
           minHeight: 48, // Touch target size for shop floor
           transition: 'all 0.2s ease',
-        },
+          ...(ownerState.color === 'error' && ownerState.variant !== 'contained'
+            ? { color: theme.palette.error.light }
+            : {}),
+        }),
         contained: {
           boxShadow: '0 4px 12px rgba(70, 130, 180, 0.3)',
           '&:hover': {
@@ -177,6 +217,25 @@ const jiggedTheme = createTheme({
           backgroundColor: '#111439',  // Deep Indigo (per design system spec)
           backgroundImage: 'linear-gradient(135deg, #111439 0%, #1a1f4a 100%)',
           border: '1px solid rgba(255, 255, 255, 0.12)',
+        },
+      },
+    },
+    /*
+     * A MODAL SURFACE IS OPAQUE. `background.paper` is `rgba(32, 38, 82, 0.78)` on purpose — a card
+     * is meant to sit *on* the lit canvas and let a little of it through. A drawer is not a card:
+     * it covers the page, and at 78% the page reads straight through it. Caught on a 390px screen,
+     * where a full-width drawer over a full-width grid made both illegible at once.
+     *
+     * Dialog and Menu already carry this same override for this same reason; a drawer was the one
+     * modal surface still inheriting the card value. Every drawer in the app today sets its own
+     * paper background, so this changes none of them — it fixes the DEFAULT, which is what the next
+     * one will get.
+     */
+    MuiDrawer: {
+      styleOverrides: {
+        paper: {
+          backgroundColor: '#111439',
+          backgroundImage: 'linear-gradient(135deg, #111439 0%, #1a1f4a 100%)',
         },
       },
     },

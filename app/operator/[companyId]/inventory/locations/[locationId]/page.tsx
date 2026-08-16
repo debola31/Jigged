@@ -1,53 +1,44 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useMemo } from 'react';
+import { useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
-import Card from '@mui/material/Card';
-import CardActionArea from '@mui/material/CardActionArea';
-import CardContent from '@mui/material/CardContent';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
-import Link from '@mui/material/Link';
-import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
-import AddIcon from '@mui/icons-material/Add';
-import RemoveIcon from '@mui/icons-material/Remove';
-import TuneIcon from '@mui/icons-material/Tune';
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 
-import { resolveScan, getLocations, getLocationHistory } from '@/utils/inventoryLocationsAccess';
+import {
+  resolveScan,
+  getLocations,
+  getLocationHistory,
+  getLocationOccupancy,
+  buildLocationTree,
+} from '@/utils/inventoryLocationsAccess';
+import { rollUpOccupancy } from '@/utils/locationOccupancy';
+import UnitGridView from '@/components/inventory/locations/UnitGridView';
 import { stockDestinationOptions } from '@/utils/locationDestinations';
-import { getCurrentMember } from '@/utils/operatorAccess';
-import { useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
-import { getStandardUnitsForUnit } from '@/lib/unitPresets';
-import type { LocationContent } from '@/types/inventoryLocations';
-import OperatorLocationActionModal, {
-  type OperatorLocationAction,
-} from '@/components/operator/OperatorLocationActionModal';
-import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
+import { useOperatorNav, useSetOperatorChrome } from '@/components/operator/OperatorChromeContext';
+import PlaceStockActionForm, {
+  type PlaceStockAction,
+} from '@/components/inventory/locations/place/PlaceStockActionForm';
+import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
 import BinHistory from '@/components/operator/BinHistory';
 
 const num = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 export default function OperatorBinViewPage() {
   const params = useParams();
-  const router = useRouter();
+  const nav = useOperatorNav();
   const companyId = params.companyId as string;
   const locationId = params.locationId as string;
 
-  const [operatorId, setOperatorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [modal, setModal] = useState<{ action: OperatorLocationAction; part: LocationContent } | null>(
-    null,
-  );
-  const [receiveOpen, setReceiveOpen] = useState(false);
+  /** Which verb's form is open, exactly as the office drawer holds it. */
+  const [openVerb, setOpenVerb] = useState<PlaceStockAction | 'adjust' | null>(null);
 
   const {
     data: scan,
@@ -59,27 +50,28 @@ export default function OperatorBinViewPage() {
     },
   });
 
-  // Operator id stamps the ledger; best-effort, never blocks the view.
-  useEffect(() => {
-    let cancelled = false;
-    getCurrentMember(companyId)
-      .then((op) => {
-        if (!cancelled) setOperatorId(op?.id ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setOperatorId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
+  /*
+   * The author lookup used to live here, feeding the two operator modals. The shared forms fetch
+   * their own — best-effort, so a failed lookup writes no name rather than blocking a stock
+   * correction — which means attribution still happens and this page no longer has to arrange it.
+   */
 
   const node = scan?.node ?? null;
   const path = scan?.path ?? [];
   const parent = path.length > 1 ? path[path.length - 2] : null;
 
-  // Header back drills UP the location tree (to the parent bin, or the inventory
-  // root at the top level). Re-registers as the parent resolves from the scan.
+  /**
+   * The DEEP-LINK fallback, and only that.
+   *
+   * This used to be described — and to behave — as though back always climbed the location tree.
+   * It did, but not by design: nothing on this branch went through `nav.push`, so the chrome's
+   * depth counter never left zero and `goBack()` always took its no-history branch. Searching for
+   * a part, tapping a location it was in, then pressing Back therefore landed on that location's
+   * PARENT rather than back on the part.
+   *
+   * With the forward navigations fixed, this is what it was always meant to be: where to go when a
+   * printed QR dropped someone straight here with nothing to pop. Climbing the tree is right then.
+   */
   useSetOperatorChrome(
     {
       back: {
@@ -116,17 +108,35 @@ export default function OperatorBinViewPage() {
   };
 
   const { data: allLocations } = useLoad(() => getLocations(companyId), [companyId]);
+
+  /**
+   * Fill state for the drawn grid.
+   *
+   * One aggregated read (`inventory_location_occupancy`), constant size whatever the tree — the
+   * same view the office board uses, and the reason it is a view at all: counting
+   * `part_location_stock` client-side would silently truncate at PostgREST's `max_rows`.
+   */
+  const { data: directPartCounts } = useLoad(() => getLocationOccupancy(companyId), [companyId]);
+
+  /** The subtree rooted here, with occupancy rolled up, for `UnitGridView`. */
+  const { gridUnit, gridOccupancy } = useMemo(() => {
+    const roots = buildLocationTree(allLocations ?? []);
+    const occ = rollUpOccupancy(roots, directPartCounts ?? new Map());
+    const find = (nodes: typeof roots): (typeof roots)[number] | null => {
+      for (const n of nodes) {
+        if (n.id === locationId) return n;
+        const hit = find(n.children);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return { gridUnit: find(roots), gridOccupancy: occ };
+  }, [allLocations, directPartCounts, locationId]);
   // Containers, the `Unassigned` pile and this bin itself are all dropped by the shared rule —
   // a container cannot hold stock, so moving stock into one would only raise on arrival.
   const moveDestinations = useMemo(
     () => stockDestinationOptions(allLocations ?? [], { excludeId: locationId }),
     [allLocations, locationId],
-  );
-
-  const modalUnit = modal?.part.primary_unit || 'ea';
-  const unitOptions = useMemo(
-    () => Array.from(new Set([modalUnit, ...getStandardUnitsForUnit(modalUnit)])).filter(Boolean),
-    [modalUnit],
   );
 
   if (loading) {
@@ -165,29 +175,32 @@ export default function OperatorBinViewPage() {
         )}
       </Box>
 
-      {/* Sub-locations: drill down */}
-      {children.length > 0 && (
+      {/*
+        Sub-locations, DRAWN.
+
+        This was a vertical stack of cards — one per child — so scanning a 12 × 15 cabinet's label
+        opened twelve cards, and each of those opened fifteen more. The operator's own model is
+        spatial ("three rows down, five slots over"), and a card stack is the one shape that
+        cannot express it.
+
+        Same `UnitGridView` the office uses, at what is **already the QR target route**: a cell tap
+        lands on exactly the bin view that exists now, at exactly the URL a bin's own label points
+        to. No new route, no new payload shape, nothing to reprint.
+      */}
+      {children.length > 0 && gridUnit && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="overline" color="text.secondary">
             Sub-locations
           </Typography>
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {children.map((child) => (
-              <Card key={child.id} elevation={2}>
-                <CardActionArea
-                  onClick={() => router.push(`/operator/${companyId}/inventory/locations/${child.id}`)}
-                  sx={{ minHeight: 56 }}
-                >
-                  <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 600 }}>{child.name}</Typography>
-                    </Box>
-                    <KeyboardArrowRightIcon color="action" />
-                  </CardContent>
-                </CardActionArea>
-              </Card>
-            ))}
-          </Stack>
+          <Box sx={{ mt: 0.5 }}>
+            <UnitGridView
+              unit={gridUnit}
+              occupancy={gridOccupancy}
+              // `nav.push`, so drilling in and pressing Back retraces the taps you made rather
+              // than climbing to whatever this cell's parent happens to be.
+              onOpenCell={(id) => nav.push(`/operator/${companyId}/inventory/locations/${id}`)}
+            />
+          </Box>
         </Box>
       )}
 
@@ -207,113 +220,114 @@ export default function OperatorBinViewPage() {
         </Typography>
       ) : (
       <Box>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-          <Typography variant="overline" color="text.secondary" sx={{ flex: 1 }}>
-            Stock here
-          </Typography>
-          <Button size="small" startIcon={<AddCircleOutlineIcon />} onClick={() => setReceiveOpen(true)}>
-            Stock a part
-          </Button>
-        </Stack>
-        {contents.length === 0 ? (
-          <Card elevation={2} sx={{ mt: 0.5 }}>
-            <CardContent sx={{ textAlign: 'center', py: 4 }}>
-              <Inventory2OutlinedIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-              <Typography color="text.secondary">Nothing stored here yet.</Typography>
-            </CardContent>
-          </Card>
-        ) : (
-          <Stack spacing={1} sx={{ mt: 0.5 }}>
-            {/* The list is capped. Saying so beats the silent `max_rows` clip this read used to
-                take — an operator seeing 200 of 9,428 needs to know the rest exist. */}
-            {/* The instruction is back, and now it points somewhere real.
-                It once read "Scan or search a part to reach one that isn't listed", when neither
-                route existed — no part search anywhere on the operator app, and a scanner that
-                resolves location labels and job travellers but never a part. It was stripped to
-                "ask the office" rather than keep promising two impossible things. J11 shipped
-                2026-07-31, so the honest version is a link to it — the lookup answers "where is
-                this?" for any part, including one below this cap. */}
-            {contentsTotal > contents.length && (
-              <Alert severity="info">
-                Showing the {contents.length} largest of {num(contentsTotal)} parts here. The rest
-                are still counted —{' '}
-                <Link
-                  component="button"
-                  type="button"
-                  onClick={() => router.push(`/operator/${companyId}/inventory`)}
+        {/*
+          THE SAME FLOW AS THE OFFICE, minus everything that configures storage.
+
+          This was a card per part, each with four buttons opening a single-part dialog — so putting
+          a delivery of six things away meant six dialogs, and none of the rules the office forms
+          grew (a blank row is not an instruction; a partial batch disarms what landed; the job list
+          narrows to jobs that could have used the part) applied here at all. The shop floor had the
+          older, thinner version of the same job.
+
+          It now renders the very same forms. Not a copy — the same components, so a rule fixed in
+          one place is fixed on both surfaces, which is exactly how the two drifted in the first
+          place.
+
+          What it does NOT get: `Change layout`, `Rename`, `Delete`, `Add storage`, `Print QR`.
+          Configuring storage is an office job; acting on the stock in it is not.
+        */}
+        <Typography variant="overline" color="text.secondary">
+          Stock here
+        </Typography>
+
+        <Box sx={{ mt: 0.5, mb: 2 }}>
+          {contents.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No parts recorded here.
+            </Typography>
+          ) : (
+            <Stack spacing={0.5}>
+              {contentsTotal > contents.length && (
+                <Alert severity="info" sx={{ mb: 0.5 }}>
+                  Showing the {contents.length} largest of {num(contentsTotal)} parts here.
+                </Alert>
+              )}
+              {contents.map((part) => (
+                <Box
+                  key={part.part_id}
+                  sx={{ display: 'flex', alignItems: 'baseline', gap: 1, minHeight: 32 }}
                 >
-                  look a part up
-                </Link>{' '}
-                to find one that isn&apos;t listed.
-              </Alert>
-            )}
-            {contents.map((part) => (
-              <Card key={part.part_id} elevation={2}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-                    <Typography sx={{ fontWeight: 600, flex: 1, minWidth: 0 }}>
-                      {part.part_name}
-                    </Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 700 }}>
-                      {num(part.quantity)}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {part.primary_unit ?? ''}
-                    </Typography>
-                  </Box>
-                  {/* Same four verbs, same words, as the admin part page.
-                      ORDER is fixed across both surfaces — Add, Remove, Move, Adjust — so a
-                      control is always in the same place. WEIGHT is what varies: Remove is the
-                      primary here (stock arrives in bulk once, and put-away is really
-                      receiving's job; it leaves in small amounts every job, all shift), while
-                      the admin page emphasises Add. Position serves the operator who knows
-                      where to reach; fill serves the one who doesn't yet.
-                      None of the four is red — reversible bookkeeping, not destruction. */}
-                  <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<AddIcon />}
-                      onClick={() => setModal({ action: 'add', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Add
-                    </Button>
-                    <Button
-                      variant="contained"
-                      startIcon={<RemoveIcon />}
-                      onClick={() => setModal({ action: 'deplete', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Remove
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      startIcon={<SwapHorizIcon />}
-                      onClick={() => setModal({ action: 'move', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Move
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      startIcon={<TuneIcon />}
-                      onClick={() => setModal({ action: 'adjust', part })}
-                      sx={{ flex: 1, minWidth: 120 }}
-                    >
-                      Adjust
-                    </Button>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        )}
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                    {part.part_name}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {num(part.quantity)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {part.primary_unit ?? ''}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </Box>
+
+        {/*
+          The four verbs, in the order fixed across both surfaces. Full-width and 48px on a phone:
+          four of them fit one row at 390px only because the words are short.
+        */}
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {(
+            [
+              ['add', 'Add', false],
+              ['deplete', 'Remove', true],
+              ['move', 'Move', true],
+              ['adjust', 'Adjust', false],
+            ] as const
+          ).map(([v, label, needsStock]) => (
+            <Button
+              key={v}
+              variant={openVerb === v ? 'contained' : 'outlined'}
+              disabled={needsStock && contents.length === 0}
+              aria-expanded={openVerb === v}
+              onClick={() => setOpenVerb((cur) => (cur === v ? null : v))}
+              sx={{ minHeight: 48 }}
+            >
+              {label}
+            </Button>
+          ))}
+        </Stack>
+
+        {openVerb === 'adjust' ? (
+          <PlaceAdjustForm
+            companyId={companyId}
+            locationId={locationId}
+            locationName={node.name}
+            onCancel={() => setOpenVerb(null)}
+            onDone={reloadAll}
+          />
+        ) : openVerb ? (
+          <PlaceStockActionForm
+            key={openVerb}
+            action={openVerb}
+            companyId={companyId}
+            locationId={locationId}
+            locationName={node.name}
+            moveDestinations={moveDestinations}
+            // The shop floor's removal has always been graceful: the material is already off the
+            // shelf, so a stale count must not refuse the write. The RPC floors at zero and writes
+            // the shortfall into the ledger note instead.
+            graceful
+            onCancel={() => setOpenVerb(null)}
+            onDone={reloadAll}
+          />
+        ) : null}
       </Box>
       )}
 
-      {/* Recent movements, last. The contents above answer "what is here now"; this answers
-          "what happened here", including the photo whoever moved it left behind. Before this there
-          was no operator-side ledger view at all, which is what made a movement photo write-only. */}
       <Box sx={{ mt: 4 }}>
         <Typography variant="overline" color="text.secondary">
           Recent activity
@@ -323,39 +337,7 @@ export default function OperatorBinViewPage() {
         </Box>
       </Box>
 
-      {modal && (
-        <OperatorLocationActionModal
-          open
-          action={modal.action}
-          companyId={companyId}
-          partId={modal.part.part_id}
-          partName={modal.part.part_name}
-          currentQuantity={modal.part.quantity}
-          primaryUnit={modalUnit}
-          unitOptions={unitOptions}
-          locationId={node.id}
-          locationName={node.name}
-          moveDestinations={moveDestinations}
-          operatorId={operatorId}
-          onClose={() => setModal(null)}
-          onDone={reloadAll}
-        />
-      )}
 
-      {/* Not mounted for a container — there is no button to open it, and a modal that could only
-          ever write somewhere the database refuses has no reason to exist on this page. */}
-      {children.length === 0 && (
-        <OperatorReceivePartModal
-          open={receiveOpen}
-          companyId={companyId}
-          locationId={node.id}
-          locationName={node.name}
-          excludePartIds={contents.map((c) => c.part_id)}
-          operatorId={operatorId}
-          onClose={() => setReceiveOpen(false)}
-          onDone={reloadAll}
-        />
-      )}
     </Box>
   );
 }

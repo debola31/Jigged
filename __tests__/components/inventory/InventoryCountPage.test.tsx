@@ -632,7 +632,7 @@ describe('counting one place', () => {
   });
 
   /** The put-away path: pick rows, pick a place, one atomic call. */
-  it('sends the ticked parts away in a single call', async () => {
+  it('moves the ticked parts in a single call', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("What's in Shelf A?");
@@ -640,7 +640,7 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('combobox', { name: /send the ticked parts to/i }));
     await user.click(await screen.findByRole('option', { name: /^Yard/ }));
-    await user.click(screen.getByRole('button', { name: /put 1 away/i }));
+    await user.click(screen.getByRole('button', { name: /move 1 to/i }));
 
     await waitFor(() => expect(bulkPutAway).toHaveBeenCalledTimes(1));
     expect(bulkPutAway).toHaveBeenCalledWith(LOC, 'loc-yard', ['BUY-ORING-214']);
@@ -659,7 +659,7 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('combobox', { name: /send the ticked parts to/i }));
     await user.click(await screen.findByRole('option', { name: /^Yard/ }));
-    await user.click(screen.getByRole('button', { name: /put 1 away/i }));
+    await user.click(screen.getByRole('button', { name: /move 1 to/i }));
 
     await waitFor(() => expect(loadCountCandidatesForPlaces).toHaveBeenCalled());
     const [, opts] = asMock(loadCountCandidatesForPlaces).mock.calls[0];
@@ -675,7 +675,7 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('combobox', { name: /send the ticked parts to/i }));
     await user.click(await screen.findByRole('option', { name: /^Yard/ }));
-    await user.click(screen.getByRole('button', { name: /put 1 away/i }));
+    await user.click(screen.getByRole('button', { name: /move 1 to/i }));
 
     expect(await screen.findByText(/3 had nothing here to move/i)).toBeInTheDocument();
   });
@@ -695,7 +695,7 @@ describe('counting one place', () => {
     await user.click(screen.getByRole('checkbox', { name: /count BUY-ORING-214/i }));
     await user.click(screen.getByRole('combobox', { name: /send the ticked parts to/i }));
     await user.click(await screen.findByRole('option', { name: /^Yard/ }));
-    await user.click(screen.getByRole('button', { name: /put 1 away/i }));
+    await user.click(screen.getByRole('button', { name: /move 1 to/i }));
 
     expect(await screen.findByText(/Too many parts at once/i)).toBeInTheDocument();
   });
@@ -1091,12 +1091,12 @@ describe('counting one part everywhere', () => {
 
   afterEach(() => searchParams.delete('part'));
 
-  it('opens straight onto a row per place, with no picker', async () => {
+  it('opens straight onto a row per location, with no picker', async () => {
     renderPage();
     await screen.findByText('Shelf A');
     expect(screen.getByText('Shelf B')).toBeInTheDocument();
     // Grouped under one part header rather than repeating the part name down the rows.
-    expect(screen.getByText('2 places')).toBeInTheDocument();
+    expect(screen.getByText('2 locations')).toBeInTheDocument();
     expect(screen.queryByText(/pick the parts/i)).not.toBeInTheDocument();
     expect(await screen.findByText(/0 of 2 counted/i)).toBeInTheDocument();
   });
@@ -1172,7 +1172,7 @@ describe('counting one part everywhere', () => {
  * part-grained — nobody chooses a shelf when deciding which parts to walk — and the SHEET is
  * place-grained, grouped under the part.
  */
-describe('a part in several places', () => {
+describe('a part in several locations', () => {
   beforeEach(() => {
     asMock(loadCountCandidates).mockResolvedValue([
       at('p1', 'BUY-ORING-214', 'loc-a', 'Cabinet 3 › Shelf A', 800),
@@ -1193,31 +1193,31 @@ describe('a part in several places', () => {
    * one row per (part, place) would have made a 20-part shop read "Count 40 parts" — the same
    * species of nonsense as the notice this change deletes.
    */
-  it('lists one row per part, saying how many places it is in', async () => {
+  it('lists one row per part, saying how many locations it is in', async () => {
     renderPage();
     await screen.findByText('BUY-ORING-214');
 
     expect(screen.getAllByText('BUY-ORING-214')).toHaveLength(1);
-    expect(screen.getByText('3 places')).toBeInTheDocument();
+    expect(screen.getByText('3 locations')).toBeInTheDocument();
     // The right-hand figure is the shop-wide total across those places.
     expect(screen.getByText('828 ft')).toBeInTheDocument();
   });
 
-  it('ticks every place of a part at once, and says so in the accessible name', async () => {
+  it('ticks every location of a part at once, and says so in the accessible name', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('BUY-ORING-214');
 
     await user.click(
-      screen.getByRole('checkbox', { name: 'Count BUY-ORING-214 in 3 places' }),
+      screen.getByRole('checkbox', { name: 'Count BUY-ORING-214 in 3 locations' }),
     );
     // Rows, not parts — and the CTA has to say both or it lies about one of them.
     expect(
-      screen.getByRole('button', { name: /^count 1 part in 3 places$/i }),
+      screen.getByRole('button', { name: /^count 1 part in 3 locations$/i }),
     ).toBeEnabled();
   });
 
-  it('expands the part into one input per place on the sheet', async () => {
+  it('expands the part into one input per location on the sheet', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('BUY-ORING-214');
@@ -1246,17 +1246,17 @@ describe('a part in several places', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('sums the counted places on the header and says how many are done', async () => {
+  it('sums the counted locations on the header and says how many are done', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('BUY-ORING-214');
     await chooseParts(user, 'BUY-ORING-214');
 
     await user.type(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf A'), '803');
-    expect(await screen.findByText('1 of 3 places counted')).toBeInTheDocument();
+    expect(await screen.findByText('1 of 3 locations counted')).toBeInTheDocument();
 
     await user.type(inputFor('BUY-ORING-214', 'Cabinet 3 › Shelf B'), '18');
-    expect(await screen.findByText('2 of 3 places counted')).toBeInTheDocument();
+    expect(await screen.findByText('2 of 3 locations counted')).toBeInTheDocument();
     // +3 at Shelf A, −2 at Shelf B.
     expect(screen.getByText('+1')).toBeInTheDocument();
   });
@@ -1265,7 +1265,7 @@ describe('a part in several places', () => {
    * A place left blank is a place you did not walk, and it must stay untouched. Partial counts
    * are the normal case — "I only got to Shelf A" — not an error state.
    */
-  it('writes only the places that were counted, each to its own shelf', async () => {
+  it('writes only the locations that were counted, each to its own bin', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('BUY-ORING-214');
@@ -1299,7 +1299,7 @@ describe('a part in several places', () => {
  * committed and the counter has walked away. So the assertion that matters is
  * `expect(commitCount).not.toHaveBeenCalled()`.
  */
-describe('stock that moved between two counted places', () => {
+describe('stock that moved between two counted locations', () => {
   beforeEach(() => {
     asMock(loadCountCandidates).mockResolvedValue([
       at('p1', 'BUY-ORING-214', 'shelf-a', 'Shelf A', 40),
@@ -1324,7 +1324,7 @@ describe('stock that moved between two counted places', () => {
     await countBothShelves();
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByText(/moved between places you counted/i)).toBeInTheDocument();
+    expect(screen.getByText(/moved between locations you counted/i)).toBeInTheDocument();
     // The whole issue in one assertion: writing 40 absolutely to Shelf A would put back the six
     // units that legitimately left, taking the total to 58 against a truth of 52.
     expect(commitCount).not.toHaveBeenCalled();
@@ -1450,7 +1450,7 @@ describe('counting a container', () => {
     // The picker is part-first — one row per part, whatever its places — so the split shows on the
     // sheet, which is where the numbers get typed.
     await user.click(screen.getByRole('checkbox', { name: /count BUY-BEARING-608ZZ/i }));
-    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 places/i }));
+    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 locations/i }));
 
     expect(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 1')).toBeInTheDocument();
     expect(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 2')).toBeInTheDocument();
@@ -1462,7 +1462,7 @@ describe('counting a container', () => {
     await screen.findByText("What's in Cabinet 3?");
 
     await user.click(screen.getByRole('checkbox', { name: /count BUY-BEARING-608ZZ/i }));
-    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 places/i }));
+    await user.click(screen.getByRole('button', { name: /^count 1 part in 2 locations/i }));
     // Only Row 2 gets a number, so only Row 2 commits — the other line has no entry.
     await user.type(inputFor('BUY-BEARING-608ZZ', 'Cabinet 3 › Row 2'), '190');
     await user.click(screen.getByRole('button', { name: /^save/i }));

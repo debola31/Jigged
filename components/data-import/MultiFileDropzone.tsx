@@ -126,7 +126,7 @@ export default function MultiFileDropzone({ files, onChange, disabled }: MultiFi
       </Box>
 
       {error && (
-        <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+        <Typography variant="body2" color="error.light" sx={{ mt: 1 }}>
           {error}
         </Typography>
       )}

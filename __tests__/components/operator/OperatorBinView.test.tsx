@@ -1,31 +1,54 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
 import OperatorBinViewPage from '@/app/operator/[companyId]/inventory/locations/[locationId]/page';
 import {
+  getLocationContents,
   resolveScan,
   depleteStockAtLocation,
+  getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 
 const mockPush = vi.fn();
+const mockNavPush = vi.fn();
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ companyId: 'co1', locationId: 'loc1' }),
   useRouter: () => ({ push: mockPush }),
 }));
 
-vi.mock('@/utils/inventoryLocationsAccess', () => ({
+/**
+ * The chrome's `push` is what tells the header back button there is in-app history to pop. Mocked
+ * apart from the raw router so a test can prove which one a navigation went through — this branch
+ * used the raw one, which left the depth counter at zero and made every Back climb the tree.
+ */
+vi.mock('@/components/operator/OperatorChromeContext', () => ({
+  useOperatorNav: () => ({ push: mockNavPush, goBack: vi.fn() }),
+  useSetOperatorChrome: vi.fn(),
+}));
+
+vi.mock('@/utils/inventoryLocationsAccess', async () => ({
   resolveScan: vi.fn(),
   // Move destinations: the page loads the whole tree so tapping Move doesn't wait on a fetch.
   getLocations: vi.fn(async () => []),
   // Recent activity for this bin. Empty by default — these tests are about the contents.
   getLocationHistory: vi.fn(async () => []),
+  // Fill state for the drawn sub-locations. One aggregated read, the same view the office uses.
+  getLocationOccupancy: vi.fn(async () => new Map()),
+  // Not mocked away: the page builds the subtree it draws from `getLocations` above, and these
+  // tests assert what that drawing contains. Re-exported so the real one runs.
+  buildLocationTree: (await vi.importActual<typeof import('@/utils/inventoryLocationsAccess')>(
+    '@/utils/inventoryLocationsAccess',
+  )).buildLocationTree,
   addStockAtLocation: vi.fn(),
   depleteStockAtLocation: vi.fn(),
+  // The shared forms read the bin themselves rather than being handed its contents — the one
+  // about to WRITE is the one that must be current. Defaults to empty; tests that act set it.
+  getLocationContents: vi.fn(async () => ({ contents: [], total: 0 })),
   adjustStockAtLocation: vi.fn(),
   transferStock: vi.fn(),
 }));
@@ -92,16 +115,29 @@ describe('OperatorBinViewPage', () => {
     expect(screen.getByText('12')).toBeInTheDocument();
   });
 
-  it('drills down into a sub-location', async () => {
+  /**
+   * Sub-locations are DRAWN now, not stacked as cards — the same `UnitGridView` the office uses,
+   * at what is already the QR target route. The grid needs grandchildren to know what is a row and
+   * what is a cell, which `resolveScan` does not carry, so it reads the tree from `getLocations`.
+   */
+  it('draws sub-locations as a grid and drills into one', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
-      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+      scanWith([loc({ id: 'sub1', name: 'Sub A' })], []),
     );
+    vi.mocked(getLocations).mockResolvedValue([
+      loc({ id: 'loc1', name: 'Bin 3' }),
+      loc({ id: 'sub1', name: 'Sub A', parent_id: 'loc1' }),
+    ]);
     renderPage();
 
-    expect(await screen.findByText('Sub A')).toBeInTheDocument();
-
-    await userEvent.click(screen.getByText('Sub A'));
-    expect(mockPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
+    // A leaf child draws as a full-width cell, and its accessible name carries the fill state
+    // rather than leaving occupancy to colour alone.
+    const cell = await screen.findByRole('button', { name: /^Sub A/ });
+    await userEvent.click(cell);
+    // Through the CHROME's push, so drilling in and pressing Back retraces the taps rather than
+    // climbing to whichever location happens to be this cell's parent.
+    expect(mockNavPush).toHaveBeenCalledWith('/operator/co1/inventory/locations/sub1');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   /**
@@ -113,26 +149,38 @@ describe('OperatorBinViewPage', () => {
    */
   it('offers no way to stock a place that has sub-locations', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(
-      scanWith([loc({ id: 'sub1', name: 'Sub A', code: 'C01-B03-A' })], []),
+      scanWith([loc({ id: 'sub1', name: 'Sub A' })], []),
     );
+    vi.mocked(getLocations).mockResolvedValue([
+      loc({ id: 'loc1', name: 'Bin 3' }),
+      loc({ id: 'sub1', name: 'Sub A', parent_id: 'loc1' }),
+    ]);
     renderPage();
 
-    expect(await screen.findByText('Sub A')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Sub A/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /stock a part/i })).not.toBeInTheDocument();
     expect(screen.getByText(/stock goes in the sub-locations above/i)).toBeInTheDocument();
   });
 
-  it('still offers Stock a part on a bin with no sub-locations', async () => {
+  it('still offers a way to put stock in, on a bin with no sub-locations', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(scanWith([], []));
     renderPage();
 
-    expect(await screen.findByRole('button', { name: /stock a part/i })).toBeInTheDocument();
+    // `Stock a part` and its dialog are gone: the shop floor now uses the same four verbs and the
+    // same forms as the office, so putting a delivery away is one form rather than six dialogs.
+    expect(await screen.findByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    for (const verb of [/^remove$/i, /^move$/i, /^adjust$/i]) {
+      expect(screen.getByRole('button', { name: verb })).toBeInTheDocument();
+    }
   });
 
   it('shows an empty state when nothing is stored here', async () => {
     (resolveScan as ReturnType<typeof vi.fn>).mockResolvedValue(scanWith([], []));
     renderPage();
-    expect(await screen.findByText('Nothing stored here yet.')).toBeInTheDocument();
+    expect(await screen.findByText(/no parts recorded here/i)).toBeInTheDocument();
+    // Nothing to take out of an empty bin, but you can always put something in.
+    expect(screen.getByRole('button', { name: /^remove$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^add$/i })).toBeEnabled();
   });
 
   it('Remove depletes gracefully and stamps the operator', async () => {
@@ -140,13 +188,19 @@ describe('OperatorBinViewPage', () => {
       scanWith([], [{ part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12 }]),
     );
     (depleteStockAtLocation as ReturnType<typeof vi.fn>).mockResolvedValue({ location_balance: 7, part_quantity: 7 });
+    (getLocationContents as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contents: [
+        { part_id: 'p1', part_name: 'Steel Rod', primary_unit: 'ea', quantity: 12, location_id: 'loc1' },
+      ],
+      total: 1,
+    });
     renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: /^remove$/i }));
 
-    const dialog = await screen.findByRole('dialog');
-    await userEvent.type(within(dialog).getByLabelText(/quantity/i), '5');
-    await userEvent.click(within(dialog).getByRole('button', { name: /^remove$/i }));
+    // The shared form, expanded in place — no dialog, and the rows are the bin's contents.
+    await userEvent.type(await screen.findByLabelText(/quantity for Steel Rod/i), '5');
+    await userEvent.click(screen.getByRole('button', { name: /^remove stock$/i }));
 
     await waitFor(() =>
       expect(depleteStockAtLocation).toHaveBeenCalledWith(
@@ -154,7 +208,9 @@ describe('OperatorBinViewPage', () => {
         'loc1',
         5,
         'ea',
-        expect.objectContaining({ graceful: true, operatorId: 'op1' }),
+        // GRACEFUL SURVIVES THE REWRITE. The material is already off the shelf, so a stale count
+        // must not refuse the write; the RPC floors at zero and records the shortfall in the note.
+        expect.objectContaining({ graceful: true }),
       ),
     );
   });

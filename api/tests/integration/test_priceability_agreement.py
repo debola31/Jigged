@@ -211,3 +211,138 @@ def test_list_and_detail_agree_when_everything_has_markup(admin: Client, env: Pr
     assert explain["is_priceable"] is True
     assert explain["missing_markups"] == []
     assert env.parent_id in list_priceable
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Charge basis (#727) re-opens the markup question for ONE edge at a time.
+#
+# "A material's markup is never used inside a parent" stopped being true the
+# moment a BOM line could charge its child at PRICE. The rule both views must
+# encode:
+#
+#     a price-basis child is satisfied  <=>  it has its own markup tier
+#
+# There is no shop-wide escape hatch, deliberately: the starter markups seed a
+# part's FIRST TIER at write time and are never read here. These cases fail
+# loudly if the list RPC and the detail explain ever drift apart, or if a
+# read-time fallback creeps back in.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _charge_at_price(admin: Client, env: PriceabilityEnv) -> None:
+    admin.table("parts_bom").update({"charge_basis": "price"}).eq(
+        "parent_part_id", env.parent_id
+    ).eq("child_part_id", env.sub_id).execute()
+
+
+def _set_starter_markups(admin: Client, env: PriceabilityEnv, made: float, bought: float) -> None:
+    """Seed values for a part's FIRST tier. Neither view should react to them."""
+    admin.table("companies").update(
+        {
+            "default_markup_made_percent": made,
+            "default_markup_bought_percent": bought,
+        }
+    ).eq("id", env.company_id).execute()
+
+
+def test_price_basis_child_without_markup_blocks_the_parent(
+    admin: Client, env: PriceabilityEnv
+):
+    # PARENT is sellable, but it charges SUB at price and SUB has no markup —
+    # there is no number to charge. Both views must say so, and both must name
+    # SUB rather than leaving the user hunting.
+    _apply_default(admin, env, env.parent_id)
+    _charge_at_price(admin, env)
+
+    explain = _detail_explain(admin, env.parent_id)
+    list_priceable = _list_priceable(admin, env.company_id)
+
+    assert explain["is_priceable"] is False
+    assert env.sub_id in {g["part_id"] for g in explain["missing_markups"]}
+    assert env.parent_id not in list_priceable
+
+
+def test_price_basis_child_with_its_own_markup_is_satisfied(
+    admin: Client, env: PriceabilityEnv
+):
+    _apply_default(admin, env, env.parent_id)
+    _apply_default(admin, env, env.sub_id)
+    _charge_at_price(admin, env)
+
+    explain = _detail_explain(admin, env.parent_id)
+    assert explain["is_priceable"] is True
+    assert explain["missing_markups"] == []
+    assert env.parent_id in _list_priceable(admin, env.company_id)
+
+
+def test_starter_markups_do_not_rescue_a_tier_less_child(
+    admin: Client, env: PriceabilityEnv
+):
+    # Both starter markups set as high as they go, and SUB still blocks the
+    # parent. They are seeds for a first tier, written when a part is set up —
+    # not a fallback the priceability rule may lean on.
+    _apply_default(admin, env, env.parent_id)
+    _charge_at_price(admin, env)
+    _set_starter_markups(admin, env, made=99, bought=99)
+
+    explain = _detail_explain(admin, env.parent_id)
+    assert explain["is_priceable"] is False
+    assert env.sub_id in {g["part_id"] for g in explain["missing_markups"]}
+    assert env.parent_id not in _list_priceable(admin, env.company_id)
+
+
+def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
+    admin: Client, env: PriceabilityEnv
+):
+    # The L&L shape: purchased material charged into a parent at its marked-up
+    # price. What makes it work is the material's OWN pricing tier — which the
+    # starter tier writes for it at setup time, from the shop's bought markup.
+    suffix = uuid.uuid4().hex[:8]
+    bought = (
+        admin.table("parts")
+        .insert(
+            {
+                "company_id": env.company_id,
+                "part_name": f"BAR-{suffix}",
+                "source": "bought",
+                "primary_unit": "ea",
+            }
+        )
+        .execute()
+    )
+    bought_id = bought.data[0]["id"]
+    admin.table("part_procurement_tiers").insert(
+        {"part_id": bought_id, "min_quantity": 1, "cost_per_unit": 10}
+    ).execute()
+    admin.table("parts_bom").update(
+        {"child_part_id": bought_id, "charge_basis": "price"}
+    ).eq("parent_part_id", env.parent_id).eq("child_part_id", env.sub_id).execute()
+    _apply_default(admin, env, env.parent_id)
+
+    try:
+        # No tier on the material: blocked, and the material is named.
+        explain = _detail_explain(admin, env.parent_id)
+        assert explain["is_priceable"] is False
+        assert bought_id in {g["part_id"] for g in explain["missing_markups"]}
+        assert env.parent_id not in _list_priceable(admin, env.company_id)
+
+        # Its own tier — the thing the starter tier writes — unblocks it, on
+        # both views.
+        admin.table("part_pricing_tiers").insert(
+            {
+                "part_id": bought_id,
+                "company_id": env.company_id,
+                "sequence": 10,
+                "quantity": 1,
+                "markup_percent": 25,
+            }
+        ).execute()
+        explain = _detail_explain(admin, env.parent_id)
+        assert explain["is_priceable"] is True
+        assert explain["missing_markups"] == []
+        assert env.parent_id in _list_priceable(admin, env.company_id)
+    finally:
+        admin.table("parts_bom").delete().eq("parent_part_id", env.parent_id).execute()
+        admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
+        admin.table("part_procurement_tiers").delete().eq("part_id", bought_id).execute()
+        admin.table("parts").delete().eq("id", bought_id).execute()

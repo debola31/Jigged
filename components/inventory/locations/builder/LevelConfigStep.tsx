@@ -61,6 +61,52 @@ function collectLeafParents(
   return out;
 }
 
+/**
+ * One editable location.
+ *
+ * A read-only `Chip` on the CREATE path, where a name that does not exist yet is edited by
+ * changing the pattern that generates it — there is nothing to rename. An editable field on a
+ * RESHAPE, where every one of these is a location that already exists: this is where you fix
+ * `Rght`, or call Left "Outer", without the numbers editor evening the unit out to do it.
+ */
+function LeafChip({
+  node,
+  onRemove,
+  onRename,
+  collides,
+}: {
+  node: LocationSpecNode;
+  onRemove: (key: string) => void;
+  onRename?: (key: string, name: string) => void;
+  collides: boolean;
+}) {
+  if (!onRename) {
+    return (
+      <Chip size="small" label={node.name} variant="outlined" onDelete={() => onRemove(node.key)} />
+    );
+  }
+  return (
+    <Stack direction="row" alignItems="center" spacing={0.25}>
+      <TextField
+        value={node.name}
+        onChange={(e) => onRename(node.key, e.target.value)}
+        size="small"
+        variant="outlined"
+        error={collides}
+        inputProps={{ 'aria-label': `Name of ${node.name}`, style: { padding: '6px 8px' } }}
+        sx={{ width: 120 }}
+      />
+      <IconButton
+        size="small"
+        aria-label={`Remove ${node.name}`}
+        onClick={() => onRemove(node.key)}
+      >
+        <DeleteOutlineIcon fontSize="small" />
+      </IconButton>
+    </Stack>
+  );
+}
+
 interface LevelConfigStepProps {
   levels: LevelSpec[];
   onChange: (levels: LevelSpec[]) => void;
@@ -72,8 +118,25 @@ interface LevelConfigStepProps {
   onAdd: (parentKey: string) => void;
   onDuplicate: (key: string) => void;
   onStartOver: () => void;
+  /**
+   * Rename one node in place.
+   *
+   * Reshape is half about renaming — the whole reason the key is preserved through
+   * `renameSpecNode` is that a rename must not read as a remove-then-create — and the customized
+   * branch was read-only chips with a delete. Absent on the create path, where a name that does
+   * not exist yet is edited by changing the pattern that generates it.
+   */
+  onRename?: (key: string, name: string) => void;
   /** Names the parent already holds, so the top level's hint continues rather than restarting. */
   existingSiblingNames?: string[];
+  /** Spec keys the plan says collide, so the offending chips can say so where you can point at them. */
+  duplicateKeys?: string[];
+  /** Reshape says "Use rows and bins instead…"; a fresh build says "Start over". */
+  startOverLabel?: string;
+  /** Replaces the mode note above the per-location editor, so a reshape can say why it is here. */
+  customizedNote?: string;
+  /** "Customize individual spots" on a fresh build; a reshape names the locations it already has. */
+  customizeLabel?: string;
 }
 
 export default function LevelConfigStep({
@@ -87,8 +150,15 @@ export default function LevelConfigStep({
   onAdd,
   onDuplicate,
   onStartOver,
+  onRename,
   existingSiblingNames = [],
+  duplicateKeys = [],
+  startOverLabel = 'Start over',
+  customizedNote,
+  customizeLabel = 'Customize individual spots',
 }: LevelConfigStepProps) {
+  const collides = (key: string) => duplicateKeys.includes(key);
+
   // ----- Customized: reflect the real per-branch structure as editable chips ---
   if (customized) {
     const leafParents = collectLeafParents(tree);
@@ -98,12 +168,14 @@ export default function LevelConfigStep({
           severity="info"
           action={
             <Button color="inherit" size="small" startIcon={<ReplayIcon />} onClick={onStartOver}>
-              Start over
+              {startOverLabel}
             </Button>
           }
           sx={{ mb: 2 }}
         >
-          Fine-tuning individual spots. Branches can differ now.
+          {/* Says what you are looking at, not what mode you are in. "Fine-tuning individual spots.
+              Branches can differ now." described the software's state; this describes the unit. */}
+          {customizedNote ?? 'Editing each location on its own. Rows can differ from each other.'}
         </Alert>
 
         {/* Top-level entries: duplicate one to make another like it, or remove it. */}
@@ -114,9 +186,21 @@ export default function LevelConfigStep({
           <Stack spacing={0.5}>
             {tree.map((container) => (
               <Stack key={container.key} direction="row" alignItems="center" spacing={0.5}>
-                <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
-                  {container.name}
-                </Typography>
+                {onRename ? (
+                  <TextField
+                    value={container.name}
+                    onChange={(e) => onRename(container.key, e.target.value)}
+                    size="small"
+                    variant="standard"
+                    error={collides(container.key)}
+                    inputProps={{ 'aria-label': `Name of ${container.name}` }}
+                    sx={{ flex: 1, minWidth: 0 }}
+                  />
+                ) : (
+                  <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                    {container.name}
+                  </Typography>
+                )}
                 <IconButton
                   size="small"
                   aria-label={`Duplicate ${container.name}`}
@@ -136,13 +220,16 @@ export default function LevelConfigStep({
           </Stack>
         </Box>
 
-        {leafParents.length === 0 ? (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {tree.map((n) => (
-              <Chip key={n.key} size="small" label={n.name} onDelete={() => onRemove(n.key)} />
-            ))}
-          </Box>
-        ) : (
+        {/*
+          A flat unit gets the `Top-level` list ABOVE and nothing here.
+
+          This used to render `tree` a second time as chips, which on a flat unit is the same set
+          of nodes with a second delete button each. Harmless while one was a label and the other a
+          chip; not harmless once reshape made both of them editable name fields, at which point a
+          three-row cabinet showed six inputs for three rows. The list above already carries
+          rename, duplicate and remove, which is every action a top-level entry has.
+        */}
+        {leafParents.length > 0 && (
           <Stack spacing={1.5}>
             {leafParents.map(({ node, path }) => (
               <Box key={node.key}>
@@ -151,12 +238,12 @@ export default function LevelConfigStep({
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
                   {node.children.map((leaf) => (
-                    <Chip
+                    <LeafChip
                       key={leaf.key}
-                      size="small"
-                      label={leaf.name}
-                      variant="outlined"
-                      onDelete={() => onRemove(leaf.key)}
+                      node={leaf}
+                      onRemove={onRemove}
+                      onRename={onRename}
+                      collides={collides(leaf.key)}
                     />
                   ))}
                   <Chip
@@ -305,10 +392,10 @@ export default function LevelConfigStep({
         disabled={total === 0}
         sx={{ mt: 2 }}
       >
-        Customize individual spots
+        {customizeLabel}
       </Button>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
-        Give specific branches different bins (e.g. a gap, or one extra).
+        Rename one, or give a single row a different number of bins.
       </Typography>
     </Box>
   );

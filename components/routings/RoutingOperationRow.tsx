@@ -197,7 +197,7 @@ export default function RoutingOperationRow({
           </Typography>
         )}
         {errorMessage && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.main', mt: 0.25 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'error.light', mt: 0.25 }}>
             <ErrorOutlineIcon sx={{ fontSize: 16 }} />
             <Typography variant="caption">{errorMessage}</Typography>
           </Box>

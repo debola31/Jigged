@@ -206,7 +206,7 @@ export default function PartLocationInventory({
               router.push(`/dashboard/${companyId}/inventory/count?part=${partId}`)
             }
           >
-            Count all {placesWithStock} places
+            Count all {placesWithStock} locations
           </Button>
         )}
       </Stack>

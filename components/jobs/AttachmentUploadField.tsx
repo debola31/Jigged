@@ -79,7 +79,7 @@ export default function AttachmentUploadField({
         </Button>
       )}
       {error && (
-        <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+        <Typography variant="caption" color="error.light" sx={{ display: 'block', mt: 0.5 }}>
           {error}
         </Typography>
       )}

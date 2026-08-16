@@ -173,6 +173,9 @@ export type Database = {
           city: string | null
           country: string | null
           created_at: string | null
+          default_markup_bought_percent: number
+          default_markup_made_percent: number
+          default_material_charge_basis: string
           demo_company_id: string | null
           email: string | null
           id: string
@@ -193,6 +196,9 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
+          default_markup_bought_percent?: number
+          default_markup_made_percent?: number
+          default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -213,6 +219,9 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
+          default_markup_bought_percent?: number
+          default_markup_made_percent?: number
+          default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
           id?: string
@@ -1083,10 +1092,12 @@ export type Database = {
           created_at: string | null
           estimated_run_minutes_per_unit: number | null
           estimated_setup_minutes: number | null
+          external_unit_price_snapshot: number | null
           id: string
           instructions: string | null
           job_id: string
           job_part_id: string
+          labor_rate_snapshot: number | null
           notes: string | null
           operation_name: string
           routing_operation_id: string | null
@@ -1096,6 +1107,7 @@ export type Database = {
           status: string
           updated_at: string | null
           work_center_id: string | null
+          work_center_kind_snapshot: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -1103,10 +1115,12 @@ export type Database = {
           created_at?: string | null
           estimated_run_minutes_per_unit?: number | null
           estimated_setup_minutes?: number | null
+          external_unit_price_snapshot?: number | null
           id?: string
           instructions?: string | null
           job_id: string
           job_part_id: string
+          labor_rate_snapshot?: number | null
           notes?: string | null
           operation_name: string
           routing_operation_id?: string | null
@@ -1116,6 +1130,7 @@ export type Database = {
           status?: string
           updated_at?: string | null
           work_center_id?: string | null
+          work_center_kind_snapshot?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -1123,10 +1138,12 @@ export type Database = {
           created_at?: string | null
           estimated_run_minutes_per_unit?: number | null
           estimated_setup_minutes?: number | null
+          external_unit_price_snapshot?: number | null
           id?: string
           instructions?: string | null
           job_id?: string
           job_part_id?: string
+          labor_rate_snapshot?: number | null
           notes?: string | null
           operation_name?: string
           routing_operation_id?: string | null
@@ -1136,6 +1153,7 @@ export type Database = {
           status?: string
           updated_at?: string | null
           work_center_id?: string | null
+          work_center_kind_snapshot?: string | null
         }
         Relationships: [
           {
@@ -1186,6 +1204,7 @@ export type Database = {
           started_at: string | null
           status_changed_at: string | null
           total_price: number | null
+          true_cost_per_unit: number | null
           unit_price: number | null
           updated_at: string
         }
@@ -1206,6 +1225,7 @@ export type Database = {
           started_at?: string | null
           status_changed_at?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number | null
           updated_at?: string
         }
@@ -1226,6 +1246,7 @@ export type Database = {
           started_at?: string | null
           status_changed_at?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number | null
           updated_at?: string
         }
@@ -2098,6 +2119,7 @@ export type Database = {
       }
       parts_bom: {
         Row: {
+          charge_basis: string
           child_part_id: string
           consume_whole_units: boolean
           created_at: string
@@ -2110,6 +2132,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          charge_basis?: string
           child_part_id: string
           consume_whole_units?: boolean
           created_at?: string
@@ -2122,6 +2145,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          charge_basis?: string
           child_part_id?: string
           consume_whole_units?: boolean
           created_at?: string
@@ -2604,6 +2628,7 @@ export type Database = {
           sequence: number
           source_tier_id: string | null
           total_price: number | null
+          true_cost_per_unit: number | null
           unit_price: number
         }
         Insert: {
@@ -2622,6 +2647,7 @@ export type Database = {
           sequence: number
           source_tier_id?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price: number
         }
         Update: {
@@ -2640,6 +2666,7 @@ export type Database = {
           sequence?: number
           source_tier_id?: string | null
           total_price?: number | null
+          true_cost_per_unit?: number | null
           unit_price?: number
         }
         Relationships: [
@@ -2669,150 +2696,6 @@ export type Database = {
             columns: ["source_tier_id"]
             isOneToOne: false
             referencedRelation: "part_pricing_tiers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      quote_materials: {
-        Row: {
-          company_id: string
-          cost_per_unit: number | null
-          created_at: string
-          id: string
-          item_name: string
-          line_cost: number | null
-          material_part_id: string | null
-          part_id: string
-          quantity: number
-          quote_id: string
-          sequence: number
-          unit: string | null
-          units_consumed: number | null
-        }
-        Insert: {
-          company_id: string
-          cost_per_unit?: number | null
-          created_at?: string
-          id?: string
-          item_name: string
-          line_cost?: number | null
-          material_part_id?: string | null
-          part_id: string
-          quantity: number
-          quote_id: string
-          sequence: number
-          unit?: string | null
-          units_consumed?: number | null
-        }
-        Update: {
-          company_id?: string
-          cost_per_unit?: number | null
-          created_at?: string
-          id?: string
-          item_name?: string
-          line_cost?: number | null
-          material_part_id?: string | null
-          part_id?: string
-          quantity?: number
-          quote_id?: string
-          sequence?: number
-          unit?: string | null
-          units_consumed?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "quote_materials_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_materials_material_part_id_fkey"
-            columns: ["material_part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_materials_part_id_fkey"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_materials_quote_id_fkey"
-            columns: ["quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      quote_operations: {
-        Row: {
-          company_id: string
-          created_at: string
-          id: string
-          labor_rate: number | null
-          operation_name: string
-          part_id: string
-          quote_id: string
-          run_cost: number | null
-          run_time_minutes: number | null
-          sequence: number
-          setup_cost: number | null
-          setup_time_minutes: number | null
-        }
-        Insert: {
-          company_id: string
-          created_at?: string
-          id?: string
-          labor_rate?: number | null
-          operation_name: string
-          part_id: string
-          quote_id: string
-          run_cost?: number | null
-          run_time_minutes?: number | null
-          sequence: number
-          setup_cost?: number | null
-          setup_time_minutes?: number | null
-        }
-        Update: {
-          company_id?: string
-          created_at?: string
-          id?: string
-          labor_rate?: number | null
-          operation_name?: string
-          part_id?: string
-          quote_id?: string
-          run_cost?: number | null
-          run_time_minutes?: number | null
-          sequence?: number
-          setup_cost?: number | null
-          setup_time_minutes?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "quote_operations_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_operations_part_id_fkey"
-            columns: ["part_id"]
-            isOneToOne: false
-            referencedRelation: "parts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_operations_quote_id_fkey"
-            columns: ["quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -3649,6 +3532,30 @@ export type Database = {
         Args: { p_table: unknown }
         Returns: undefined
       }
+      apply_location_layout: {
+        Args: {
+          p_moves?: Json
+          p_nodes: Json
+          p_parent_id: string
+          p_removals?: string[]
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          id: string
+          kind: string | null
+          name: string
+          parent_id: string | null
+          sort_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "inventory_locations"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       apply_stripe_subscription: {
         Args: {
           p_cancel_at: string
@@ -3706,6 +3613,10 @@ export type Database = {
         Args: { p_job_id: string }
         Returns: string
       }
+      compute_part_charge_base_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: number
+      }
       compute_part_cost_at_qty: {
         Args: { p_part_id: string; p_qty: number }
         Returns: number
@@ -3718,6 +3629,17 @@ export type Database = {
           missing_markups: Json
           missing_op_rates: Json
           unit_cost: number
+        }[]
+      }
+      compute_part_price_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: number
+      }
+      compute_part_price_explain_at_qty: {
+        Args: { p_part_id: string; p_qty: number }
+        Returns: {
+          markup_percent: number
+          unit_price: number
         }[]
       }
       contact_block_snapshot: { Args: { p_contact_id: string }; Returns: Json }
@@ -3946,6 +3868,14 @@ export type Database = {
           viewer_count: number
         }[]
       }
+      part_rollup_at_qty: {
+        Args: {
+          p_apply_charge_basis: boolean
+          p_part_id: string
+          p_qty: number
+        }
+        Returns: number
+      }
       parts_deletion_impact: {
         Args: { p_ids: string[] }
         Returns: {
@@ -3990,25 +3920,6 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
-      subdivide_location: {
-        Args: { p_moves?: Json; p_nodes: Json; p_parent_id: string }
-        Returns: {
-          company_id: string
-          created_at: string
-          id: string
-          kind: string | null
-          name: string
-          parent_id: string | null
-          sort_order: number
-          updated_at: string
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "inventory_locations"
-          isOneToOne: false
-          isSetofReturn: true
-        }
-      }
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined

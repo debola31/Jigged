@@ -322,13 +322,19 @@ def test_concurrent_subdivide_and_stock_cannot_both_win(db, shop, commit_first):
             conn.close()
 
 
-# ── subdivide_location: the one caller allowed through the illegal state ──────
+# ── apply_location_layout: the one caller allowed through the illegal state ───
+#
+# Was `subdivide_location`, dropped in 20260815192344. A reshape is a strict superset of a
+# subdivide — all-creates plus moves — and keeping both would have left two browser-callable
+# SECURITY DEFINER functions permitted to defer this invariant. These three cases move across
+# unchanged in what they assert; only the call does. The rest of the reshape surface (the parking
+# pass, removals, the partition rule) lives in `test_apply_location_layout.py`.
 
 
 def test_subdivide_moves_the_stock_down_and_commits(db, shop):
     with user_session(shop["user"]) as (conn, cur):
         cur.execute(
-            "SELECT id, name FROM subdivide_location(%s, %s::jsonb, %s::jsonb)",
+            "SELECT id, name FROM apply_location_layout(%s, %s::jsonb, %s::jsonb)",
             (
                 shop["stocked"],
                 json.dumps(
@@ -341,6 +347,7 @@ def test_subdivide_moves_the_stock_down_and_commits(db, shop):
                     [
                         {
                             "part_id": shop["part"],
+                            "from_location_id": shop["stocked"],
                             "to_ref": "a",
                             "quantity": 60,
                             "unit": "each",
@@ -348,6 +355,7 @@ def test_subdivide_moves_the_stock_down_and_commits(db, shop):
                         },
                         {
                             "part_id": shop["part"],
+                            "from_location_id": shop["stocked"],
                             "to_ref": "b",
                             "quantity": 40,
                             "unit": "each",
@@ -360,7 +368,9 @@ def test_subdivide_moves_the_stock_down_and_commits(db, shop):
         created = {name: loc_id for loc_id, name in cur.fetchall()}
         conn.commit()  # the deferred check runs here, and must pass
 
-    assert set(created) == {"Bin 1", "Bin 2"}
+    # The RPC returns the whole subtree, the unit included — after a flatten the unit is the only
+    # location left, so it cannot be omitted.
+    assert set(created) == {"Shelf X", "Bin 1", "Bin 2"}
 
     with db.cursor() as cur:
         cur.execute(
@@ -395,7 +405,7 @@ def test_subdivide_with_an_incomplete_distribution_rolls_everything_back(db, sho
     """
     with user_session(shop["user"]) as (conn, cur):
         cur.execute(
-            "SELECT id FROM subdivide_location(%s, %s::jsonb, %s::jsonb)",
+            "SELECT id FROM apply_location_layout(%s, %s::jsonb, %s::jsonb)",
             (
                 shop["stocked"],
                 json.dumps([{"ref": "a", "parent_ref": None, "name": "Bin 1"}]),
@@ -403,6 +413,7 @@ def test_subdivide_with_an_incomplete_distribution_rolls_everything_back(db, sho
                     [
                         {
                             "part_id": shop["part"],
+                            "from_location_id": shop["stocked"],
                             "to_ref": "a",
                             "quantity": 60,  # 40 left behind on the parent
                             "unit": "each",
@@ -447,7 +458,7 @@ def test_subdivide_is_refused_to_a_non_member(db, shop):
         with pytest.raises(errors.InsufficientPrivilege, match="access denied"):
             with user_session(outsider) as (_conn, cur):
                 cur.execute(
-                    "SELECT id FROM subdivide_location(%s, %s::jsonb)",
+                    "SELECT id FROM apply_location_layout(%s, %s::jsonb)",
                     (
                         shop["container"],
                         json.dumps([{"ref": "a", "parent_ref": None, "name": "Side 2"}]),

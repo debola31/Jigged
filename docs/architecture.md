@@ -77,7 +77,7 @@ cross-tenant reads; one user can belong to many companies.
 
 | Table | Shape that matters |
 |---|---|
-| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts)). |
+| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_markup_made_percent, default_markup_bought_percent` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts)). The two markup columns are **real columns, not settings keys**, because a markup is `numeric(10,6)` and the `settings.defaults` registry is integer-only — see [parts.md](modules/parts.md#parts_bom). |
 | `user_company_access` | `(user_id, company_id) UNIQUE`; `role` CHECK-constrained to **`admin` \| `user` \| `operator`** (default `operator`); also `name`, `email`, `pin_hash`, `excluded_from_metrics`. *(Previously listed an `owner` role; the constraint has never allowed it.)* |
 | `user_preferences` | `user_id UNIQUE`, `last_company_id`, `preferences jsonb`. |
 
@@ -460,8 +460,10 @@ Feature-scoped groups, each owned by its module doc rather than repeated here:
 `STRIPE_RESTRICTED_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` /
 `STRIPE_FOUNDING_PRICE_ID` ([modules/billing.md](modules/billing.md); note §8.4 —
 the restricted key deliberately has **no** fallback to `STRIPE_SECRET_KEY`),
-`QUICKBOOKS_*` + `APP_BASE_URL`, `RESEND_API_KEY` / `QUOTES_FROM_EMAIL`, and
-`SENTRY_DSN` ([telemetry.md](telemetry.md)).
+`QUICKBOOKS_*` + `APP_BASE_URL`, and `SENTRY_DSN` ([telemetry.md](telemetry.md)).
+`RESEND_API_KEY` is an **Edge Function** secret, not a backend one — Python stopped
+sending mail when `/api/quotes/{id}/email` and `api/services/email.py` were deleted
+([modules/invitation-system.md](modules/invitation-system.md)).
 
 *(§10 Development Commands was removed 2026-08-03: CLAUDE.md genuinely does own it,
 and this copy said `pip install -r requirements.txt` / `python index.py` against the

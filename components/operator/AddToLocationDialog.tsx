@@ -3,6 +3,13 @@
 /**
  * "Where does this go?" — the fallback path when scanning isn't available.
  *
+ * ## Was `PutAwayPickerDialog`, renamed 2026-08-15
+ *
+ * The office side dropped `Put away` as a name in the 2026-08-10 four-verb rework, on the
+ * founder's own reading — *"I just don't get the meaning of put away which it seems is move"* —
+ * and the operator surface kept it. Nobody meets both surfaces and both words, so one of them had
+ * to go, and it was the one that had already been argued out of the vocabulary.
+ *
  * ## Why this is a fallback and not the main way
  *
  * Scanning the shelf label is the better input and should stay the default: it is the only
@@ -38,7 +45,7 @@
  * the source. `excludeSystem` stays on the picker as a second line: it is redundant against the
  * current builder and costs nothing, and it keeps the intent legible at the call site.
  *
- * No `onCreate` either — creating places is an owner's job, the same call the board makes by
+ * No `onCreate` either — creating locations is an owner's job, the same call the board makes by
  * withholding "Add storage".
  */
 
@@ -56,7 +63,7 @@ import LocationPicker, {
 import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation, PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
 
-export interface PutAwayPickerDialogProps {
+export interface AddToLocationDialogProps {
   open: boolean;
   partName: string;
   /** Unit for the per-option quantity caption. Without it the quantities stay hidden. */
@@ -69,7 +76,7 @@ export interface PutAwayPickerDialogProps {
   onChoose: (locationId: string) => void;
 }
 
-export default function PutAwayPickerDialog({
+export default function AddToLocationDialog({
   open,
   partName,
   unit,
@@ -77,7 +84,7 @@ export default function PutAwayPickerDialog({
   balances,
   onClose,
   onChoose,
-}: PutAwayPickerDialogProps) {
+}: AddToLocationDialogProps) {
   const [choice, setChoice] = useState<LocationPickerOption | null>(null);
 
   // Leaf-only, pile excluded, already-holding-some sorted first — all of it now the shared rule in
@@ -94,10 +101,10 @@ export default function PutAwayPickerDialog({
 
   return (
     <Dialog open={open} onClose={close} fullWidth maxWidth="xs">
-      <DialogTitle>Put away {partName}</DialogTitle>
+      <DialogTitle>Add {partName} to a new location</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Pick where it&apos;s going and we&apos;ll take you there. Scanning the shelf label is
+          Pick where it&apos;s going and we&apos;ll take you there. Scanning the label is
           quicker when you&apos;re standing at it.
         </Typography>
         <LocationPicker

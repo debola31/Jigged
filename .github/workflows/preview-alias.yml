@@ -1,0 +1,77 @@
+# One stable URL for the newest preview, whatever branch produced it.
+#
+# WHY: Intuit matches an OAuth redirect URI EXACTLY, and Vercel's preview URLs
+# carry a per-deployment hash. Every stable URL Vercel offers is branch-scoped —
+# the generated `<project>-git-<branch>-<scope>.vercel.app`, or a domain pinned to
+# one branch in project settings. Both would mean re-registering a URI per branch,
+# or keeping one long-lived branch alive purely to hold a URI — and a long-lived
+# branch holds a Supabase preview branch open for nothing.
+#
+# So: register https://preview.jigged.app/api/quickbooks/callback with Intuit
+# once, and repoint that domain at each new preview as it goes live.
+#
+# `vercel alias` moves a domain onto a deployment Vercel has ALREADY built. This
+# is NOT the CLI-build approach withdrawn in
+# docs/runbooks/database-migrations.md — that failed on build limits, none of
+# which apply to a metadata call.
+#
+# QuickBooks DESKTOP needs none of this: it has no OAuth callback at all. This
+# exists for QuickBooks Online, whose connect flow redirects back to us.
+
+name: Preview Alias
+
+# deployment_status is the only event whose payload carries the real preview URL
+# (environment_url). The commit STATUS Vercel also posts points at the vercel.com
+# dashboard, not at the site, so it cannot drive this.
+#
+# THIS DOES NOTHING UNTIL IT IS ON main. GitHub reads deployment_status workflow
+# files from the DEFAULT BRANCH only, so the branch adding this file cannot test
+# it — verify on the first preview after merge.
+on: deployment_status
+
+env:
+  ALIAS_DOMAIN: preview.jigged.app
+
+# Last one in wins, on purpose. When two previews finish together the domain
+# should end up on the NEWER one, so an in-flight alias is cancelled by the
+# deployment that superseded it rather than racing it to the finish.
+#
+# The consequence to know: this domain is shared mutable state. If someone else's
+# preview lands mid-test, an OAuth callback arrives at their build, not yours.
+concurrency:
+  group: preview-alias
+  cancel-in-progress: true
+
+# Touches neither the repo nor the GITHUB_TOKEN — it only calls Vercel.
+permissions: {}
+
+jobs:
+  alias:
+    # Production owns www.jigged.app; pointing the preview domain at a production
+    # deployment would be both wrong and confusing. `state` also filters out the
+    # pending/failure/error statuses that fire for the same deployment.
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment == 'Preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Point the preview domain at this deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          # The team ID, never its slug. The slug already changed once — on the
+          # Pro upgrade, adebola-akeredolus-projects became psyco-ghost — which
+          # silently invalidates every URL built from it. The ID does not move.
+          VERCEL_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
+          TARGET_URL: ${{ github.event.deployment_status.environment_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TARGET_URL}" ]; then
+            echo "::error::deployment_status carried no environment_url; nothing to alias."
+            exit 1
+          fi
+          # Pinned to a major. An alias that silently stops working is worse than
+          # one that fails loudly on an upgrade we chose.
+          npx --yes vercel@59 alias set "${TARGET_URL}" "${ALIAS_DOMAIN}" \
+            --token "${VERCEL_TOKEN}" --scope "${VERCEL_SCOPE}"
+          echo "[${ALIAS_DOMAIN}](https://${ALIAS_DOMAIN}) → ${TARGET_URL}" >> "${GITHUB_STEP_SUMMARY}"

@@ -7,10 +7,11 @@ import type { QuickBooksStatus, QuickBooksPoField } from '@/utils/quickbooksAcce
 
 const mockGetStatus = vi.fn();
 const mockRefreshPoField = vi.fn();
+const mockStartConnect = vi.hoisted(() => vi.fn());
 
 vi.mock('@/utils/quickbooksAccess', () => ({
   getQuickBooksStatus: (...args: unknown[]) => mockGetStatus(...args),
-  startQuickBooksConnect: vi.fn(),
+  startQuickBooksConnect: (...args: unknown[]) => mockStartConnect(...args),
   disconnectQuickBooks: vi.fn(),
   refreshQuickBooksPoField: (...args: unknown[]) => mockRefreshPoField(...args),
 }));
@@ -21,9 +22,10 @@ vi.mock('@/hooks/useCompanyFeatures', () => ({
 }));
 
 const mockGetDesktopStatus = vi.fn();
+const mockStartDesktopConnect = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/quickbooksDesktop', () => ({
   getQuickBooksDesktopStatus: (...args: unknown[]) => mockGetDesktopStatus(...args),
-  startQuickBooksDesktopConnect: vi.fn(),
+  startQuickBooksDesktopConnect: (...args: unknown[]) => mockStartDesktopConnect(...args),
   testQuickBooksDesktop: vi.fn(),
   disconnectQuickBooksDesktop: vi.fn(),
   listQuickBooksDesktopAccounts: vi.fn(),
@@ -176,5 +178,77 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     ).not.toBeInTheDocument();
     // And it must not assert a status it never learned.
     expect(screen.queryByText(/Not connected/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Both connects are multi-second — QuickBooks Online round-trips our API for an
+ * Intuit authorize URL before navigating away, and Desktop makes two Conductor
+ * calls. A button that only greys out for that long reads as a dropped click,
+ * which is what a shop reported about the panel's buttons.
+ */
+describe('QuickBooksIntegrationCard — connecting', () => {
+  const user = userEvent.setup();
+
+  /** A promise we control, so the in-flight state can actually be observed. */
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRouterMocks();
+    // Not connected to either, so the provider choice renders.
+    mockGetStatus.mockResolvedValue({
+      connected: false,
+      environment: 'sandbox',
+      qb_company_name: null,
+      reconnect_required: false,
+      connected_at: null,
+    });
+    mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
+    mockFeatures.mockReturnValue({ quickbooks_desktop: true });
+  });
+
+  it('says it is creating the setup link while Desktop connect is in flight', async () => {
+    const d = deferred<{ auth_flow_url: string; expires_at: string }>();
+    mockStartDesktopConnect.mockReturnValue(d.promise);
+
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+    await user.click(await screen.findByRole('button', { name: /connect quickbooks desktop/i }));
+
+    expect(await screen.findByRole('button', { name: /creating setup link/i })).toBeInTheDocument();
+    // The other card is disabled meanwhile, but must not claim to be working.
+    const online = screen.getByRole('button', { name: /connect quickbooks online/i });
+    expect(online).toBeDisabled();
+    expect(online).not.toHaveTextContent(/opening quickbooks/i);
+
+    d.resolve({ auth_flow_url: 'https://connect.conductor.is/qbd/x', expires_at: null as never });
+  });
+
+  it('says it is opening QuickBooks while the Online connect is in flight', async () => {
+    const d = deferred<string>();
+    mockStartConnect.mockReturnValue(d.promise);
+
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+    await user.click(await screen.findByRole('button', { name: /connect quickbooks online/i }));
+
+    expect(await screen.findByRole('button', { name: /opening quickbooks/i })).toBeInTheDocument();
+    d.resolve('https://appcenter.intuit.com/connect/oauth2?x=1');
+  });
+
+  it('restores the button when starting the connection fails', async () => {
+    mockStartDesktopConnect.mockRejectedValue(new Error('Conductor is unavailable'));
+
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+    await user.click(await screen.findByRole('button', { name: /connect quickbooks desktop/i }));
+
+    // A spinner left running after a failure is how a retry becomes impossible.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /connect quickbooks desktop/i })).toBeEnabled(),
+    );
+    expect(await screen.findByText(/Conductor is unavailable/i)).toBeInTheDocument();
   });
 });

@@ -15,6 +15,10 @@
  *      chip colors; on a button fill they mislead (a green button reads as
  *      "already done"). See docs/design-system.md "Buttons". This is exactly
  *      how the green "Complete"/"Mark Received" one-offs crept in.
+ *   4. Silent busy buttons — a control that only greys out during a third-party
+ *      round trip reads as a dropped click. Three live bug reports from one shop
+ *      before the rule existed. See docs/interaction-standards.md §5; use the
+ *      shared components/common/BusyButton, which makes the label mandatory.
  *
  * Mirrors scripts/schemaEmbedCheck.ts: a pure scan function the test drives,
  * plus a main() for `pnpm exec tsx`.
@@ -25,9 +29,28 @@ import path from 'path';
 export interface StandardsViolation {
   file: string; // relative to repo root
   line: number;
-  rule: 'placeholder' | 'grey-delete' | 'button-color';
+  rule: 'placeholder' | 'grey-delete' | 'button-color' | 'silent-busy-button';
   message: string;
 }
+
+/**
+ * Surfaces whose buttons cross to a THIRD PARTY, so their round trips are
+ * reliably over Nielsen's 1-second "no feedback needed" limit — Conductor's Web
+ * Connector hop to a PC in the shop is 3-10s cold, longer when QuickBooks is shut.
+ *
+ * Scoped by PATH, not by import. Importing a slow client says nothing about any
+ * individual button: the job page imports quickbooksAccess to list invoice links,
+ * and nine of its ten buttons are sub-second Supabase writes. Matching the
+ * integration surfaces themselves is the closest honest proxy for "this control
+ * calls out", and it is why the first draft of this rule was wrong.
+ *
+ * Deliberately narrow. `disabled={busy}` appears ~260 times across ~77 files and
+ * the overwhelming majority are fast local writes where a spinner is noise, not
+ * help. A check that flags those is a check nobody trusts and an allowlist that
+ * swallows the rule. Widen this only for a surface whose latency is known to
+ * exceed a second.
+ */
+const THIRD_PARTY_SURFACES = /quickbooks/i;
 
 // Escape hatch for genuine exceptions, keyed by `relativePath:line` is too
 // brittle (line numbers shift); key by `relativePath::snippet` instead.
@@ -165,11 +188,58 @@ export function findButtonColorViolations(source: string, relPath: string): Stan
   return out;
 }
 
+/**
+ * Find buttons that go silent during a third-party round trip.
+ *
+ * Scoped to the THIRD_PARTY_SURFACES paths, where a wait over a second is the
+ * norm rather than the exception. Inside those files a `<Button>` carrying a
+ * busy-ish `disabled` is flagged: `disabled` greys the control and says nothing,
+ * which is the same defect docs/interaction-standards.md §4 already bans for
+ * unavailable actions. Use components/common/BusyButton so the pending label
+ * cannot be forgotten — it makes `pendingLabel` required.
+ *
+ * Only the busy-ish names are matched (`disabled={saving}`, `{busy}`, …), not
+ * every `disabled`: a genuinely unavailable action — no rows selected, lapsed
+ * subscription — is §4's business and must NOT grow a spinner.
+ */
+export function findSilentBusyButtonViolations(
+  source: string,
+  relPath: string,
+): StandardsViolation[] {
+  if (!THIRD_PARTY_SURFACES.test(relPath)) return [];
+
+  const out: StandardsViolation[] = [];
+  const re = /<Button\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const tag = sliceOpeningTag(source, m.index);
+    if (!tag) continue;
+    // `busy`, `saving`, `isLoading`, `actionLoading`, `submitting`, `pending`…
+    if (!/\bdisabled=\{[^}]*\b\w*(?:busy|Busy|loading|Loading|saving|Saving|submitting|Submitting|pending|Pending)\w*\b[^}]*\}/.test(tag))
+      continue;
+    // A button that only flips local state — `onClick={() => setDisconnectOpen(true)}`
+    // — opens a dialog; it does not call out, so it waits for nothing and must
+    // not grow a spinner. It is still disabled during other work, which is right.
+    if (/onClick=\{\(\)\s*=>\s*set[A-Z]\w*\(/.test(tag)) continue;
+    if (ALLOWLIST.has(`${relPath}::silent-busy-button`)) continue;
+    const line = source.slice(0, m.index).split('\n').length;
+    out.push({
+      file: relPath,
+      line,
+      rule: 'silent-busy-button',
+      message:
+        '<Button disabled={…busy…}> in a file that calls a third-party client. A control that only greys out for a multi-second round trip reads as a dropped click. Use components/common/BusyButton (pendingLabel is required) — see docs/interaction-standards.md §5.',
+    });
+  }
+  return out;
+}
+
 export function scanSource(source: string, relPath: string): StandardsViolation[] {
   return [
     ...findPlaceholderViolations(source, relPath),
     ...findGreyDeleteViolations(source, relPath),
     ...findButtonColorViolations(source, relPath),
+    ...findSilentBusyButtonViolations(source, relPath),
   ];
 }
 
@@ -201,8 +271,9 @@ export function scanProject(
   const violations: StandardsViolation[] = [];
   for (const file of files) {
     const rel = path.relative(repoRoot, file);
-    // Don't flag the shared component's own internals.
+    // Don't flag the shared components' own internals — they ARE the fix.
     if (rel.endsWith(path.join('common', 'DeleteIconButton.tsx'))) continue;
+    if (rel.endsWith(path.join('common', 'BusyButton.tsx'))) continue;
     violations.push(...scanSource(readFileSync(file, 'utf8'), rel));
   }
   return violations;

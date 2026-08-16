@@ -6,6 +6,7 @@ import {
   findGreyDeleteViolations,
   findButtonColorViolations,
   scanProject,
+  findSilentBusyButtonViolations,
 } from '../../scripts/interactionStandardsCheck';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -110,5 +111,39 @@ describe('interactionStandardsCheck — repo is clean', () => {
     const violations = scanProject(REPO_ROOT);
     const formatted = violations.map((v) => `${v.file}:${v.line} [${v.rule}] ${v.message}`).join('\n');
     expect(formatted, formatted).toBe('');
+  });
+});
+
+describe('silent busy buttons (§5)', () => {
+  const QB = 'components/settings/quickbooks/Thing.tsx';
+
+  it('flags a busy-disabled Button on a QuickBooks surface', () => {
+    const src = `<Button onClick={handleTest} disabled={busy}>Test connection</Button>`;
+    const v = findSilentBusyButtonViolations(src, QB);
+    expect(v).toHaveLength(1);
+    expect(v[0].rule).toBe('silent-busy-button');
+  });
+
+  it('accepts BusyButton, which is the fix', () => {
+    const src = `<BusyButton onClick={handleTest} disabled={busy} pendingLabel="Asking…">Test</BusyButton>`;
+    expect(findSilentBusyButtonViolations(src, QB)).toEqual([]);
+  });
+
+  // The rule must not creep into the ~260 sub-second sites it deliberately skips.
+  it('ignores the same pattern away from an integration surface', () => {
+    const src = `<Button onClick={handleSave} disabled={saving}>Save</Button>`;
+    expect(findSilentBusyButtonViolations(src, 'components/parts/PartForm.tsx')).toEqual([]);
+  });
+
+  // §4's business, not §5's: an action that is genuinely unavailable stays
+  // disabled-and-explained, and must never grow a spinner.
+  it('ignores a disable that is not a busy flag', () => {
+    const src = `<Button onClick={handleSend} disabled={!canSend}>Send</Button>`;
+    expect(findSilentBusyButtonViolations(src, QB)).toEqual([]);
+  });
+
+  it('ignores a button that only opens a dialog', () => {
+    const src = `<Button onClick={() => setDisconnectOpen(true)} disabled={busy}>Disconnect</Button>`;
+    expect(findSilentBusyButtonViolations(src, QB)).toEqual([]);
   });
 });

@@ -29,6 +29,7 @@ import SettingsSection from '@/components/settings/SettingsSection';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import DesktopAuthHandoff from '@/components/settings/quickbooks/DesktopAuthHandoff';
 import QuickBooksDesktopPanel from '@/components/settings/quickbooks/QuickBooksDesktopPanel';
+import BusyButton from '@/components/common/BusyButton';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import posthog from 'posthog-js';
 import {
@@ -75,11 +76,12 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
    *  Conductor calls (create the end user, mint an auth session). `busy` only
    *  greys both cards out, which reads as a dead button rather than work in
    *  progress -- the same complaint raised about the panel's buttons. */
-  const [connecting, setConnecting] = useState<null | 'qbo' | 'qbd'>(null);
+  const [pending, setPending] = useState<null | 'qbo' | 'qbd' | 'po-field'>(null);
 
   const handleCheckPoField = async () => {
     setError(null);
     setBusy(true);
+    setPending('po-field');
     try {
       const found = await refreshQuickBooksPoField(companyId);
       setPoField(found);
@@ -92,6 +94,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
       setError(err instanceof Error ? err.message : 'Could not read QuickBooks settings.');
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
@@ -159,7 +162,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const handleConnect = async () => {
     setError(null);
     setBusy(true);
-    setConnecting('qbo');
+    setPending('qbo');
     posthog.capture('accounting connect started', { provider: 'qbo' });
     try {
       const url = await startQuickBooksConnect(companyId);
@@ -170,7 +173,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the QuickBooks connection.');
       setBusy(false);
-      setConnecting(null);
+      setPending(null);
     }
   };
 
@@ -211,7 +214,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const handleConnectDesktop = async () => {
     setError(null);
     setBusy(true);
-    setConnecting('qbd');
+    setPending('qbd');
     posthog.capture('accounting connect started', { provider: 'qbd' });
     try {
       setPendingLink(await startQuickBooksDesktopConnect(companyId));
@@ -221,7 +224,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
       );
     } finally {
       setBusy(false);
-      setConnecting(null);
+      setPending(null);
     }
   };
 
@@ -317,7 +320,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 pendingLabel="Opening QuickBooks…"
                 onConnect={handleConnect}
                 busy={busy}
-                pending={connecting === 'qbo'}
+                pending={pending === 'qbo'}
               />
               {desktopEnabled && (
               <ProviderOption
@@ -327,7 +330,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 pendingLabel="Creating setup link…"
                 onConnect={handleConnectDesktop}
                 busy={busy}
-                pending={connecting === 'qbd'}
+                pending={pending === 'qbd'}
               />
               )}
             </Stack>
@@ -339,9 +342,16 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 severity="warning"
                 sx={{ mb: 2 }}
                 action={
-                  <Button color="inherit" size="small" onClick={handleConnect} disabled={busy}>
+                  <BusyButton
+                    color="inherit"
+                    size="small"
+                    onClick={handleConnect}
+                    disabled={busy}
+                    pending={pending === 'qbo'}
+                    pendingLabel="Opening QuickBooks…"
+                  >
                     Reconnect
-                  </Button>
+                  </BusyButton>
                 }
               >
                 The QuickBooks connection expired. Reconnect to keep pushing invoices.
@@ -398,14 +408,16 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               </>
             )}
 
-            <Button
+            <BusyButton
               size="small"
               onClick={handleCheckPoField}
               disabled={busy}
+              pending={pending === 'po-field'}
+              pendingLabel="Reading QuickBooks settings…"
               sx={{ mb: 3, display: 'block' }}
             >
               {poField ? 'Check again' : 'Check QuickBooks settings'}
-            </Button>
+            </BusyButton>
 
             <Button variant="outlined" color="error" onClick={() => setDisconnectOpen(true)} disabled={busy}>
               Disconnect
@@ -467,14 +479,15 @@ function ProviderOption({
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         {detail}
       </Typography>
-      <Button
+      <BusyButton
         variant="contained"
         onClick={onConnect}
         disabled={busy}
-        startIcon={pending ? <CircularProgress size={16} color="inherit" /> : undefined}
+        pending={pending}
+        pendingLabel={pendingLabel}
       >
-        {pending ? pendingLabel : actionLabel}
-      </Button>
+        {actionLabel}
+      </BusyButton>
     </Card>
   );
 }

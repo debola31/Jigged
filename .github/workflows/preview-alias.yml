@@ -1,22 +1,37 @@
 # One stable URL for the newest preview, whatever branch produced it.
 #
-# WHY: Intuit matches an OAuth redirect URI EXACTLY, and Vercel's preview URLs
-# carry a per-deployment hash. Every stable URL Vercel offers is branch-scoped —
-# the generated `<project>-git-<branch>-<scope>.vercel.app`, or a domain pinned to
-# one branch in project settings. Both would mean re-registering a URI per branch,
-# or keeping one long-lived branch alive purely to hold a URI — and a long-lived
-# branch holds a Supabase preview branch open for nothing.
+# WHY: Intuit matches an OAuth redirect URI EXACTLY, and Vercel preview URLs carry
+# a per-deployment hash. Every stable URL Vercel offers is branch-scoped, so the
+# alternatives were re-registering a URI per branch, or keeping a long-lived
+# branch alive purely to hold one — which would also hold a Supabase preview
+# branch open indefinitely for nothing.
 #
 # So: register https://preview.jigged.app/api/quickbooks/callback with Intuit
-# once, and repoint that domain at each new preview as it goes live.
+# once, and repoint the domain at each new preview as it goes live.
 #
-# `vercel alias` moves a domain onto a deployment Vercel has ALREADY built. This
-# is NOT the CLI-build approach withdrawn in
-# docs/runbooks/database-migrations.md — that failed on build limits, none of
-# which apply to a metadata call.
+# HOW, and why NOT `vercel alias set` — this is the correction that matters. A
+# project domain with no gitBranch IS a production domain: Vercel documents that
+# such a domain "will point to the most recent production deployment of that
+# project by default", so it auto-reclaims the domain on every production deploy.
+# `vercel alias set` therefore held only until the next merge to main, which is
+# exactly what shipped first and was reported as the domain "showing production".
 #
-# QuickBooks DESKTOP needs none of this: it has no OAuth callback at all. This
-# exists for QuickBooks Online, whose connect flow redirects back to us.
+# Binding the domain to a BRANCH instead puts it in the Preview environment,
+# where production cannot take it. Vercel's docs name the endpoint used here:
+# "you can assign a domain to a Git branch programmatically using the Vercel REST
+# API's 'Update a project domain' PATCH endpoint."
+#
+# The branch has to be looked up rather than read from the event: GitHub's
+# deployment_status payload carries a full SHA in `ref` and an empty `payload`,
+# so the branch name is simply not in it. Vercel's deployment object has it as
+# meta.githubCommitRef.
+#
+# Verified by hand against the live project before this was written: PATCH set
+# gitBranch, and `vercel alias ls` then showed preview.jigged.app resolving to
+# that branch's newest preview deployment.
+#
+# QuickBooks DESKTOP needs none of this: it has no OAuth callback. This exists
+# for QuickBooks Online, whose connect flow redirects back to us.
 
 name: Preview Alias
 
@@ -25,7 +40,7 @@ name: Preview Alias
 # dashboard, not at the site, so it cannot drive this.
 #
 # GitHub's docs say deployment_status workflows are read from the default branch
-# only. That is NOT what happened here — this ran on its own PR branch, before it
+# only. That is NOT what happens here — this ran on its own PR branch, before it
 # had ever been on main. Trust the Actions tab over either claim.
 on: deployment_status
 
@@ -33,7 +48,7 @@ env:
   ALIAS_DOMAIN: preview.jigged.app
 
 # Last one in wins, on purpose. When two previews finish together the domain
-# should end up on the NEWER one, so an in-flight alias is cancelled by the
+# should end up on the NEWER one, so an in-flight run is cancelled by the
 # deployment that superseded it rather than racing it to the finish.
 #
 # The consequence to know: this domain is shared mutable state. If someone else's
@@ -47,48 +62,64 @@ permissions: {}
 
 jobs:
   alias:
-    # Production owns www.jigged.app; pointing the preview domain at a production
-    # deployment would be both wrong and confusing. `state` also filters out the
-    # pending/failure/error statuses that fire for the same deployment.
+    # Production deployments own www.jigged.app and must never move this domain —
+    # which is the whole point of binding it to a branch. `state` also filters out
+    # the pending/failure/error statuses that fire for the same deployment.
     if: >-
       github.event.deployment_status.state == 'success' &&
       github.event.deployment_status.environment == 'Preview'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Point the preview domain at this deployment
+      - name: Point the preview domain at this branch
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           # The team ID, never its slug. The slug already changed once — on the
           # Pro upgrade, adebola-akeredolus-projects became psyco-ghost — which
           # silently invalidates every URL built from it. The ID does not move.
           VERCEL_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           TARGET_URL: ${{ github.event.deployment_status.environment_url }}
-        # NEVER fails the run, deliberately. This is a convenience alias for
-        # QuickBooks Online OAuth testing, not a correctness gate — and this job
-        # attaches to the commit, so a hard failure paints a red X on every
-        # unrelated PR. A check that is red for a reason nobody needs to act on
-        # is how people learn to ignore red checks. The outcome is reported in
-        # the step summary and as a warning annotation instead.
+        # NEVER fails the run, deliberately. This is a convenience for QuickBooks
+        # Online OAuth testing, not a correctness gate — and this job attaches to
+        # the commit, so a hard failure paints a red X on every unrelated PR. A
+        # check that is red for a reason nobody needs to act on is how people
+        # learn to ignore red checks. The outcome goes to the step summary and a
+        # warning annotation instead.
+        #
+        # The trade to know: green means the job ran, not that the domain moved.
         run: |
           set -uo pipefail
+          API=https://api.vercel.com
+
           if [ -z "${TARGET_URL}" ]; then
-            echo "::warning::deployment_status carried no environment_url; nothing to alias."
+            echo "::warning::deployment_status carried no environment_url; nothing to point."
             exit 0
           fi
-          # Pinned to a major, so an upstream break is one we chose to take.
-          if npx --yes vercel@59 alias set "${TARGET_URL}" "${ALIAS_DOMAIN}" \
-               --token "${VERCEL_TOKEN}" --scope "${VERCEL_SCOPE}"; then
-            echo "${ALIAS_DOMAIN} → ${TARGET_URL}" >> "${GITHUB_STEP_SUMMARY}"
+          HOST="${TARGET_URL#https://}"; HOST="${HOST%%/*}"
+
+          BRANCH=$(curl -sS -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            "${API}/v13/deployments/${HOST}?teamId=${VERCEL_SCOPE}" \
+            | jq -r '.meta.githubCommitRef // empty')
+
+          if [ -z "${BRANCH}" ]; then
+            echo "::warning::No branch on deployment ${HOST} (meta.githubCommitRef empty). Leaving ${ALIAS_DOMAIN} where it is."
+            echo "Preview domain unchanged — could not resolve a branch." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          RESULT=$(curl -sS -X PATCH \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${API}/v9/projects/${VERCEL_PROJECT_ID}/domains/${ALIAS_DOMAIN}?teamId=${VERCEL_SCOPE}" \
+            -d "$(jq -nc --arg b "${BRANCH}" '{gitBranch: $b}')")
+
+          BOUND=$(printf '%s' "${RESULT}" | jq -r '.gitBranch // empty')
+          if [ "${BOUND}" = "${BRANCH}" ]; then
+            echo "${ALIAS_DOMAIN} → ${BRANCH} (${HOST})" >> "${GITHUB_STEP_SUMMARY}"
           else
-            # The expected first failure is certificate issuance, which means DNS
-            # is not answering for the subdomain yet: jigged.app runs on
-            # third-party nameservers, so Vercel cannot create the record itself.
-            #
-            # Deliberately does NOT name a CNAME target. The generic
-            # cname.vercel-dns.com from Vercel's docs is NOT what this project
-            # uses -- it is issued a per-project host, and pasting the generic one
-            # leaves the domain unverifiable while looking correct. Ask Vercel.
-            echo "::warning::Could not point ${ALIAS_DOMAIN} at ${TARGET_URL}. If the log ends at 'Issuing a certificate', DNS is not answering for it yet. Run 'vercel domains verify ${ALIAS_DOMAIN}' for the exact record to create -- the CNAME target is project-specific, not the generic one in Vercel's docs."
-            echo "Alias FAILED — ${ALIAS_DOMAIN} unchanged. See the job log." >> "${GITHUB_STEP_SUMMARY}"
+            # Most likely cause is token scope: this writes PROJECT SETTINGS,
+            # where the old `vercel alias set` only touched deployments.
+            echo "::warning::Could not bind ${ALIAS_DOMAIN} to ${BRANCH}. Vercel said: $(printf '%s' "${RESULT}" | jq -c '.error // .' | head -c 300)"
+            echo "Preview domain unchanged — PATCH rejected." >> "${GITHUB_STEP_SUMMARY}"
           fi

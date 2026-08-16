@@ -247,7 +247,6 @@ export default function LocationPanel({
           occupancy={occupancy}
           selectedId={place.id}
           onOpenCell={onSelectPlace}
-          onOpenBand={onSelectPlace}
         />
       </Box>
 

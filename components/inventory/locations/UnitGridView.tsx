@@ -75,14 +75,6 @@ export interface UnitGridViewProps {
   onOpenCell: (locationId: string) => void;
   /** The place currently being shown below the grid, marked so you can see where you are. */
   selectedId?: string | null;
-  /**
-   * Tapping a row's label.
-   *
-   * A row is a real location — it can be renamed, printed, deleted — and until this existed the
-   * grid gave it no action path at all: the old accordion could open any node, and the first cut
-   * of the grid could only open leaves. Omit it and the label is inert text.
-   */
-  onOpenBand?: (locationId: string) => void;
 }
 
 function CellButton({
@@ -182,12 +174,10 @@ function GridBody({
   shape,
   selectedId,
   onOpenCell,
-  onOpenBand,
 }: {
   shape: GridShape;
   selectedId?: string | null;
   onOpenCell: (id: string) => void;
-  onOpenBand?: (id: string) => void;
 }) {
   return (
     <Paper
@@ -248,32 +238,25 @@ function GridBody({
                 pr: 1,
               }}
             >
-              {onOpenBand && !band.isLeafItself ? (
-                <Typography
-                  component="button"
-                  variant="body2"
-                  noWrap
-                  title={`Open ${band.name}`}
-                  onClick={() => onOpenBand(band.id)}
-                  sx={{
-                    background: 'none',
-                    border: 0,
-                    p: 0,
-                    font: 'inherit',
-                    fontWeight: 600,
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    '&:hover': { textDecoration: 'underline' },
-                  }}
-                >
-                  {band.name}
-                </Typography>
-              ) : (
-                <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
-                  {band.name}
-                </Typography>
-              )}
+              {/*
+                A row's LABEL IS NOT A CONTROL — removed 2026-08-15.
+
+                It used to open the row, and opening a container makes it the pane's subject, so a
+                mis-aimed click on "Sector 3" replaced the cabinet you were reading with one row of
+                it. The founder: *"clicking on 'sector' in this view take you to the view for that
+                row from where the only way back available is through the hierarchy on the top which
+                is easy to miss. We should simply not make that clickable since every thing can be
+                viewed on the grid."*
+
+                Nothing is orphaned by that. A row is renamed and removed in `Change layout` →
+                `Edit locations one by one…`, and its printed label is already collected by the
+                unit's `Print QR` (`collectLabels` walks the whole subtree). A row that IS a
+                location — `isLeafItself` — was never this branch: it is the full-width cell below,
+                and still opens.
+              */}
+              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={band.name}>
+                {band.name}
+              </Typography>
             </Box>
 
             {band.isLeafItself ? (
@@ -308,7 +291,6 @@ export default function UnitGridView({
   unit,
   occupancy,
   onOpenCell,
-  onOpenBand,
   selectedId,
 }: UnitGridViewProps) {
   const layout: UnitLayout = readUnitLayout(unit, occupancy);
@@ -369,7 +351,6 @@ export default function UnitGridView({
           shape={active}
           selectedId={selectedId}
           onOpenCell={onOpenCell}
-          onOpenBand={onOpenBand}
         />
       </Box>
     );
@@ -433,7 +414,6 @@ export default function UnitGridView({
             shape={activeSection}
             selectedId={selectedId}
             onOpenCell={onOpenCell}
-            onOpenBand={onOpenBand}
           />
         )}
       </Box>
@@ -451,7 +431,6 @@ export default function UnitGridView({
         shape={layout}
         selectedId={selectedId}
         onOpenCell={onOpenCell}
-        onOpenBand={onOpenBand}
       />
     </Box>
   );

@@ -63,12 +63,18 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
 import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import { getBalancesForPart, getLocations } from '@/utils/inventoryLocationsAccess';
 import AddToLocationDialog from '@/components/operator/AddToLocationDialog';
+import PlaceStockActionForm, {
+  type PlaceStockAction,
+} from '@/components/inventory/locations/place/PlaceStockActionForm';
+import PlaceAdjustForm from '@/components/inventory/locations/place/PlaceAdjustForm';
+import { stockDestinationOptions } from '@/utils/locationDestinations';
 import type { InventoryLocation } from '@/types/inventoryLocations';
 import { SYSTEM_KIND } from '@/lib/locationKinds';
 import type { PartLocationBalanceWithLocation } from '@/types/inventoryLocations';
@@ -109,11 +115,16 @@ export default function OperatorPartLookup({
   const [addToLocationOpen, setAddToLocationOpen] = useState(false);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
+  /** Which location's verbs are open, and which verb. One at a time. */
+  const [open, setOpen] = useState<{ locationId: string; action: PlaceStockAction | 'adjust' } | null>(
+    null,
+  );
 
   const pick = (part: PartSelectOption | null) => {
     setSelected(part);
     setBalances(null);
     setError(null);
+    setOpen(null);
     onSelectionChange?.(part);
     if (!part) return;
     setLoadingBalances(true);
@@ -121,6 +132,37 @@ export default function OperatorPartLookup({
       .then(setBalances)
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not read where this is.'))
       .finally(() => setLoadingBalances(false));
+  };
+
+  /**
+   * Open a location's verbs, closing whichever was open.
+   *
+   * Loads the location tree on the way in — `Move` needs somewhere to move to, and most lookups
+   * never expand a row at all, so paying for the whole tree on every part would be waste. Failing
+   * that read does not block the other three verbs; only Move's destination list comes up empty.
+   */
+  const toggleLocation = (locationId: string) => {
+    setOpen((cur) => (cur?.locationId === locationId ? null : { locationId, action: 'deplete' }));
+    if (locations.length > 0 || loadingPlaces) return;
+    setLoadingPlaces(true);
+    getLocations(companyId)
+      .then(setLocations)
+      .catch(() => {})
+      .finally(() => setLoadingPlaces(false));
+  };
+
+  /** Leaves only, never the pile, never the location the stock is already in. */
+  const moveDestinationsFor = (locationId: string) =>
+    stockDestinationOptions(locations, { excludeId: locationId });
+
+  /** A write landed: re-read where the part is, so the quantities on screen are the new ones. */
+  const afterWrite = async () => {
+    if (!selected) return;
+    try {
+      setBalances(await getBalancesForPart(selected.id));
+    } catch {
+      /* The write succeeded; a failed refresh is not worth an error over the form that did it. */
+    }
   };
 
   /**
@@ -256,32 +298,121 @@ export default function OperatorPartLookup({
                   {places.length === 1 ? '1 location' : `${places.length} locations`}
                 </Typography>
               )}
+              {/*
+                ACT ON THE PART WHERE YOU FOUND IT — the same rule the office side already follows.
+
+                Tapping a location used to navigate to that bin, which throws away half of what you
+                arrived with: you hold a PART and a PLACE, and the bin view keeps only the place, so
+                you re-find your part among everything else in it. `PartPlacesDrawer` fixed that in
+                the office on 2026-08-12 and the shop floor kept the old behaviour, which is exactly
+                how the two surfaces drifted apart the first time.
+
+                Same components, not a copy: `PlaceStockActionForm` and `PlaceAdjustForm` narrowed
+                by `restrictTo` / `restrictToPartId`, so the blank-row rule, the disarm-what-landed
+                rule and the job-list narrowing are fixed in one place for both surfaces.
+              */}
               <Stack spacing={1}>
-                {places.map((b) => (
-                  <Card key={b.location_id} elevation={2}>
-                    <CardActionArea
-                      onClick={() => onOpenLocation(b.location_id)}
-                      sx={{ minHeight: 56 }}
-                    >
-                      <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
-                          {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
-                          {b.path.length > 1 && (
-                            <Typography variant="caption" color="text.secondary">
-                              {b.path.join(' › ')}
-                            </Typography>
+                {places.map((b) => {
+                  const path = b.path.join(' › ') || b.location_name;
+                  const here = open?.locationId === b.location_id ? open.action : null;
+                  return (
+                    <Card key={b.location_id} elevation={2}>
+                      <CardActionArea
+                        onClick={() => toggleLocation(b.location_id)}
+                        aria-expanded={Boolean(here)}
+                        sx={{ minHeight: 56 }}
+                      >
+                        <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 1.5 }}>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography sx={{ fontWeight: 600 }}>{b.location_name}</Typography>
+                            {/* The full path, because "Left" means nothing without "Cabinet 1 › Row 3". */}
+                            {b.path.length > 1 && (
+                              <Typography variant="caption" color="text.secondary">
+                                {path}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Chip
+                            size="small"
+                            label={`${num(b.quantity)} ${selected.primary_unit ?? ''}`.trim()}
+                          />
+                          {here ? (
+                            <KeyboardArrowDownIcon color="action" />
+                          ) : (
+                            <KeyboardArrowRightIcon color="action" />
                           )}
+                        </CardContent>
+                      </CardActionArea>
+
+                      {here && (
+                        <Box sx={{ px: 1.5, pb: 1.5 }}>
+                          {/* The four verbs, in the order fixed across both surfaces, scoped to
+                              THIS part at THIS location — the pair you arrived holding. */}
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {(
+                              [
+                                ['add', 'Add'],
+                                ['deplete', 'Remove'],
+                                ['move', 'Move'],
+                                ['adjust', 'Adjust'],
+                              ] as const
+                            ).map(([v, label]) => (
+                              <Button
+                                key={v}
+                                variant={here === v ? 'contained' : 'outlined'}
+                                onClick={() => setOpen({ locationId: b.location_id, action: v })}
+                                sx={{ minHeight: 48 }}
+                              >
+                                {label}
+                              </Button>
+                            ))}
+                          </Stack>
+
+                          {here === 'adjust' ? (
+                            <PlaceAdjustForm
+                              key={`${b.location_id}:adjust`}
+                              companyId={companyId}
+                              locationId={b.location_id}
+                              locationName={path}
+                              restrictToPartId={selected.id}
+                              onCancel={() => setOpen(null)}
+                              onDone={afterWrite}
+                            />
+                          ) : (
+                            <PlaceStockActionForm
+                              key={`${b.location_id}:${here}`}
+                              action={here}
+                              companyId={companyId}
+                              locationId={b.location_id}
+                              locationName={path}
+                              moveDestinations={moveDestinationsFor(b.location_id)}
+                              restrictTo={{
+                                partId: selected.id,
+                                partName: selected.part_name,
+                                primaryUnit: selected.primary_unit,
+                              }}
+                              // The shop floor's removal has always been graceful: the material is
+                              // already off the shelf, so a stale count must not refuse the write.
+                              graceful
+                              onCancel={() => setOpen(null)}
+                              onDone={afterWrite}
+                            />
+                          )}
+
+                          {/* Inside the section, never a second target on the row: two hit targets
+                              on one 48px row is the ambiguity this module removed from the grid. */}
+                          <Button
+                            variant="text"
+                            onClick={() => onOpenLocation(b.location_id)}
+                            sx={{ minHeight: 48, mt: 0.5 }}
+                          >
+                            Open this location
+                          </Button>
                         </Box>
-                        <Chip
-                          size="small"
-                          label={`${num(b.quantity)} ${selected.primary_unit ?? ''}`.trim()}
-                        />
-                        <KeyboardArrowRightIcon color="action" />
-                      </CardContent>
-                    </CardActionArea>
-                  </Card>
-                ))}
+                      )}
+                    </Card>
+                  );
+                })}
               </Stack>
             </>
           )}

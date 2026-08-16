@@ -93,7 +93,14 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     expect(screen.getByText(/240 ea in 2 locations/)).toBeInTheDocument();
   });
 
-  it('navigates to the place, which is the point of looking it up', async () => {
+  /**
+   * Act on the part where you found it — the office rule, now on the shop floor too.
+   *
+   * Tapping a location used to navigate to that bin, which throws away half of what you arrived
+   * with: you hold a PART and a PLACE, and the bin view keeps only the place. The office side fixed
+   * that on 2026-08-12 and this surface kept the old behaviour.
+   */
+  it('expands the four verbs in place rather than navigating away', async () => {
     const user = userEvent.setup();
     mockBalances.mockResolvedValue([
       { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12, kind: 'shelf' },
@@ -101,6 +108,23 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
     renderLookup();
     await pick(user);
     await user.click(await screen.findByText('Yard'));
+
+    expect(onOpenLocation).not.toHaveBeenCalled();
+    for (const verb of ['Add', 'Remove', 'Move', 'Adjust']) {
+      expect(screen.getByRole('button', { name: verb })).toBeInTheDocument();
+    }
+  });
+
+  it('keeps the bin one click away, inside the section rather than on the row', async () => {
+    // Two hit targets on one 48px row is the ambiguity this module removed from the grid.
+    const user = userEvent.setup();
+    mockBalances.mockResolvedValue([
+      { location_id: 'l1', location_name: 'Yard', location_code: null, path: ['Yard'], quantity: 12, kind: 'shelf' },
+    ]);
+    renderLookup();
+    await pick(user);
+    await user.click(await screen.findByText('Yard'));
+    await user.click(screen.getByRole('button', { name: /open this location/i }));
 
     expect(onOpenLocation).toHaveBeenCalledWith('l1');
   });

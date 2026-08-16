@@ -174,9 +174,37 @@ three different structural limits, none of them misconfiguration:
    the total by **0.00 MB**. Measured, not assumed.
 3. A runner has no Vercel build cache, so even a working version traded a ~3 minute deploy for ~30.
 
-Vercel's own builder hits none of these and had been deploying this app throughout. Handing the build
-back to it left this workflow responsible only for ordering — which was always the point. Measured
-after the change: **gate 5s, trigger 5s.**
+Handing the build back to Vercel's own builder left this workflow responsible only for ordering —
+which was always the point. Measured after the change: **gate 5s, trigger 5s.**
+
+> ### Correction, 2026-08-15 — read this before quoting the three limits above
+>
+> This passage used to end "Vercel's own builder hits none of these", and that sentence was wrong
+> about limit #1 in a way that cost hours and misled two separate agents into declaring a live
+> deployment failure a non-issue. **The 12-function cap is not CLI-only.**
+>
+> The QuickBooks Desktop branch added seven Python files under `api/` and the *hosted git-integration*
+> builder — the one that clones from GitHub, not the CLI — failed with
+> `exceeded_serverless_functions_per_deployment` at the `patchBuild` step, **after** a clean build.
+> The build log shows its Python dependency install repeating **11 times on that branch against 9 on
+> another**, so the hosted builder expands the glob too; it simply expands it less than `vercel build`
+> does. The error never appears in the build log — only in
+> `GET https://api.vercel.com/v13/deployments/{id}`, as `errorCode` / `errorMessage`. **That API is
+> where you diagnose a deploy-step failure**; the log stops at "Deploying outputs…".
+>
+> **Resolved by upgrading to Vercel Pro**, which removes the cap. Redeploying the identical commit with
+> zero code changes went green in 2m, which is what proves the cap was the binding constraint.
+>
+> The upgrade was owed regardless, and this is the durable reason: **Vercel's fair-use terms restrict
+> Hobby to non-commercial personal use, and Jigged takes payments.** Any plan discussion starts there,
+> not at a function count.
+>
+> Two live consequences of being on Pro:
+> - **Set a Spend Management cap.** Hobby *stopped* at its ceilings; Pro *meters* past them and bills.
+>   That is the header-badge credit burn in [CLAUDE.md](../../CLAUDE.md) with a different currency.
+> - Limit #2's **225 MB** figure is **stale and unverified** — Vercel now documents a far larger Python
+>   bundle limit. Re-measure before treating it as a constraint, and do not repeat the mistake of
+>   narrowing the glob on the strength of it.
 
 **If deploys ever stop reaching production**, the first thing to check is whether the hook still
 exists (`vercel deploy-hooks list`) and matches the `VERCEL_DEPLOY_HOOK_URL` secret. Reverting

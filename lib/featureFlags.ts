@@ -78,6 +78,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     description:
       'A maintenance logbook per machine, written by whoever is standing at it: a Maintenance tab on the operator view once a station is selected, with optional machine details and manuals, plus a read-only log on the work-center page. One pilot shop at a time — see docs/modules/machine-maintenance.md.',
   },
+  {
+    key: 'quickbooks_desktop',
+    label: 'QuickBooks Desktop',
+    description:
+      'Connect a locally installed QuickBooks Desktop (via Conductor) instead of QuickBooks Online, and push invoices to it. A company connects one or the other, never both. Opt-in per tenant: Conductor bills per connected company file, so this flag gates the backend connect endpoint and not just the UI — see docs/modules/quickbooks-desktop.md.',
+  },
 ] as const;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];

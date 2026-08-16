@@ -26,7 +26,10 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from supabase import Client, create_client
 
+import routes.company_auth as company_auth
+import services.accounting as accounting
 import services.quickbooks as qb
+import services.quickbooks_desktop as qbd
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +39,10 @@ STATE_TTL_SECONDS = 600
 
 
 # ───────────────────────── helpers ─────────────────────────
-def _service_client() -> Client:
-    url = os.getenv("NEXT_PUBLIC_SUPABASE_URL") or os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise HTTPException(status_code=503, detail="Database not configured")
-    return create_client(url, key)
+# Re-exported under their historical private names so existing call sites and the
+# integration tests' monkeypatching keep resolving after the extraction.
+_service_client = company_auth.service_client
+_verify_company_access = company_auth.verify_company_access
 
 
 def _app_base_url() -> str:
@@ -78,50 +79,44 @@ def _verify_state(state: str) -> dict:
     return jwt.decode(state, _state_secret(), algorithms=["HS256"])
 
 
-async def _verify_company_access(
-    request: Request, company_id: str, require_admin: bool = False
-) -> tuple[str, dict]:
-    """Returns (user_id, access_row) where access_row has the user_company_access id + role."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    client = _service_client()
-    try:
-        user_response = client.auth.get_user(token)
-        if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        user_id = user_response.user.id
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Token verification failed: %s", exc)
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    access = (
-        client.table("user_company_access")
-        .select("id, role")
-        .eq("user_id", user_id)
-        .eq("company_id", company_id)
-        .limit(1)
-        .execute()
-    )
-    if not access.data:
-        raise HTTPException(status_code=403, detail="No access to this company")
-    row = access.data[0]
-    if require_admin and row.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-    return user_id, row
-
-
 def _map_qb_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, qb.QuickBooksServiceUnavailable):
+    if isinstance(exc, (qb.QuickBooksServiceUnavailable, qbd.QbdServiceUnavailable)):
         return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, qb.QuickBooksValidationError):
+        # Our own guard (e.g. billing more than is ordered) — a bad request, not a
+        # QuickBooks failure.
+        return HTTPException(status_code=400, detail=str(exc))
+
+    # ── QuickBooks Desktop connection classes ──
+    # All 4xx, all structured, and NONE of them captured by Sentry. The Starlette
+    # integration captures 5xx only, so returning 409 here is what keeps a shop
+    # PC being switched off out of the issue queue — Conductor's own guidance is
+    # not to alert on these, since only the end user can fix them.
+    if isinstance(exc, qbd.QbdOffline):
+        return HTTPException(
+            status_code=409, detail={"code": "qbd_offline", "message": str(exc)}
+        )
+    if isinstance(exc, qbd.QbdUnknownOutcome):
+        return HTTPException(
+            status_code=409, detail={"code": "qbd_verify", "message": str(exc)}
+        )
+    if isinstance(exc, qbd.QbdNotConnected):
+        # Structured, unlike the QBO twin below: the browser branches on this code
+        # to render a warning with a retry rather than a red error. Returned as a
+        # bare string it was indistinguishable from a generic failure, so the same
+        # condition showed amber in Settings and red in the push dialog.
+        return HTTPException(
+            status_code=409, detail={"code": "qbd_not_connected", "message": str(exc)}
+        )
     if isinstance(exc, qb.QuickBooksNotConnected):
         return HTTPException(status_code=409, detail=str(exc))
-    if isinstance(exc, qb.QuickBooksValidationError):
-        # Our own guard (e.g. billing more than has shipped) — a bad request, not a QBO failure.
-        return HTTPException(status_code=400, detail=str(exc))
+
+    if isinstance(exc, qbd.QbdApiError):
+        # QuickBooks rejected the request on business-logic grounds. Surface its
+        # own wording: it names the offending field better than we can.
+        return HTTPException(
+            status_code=502, detail={"code": "qbd_rejected", "message": str(exc)}
+        )
     if isinstance(exc, qb.QuickBooksApiError):
         return HTTPException(status_code=502, detail="QuickBooks rejected the request.")
     return HTTPException(status_code=500, detail="Unexpected error")
@@ -229,27 +224,57 @@ class TermsResponse(BaseModel):
 async def terms(company_id: str, request: Request):
     """List the Terms this company already has in QuickBooks.
 
-    Read-only, and deliberately NOT cached in our own table. A cached copy would
-    be a second list of terms that drifts from QuickBooks' — the exact problem
-    this endpoint exists to remove. The query is four rows and this is not an
-    AI call, so live is affordable.
+    THE TWO PROVIDERS ARE SERVED DIFFERENTLY HERE, AND THAT IS NOT AN OVERSIGHT.
+
+    QBO stays LIVE. A cached copy would be a second list of terms drifting from
+    QuickBooks' own — the exact problem this endpoint removes — and the query is
+    four rows against Intuit's REST API, so live is affordable.
+
+    QuickBooks Desktop is served FROM CACHE, because affordability is the whole
+    difference. `PaymentTermsPicker` calls this from a MOUNT effect on every quote
+    form and every customer detail page. Against Desktop, live would mean a
+    multi-second Web Connector round trip on page load, aimed at a PC that may be
+    switched off — precisely the failure mode the "no third-party call from a
+    mount" rule exists to prevent. The cache is refreshed on connect and by an
+    explicit admin action, never by a render.
 
     Never raises for the ordinary "no QuickBooks" cases. A shop that hasn't
-    connected, or an Intuit outage, must not stop anyone from writing a quote:
-    the caller falls back to Jigged's own presets, and `resolve_term_id` still
-    creates whatever term is chosen at push time. Missing options degrade the
-    picker; they never block the quote.
+    connected, an Intuit outage, or a cold cache must not stop anyone from writing
+    a quote: the caller falls back to Jigged's own presets, and `resolve_term_id`
+    still creates whatever term is chosen at push time. Missing options degrade
+    the picker; they never block the quote.
     """
     await _verify_company_access(request, company_id)
     db = _service_client()
+
     conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn) or conn.get("reconnect_required"):
-        return TermsResponse(connected=False)
-    try:
-        return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
-        return TermsResponse(connected=False)
+    if _is_connected(conn) and not conn.get("reconnect_required"):
+        try:
+            return TermsResponse(connected=True, terms=qb.list_qb_terms(db, company_id))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not list QuickBooks terms for %s", company_id, exc_info=True)
+            return TermsResponse(connected=False)
+
+    dconn = qbd.get_connection(db, company_id)
+    if dconn and dconn.get("environment") == qbd._environment():
+        rows = (
+            db.table("quickbooks_terms_cache")
+            .select("qb_term_id, name, due_days")
+            .eq("company_id", company_id)
+            .eq("realm_id", dconn["conductor_end_user_id"])
+            .execute()
+            .data
+            or []
+        )
+        return TermsResponse(
+            connected=True,
+            terms=[
+                {"id": r["qb_term_id"], "name": r["name"], "due_days": r["due_days"]}
+                for r in rows
+            ],
+        )
+
+    return TermsResponse(connected=False)
 
 
 class PoFieldResponse(BaseModel):
@@ -367,12 +392,16 @@ async def _load_gated_job(db: Client, company_id: str, job_id: str) -> dict:
 async def preflight(company_id: str, job_id: str, request: Request):
     await _verify_company_access(request, company_id)
     db = _service_client()
-    conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn) or conn.get("reconnect_required"):
+    provider = accounting.get_provider(db, company_id)
+    if provider is None or provider.requires_reconnect:
         return {"connected": False}
 
-    realm = conn["realm_id"]
+    realm = provider.scope_id
     job = await _load_gated_job(db, company_id, job_id)
+
+    # Surfaced so the push dialog can explain a blocked Create button rather than
+    # letting the user click it and take a 409.
+    unverified = _job_has_unverified_invoice(db, company_id, job_id)
 
     customer = (
         db.table("customers").select("id, name").eq("id", job["customer_id"]).limit(1).execute().data
@@ -399,20 +428,111 @@ async def preflight(company_id: str, job_id: str, request: Request):
                 "candidates": [],
             }
         else:
-            customer_res = qb.find_customer_candidates(db, company_id, customer["name"])
+            # A customer lookup must never block the dialog. Not finding one is the
+            # ORDINARY path -- it ends in creating the customer at push time, which
+            # is exactly how QuickBooks Online behaves -- so a failure here degrades
+            # to "unmatched" rather than turning a routine first invoice into an
+            # error the user cannot act on.
+            try:
+                customer_res = provider.find_customer_candidates(customer["name"])
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "QuickBooks customer lookup failed for %s; offering to create",
+                    customer["name"], exc_info=True,
+                )
+                customer_res = {
+                    "status": "unmatched", "qb_customer_id": None, "candidates": [],
+                }
         # Per-part billing context (ordered / shipped / invoiced / invoiceable + price)
         # for the quantity picker. Replaces the old whole-job "lines_preview": a job now
         # has many invoices, each billing a chosen quantity of shipped-but-unbilled parts.
-        parts = qb.load_billable_parts(db, company_id, job, realm)
+        parts = qb.load_billable_parts(db, company_id, job)
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)
 
     customer_res.update({"jigged_customer_id": customer["id"], "jigged_name": customer["name"]})
     return {
         "connected": True,
+        "provider": provider.name,
+        # None for QuickBooks Desktop: there is no web app to link an invoice into,
+        # so the dialog must not pre-open a tab it will only close again.
+        "has_deep_links": provider.name == "qbo",
+        "blocked": (
+            {"code": "qbd_blocked_unverified", "link_id": unverified["id"]}
+            if unverified
+            else None
+        ),
         "customer": customer_res,
         "parts": parts,
     }
+
+
+class VerifyResponse(BaseModel):
+    outcome: str  # 'adopted' | 'released'
+    qb_invoice_id: str | None = None
+    doc_number: str | None = None
+    url: str | None = None
+
+
+@router.post("/{company_id}/invoices/{link_id}/verify", response_model=VerifyResponse)
+async def verify_invoice(company_id: str, link_id: str, request: Request):
+    """Resolve an invoice whose create ended with an unknown outcome.
+
+    This is the ONLY way a 'needs_verification' link advances. It is deliberately
+    a human-triggered action rather than an automatic retry: Conductor does not
+    deduplicate, and a create aborted client-side was verified to still produce an
+    invoice, so retrying blind is exactly how a customer gets billed twice.
+
+    Adopting is idempotent — the line-item upsert ignores duplicates — so running
+    this twice records the invoice once.
+    """
+    await _verify_company_access(request, company_id)
+    db = _service_client()
+    provider = accounting.get_provider(db, company_id)
+    if provider is None:
+        raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
+
+    rows = (
+        db.table("quickbooks_invoice_links")
+        .select("*")
+        .eq("company_id", company_id)
+        .eq("id", link_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Invoice record not found.")
+    row = rows[0]
+
+    if row["status"] == "created":
+        return VerifyResponse(
+            outcome="adopted",
+            qb_invoice_id=row.get("qb_invoice_id"),
+            doc_number=row.get("qb_invoice_doc_number"),
+            url=row.get("qb_invoice_url"),
+        )
+
+    try:
+        found = provider.find_created_invoice(row)
+    except Exception as exc:  # noqa: BLE001
+        raise _map_qb_error(exc)
+
+    if found:
+        # The line items were written at claim time, so flipping the status is all
+        # that is needed — and it is what makes the quantities count.
+        adopted = _adopt_invoice(db, link_id, found, provider)
+        return VerifyResponse(
+            outcome="adopted",
+            qb_invoice_id=adopted["qb_invoice_id"],
+            doc_number=adopted["doc_number"],
+            url=adopted["url"],
+        )
+
+    # Not found: it provably never landed. Release the draft so a retry can claim
+    # it again with a fresh attempt.
+    db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
+    return VerifyResponse(outcome="released")
 
 
 class CommitCustomer(BaseModel):
@@ -433,6 +553,11 @@ class CommitBody(BaseModel):
     request_id: str
     # lines: the per-part quantities to bill. Empty/omitted is rejected server-side.
     lines: list[InvoiceLineSelection] = []
+    # transaction_date: the invoice date, YYYY-MM-DD, supplied by the browser
+    # because it knows the shop's timezone and the server only knows UTC. Bounded
+    # server-side to +/-1 day so a client cannot backdate into a closed period.
+    # QBO derives its own TxnDate; QuickBooks Desktop requires one.
+    transaction_date: str | None = None
 
 
 def _upsert_customer_map(
@@ -460,18 +585,106 @@ def _pending_is_fresh(row: dict) -> bool:
     return age.total_seconds() < qb.PENDING_STALE_SECONDS
 
 
+def _resolve_transaction_date(supplied: str | None) -> str:
+    """The invoice date, taken from the browser because it knows the shop's
+    timezone and the server only knows UTC.
+
+    Bounded to +/-1 day of the server's date so a client cannot backdate an
+    invoice into a closed accounting period. A bare UTC default would misdate
+    roughly one push in thirty for a US shop working past 4pm Pacific -- a real
+    period-cutoff error, not a cosmetic one.
+    """
+    today = datetime.now(timezone.utc).date()
+    if not supplied:
+        return today.isoformat()
+    try:
+        parsed = datetime.strptime(supplied, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid invoice date.")
+    if abs((parsed - today).days) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Invoice date must be within a day of today.",
+        )
+    return parsed.isoformat()
+
+
+def _adopt_invoice(db: Client, link_id: str, found, provider) -> dict:
+    """An invoice we could not confirm turned out to exist. Record it and flip
+    the link to 'created'.
+
+    Safe to run twice: the line-item upsert is keyed on
+    (invoice_link_id, job_part_id) with ignore_duplicates, so a second verify
+    writes nothing new.
+    """
+    url = provider.invoice_deep_link(found.id)
+    db.table("quickbooks_invoice_links").update(
+        {
+            "status": "created",
+            "qb_invoice_id": found.id,
+            "qb_invoice_doc_number": found.doc_number,
+            "qb_invoice_sync_token": found.sync_token,
+            "qb_invoice_url": url,
+        }
+    ).eq("id", link_id).execute()
+    return {
+        "qb_invoice_id": found.id,
+        "doc_number": found.doc_number,
+        "url": url,
+        "already_existed": True,
+    }
+
+
+def _job_has_unverified_invoice(db: Client, company_id: str, job_id: str) -> dict | None:
+    rows = (
+        db.table("quickbooks_invoice_links")
+        .select("id, qb_request_id")
+        .eq("company_id", company_id)
+        .eq("job_id", job_id)
+        .eq("status", "needs_verification")
+        .limit(1)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else None
+
+
 @router.post("/{company_id}/jobs/{job_id}/invoice")
 async def push_invoice(company_id: str, job_id: str, request: Request, body: CommitBody):
     _, access = await _verify_company_access(request, company_id)
     db = _service_client()
-    conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn) or conn.get("reconnect_required"):
+    provider = accounting.get_provider(db, company_id)
+    if provider is None or provider.requires_reconnect:
         raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
-    realm = conn["realm_id"]
+    realm = provider.scope_id
+    conn = getattr(provider, "_conn", {})
     job = await _load_gated_job(db, company_id, job_id)
 
     if not body.request_id:
         raise HTTPException(status_code=400, detail="Missing invoice request id.")
+
+    transaction_date = _resolve_transaction_date(body.transaction_date)
+
+    # ── An unverified invoice on this job blocks a new one. ──
+    # A 'needs_verification' link contributes ZERO to invoiced quantity (every
+    # compute function and assert_invoice_not_over_ordered filter status='created'),
+    # which is right — money we cannot confirm must not satisfy a billing cap. But
+    # it means the ordered-cap would happily let the same quantity be billed again.
+    # This block is what closes that. Per JOB, not per company: the ambiguity is
+    # about specific quantities on one job.
+    unverified = _job_has_unverified_invoice(db, company_id, job_id)
+    if unverified:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "qbd_blocked_unverified",
+                "message": (
+                    "An earlier invoice for this job could not be confirmed in "
+                    "QuickBooks. Check it before creating another."
+                ),
+                "link_id": unverified["id"],
+            },
+        )
 
     # ── Idempotency claim, keyed on the client-minted request_id. A job now has MANY
     #    invoices, so (job_id, realm) no longer identifies "the invoice" — the draft's
@@ -500,22 +713,84 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         # A sibling request for this same draft is in flight — do not double-POST.
         return {"in_progress": True}
 
-    # Build + validate the selected lines (ship-cap, price snapshot). Done after the
+    # Build + validate the selected lines (ordered-cap, price snapshot). Done after the
     # created/pending short-circuit above but before claiming a NEW row, so a bad
     # selection returns 400 without leaving a junk pending link (resume of an
     # error/stale row re-validates cleanly — its lines aren't counted yet).
     selection = [{"job_part_id": ln.job_part_id, "quantity": ln.quantity} for ln in body.lines]
     try:
         lines, bill_addr, snapshot_rows = qb.load_firm_invoice_lines(
-            db, company_id, job, selection, realm
+            db, company_id, job, selection
         )
     except Exception as exc:  # noqa: BLE001
         raise _map_qb_error(exc)
 
+    # The raw address row, for providers that shape it themselves.
+    # load_firm_invoice_lines returns bill_addr already in QuickBooks ONLINE's
+    # shape (Line1 / CountrySubDivisionCode); Desktop uses different key names and
+    # rejects that one outright.
+    raw_bill_addr = None
+    if job.get("billing_address_id"):
+        rows = (
+            db.table("customer_addresses")
+            .select("address_line1, address_line2, city, state, postal_code, country")
+            .eq("id", job["billing_address_id"])
+            .limit(1)
+            .execute()
+            .data
+        )
+        raw_bill_addr = rows[0] if rows else None
+
     if existing:
-        # Stale pending or prior error → resume with the SAME request id (QBO replays).
-        request_id = existing[0]["qb_request_id"]
-        link_id = existing[0]["id"]
+        row = existing[0]
+        request_id = row["qb_request_id"]
+        link_id = row["id"]
+
+        # A stale PENDING row means a worker died mid-flight and we do not know
+        # whether the invoice landed.
+        #
+        # QBO resumes by re-POSTing with the same request id, which is safe only
+        # because Intuit dedupes on ?requestid=. Conductor has no such mechanism,
+        # and a create aborted client-side at 1s was verified to still produce an
+        # invoice — so re-POSTing here is how you double-bill a customer. For a
+        # provider that does not dedupe, look before leaping: probe for the
+        # invoice, adopt it if it exists, and otherwise park the link for a human.
+        if row["status"] == "pending" and not provider.dedupes_replayed_creates:
+            try:
+                found = provider.find_created_invoice(row)
+            except Exception:  # noqa: BLE001 — a failed probe is not a failed invoice
+                found = None
+            if found:
+                return _adopt_invoice(db, link_id, found, provider)
+            db.table("quickbooks_invoice_links").update(
+                {"status": "needs_verification"}
+            ).eq("id", link_id).execute()
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "qbd_verify",
+                    "message": (
+                        "We couldn't confirm whether QuickBooks recorded that "
+                        "invoice. Check QuickBooks before trying again."
+                    ),
+                    "link_id": link_id,
+                },
+            )
+
+        # An ERROR row is reclaimed in place. The push dialog's retry deliberately
+        # reuses the same request_id (that is what makes a double-click safe), and
+        # the errored row still holds it — so without this the retry would collide
+        # with UNIQUE(realm_id, qb_request_id) and dead-end. It is the same draft;
+        # only the attempt is new.
+        db.table("quickbooks_invoice_links").update(
+            {
+                "status": "pending",
+                "qb_invoice_id": None,
+                "qb_invoice_doc_number": None,
+                "qb_invoice_url": None,
+                "transaction_date": transaction_date,
+            }
+        ).eq("id", link_id).execute()
     else:
         request_id = body.request_id
         try:
@@ -527,7 +802,9 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
                         "job_id": job_id,
                         "quote_id": job.get("quote_id"),  # provenance only; null for PO-sourced jobs
                         "realm_id": realm,
+                        "provider": provider.name,
                         "qb_request_id": request_id,
+                        "transaction_date": transaction_date,
                         "status": "pending",
                         "pushed_by": access["id"],
                     }
@@ -537,6 +814,30 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             link_id = inserted.data[0]["id"]
         except Exception:  # noqa: BLE001 - unique violation = a sibling claimed it first
             return {"in_progress": True}
+
+    # ── Record the billed quantities NOW, while the link is still 'pending'. ──
+    # They count for nothing until the link flips to 'created' (every compute
+    # function and assert_invoice_not_over_ordered filter on that status), so
+    # writing them early is safe — and it is what makes an unknown outcome
+    # recoverable at all. If the create's result is lost, the quantities that were
+    # billed are the one thing we could never reconstruct from QuickBooks, because
+    # the invoice there is denominated in its own lines, not in job_part ids.
+    # Delete-then-insert rather than upsert: a reclaimed draft may have been edited
+    # between attempts, and a stale row would bill a part nobody chose.
+    db.table("quickbooks_invoice_line_items").delete().eq("invoice_link_id", link_id).execute()
+    db.table("quickbooks_invoice_line_items").insert(
+        [
+            {
+                "company_id": company_id,
+                "invoice_link_id": link_id,
+                "job_part_id": r["job_part_id"],
+                "quantity": r["quantity"],
+                "unit_price": r["unit_price"],
+                "total_price": r["total_price"],
+            }
+            for r in snapshot_rows
+        ]
+    ).execute()
 
     try:
         customer = (
@@ -564,38 +865,98 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
                 db, company_id, customer["id"], realm, customer_ref, customer["name"], access["id"]
             )
         else:
-            customer_ref = qb.create_customer(db, company_id, customer["name"], bill_addr)
+            customer_ref = provider.create_customer(customer["name"], raw_bill_addr)
             _upsert_customer_map(
                 db, company_id, customer["id"], realm, customer_ref, customer["name"], access["id"]
             )
 
-        item_ref = qb.resolve_default_item(db, company_id, conn)
+        # Record the customer alongside the claim: the QuickBooks Desktop recovery
+        # probe narrows on it, and a re-mapping between push and verify must not
+        # move the window.
+        db.table("quickbooks_invoice_links").update(
+            {"qb_customer_id": customer_ref}
+        ).eq("id", link_id).execute()
 
-        # Terms the job was sold on -> a QBO Term Id. Best-effort by design: a
+        item_ref = provider.resolve_default_item()
+
+        # Terms the job was sold on. Best-effort by design on both providers: a
         # term that cannot be resolved or created returns None and the invoice
-        # goes out exactly as it did before this existed, rather than failing.
+        # goes out with the customer's own default rather than failing.
         sales_term_id = (
-            qb.resolve_term_id(db, company_id, job["payment_terms"])
+            provider.resolve_term_id(job["payment_terms"])
             if job.get("payment_terms")
             else None
         )
 
-        # The shop's PO custom field, if they have made one. Read from the cached
-        # discovery on the connection — Preferences is not re-read per push.
-        payload = qb.quote_to_invoice_payload(
+        # The customer's OWN sales-tax code. QBO returns None here and pins 'NON'
+        # internally, because an omitted code is TAXABLE under Automated Sales Tax.
+        # QuickBooks Desktop is the mirror image: verified that a line with no code
+        # defaults to 'Non' and is NOT taxed even for a customer whose record reads
+        # 'Tax', so omitting it there silently under-bills a taxable sale.
+        sales_tax_code_id = provider.customer_tax_code_id(customer_ref)
+
+        payload = provider.build_invoice_payload(
             customer_ref=customer_ref,
             item_ref=item_ref,
             job_number=job.get("job_number"),
             customer_po_number=job.get("customer_po_number"),
             bill_addr=bill_addr,
+            raw_billing_address=raw_bill_addr,
             lines=lines,
             sales_term_id=sales_term_id,
+            term_id=sales_term_id,
+            sales_tax_code_id=sales_tax_code_id,
+            transaction_date=transaction_date,
+            request_id=str(request_id),
             po_custom_field_id=conn.get("po_custom_field_id"),
             po_custom_field_name=conn.get("po_custom_field_name"),
         )
-        result = qb.create_invoice(db, company_id, payload, request_id)
-        invoice_url = qb.invoice_deep_link(
-            conn.get("environment", ""), result["id"], conn.get("realm_id")
+        created = provider.create_invoice(payload, request_id=str(request_id))
+        result = {
+            "id": created.id,
+            "doc_number": created.doc_number,
+            "sync_token": created.sync_token,
+        }
+        invoice_url = provider.invoice_deep_link(created.id)
+    except qbd.QbdUnknownOutcome:
+        # The create may well have landed — verified that one aborted at 1s did.
+        # Probe once; adopt it if it is there, otherwise park the link and make a
+        # human look. NEVER retry: that is precisely how the duplicate happens.
+        probe_row = {
+            "qb_request_id": str(request_id),
+            "qb_customer_id": locals().get("customer_ref"),
+            "transaction_date": transaction_date,
+        }
+        try:
+            found = provider.find_created_invoice(probe_row)
+        except Exception:  # noqa: BLE001
+            found = None
+        if found:
+            return _adopt_invoice(db, link_id, found, provider)
+
+        db.table("quickbooks_invoice_links").update(
+            {"status": "needs_verification"}
+        ).eq("id", link_id).execute()
+        # A 409 is NOT auto-captured by the Starlette integration, and unconfirmed
+        # money is the one thing that must reach the queue — so this is a single
+        # deliberate capture, not a duplicate of an existing one.
+        sentry_sdk.set_context(
+            "quickbooks_desktop_invoice",
+            {"link_id": link_id, "job_id": job_id, "request_id": str(request_id)},
+        )
+        sentry_sdk.capture_message(
+            "QuickBooks Desktop invoice outcome unknown", level="warning"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "qbd_verify",
+                "message": (
+                    "We couldn't confirm whether QuickBooks recorded that invoice. "
+                    "Check QuickBooks before trying again."
+                ),
+                "link_id": link_id,
+            },
         )
     except HTTPException:
         db.table("quickbooks_invoice_links").update({"status": "error"}).eq("id", link_id).execute()
@@ -610,26 +971,10 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
         logger.warning("QuickBooks push failed for job %s", job_id, exc_info=True)
         raise _map_qb_error(exc)
 
-    # Success: flip the link to created. This fires the invoicing_status recompute
-    # triggers — but only after the line rows exist, so insert them first.
-    line_rows = [
-        {
-            "company_id": company_id,
-            "invoice_link_id": link_id,
-            "job_part_id": r["job_part_id"],
-            "quantity": r["quantity"],
-            "unit_price": r["unit_price"],
-            "total_price": r["total_price"],
-        }
-        for r in snapshot_rows
-    ]
+    # Success: flip the link to created. The line rows were written at claim time
+    # (above), so the on-status trigger sees them and recomputes invoicing_status;
+    # the over-invoice BEFORE trigger has already backstopped their insert.
     try:
-        # Resume-safe: unique(invoice_link_id, job_part_id) + ignore-duplicates makes a
-        # replay a no-op rather than double-billing. Insert BEFORE the status flip so the
-        # on-link-status trigger sees the lines; the over-invoice BEFORE trigger backstops.
-        db.table("quickbooks_invoice_line_items").upsert(
-            line_rows, on_conflict="invoice_link_id,job_part_id", ignore_duplicates=True
-        ).execute()
         db.table("quickbooks_invoice_links").update(
             {
                 "status": "created",

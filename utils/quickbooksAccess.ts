@@ -9,6 +9,10 @@ import { API_BASE_URL } from '@/lib/api';
  * learns connection status / resolution data via these endpoints.
  */
 
+/** Which accounting system a company is connected to. A company connects exactly
+ *  one — enforced in the database by assert_single_accounting_provider(). */
+export type QuickBooksProvider = 'qbo' | 'qbd';
+
 export interface QuickBooksStatus {
   connected: boolean;
   reconnect_required?: boolean;
@@ -16,6 +20,43 @@ export interface QuickBooksStatus {
   environment?: string | null;
   qb_company_name?: string | null;
   connected_at?: string | null;
+}
+
+/** Structured `detail.code` values the backend returns, so surfaces can branch on
+ *  a stable identifier instead of string-matching a message. */
+export const QB_ERROR = {
+  /** The shop PC is off, asleep, or QuickBooks is closed. A WARNING with a retry,
+   *  never a failure — nothing is broken and the connection is still set up. */
+  desktopUnreachable: 'qbd_offline',
+  /** A create whose outcome we could not confirm. Needs a human to verify, and
+   *  must never be auto-retried. */
+  desktopVerify: 'qbd_verify',
+  /** This job holds an unconfirmed invoice, so a new one is refused. */
+  desktopBlocked: 'qbd_blocked_unverified',
+  /** The shop started the setup but never finished it on the QuickBooks
+   *  computer. Also a warning with a retry — the action differs, not the tone. */
+  desktopNotConnected: 'qbd_not_connected',
+} as const;
+
+/** True when QuickBooks Desktop simply is not reachable right now.
+ *
+ *  Every surface uses this to choose warning-with-retry over error. A shop PC
+ *  being switched off is the expected path, not a defect — which is also why this
+ *  module reports nothing to Sentry. */
+export function isQuickBooksUnreachable(err: unknown): boolean {
+  return (
+    err instanceof QuickBooksError &&
+    (err.code === QB_ERROR.desktopUnreachable ||
+      err.code === QB_ERROR.desktopNotConnected)
+  );
+}
+
+/** True when an invoice's fate is unknown and a human must check QuickBooks. */
+export function isQuickBooksUnverified(err: unknown): boolean {
+  return (
+    err instanceof QuickBooksError &&
+    (err.code === QB_ERROR.desktopVerify || err.code === QB_ERROR.desktopBlocked)
+  );
 }
 
 export interface CustomerCandidate {
@@ -53,6 +94,15 @@ export interface BillablePart {
 
 export interface PreflightResult {
   connected: boolean;
+  provider?: QuickBooksProvider;
+  /** False for QuickBooks Desktop. The push dialog uses this to decide whether to
+   *  pre-open a browser tab: opening one for a provider with no web app flashes an
+   *  empty window and closes it seconds later. */
+  has_deep_links?: boolean;
+  /** Set when this job holds an invoice whose fate is unconfirmed, so Create is
+   *  refused. Surfaced here so the dialog can explain it rather than letting the
+   *  user click and take a 409. */
+  blocked?: { code: string; link_id: string } | null;
   customer?: PreflightCustomer;
   parts?: BillablePart[];
 }
@@ -73,7 +123,8 @@ export interface PushResult {
 export interface QuickBooksInvoiceLink {
   invoiceId: string | null;
   docNumber: string | null;
-  url: string;
+  /** Null for QuickBooks Desktop: there is no web app to link an invoice into. */
+  url: string | null;
 }
 
 /** Error carrying the HTTP status and any structured `detail.code` from the backend. */
@@ -88,7 +139,9 @@ export class QuickBooksError extends Error {
   }
 }
 
-async function authHeader(): Promise<Record<string, string>> {
+/** @internal — exported only for utils/quickbooksDesktop.ts, which addresses a
+ *  different base path but must not duplicate auth or error parsing. */
+export async function authHeader(): Promise<Record<string, string>> {
   const supabase = getSupabase();
   const {
     data: { session },
@@ -182,7 +235,42 @@ export function pushJobToQuickBooks(
 ): Promise<PushResult> {
   return qbRequest<PushResult>(`/${companyId}/jobs/${jobId}/invoice`, {
     method: 'POST',
-    body: { customer, request_id: requestId, lines },
+    body: {
+      customer,
+      request_id: requestId,
+      lines,
+      // The browser knows the shop's timezone; the server only knows UTC. Bounded
+      // server-side to +/-1 day so this cannot backdate into a closed period.
+      // QuickBooks Online derives its own date; Desktop requires one.
+      transaction_date: localInvoiceDate(),
+    },
+  });
+}
+
+/** Today, in the BROWSER's timezone, as YYYY-MM-DD. `toISOString()` would be UTC
+ *  and would misdate roughly one push in thirty for a US shop working past 4pm
+ *  Pacific — a real period-cutoff error, not a cosmetic one. */
+function localInvoiceDate(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Resolve an invoice whose creation could not be confirmed.
+ *
+ * The ONLY way a blocked job unblocks. Deliberately a human action rather than an
+ * automatic retry: Conductor does not deduplicate, and a create aborted mid-flight
+ * was verified to still produce an invoice, so retrying blind is how a customer
+ * gets billed twice.
+ */
+export function verifyQuickBooksInvoice(
+  companyId: string,
+  linkId: string,
+): Promise<{ outcome: 'adopted' | 'released'; doc_number?: string | null }> {
+  return qbRequest(`/${companyId}/invoices/${linkId}/verify`, {
+    method: 'POST',
+    body: {},
   });
 }
 
@@ -206,7 +294,11 @@ export async function getQuickBooksInvoiceLinkForJob(
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!data?.qb_invoice_url) return null;
+  // Keyed on the INVOICE, not on the deep link. QuickBooks Desktop has no web app,
+  // so qb_invoice_url is always null there — and the job page uses this result as
+  // its delete gate, which would have silently stopped firing for every
+  // Desktop-invoiced job.
+  if (!data?.qb_invoice_id) return null;
   return {
     invoiceId: data.qb_invoice_id,
     docNumber: data.qb_invoice_doc_number,

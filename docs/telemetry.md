@@ -159,6 +159,11 @@ fails, and so does a listed property nothing passes.
 | `label scan rejected` | A code decoded but was refused. `reason` is one of `not_jigged`, `foreign_company`, `traveler_unsupported`, `caller_rejected` | `surface`, `reason` | [LocationScanner.tsx](../components/scanner/LocationScanner.tsx) |
 | `scan link opened` | A printed code scanned with the phone's **camera app** lands on the operator login passthrough. `had_session` false means the scan cost an extra screen | `kind`, `had_session` | [login/page.tsx](../app/operator/[companyId]/login/page.tsx) |
 
+| `accounting connect started` | An admin picks an accounting system and starts connecting. `provider` is `qbo` (an Intuit OAuth redirect) or `qbd` (a setup link created for the shop computer) | `provider` | [QuickBooksIntegrationCard.tsx](../components/settings/QuickBooksIntegrationCard.tsx) |
+| `accounting connection tested` | An explicit "Test connection" returns. `ok` false is the ordinary "QuickBooks isn't open right now" case, not an error — it is the denominator for how often a shop PC is actually reachable | `provider`, `ok`, `ms_elapsed` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
+| `accounting disconnected` | An admin disconnects the accounting system | `provider` | [QuickBooksDesktopPanel.tsx](../components/settings/quickbooks/QuickBooksDesktopPanel.tsx) |
+| `invoice pushed` | An invoice is created in QuickBooks from the job push dialog. `has_deep_link` is false for QuickBooks Desktop, which has no web page to link to | `provider`, `line_count`, `already_existed`, `has_deep_link` | [PushToQuickBooksDialog.tsx](../components/jobs/PushToQuickBooksDialog.tsx) |
+
 <!-- registry:end -->
 
 The markers are not decoration — the checker parses only between them, because this document

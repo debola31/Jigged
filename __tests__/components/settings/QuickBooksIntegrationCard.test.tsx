@@ -15,6 +15,21 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   refreshQuickBooksPoField: (...args: unknown[]) => mockRefreshPoField(...args),
 }));
 
+const mockFeatures = vi.fn();
+vi.mock('@/hooks/useCompanyFeatures', () => ({
+  useCompanyFeatures: () => ({ features: mockFeatures(), loading: false }),
+}));
+
+const mockGetDesktopStatus = vi.fn();
+vi.mock('@/utils/quickbooksDesktop', () => ({
+  getQuickBooksDesktopStatus: (...args: unknown[]) => mockGetDesktopStatus(...args),
+  startQuickBooksDesktopConnect: vi.fn(),
+  testQuickBooksDesktop: vi.fn(),
+  disconnectQuickBooksDesktop: vi.fn(),
+  listQuickBooksDesktopAccounts: vi.fn(),
+  setQuickBooksDesktopIncomeAccount: vi.fn(),
+}));
+
 const CONNECTED: QuickBooksStatus = {
   connected: true,
   environment: 'sandbox',
@@ -38,6 +53,10 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     vi.clearAllMocks();
     resetRouterMocks();
     mockGetStatus.mockResolvedValue(CONNECTED);
+    mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
+    // QuickBooks Desktop is opt-in, so the option only renders for a tenant with
+    // the flag on. Default it on here; the test below covers the off case.
+    mockFeatures.mockReturnValue({ quickbooks_desktop: true });
     mockRefreshPoField.mockResolvedValue(NOT_FOUND);
   });
 
@@ -110,7 +129,52 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
     render(<QuickBooksIntegrationCard companyId="c1" />);
 
-    await screen.findByRole('button', { name: /Connect to QuickBooks/i });
+    await screen.findByRole('button', { name: /Connect QuickBooks Online/i });
     expect(screen.queryByText(/Customer PO number/i)).not.toBeInTheDocument();
+  });
+
+  it('offers both providers when nothing is connected', async () => {
+    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    expect(
+      await screen.findByRole('button', { name: /Connect QuickBooks Online/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Connect QuickBooks Desktop/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides QuickBooks Desktop for a tenant without the flag', async () => {
+    // The backend refuses /connect for a flag-off tenant, so showing the button
+    // would offer an action that can only fail. Conductor bills per connected
+    // company file, which is why the flag exists at all.
+    mockFeatures.mockReturnValue({});
+    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    expect(
+      await screen.findByRole('button', { name: /Connect QuickBooks Online/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect QuickBooks Desktop/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not offer to connect when the status check itself failed', async () => {
+    // A failed check is not a definitive "not connected". With two providers,
+    // getting this wrong shows "pick a provider" to a shop that already has one.
+    mockGetStatus.mockRejectedValue(new Error('network down'));
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    await screen.findByText(/network down/i);
+    expect(
+      screen.queryByRole('button', { name: /Connect QuickBooks Online/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect QuickBooks Desktop/i }),
+    ).not.toBeInTheDocument();
+    // And it must not assert a status it never learned.
+    expect(screen.queryByText(/Not connected/i)).not.toBeInTheDocument();
   });
 });

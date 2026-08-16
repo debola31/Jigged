@@ -101,7 +101,8 @@ insert into public.companies (
    -- reachable by hand: quote Northwind (has its own terms) and the field
    -- credits the customer; quote Sierra Pump & Valve (has none) and it credits
    -- the shop default instead.
-   '{"features": {"data_import": true, "machine_maintenance": true},
+   '{"features": {"data_import": true, "machine_maintenance": true,
+                  "quickbooks_desktop": true},
      "default_payment_terms": "2/10 Net 30"}'::jsonb)
 on conflict (id) do nothing;
 

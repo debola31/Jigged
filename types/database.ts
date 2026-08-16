@@ -2294,6 +2294,7 @@ export type Database = {
           customer_id: string
           id: string
           linked_by: string | null
+          provider: string
           qb_customer_id: string
           qb_display_name: string | null
           realm_id: string
@@ -2305,6 +2306,7 @@ export type Database = {
           customer_id: string
           id?: string
           linked_by?: string | null
+          provider?: string
           qb_customer_id: string
           qb_display_name?: string | null
           realm_id: string
@@ -2316,6 +2318,7 @@ export type Database = {
           customer_id?: string
           id?: string
           linked_by?: string | null
+          provider?: string
           qb_customer_id?: string
           qb_display_name?: string | null
           realm_id?: string
@@ -2339,6 +2342,69 @@ export type Database = {
           {
             foreignKeyName: "quickbooks_customer_map_linked_by_fkey"
             columns: ["linked_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_desktop_connections: {
+        Row: {
+          company_id: string
+          conductor_end_user_id: string
+          connected_by: string | null
+          created_at: string
+          default_income_account_id: string | null
+          default_service_item_id: string | null
+          environment: string
+          id: string
+          integration_connection_id: string | null
+          last_health_check_at: string | null
+          last_successful_request_at: string | null
+          qb_company_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          conductor_end_user_id: string
+          connected_by?: string | null
+          created_at?: string
+          default_income_account_id?: string | null
+          default_service_item_id?: string | null
+          environment?: string
+          id?: string
+          integration_connection_id?: string | null
+          last_health_check_at?: string | null
+          last_successful_request_at?: string | null
+          qb_company_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          conductor_end_user_id?: string
+          connected_by?: string | null
+          created_at?: string
+          default_income_account_id?: string | null
+          default_service_item_id?: string | null
+          environment?: string
+          id?: string
+          integration_connection_id?: string | null
+          last_health_check_at?: string | null
+          last_successful_request_at?: string | null
+          qb_company_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_desktop_connections_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_desktop_connections_connected_by_fkey"
+            columns: ["connected_by"]
             isOneToOne: false
             referencedRelation: "user_company_access"
             referencedColumns: ["id"]
@@ -2409,7 +2475,9 @@ export type Database = {
           created_at: string
           id: string
           job_id: string
+          provider: string
           pushed_by: string | null
+          qb_customer_id: string | null
           qb_invoice_doc_number: string | null
           qb_invoice_id: string | null
           qb_invoice_sync_token: string | null
@@ -2418,6 +2486,7 @@ export type Database = {
           quote_id: string | null
           realm_id: string
           status: string
+          transaction_date: string | null
           updated_at: string
           voided_at: string | null
           voided_by: string | null
@@ -2427,7 +2496,9 @@ export type Database = {
           created_at?: string
           id?: string
           job_id: string
+          provider?: string
           pushed_by?: string | null
+          qb_customer_id?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
@@ -2436,6 +2507,7 @@ export type Database = {
           quote_id?: string | null
           realm_id: string
           status?: string
+          transaction_date?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null
@@ -2445,7 +2517,9 @@ export type Database = {
           created_at?: string
           id?: string
           job_id?: string
+          provider?: string
           pushed_by?: string | null
+          qb_customer_id?: string | null
           qb_invoice_doc_number?: string | null
           qb_invoice_id?: string | null
           qb_invoice_sync_token?: string | null
@@ -2454,6 +2528,7 @@ export type Database = {
           quote_id?: string | null
           realm_id?: string
           status?: string
+          transaction_date?: string | null
           updated_at?: string
           voided_at?: string | null
           voided_by?: string | null
@@ -2485,6 +2560,53 @@ export type Database = {
             columns: ["quote_id"]
             isOneToOne: false
             referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_terms_cache: {
+        Row: {
+          company_id: string
+          created_at: string
+          due_days: number | null
+          id: string
+          name: string
+          provider: string
+          qb_term_id: string
+          realm_id: string
+          refreshed_at: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          due_days?: number | null
+          id?: string
+          name: string
+          provider: string
+          qb_term_id: string
+          realm_id: string
+          refreshed_at?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          due_days?: number | null
+          id?: string
+          name?: string
+          provider?: string
+          qb_term_id?: string
+          realm_id?: string
+          refreshed_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_terms_cache_company_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]

@@ -1910,6 +1910,64 @@ export type Database = {
           },
         ]
       }
+      part_customer_references: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_drawing_number: string | null
+          customer_id: string
+          customer_part_number: string
+          customer_revision: string | null
+          id: string
+          part_id: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_drawing_number?: string | null
+          customer_id: string
+          customer_part_number: string
+          customer_revision?: string | null
+          id?: string
+          part_id: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_drawing_number?: string | null
+          customer_id?: string
+          customer_part_number?: string
+          customer_revision?: string | null
+          id?: string
+          part_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_customer_references_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_customer_references_customer_fk"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_customer_references_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       part_location_stock: {
         Row: {
           company_id: string
@@ -3841,6 +3899,7 @@ export type Database = {
           viewer_name: string
         }[]
       }
+      part_has_cost_basis: { Args: { p_part_id: string }; Returns: boolean }
       part_playbook_notes: {
         Args: {
           p_exclude_job_id?: string

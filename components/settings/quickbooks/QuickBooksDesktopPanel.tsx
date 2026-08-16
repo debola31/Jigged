@@ -57,9 +57,19 @@ export default function QuickBooksDesktopPanel({
   const [unreachableCode, setUnreachableCode] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<DesktopIncomeAccount[] | null>(null);
+  /**
+   * WHICH action is in flight, not merely THAT one is. Every button on this
+   * panel is a Web Connector round trip to the shop's PC: ~0.5s warm, 3-10s
+   * cold, and up to ~30s more when QuickBooks was closed. `busy` alone only
+   * greys every button out, so the one you pressed sits there looking dead for
+   * seconds -- which a shop reported as "something is wrong". Naming the action
+   * lets the pressed button, and only that button, say what it is waiting for.
+   */
+  const [pending, setPending] = useState<null | 'test' | 'accounts'>(null);
 
   const handleTest = async () => {
     setBusy(true);
+    setPending('test');
     setUnreachable(null);
     setNote(null);
     const started = Date.now();
@@ -81,11 +91,13 @@ export default function QuickBooksDesktopPanel({
       setUnreachable(err instanceof Error ? err.message : null);
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
   const handleLoadAccounts = async () => {
     setBusy(true);
+    setPending('accounts');
     setUnreachable(null);
     try {
       const { accounts: rows } = await listQuickBooksDesktopAccounts(companyId);
@@ -98,6 +110,7 @@ export default function QuickBooksDesktopPanel({
       setUnreachable(err instanceof Error ? err.message : null);
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
@@ -180,8 +193,15 @@ export default function QuickBooksDesktopPanel({
               ).toLocaleString()}.`
             : 'Not yet used.'}
         </Typography>
-        <Button size="small" onClick={handleTest} disabled={busy}>
-          Test connection
+        <Button
+          size="small"
+          onClick={handleTest}
+          disabled={busy}
+          startIcon={
+            pending === 'test' ? <CircularProgress size={14} color="inherit" /> : undefined
+          }
+        >
+          {pending === 'test' ? 'Asking QuickBooks…' : 'Test connection'}
         </Button>
       </Stack>
 
@@ -216,14 +236,42 @@ export default function QuickBooksDesktopPanel({
               : 'Done. Change it any time.'}
           </Typography>
           {accounts === null ? (
-            <Button
-              variant={status.needs_income_account ? 'contained' : 'outlined'}
-              size="small"
-              onClick={handleLoadAccounts}
-              disabled={busy}
-            >
-              {status.needs_income_account ? 'Choose account' : 'Change account'}
-            </Button>
+            <>
+              <Button
+                variant={status.needs_income_account ? 'contained' : 'outlined'}
+                size="small"
+                onClick={handleLoadAccounts}
+                disabled={busy}
+                startIcon={
+                  pending === 'accounts' ? (
+                    <CircularProgress size={14} color="inherit" />
+                  ) : undefined
+                }
+              >
+                {pending === 'accounts'
+                  ? 'Reading accounts…'
+                  : status.needs_income_account
+                    ? 'Choose account'
+                    : 'Change account'}
+              </Button>
+              {/* Says WHERE the wait is, not just that there is one. The round
+                  trip is to the shop's PC, so "a few seconds" is normal and a
+                  closed QuickBooks makes it much longer -- naming that is what
+                  stops the pause reading as a fault. aria-live because the text
+                  appears after the press, not with it. */}
+              {pending === 'accounts' && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ mt: 1 }}
+                  aria-live="polite"
+                >
+                  Reading your accounts from QuickBooks on the shop computer. This takes a few
+                  seconds, and longer if QuickBooks was closed.
+                </Typography>
+              )}
+            </>
           ) : (
             <TextField
               select

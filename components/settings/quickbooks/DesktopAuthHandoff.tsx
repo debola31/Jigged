@@ -86,13 +86,21 @@ export default function DesktopAuthHandoff({
   expiresAt,
   onCheckNow,
   onNewLink,
+  onCancel,
   checking,
+  cancelling,
 }: {
   authFlowUrl: string;
   expiresAt: string | null;
   onCheckNow: () => void;
   onNewLink: () => void;
+  /** Abandon setup and go back to picking a provider. Without this the card has
+   *  no exit: once a connection row exists the choice screen stops rendering, so
+   *  a shop that started Desktop setup by mistake — or wants to start over — is
+   *  stuck on this screen with no way back. */
+  onCancel?: () => void;
   checking?: boolean;
+  cancelling?: boolean;
 }) {
   /** null = not asked yet. 'here' = at the QuickBooks PC. 'other' = send it on. */
   const [where, setWhere] = useState<null | 'here' | 'other'>(null);
@@ -129,23 +137,37 @@ export default function DesktopAuthHandoff({
   // so the two cannot drift into handling http://localhost differently.
   const handleCopy = async () => setCopied(await copyText(authFlowUrl));
 
+  /** Rendered in EVERY branch below, because every branch is otherwise a dead
+   *  end. No confirm dialog: nothing has been connected yet, so there is nothing
+   *  to lose — unlike disconnecting a live connection, which does confirm. */
+  const cancelRow = onCancel ? (
+    <Box sx={{ mt: 2 }}>
+      <Button variant="text" size="small" color="inherit" onClick={onCancel} disabled={cancelling}>
+        {cancelling ? 'Cancelling…' : 'Cancel setup'}
+      </Button>
+    </Box>
+  ) : null;
+
   // Both states mean the same thing to the user — there is no usable link right
   // now — and both are fixed by the same button, so they share a branch rather
   // than one of them silently rendering a dead "I'm on that computer".
   if (noLink || expired) {
     return (
-      <Alert
-        severity="info"
-        action={
-          <Button color="inherit" size="small" onClick={onNewLink}>
-            Get a new link
-          </Button>
-        }
-      >
-        {noLink
-          ? 'Setup was started but not finished. Get a fresh link to open on the computer that runs QuickBooks.'
-          : 'That setup link has expired.'}
-      </Alert>
+      <Box>
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" onClick={onNewLink}>
+              Get a new link
+            </Button>
+          }
+        >
+          {noLink
+            ? 'Setup was started but not finished. Get a fresh link to open on the computer that runs QuickBooks.'
+            : 'That setup link has expired.'}
+        </Alert>
+        {cancelRow}
+      </Box>
     );
   }
 
@@ -164,6 +186,7 @@ export default function DesktopAuthHandoff({
             It&apos;s a different computer
           </Button>
         </Stack>
+        {cancelRow}
       </Box>
     );
   }
@@ -215,6 +238,7 @@ export default function DesktopAuthHandoff({
             Send it to another computer instead
           </Button>
         </Stack>
+        {cancelRow}
       </Box>
     );
   }
@@ -269,6 +293,7 @@ export default function DesktopAuthHandoff({
           Actually, I&apos;m on that computer
         </Button>
       </Stack>
+      {cancelRow}
     </Box>
   );
 }

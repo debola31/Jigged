@@ -26,16 +26,18 @@ afterEach(() => vi.unstubAllGlobals());
 
 function setup(props: Partial<React.ComponentProps<typeof DesktopAuthHandoff>> = {}) {
   const onNewLink = vi.fn();
+  const onCancel = vi.fn();
   render(
     <DesktopAuthHandoff
       authFlowUrl={URL}
       expiresAt={FUTURE}
       onCheckNow={vi.fn()}
       onNewLink={onNewLink}
+      onCancel={onCancel}
       {...props}
     />,
   );
-  return { onNewLink };
+  return { onNewLink, onCancel };
 }
 
 describe('DesktopAuthHandoff', () => {
@@ -68,5 +70,49 @@ describe('DesktopAuthHandoff', () => {
   it('still reports an expired link separately from a missing one', () => {
     setup({ expiresAt: new Date(Date.now() - 1000).toISOString() });
     expect(screen.getByText(/that setup link has expired/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Once /connect has run, a connection row exists and the card stops rendering
+   * the provider choice — so without an exit here, a shop that started Desktop
+   * setup by mistake is stuck on this screen permanently. Every branch is a dead
+   * end otherwise, hence the parametrised sweep rather than one happy path.
+   */
+  describe('cancel', () => {
+    it.each([
+      ['first step', {}],
+      ['no link', { authFlowUrl: '' }],
+      ['expired link', { expiresAt: new Date(Date.now() - 1000).toISOString() }],
+    ])('offers a way out on the %s screen', async (_name, props) => {
+      const { onCancel } = setup(props);
+      await userEvent.click(screen.getByRole('button', { name: /cancel setup/i }));
+      expect(onCancel).toHaveBeenCalled();
+    });
+
+    it('offers a way out after choosing "different computer"', async () => {
+      const { onCancel } = setup();
+      await userEvent.click(screen.getByRole('button', { name: /different computer/i }));
+      await userEvent.click(screen.getByRole('button', { name: /cancel setup/i }));
+      expect(onCancel).toHaveBeenCalled();
+    });
+
+    it('offers a way out after opening the setup page', async () => {
+      const { onCancel } = setup();
+      await userEvent.click(screen.getByRole('button', { name: /I'm on that computer/i }));
+      await userEvent.click(screen.getByRole('button', { name: /cancel setup/i }));
+      expect(onCancel).toHaveBeenCalled();
+    });
+
+    it('is absent when the caller offers no way to cancel', () => {
+      render(
+        <DesktopAuthHandoff
+          authFlowUrl={URL}
+          expiresAt={FUTURE}
+          onCheckNow={vi.fn()}
+          onNewLink={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /cancel setup/i })).not.toBeInTheDocument();
+    });
   });
 });

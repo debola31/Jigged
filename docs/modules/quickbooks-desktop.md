@@ -234,6 +234,6 @@ company file.
 | Provider seam (protocol + both adapters) | [api/services/accounting/](../../api/services/accounting) |
 | Connection lifecycle and terms refresh | [api/routes/quickbooks_desktop_routes.py](../../api/routes/quickbooks_desktop_routes.py) |
 | Invoice push, including customer resolution (shared with QBO) | [api/routes/quickbooks_routes.py](../../api/routes/quickbooks_routes.py) |
-| Schema | [20260810235000_quickbooks_desktop_provider.sql](../../supabase/migrations/20260810235000_quickbooks_desktop_provider.sql) |
+| Schema | [20260816043137_quickbooks_desktop_provider.sql](../../supabase/migrations/20260816043137_quickbooks_desktop_provider.sql) |
 | Settings UI | [QuickBooksIntegrationCard.tsx](../../components/settings/QuickBooksIntegrationCard.tsx) |
 | Frontend client | [utils/quickbooksDesktop.ts](../../utils/quickbooksDesktop.ts) |

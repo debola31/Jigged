@@ -33,7 +33,10 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+
 import { unreadableMessage, type BuiltRow } from '@/lib/drawingImportExtract';
+import { needsAssist } from '@/utils/drawingFieldsAssist';
 import { valueOf, type DrawingRowValues } from '@/types/drawingImport';
 
 interface Props {
@@ -43,6 +46,8 @@ interface Props {
   onBack: () => void;
   onCreate: () => void;
   creating: boolean;
+  onAssist: () => void;
+  assisted: boolean;
 }
 
 /** What this row needs a human for, in words. `null` when it needs nothing. */
@@ -70,6 +75,8 @@ export default function DrawingReviewStep({
   onBack,
   onCreate,
   creating,
+  onAssist,
+  assisted,
 }: Props) {
   const update = (stem: string, change: (row: BuiltRow) => BuiltRow) =>
     onRowsChange(rows.map((r) => (r.stem === stem ? change(r) : r)));
@@ -78,6 +85,7 @@ export default function DrawingReviewStep({
     update(stem, (r) => ({ ...r, edits: { ...r.edits, [key]: value } }));
 
   const needsAttention = useMemo(() => rows.filter((r) => attention(r) !== null), [rows]);
+  const assistCandidates = useMemo(() => rows.filter(needsAssist).length, [rows]);
   const willUpdate = useMemo(
     () => rows.filter((r) => !r.excluded && r.identity.kind === 'known').length,
     [rows],
@@ -92,6 +100,28 @@ export default function DrawingReviewStep({
           </AlertTitle>
           Everything else is ready. You can create these now and fix the rest later — nothing here
           blocks the others.
+        </Alert>
+      )}
+
+      {assistCandidates > 0 && !assisted && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={onAssist}
+              disabled={creating}
+            >
+              Read the title blocks
+            </Button>
+          }
+        >
+          <AlertTitle>{assistCandidates} rows are missing material or finish</AlertTitle>
+          We can read those from the drawing. It costs about a penny a drawing and only runs when
+          you press the button.
         </Alert>
       )}
 

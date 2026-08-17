@@ -1,0 +1,121 @@
+/**
+ * The optional AI pass over rows the deterministic reader left thin.
+ *
+ * NEVER CALLED ON MOUNT. CLAUDE.md is explicit: an Anthropic call needs a user
+ * action, because a header badge once fired five of them per dashboard load and
+ * burned the credits in days. This is invoked from a button, and it says what it
+ * will cost before it runs.
+ *
+ * It also only asks about rows worth asking about. A row whose material and finish
+ * are already read costs nothing to skip, and a row with no text at all — a scan —
+ * has nothing to send.
+ */
+
+import { getSupabase } from '@/lib/supabase';
+import { API_BASE_URL } from '@/lib/api';
+import type { BuiltRow } from '@/lib/drawingImportExtract';
+import type { ExtractedFields, FieldRole } from '@/lib/drawingText';
+
+/** Roles the AI arm measurably improves. Identity is deterministic's job. */
+const ASSISTED_ROLES: FieldRole[] = ['material', 'finish', 'description'];
+
+interface AssistResponse {
+  fields: Record<string, { value: string | null; caption: string | null }>;
+  fields_available: boolean;
+  dropped: string[];
+}
+
+export interface AssistOutcome {
+  /** Rows the call actually improved, by stem. */
+  filled: Map<string, ExtractedFields>;
+  askedAbout: number;
+  skipped: number;
+  failed: number;
+  /** Values the server refused because they were not on the drawing. */
+  dropped: string[];
+}
+
+/** Worth asking about: it has text to send, and at least one assisted role is blank. */
+export function needsAssist(row: BuiltRow): boolean {
+  if (row.readSource === 'none') return false;
+  return ASSISTED_ROLES.some((role) => !row.fields[role]?.value);
+}
+
+/**
+ * Ask the server to assign title-block roles for the rows that need it.
+ *
+ * One request per drawing. That is deliberate: a package-wide request would be a
+ * single point of failure over 31 sheets and would push the payload toward
+ * Vercel's body ceiling, while a per-sheet request fails only its own row.
+ */
+export async function assistRows(
+  companyId: string,
+  rows: BuiltRow[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<AssistOutcome> {
+  const outcome: AssistOutcome = {
+    filled: new Map(),
+    askedAbout: 0,
+    skipped: 0,
+    failed: 0,
+    dropped: [],
+  };
+
+  const candidates = rows.filter(needsAssist);
+  outcome.skipped = rows.length - candidates.length;
+
+  const supabase = getSupabase();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) {
+    // Not a silent no-op: the caller shows this, because "nothing happened" and
+    // "you are not signed in" look identical on screen otherwise.
+    throw new Error('Your session expired. Sign in again and retry.');
+  }
+
+  for (const [index, row] of candidates.entries()) {
+    outcome.askedAbout += 1;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/drawings/fields`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          company_id: companyId,
+          // Only what the deterministic pass already holds. The file never leaves
+          // the browser.
+          strings: row.items.map((i) => ({
+            text: i.text,
+            x: i.x,
+            y: i.y,
+            height: i.height,
+          })),
+        }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const body = (await response.json()) as AssistResponse;
+      outcome.dropped.push(...(body.dropped ?? []));
+
+      // Merge, never overwrite. A value the deterministic pass read from an
+      // attribute tag is stronger evidence than an assignment, and the user may
+      // already have edited the row.
+      const merged: ExtractedFields = {};
+      for (const role of ASSISTED_ROLES) {
+        if (row.fields[role]?.value) continue;
+        const value = body.fields?.[role]?.value;
+        if (!value) continue;
+        merged[role] = {
+          value,
+          source: 'geometry',
+          caption: body.fields[role]?.caption ?? undefined,
+        };
+      }
+      if (Object.keys(merged).length > 0) outcome.filled.set(row.stem, merged);
+    } catch {
+      // One drawing failing must not abandon the other thirty.
+      outcome.failed += 1;
+    }
+    onProgress?.(index + 1, candidates.length);
+  }
+
+  return outcome;
+}

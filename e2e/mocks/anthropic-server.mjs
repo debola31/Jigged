@@ -82,14 +82,60 @@ function buildResponse() {
   };
 }
 
+/**
+ * Title-block field assignment for the drawings import.
+ *
+ * Two callers now share `/v1/messages`, so the body has to be inspected to tell
+ * them apart — a CSV column mapping and a title-block assignment are different
+ * JSON shapes and returning the wrong one silently breaks the other spec.
+ *
+ * The values below are ECHOED FROM THE REQUEST rather than hardcoded, because the
+ * route drops any value that was not among the strings it sent. A hardcoded
+ * fixture would be dropped as invention and the spec would prove nothing.
+ */
+function buildDrawingFields(body) {
+  const sent = [...String(body).matchAll(/^"((?:[^"\\]|\\.)*)"\s+@\(/gm)].map((m) =>
+    m[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'),
+  );
+  const find = (re) => sent.find((t) => re.test(t)) ?? null;
+
+  return {
+    id: 'msg_mock_drawing',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-4-mock',
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          fields: {
+            part_number: { value: null, caption: null },
+            drawing_number: { value: null, caption: null },
+            description: { value: null, caption: null },
+            // The one field the deterministic pass most often misses, so it is the
+            // one worth proving the round trip on.
+            material: { value: find(/^(AL|ST|AMPCO|Delrin|[0-9]{4}-T)/i), caption: 'MATERIAL:' },
+            finish: { value: find(/POWDERCOAT|ZINC/i), caption: 'FINISH:' },
+            revision: { value: null, caption: null },
+            weight: { value: null, caption: null },
+          },
+        }),
+      },
+    ],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url.endsWith('/v1/messages')) {
-    // Drain the request stream so the 'end' event fires; the mock returns a
-    // canned response and does not inspect the request body.
-    req.on('data', () => {});
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
+      const body = Buffer.concat(chunks).toString('utf8');
+      const isDrawing = body.includes('STRINGS ON THIS DRAWING');
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(buildResponse()));
+      res.end(JSON.stringify(isDrawing ? buildDrawingFields(body) : buildResponse()));
     });
     return;
   }

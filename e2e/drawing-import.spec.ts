@@ -5,11 +5,17 @@ import path from 'path';
 /**
  * E2E: Add parts from drawings.
  *
- * NO AI IS INVOLVED IN THIS SPEC, and that is the point. The deterministic pass
- * runs entirely in the browser — DXF parsing, the title-block matcher, the
- * cut-list reader — so the grid is populated with no network call and no Anthropic
- * credits. The AI assist is a separate explicit button, per CLAUDE.md's rule that
- * an AI call needs a user action.
+ * THE GRID FILLS WITH NO NETWORK CALL AT ALL, and that is the point. The
+ * deterministic pass — DXF parsing, the title-block matcher, the cut-list reader —
+ * runs entirely in the browser. The AI assist is a separate explicit button, per
+ * CLAUDE.md's rule that an Anthropic call needs a user action, and this spec
+ * presses it against the MOCK (`e2e/mocks/anthropic-server.mjs`, reached via
+ * ANTHROPIC_BASE_URL) so the real route, gates and fidelity check are exercised for
+ * no credits.
+ *
+ * The mock echoes a material back out of the strings it was SENT, because the route
+ * drops any value that was not on the drawing. A hardcoded fixture would be dropped
+ * as invention and this spec would prove nothing.
  *
  * Prerequisites:
  * - The `drawing_import` feature flag must be on for the test company. The
@@ -67,6 +73,18 @@ test.describe('Add parts from drawings', () => {
 
     // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet.
     await expect(page.getByText(/3 components/i)).toBeVisible();
+
+    // ── Step 3b: the OPTIONAL AI pass ──
+    // A button, never a mount effect. Anthropic is mocked (see the file header), so
+    // this exercises the real route, gates and fidelity check for no credits. The
+    // mock echoes a material back OUT OF THE STRINGS IT WAS SENT, because the route
+    // drops anything that was not on the drawing.
+    const assist = page.getByRole('button', { name: /Read the title blocks/i });
+    if (await assist.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await assist.click();
+      // The offer disappears once it has run, whatever it found.
+      await expect(assist).toBeHidden({ timeout: 120_000 });
+    }
 
     // ── Step 4: create ──
 

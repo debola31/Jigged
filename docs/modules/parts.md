@@ -231,13 +231,15 @@ selected) rather than the toggle picking one and misreporting the rest.
 
 ### `part_attachments`
 
-Engineering files — drawings (PDF), CAD (STEP), legacy CAD (DWG). Bytes live in the **private**
+Engineering files — drawings (PDF **and DXF**), CAD (STEP), legacy CAD (DWG). Bytes live in the **private**
 `attachments` bucket at `{companyId}/parts/{partId}/{uuid}_{filename}`; this table is the metadata
 index. Mirrors `job_attachments`, widened to multiple kinds. Access layer:
 `utils/partAttachmentsAccess.ts`.
 
 Columns: `id`, `company_id`, `part_id` (both cascade), `storage_path`, `file_name`, `kind`
-(`pdf|step|dwg|other` CHECK, computed from the extension at upload — drives viewer dispatch),
+(`pdf|step|dwg|dxf|other` CHECK, computed from the extension at upload — drives viewer dispatch;
+`dxf` is the file the title-block extractor READS, kept beside the part it came from, and is
+download-only until a viewer exists),
 `mime_type` (advisory; STEP/DWG often report `application/octet-stream`), `size_bytes`,
 `uploaded_by` (→ `user_company_access`, `ON DELETE SET NULL`), `created_at`.
 **Index:** `(part_id, created_at DESC)` — the newest-first list query.
@@ -574,6 +576,56 @@ normalize is `unknown_unit`.
 > are `is_stocked = false`.
 
 ---
+
+## Add parts from drawings — `/dashboard/{companyId}/parts/drawings`
+
+Flag-gated on `drawing_import`. Drop a folder of engineering drawings, review one row per part,
+create. Built because a shop that receives 31 drawings from a customer types 31 parts by hand.
+
+**The deterministic pass runs in the browser and costs nothing.** `lib/dxfTextExtract.ts` or
+`lib/pdfTextExtract.ts` produce `(text, x, y, height)` items; `lib/drawingText.ts` assigns them to
+title-block roles; `lib/drawingCutList.ts` reads a weldment's bill of materials. No file ever leaves
+the tab. The AI pass is a separate **button** — per [CLAUDE.md](../../CLAUDE.md), an Anthropic call
+needs a user action — and it sends only the extracted strings, never the drawing.
+
+Measured on 63 drawings resembling what a precision shop quotes: deterministic alone reaches 54%
+recall at 67% precision; deterministic plus `claude-sonnet-4-6` reaches 90% at 89% for about
+$0.016 a drawing. Across every model and run, no returned value was ever absent from the file —
+`api/routes/drawing_routes.py` validates each one against the strings it was sent and drops
+anything else, which is what makes the arm safe rather than lucky.
+
+### What the rules are, and why
+
+**One part per basename stem, but the folder matters.** `File.name` carries no path, so a
+folder-per-part export arrives as one repeated filename; grouping keys on the directory too or two
+parts land in one row. A leading `NN_` index comes off only when dropping it is what makes two
+stems meet.
+
+**A 3D model joins its drawing by part number.** The real package names them differently —
+`1011770-…-60082-10-0000.dxf` is the drawing and `1011770-…-60078-02-0000.step` is the model — so a
+group with nothing readable is adopted by a readable group whose leading token matches, only in the
+same folder and only when exactly one candidate does.
+
+**DXF before PDF, always.** A DXF carries attribute tags that name their own fields; a PDF carries
+only what was printed. A group with both reads the DXF. A PDF with no text operators is a scan, and
+says so rather than showing a blank row — the row is still created with its files attached.
+
+**Identity keys on `(customer_id, customer_part_number)`, never on `part_name`.** Two OEMs
+legitimately use the same number, and name reuse revives an archived part, so a name-keyed import
+would merge one customer's part onto another's. See `part_customer_references` above and
+`utils/drawingImportIdentity.ts`: an archived match becomes a choice, a live part belonging to
+another customer is never written to, and a failed lookup reports "we couldn't check" rather than
+"clear to create".
+
+**Material and finish compose into the description.** `parts` has no material column;
+`part_comments` would bury the value and a spec card is unverified, so the row reads
+`plate · AL · POWDERCOAT RAL 7035`.
+
+### Not built yet
+
+The components panel (stock dedupe, placeholder children for `USE DRAWING` rows, the
+incomplete-package banner) and the quote handoff. `lib/drawingCutList.ts` already reads the table —
+2 of 96 corpus drawings carry one, both weldments — but nothing writes `parts_bom` from it.
 
 ## Delete — archive (soft-delete), never blocks
 

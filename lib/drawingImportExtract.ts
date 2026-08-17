@@ -30,6 +30,12 @@ export type UnreadableReason =
 export interface BuiltRow extends DrawingRow {
   /** Set only when `readSource` is 'none'. */
   unreadable?: UnreadableReason;
+  /**
+   * The strings this row was read from, kept because two later steps need them:
+   * the optional AI pass sends exactly these (never the file), and the fidelity
+   * check validates anything it returns against them.
+   */
+  items: TextItem[];
 }
 
 async function readGroup(
@@ -105,6 +111,7 @@ export async function buildRows(
       identity: { kind: 'new' },
       excluded: false,
       edits: {},
+      items,
       ...(unreadable ? { unreadable } : {}),
     });
 

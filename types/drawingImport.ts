@@ -107,7 +107,7 @@ export function valueOf(row: DrawingRow, key: keyof DrawingRowValues): string {
     case 'part_name':
       return row.fields.part_number?.value ?? row.stem;
     case 'description':
-      return row.fields.description?.value ?? '';
+      return composeDescription(row);
     case 'customer_part_number':
       return row.fields.part_number?.value ?? '';
     case 'customer_drawing_number':
@@ -119,4 +119,30 @@ export function valueOf(row: DrawingRow, key: keyof DrawingRowValues): string {
     default:
       return '';
   }
+}
+
+/**
+ * Description, with material and finish folded in.
+ *
+ * `parts` has NO material column, and the two candidates were both rejected:
+ * `part_comments` buries the value under every note the part will ever collect,
+ * and a dedicated spec card changes the part page in a way nobody has verified is
+ * useful. So the drawing's material and finish compose into the description, where
+ * a shop already looks — "plate · AL · POWDERCOAT RAL 7035".
+ *
+ * Skipped when the value is already in the text, so re-running the AI pass over a
+ * row cannot say "plate · AL · AL".
+ */
+export function composeDescription(row: DrawingRow): string {
+  const base = row.fields.description?.value?.trim() ?? '';
+  const parts = [base];
+
+  for (const role of ['material', 'finish'] as const) {
+    const value = row.fields[role]?.value?.trim();
+    if (!value) continue;
+    if (parts.some((p) => p.toLowerCase().includes(value.toLowerCase()))) continue;
+    parts.push(value);
+  }
+
+  return parts.filter(Boolean).join(' · ');
 }

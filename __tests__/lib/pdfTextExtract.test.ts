@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { jsPDF } from 'jspdf';
-import { extractPdfText } from '@/lib/pdfTextExtract';
+import { extractPdfText, toTextItems } from '@/lib/pdfTextExtract';
 
 /**
  * A real PDF, built at runtime. Fixtures would be opaque binaries nobody can
@@ -92,5 +92,51 @@ describe('extractPdfText', () => {
 
     expect(bytes.byteLength).toBe(before);
     expect(bytes[0]).toBe('%'.charCodeAt(0));
+  });
+
+});
+
+/**
+ * The mapping, tested directly on synthetic runs.
+ *
+ * These cases cannot be reached through a real document: jsPDF will not emit a
+ * whitespace-only run, so a mutant deleting the skip survived the entire suite.
+ * Against real drawings the branch fires constantly — 1,156 whitespace-only runs
+ * across 60 of the 96 corpus files — which is why it is worth pinning at all.
+ */
+describe('toTextItems', () => {
+  const run = (str: string, over: Partial<{ transform: number[]; height: number }> = {}) => ({
+    str,
+    transform: [12, 0, 0, 12, 100, 200],
+    ...over,
+  });
+
+  it('drops runs that are only whitespace, which carry a position but no value', () => {
+    const items = toTextItems([run(' '), run('MATERIAL:'), run('\t'), run('   \n ')]);
+    expect(items.map((i) => i.text)).toEqual(['MATERIAL:']);
+  });
+
+  it('takes x, y and height from the text matrix', () => {
+    const [item] = toTextItems([run('AL', { transform: [7, 0, 0, 7, 42, 84] })]);
+    expect(item).toEqual({ text: 'AL', x: 42, y: 84, height: 7 });
+  });
+
+  it('falls back to the device-space height, then to 1', () => {
+    const [withHeight] = toTextItems([run('A', { transform: [0, 0, 0, 0, 1, 1], height: 9 })]);
+    expect(withHeight.height).toBe(9);
+
+    // A window of zero width matches nothing, so never leave height at 0.
+    const [neither] = toTextItems([run('A', { transform: [0, 0, 0, 0, 1, 1], height: 0 })]);
+    expect(neither.height).toBe(1);
+  });
+
+  it('treats a missing transform as the origin rather than NaN', () => {
+    const [item] = toTextItems([{ str: 'X' }]);
+    expect(item).toMatchObject({ x: 0, y: 0, height: 1 });
+  });
+
+  it('keeps a negative scale as a magnitude — flipped text still has a size', () => {
+    const [item] = toTextItems([run('A', { transform: [10, 0, 0, -10, 5, 5] })]);
+    expect(item.height).toBe(10);
   });
 });

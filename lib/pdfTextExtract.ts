@@ -33,6 +33,50 @@ export interface PdfTextResult {
 }
 
 /**
+ * The part of a pdf.js text item this module reads. Named so the mapping below can
+ * be tested with synthetic runs.
+ */
+export interface PdfTextRun {
+  str: string;
+  /** 6-element text matrix; index 3 is the scaled font size, 4 and 5 are x and y. */
+  transform?: number[];
+  height?: number;
+}
+
+/**
+ * Map pdf.js runs onto the matcher's `TextItem` shape.
+ *
+ * Separated from the file I/O deliberately: the whitespace skip below is
+ * unreachable from a PDF built with jsPDF, so a unit test that goes through a real
+ * document cannot pin it — a mutant deleting the skip survived the whole suite.
+ * Against real drawings it fires constantly: 1,156 whitespace-only runs across 60
+ * of the 96 corpus files, and each one carries a POSITION, so keeping them would
+ * hand the matcher blank values sitting beside real captions.
+ */
+export function toTextItems(runs: readonly PdfTextRun[]): TextItem[] {
+  const items: TextItem[] = [];
+  for (const run of runs) {
+    if (!run.str?.trim()) continue;
+
+    // Index 3 of the text matrix is fontSize x vertical scale, and across the
+    // sample it was the only local scale a PDF offered reliably — the matcher
+    // sizes its search windows by it, so getting this wrong is not cosmetic.
+    // `height` is device-space and second choice; 1 is the last resort that keeps
+    // a window finite rather than zero-wide.
+    const scaledFontSize = Math.abs(Number(run.transform?.[3]));
+    const height = scaledFontSize || Math.abs(Number(run.height)) || 1;
+
+    items.push({
+      text: run.str,
+      x: Number(run.transform?.[4]) || 0,
+      y: Number(run.transform?.[5]) || 0,
+      height,
+    });
+  }
+  return items;
+}
+
+/**
  * Extract every text run from a vector PDF.
  *
  * Never throws: a file the user just dropped being unreadable is an expected
@@ -66,7 +110,7 @@ export async function extractPdfText(data: Uint8Array): Promise<PdfTextResult> {
     // part's attachment), so hand over a copy and leave the caller's intact.
     task = pdfjs.getDocument({ data: data.slice() });
     const doc = await task.promise;
-    const items: TextItem[] = [];
+    const runs: PdfTextRun[] = [];
 
     // Every page. A title block is usually on sheet 1, but a cut list or a
     // revision table routinely is not.
@@ -77,25 +121,11 @@ export async function extractPdfText(data: Uint8Array): Promise<PdfTextResult> {
       for (const run of content.items) {
         // Marked-content boundaries share the array and carry no text.
         if (!('str' in run)) continue;
-        if (!run.str.trim()) continue;
-
-        // Index 3 of the text matrix is fontSize x vertical scale, and across
-        // the sample it was the only local scale a PDF offered reliably — the
-        // matcher sizes its search windows by it, so getting it wrong is not
-        // cosmetic. `item.height` is device-space and second choice; 1 is the
-        // last resort that keeps a window finite rather than zero-wide.
-        const scaledFontSize = Math.abs(Number(run.transform?.[3]));
-        const height = scaledFontSize || Math.abs(run.height) || 1;
-
-        items.push({
-          text: run.str,
-          x: Number(run.transform?.[4]) || 0,
-          y: Number(run.transform?.[5]) || 0,
-          height,
-        });
+        runs.push({ str: run.str, transform: run.transform, height: run.height });
       }
     }
 
+    const items = toTextItems(runs);
     return { items, hasTextLayer: items.length > 0 };
   } catch {
     // Corrupt, encrypted, or not a PDF at all — one answer covers all three,

@@ -55,9 +55,22 @@ $$;
 COMMENT ON FUNCTION public.part_has_cost_basis(uuid) IS
   'Does this part have anything to compute a cost FROM? Bought: a non-expired procurement tier. Made: at least one routing operation or one BOM child. Single source of truth shared by compute_part_cost_explain (detail view) and get_priceable_part_ids (list view) so the two cannot drift. A made part with neither is not free — it has no basis, and rolling it up as 0 is what this replaced.';
 
--- Browser roles never call this directly; it is a helper for the two functions
--- below, which are themselves SECURITY INVOKER and RLS-bound.
-REVOKE EXECUTE ON FUNCTION public.part_has_cost_basis(uuid) FROM PUBLIC, anon, authenticated;
+-- `authenticated` MUST be able to execute this, and the reason is worth stating
+-- because the instinct is to lock a helper down.
+--
+-- `get_priceable_part_ids` is SECURITY INVOKER — it carries no DEFINER — and the
+-- parts list calls it by RPC from the browser. So it runs AS the signed-in user,
+-- and that user needs EXECUTE on everything it calls. The CLAUDE.md exemption for
+-- "helpers called only from a SECURITY DEFINER parent" does not apply: there is no
+-- definer in this chain. Revoking from `authenticated` fails the parts list with a
+-- bare 42501 whose only clue is the function name.
+--
+-- Granting it leaks nothing. The function is SECURITY INVOKER too, so every table
+-- it touches is still filtered by that user's RLS: asked about a part in another
+-- tenant it sees no rows and answers false, which is what a caller could already
+-- infer. `anon` gets nothing — the parts list is behind a session.
+REVOKE EXECUTE ON FUNCTION public.part_has_cost_basis(uuid) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.part_has_cost_basis(uuid) TO authenticated;
 GRANT  EXECUTE ON FUNCTION public.part_has_cost_basis(uuid) TO service_role;
 
 -- ---------------------------------------------------------------------------

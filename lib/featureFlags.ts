@@ -79,6 +79,12 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
       'A maintenance logbook per machine, written by whoever is standing at it: a Maintenance tab on the operator view once a station is selected, with optional machine details and manuals, plus a read-only log on the work-center page. One pilot shop at a time — see docs/modules/machine-maintenance.md.',
   },
   {
+    key: 'drawing_import',
+    label: 'Add parts from drawings',
+    description:
+      'Drop a folder of engineering drawings on the Parts page and create parts from them: file grouping, title-block extraction from DXF or vector PDF, a review grid, and the customer part-number references the import writes. The AI assist that fills material and finish is behind an explicit button and costs Anthropic credits per drawing, so this flag gates the backend route and not just the UI — see docs/modules/parts.md.',
+  },
+  {
     key: 'quickbooks_desktop',
     label: 'QuickBooks Desktop',
     description:

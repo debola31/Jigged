@@ -7,9 +7,9 @@
  * fixture stores that — the test then exercises `extractDrawingFields` end to end
  * in CI with no proprietary CAD file present.
  *
- * ⚠️ THIS STILL EMBEDS THE THIRD PARTY'S PART NUMBERS AND DESCRIPTIONS. The package
- * came to us from a customer's customer, so committing it is a call for a human to
- * make, not this script. It is written to the repo but left uncommitted on purpose.
+ * ⚠️ IT DOES EMBED THE THIRD PARTY'S PART NUMBERS AND DESCRIPTIONS. The package came
+ * to us from a customer's customer. Committing it was an explicit decision, not an
+ * accident of this script — do not redistribute the file.
  *
  * The identifier expectations are derived from the FILENAME, which encodes both
  * numbers independently of anything the extractor does — so the fixture cannot
@@ -91,7 +91,26 @@ const fixture = {
   drawings,
 };
 
-writeFileSync(OUT, JSON.stringify(fixture, null, 1));
+/**
+ * ONE LINE PER DRAWING, not pretty-printed.
+ *
+ * Pretty-printing 5,365 text entities at one field per line makes a 38,000-line
+ * file, which buries a PR and makes every regeneration look like a rewrite. Keyed
+ * per drawing instead: a changed drawing is a one-line diff, and the file is still
+ * greppable by part number.
+ */
+const { drawings: rows, ...header } = fixture;
+writeFileSync(
+  OUT,
+  [
+    '{',
+    ...Object.entries(header).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)},`),
+    '"drawings": [',
+    ...rows.map((d, i) => JSON.stringify(d) + (i === rows.length - 1 ? '' : ',')),
+    ']',
+    '}',
+  ].join('\n') + '\n',
+);
 
 console.log(`${drawings.length} drawings, ${drawings.reduce((a, d) => a + d.items.length, 0)} text entities`);
 console.log(`Wrote ${OUT} (${(readFileSync(OUT).length / 1024).toFixed(0)} KB)`);

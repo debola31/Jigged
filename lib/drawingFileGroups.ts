@@ -163,7 +163,7 @@ export function groupDrawingFiles(files: File[]): DrawingGroup[] {
     return `${withFolder} (${claimed.size})`;
   }
 
-  const groups: DrawingGroup[] = [];
+  const built: Array<{ dir: string; stem: string; files: Entry[] }> = [];
   for (const members of byIndexless.values()) {
     // When several stems merged, the index is what differed, so the indexless form
     // is the name. A lone stem keeps exactly what was on disk.
@@ -171,13 +171,65 @@ export function groupDrawingFiles(files: File[]): DrawingGroup[] {
       members.length > 1 ? members[0].stem.replace(INDEX_PREFIX, '') : members[0].stem;
     const stem = nameFor(members[0].dir, base);
     claimed.add(stem.toLowerCase());
-    groups.push({
+    built.push({ dir: members[0].dir, stem, files: members.flatMap((m) => m.files) });
+  }
+
+  return adoptModelsByPartNumber(built)
+    .map(({ stem, files }) => ({
       stem,
       // Strip the internal bookkeeping back off — callers get plain DrawingFiles,
       // each still holding the original File by reference.
-      files: members.flatMap((m) => m.files.map(({ file, name, kind }) => ({ file, name, kind }))),
-    });
+      files: files.map(({ file, name, kind }) => ({ file, name, kind })),
+    }))
+    .sort((a, b) => compare(a.stem, b.stem));
+}
+
+/** Leading run of letters and digits — the part number on a `1011770-_314-…` stem. */
+const PART_TOKEN = /^[A-Za-z0-9]+/;
+
+/** A group we can actually extract fields from. A STEP model on its own is not one. */
+const isReadable = (files: Entry[]) => files.some((f) => f.kind === 'pdf' || f.kind === 'dxf');
+
+/**
+ * Let a MODEL join the drawing it belongs to.
+ *
+ * Measured on the real customer package, which is why this exists at all: the
+ * drawing and the model do NOT share a stem. They share only the part number.
+ *
+ *   1011770-_314-092-60082-10-0000.dxf   <- the drawing
+ *   1011770-_314-092-60078-02-0000.step  <- the model, a different document number
+ *
+ * Grouping on the stem alone turned 93 files into 62 rows — 31 real parts plus 31
+ * step-only rows nobody wants — and the models never reached the parts they
+ * describe.
+ *
+ * Deliberately timid. It only adopts a group with NOTHING readable in it, only
+ * into a readable group in the SAME folder, only on a token long enough not to be
+ * a package index, and only when exactly ONE candidate matches. Anything
+ * ambiguous is left as its own row, because a wrong attachment is worse than an
+ * extra row a user can see and dismiss.
+ */
+function adoptModelsByPartNumber(
+  groups: Array<{ dir: string; stem: string; files: Entry[] }>,
+): Array<{ dir: string; stem: string; files: Entry[] }> {
+  const tokenOf = (stem: string) => (stem.match(PART_TOKEN)?.[0] ?? '').toLowerCase();
+  // Four characters, so a `00_`-style index or a one-letter prefix can never be
+  // mistaken for a part number.
+  const MIN_TOKEN = 4;
+
+  const readable = groups.filter((g) => isReadable(g.files));
+  const orphans = groups.filter((g) => !isReadable(g.files));
+  if (readable.length === 0 || orphans.length === 0) return groups;
+
+  const adopted = new Set<typeof groups[number]>();
+  for (const orphan of orphans) {
+    const token = tokenOf(orphan.stem);
+    if (token.length < MIN_TOKEN) continue;
+    const matches = readable.filter((g) => g.dir === orphan.dir && tokenOf(g.stem) === token);
+    if (matches.length !== 1) continue;
+    matches[0].files.push(...orphan.files);
+    adopted.add(orphan);
   }
 
-  return groups.sort((a, b) => compare(a.stem, b.stem));
+  return groups.filter((g) => !adopted.has(g));
 }

@@ -251,3 +251,63 @@ describe('groupDrawingFiles — cases mutation testing showed were unenforced', 
     expect(groups.map((g) => g.stem)).toEqual(['B', 'C', 'a']);
   });
 });
+
+/**
+ * Measured on the real customer package: the drawing and the 3D model do not share
+ * a stem, only the part number. Grouping on the stem alone turned 93 files into 62
+ * rows and the models never reached the parts they describe.
+ */
+describe('groupDrawingFiles — models joining their drawing', () => {
+  const DRAWING = '1011770-_314-092-60082-10-0000';
+  const MODEL = '1011770-_314-092-60078-02-0000';
+
+  it('adopts a STEP model into the drawing group that shares its part number', () => {
+    const groups = groupDrawingFiles([
+      f(`${DRAWING}.dxf`),
+      f(`${DRAWING}.pdf`),
+      f(`${MODEL}.step`),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(namesOf(groups[0].files).sort()).toEqual(
+      [`${DRAWING}.dxf`, `${DRAWING}.pdf`, `${MODEL}.step`].sort(),
+    );
+    // The row is named after the DRAWING, not the model.
+    expect(groups[0].stem).toBe(DRAWING);
+  });
+
+  /** A wrong attachment is worse than an extra row someone can see and dismiss. */
+  it('leaves a model alone when two drawings could claim it', () => {
+    const groups = groupDrawingFiles([
+      f('1011770-A.dxf'),
+      f('1011770-B.dxf'),
+      f('1011770-model.step'),
+    ]);
+    expect(groups).toHaveLength(3);
+  });
+
+  it('never adopts on a token too short to be a part number', () => {
+    // `00` would otherwise match every 00_-prefixed stem in the folder.
+    const groups = groupDrawingFiles([f('00_Plate.dxf'), f('00_Other.step')]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('does not reach across folders', () => {
+    const inDir = (dir: string, name: string) => {
+      const file = new File(['drawing'], name);
+      Object.defineProperty(file, 'webkitRelativePath', { value: `${dir}/${name}` });
+      return file;
+    };
+    const groups = groupDrawingFiles([
+      inDir('pkg/A', `${DRAWING}.dxf`),
+      inDir('pkg/B', `${MODEL}.step`),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('keeps a model-only group as its own row when nothing matches', () => {
+    const groups = groupDrawingFiles([f('9999999-lonely.step')]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].files).toHaveLength(1);
+  });
+});

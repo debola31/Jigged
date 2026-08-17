@@ -51,3 +51,17 @@ afterAll(() => {
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+
+// jsdom's Blob has no `arrayBuffer()`, which every browser has had for years. Code
+// that reads a dropped file the ordinary way would otherwise be untestable here.
+// Same shape as the scrollIntoView shim above: only fill in what jsdom lacks.
+if (!Blob.prototype.arrayBuffer) {
+  Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob): Promise<ArrayBuffer> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}

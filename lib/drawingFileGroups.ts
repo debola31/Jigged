@@ -6,7 +6,12 @@
  * and `.stp` — and that is one part, not three. So the basename stem IS the part,
  * and everything below exists to decide which stems are really the same stem.
  *
- * Pure: no Supabase, no reads. The `File` objects are carried through untouched
+ * TWO FILES BECOMING ONE PART IS THE WHOLE JOB. TWO PARTS BECOMING ONE ROW IS THE
+ * FAILURE — a row carrying a mix of two parts' drawings, with fields extracted
+ * from whichever one won. Every rule here is shaped by which side of that line it
+ * falls on.
+ *
+ * Pure: no Supabase, no reads. The `File` objects are carried through BY REFERENCE
  * because the caller uploads them after the user has reviewed the grid.
  */
 
@@ -24,7 +29,8 @@ const EXTENSION_KINDS: Record<string, DrawingFileKind> = {
  *
  * Deliberately narrow. Part numbers are long and digit-heavy — `1011770-_314-092`
  * — so a loose pattern would start eating them; an index is a couple of digits and
- * an underscore. The lookahead keeps `00_.pdf` from stripping down to nothing.
+ * an underscore. The lookahead stops `00_.pdf` from stripping to an EMPTY stem,
+ * which would otherwise become the part's name downstream.
  */
 const INDEX_PREFIX = /^\d{1,3}_(?=.)/;
 
@@ -33,7 +39,8 @@ const THUMBS_DB = 'thumbs.db';
 
 /**
  * Code-unit order rather than `localeCompare`: the grid's row order must be the
- * same on every machine, and locale collation is not.
+ * same on every machine, and locale collation is not — `localeCompare` sorts `a`
+ * before `B` under most locales and after it under none consistently.
  */
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -49,6 +56,25 @@ function stemOf(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/**
+ * The folder a file came from, and the reason this function exists.
+ *
+ * `File.name` is a BASENAME — it carries no path. A `webkitdirectory` drop of
+ * `pkg/PartA/drawing.pdf` and `pkg/PartB/drawing.pdf` therefore arrives as two
+ * files both called `drawing.pdf`, and grouping on the name alone welds two parts
+ * into one row. Folder-per-part is a common CAD export shape, so this is not a
+ * corner case.
+ *
+ * `webkitRelativePath` is non-standard and empty for a plain multi-file drop —
+ * in which case everything correctly shares one flat namespace.
+ */
+function dirOf(file: File): string {
+  const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  if (!rel) return '';
+  const cut = rel.lastIndexOf('/');
+  return cut > 0 ? rel.slice(0, cut) : '';
+}
+
 /** Real folders carry junk, and a shop's folder carries more of it than most. */
 function isJunk(file: File): boolean {
   // A zero-byte file is a placeholder or a failed copy — there is nothing to read
@@ -59,47 +85,99 @@ function isJunk(file: File): boolean {
   return file.name.toLowerCase() === THUMBS_DB;
 }
 
+interface Entry extends DrawingFile {
+  dir: string;
+  stem: string;
+}
+
+interface StemBucket {
+  dir: string;
+  stem: string;
+  files: Entry[];
+}
+
+/**
+ * Stems compare case-INSENSITIVELY within a folder. On the case-insensitive
+ * filesystems this audience uses, `BRACKET.DXF` and `Bracket.pdf` cannot be two
+ * different parts in one directory, so splitting them is always wrong. Across
+ * folders they can be, which is why the folder is part of the key.
+ */
+const keyOf = (dir: string, stem: string) => `${dir}\u0000${stem.toLowerCase()}`;
+
 export function groupDrawingFiles(files: File[]): DrawingGroup[] {
   // Sort first: a directory drop hands files over in whatever order the OS
   // enumerated them, and that order would otherwise decide group and file order.
-  const kept = files.filter((f) => !isJunk(f)).sort((a, b) => compare(a.name, b.name));
+  const kept: Entry[] = files
+    .filter((f) => !isJunk(f))
+    .map((file) => ({
+      file,
+      name: file.name,
+      kind: classifyFile(file.name),
+      dir: dirOf(file),
+      stem: stemOf(file.name),
+    }))
+    .sort((a, b) => compare(a.dir, b.dir) || compare(a.name, b.name));
 
-  const byStem = new Map<string, DrawingFile[]>();
-  for (const file of kept) {
-    const entry: DrawingFile = { file, name: file.name, kind: classifyFile(file.name) };
-    const stem = stemOf(file.name);
-    const existing = byStem.get(stem);
-    if (existing) existing.push(entry);
-    else byStem.set(stem, [entry]);
+  const byStem = new Map<string, StemBucket>();
+  for (const entry of kept) {
+    const key = keyOf(entry.dir, entry.stem);
+    const existing = byStem.get(key);
+    if (existing) existing.files.push(entry);
+    else byStem.set(key, { dir: entry.dir, stem: entry.stem, files: [entry] });
   }
 
   /**
    * The index only comes off when dropping it is what makes two stems meet.
    * `00_Backplate` and `01_Backplate` are one part; `00_Axis1part2` and
-   * `01_Axis2part1` are two, and stripping blindly would weld them into one row
-   * carrying a mix of two parts' drawings.
+   * `01_Axis2part1` are two, and stripping blindly would weld them together.
+   *
+   * Only stems holding a real drawing get a vote. A stray `Backplate.txt` is not a
+   * part — the filter here says exactly that — so it must not be the thing that
+   * renames a real one, and the stem is the part-name fallback.
    */
-  const byIndexless = new Map<string, string[]>();
-  for (const stem of byStem.keys()) {
-    const indexless = stem.replace(INDEX_PREFIX, '');
-    const existing = byIndexless.get(indexless);
-    if (existing) existing.push(stem);
-    else byIndexless.set(indexless, [stem]);
+  const votable = [...byStem.values()].filter((g) => g.files.some((f) => f.kind !== 'other'));
+  const byIndexless = new Map<string, StemBucket[]>();
+  for (const g of votable) {
+    const key = keyOf(g.dir, g.stem.replace(INDEX_PREFIX, ''));
+    const existing = byIndexless.get(key);
+    if (existing) existing.push(g);
+    else byIndexless.set(key, [g]);
+  }
+
+  /**
+   * Display names must be unique: the review grid keys its rows by stem, and two
+   * rows sharing one collide silently. Prefer the folder as the disambiguator —
+   * it is the thing that actually differs, and it reads as a location rather than
+   * as a serial number.
+   */
+  const claimed = new Set<string>();
+  function nameFor(dir: string, stem: string): string {
+    if (!claimed.has(stem.toLowerCase())) return stem;
+    const folder = dir.slice(dir.lastIndexOf('/') + 1);
+    const withFolder = folder ? `${folder}/${stem}` : stem;
+    if (!claimed.has(withFolder.toLowerCase())) return withFolder;
+    for (let n = 2; n < 1000; n += 1) {
+      const candidate = `${withFolder} (${n})`;
+      if (!claimed.has(candidate.toLowerCase())) return candidate;
+    }
+    return `${withFolder} (${claimed.size})`;
   }
 
   const groups: DrawingGroup[] = [];
-  for (const [indexless, stems] of byIndexless) {
+  for (const members of byIndexless.values()) {
+    // When several stems merged, the index is what differed, so the indexless form
+    // is the name. A lone stem keeps exactly what was on disk.
+    const base =
+      members.length > 1 ? members[0].stem.replace(INDEX_PREFIX, '') : members[0].stem;
+    const stem = nameFor(members[0].dir, base);
+    claimed.add(stem.toLowerCase());
     groups.push({
-      stem: stems.length > 1 ? indexless : stems[0],
-      files: stems.flatMap((s) => byStem.get(s) ?? []),
+      stem,
+      // Strip the internal bookkeeping back off — callers get plain DrawingFiles,
+      // each still holding the original File by reference.
+      files: members.flatMap((m) => m.files.map(({ file, name, kind }) => ({ file, name, kind }))),
     });
   }
 
-  return (
-    groups
-      // A group of nothing but unreadable files is a subfolder's leftovers, not a
-      // part — there is no drawing to extract from and no row worth reviewing.
-      .filter((g) => g.files.some((f) => f.kind !== 'other'))
-      .sort((a, b) => compare(a.stem, b.stem))
-  );
+  return groups.sort((a, b) => compare(a.stem, b.stem));
 }

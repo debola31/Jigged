@@ -62,7 +62,14 @@ describe('groupDrawingFiles', () => {
     const pdf = f(`${CUSTOMER_STEM}.pdf`);
     const dxf = f(`${CUSTOMER_STEM}.dxf`);
     const [group] = groupDrawingFiles([pdf, dxf]);
-    expect(group.files.map((x) => x.file)).toEqual(expect.arrayContaining([pdf, dxf]));
+    // REFERENCE identity, via toBe. `toEqual` on a File compares nothing at all —
+    // two Files with different names AND different bytes pass it — so the previous
+    // assertion here was vacuous and a mutant returning a completely different
+    // File survived the whole suite.
+    const carried = group.files.map((x) => x.file);
+    expect(carried).toHaveLength(2);
+    expect(carried.some((c) => c === pdf)).toBe(true);
+    expect(carried.some((c) => c === dxf)).toBe(true);
   });
 
   it('accepts a pdf-only part', () => {
@@ -156,5 +163,91 @@ describe('groupDrawingFiles', () => {
     ]);
     expect(groups.map((g) => g.stem)).toEqual([CUSTOMER_STEM, 'Backplate', 'Weldment']);
     expect(groups.map((g) => g.files.length)).toEqual([3, 2, 1]);
+  });
+});
+
+describe('groupDrawingFiles — cases mutation testing showed were unenforced', () => {
+  /** A file that reports a folder, the way a `webkitdirectory` drop does. */
+  const inDir = (dir: string, name: string) => {
+    const file = new File(['drawing'], name);
+    Object.defineProperty(file, 'webkitRelativePath', { value: `${dir}/${name}` });
+    return file;
+  };
+
+  /**
+   * THE FAILURE THIS MODULE EXISTS TO PREVENT, arriving through the door nobody
+   * watched. `File.name` is a basename, so folder-per-part exports look like one
+   * repeated filename and two parts land in one row.
+   */
+  it('keeps same-named files in different folders as different parts', () => {
+    const groups = groupDrawingFiles([
+      inDir('pkg/PartA', 'drawing.pdf'),
+      inDir('pkg/PartA', 'drawing.dxf'),
+      inDir('pkg/PartB', 'drawing.pdf'),
+      inDir('pkg/PartB', 'drawing.dxf'),
+    ]);
+    expect(groups).toHaveLength(2);
+    for (const g of groups) expect(g.files).toHaveLength(2);
+    // Names must differ too, or the grid's row keys collide.
+    expect(groups[0].stem).not.toBe(groups[1].stem);
+  });
+
+  it('still groups a flat drop, where no folder is reported', () => {
+    expect(groupDrawingFiles([f('X.pdf'), f('X.dxf')])).toHaveLength(1);
+  });
+
+  /** Two rows sharing a stem collide silently in a grid keyed by it. */
+  it('never emits two groups with the same stem', () => {
+    const groups = groupDrawingFiles([
+      f('00_Backplate.pdf'),
+      f('01_00_Backplate.dxf'),
+      f('02_00_Backplate.stp'),
+    ]);
+    expect(new Set(groups.map((g) => g.stem)).size).toBe(groups.length);
+  });
+
+  /**
+   * An all-'other' group "is not a part" by this module's own rule, so it must not
+   * be the thing that decides a real part's name — the stem is the name fallback.
+   */
+  it('does not let a stray .txt rename a real part', () => {
+    const groups = groupDrawingFiles([
+      f('00_Backplate.dxf'),
+      f('00_Backplate.pdf'),
+      f('Backplate.txt'),
+    ]);
+    expect(groups.map((g) => g.stem)).toEqual(['00_Backplate']);
+  });
+
+  /**
+   * On a case-insensitive filesystem these two cannot be separate parts in one
+   * folder, so splitting them is wrong wherever it happens.
+   */
+  it('folds stem case within a folder', () => {
+    const groups = groupDrawingFiles([f('BRACKET.DXF'), f('Bracket.pdf')]);
+    expect(groups).toHaveLength(1);
+    expect(namesOf(groups[0].files).sort()).toEqual(['BRACKET.DXF', 'Bracket.pdf']);
+  });
+
+  /** Removing the `(?=.)` lookahead makes this stem empty, and empty becomes the part name. */
+  it('never strips an index down to an empty stem', () => {
+    const groups = groupDrawingFiles([f('00_.pdf'), f('01_.dxf')]);
+    for (const g of groups) expect(g.stem).not.toBe('');
+  });
+
+  /** Thumbs.db must be dropped by the junk filter, not incidentally by another rule. */
+  it('drops Thumbs.db even when a real part shares its stem', () => {
+    const groups = groupDrawingFiles([f('Thumbs.pdf'), f('Thumbs.db'), f('THUMBS.DB')]);
+    expect(groups).toHaveLength(1);
+    expect(namesOf(groups[0].files)).toEqual(['Thumbs.pdf']);
+  });
+
+  /**
+   * Row order must not depend on the machine's locale. `localeCompare` orders
+   * these differently from code-unit order, so a locale-sensitive sort fails here.
+   */
+  it('orders stems by code unit, not by locale', () => {
+    const groups = groupDrawingFiles([f('a.pdf'), f('B.pdf'), f('C.pdf')]);
+    expect(groups.map((g) => g.stem)).toEqual(['B', 'C', 'a']);
   });
 });

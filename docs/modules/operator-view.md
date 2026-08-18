@@ -293,6 +293,39 @@ work where that one did not:
 | **`capture_source` ships with the operator path** | `operator | sensor | system`. `left_running` overnight intervals are exactly where a sensor interval will later contradict a labour interval, and without a common shape there is nothing to express the disagreement *in*. |
 | **No setup/run phase control** | An 18-vendor sweep found nobody shipping a SETUP/RUN toggle inside a running timer: it is a UI mode that fails *silently* into the office's numbers. The split is solvable office-side from what this table already produces — `T = setup + q × cycle` across runs of the same part-operation, with the existing estimates as priors — at zero operator taps. **Deferred, not rejected.** |
 
+**Starting is mandatory, and the primary button is what enforces it.** One button changes meaning
+— `START THIS STEP` when idle, `RECORD <n> FINISHED` when running. Having both on screen at once
+was the original mistake: it let a step be completed without ever being timed, which made the timer
+optional in practice and left the data half-collected. The label **interpolates the quantity** into
+the verb rather than reading `COMPLETE`, because partial completion is the normal case and a bare
+"Complete" would misstate it.
+
+**`Complete without timing` is the deliberate escape hatch**, quiet but always present when there
+is a quantity to record. A hard block is the one shape that reliably corrupts this screen — it
+already carries an incident where a constraint that could not be satisfied led operators to type a
+false quantity to get past it. It records **no interval**, never a backdated one: a remembered
+start is a recall estimate, recall bias grows with the magnitude estimated, and an invented duration
+would corrupt exactly the data this feature exists to collect. An honest absence beats a plausible
+fabrication, and it is the same state an office-side completion already produces. `operation
+completed untimed` measures how often it is used — a rising rate means starting is too hard to
+reach, which is our problem and not the operator's.
+
+**Capture moved to a confirm sheet, and that is NOT the pattern deleted in
+[B4](#capture-is-part-of-completing-b4).** What B4 removed was a **post**-completion offer —
+record, then a prompt for a photo, then a separate Post: three commits, and the middle had no
+durability, so a back tap discarded a photo the flow had already implied was saved. The sheet is
+the mirror image: **nothing is written until its primary is tapped**, so backing out loses only
+what is visibly still in the composer. Still one commit, still the same
+completion → interval-close → note order. It renders the *same* `useNoteCapture` object the step
+screen holds, so a note jotted while the work was happening is carried in rather than abandoned,
+and because it is a modal overlay only one composer is ever on screen. The app shipped this shape
+once before as `JobCompleteModal`, removed with the timer rather than for any fault of its own.
+
+**No dictate button.** Both mobile keyboards ship a microphone, so a plain multiline field already
+gives dictation on every phone with no permission prompt and no bundle. `webkitSpeechRecognition`
+does exist in iOS Safari (14.5+) but requires the user to have Siri enabled and has documented
+throttling and interim-result bugs in WebKit — strictly worse than what the OS gives free.
+
 **Why there is no "you left a timer running" notification.** iOS Web Push requires the site to be a
 Home Screen *web app*, and [`app/manifest.ts`](../../app/manifest.ts) sets `display: 'browser'`
 deliberately: standalone gives the icon a cookie jar separate from Safari, and since the Camera app
@@ -590,7 +623,7 @@ schema rather than in review:
 
 | Operator sees | Operator never sees |
 |---|---|
-| The interval running **right now** — start time leading, elapsed trailing | A total across jobs, a weekly figure, an average, a rate |
+| The interval running **right now**, as a large monospace clock | A total across jobs, a weekly figure, an average, a rate |
 | A journal of their own recorded intervals, each naming its job and step | A row count, an entry total, or any scalar over that journal |
 | Their own raw times beside their own corrections | Anyone else's times, or their own compared to the estimate |
 
@@ -598,7 +631,18 @@ schema rather than in review:
 engineer's input to the job and the printed traveler carries the same figure. Beside a live counter
 it is a target, and a number about your own output next to a standard is the adjacent comparison
 that turns informational feedback into controlling feedback — the same Deci/Koestner/Ryan
-distinction that separates +0.66 from −0.44.
+distinction that separates +0.66 from −0.44. This is the load-bearing half of the guardrail, and it
+is the half that must not move.
+
+**Withdrawn 2026-08-17: "the elapsed counter is secondary and monochrome; a start time is a fact,
+a hero counter is closer to Etkin's manipulation."** Wrong because it over-applied the evidence.
+Etkin's harmful counter was a tally of **output accumulating across a task**; a stopwatch on the
+operation in front of you accumulates nothing and — with the estimate gone — sits beside no
+standard. The clock is now a large centred monospace figure, matching what this app shipped before
+[`541ca291`](https://github.com/debola31/Jigged/commit/541ca291) removed it. It also earns the size
+operationally, which the first version undervalued: **an unmissable clock is the best defence
+against the forgotten start and the forgotten stop**, which is the failure mode the whole model
+fights. What did not change: no estimate beside it, no total across jobs, no average.
 
 **Aggregate-by-default is enforced by RLS, not convention.** `job_operation_intervals` has **no
 admin-readable path**: a row-returning SELECT policy exposing `operator_id` would *be* a per-person

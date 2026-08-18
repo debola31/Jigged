@@ -51,20 +51,30 @@ import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
 import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
-import { elapsedMs, formatClockTime, formatDuration } from '@/lib/duration';
+import CompleteStepSheet from '@/components/operator/CompleteStepSheet';
+import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
  * step on the traveler, or directly from the station-scoped jobs list.
  *
  * Operators record how many GOOD pieces they finished: one number field that
- * defaults to the full remaining balance, so RECORD COMPLETION completes the
- * operation by default and records a partial when the number is dialled down
- * (each event appends to job_operation_completions; a DB trigger derives the
- * op status). No "start", no pause/exit, no on-job timer (shop operators don't
- * reliably start/pause/resume, so we don't pretend to track that time). Undo
- * voids the recorded completions. Loads by job_operation_id so the exact step
- * the operator chose is the one actioned.
+ * defaults to the full remaining balance, so the completion records the whole
+ * step by default and a partial when the number is dialled down (each event
+ * appends to job_operation_completions; a DB trigger derives the op status).
+ * Undo voids the recorded completions. Loads by job_operation_id so the exact
+ * step the operator chose is the one actioned.
+ *
+ * ONE PRIMARY BUTTON THAT CHANGES MEANING: idle it is START THIS STEP, running
+ * it is RECORD <n> FINISHED. Both on screen at once was the bug — it let a step
+ * be completed without ever being timed, which made the timer optional in
+ * practice. There is still no pause and no resume: you stop by starting the next
+ * thing, by recording the completion, or from the running strip's menu.
+ *
+ * `Complete without timing` is the deliberate escape hatch for the operator who
+ * did the work and forgot to start. It records NO interval rather than a
+ * backdated guess, because a remembered start is a recall estimate and inventing
+ * one would corrupt the data this feature exists to collect.
  *
  * Station guard: recording requires a selected station (StationSelector prompts
  * when none is set). If the step's work center doesn't match the operator's
@@ -104,6 +114,7 @@ export default function OperatorOperationActionPage() {
   // adjusted values at all, so `adjusted_at` stays NULL and the row does not
   // claim to have been corrected when it was not.
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
   const [pendingAdjust, setPendingAdjust] = useState<{
     startedAt: string;
     endedAt: string | null;
@@ -238,6 +249,29 @@ export default function OperatorOperationActionPage() {
   const canComplete = Number(qtyValue) > 0;
   const noteOnly = !canComplete && capture.hasContent;
 
+  // This block only renders for an internal, incomplete op (see the
+  // isCompleted / isExternal branches below), so "nothing running" is the whole
+  // of the idle condition.
+  const showStart = !running;
+
+  /**
+   * What the single primary button does, in strict precedence order.
+   *
+   * `note` IS FIRST, AND THAT ORDERING IS LOAD-BEARING. An operator who cleared
+   * the quantity and typed something has finished zero pieces and is telling us
+   * why — "machine down", "waiting on material". That path exists precisely so
+   * nobody types a false quantity to get a note saved, and an earlier draft of
+   * this refactor put `start` first and made SAVE NOTE unreachable, which
+   * quietly reinstated the hole B4 was opened to close.
+   */
+  const primaryAction: 'note' | 'start' | 'complete' | 'none' = noteOnly
+    ? 'note'
+    : showStart
+      ? 'start'
+      : canComplete
+        ? 'complete'
+        : 'none';
+
   const reloadAll = async () => {
     await Promise.all([loadJob(), loadSummary()]);
   };
@@ -342,6 +376,37 @@ export default function OperatorOperationActionPage() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  /**
+   * Open the confirm sheet rather than writing straight away.
+   *
+   * THIS IS A PRE-COMPLETION STEP, WHICH IS NOT THE THING B4 DELETED. What was
+   * removed was a POST-completion offer: record, then a prompt for a photo, then
+   * a separate Post — three commits, and the middle had no durability, so a back
+   * tap discarded a photo the flow had already implied was saved. Nothing is
+   * written until the sheet's primary is tapped, so backing out of this loses
+   * only what is visibly still sitting in the composer. Still one commit.
+   */
+  const handleOpenComplete = () => {
+    setError(null);
+    setCompleteOpen(true);
+  };
+
+  /**
+   * Record the completion with NO interval — the forgot-to-start path.
+   *
+   * Deliberately writes nothing about time rather than a backdated guess: a
+   * remembered start is a recall estimate, and recall bias grows with the
+   * magnitude being estimated, so an invented duration would corrupt exactly the
+   * data this feature exists to collect. An op with no interval reports "no time
+   * recorded", which is the same honest state an office-side completion produces.
+   */
+  const handleCompleteWithoutTiming = async () => {
+    posthog.capture('operation completed untimed', {
+      is_partial: Number(qtyValue) < remaining,
+    });
+    await handleRecord();
   };
 
   // Save a note with NO completion.
@@ -805,59 +870,58 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
-          {/* TIME. Two states, and neither is a stopwatch screen the operator has
-              to remember to visit — starting is one tap on the step they were
-              going to open anyway, and stopping is a side effect of recording
-              the completion they were going to record anyway. */}
-          {!isExternal &&
-            (running ? (
-              <Box
+          {/* TIME. Starting is one tap on the step the operator was going to open
+              anyway, and stopping is a side effect of recording the completion
+              they were going to record anyway — there is no stopwatch screen to
+              remember to visit. */}
+          {!isExternal && running && (
+            <Box sx={{ textAlign: 'center', py: 1 }}>
+              {/* THE HERO CLOCK, and it is deliberately loud.
+                  Amended 2026-08-17. The first version made this a quiet caption,
+                  reasoning that a live counter reflects pace back at the operator.
+                  That over-applied the evidence: Etkin's harmful counter was a
+                  tally of OUTPUT accumulating across a task, whereas this is
+                  elapsed time on the one thing in front of you — it accumulates
+                  nothing and, with the estimate hidden below, sits beside no
+                  standard. The load-bearing half of the guardrail is the ADJACENT
+                  COMPARISON, and that is still gone.
+                  It also earns its size operationally: an unmissable clock is the
+                  best defence against the forgotten start and the forgotten stop,
+                  which is the failure mode this whole design fights. Matches the
+                  h2 monospace clock this app shipped before 541ca291 removed it. */}
+              <Typography
+                component="div"
+                variant="h2"
                 sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  px: 1.5,
-                  py: 1,
-                  borderRadius: 1,
-                  bgcolor: 'rgba(26, 31, 74, 0.55)',
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  color: 'primary.main',
+                  // Tabular figures so the width does not jitter every second.
+                  fontVariantNumeric: 'tabular-nums',
+                  lineHeight: 1.1,
                 }}
+                // Announced once, not on every tick — a per-second live region
+                // would make a screen reader unusable.
+                aria-label={`Timing this step, started ${formatClockTime(running.effective_started_at)}`}
               >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  {/* The FACT leads. The elapsed figure trails it, in the same
-                      size and the same colour — it is here so the operator can
-                      see the thing is live, not so they can watch it climb. */}
-                  <Typography variant="body2">
-                    On this step since {formatClockTime(running.effective_started_at)}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {formatDuration(elapsedMs(running.effective_started_at, serverSkewMs))} so far
-                    {pendingAdjust && ' · times adjusted'}
-                  </Typography>
-                </Box>
+                {formatStopwatch(elapsedMs(running.effective_started_at, serverSkewMs))}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  started {formatClockTime(running.effective_started_at)}
+                  {pendingAdjust && ' · adjusted'}
+                </Typography>
                 <Button
                   onClick={() => setAdjustOpen(true)}
                   disabled={actionLoading}
-                  sx={{ minHeight: 44, flexShrink: 0 }}
+                  size="small"
+                  sx={{ minHeight: 44 }}
                 >
                   Adjust
                 </Button>
               </Box>
-            ) : (
-              <Button
-                fullWidth
-                variant="outlined"
-                color="primary"
-                onClick={handleStart}
-                disabled={actionLoading}
-                startIcon={<PlayArrowIcon />}
-                // OUTLINED, not contained: RECORD COMPLETION is the primary
-                // action on this screen and must stay the only filled button.
-                // interactionStandardsCheck would also reject a green one.
-                sx={{ minHeight: 56 }}
-              >
-                Start timing this step
-              </Button>
-            ))}
+            </Box>
+          )}
 
           {/* CAPTURE, MERGED INTO COMPLETION.
               Finishing a step and writing down what you learned are one act, one
@@ -891,29 +955,87 @@ export default function OperatorOperationActionPage() {
               again the action can drift off-screen, which is exactly how it broke
               the first time. Measure before adding anything above it. */}
           <Box>
-            {/* One button, and it says what it will do. The quantity field
-                defaults to the full remaining balance, so this records a full
-                completion by default and a partial when the number is dialled
-                down. With nothing finished but something typed it saves the note
-                alone — better than a dead button that does not explain itself. */}
+            {/* ONE PRIMARY, AND IT CHANGES MEANING WITH THE STATE.
+                Idle it is START; running it records what was finished. Having
+                both on screen at once was the bug: it let an operator complete a
+                step without ever timing it, which made the timer optional in
+                practice and left the data half-collected.
+
+                THE COMPLETION LABEL INTERPOLATES THE NUMBER — `RECORD 12
+                FINISHED`, not `COMPLETE`. Partial completion is the normal case
+                (3 of 12 is an event, not a finished step), so a bare "Complete"
+                would misstate the common outcome; and putting the figure in the
+                verb means the operator does no arithmetic to know what the tap
+                will write. Same reason Harvest labels its recovery actions
+                "Add 47 minutes as a new entry" rather than "Add".
+
+                Still falls back to SAVE NOTE at qty 0 — that path exists so
+                nobody types a false quantity to get a note saved, and it stays
+                reachable without a timer for exactly that reason. */}
             <Button
               fullWidth
               variant="contained"
               size="large"
               color="primary"
-              startIcon={canComplete ? <CheckCircleIcon /> : <NoteAddIcon />}
-              onClick={canComplete ? handleRecord : handleSaveNoteOnly}
-              disabled={actionLoading || (!canComplete && !noteOnly)}
+              startIcon={
+                primaryAction === 'start' ? (
+                  <PlayArrowIcon />
+                ) : primaryAction === 'complete' ? (
+                  <CheckCircleIcon />
+                ) : (
+                  <NoteAddIcon />
+                )
+              }
+              onClick={
+                primaryAction === 'start'
+                  ? handleStart
+                  : primaryAction === 'complete'
+                    ? handleOpenComplete
+                    : handleSaveNoteOnly
+              }
+              disabled={actionLoading || primaryAction === 'none'}
               sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
             >
               {actionLoading ? (
                 <CircularProgress size={24} />
-              ) : canComplete ? (
-                'RECORD COMPLETION'
+              ) : primaryAction === 'start' ? (
+                'START THIS STEP'
+              ) : primaryAction === 'complete' ? (
+                `RECORD ${qtyValue} FINISHED`
               ) : (
                 'SAVE NOTE'
               )}
             </Button>
+
+            {/* THE ESCAPE HATCH, and it is deliberately quiet rather than absent.
+                A hard block is the one shape that reliably corrupts data here:
+                this page already carries an incident where a UI constraint that
+                could not be satisfied led operators to type a false quantity to
+                get past it. So an operator who did the work and forgot to start
+                can still record it.
+
+                It records NO INTERVAL rather than a backdated one. A remembered
+                start time is a recall estimate, and recall is biased upward with
+                the magnitude being estimated — inventing that number would poison
+                the very data this feature exists to collect. An honest absence is
+                better than a plausible fabrication, and it is the same shape an
+                office-side completion already produces.
+
+                Instrumented, so how often it is used is measurable: if it becomes
+                the normal path, the timer is too hard to reach and that is our
+                problem, not the operator's. */}
+            {primaryAction === 'start' && canComplete && (
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                onClick={handleCompleteWithoutTiming}
+                disabled={actionLoading}
+                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
+              >
+                Complete without timing
+              </Button>
+            )}
           </Box>
 
           {qtyGood > 0 && (
@@ -930,6 +1052,40 @@ export default function OperatorOperationActionPage() {
             </Button>
           )}
         </Box>
+      )}
+
+      {/* The confirm-before-recording step. Mounted only while open so its own
+          state seeds fresh, and it renders the SAME capture object as the step
+          screen — one composer, surfaced twice in time rather than twice on
+          screen. */}
+      {completeOpen && (
+        <CompleteStepSheet
+          open
+          onClose={() => setCompleteOpen(false)}
+          onConfirm={async () => {
+            await handleRecord();
+            setCompleteOpen(false);
+          }}
+          saving={actionLoading}
+          // Nullable on an ad-hoc step with no routing operation behind it.
+          operationName={job.operation_name ?? 'this step'}
+          jobNumber={job.job_number}
+          quantity={qtyValue}
+          onQuantityChange={(v) => {
+            setQtyDirty(true);
+            setQtyInput(v);
+          }}
+          quantityHelper={
+            consequence.kind === 'none'
+              ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
+              : completionConsequenceCaption(consequence)
+          }
+          startedAt={running ? (pendingAdjust?.startedAt ?? running.effective_started_at) : null}
+          serverSkewMs={serverSkewMs}
+          onAdjust={running ? () => setAdjustOpen(true) : undefined}
+          adjusted={Boolean(pendingAdjust)}
+          capture={capture}
+        />
       )}
 
       {/* Correcting the times BEFORE they are committed. The adjustment is held

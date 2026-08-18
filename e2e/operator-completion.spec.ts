@@ -66,7 +66,21 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<v
 }
 
 const qtyField = (page: Page) => page.getByLabel('Parts finished');
-const recordButton = (page: Page) => page.getByRole('button', { name: /record completion/i });
+/**
+ * The untimed completion path, and that choice is deliberate.
+ *
+ * `RECORD <n> FINISHED` now requires a running interval — starting is mandatory
+ * on the shop floor, so the primary button is START until one is open. What THIS
+ * file tests is completion mechanics: default quantity, partials,
+ * over-completion, undo, and the note riding along. None of that is about time,
+ * and routing it through the timer would make it fail for reasons that have
+ * nothing to do with quantities. `Complete without timing` records exactly the
+ * same completion event with no interval attached.
+ *
+ * The timed path is covered end to end in e2e/operator-time-capture.spec.ts.
+ */
+const recordButton = (page: Page) =>
+  page.getByRole('button', { name: /complete without timing/i });
 const undoButton = (page: Page) => page.getByRole('button', { name: /undo all/i });
 const saveNoteButton = (page: Page) => page.getByRole('button', { name: /save note/i });
 const completeBanner = (page: Page) =>

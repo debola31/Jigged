@@ -60,12 +60,20 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<s
 }
 
 const qtyField = (page: Page) => page.getByLabel('Parts finished');
-const startButton = (page: Page) => page.getByRole('button', { name: /start timing this step/i });
+const startButton = (page: Page) => page.getByRole('button', { name: /start this step/i });
 const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/i });
-const recordButton = (page: Page) => page.getByRole('button', { name: /record completion/i });
+// `RECORD <n> FINISHED` — the number is interpolated into the verb, so match on
+// the shape rather than a fixed quantity.
+const recordButton = (page: Page) => page.getByRole('button', { name: /^record \d+ finished/i });
+// The confirm sheet's own primary. Same label, so scope to the dialog or the
+// two collide under strict mode.
+const sheetRecordButton = (page: Page) =>
+  page.getByRole('dialog').getByRole('button', { name: /^record \d+ finished/i });
 const completeBanner = (page: Page) =>
   page.getByRole('button', { name: /this step is complete/i });
-const runningOnStep = (page: Page) => page.getByText(/On this step since/i);
+// The hero clock's caption. The clock itself is a bare HH:MM:SS and matching on
+// digits would be brittle.
+const runningOnStep = (page: Page) => page.getByText(/^started \d/i);
 const estimateLine = (page: Page) => page.getByText(/^Estimated:/);
 
 /**
@@ -168,7 +176,7 @@ test.describe('operator time capture', () => {
     await expect(page.getByText(/^Recorded /)).toBeVisible();
 
     await page.getByRole('button', { name: /^save$/i }).click();
-    await expect(page.getByText(/times adjusted/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/· adjusted/i)).toBeVisible({ timeout: 30_000 });
 
     await stopTimer(page);
   });
@@ -182,7 +190,19 @@ test.describe('operator time capture', () => {
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
     await qtyField(page).fill('1');
+
+    // The primary opens the confirm sheet rather than writing. NOTHING IS
+    // COMMITTED YET — this is the pre-completion step, which is why it does not
+    // reintroduce the post-completion offer B4 deleted.
     await recordButton(page).click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByText(/^Finishing /)).toBeVisible({ timeout: 30_000 });
+
+    // The composer is here, carried from the step screen, so the last chance to
+    // say something is on the way OUT rather than after the fact.
+    await expect(sheet.getByPlaceholder(/next person/i)).toBeVisible();
+
+    await sheetRecordButton(page).click();
 
     // The completion landed AND the interval closed with it.
     await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });

@@ -166,7 +166,14 @@ function renderPage() {
   );
 }
 
-const recordButton = () => screen.getByRole('button', { name: /record completion/i });
+/**
+ * The untimed completion path — see the same note in e2e/operator-completion.
+ * `RECORD <n> FINISHED` requires a running interval now that starting is
+ * mandatory on the shop floor; this file is about completion mechanics, not
+ * time, so it takes the escape hatch that records the identical event with no
+ * interval attached.
+ */
+const recordButton = () => screen.getByRole('button', { name: /complete without timing/i });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -220,18 +227,26 @@ describe('operation action page — completion (characterisation)', () => {
     );
   });
 
-  it('cannot record zero', async () => {
-    // The floor is unchanged: no zero-quantity completion. What changed is the
-    // button's label when the quantity is empty — with nothing to record and
-    // nothing typed there is no action to offer, so it is disabled either way.
+  it('offers no way to record zero', async () => {
+    // The floor is unchanged — no zero-quantity completion — but the shape of
+    // "no" changed with the timer. This used to assert a DISABLED save button,
+    // because completing was the only thing this screen could do and an empty
+    // quantity left nothing to offer. Starting needs no quantity, so with the
+    // field cleared there is now a real action available and the primary is
+    // START. What must stay true is that NEITHER completion path is reachable.
     const user = userEvent.setup();
     renderPage();
     const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /save note/i })).toBeDisabled());
-    expect(screen.queryByRole('button', { name: /record completion/i })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /start this step/i })).toBeEnabled(),
+    );
+    expect(screen.queryByRole('button', { name: /^record /i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /complete without timing/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('saves a note alone when nothing was finished', async () => {

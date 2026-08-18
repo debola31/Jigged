@@ -181,11 +181,18 @@ test.describe('operator time capture', () => {
     await expect(feedStarted(page)).toBeVisible({ timeout: 30_000 });
 
     // And NOT in a header strip: that was removed deliberately, so no other
-    // screen carries running state. This asserts the absence, because the cost
-    // (nothing outside this screen shows a running timer) was accepted knowingly
-    // and should fail loudly if a strip creeps back in.
+    // screen carries running state.
+    //
+    // WEAK ASSERTION, AND SAYING SO RATHER THAN IMPLYING COVERAGE IT LACKS. It
+    // matches the copy the DELETED strip used ("since 9:12 AM"), so a strip
+    // reintroduced with any other wording sails past it — this can effectively
+    // only pass. It is kept because it costs nothing and catches a literal
+    // revert, not because it guards the decision. The decision is guarded by
+    // docs/modules/operator-view.md#recording-time and by review.
     await page.goto(`/operator/${companyId}/jobs`);
     await expect(page.getByText(/^since \d/i)).toHaveCount(0);
+    // This half is real: no step-level running control may leak into the shell.
+    await expect(recordButton(page)).toHaveCount(0);
 
     await page.goBack();
     await stopTimer(page);

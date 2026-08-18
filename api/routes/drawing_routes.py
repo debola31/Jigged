@@ -49,7 +49,10 @@ FEATURE_FLAG = "drawing_import"
 _limiter = RateLimiter(max_requests=200, window_seconds=600)
 
 # One request per drawing, so the caps bound a single sheet rather than a package.
-MAX_STRINGS = 400
+# The client sends the title-block region capped at 200; this is the backstop
+# against a client that does not, sized well above that and still far below the
+# body limit — the largest real drawing's FULL string list is 80 KB, 1.7% of it.
+MAX_STRINGS = 1000
 MAX_STRING_LENGTH = 500
 
 # The SDK default is 10 minutes with two retries, against a 60s Vercel wall — that

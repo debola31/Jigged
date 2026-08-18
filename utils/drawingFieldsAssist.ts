@@ -14,6 +14,7 @@
 import { getSupabase } from '@/lib/supabase';
 import { API_BASE_URL } from '@/lib/api';
 import type { BuiltRow } from '@/lib/drawingImportExtract';
+import { titleBlockRegion } from '@/lib/drawingText';
 import type { ExtractedFields, FieldRole } from '@/lib/drawingText';
 
 /** Roles the AI arm measurably improves. Identity is deterministic's job. */
@@ -81,9 +82,10 @@ export async function assistRows(
         headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           company_id: companyId,
-          // Only what the deterministic pass already holds. The file never leaves
-          // the browser.
-          strings: row.items.map((i) => ({
+          // The title-block region only, capped — the exact input the published
+          // 90%/89% was measured on. Sending every string on the sheet would be a
+          // different experiment, and would 413 on a drawing with 1,396 of them.
+          strings: titleBlockRegion(row.items).map((i) => ({
             text: i.text,
             x: i.x,
             y: i.y,

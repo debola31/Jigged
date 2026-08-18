@@ -449,3 +449,35 @@ export function extractDrawingFields(
   fromGeometry(items, fields);
   return fields;
 }
+
+/**
+ * The strings worth asking a model about — the sheet's bottom-right corner.
+ *
+ * ISO 5457 puts the title block there, and on a D-size sheet the rest is
+ * dimensions and notes that only dilute the prompt. THIS IS THE INPUT THE
+ * PUBLISHED NUMBERS WERE MEASURED ON: 90% recall at 89% precision came from this
+ * region capped at 200 strings, so sending anything else would be shipping a
+ * different experiment than the one that was run.
+ *
+ * Falls back to everything when the corner is nearly empty — some templates run
+ * their strip across the full width, and handing the model an empty list is worse
+ * than handing it a noisy one.
+ */
+export function titleBlockRegion(items: TextItem[], max = 200): TextItem[] {
+  if (items.length === 0) return [];
+
+  const xs = items.map((i) => i.x);
+  const ys = items.map((i) => i.y);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const width = Math.max(...xs) - x0 || 1;
+  const height = Math.max(...ys) - y0 || 1;
+
+  const corner = items.filter((i) => i.x > x0 + 0.4 * width && i.y < y0 + 0.35 * height);
+  const chosen = corner.length >= 4 ? corner : items;
+
+  // Cap from the BOTTOM RIGHT inward: if a sheet somehow exceeds this, the strings
+  // nearest the title block are the ones worth keeping.
+  if (chosen.length <= max) return chosen;
+  return [...chosen].sort((a, b) => a.y - b.y || b.x - a.x).slice(0, max);
+}

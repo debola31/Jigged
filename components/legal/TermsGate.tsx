@@ -34,7 +34,12 @@ const TermsAcceptanceDialog = dynamic(() => import('./TermsAcceptanceDialog'), {
 export default function TermsGate() {
   const { user, loading: authLoading } = useAuth();
   const pathname = usePathname();
-  const status = useTermsStatus();
+  // Do not even ask on a route the gate cannot act on. Beyond saving a query on
+  // every marketing and login page, this is what stops a pre-acceptance answer
+  // fetched on /accept-invite being reused on the dashboard the user is
+  // redirected to -- see the note on useTermsStatus.
+  const exempt = isTermsExempt(pathname);
+  const status = useTermsStatus(!exempt);
   /**
    * The path a deferral was made on, rather than a boolean plus an effect to
    * clear it. A deferral is per-page, not per-session — the operator gets on
@@ -46,7 +51,7 @@ export default function TermsGate() {
   const [dismissedOn, setDismissedOn] = useState<string | null>(null);
 
   if (authLoading || !user) return null;
-  if (isTermsExempt(pathname)) return null;
+  if (exempt) return null;
   if (status.state !== 'resolved') return null;
   if (status.needs.length === 0) return null;
   if (dismissedOn === pathname) return null;

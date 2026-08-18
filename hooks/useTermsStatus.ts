@@ -34,7 +34,21 @@ type Result =
 
 const NONE: LegalDocumentType[] = [];
 
-export function useTermsStatus(): TermsStatus {
+/**
+ * @param enabled Whether the caller could act on the answer. `TermsGate` passes
+ *   false on exempt routes.
+ *
+ *   NOT an optimisation -- it is the fix for a real bug. `TermsGate` has to call
+ *   this hook unconditionally, so it used to query on /accept-invite too, BEFORE
+ *   the user had agreed. `router.replace` into the dashboard is a client-side
+ *   navigation, so the layout never remounts and that pre-acceptance answer
+ *   survived onto a route where the gate DOES act on it -- prompting someone who
+ *   had just ticked the box, then vanishing on the next reload. Not querying
+ *   until the answer can be used, and re-querying on the transition, removes the
+ *   staleness at its source rather than having the accept page remember to poke
+ *   the gate afterwards.
+ */
+export function useTermsStatus(enabled = true): TermsStatus {
   const { user, loading: authLoading } = useAuth();
   const [result, setResult] = useState<Result | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -45,7 +59,7 @@ export function useTermsStatus(): TermsStatus {
   }, []);
 
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (!enabled || authLoading || !user) return;
     const userId = user.id;
     let cancelled = false;
 
@@ -65,8 +79,11 @@ export function useTermsStatus(): TermsStatus {
     return () => {
       cancelled = true;
     };
-  }, [user, authLoading, nonce]);
+  }, [user, authLoading, nonce, enabled]);
 
+  // Nothing has been asked, so nothing is known. The gate renders null on
+  // 'loading', which is what an exempt route wants anyway.
+  if (!enabled) return { state: 'loading', refresh };
   if (authLoading) return { state: 'loading', refresh };
   // Signed out: nothing is owed, and the gate has nothing to do.
   if (!user) return { state: 'resolved', needs: NONE, refresh };

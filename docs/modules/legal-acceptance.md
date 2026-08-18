@@ -176,6 +176,22 @@ storage cannot hand someone a fresh window indefinitely. The 5-dismissal budget
 is a courtesy and lives in `localStorage`; clearing it buys five more taps inside
 a window the date has already closed.
 
+### It does not ask someone who has just agreed
+
+`TermsGate` must call `useTermsStatus` unconditionally — hooks cannot sit behind
+an early return — so the hook takes an `enabled` flag and the gate passes
+`false` on exempt routes.
+
+That is a **bug fix, not an optimisation**. Without it the gate queried on
+`/accept-invite` *before* the user ticked the box, and because `router.replace`
+into the dashboard is a client-side navigation the layout never remounts — so
+that pre-acceptance answer survived onto a route where the gate *does* act on
+it. The invitee agreed, landed on the dashboard, and was asked again; a reload
+then cleared it for good, which made it look like a display glitch rather than a
+stale read. Not asking until the answer can be used, and re-asking on the
+transition, removes the staleness at its source instead of making the accept
+page remember to poke the gate afterwards.
+
 ### Failing in the right direction
 
 The status is three-state — `loading | unknown | resolved` — and never a boolean.
@@ -206,5 +222,6 @@ their next login, and accepts through the same path as everyone else.
 | [`__tests__/lib/termsGate.test.ts`](../../__tests__/lib/termsGate.test.ts) | *routes the prompt must never cover*, *the cap* | 15 |
 | [`__tests__/utils/termsAccess.test.ts`](../../__tests__/utils/termsAccess.test.ts) | *who still has to accept* | 8 |
 | [`__tests__/components/legal/TermsGate.test.tsx`](../../__tests__/components/legal/TermsGate.test.tsx) | *when it blocks*, *the operator surface* | 12 |
+| [`__tests__/hooks/useTermsStatus.test.tsx`](../../__tests__/hooks/useTermsStatus.test.tsx) | *when it is allowed to ask* | 5 |
 | [`api/tests/integration/test_terms_acceptances_rls.py`](../../api/tests/integration/test_terms_acceptances_rls.py) | RLS, append-only, cross-user isolation | 12 |
 | [`e2e/terms-acceptance.spec.ts`](../../e2e/terms-acceptance.spec.ts) | the whole chain, once, for real | 1 |

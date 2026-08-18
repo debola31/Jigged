@@ -60,6 +60,16 @@ export interface AdjustTimesDialogProps {
   saving?: boolean;
   /** Set when the operator is being asked about a stale interval at their next tap. */
   prompt?: string;
+  /**
+   * A failure from the caller's save, rendered inside this dialog.
+   *
+   * The caller must ALSO keep the dialog open when it sets this. An earlier
+   * version closed on failure and wrote the message to a state nothing rendered,
+   * so a rejected write looked exactly like a successful one — the operator's
+   * correction silently did nothing and their input was thrown away. A write
+   * that fails must say so where the person who made it is looking.
+   */
+  saveError?: string | null;
 }
 
 const NUDGES = [-15, -5, 5, 15] as const;
@@ -74,6 +84,7 @@ export default function AdjustTimesDialog({
   effectiveEndedAt,
   saving = false,
   prompt,
+  saveError = null,
 }: AdjustTimesDialogProps) {
   // Seeded once, at mount. THE CALLER MOUNTS THIS ONLY WHILE IT IS OPEN (see the
   // `open && ...` guard at its call sites), which is what makes that correct —
@@ -151,9 +162,9 @@ export default function AdjustTimesDialog({
             </Typography>
           )}
 
-          {error && (
+          {(saveError || error) && (
             <Typography variant="body2" color="error.light">
-              {error}
+              {saveError || error}
             </Typography>
           )}
         </Stack>

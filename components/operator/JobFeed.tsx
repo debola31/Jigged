@@ -180,6 +180,8 @@ export default function JobFeed({
     interval: OperationIntervalWithContext;
     edge: 'start' | 'finish';
   } | null>(null);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [adjustSaving, setAdjustSaving] = useState(false);
 
   // Merge optimistic posts ahead of the loaded feed, dropping any that the
   // latest load already includes (matched by id) so there are no duplicates.
@@ -496,8 +498,15 @@ export default function JobFeed({
       {adjusting && (
         <AdjustTimesDialog
           open
-          onClose={() => setAdjusting(null)}
+          onClose={() => {
+            setAdjusting(null);
+            setAdjustError(null);
+          }}
+          saving={adjustSaving}
+          saveError={adjustError}
           onSave={async (next) => {
+            setAdjustSaving(true);
+            setAdjustError(null);
             try {
               await adjustOperationInterval(adjusting.interval.id, {
                 adjustedStartedAt: next.startedAt,
@@ -506,8 +515,12 @@ export default function JobFeed({
               setAdjusting(null);
               await reloadIntervals();
             } catch (err) {
-              setRowError(err instanceof Error ? err.message : 'Could not save those times.');
-              setAdjusting(null);
+              // STAYS OPEN. Closing here is what made a rejected write look
+              // identical to a successful one — the message went to a state
+              // nothing rendered and the operator's input was discarded with it.
+              setAdjustError(err instanceof Error ? err.message : 'Could not save those times.');
+            } finally {
+              setAdjustSaving(false);
             }
           }}
           rawStartedAt={adjusting.interval.started_at}

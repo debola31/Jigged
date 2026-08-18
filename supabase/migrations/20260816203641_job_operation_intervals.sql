@@ -979,6 +979,61 @@ AS $$
   ORDER BY 1;
 $$;
 
+-- ── The definer-writer exempt list ───────────────────────────────────────────
+-- Restated from the LIVE definition in 20260801150944, which is the ONLY migration
+-- that has ever defined this function — verified by grep across supabase/migrations,
+-- so unlike function_execute_leaks above, rebasing here cannot silently drop a later
+-- entry. Only `void_intervals_with_completion` is added.
+--
+-- Why it is exempt, in the same category as the two triggers already listed: it is
+-- an AFTER UPDATE trigger on job_operation_completions, and that table carries
+-- billing_gate_update (20260726033616) — RESTRICTIVE, FOR UPDATE, TO authenticated.
+-- Undo is a plain browser `.update()` (utils/operationCompletionsAccess.ts), so a
+-- lapsed shop is refused by RLS before the trigger can fire. It has no other caller:
+-- EXECUTE is revoked from the browser roles and nothing invokes it directly.
+--
+-- The contrast with the two RPCs is the whole point. start_/close_operation_interval
+-- are browser-callable SECURITY DEFINER entry points, so RLS never runs for them and
+-- they call company_can_write by hand. This one is not an entry point; it only ever
+-- runs downstream of a write that was already gated. Gating it again would re-check a
+-- condition already proven, and the failure mode of the redundant check — a raise
+-- inside the trigger — would abort a completion undo that RLS had already allowed.
+CREATE OR REPLACE FUNCTION public.definer_writers_missing_write_gate()
+RETURNS TABLE(function_name text)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH gated AS (
+    SELECT DISTINCT tablename FROM pg_policies
+    WHERE schemaname = 'public' AND policyname = 'billing_gate_insert'
+  )
+  SELECT p.proname::text
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public'
+    AND p.prokind = 'f'
+    AND p.prosecdef
+    AND EXISTS (
+      SELECT 1 FROM gated g
+      WHERE pg_get_functiondef(p.oid) ~* ('(insert into|update)\s+(public\.)?' || g.tablename)
+    )
+    AND pg_get_functiondef(p.oid) NOT LIKE '%company_can_write%'
+    AND pg_get_functiondef(p.oid) NOT LIKE '%inv_assert_can_write%'
+    AND p.proname NOT IN (
+      -- triggers: the statement that fired them was gated
+      'auto_track_stocked_part', 'note_views_bump_counts',
+      'void_intervals_with_completion',
+      -- internal helpers: no browser EXECUTE, always called post-assertion
+      'inv_get_or_create_unassigned', 'recompute_part_quantity_from_locations',
+      'enable_location_tracking_for_company',
+      -- demo bootstrap: company_can_write() is true for is_demo by design
+      'seed_demo_data',
+      -- known gap, filed separately: browser-callable, genuinely ungated
+      'create_shipment_with_line_items'
+    )
+  ORDER BY 1;
+$$;
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- 8. COMMENTS
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1015,7 +1070,9 @@ COMMENT ON TABLE public.operator_time_access_log IS
 --   DROP TABLE IF EXISTS public.job_operation_intervals;   -- takes its triggers
 --   DROP FUNCTION IF EXISTS public.job_op_intervals_restrict_update();
 --   DROP TABLE IF EXISTS public.operator_time_access_log;
---   -- and restore function_execute_leaks() to its 20260801024552 allowlist.
+--   -- and restore function_execute_leaks() to its 20260801024552 allowlist,
+--   -- tenant_tables_missing_write_gate() and definer_writers_missing_write_gate()
+--   -- to theirs (both restated above, minus the entries this file added).
 --
 -- Nothing outside this file depends on these objects: costing and quoting still
 -- read only the estimated fields, exactly as 20260621132129 left them.

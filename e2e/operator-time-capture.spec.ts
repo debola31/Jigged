@@ -127,10 +127,20 @@ async function stopTimer(page: Page): Promise<void> {
   // reopen the interval, which is what makes this a clean teardown.
   await recordButton(page).click();
   await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
+
+  // WHICHEVER BRANCH THE PAGE LANDS ON. The quantity defaults to the remaining
+  // balance, so this usually completes the step OUTRIGHT — and a full completion
+  // flips the page to the complete banner instead of "Undo all (n)". They are
+  // the same action wearing different words, and which one appears depends on
+  // seeded quantities this file does not control.
   const undo = page.getByRole('button', { name: /undo all/i });
-  await undo.waitFor({ timeout: 30_000 });
-  await undo.click();
-  await expect(undo).toBeHidden({ timeout: 30_000 });
+  await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
+  if (await completeBanner(page).isVisible()) {
+    await completeBanner(page).click();
+  } else {
+    await undo.click();
+  }
+  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe.configure({ mode: 'serial' });

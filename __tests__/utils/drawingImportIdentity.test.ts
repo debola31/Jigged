@@ -101,18 +101,17 @@ describe('resolveIdentities', () => {
    * queries archived rows itself — an archived name is exactly the one that would
    * be silently revived.
    */
-  it('surfaces an archived match as a CHOICE rather than reviving it', async () => {
+  it('treats an archived namesake as no match at all', async () => {
     setParts([{ id: 'pOld', part_name: 'BASE PLATE', deleted_at: '2026-01-01T00:00:00Z' }]);
 
     const out = await resolveIdentities(CO, CUST_A, [
       { stem: 's1', partName: 'BASE PLATE', customerPartNumber: '999' },
     ]);
     const outcome = out.get('s1')!;
-    expect(outcome.kind).toBe('archived');
-    expect(outcome).toMatchObject({ partId: 'pOld', choice: 'revive' });
-    // create_new needs a name: parts_unique_per_company covers archived rows too.
-    expect((outcome as { suggestedName: string }).suggestedName).toBe('BASE PLATE-2');
-    expect(needsAttention(outcome)).toBe(true);
+    // The archived row gives its name up on the insert's 23505, so this is an
+    // ordinary create — no chip, no question, no inherited history.
+    expect(outcome.kind).toBe('new');
+    expect(needsAttention(outcome)).toBe(false);
   });
 
   it('updates the shop\'s own live part when nobody else claims it', async () => {
@@ -152,7 +151,7 @@ describe('resolveIdentities', () => {
     const out = await resolveIdentities(CO, null, [
       { stem: 's1', partName: 'COVER', customerPartNumber: '' },
     ]);
-    expect(out.get('s1')!.kind).toBe('archived');
+    expect(out.get('s1')!.kind).toBe('new');
     // With no customer there is nothing to look a reference up by.
     expect(findByNumbers).not.toHaveBeenCalled();
   });

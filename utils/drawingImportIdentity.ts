@@ -170,19 +170,18 @@ export async function resolveIdentities(
       continue;
     }
 
+    /**
+     * An archived part is NOT a match. Archiving renames the row out of the way
+     * (`1003308 (archived)`), so it no longer holds the name and a fresh part
+     * simply takes it — no revive, no choice, no chip.
+     *
+     * The check stays because the rename is per-company data: a row archived
+     * before that migration, or restored back onto its bare name, is still a real
+     * collision and reviving it silently is still the wrong answer.
+     */
     if (match.archived) {
-      // Reviving is legitimate — this may well be the same part coming back. Doing
-      // it silently is not, so it is a choice on the row. `create_new` needs a name
-      // because the unique constraint covers archived rows too.
-      const suggested = suggestFreeName(name, taken);
-      taken.add(suggested.toLowerCase());
-      out.set(row.stem, {
-        kind: 'archived',
-        partId: match.id,
-        partName: match.part_name,
-        suggestedName: suggested,
-        choice: 'revive',
-      });
+      out.set(row.stem, { kind: 'new' });
+      taken.add(name.toLowerCase());
       continue;
     }
 
@@ -210,5 +209,5 @@ export async function resolveIdentities(
 
 /** Does this outcome need a human before the import can proceed on that row? */
 export function needsAttention(outcome: IdentityOutcome): boolean {
-  return outcome.kind === 'archived' || outcome.kind === 'name_taken' || outcome.kind === 'unknown';
+  return outcome.kind === 'name_taken' || outcome.kind === 'unknown';
 }

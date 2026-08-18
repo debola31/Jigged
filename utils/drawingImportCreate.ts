@@ -43,7 +43,7 @@ export interface CreatedRow {
   /** True once the part has both a cost basis and a markup — i.e. it can be quoted. */
   quotable: boolean;
   /** What we did, so the summary can say it rather than implying everything was new. */
-  action: 'created' | 'revived' | 'updated' | 'skipped' | 'failed';
+  action: 'created' | 'updated' | 'skipped' | 'failed';
   filesAttached: number;
   /** Files that could not be attached. The part still exists; these are addable later. */
   fileErrors: string[];
@@ -94,9 +94,6 @@ export function resolveName(row: DrawingRow): string {
     !typed || typed.toLowerCase() === taken.trim().toLowerCase() ? suggested : typed;
 
   if (row.identity.kind === 'name_taken') {
-    return renamed(row.identity.partName, row.identity.suggestedName);
-  }
-  if (row.identity.kind === 'archived' && row.identity.choice === 'create_new') {
     return renamed(row.identity.partName, row.identity.suggestedName);
   }
   return valueOf(row, 'part_name');
@@ -226,12 +223,7 @@ export async function createPartsFromRows(
           preferred_vendor_id: null,
         }));
         result.partId = created.id;
-        // Report what HAPPENED, not what was intended: if the id came back as the
-        // archived row we found, it was revived.
-        result.action =
-          row.identity.kind === 'archived' && created.id === row.identity.partId
-            ? 'revived'
-            : 'created';
+        result.action = 'created';
       }
 
       // The reference row, written in the same pass as the part. A row written
@@ -546,11 +538,12 @@ async function createMaterials(
 }
 
 /**
- * The material this name refers to, creating it only if it is not already there.
+ * The material this name refers to, creating it only if a LIVE one is not there.
  *
- * Archived rows count as there: name is identity in this repo and reuse revives,
- * so a material someone archived last quarter comes back rather than colliding
- * forever against a unique constraint it cannot see.
+ * An archived namesake is deliberately not reused. It would arrive with whatever
+ * costs, units and stock it was archived holding, and silently become part of this
+ * weldment's price — `createPart` moves it aside instead and this import gets a
+ * clean part. Same rule as everywhere else now.
  */
 async function findOrCreateComponent(
   companyId: string,
@@ -562,21 +555,15 @@ async function findOrCreateComponent(
 
   const { data: found, error: findError } = await supabase
     .from('parts')
-    .select('id, deleted_at, primary_unit')
+    .select('id, primary_unit')
     .eq('company_id', companyId)
     .eq('part_name', name)
+    .is('deleted_at', null)
     .limit(1);
   if (findError) throw findError;
 
   const existing = (found ?? [])[0];
   if (existing) {
-    if (existing.deleted_at) {
-      const { error } = await supabase
-        .from('parts')
-        .update({ deleted_at: null })
-        .eq('id', existing.id);
-      if (error) throw error;
-    }
     // Its OWN unit, not the one we asked for — a part that already exists is
     // already measured in something, and the caller has to reckon with that.
     // `primary_unit` is NOT NULL by CHECK; the generated type is merely wider.
@@ -604,7 +591,6 @@ export function summarise(results: CreatedRow[]): string {
   }, {});
   const parts: string[] = [];
   if (counts.created) parts.push(`${counts.created} created`);
-  if (counts.revived) parts.push(`${counts.revived} restored`);
   if (counts.updated) parts.push(`${counts.updated} updated`);
   if (counts.failed) parts.push(`${counts.failed} failed`);
   const files = results.reduce((n, r) => n + r.filesAttached, 0);

@@ -113,21 +113,23 @@ export default function DrawingDropStep({
             identical answers is 31 chances to mis-click for no information gained.
           */}
           <Box sx={{ minWidth: 200 }}>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Are these made or bought?
-            </Typography>
+            {/*
+              The buttons say what they do, so the question goes UNDER them where
+              the other two fields keep their captions — a label above would push
+              this control a line lower than the inputs it sits beside. The height
+              matches an outlined input for the same reason.
+            */}
             <ToggleButtonGroup
-              size="small"
               exclusive
               value={defaultSource}
               onChange={(_, next) => next && onDefaultSourceChange(next)}
-              sx={{ mt: 0.5 }}
+              sx={{ height: 56 }}
             >
               <ToggleButton value="made">We make them</ToggleButton>
               <ToggleButton value="bought">We buy them</ToggleButton>
             </ToggleButtonGroup>
             <Typography variant="caption" color="text.secondary" display="block">
-              Import the other kind separately.
+              Are these made or bought?
             </Typography>
           </Box>
           <Box sx={{ minWidth: 200 }}>

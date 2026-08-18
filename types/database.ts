@@ -3949,6 +3949,10 @@ export type Database = {
           role_name: string
         }[]
       }
+      reclaim_part_name: {
+        Args: { p_company_id: string; p_name: string }
+        Returns: boolean
+      }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }
         Returns: undefined

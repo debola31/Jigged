@@ -1013,10 +1013,33 @@ async def execute_import(
         updated_count = len(rows_to_upsert) - imported_count
         id_by_part_name: dict[str, str] = {}
 
-        # Reusing an archived part's name revives it: clearing deleted_at on the upsert's
-        # DO UPDATE un-archives the row instead of leaving the re-imported part hidden.
-        for row in rows_to_upsert:
-            row["deleted_at"] = None
+        # Reusing an archived part's name CREATES a new part; it no longer revives the
+        # archived one. Move any archived namesake aside first, so the upsert's
+        # ON CONFLICT finds nothing and inserts. Without this the two create paths
+        # disagree — the part form and the drawings importer would create while a CSV
+        # of the same names revived — and which one a shop got would depend on how it
+        # happened to add the parts.
+        #
+        # Only names actually in this batch move. Part names are read live by quotes and
+        # invoices, so a rename is not free and archived parts nobody is asking for keep
+        # theirs. See migration 20260818141141.
+        for name in {r["part_name"] for r in rows_to_upsert}:
+            try:
+                supabase.rpc(
+                    "reclaim_part_name",
+                    {"p_company_id": request.company_id, "p_name": name},
+                ).execute()
+            except Exception as e:
+                # Fail before writing anything, rather than half-applying the rule.
+                # If the rename did not happen, ON CONFLICT matches the ARCHIVED row
+                # and DO UPDATE writes into it without clearing deleted_at — the
+                # import would report success over a part that stays invisible.
+                # Nothing has been upserted yet at this point, so raising is clean.
+                logger.error("reclaim_part_name failed: %s", type(e).__name__)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not prepare archived part names for this import. Nothing was imported.",
+                ) from e
 
         if rows_to_upsert:
             try:

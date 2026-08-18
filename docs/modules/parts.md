@@ -658,9 +658,15 @@ document referencing the part still resolves; the part is just hidden from lists
 `parts_deletion_impact` — quotes/jobs referencing the parts (kept for history) and how many **other**
 parts hold them as a BOM component and will be re-costed — but never prevents the delete.
 
-Name is the part's natural identity, so re-creating or re-importing an archived `part_name`
-**revives** the row (un-archive + update) rather than duplicating it. Quote line items stay immutable
-historical records regardless. Full standard: `docs/architecture.md` §16.
+Name is the part's natural identity, but re-creating or re-importing an archived `part_name` makes a
+**new part**: `reclaim_part_name` renames the archived row to `<name> (archived)` and the insert is
+retried. Parts diverge from customers/vendors/work centres here, which still revive — a part number
+on a customer's drawing belongs to whoever sent it, and reviving handed the new part the old one's
+stock, costs and BOM history.
+
+The rename fires on the collision, **never on archive**. `quote_line_items` and `job_parts` store no
+name snapshot, so a part rename changes how its past quotes and invoices read; doing it lazily means
+only a number somebody deliberately reassigned ever moves. Full standard: `docs/architecture.md` §16.
 
 ---
 

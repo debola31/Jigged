@@ -788,6 +788,8 @@ export default function PartsPage() {
         entityLabel="part"
         count={selectedIds.length}
         impactLines={buildPartsImpactLines(deleteDialog.impact)}
+        // Re-using the name now creates a NEW part — see reclaim_part_name.
+        revivableByName={false}
       />
 
       <Snackbar

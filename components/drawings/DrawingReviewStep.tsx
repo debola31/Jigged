@@ -28,8 +28,6 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 
@@ -57,8 +55,6 @@ function attention(row: BuiltRow): string | null {
   const unreadable = unreadableMessage(row);
   if (unreadable) return unreadable;
   switch (row.identity.kind) {
-    case 'archived':
-      return `"${row.identity.partName}" exists but is archived`;
     case 'name_taken':
       return `Another customer's part is called "${row.identity.partName}" — renamed`;
     case 'unknown':
@@ -86,28 +82,6 @@ export default function DrawingReviewStep({
 
   const edit = (stem: string, key: keyof DrawingRowValues, value: string) =>
     update(stem, (r) => ({ ...r, edits: { ...r.edits, [key]: value } }));
-
-  /**
-   * Switching to "Create new" renames the row, and switching back undoes it.
-   *
-   * The name has to move with the choice, because the constraint is FULL — an
-   * archived row still holds its name, so a second part genuinely cannot have it.
-   * Putting the suggested name straight into the field means the column always
-   * reads as what will be created, and the user can still type over it.
-   */
-  const setArchivedChoice = (row: BuiltRow, choice: 'revive' | 'create_new') =>
-    update(row.stem, (r) => {
-      if (r.identity.kind !== 'archived') return r;
-      const { part_name: _dropped, ...rest } = r.edits;
-      return {
-        ...r,
-        identity: { ...r.identity, choice },
-        edits:
-          choice === 'create_new'
-            ? { ...rest, part_name: r.identity.suggestedName }
-            : rest,
-      };
-    });
 
   const needsAttention = useMemo(() => rows.filter((r) => attention(r) !== null), [rows]);
   const assistCandidates = useMemo(() => rows.filter(needsAssist).length, [rows]);
@@ -252,28 +226,6 @@ export default function DrawingReviewStep({
                         {/* Review by exception: a healthy row renders nothing at all. */}
                         {note && <Chip size="small" color="warning" label={note} />}
 
-                        {/*
-                          A chip is a label, not a flow. An archived match defaults to
-                          reviving, and reviving silently is the thing this guard was
-                          written to stop — so the choice is here, on the row, next to
-                          the name it changes.
-                        */}
-                        {row.identity.kind === 'archived' && (
-                          <ToggleButtonGroup
-                            size="small"
-                            exclusive
-                            sx={{ mt: 0.5 }}
-                            value={row.identity.choice}
-                            onChange={(_, next) => next && setArchivedChoice(row, next)}
-                          >
-                            <ToggleButton value="revive" aria-label={`Restore ${row.stem}`}>
-                              Restore it
-                            </ToggleButton>
-                            <ToggleButton value="create_new" aria-label={`Create a new part for ${row.stem}`}>
-                              Create new
-                            </ToggleButton>
-                          </ToggleButtonGroup>
-                        )}
                       </TableCell>
                     </TableRow>
                   );

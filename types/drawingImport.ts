@@ -47,21 +47,6 @@ export type IdentityOutcome =
   /** We have seen this customer's number before — update that part. */
   | { kind: 'known'; partId: string; partName: string }
   /**
-   * A part of this name exists and is ARCHIVED, for this same customer or with no
-   * attribution. Reviving is legitimate here; doing it silently is not.
-   *
-   * `create_new` carries a suggested name because it has to: the
-   * `parts_unique_per_company` constraint is FULL, not partial, so an archived row
-   * still holds its name and a second part cannot take it.
-   */
-  | {
-      kind: 'archived';
-      partId: string;
-      partName: string;
-      suggestedName: string;
-      choice: 'revive' | 'create_new';
-    }
-  /**
    * A LIVE part of this name belongs to a different customer. Merging would be
    * the incident `part_customer_references` exists to prevent.
    */

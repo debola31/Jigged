@@ -237,7 +237,6 @@ export default function AddPartsFromDrawingsPage() {
       setResults(created);
       posthog.capture('parts created from drawings', {
         created_count: created.filter((r) => r.action === 'created').length,
-        revived_count: created.filter((r) => r.action === 'revived').length,
         updated_count: created.filter((r) => r.action === 'updated').length,
         failed_count: created.filter((r) => r.action === 'failed').length,
         excluded_count: rows.length - created.length,

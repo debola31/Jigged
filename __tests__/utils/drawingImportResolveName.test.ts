@@ -51,30 +51,6 @@ describe('resolveName', () => {
     expect(resolveName(rowWith(nameTaken))).toBe('1003308-2');
   });
 
-  it('keeps the archived name when the user chose to restore', () => {
-    const identity: IdentityOutcome = {
-      kind: 'archived',
-      partId: 'archived-part',
-      partName: '1005337',
-      suggestedName: '1005337-2',
-      choice: 'revive',
-    };
-    // Reviving is the whole point of the choice — it must not rename.
-    expect(resolveName(rowWith(identity, '1005337'))).toBe('1005337');
-  });
-
-  it('renames when the user chose to create a new part instead of restoring', () => {
-    const identity: IdentityOutcome = {
-      kind: 'archived',
-      partId: 'archived-part',
-      partName: '1005337',
-      suggestedName: '1005337-2',
-      choice: 'create_new',
-    };
-    // The constraint covers archived rows, so the old name is genuinely unavailable.
-    expect(resolveName(rowWith(identity, '1005337'))).toBe('1005337-2');
-  });
-
   it('leaves an ordinary row alone', () => {
     expect(resolveName(rowWith({ kind: 'new' }, '1006914'))).toBe('1006914');
   });

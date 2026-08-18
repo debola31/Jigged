@@ -61,7 +61,10 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<s
 
 const qtyField = (page: Page) => page.getByLabel('Parts finished');
 const startButton = (page: Page) => page.getByRole('button', { name: /start this step/i });
-const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/i });
+// `.first()` for the same reason as the feed locators — one Adjust per entry.
+// First is the NEWEST row (the feed sorts newest first), which is the interval
+// the test just started, so this is semantically right and not just a silencer.
+const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/i }).first();
 // `RECORD <n> FINISHED` — the number is interpolated into the verb, so match on
 // the shape rather than a fixed quantity.
 const recordButton = (page: Page) => page.getByRole('button', { name: /^record \d+ finished/i });
@@ -71,8 +74,13 @@ const completeBanner = (page: Page) =>
 // digits would be brittle.
 const runningOnStep = (page: Page) => page.getByText(/^started \d/i);
 // Feed entries. The record of a start/finish lives here, not in a header strip.
-const feedStarted = (page: Page) => page.getByText(/^Started /);
-const feedFinished = (page: Page) => page.getByText(/^Finished /);
+//
+// `.first()` because the feed is JOB-scoped and every test in this file times a
+// step on the same seeded job, so entries accumulate across the run — three
+// "Started …" rows by the last test. That is the feed behaving correctly; these
+// assertions only care that the entry exists at all.
+const feedStarted = (page: Page) => page.getByText(/^Started /).first();
+const feedFinished = (page: Page) => page.getByText(/^Finished /).first();
 const estimateLine = (page: Page) => page.getByText(/^Estimated:/);
 
 /**
@@ -180,7 +188,7 @@ test.describe('operator time capture', () => {
     // Written immediately against the running interval — the DB constraint
     // permits an adjusted START before the interval closes, precisely so this
     // correction does not have to be held in page state until completion.
-    await expect(page.getByText(/recorded \d/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/recorded \d/i).first()).toBeVisible({ timeout: 30_000 });
 
     await stopTimer(page);
   });

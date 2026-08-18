@@ -216,3 +216,19 @@ describe('a component survives the trip to a BOM line', () => {
     expect(blocked.get('WELD-1')?.reasons).toContain('TUBE 2x2');
   });
 });
+
+/**
+ * On the real package, 1006942 cuts four lengths of the same tube. Listing it
+ * four times reads as four problems when it is one cost to enter.
+ */
+it('names a material once per parent, however many lengths are cut from it', () => {
+  const plan = planComponents([
+    row('W1', [
+      line({ description: 'TUBE 8x4', length: '1803.2' }),
+      line({ description: 'TUBE 8x4', length: '653.6' }),
+      line({ description: 'TUBE 8x4', length: '400' }),
+    ]),
+  ]);
+
+  expect(parentsBlockedBy(plan).get('W1')?.reasons).toEqual(['TUBE 8x4']);
+});

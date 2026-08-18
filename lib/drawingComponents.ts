@@ -219,7 +219,10 @@ export function parentsBlockedBy(plan: ComponentPlan): Map<string, BlockedParent
 
   for (const material of plan.materials) {
     if (!material.include || material.costPerUnit !== null) continue;
-    for (const use of material.usedBy) add(use.stem, use.parentName, material.description);
+    // Once per PARENT, not once per cut-list row — four lengths of the same tube
+    // are one thing to price, and naming it four times reads like four problems.
+    const parents = new Map(material.usedBy.map((use) => [use.stem, use.parentName]));
+    for (const [stem, name] of parents) add(stem, name, material.description);
   }
   // A made component has no work yet by definition — it is a part we are creating
   // from a name on someone else's drawing.

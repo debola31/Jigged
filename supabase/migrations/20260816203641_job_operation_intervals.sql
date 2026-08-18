@@ -462,9 +462,27 @@ SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $$
 BEGIN
+  -- TRANSLATE the actor; do NOT copy it. The two voided_by columns are not the
+  -- same kind of id, which is easy to miss because they share a name:
+  -- job_operation_completions.voided_by holds an auth.users id and carries no FK
+  -- at all, while this table's voided_by references user_company_access(id) so
+  -- that it lines up with operator_id. Copying one into the other raises 23503,
+  -- which PostgREST returns as 409. The whole UPDATE aborts, so the UNDO ITSELF
+  -- fails: the completion stays, the time stays, and the operator gets
+  -- "Failed to undo that completion." with nothing they can do about it.
+  --
+  -- NULL when the actor holds no membership row for this company (a system admin
+  -- undoing on someone's behalf). That is already a representable state — the FK
+  -- is ON DELETE SET NULL — and voided_at still records that it was retracted.
   UPDATE public.job_operation_intervals
      SET voided_at = NEW.voided_at,
-         voided_by = NEW.voided_by
+         voided_by = (
+           SELECT uca.id
+             FROM public.user_company_access uca
+            WHERE uca.company_id = NEW.company_id
+              AND uca.user_id    = NEW.voided_by
+            LIMIT 1
+         )
    WHERE completion_id = NEW.id
      AND voided_at IS NULL;
   RETURN NULL;

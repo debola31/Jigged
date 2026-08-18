@@ -56,6 +56,8 @@ That shape is this repo's main defence against silent breakage, and it is the on
 | `tenant_tables_missing_write_gate()` | Every `company_id` table is billing-gated or explicitly exempt |
 | `definer_writers_missing_write_gate()` | A definer function writing a gated table calls `company_can_write` |
 | `note_counter_write_leaks()` | Only `notes.body` is browser-updatable; the view counters are not |
+| [`legalDocumentsCheck.ts`](../../scripts/legalDocumentsCheck.ts) | A published legal document's bytes AND its metadata are frozen; every file under `public/legal` is declared; the frozen text says the same words as the vendor export it came from |
+| `terms_acceptance_write_leaks()` | No browser role can write `terms_acceptances`, and only `authenticated` can read it |
 | [`schemaEmbedCheck.ts`](../../scripts/schemaEmbedCheck.ts) | Every PostgREST `.select()` embed matches the real schema |
 | [`interactionStandardsCheck.ts`](../../scripts/interactionStandardsCheck.ts) | No value-like placeholders, grey delete icons, or off-theme contained buttons |
 | `types/database.ts` regen diff (in `test.yml`) | The committed types match what the migrations produce |

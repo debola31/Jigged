@@ -18,6 +18,7 @@ import { useTheme } from '@mui/material/styles';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getSupabase } from '@/lib/supabase';
 import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
+import { PARTS_SUBROUTES } from '@/lib/partsSubroutes';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -35,11 +36,12 @@ function getPageTitle(pathname: string): string {
       if (segments.includes('edit')) return 'Edit Routing';
       return 'Routing';
     }
-    if (segments.includes('new')) return 'New Part';
-    if (segments.includes('edit')) return 'Edit Part';
-    if (segments.includes('import')) return 'Import Parts';
+    // Same named-subroute map as the header, and the same trap if it is skipped:
+    // an unlisted page under /parts reads as a part ID and titles itself detail.
     const idx = segments.indexOf('parts');
-    if (idx < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[idx + 1])) return 'Part Details';
+    const child = segments[idx + 1];
+    if (child && child in PARTS_SUBROUTES) return PARTS_SUBROUTES[child];
+    if (child) return 'Part Details';
     return 'Parts';
   }
 

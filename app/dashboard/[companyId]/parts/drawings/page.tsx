@@ -23,7 +23,6 @@ import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
 import Typography from '@mui/material/Typography';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
@@ -308,22 +307,11 @@ export default function AddPartsFromDrawingsPage() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/parts`)}
-        >
-          Parts
-        </Button>
-        <Box>
-          <Typography variant="h5">Add parts from drawings</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Drop a folder of drawings. We read what each one says and show you before anything is
-            created.
-          </Typography>
-        </Box>
-      </Box>
-
+      {/*
+        No page heading and no back link. The app header already names this page,
+        and Parts is one item down the sidebar — repeating both cost a third of the
+        screen above the fold for nothing anyone needed.
+      */}
       <Stepper activeStep={step} sx={{ mb: 4 }}>
         {STEPS.map((label) => (
           <Step key={label}>

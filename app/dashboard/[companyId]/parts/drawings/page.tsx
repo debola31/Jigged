@@ -111,10 +111,21 @@ export default function AddPartsFromDrawingsPage() {
             customerPartNumber: valueOf(r, 'customer_part_number'),
           })),
         );
-        const withIdentity = built.map((r) => ({
-          ...r,
-          identity: identities.get(r.stem) ?? r.identity,
-        }));
+        const withIdentity = built.map((r) => {
+          const identity = identities.get(r.stem) ?? r.identity;
+          // A live part of this name belongs to someone else, so this row cannot
+          // have it. Put the name it WILL get into the field now: a column showing
+          // "1003308" while creating "1003308-2" is worse than either name alone,
+          // and the user can still type over it.
+          if (identity.kind === 'name_taken') {
+            return {
+              ...r,
+              identity,
+              edits: { ...r.edits, part_name: identity.suggestedName },
+            };
+          }
+          return { ...r, identity };
+        });
         setRows(withIdentity);
 
         // Shape, never content: how many files became how many parts, which

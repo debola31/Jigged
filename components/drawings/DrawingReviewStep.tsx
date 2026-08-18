@@ -60,7 +60,7 @@ function attention(row: BuiltRow): string | null {
     case 'archived':
       return `"${row.identity.partName}" exists but is archived`;
     case 'name_taken':
-      return 'Another customer already uses this name';
+      return `Another customer's part is called "${row.identity.partName}" — renamed`;
     case 'unknown':
       return `We couldn't check this one — ${row.identity.reason}`;
     case 'known':
@@ -86,6 +86,28 @@ export default function DrawingReviewStep({
 
   const edit = (stem: string, key: keyof DrawingRowValues, value: string) =>
     update(stem, (r) => ({ ...r, edits: { ...r.edits, [key]: value } }));
+
+  /**
+   * Switching to "Create new" renames the row, and switching back undoes it.
+   *
+   * The name has to move with the choice, because the constraint is FULL — an
+   * archived row still holds its name, so a second part genuinely cannot have it.
+   * Putting the suggested name straight into the field means the column always
+   * reads as what will be created, and the user can still type over it.
+   */
+  const setArchivedChoice = (row: BuiltRow, choice: 'revive' | 'create_new') =>
+    update(row.stem, (r) => {
+      if (r.identity.kind !== 'archived') return r;
+      const { part_name: _dropped, ...rest } = r.edits;
+      return {
+        ...r,
+        identity: { ...r.identity, choice },
+        edits:
+          choice === 'create_new'
+            ? { ...rest, part_name: r.identity.suggestedName }
+            : rest,
+      };
+    });
 
   const needsAttention = useMemo(() => rows.filter((r) => attention(r) !== null), [rows]);
   const assistCandidates = useMemo(() => rows.filter(needsAssist).length, [rows]);
@@ -122,9 +144,10 @@ export default function DrawingReviewStep({
             </Button>
           }
         >
-          <AlertTitle>{assistCandidates} rows are missing material or finish</AlertTitle>
-          We can look at those drawings more closely and add what they say to the description.
-          Nothing happens until you press the button.
+          <AlertTitle>Add more detail from the drawings?</AlertTitle>
+          We can read the drawings more closely and add what they say — material, finish, and the
+          rest of the title block — to the part descriptions. Nothing is sent until you press the
+          button.
         </Alert>
       )}
 
@@ -237,9 +260,32 @@ export default function DrawingReviewStep({
                           </Typography>
                         )}
                       </TableCell>
-                      <TableCell sx={{ maxWidth: 260 }}>
+                      <TableCell sx={{ maxWidth: 300 }}>
                         {/* Review by exception: a healthy row renders nothing at all. */}
                         {note && <Chip size="small" color="warning" label={note} />}
+
+                        {/*
+                          A chip is a label, not a flow. An archived match defaults to
+                          reviving, and reviving silently is the thing this guard was
+                          written to stop — so the choice is here, on the row, next to
+                          the name it changes.
+                        */}
+                        {row.identity.kind === 'archived' && (
+                          <ToggleButtonGroup
+                            size="small"
+                            exclusive
+                            sx={{ mt: 0.5 }}
+                            value={row.identity.choice}
+                            onChange={(_, next) => next && setArchivedChoice(row, next)}
+                          >
+                            <ToggleButton value="revive" aria-label={`Restore ${row.stem}`}>
+                              Restore it
+                            </ToggleButton>
+                            <ToggleButton value="create_new" aria-label={`Create a new part for ${row.stem}`}>
+                              Create new
+                            </ToggleButton>
+                          </ToggleButtonGroup>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

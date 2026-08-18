@@ -65,7 +65,7 @@ export type IdentityOutcome =
    * A LIVE part of this name belongs to a different customer. Merging would be
    * the incident `part_customer_references` exists to prevent.
    */
-  | { kind: 'name_taken'; partId: string; suggestedName: string }
+  | { kind: 'name_taken'; partId: string; partName: string; suggestedName: string }
   /** The lookup itself failed. Never render a failed check as a clean "new". */
   | { kind: 'unknown'; reason: string };
 

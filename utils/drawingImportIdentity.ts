@@ -191,7 +191,12 @@ export async function resolveIdentities(
     if (match.ownedByCustomerId && match.ownedByCustomerId !== customerId) {
       const suggested = suggestFreeName(name, taken);
       taken.add(suggested.toLowerCase());
-      out.set(row.stem, { kind: 'name_taken', partId: match.id, suggestedName: suggested });
+      out.set(row.stem, {
+        kind: 'name_taken',
+        partId: match.id,
+        partName: match.part_name,
+        suggestedName: suggested,
+      });
       continue;
     }
 

@@ -72,12 +72,32 @@ export interface CreateOptions {
  */
 const ATTACHABLE = new Set(['pdf', 'dxf', 'step']);
 
-function resolveName(row: DrawingRow): string {
-  // An identity decision the user made overrides everything, including extraction:
-  // it is the answer to a question we asked them.
-  if (row.identity.kind === 'name_taken') return row.identity.suggestedName;
+/**
+ * The name this row will actually be created under.
+ *
+ * The grid seeds the suggested name into the row's edits, so what the user reads
+ * in the Part name column is what gets written — a row that says `1003308` while
+ * creating `1003308-2` is worse than either name on its own.
+ *
+ * The collision names are then a BACKSTOP, not the mechanism: if the user types
+ * the taken name back in, we do not write it. Reusing a name in this repo revives
+ * or merges, and for `name_taken` that means writing onto ANOTHER CUSTOMER'S part
+ * with all of its quotes and jobs still pointing at it. That is the incident this
+ * whole guard exists to prevent, so it does not get to happen by typing.
+ */
+export function resolveName(row: DrawingRow): string {
+  // What the USER typed, not `valueOf` — that merges in extraction and falls back
+  // to the filename stem, and neither is a decision about a name we already know
+  // is unavailable.
+  const typed = (row.edits.part_name ?? '').trim();
+  const renamed = (taken: string, suggested: string) =>
+    !typed || typed.toLowerCase() === taken.trim().toLowerCase() ? suggested : typed;
+
+  if (row.identity.kind === 'name_taken') {
+    return renamed(row.identity.partName, row.identity.suggestedName);
+  }
   if (row.identity.kind === 'archived' && row.identity.choice === 'create_new') {
-    return row.identity.suggestedName;
+    return renamed(row.identity.partName, row.identity.suggestedName);
   }
   return valueOf(row, 'part_name');
 }

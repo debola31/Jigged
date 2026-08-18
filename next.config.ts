@@ -2,6 +2,17 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // `/legal/privacy.html` was the live URL of the privacy policy before it was
+  // versioned to `/legal/privacy/v1.html`. Nothing inside the repo referenced
+  // it, and it was never published in outreach email or an external listing --
+  // so this is belt and braces rather than a known-broken link. Permanent,
+  // because the document did not move temporarily.
+  async redirects() {
+    return [
+      { source: '/legal/privacy.html', destination: '/privacy', permanent: true },
+    ];
+  },
+
   async rewrites() {
     return [
       // Printed QR codes encode an all-uppercase URL — that is what keeps the payload in QR

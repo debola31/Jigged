@@ -17,7 +17,24 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { isValidEmail } from '@/lib/validators';
+import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
+import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
+/**
+ * Self-serve signup.
+ *
+ * DORMANT: app/signup/page.tsx redirects to /login, and nothing in app/ renders
+ * this. Accounts are created by invitation. The clickwrap below is here so the
+ * screen is correct if it is ever revived, not because it reaches anyone today.
+ *
+ * IT GATES SUBMIT BUT RECORDS NOTHING, deliberately. At `auth.signUp` there is
+ * no session yet — email confirmation has not happened — so there is no
+ * authenticated call available to write the acceptance. The only alternative
+ * would be an unauthenticated endpoint keyed on the returned user id, which is
+ * a forgeable legal record and exactly what the service-role-only posture
+ * exists to prevent. Their acceptance is collected by TermsGate on first
+ * sign-in instead, through the same server path as everyone else's.
+ */
 export default function SignUp() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -26,6 +43,7 @@ export default function SignUp() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -52,6 +70,15 @@ export default function SignUp() {
     // Validate passwords match
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    // The button is disabled, but that is an affordance and this is the
+    // contract. A clickwrap that can be bypassed by re-enabling a button in
+    // devtools is not one worth arguing in front of anybody.
+    if (!termsAccepted) {
+      setError('Please agree to the Terms of Service and Privacy Policy');
       setLoading(false);
       return;
     }
@@ -229,13 +256,24 @@ export default function SignUp() {
             }
           />
 
+          <TermsConsentCheckbox
+            checked={termsAccepted}
+            onChange={setTermsAccepted}
+            disabled={loading}
+          />
+
+          <MissingFieldsNotice
+            items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}
+            title="Before you can create an account:"
+          />
+
           <Button
             type="submit"
             variant="contained"
             fullWidth
             size="large"
-            disabled={loading}
-            sx={{ mb: 2 }}
+            disabled={loading || !termsAccepted}
+            sx={{ mt: 2, mb: 2 }}
           >
             {loading ? (
               <CircularProgress size={24} color="inherit" />
@@ -243,18 +281,6 @@ export default function SignUp() {
               'Create Account'
             )}
           </Button>
-
-          <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 1 }}>
-            By creating an account, you agree to our{' '}
-            <MuiLink component={Link} href="/terms" underline="hover">
-              Terms of Service
-            </MuiLink>
-            {' and '}
-            <MuiLink component={Link} href="/privacy" underline="hover">
-              Privacy Policy
-            </MuiLink>
-            .
-          </Typography>
 
           <Typography variant="body2" align="center" color="text.secondary">
             Already have an account?{' '}

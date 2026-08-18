@@ -136,12 +136,18 @@ CREATE TABLE public.job_operation_intervals (
     CONSTRAINT job_op_intervals_adjusted_ordered
         CHECK (adjusted_ended_at IS NULL
                OR COALESCE(adjusted_started_at, started_at) < adjusted_ended_at),
-    -- You cannot correct an interval that has not finished yet. Prevents an
-    -- adjusted end sitting on a still-running row, where effective_ended_at would
-    -- then claim a finish that never happened.
-    CONSTRAINT job_op_intervals_adjust_only_when_closed
-        CHECK (ended_at IS NOT NULL
-               OR (adjusted_started_at IS NULL AND adjusted_ended_at IS NULL)),
+    -- An adjusted END may only exist on a closed interval: otherwise
+    -- effective_ended_at would claim a finish that never happened.
+    --
+    -- An adjusted START is deliberately allowed WHILE RUNNING. "I actually
+    -- started twenty minutes before I tapped" is the single most common
+    -- correction there is, and it is knowable immediately — making the operator
+    -- wait until they finish to record it means holding it in their head, which
+    -- is how it turns into a recall estimate. An earlier draft of this constraint
+    -- blocked both and made the feed's Adjust affordance unimplementable on a
+    -- running interval.
+    CONSTRAINT job_op_intervals_adjusted_end_only_when_closed
+        CHECK (ended_at IS NOT NULL OR adjusted_ended_at IS NULL),
     CONSTRAINT job_op_intervals_note_not_blank
         CHECK (note IS NULL OR length(btrim(note)) > 0),
 

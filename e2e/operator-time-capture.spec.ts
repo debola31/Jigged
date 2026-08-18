@@ -16,10 +16,10 @@ import {
  *   1. Starting writes a row through a SECURITY DEFINER RPC, not a `.from()`
  *      insert — the browser has no INSERT grant at all, so a wrong argument name
  *      is a 404 at runtime and compiles perfectly.
- *   2. The running strip is rendered by the LAYOUT from a context the step
- *      screen also consumes. Unit tests mock the access layer, so the select
- *      string and its two nested PostgREST embeds never meet a database — which
- *      is exactly how the NewHelpful embed shipped 400ing on every load.
+ *   2. Start and finish are entries in the JOB FEED, loaded through a select
+ *      with two nested PostgREST embeds and a filter on an embedded column.
+ *      Unit tests mock the access layer, so that string never meets a database —
+ *      which is exactly how the NewHelpful embed shipped 400ing on every load.
  *   3. The estimate must DISAPPEAR from the step screen while a timer runs. That
  *      is a guardrail rather than a layout preference (a live counter beside a
  *      standard is the adjacent comparison the surveillance rule exists to
@@ -65,15 +65,14 @@ const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/
 // `RECORD <n> FINISHED` — the number is interpolated into the verb, so match on
 // the shape rather than a fixed quantity.
 const recordButton = (page: Page) => page.getByRole('button', { name: /^record \d+ finished/i });
-// The confirm sheet's own primary. Same label, so scope to the dialog or the
-// two collide under strict mode.
-const sheetRecordButton = (page: Page) =>
-  page.getByRole('dialog').getByRole('button', { name: /^record \d+ finished/i });
 const completeBanner = (page: Page) =>
   page.getByRole('button', { name: /this step is complete/i });
 // The hero clock's caption. The clock itself is a bare HH:MM:SS and matching on
 // digits would be brittle.
 const runningOnStep = (page: Page) => page.getByText(/^started \d/i);
+// Feed entries. The record of a start/finish lives here, not in a header strip.
+const feedStarted = (page: Page) => page.getByText(/^Started /);
+const feedFinished = (page: Page) => page.getByText(/^Finished /);
 const estimateLine = (page: Page) => page.getByText(/^Estimated:/);
 
 /**
@@ -113,7 +112,9 @@ async function openIdleStep(page: Page): Promise<void> {
  * strict-mode violation inside a shared helper.
  */
 async function stopTimer(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /stop timing/i }).first().click();
+  // The step screen's own control. There is no running strip any more, so this
+  // is the only route to stopping without completing.
+  await page.getByRole('button', { name: /stop without finishing/i }).click();
   await page.getByRole('menuitem', { name: /done for the day/i }).click();
   await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
 }
@@ -121,7 +122,7 @@ async function stopTimer(page: Page): Promise<void> {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('operator time capture', () => {
-  test('starts a timer, shows it in the shell, and hides the estimate', async ({ page }) => {
+  test('starts a timer, records it in the feed, and hides the estimate', async ({ page }) => {
     const companyId = await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
 
@@ -142,18 +143,16 @@ test.describe('operator time capture', () => {
       await expect(estimateLine(page)).toBeHidden();
     }
 
-    // The strip is rendered by the LAYOUT, so it shows on screens that know
-    // nothing about this step — that is the whole reason it lives in the shell,
-    // and an operator who walks away with a timer running has to see it. An
-    // explicit goto rather than clicking the nav and going back: the assertion
-    // is about the layout, and routing it through two navigations only adds ways
-    // to be flaky.
-    await page.goto(`/operator/${companyId}/jobs`);
-    await expect(runningOnStep(page).or(page.getByText(/since \d/i))).toBeVisible({
-      timeout: 30_000,
-    });
+    // Starting is RECORDED IN THE FEED, which is where the operator corrects it.
+    await expect(feedStarted(page)).toBeVisible({ timeout: 30_000 });
 
-    // Leave nothing running. See stopTimer.
+    // And NOT in a header strip: that was removed deliberately, so no other
+    // screen carries running state. This asserts the absence, because the cost
+    // (nothing outside this screen shows a running timer) was accepted knowingly
+    // and should fail loudly if a strip creeps back in.
+    await page.goto(`/operator/${companyId}/jobs`);
+    await expect(page.getByText(/^since \d/i)).toHaveCount(0);
+
     await page.goBack();
     await stopTimer(page);
   });
@@ -164,6 +163,8 @@ test.describe('operator time capture', () => {
     await startButton(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
+    // Adjust is on the FEED ROW that shows the wrong number, not beside the clock.
+    await expect(feedStarted(page)).toBeVisible({ timeout: 30_000 });
     await adjustButton(page).click();
     await expect(page.getByRole('heading', { name: /adjust times/i })).toBeVisible();
 
@@ -176,7 +177,10 @@ test.describe('operator time capture', () => {
     await expect(page.getByText(/^Recorded /)).toBeVisible();
 
     await page.getByRole('button', { name: /^save$/i }).click();
-    await expect(page.getByText(/· adjusted/i)).toBeVisible({ timeout: 30_000 });
+    // Written immediately against the running interval — the DB constraint
+    // permits an adjusted START before the interval closes, precisely so this
+    // correction does not have to be held in page state until completion.
+    await expect(page.getByText(/recorded \d/i)).toBeVisible({ timeout: 30_000 });
 
     await stopTimer(page);
   });
@@ -191,22 +195,18 @@ test.describe('operator time capture', () => {
 
     await qtyField(page).fill('1');
 
-    // The primary opens the confirm sheet rather than writing. NOTHING IS
-    // COMMITTED YET — this is the pre-completion step, which is why it does not
-    // reintroduce the post-completion offer B4 deleted.
+    // One tap, one commit — no confirm sheet. The note composer sits inline
+    // above this button and rides along with it, as B4 requires.
     await recordButton(page).click();
-    const sheet = page.getByRole('dialog');
-    await expect(sheet.getByText(/^Finishing /)).toBeVisible({ timeout: 30_000 });
-
-    // The composer is here, carried from the step screen, so the last chance to
-    // say something is on the way OUT rather than after the fact.
-    await expect(sheet.getByPlaceholder(/next person/i)).toBeVisible();
-
-    await sheetRecordButton(page).click();
 
     // The completion landed AND the interval closed with it.
     await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
     await expect(page.getByText(/1 of 5 good so far/)).toBeVisible({ timeout: 30_000 });
+
+    // The finish is a SECOND feed entry beside the start, not a rewrite of it —
+    // a log that edits itself after the fact reads as losing track.
+    await expect(feedFinished(page)).toBeVisible({ timeout: 30_000 });
+    await expect(feedStarted(page)).toBeVisible();
 
     // Undo the completion so the shared job is left as this file found it —
     // the completion spec asserts exact quantities against the same seed.

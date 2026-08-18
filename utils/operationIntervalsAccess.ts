@@ -239,6 +239,43 @@ export async function getMyOpenIntervals(
 }
 
 /**
+ * The caller's own intervals on one job, oldest first — the job feed's timeline.
+ *
+ * OWN ROWS ONLY, and that is a property of the feed rather than a limitation of
+ * this query. Notes in that feed are everyone's; time entries are yours. A
+ * job-scoped feed showing "Priya started Final Inspection at 11:06 PM" to every
+ * operator would be a per-person time view available shop-wide — looser than
+ * what admins get, who have to go through an audited function for the same fact.
+ * RLS enforces it; this comment exists so the asymmetry reads as deliberate.
+ *
+ * Filters on the embedded operation's `job_id` because the interval row carries
+ * `job_part_id` but not `job_id`; `!inner` makes the embed a join rather than a
+ * left join, so the filter actually restricts.
+ */
+export async function getMyIntervalsForJob(
+  companyId: string,
+  jobId: string,
+): Promise<OperationIntervalWithContext[]> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase
+    .from('job_operation_intervals')
+    .select(INTERVAL_WITH_CONTEXT)
+    .eq('company_id', companyId)
+    .eq('job_operations.job_id', jobId)
+    .is('voided_at', null)
+    .order('started_at', { ascending: false });
+
+  if (error) {
+    throw toFriendlyError(error, {
+      entity: 'time entry',
+      fallback: 'Could not load recorded time for this job.',
+    });
+  }
+  return (data ?? []).map((row) => withContext(row));
+}
+
+/**
  * The operator's own journal: their recorded intervals, newest first.
  *
  * Paged by DATE RANGE rather than by count, and deliberately returning no total.

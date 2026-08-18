@@ -310,16 +310,41 @@ fabrication, and it is the same state an office-side completion already produces
 completed untimed` measures how often it is used — a rising rate means starting is too hard to
 reach, which is our problem and not the operator's.
 
-**Capture moved to a confirm sheet, and that is NOT the pattern deleted in
-[B4](#capture-is-part-of-completing-b4).** What B4 removed was a **post**-completion offer —
-record, then a prompt for a photo, then a separate Post: three commits, and the middle had no
-durability, so a back tap discarded a photo the flow had already implied was saved. The sheet is
-the mirror image: **nothing is written until its primary is tapped**, so backing out loses only
-what is visibly still in the composer. Still one commit, still the same
-completion → interval-close → note order. It renders the *same* `useNoteCapture` object the step
-screen holds, so a note jotted while the work was happening is carried in rather than abandoned,
-and because it is a modal overlay only one composer is ever on screen. The app shipped this shape
-once before as `JobCompleteModal`, removed with the timer rather than for any fault of its own.
+**The job feed is the record; the clock is only the readout.** Starting appends a *"Started Final
+Inspection · 11:06 PM"* entry and finishing appends a separate *"Finished … · 12:47 AM · 1h 41m"*
+above it — **two rows, never one that rewrites itself**, because a log entry that changes after the
+fact reads as the surface losing track. Each row carries **Adjust**, editing the end its own number
+came from, so a correction happens where the wrong figure is rather than in a dialog asking about
+both. Corrections write immediately (see the constraint note below); nothing is held in page state.
+
+**Withdrawn 2026-08-17, unshipped: a confirm sheet before recording.** It was built and removed the
+same day. The reasoning that made it *safe* still stands — what B4 deleted was a **post**-completion
+offer, and a pre-completion sheet writes nothing until confirmed, so it never reintroduced that bug
+— but safe is not the same as warranted. It put a third surface (strip, clock, sheet) in front of
+one fact, and once the feed carries the record there is nothing for a sheet to add. Completion is
+one tap again, with the inline composer riding along exactly as B4 requires.
+
+**Withdrawn 2026-08-17: the running-timer strip in the shell.** A bar above the job card duplicated
+what the step screen's own clock and feed already say. **The cost is real and was accepted
+knowingly:** with no notification channel either (see below), *nothing outside the step screen
+indicates a timer is running*, so a forgotten stop is caught by the office Still-running list the
+next morning rather than by the operator in the moment — which makes that correction a recall
+estimate. An E2E assertion checks the strip has not crept back.
+
+Removing it also took the only `Done for the day` / `Left it running` control with it, so the step
+screen now carries **`Stop without finishing`** as a secondary. That is not a convenience: a timer
+that can only be stopped by completing work you did not finish is worse than no timer.
+
+**The feed shows YOUR time entries and EVERYONE'S notes**, and the asymmetry is deliberate. A
+job-scoped feed naming when each person started would be a per-person time view available shop-wide
+— looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS
+enforces it.
+
+**An adjusted START is allowed on a running interval; an adjusted END is not.** `job_op_intervals_
+adjusted_end_only_when_closed` guards only the end, which would otherwise claim a finish that never
+happened. *"I actually started twenty minutes before I tapped"* is knowable immediately, and making
+the operator hold it until they finish is how it becomes a recall estimate. An earlier draft blocked
+both and made the feed's Adjust unimplementable while running.
 
 **No dictate button, and no speech API — decided 2026-08-17.** `webkitSpeechRecognition` **fails in
 an installed PWA**, and even in plain Safari it needs Siri enabled and carries documented throttling
@@ -632,6 +657,7 @@ schema rather than in review:
 | Operator sees | Operator never sees |
 |---|---|
 | The interval running **right now**, as a large monospace clock | A total across jobs, a weekly figure, an average, a rate |
+| Their own start and finish entries in the job feed, each correctable | Anyone else's start or finish, on any surface |
 | A journal of their own recorded intervals, each naming its job and step | A row count, an entry total, or any scalar over that journal |
 | Their own raw times beside their own corrections | Anyone else's times, or their own compared to the estimate |
 

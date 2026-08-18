@@ -40,7 +40,6 @@ import OperatorDemoBar, {
 } from '@/components/operator/OperatorDemoBar';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
 import { OperatorIntervalProvider } from '@/components/operator/OperatorIntervalContext';
-import RunningIntervalStrip from '@/components/operator/RunningIntervalStrip';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
@@ -712,13 +711,14 @@ function OperatorShell({
           Applies to every operator screen, deliberately — Jobs and Me had the same problem and
           nobody had noticed because nobody opens them on a monitor.
         */}
-        <Box sx={{ maxWidth: 680, mx: 'auto' }}>
-          {/* Inside the phone-width column and above the page, so "you are on
-              OP 30" is the first thing rendered on every screen while anything
-              is running. Renders nothing when nothing is open. */}
-          <RunningIntervalStrip />
-          {children}
-        </Box>
+        {/* NO RUNNING-TIMER STRIP, decided 2026-08-17. A bar above the job card
+            duplicated what the step screen's own clock and job feed already say,
+            and the shell is not where a step's state belongs. The cost is real
+            and accepted: with no notification channel either, nothing outside
+            the step screen indicates a timer is running, so a forgotten stop is
+            caught by the office Still-running list rather than by the operator.
+            See docs/modules/operator-view.md#recording-time. */}
+        <Box sx={{ maxWidth: 680, mx: 'auto' }}>{children}</Box>
       </Box>
 
       {/* Bottom Navigation — hidden only on the bare station-selection screen */}

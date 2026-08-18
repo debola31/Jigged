@@ -18,6 +18,8 @@ import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import NoteAddIcon from '@mui/icons-material/NoteAdd';
@@ -50,8 +52,6 @@ import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
-import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
-import CompleteStepSheet from '@/components/operator/CompleteStepSheet';
 import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
 
 /**
@@ -69,7 +69,11 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
  * it is RECORD <n> FINISHED. Both on screen at once was the bug — it let a step
  * be completed without ever being timed, which made the timer optional in
  * practice. There is still no pause and no resume: you stop by starting the next
- * thing, by recording the completion, or from the running strip's menu.
+ * thing, by recording the completion, or with `Stop without finishing`.
+ *
+ * TIME IS RECORDED IN THE JOB FEED BELOW — a "Started …" entry when the clock
+ * starts and a "Finished …" entry when it stops, each adjustable from the row
+ * that shows it. The clock here is the live readout; the feed is the record.
  *
  * `Complete without timing` is the deliberate escape hatch for the operator who
  * did the work and forgot to start. It records NO interval rather than a
@@ -113,8 +117,7 @@ export default function OperatorOperationActionPage() {
   // commits them. Null until they touch Adjust — an untouched interval writes no
   // adjusted values at all, so `adjusted_at` stays NULL and the row does not
   // claim to have been corrected when it was not.
-  const [adjustOpen, setAdjustOpen] = useState(false);
-  const [completeOpen, setCompleteOpen] = useState(false);
+  const [stopAnchor, setStopAnchor] = useState<null | HTMLElement>(null);
 
   /**
    * A repaint tick for the hero clock — NOT a counter.
@@ -134,10 +137,6 @@ export default function OperatorOperationActionPage() {
     const id = setInterval(() => setClockTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [running]);
-  const [pendingAdjust, setPendingAdjust] = useState<{
-    startedAt: string;
-    endedAt: string | null;
-  } | null>(null);
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -337,11 +336,7 @@ export default function OperatorOperationActionPage() {
       // row failed, which is the trade this page already refused once.
       if (running) {
         try {
-          await closeInterval(running.id, 'completed', {
-            adjustedStartedAt: pendingAdjust?.startedAt ?? null,
-            adjustedEndedAt: pendingAdjust?.endedAt ?? null,
-          });
-          setPendingAdjust(null);
+          await closeInterval(running.id, 'completed');
         } catch {
           // Deliberately swallowed at page level: "the completion worked, the
           // timer did not stop" is not something an operator can act on from
@@ -359,6 +354,10 @@ export default function OperatorOperationActionPage() {
       //
       // So a note failure surfaces on its own and the step stays complete. The
       // operator can retype it; they cannot un-finish the part they finished.
+      // Bumped unconditionally: the completion closed an interval, which is a
+      // feed entry in its own right whether or not a note rode along with it.
+      setFeedRefreshSignal((n) => n + 1);
+
       if (capture.hasContent) {
         try {
           await capture.submit();
@@ -390,6 +389,8 @@ export default function OperatorOperationActionPage() {
     setError(null);
     try {
       await startInterval(jobOperationId);
+      // The feed gains a "Started …" entry — that is where the record lives now.
+      setFeedRefreshSignal((n) => n + 1);
     } catch (err) {
       setError(err);
     } finally {
@@ -397,19 +398,21 @@ export default function OperatorOperationActionPage() {
     }
   };
 
-  /**
-   * Open the confirm sheet rather than writing straight away.
-   *
-   * THIS IS A PRE-COMPLETION STEP, WHICH IS NOT THE THING B4 DELETED. What was
-   * removed was a POST-completion offer: record, then a prompt for a photo, then
-   * a separate Post — three commits, and the middle had no durability, so a back
-   * tap discarded a photo the flow had already implied was saved. Nothing is
-   * written until the sheet's primary is tapped, so backing out of this loses
-   * only what is visibly still sitting in the composer. Still one commit.
-   */
-  const handleOpenComplete = () => {
+  /** Close the running interval without completing the step. */
+  const handleStop = async (reason: 'done_for_day' | 'left_running') => {
+    setStopAnchor(null);
+    if (!running) return;
+    setActionLoading(true);
     setError(null);
-    setCompleteOpen(true);
+    try {
+      await closeInterval(running.id, reason);
+      // The feed gains a "Finished …" entry, so it has to re-read.
+      setFeedRefreshSignal((n) => n + 1);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   /**
@@ -925,20 +928,14 @@ export default function OperatorOperationActionPage() {
               >
                 {formatStopwatch(elapsedMs(running.effective_started_at, serverSkewMs))}
               </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                <Typography variant="body2" color="text.secondary">
-                  started {formatClockTime(running.effective_started_at)}
-                  {pendingAdjust && ' · adjusted'}
-                </Typography>
-                <Button
-                  onClick={() => setAdjustOpen(true)}
-                  disabled={actionLoading}
-                  size="small"
-                  sx={{ minHeight: 44 }}
-                >
-                  Adjust
-                </Button>
-              </Box>
+              {/* NO ADJUST HERE. Correcting a time happens in the job feed
+                  below, on the row that shows the wrong number — one place to
+                  fix it, next to the record being fixed, and it writes
+                  immediately rather than being held in page state until the
+                  completion lands. */}
+              <Typography variant="body2" color="text.secondary">
+                started {formatClockTime(running.effective_started_at)}
+              </Typography>
             </Box>
           )}
 
@@ -1009,7 +1006,7 @@ export default function OperatorOperationActionPage() {
                 primaryAction === 'start'
                   ? handleStart
                   : primaryAction === 'complete'
-                    ? handleOpenComplete
+                    ? handleRecord
                     : handleSaveNoteOnly
               }
               disabled={actionLoading || primaryAction === 'none'}
@@ -1043,6 +1040,37 @@ export default function OperatorOperationActionPage() {
                 Instrumented, so how often it is used is measurable: if it becomes
                 the normal path, the timer is too hard to reach and that is our
                 problem, not the operator's. */}
+            {/* STOPPING WITHOUT FINISHING, and this is now its only home.
+                It used to live in the running strip's overflow menu; removing
+                the strip took that route with it, and a timer you cannot stop
+                except by completing work you did not finish is worse than no
+                timer. `Left it running` is the lights-out case — it closes the
+                operator's labour without pretending the machine stopped. */}
+            {primaryAction === 'complete' && (
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                onClick={(e) => setStopAnchor(e.currentTarget)}
+                disabled={actionLoading}
+                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
+              >
+                Stop without finishing
+              </Button>
+            )}
+            <Menu
+              anchorEl={stopAnchor}
+              open={Boolean(stopAnchor)}
+              onClose={() => setStopAnchor(null)}
+            >
+              <MenuItem onClick={() => handleStop('done_for_day')} sx={{ minHeight: 48 }}>
+                Done for the day
+              </MenuItem>
+              <MenuItem onClick={() => handleStop('left_running')} sx={{ minHeight: 48 }}>
+                Left it running
+              </MenuItem>
+            </Menu>
+
             {primaryAction === 'start' && canComplete && (
               <Button
                 fullWidth
@@ -1071,61 +1099,6 @@ export default function OperatorOperationActionPage() {
             </Button>
           )}
         </Box>
-      )}
-
-      {/* The confirm-before-recording step. Mounted only while open so its own
-          state seeds fresh, and it renders the SAME capture object as the step
-          screen — one composer, surfaced twice in time rather than twice on
-          screen. */}
-      {completeOpen && (
-        <CompleteStepSheet
-          open
-          onClose={() => setCompleteOpen(false)}
-          onConfirm={async () => {
-            await handleRecord();
-            setCompleteOpen(false);
-          }}
-          saving={actionLoading}
-          // Nullable on an ad-hoc step with no routing operation behind it.
-          operationName={job.operation_name ?? 'this step'}
-          jobNumber={job.job_number}
-          quantity={qtyValue}
-          onQuantityChange={(v) => {
-            setQtyDirty(true);
-            setQtyInput(v);
-          }}
-          quantityHelper={
-            consequence.kind === 'none'
-              ? `Order qty ${target}${qtyGood > 0 ? ` · ${remaining} remaining` : ''}`
-              : completionConsequenceCaption(consequence)
-          }
-          startedAt={running ? (pendingAdjust?.startedAt ?? running.effective_started_at) : null}
-          serverSkewMs={serverSkewMs}
-          onAdjust={running ? () => setAdjustOpen(true) : undefined}
-          adjusted={Boolean(pendingAdjust)}
-          capture={capture}
-        />
-      )}
-
-      {/* Correcting the times BEFORE they are committed. The adjustment is held
-          in page state and written by RECORD COMPLETION, so an operator who
-          opens this and cancels leaves no `adjusted_at` behind — the row must
-          not claim to have been corrected when it was not. */}
-      {/* Mounted only while open, so its state is seeded at mount and reopening
-          is a fresh seed — see the note in AdjustTimesDialog. */}
-      {running && adjustOpen && (
-        <AdjustTimesDialog
-          open
-          onClose={() => setAdjustOpen(false)}
-          onSave={(next) => {
-            setPendingAdjust(next);
-            setAdjustOpen(false);
-          }}
-          rawStartedAt={running.started_at}
-          rawEndedAt={null}
-          effectiveStartedAt={pendingAdjust?.startedAt ?? running.effective_started_at}
-          effectiveEndedAt={null}
-        />
       )}
 
       {/* Job feed — capture notes/photos for THIS step (auto-tagged), and read

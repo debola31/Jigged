@@ -223,8 +223,16 @@ GRANT EXECUTE ON FUNCTION public.terms_acceptance_write_leaks() TO service_role;
 -- ============================================================================
 -- 6. Billing write-gate completeness
 -- ============================================================================
--- Recreated VERBATIM from 20260816043137 (the current declaration - confirmed
--- nothing later redefines it) with ONE new exempt entry.
+-- Recreated VERBATIM from 20260816203641_job_operation_intervals.sql -- the
+-- CURRENT declaration on main, NOT 20260816043137 -- with ONE new exempt entry.
+--
+-- This file originally rebased from 20260816043137, which was the newest copy
+-- when it was written. Main then merged #769, which added operator_time_access_log
+-- and recreated this function to exempt it. Because THIS migration has the later
+-- timestamp it runs last, so the older body silently overwrote theirs and the
+-- guard reported their table as un-gated -- exactly the near-miss 20260801181116
+-- documents. Rebasing from the newest copy is not a one-time check at authoring
+-- time; it has to be re-checked before merge, because main moves underneath you.
 --
 -- terms_acceptances is exempt for two independent reasons, and both are true --
 -- billing.md section 4 records that a plausible-but-false rationale is what
@@ -271,6 +279,12 @@ AS $$
       'quickbooks_desktop_connections', 'quickbooks_terms_cache',
       -- SECURITY DEFINER-only writers; see 20260728040701
       'note_views', 'operator_events',
+      -- Added in 20260816203641. An audit record of who looked at whose recorded
+      -- time, written only by get_operator_time_detail and granted to
+      -- service_role alone. The write is incidental to a read, and reads stay
+      -- open when billing lapses - gating it would mean a lapsed shop either
+      -- cannot look, or looks unlogged.
+      'operator_time_access_log',
       -- Append-only legal record, service-role write only; see section 6 above
       'terms_acceptances'
     )

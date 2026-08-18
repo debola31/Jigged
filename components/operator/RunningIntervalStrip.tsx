@@ -33,6 +33,15 @@ export default function RunningIntervalStrip() {
   const { openIntervals, serverSkewMs } = useIntervalContext();
   const [expanded, setExpanded] = useState(false);
 
+  // CONSIDERED AND REVERTED 2026-08-17: suppressing this strip's row for the
+  // step you are currently looking at, since that screen renders its own large
+  // clock for the same interval. Wrong because the strip's overflow menu is the
+  // ONLY route to `Done for the day` / `Left it running` — hiding the row would
+  // leave the step screen with no way to stop a timer without completing it,
+  // which is a real hole traded for a small cosmetic win. The two are also far
+  // apart in practice (sticky header versus mid-page), so the duplication reads
+  // as a persistent status bar rather than a repeat.
+
   /**
    * A repaint tick, NOT a counter.
    *

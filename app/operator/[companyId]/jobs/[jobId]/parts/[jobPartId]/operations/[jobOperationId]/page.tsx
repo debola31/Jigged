@@ -115,6 +115,25 @@ export default function OperatorOperationActionPage() {
   // claim to have been corrected when it was not.
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
+
+  /**
+   * A repaint tick for the hero clock — NOT a counter.
+   *
+   * The displayed figure is recomputed from the stored start instant on every
+   * render (see lib/duration), so this interval only has to say "paint again".
+   * Without it the clock renders once at 0:00 and never moves, which is exactly
+   * how it shipped in the first cut of this screen: the strip and the confirm
+   * sheet each had their own tick and this one did not, so the loudest element
+   * on the page was the only frozen one. Caught by a screenshot, not by a test —
+   * jsdom renders one frame and asserts on it, so a clock that never advances
+   * looks identical to a working one.
+   */
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setClockTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
   const [pendingAdjust, setPendingAdjust] = useState<{
     startedAt: string;
     endedAt: string | null;

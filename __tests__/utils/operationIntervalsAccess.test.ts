@@ -122,7 +122,7 @@ describe('closeOperationInterval', () => {
   it('sends both adjusted ends, and no reason', async () => {
     responses['close_operation_interval'] = { data: null, error: null };
 
-    await closeOperationInterval('iv1', {
+    await closeOperationInterval('iv1', 'completion-1', {
       adjustedStartedAt: '2026-08-16T08:55:00Z',
       adjustedEndedAt: '2026-08-16T10:40:00Z',
       note: '  waiting on material  ',
@@ -131,6 +131,9 @@ describe('closeOperationInterval', () => {
     expect(rpcCalls[0].fn).toBe('close_operation_interval');
     expect(rpcCalls[0].args).toMatchObject({
       p_interval_id: 'iv1',
+      // The link that lets the feed show a quantity and lets Undo retract the
+      // time along with the count.
+      p_completion_id: 'completion-1',
       p_adjusted_started_at: '2026-08-16T08:55:00Z',
       p_adjusted_ended_at: '2026-08-16T10:40:00Z',
     });

@@ -72,7 +72,11 @@ vi.mock('@/utils/imageCompression', () => ({
 }));
 
 vi.mock('@/utils/operationCompletionsAccess', () => ({
-  createOperationCompletion: vi.fn(async () => undefined),
+  // Returns { id } like the real thing: the page keeps that id so the interval
+  // can point at the completion that closed it. A mock resolving undefined was
+  // lying about the contract, and only stopped passing when the caller started
+  // using the return value.
+  createOperationCompletion: vi.fn(async () => ({ id: 'completion-1' })),
   getOperationCompletionSummaries: vi.fn(),
 }));
 
@@ -179,7 +183,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockDetail.mockResolvedValue(detail() as never);
   mockSummaries.mockResolvedValue(summary(0) as never);
-  mockCreate.mockResolvedValue(undefined as never);
+  mockCreate.mockResolvedValue({ id: 'completion-1' } as never);
   mockRevert.mockResolvedValue(undefined as never);
   mockAddNote.mockResolvedValue({ id: 'note1', media: [] } as never);
 });
@@ -317,7 +321,12 @@ describe('operation action page — completion (characterisation)', () => {
     // The funnel's entire job is separating "tried" from "succeeded". A failed
     // completion that still logged would make the number a lie.
     let release: () => void = () => {};
-    mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
+    // Resolves to { id }, like the real function — the page reads it to link the
+    // interval to its completion. A void promise here breaks the caller, not the
+    // ordering property this test is actually about.
+    mockCreate.mockReturnValue(
+      new Promise<{ id: string }>((r) => (release = () => r({ id: 'completion-1' }))) as never,
+    );
     renderPage();
     await screen.findByLabelText('Parts finished');
 
@@ -353,7 +362,12 @@ describe('operation action page — completion (characterisation)', () => {
     // work because an image failed to upload would be worse, not safer.
     const user = userEvent.setup();
     let release: () => void = () => {};
-    mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
+    // Resolves to { id }, like the real function — the page reads it to link the
+    // interval to its completion. A void promise here breaks the caller, not the
+    // ordering property this test is actually about.
+    mockCreate.mockReturnValue(
+      new Promise<{ id: string }>((r) => (release = () => r({ id: 'completion-1' }))) as never,
+    );
     renderPage();
     await screen.findByLabelText('Parts finished');
 

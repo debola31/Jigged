@@ -343,6 +343,24 @@ the times from the feed afterwards, which is the same correction path every othe
 accepted cost is that a deliberate lights-out run and a forgotten stop now look identical until
 someone says otherwise.
 
+**A `Finished` row says how many parts it produced**, resolved through
+`job_operation_intervals.completion_id` rather than stored, so it can never disagree with the
+completion itself. A row that says a step stopped but not what came off it withholds the half an
+operator scrolls back to check.
+
+**Undo retracts the time with the count — decided 2026-08-18.** Voiding a completion voids the
+intervals it closed, through a trigger on `job_operation_completions` rather than client code: it is
+atomic with the void, and `revertOperationCompletion` is called from both the operator undo and the
+office one, so neither caller has to know and a third cannot forget. Scoped by `completion_id`, so
+`switched` intervals — real work no completion ever claimed — survive.
+
+**The cost is accepted, not overlooked: real measured minutes are discarded because a COUNT was
+wrong.** An operator who types 10 instead of 12 loses the timing of work they genuinely did, and
+re-recording produces a fresh, shorter interval that understates it. The alternative — keeping the
+time and dropping the quantity — was rejected because a `Finished` row surviving its own completion
+claims production that was retracted, and once the row carries a quantity that is not clutter but a
+false statement.
+
 **The feed shows YOUR time entries and EVERYONE'S notes**, and the asymmetry is deliberate. A
 job-scoped feed naming when each person started would be a per-person time view available shop-wide
 — looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS

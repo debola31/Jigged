@@ -201,7 +201,7 @@ export default function OperatorOperationActionPage() {
   const {
     data: job,
     loading,
-    reload: loadJob,
+    refresh: loadJob,
   } = useLoad(
     () => getOperatorOperationDetail(jobOperationId, companyId),
     [jobOperationId, companyId],
@@ -288,6 +288,15 @@ export default function OperatorOperationActionPage() {
         ? 'complete'
         : 'none';
 
+  /**
+   * Post-write refetch that KEEPS THE SCREEN UP.
+   *
+   * Both loaders use `refresh`, not `reload`. `reload` re-enters the loading
+   * state, and this page early-returns a full-height spinner on `loading` — so
+   * every completion replaced the entire screen with a spinner and brought it
+   * back, which is indistinguishable from a page reload and happened on every
+   * single action.
+   */
   const reloadAll = async () => {
     await Promise.all([loadJob(), loadSummary()]);
   };
@@ -307,7 +316,10 @@ export default function OperatorOperationActionPage() {
     setActionLoading(true);
     setError(null);
     try {
-      await createOperationCompletion({
+      // The id is kept so the interval can point at the completion that closed
+      // it — that link is what lets the feed show how many parts a "Finished"
+      // row represents, and what lets Undo retract the time along with the count.
+      const { id: completionId } = await createOperationCompletion({
         companyId,
         jobOperationId,
         jobPartId,
@@ -334,7 +346,7 @@ export default function OperatorOperationActionPage() {
       // row failed, which is the trade this page already refused once.
       if (running) {
         try {
-          await closeInterval(running.id);
+          await closeInterval(running.id, completionId);
         } catch {
           // Deliberately swallowed at page level: "the completion worked, the
           // timer did not stop" is not something an operator can act on from
@@ -898,7 +910,15 @@ export default function OperatorOperationActionPage() {
                 sx={{
                   fontFamily: 'monospace',
                   fontWeight: 700,
-                  color: 'primary.main',
+                  // WHITE, AND FOR TWO REASONS. Contrast: #ffffff on the #111439
+                  // page is 17.75:1 where primary.main was 4.32:1 — AA-large
+                  // only, the weakest option in the palette, on a hero element
+                  // read at arm's length under shop lighting. And neutrality: a
+                  // colour with valence is the timer passing judgment. Green
+                  // reads "good", amber reads "caution", and both make the clock
+                  // an opinion about pace, which is the one thing this surface
+                  // must not be. Size, weight and monospace carry the prominence.
+                  color: 'text.primary',
                   // Tabular figures so the width does not jitter every second.
                   fontVariantNumeric: 'tabular-nums',
                   lineHeight: 1.1,

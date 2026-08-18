@@ -1094,6 +1094,7 @@ export type Database = {
           capture_source: string
           close_reason: string | null
           company_id: string
+          completion_id: string | null
           created_at: string
           effective_ended_at: string | null
           effective_started_at: string | null
@@ -1117,6 +1118,7 @@ export type Database = {
           capture_source?: string
           close_reason?: string | null
           company_id: string
+          completion_id?: string | null
           created_at?: string
           effective_ended_at?: string | null
           effective_started_at?: string | null
@@ -1140,6 +1142,7 @@ export type Database = {
           capture_source?: string
           close_reason?: string | null
           company_id?: string
+          completion_id?: string | null
           created_at?: string
           effective_ended_at?: string | null
           effective_started_at?: string | null
@@ -1168,6 +1171,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_completion_fk"
+            columns: ["completion_id"]
+            isOneToOne: false
+            referencedRelation: "job_operation_completions"
             referencedColumns: ["id"]
           },
           {
@@ -3756,6 +3766,7 @@ export type Database = {
         Args: {
           p_adjusted_ended_at?: string
           p_adjusted_started_at?: string
+          p_completion_id?: string
           p_interval_id: string
           p_note?: string
         }

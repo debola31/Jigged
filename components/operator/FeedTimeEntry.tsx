@@ -62,6 +62,11 @@ export default function FeedTimeEntry({
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
           {formatClockTime(at)}
           {kind === 'finish' && duration != null && ` · ${formatDuration(duration)}`}
+          {/* What the completion actually claimed. A "Finished" row without it
+              says a step stopped but not what came off it, which is the half an
+              operator is checking when they scroll back. */}
+          {kind === 'finish' && interval.quantity_good != null &&
+            ` · ${interval.quantity_good} ${interval.quantity_good === 1 ? 'part' : 'parts'}`}
           {wasAdjusted && ` · recorded ${formatClockTime(rawAt!)}`}
         </Typography>
       </Box>

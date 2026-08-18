@@ -38,7 +38,7 @@ import type {
  * the shape you wanted.
  */
 const INTERVAL_COLUMNS =
-  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note' as const;
+  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, job_operation_completions(quantity_good)' as const;
 
 /**
  * The same interval plus the job/step it belongs to.
@@ -49,7 +49,7 @@ const INTERVAL_COLUMNS =
  * which the interval row does not carry and the step route needs.
  */
 const INTERVAL_WITH_CONTEXT =
-  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, job_operations!inner(job_id, operation_name, sequence, jobs!inner(job_number)), job_parts!inner(parts(part_name))' as const;
+  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, job_operation_completions(quantity_good), job_operations!inner(job_id, operation_name, sequence, jobs!inner(job_number)), job_parts!inner(parts(part_name))' as const;
 
 /** Flatten the nested join rows into the shape the UI reads. */
 function withContext(row: Record<string, unknown>): OperationIntervalWithContext {
@@ -57,8 +57,10 @@ function withContext(row: Record<string, unknown>): OperationIntervalWithContext
     | { job_id: string; operation_name: string; sequence: number; jobs: { job_number: string } }
     | null;
   const part = row.job_parts as { parts: { part_name: string } | null } | null;
+  const completion = row.job_operation_completions as { quantity_good: number } | null;
   return {
     ...(row as unknown as OperationInterval),
+    quantity_good: completion ? Number(completion.quantity_good) : null,
     job_id: op?.job_id ?? '',
     operation_name: op?.operation_name ?? '',
     operation_sequence: op?.sequence ?? 0,
@@ -124,12 +126,14 @@ export async function startOperationInterval(jobOperationId: string): Promise<Ru
  */
 export async function closeOperationInterval(
   intervalId: string,
+  completionId: string | null = null,
   adjustment: IntervalAdjustment = {},
 ): Promise<void> {
   const supabase = getSupabase();
 
   const { error } = await supabase.rpc('close_operation_interval', {
     p_interval_id: intervalId,
+    p_completion_id: completionId ?? undefined,
     p_adjusted_started_at: adjustment.adjustedStartedAt ?? undefined,
     p_adjusted_ended_at: adjustment.adjustedEndedAt ?? undefined,
     p_note: adjustment.note ?? undefined,

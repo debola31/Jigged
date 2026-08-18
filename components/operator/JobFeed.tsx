@@ -158,6 +158,7 @@ export default function JobFeed({
     data: loadedNotesData,
     loading,
     reload: load,
+    refresh: refreshNotes,
   } = useLoad(() => getJobNotes(jobId, companyId), [jobId, companyId], {
     onError: (err) => {
       setError(err instanceof Error ? err.message : 'Could not load the feed.');
@@ -167,7 +168,7 @@ export default function JobFeed({
 
   // The caller's OWN recorded time on this job. Notes here belong to everyone;
   // time entries do not — see FeedTimeEntry for why that asymmetry is deliberate.
-  const { data: intervalsData, reload: reloadIntervals } = useLoad(
+  const { data: intervalsData, refresh: reloadIntervals } = useLoad(
     () => getMyIntervalsForJob(companyId, jobId),
     [companyId, jobId],
   );
@@ -250,11 +251,14 @@ export default function JobFeed({
     if (!refreshSignal) return;
     if (refreshSignal === lastRefresh.current) return;
     lastRefresh.current = refreshSignal;
-    load();
+    // `refresh`, not `load`: the parent bumps this right after a write, and
+    // blanking the feed to a spinner at the exact moment its new entry arrives
+    // is the worst possible time to do it.
+    refreshNotes();
     // Intervals too: the parent bumps this after starting, stopping or
     // completing, and those are feed entries now rather than just notes.
     reloadIntervals();
-  }, [refreshSignal, load, reloadIntervals]);
+  }, [refreshSignal, refreshNotes, reloadIntervals]);
 
   // Fetch signed URLs for any media we don't already have a URL for.
   useEffect(() => {

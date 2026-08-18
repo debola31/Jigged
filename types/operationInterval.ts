@@ -45,6 +45,14 @@ export interface OperationInterval {
   close_reason: IntervalCloseReason | null;
   capture_source: IntervalCaptureSource;
   note: string | null;
+  /**
+   * How many good pieces the completion that closed this interval recorded.
+   *
+   * Null on an interval the chain closed, or one still running — nothing was
+   * claimed, so there is nothing to show. Resolved through `completion_id`
+   * rather than stored, so it can never disagree with the completion itself.
+   */
+  quantity_good: number | null;
 }
 
 /**

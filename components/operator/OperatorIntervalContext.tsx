@@ -38,7 +38,7 @@ interface IntervalContextValue {
   /** The open interval on this operation, if the operator has one. */
   intervalFor: (jobOperationId: string) => OperationIntervalWithContext | null;
   start: (jobOperationId: string) => Promise<void>;
-  close: (intervalId: string, adjustment?: IntervalAdjustment) => Promise<void>;
+  close: (intervalId: string, completionId?: string | null, adjustment?: IntervalAdjustment) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -114,8 +114,12 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
   );
 
   const close = useCallback(
-    async (intervalId: string, adjustment: IntervalAdjustment = {}) => {
-      await closeOperationInterval(intervalId, adjustment);
+    async (
+      intervalId: string,
+      completionId: string | null = null,
+      adjustment: IntervalAdjustment = {},
+    ) => {
+      await closeOperationInterval(intervalId, completionId, adjustment);
       posthog.capture('time interval closed', {
         was_adjusted: Boolean(adjustment.adjustedStartedAt || adjustment.adjustedEndedAt),
       });

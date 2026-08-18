@@ -115,6 +115,17 @@ CREATE TABLE public.job_operation_intervals (
     -- shape there is nothing to express the disagreement in.
     capture_source text NOT NULL DEFAULT 'operator',
 
+    -- WHICH COMPLETION CLOSED THIS INTERVAL. Set by close_operation_interval;
+    -- NULL on an interval the chain closed ('switched') or one still running.
+    --
+    -- Two things need it. The feed's "Finished …" row shows the quantity that
+    -- was recorded, which is only knowable through this link. And voiding a
+    -- completion has to void the time it closed (see the trigger in section 5),
+    -- which needs to know WHICH intervals belong to it — a per-operation sweep
+    -- would also discard 'switched' intervals, and those are real work that no
+    -- completion ever claimed.
+    completion_id uuid,
+
     note text,
 
     -- Correction of last resort, mirroring job_operation_completions: void, never
@@ -168,6 +179,11 @@ CREATE TABLE public.job_operation_intervals (
         REFERENCES public.work_centers(id) ON DELETE RESTRICT,
     CONSTRAINT job_op_intervals_operator_fk FOREIGN KEY (operator_id)
         REFERENCES public.user_company_access(id) ON DELETE CASCADE,
+    -- SET NULL, not CASCADE: completions are voided rather than deleted, so this
+    -- only fires if one is ever hard-deleted — and losing the link should not
+    -- silently delete the record of time somebody worked.
+    CONSTRAINT job_op_intervals_completion_fk FOREIGN KEY (completion_id)
+        REFERENCES public.job_operation_completions(id) ON DELETE SET NULL,
     CONSTRAINT job_op_intervals_adjusted_by_fk FOREIGN KEY (adjusted_by)
         REFERENCES public.user_company_access(id) ON DELETE SET NULL,
     CONSTRAINT job_op_intervals_voided_by_fk FOREIGN KEY (voided_by)
@@ -414,6 +430,62 @@ CREATE TRIGGER job_op_intervals_updated_at
     BEFORE UPDATE ON public.job_operation_intervals
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+/**
+ * Voiding a completion voids the time it closed.
+ *
+ * DECIDED 2026-08-18: Undo means "that did not happen", so the interval goes
+ * with the completion rather than surviving as an orphan claiming work that was
+ * retracted. Without this, repeatedly recording and undoing left a growing stack
+ * of "Finished …" rows in the job feed — and once those rows carry the recorded
+ * QUANTITY, an orphan is not merely clutter, it is a false statement about
+ * production.
+ *
+ * The cost, accepted knowingly: real measured minutes are discarded because a
+ * COUNT was wrong. An operator who typed 10 instead of 12 loses the timing of
+ * work they genuinely did, and re-recording produces a fresh, shorter interval
+ * that understates it.
+ *
+ * A TRIGGER RATHER THAN CLIENT CODE, for two reasons. It is atomic with the void
+ * — there is no window where the completion is retracted and its time is not.
+ * And `revertOperationCompletion` is called from BOTH the operator undo and the
+ * office-side undo, so putting it here means neither caller has to know, and a
+ * third caller added later cannot forget.
+ *
+ * Scoped by completion_id, NOT by operation. A per-operation sweep would also
+ * void 'switched' intervals, which are real work that no completion ever claimed
+ * and that no undo is retracting.
+ */
+CREATE OR REPLACE FUNCTION public.void_intervals_with_completion()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $$
+BEGIN
+  UPDATE public.job_operation_intervals
+     SET voided_at = NEW.voided_at,
+         voided_by = NEW.voided_by
+   WHERE completion_id = NEW.id
+     AND voided_at IS NULL;
+  RETURN NULL;
+END;
+$$;
+
+COMMENT ON FUNCTION public.void_intervals_with_completion() IS
+  'Voids the time intervals a completion closed, when that completion is voided. Undo means "that did not happen", and an interval left behind would claim production that was retracted. Scoped by completion_id so ''switched'' intervals — real work no completion claimed — survive.';
+
+-- AFTER UPDATE OF voided_at, and only on the transition into voided. Completions
+-- are never un-voided, so there is no inverse to handle.
+CREATE TRIGGER job_operation_completions_void_intervals
+    AFTER UPDATE OF voided_at ON public.job_operation_completions
+    FOR EACH ROW
+    WHEN (OLD.voided_at IS NULL AND NEW.voided_at IS NOT NULL)
+    EXECUTE FUNCTION public.void_intervals_with_completion();
+
+REVOKE EXECUTE ON FUNCTION public.void_intervals_with_completion()
+  FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.void_intervals_with_completion() TO service_role;
+
 CREATE TRIGGER zz_job_op_intervals_restrict_update
     BEFORE UPDATE ON public.job_operation_intervals
     FOR EACH ROW EXECUTE FUNCTION public.job_op_intervals_restrict_update();
@@ -526,6 +598,7 @@ COMMENT ON FUNCTION public.start_operation_interval(uuid) IS
 -- and nothing to stop them.
 CREATE OR REPLACE FUNCTION public.close_operation_interval(
     p_interval_id uuid,
+    p_completion_id uuid DEFAULT NULL,
     p_adjusted_started_at timestamptz DEFAULT NULL,
     p_adjusted_ended_at timestamptz DEFAULT NULL,
     p_note text DEFAULT NULL
@@ -564,6 +637,7 @@ BEGIN
     UPDATE public.job_operation_intervals
        SET ended_at = now(),
            close_reason = 'completed',
+           completion_id = p_completion_id,
            adjusted_started_at = p_adjusted_started_at,
            adjusted_ended_at = p_adjusted_ended_at,
            note = NULLIF(btrim(COALESCE(p_note, '')), '')
@@ -571,7 +645,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text) IS
+COMMENT ON FUNCTION public.close_operation_interval(uuid, uuid, timestamptz, timestamptz, text) IS
   'Closes an interval as completed, with optional adjusted times and note. Asserts the caller OWNS the interval — unlike start_operation_interval, which crosses ownership by design — because with RLS bypassed an unchecked id parameter would let any member rewrite anyone''s recorded hours. Idempotent on an already-closed interval so a double-tap or a retry is not an error.';
 
 -- ── 6c. AGGREGATE READ: actual vs estimate, per operation ────────────────────
@@ -740,7 +814,7 @@ COMMENT ON FUNCTION public.get_operator_time_detail(uuid, uuid, text) IS
 -- (issue #640). Revoke first, then grant back exactly what is needed.
 REVOKE EXECUTE ON FUNCTION public.start_operation_interval(uuid)
   FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text)
+REVOKE EXECUTE ON FUNCTION public.close_operation_interval(uuid, uuid, timestamptz, timestamptz, text)
   FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.get_operation_actuals(uuid[])
   FROM PUBLIC, anon, authenticated;
@@ -753,7 +827,7 @@ REVOKE EXECUTE ON FUNCTION public.job_op_intervals_restrict_update()
 
 -- authenticated only. anon gets nothing: every one of these runs signed in.
 GRANT EXECUTE ON FUNCTION public.start_operation_interval(uuid) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.close_operation_interval(uuid, uuid, timestamptz, timestamptz, text) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_operation_actuals(uuid[]) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_open_intervals(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_operator_time_detail(uuid, uuid, text) TO authenticated, service_role;
@@ -934,8 +1008,10 @@ COMMENT ON TABLE public.operator_time_access_log IS
 --   DROP FUNCTION IF EXISTS public.get_operator_time_detail(uuid, uuid, text);
 --   DROP FUNCTION IF EXISTS public.get_open_intervals(uuid);
 --   DROP FUNCTION IF EXISTS public.get_operation_actuals(uuid[]);
---   DROP FUNCTION IF EXISTS public.close_operation_interval(uuid, timestamptz, timestamptz, text);
+--   DROP FUNCTION IF EXISTS public.close_operation_interval(uuid, uuid, timestamptz, timestamptz, text);
 --   DROP FUNCTION IF EXISTS public.start_operation_interval(uuid);
+--   DROP TRIGGER IF EXISTS job_operation_completions_void_intervals ON public.job_operation_completions;
+--   DROP FUNCTION IF EXISTS public.void_intervals_with_completion();
 --   DROP TABLE IF EXISTS public.job_operation_intervals;   -- takes its triggers
 --   DROP FUNCTION IF EXISTS public.job_op_intervals_restrict_update();
 --   DROP TABLE IF EXISTS public.operator_time_access_log;

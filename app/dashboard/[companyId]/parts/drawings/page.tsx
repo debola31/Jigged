@@ -56,6 +56,7 @@ export default function AddPartsFromDrawingsPage() {
   const [rows, setRows] = useState<BuiltRow[]>([]);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [defaultUnit, setDefaultUnit] = useState('ea');
+  const [defaultSource, setDefaultSource] = useState<'made' | 'bought'>('made');
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,53 @@ export default function AddPartsFromDrawingsPage() {
       excluded: [...next.materials, ...next.made].filter((c) => !c.include).map((c) => c.key),
     });
   }, []);
+
+  /**
+   * Read the title blocks closely.
+   *
+   * Takes its rows as an ARGUMENT rather than reading state: it runs immediately
+   * after `setRows`, and React has not re-rendered yet, so `rows` here would be
+   * the previous import's — or on the first run, empty.
+   *
+   * Reached two ways, both of them a press the user made: the button on step 1
+   * (which does this as part of reading the files) and the offer on step 2, which
+   * stands as the retry when this fails.
+   */
+  const runAssist = useCallback(async (target: BuiltRow[]) => {
+    setError(null);
+    setBusy('Reading the title blocks…');
+    try {
+      const outcome = await assistRows(companyId, target, (done, total) =>
+        setProgress({ done, total }),
+      );
+      setRows((current) =>
+        current.map((r) => {
+          const filled = outcome.filled.get(r.stem);
+          return filled ? { ...r, fields: { ...r.fields, ...filled } } : r;
+        }),
+      );
+      setAssisted(true);
+      // `dropped_count` is the fidelity check firing. It has never fired in
+      // measurement, so a non-zero here is the signal that something changed.
+      posthog.capture('drawing title blocks read', {
+        asked_count: outcome.askedAbout,
+        filled_count: outcome.filled.size,
+        skipped_count: outcome.skipped,
+        failed_count: outcome.failed,
+        dropped_count: outcome.dropped.length,
+      });
+      if (outcome.failed > 0) {
+        setError(
+          `${outcome.filled.size} of ${outcome.askedAbout} drawings filled in. ${outcome.failed} could not be read — the rest are unaffected.`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not read the title blocks.');
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  }, [companyId]);
 
   /**
    * Read the dropped files, then resolve identity in ONE batched pass. Per-row
@@ -125,7 +173,11 @@ export default function AddPartsFromDrawingsPage() {
             };
           }
           return { ...r, identity };
-        });
+        }).map((r) => ({
+          // Answered once on the previous step for the whole package.
+          ...r,
+          edits: { ...r.edits, source: defaultSource },
+        }));
         setRows(withIdentity);
 
         // Shape, never content: how many files became how many parts, which
@@ -140,6 +192,20 @@ export default function AddPartsFromDrawingsPage() {
           has_customer: !!customerId,
         });
         setStep(1);
+
+        /**
+         * Then read the drawings closely, as part of the SAME press.
+         *
+         * This does not break the no-AI-on-load rule: the rule is about lifecycle
+         * hooks — mount, effect, poll — and this is a button the user pressed with
+         * files they chose. What it is not is a second button asking permission
+         * for something they already asked for.
+         *
+         * It runs AFTER the rows are on screen, so the deterministic result is
+         * never held hostage to it, and a failure leaves the offer standing rather
+         * than losing the import.
+         */
+        await runAssist(withIdentity);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not read those files.');
       } finally {
@@ -147,45 +213,9 @@ export default function AddPartsFromDrawingsPage() {
         setProgress(null);
       }
     },
-    [companyId, customerId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [companyId, customerId, defaultSource],
   );
-
-  /** Explicit user action, never a lifecycle hook — this is the one path that spends. */
-  const handleAssist = useCallback(async () => {
-    setError(null);
-    setBusy('Reading the title blocks…');
-    try {
-      const outcome = await assistRows(companyId, rows, (done, total) =>
-        setProgress({ done, total }),
-      );
-      setRows((current) =>
-        current.map((r) => {
-          const filled = outcome.filled.get(r.stem);
-          return filled ? { ...r, fields: { ...r.fields, ...filled } } : r;
-        }),
-      );
-      setAssisted(true);
-      // `dropped_count` is the fidelity check firing. It has never fired in
-      // measurement, so a non-zero here is the signal that something changed.
-      posthog.capture('drawing title blocks read', {
-        asked_count: outcome.askedAbout,
-        filled_count: outcome.filled.size,
-        skipped_count: outcome.skipped,
-        failed_count: outcome.failed,
-        dropped_count: outcome.dropped.length,
-      });
-      if (outcome.failed > 0) {
-        setError(
-          `${outcome.filled.size} of ${outcome.askedAbout} drawings filled in. ${outcome.failed} could not be read — the rest are unaffected.`,
-        );
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not read the title blocks.');
-    } finally {
-      setBusy(null);
-      setProgress(null);
-    }
-  }, [companyId, rows]);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -302,6 +332,8 @@ export default function AddPartsFromDrawingsPage() {
           onCustomerChange={setCustomerId}
           defaultUnit={defaultUnit}
           onDefaultUnitChange={setDefaultUnit}
+          defaultSource={defaultSource}
+          onDefaultSourceChange={setDefaultSource}
           onFiles={handleFiles}
           disabled={!!busy}
         />
@@ -315,7 +347,7 @@ export default function AddPartsFromDrawingsPage() {
           onBack={() => setStep(0)}
           onCreate={() => setStep(2)}
           creating={!!busy}
-          onAssist={handleAssist}
+          onAssist={() => void runAssist(rows)}
           assisted={assisted}
           customerId={customerId}
         />

@@ -17,6 +17,8 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 
@@ -26,6 +28,9 @@ import { getAllCustomers } from '@/utils/customerAccess';
 import type { CustomerWithRelations } from '@/types/customer';
 
 interface Props {
+  /** Made or bought, for the whole package — see the block that renders it. */
+  defaultSource: 'made' | 'bought';
+  onDefaultSourceChange: (next: 'made' | 'bought') => void;
   companyId: string;
   customerId: string | null;
   onCustomerChange: (id: string | null) => void;
@@ -38,6 +43,8 @@ interface Props {
 export default function DrawingDropStep({
   companyId,
   customerId,
+  defaultSource,
+  onDefaultSourceChange,
   onCustomerChange,
   defaultUnit,
   onDefaultUnitChange,
@@ -97,6 +104,30 @@ export default function DrawingDropStep({
             <Typography variant="caption" color="text.secondary">
               Optional, but it lets us keep their part numbers straight from another
               customer&apos;s.
+            </Typography>
+          </Box>
+          {/*
+            One answer for the package, not a column in the grid.
+            A shop importing a folder of prints is importing parts it MAKES —
+            bought stock arrives as a different job, and a per-row toggle on 31
+            identical answers is 31 chances to mis-click for no information gained.
+          */}
+          <Box sx={{ minWidth: 200 }}>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Are these made or bought?
+            </Typography>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={defaultSource}
+              onChange={(_, next) => next && onDefaultSourceChange(next)}
+              sx={{ mt: 0.5 }}
+            >
+              <ToggleButton value="made">We make them</ToggleButton>
+              <ToggleButton value="bought">We buy them</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Import the other kind separately.
             </Typography>
           </Box>
           <Box sx={{ minWidth: 200 }}>

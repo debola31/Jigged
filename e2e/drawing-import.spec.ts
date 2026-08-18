@@ -86,17 +86,17 @@ test.describe('Add parts from drawings', () => {
     // and that column means "act on this".
     await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
 
-    // ── Step 3b: the OPTIONAL AI pass ──
-    // A button, never a mount effect. Anthropic is mocked (see the file header), so
-    // this exercises the real route, gates and fidelity check for no credits. The
-    // mock echoes a material back OUT OF THE STRINGS IT WAS SENT, because the route
-    // drops anything that was not on the drawing.
+    // ── Step 3b: the AI pass, which has already run ──
+    // It is chained to the "Read the files" press rather than being a second
+    // button — the no-AI-on-load rule is about lifecycle hooks, and that press is
+    // a user action. Anthropic is mocked (see the file header), so this exercises
+    // the real route, gates and fidelity check for no credits, and the mock echoes
+    // a material back OUT OF THE STRINGS IT WAS SENT because the route drops
+    // anything that was not on the drawing.
+    //
+    // The offer only remains as a RETRY, so its absence is the success condition.
     const assist = page.getByRole('button', { name: /Read the title blocks/i });
-    if (await assist.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await assist.click();
-      // The offer disappears once it has run, whatever it found.
-      await expect(assist).toBeHidden({ timeout: 120_000 });
-    }
+    await expect(assist).toBeHidden({ timeout: 120_000 });
 
     // ── Step 4: how they are made ──
     // The step that makes the whole flow worth having. Without a priced operation

@@ -170,7 +170,6 @@ export default function DrawingReviewStep({
                       <TableCell>Their number</TableCell>
                     </Tooltip>
                   )}
-                  <TableCell>Make or buy</TableCell>
                   <TableCell>Files</TableCell>
                   <TableCell>Components</TableCell>
                   <TableCell>Needs a look</TableCell>
@@ -226,17 +225,6 @@ export default function DrawingReviewStep({
                           />
                         </TableCell>
                       )}
-                      <TableCell>
-                        <ToggleButtonGroup
-                          size="small"
-                          exclusive
-                          value={valueOf(row, 'source') || 'made'}
-                          onChange={(_, next) => next && edit(row.stem, 'source', next)}
-                        >
-                          <ToggleButton value="made">Make</ToggleButton>
-                          <ToggleButton value="bought">Buy</ToggleButton>
-                        </ToggleButtonGroup>
-                      </TableCell>
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 0.5 }}>
                           {row.group.files.map((f) => (

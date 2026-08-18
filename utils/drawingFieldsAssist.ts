@@ -48,7 +48,15 @@ export function needsAssist(row: BuiltRow): boolean {
  * One request per drawing. That is deliberate: a package-wide request would be a
  * single point of failure over 31 sheets and would push the payload toward
  * Vercel's body ceiling, while a per-sheet request fails only its own row.
+ *
+ * They go out CONCURRENTLY. One at a time meant 31 sequential round trips of a
+ * couple of seconds each — a minute and a half of watching a counter tick, for
+ * work that has no ordering between sheets. A fixed pool keeps that bounded well
+ * under the route's own 200-per-10-minutes limiter, which a package of this size
+ * never approaches.
  */
+const ASSIST_CONCURRENCY = 6;
+
 export async function assistRows(
   companyId: string,
   rows: BuiltRow[],
@@ -74,7 +82,10 @@ export async function assistRows(
     throw new Error('Your session expired. Sign in again and retry.');
   }
 
-  for (const [index, row] of candidates.entries()) {
+  let done = 0;
+  let cursor = 0;
+
+  const readOne = async (row: BuiltRow) => {
     outcome.askedAbout += 1;
     try {
       const response = await fetch(`${API_BASE_URL}/api/drawings/fields`, {
@@ -116,8 +127,21 @@ export async function assistRows(
       // One drawing failing must not abandon the other thirty.
       outcome.failed += 1;
     }
-    onProgress?.(index + 1, candidates.length);
-  }
+    done += 1;
+    onProgress?.(done, candidates.length);
+  };
+
+  // Workers pull from a shared cursor, so a slow sheet holds up only itself.
+  await Promise.all(
+    Array.from({ length: Math.min(ASSIST_CONCURRENCY, candidates.length) }, async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= candidates.length) return;
+        await readOne(candidates[index]);
+      }
+    }),
+  );
 
   return outcome;
 }

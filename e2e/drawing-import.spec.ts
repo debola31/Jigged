@@ -102,7 +102,7 @@ test.describe('Add parts from drawings', () => {
     // The step that makes the whole flow worth having. Without a priced operation
     // a made part has no cost basis, so every part lands incomplete and nothing
     // can be quoted.
-    await page.getByRole('button', { name: /Create 3 parts/i }).click();
+    await page.getByRole('button', { name: /Next — how they are made/i }).click();
     await expect(page.getByText(/How are these parts made/i)).toBeVisible();
 
     await page.getByRole('button', { name: /Add Operation/i }).click();
@@ -178,7 +178,7 @@ test.describe('Add parts from drawings', () => {
 
     // Nine cut-list rows on this sheet.
     await expect(page.getByTitle(/lists 9 components/i)).toBeVisible({ timeout: 60_000 });
-    await page.getByRole('button', { name: /Create 1 part/i }).click();
+    await page.getByRole('button', { name: /Next — how they are made/i }).click();
 
     // Twelve rows collapse to the distinct tube sizes, pooled across the drawing.
     const materials = page.getByTestId('material-row');

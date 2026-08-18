@@ -58,6 +58,9 @@ export default function AddPartsFromDrawingsPage() {
   const [defaultUnit, setDefaultUnit] = useState('ea');
   const [defaultSource, setDefaultSource] = useState<'made' | 'bought'>('made');
   const [busy, setBusy] = useState<string | null>(null);
+  // Distinct from `busy`: only the final write. The primary button reads from this,
+  // and while the title blocks were being read it used to say "Creating…".
+  const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
@@ -220,6 +223,7 @@ export default function AddPartsFromDrawingsPage() {
   const handleCreate = useCallback(async () => {
     setError(null);
     setBusy('Creating parts…');
+    setCreating(true);
     setStep(3);
     try {
       // One routing, applied to the parts the user ticked.
@@ -251,6 +255,7 @@ export default function AddPartsFromDrawingsPage() {
       setError(err instanceof Error ? err.message : 'Could not create these parts.');
     } finally {
       setBusy(null);
+      setCreating(false);
       setProgress(null);
     }
   }, [rows, companyId, customerId, defaultUnit, assisted, work, components]);
@@ -342,12 +347,12 @@ export default function AddPartsFromDrawingsPage() {
         <DrawingReviewStep
           rows={rows}
           onRowsChange={setRows}
-          includedCount={includedCount}
           onBack={() => setStep(0)}
           onCreate={() => setStep(2)}
-          creating={!!busy}
+          creating={creating}
           onAssist={() => void runAssist(rows)}
           assisted={assisted}
+          reading={!!busy}
           customerId={customerId}
         />
       )}
@@ -360,7 +365,7 @@ export default function AddPartsFromDrawingsPage() {
           onPlanChange={setWork}
           onBack={() => setStep(1)}
           onCreate={handleCreate}
-          creating={!!busy}
+          creating={creating}
           includedCount={includedCount}
           components={components}
           onComponentsChange={handleComponentsChange}

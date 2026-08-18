@@ -40,12 +40,13 @@ import { valueOf, type DrawingRowValues } from '@/types/drawingImport';
 interface Props {
   rows: BuiltRow[];
   onRowsChange: (rows: BuiltRow[]) => void;
-  includedCount: number;
   onBack: () => void;
   onCreate: () => void;
   creating: boolean;
   onAssist: () => void;
   assisted: boolean;
+  /** True while the title blocks are being read. Not the same as `creating`. */
+  reading: boolean;
   /** Null when the user did not say whose drawings these are. */
   customerId: string | null;
 }
@@ -69,12 +70,12 @@ function attention(row: BuiltRow): string | null {
 export default function DrawingReviewStep({
   rows,
   onRowsChange,
-  includedCount,
   onBack,
   onCreate,
   creating,
   onAssist,
   assisted,
+  reading,
   customerId,
 }: Props) {
   const update = (stem: string, change: (row: BuiltRow) => BuiltRow) =>
@@ -102,7 +103,7 @@ export default function DrawingReviewStep({
         </Alert>
       )}
 
-      {assistCandidates > 0 && !assisted && (
+      {assistCandidates > 0 && !assisted && !reading && (
         <Alert
           severity="info"
           sx={{ mb: 2 }}
@@ -247,9 +248,14 @@ export default function DrawingReviewStep({
             </Typography>
           )}
         </Box>
-        {/* Never disabled while there is something to do — see interaction-standards §4. */}
+        {/*
+          This advances to the work step — it does not create anything, and saying
+          "Create 31 parts" here promised something the next screen then asked more
+          questions about. Never disabled: reading title blocks in the background is
+          not a reason to trap someone on this page.
+        */}
         <Button variant="contained" size="large" onClick={onCreate} disabled={creating}>
-          {creating ? 'Creating…' : `Create ${includedCount} part${includedCount === 1 ? '' : 's'}`}
+          Next — how they are made
         </Button>
       </Box>
     </>

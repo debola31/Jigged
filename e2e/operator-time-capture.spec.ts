@@ -249,10 +249,25 @@ test.describe('operator time capture', () => {
     await expect(feedFinished(page)).toBeVisible({ timeout: 30_000 });
     await expect(feedStarted(page)).toBeVisible();
 
+    // AND IT SAYS WHAT CAME OFF THE STEP. A "Finished" row carrying only a time
+    // says a step stopped but not what it produced, which is the half an
+    // operator is checking when they scroll back. The `·` anchors this to the
+    // feed caption rather than any other "1 part" on the page.
+    await expect(page.getByText(/·\s*1 part\b/)).toBeVisible({ timeout: 30_000 });
+
     // Undo the completion so the shared job is left as this file found it —
     // the completion spec asserts exact quantities against the same seed.
     await page.getByRole('button', { name: /undo all/i }).click();
     await expect(page.getByText(/1 of 5 good so far/)).toBeHidden({ timeout: 30_000 });
+
+    // AND THE TIME GOES WITH THE COUNT. Undo means "that did not happen", so the
+    // pair of feed rows is retracted too rather than left behind claiming work
+    // that was withdrawn. Asserted explicitly because otherwise this path is
+    // covered only incidentally — by teardown timing out — which is how the
+    // voided_by FK violation reached a preview: the suite went red without ever
+    // saying what had broken.
+    await expect(feedFinished(page)).toBeHidden({ timeout: 30_000 });
+    await expect(feedStarted(page)).toBeHidden();
   });
 
   test('the Me tab journal carries no aggregate figure', async ({ page }) => {

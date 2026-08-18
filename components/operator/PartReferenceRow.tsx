@@ -99,9 +99,13 @@ export default function PartReferenceRow({
           own label needs — past that the row wraps instead of truncating. */}
       {leading && <Box sx={{ flex: '1 1 190px', minWidth: 190 }}>{leading}</Box>}
 
-      {/* Both outlined so they read as one family (per the design system —
-          grouped actions share a variant). Files leads its pair via bolder weight
-          + a count, not by being the only one with a border. */}
+      {/* WRAPS AS A PAIR. Without this Box the two buttons are independent flex
+          items, so a narrow screen breaks between them and strands Playbook
+          alone on its own line — they read as one family, so they should move as
+          one. Both outlined for the same reason (per the design system, grouped
+          actions share a variant); Files leads via bolder weight and a count,
+          not by being the only one with a border. */}
+      <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
       <Button
         variant="outlined"
         startIcon={<FolderOpenIcon />}
@@ -123,6 +127,7 @@ export default function PartReferenceRow({
       >
         {hasNotes ? `Playbook · ${noteCount}` : 'Playbook'}
       </Button>
+      </Box>
 
       {filesOpen && (
         <PartFilesSheet

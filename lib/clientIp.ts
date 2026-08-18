@@ -3,34 +3,48 @@ import { isIP } from 'net';
 /**
  * Determining the client address behind Vercel's proxy, for the clickwrap record.
  *
- * THE NAIVE VERSION IS WRONG. A client can put anything in `X-Forwarded-For`,
- * and whether the LEFTMOST entry is the true client depends entirely on whether
- * the terminating proxy REPLACES the header (leftmost correct) or APPENDS to it
- * (leftmost is whatever the attacker typed). Guidance on the internet assumes
- * replace; a record that a court might read should not rest on that assumption.
+ * WHAT VERCEL ACTUALLY DOES, from its request-header documentation -- the
+ * question this function was designed around, now settled rather than assumed:
  *
- * So, in order:
+ *   x-forwarded-for        "we currently OVERWRITE the X-Forwarded-For header
+ *                           and do not forward external IPs. This restriction is
+ *                           in place to prevent IP spoofing."
+ *   x-real-ip              "identical to the x-forwarded-for header."
+ *   x-vercel-forwarded-for "identical to x-forwarded-for. HOWEVER,
+ *                           x-forwarded-for could be overwritten if you're using
+ *                           a proxy on top of Vercel."
  *
- *   1. Prefer `x-real-ip`. Vercel sets it to the address it determined, and it
- *      is single-valued, so append-vs-replace never arises.
- *   2. Fall back to `x-forwarded-for`, taking the entry TRUSTED_PROXY_HOPS from
- *      the RIGHT. Under replace there is one entry and the choice is free; under
- *      append the rightmost entries are the proxies' and the leftmost is the only
- *      one a client controls. Rightmost is correct-or-equal under both.
- *   3. Otherwise `null`, with source `unavailable`.
+ * So a caller CANNOT spoof their address here: Vercel replaces the header rather
+ * than appending to it, and honouring a caller's own X-Forwarded-For is a
+ * purchased Enterprise "Trusted Proxy" feature that is not enabled on this
+ * project. The leftmost-vs-rightmost question that shapes this code on other
+ * platforms is therefore moot today -- there is exactly one entry.
  *
- * RESIDUAL EXPOSURE, NAMED RATHER THAN HIDDEN: if `x-real-ip` is ever absent AND
- * a second trusted proxy is introduced without raising TRUSTED_PROXY_HOPS, this
- * records an internal hop. That is wrong, but it is not FORGEABLE -- which is
- * the failure direction to prefer in a legal record. The opposite mistake hands
- * an attacker the ability to write their own address into evidence.
+ * Preference order, most trustworthy first:
+ *
+ *   1. `x-vercel-forwarded-for` -- the only one of the three a proxy placed IN
+ *      FRONT of Vercel cannot overwrite. Nothing sits in front today; this is
+ *      cheap insurance for the day a CDN or WAF does, because by then these rows
+ *      will be years old and nobody will revisit this file.
+ *   2. `x-real-ip` -- Vercel's own value, single-valued.
+ *   3. `x-forwarded-for`, taking the entry TRUSTED_PROXY_HOPS from the RIGHT.
+ *      Moot under replace; correct-or-equal if that ever changes.
+ *   4. Otherwise `null`, with source `unavailable`.
+ *
+ * Recording WHICH header answered is the point of `ip_source`: it is what lets a
+ * reader years from now tell a platform-observed address from a proxy-reported
+ * one, instead of having to trust that this comment was still true.
  *
  * NEVER A SENTINEL. When the address genuinely cannot be determined the answer
  * is null. `0.0.0.0` or `127.0.0.1` would be a fabricated fact inside a legal
  * record -- the silent-fallback failure mode where it is least survivable.
  */
 
-export type IpSource = 'x-real-ip' | 'x-forwarded-for' | 'unavailable';
+export type IpSource =
+  | 'x-vercel-forwarded-for'
+  | 'x-real-ip'
+  | 'x-forwarded-for'
+  | 'unavailable';
 
 export interface ResolvedIp {
   ip: string | null;
@@ -76,6 +90,12 @@ function firstValid(values: string[]): string | null {
 }
 
 export function resolveClientIp(headers: Headers): ResolvedIp {
+  const vercelIp = headers.get('x-vercel-forwarded-for');
+  if (vercelIp && vercelIp.length <= MAX_HEADER_LENGTH) {
+    const candidate = stripPort((vercelIp.split(',')[0] ?? '').trim());
+    if (isIP(candidate)) return { ip: candidate, source: 'x-vercel-forwarded-for' };
+  }
+
   const realIp = headers.get('x-real-ip');
   if (realIp && realIp.length <= MAX_HEADER_LENGTH) {
     const candidate = stripPort(realIp);

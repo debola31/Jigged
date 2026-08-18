@@ -120,11 +120,27 @@ versions it believes it displayed. **There is no parameter for version, hash, IP
 user agent or timestamp** — the strongest form of "do not trust a client-supplied
 version" is to have nowhere to put one.
 
-- **IP** comes from `x-real-ip`, else the `X-Forwarded-For` entry counted from
-  the **right**. Leftmost is correct only if the terminating proxy *replaces* the
-  header; if it appends, leftmost is whatever the caller typed. Absent headers
-  store `NULL` with `ip_source = 'unavailable'` — **never a sentinel**, because
-  `0.0.0.0` would be a fabricated fact inside a legal record.
+- **IP** is taken from `x-vercel-forwarded-for`, then `x-real-ip`, then
+  `x-forwarded-for` (rightmost entry). Absent headers store `NULL` with
+  `ip_source = 'unavailable'` — **never a sentinel**, because `0.0.0.0` would be
+  a fabricated fact inside a legal record.
+
+  > **Measured on the preview, 2026-08-18, and settled by Vercel's request-header
+  > docs.** Vercel *"currently **overwrite** the `X-Forwarded-For` header and do
+  > not forward external IPs… to prevent IP spoofing"*; `x-real-ip` is
+  > *"identical to the `x-forwarded-for` header"*. **A caller cannot spoof their
+  > address**: the header is replaced, not appended, and honouring a caller's own
+  > `X-Forwarded-For` is a purchased Enterprise "Trusted Proxy" feature that is
+  > not enabled here. The leftmost-vs-rightmost question that shapes this code on
+  > other platforms is moot — there is exactly one entry.
+  >
+  > `x-vercel-forwarded-for` is preferred anyway, because it is the only one of
+  > the three that *"could **not** be overwritten if you're using a proxy on top
+  > of Vercel"*. Nothing sits in front of Vercel today; that ordering is cheap
+  > insurance for the day a CDN or WAF does, by which point these rows will be
+  > years old. `ip_source` records which header answered, so a reader can tell a
+  > platform-observed address from a proxy-reported one without trusting this
+  > paragraph.
 - **A stale tab gets 409**, never a silent upgrade. Recording a tick against text
   the user never saw is the failure this whole feature exists to prevent.
 - **Same-origin is asserted.** There is no `middleware.ts` and Next's

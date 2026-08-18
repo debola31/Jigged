@@ -24,6 +24,29 @@ describe('clientIp — stripPort', () => {
 });
 
 describe('clientIp — source preference', () => {
+  /**
+   * x-vercel-forwarded-for wins because it is the only one of the three that a
+   * proxy placed IN FRONT of Vercel cannot overwrite. Vercel's docs: the other
+   * two "could be overwritten if you're using a proxy on top of Vercel".
+   */
+  it('prefers x-vercel-forwarded-for over everything else', () => {
+    const r = resolveClientIp(
+      h({
+        'x-vercel-forwarded-for': '198.51.100.9',
+        'x-real-ip': '203.0.113.7',
+        'x-forwarded-for': '10.9.9.9',
+      }),
+    );
+    expect(r).toEqual({ ip: '198.51.100.9', source: 'x-vercel-forwarded-for' });
+  });
+
+  it('falls through when x-vercel-forwarded-for is absent or garbage', () => {
+    expect(resolveClientIp(h({ 'x-real-ip': '203.0.113.7' })).source).toBe('x-real-ip');
+    expect(
+      resolveClientIp(h({ 'x-vercel-forwarded-for': 'nope', 'x-real-ip': '203.0.113.7' })).source,
+    ).toBe('x-real-ip');
+  });
+
   it('prefers x-real-ip', () => {
     expect(resolveClientIp(h({ 'x-real-ip': '203.0.113.7' }))).toEqual({
       ip: '203.0.113.7',

@@ -72,7 +72,11 @@ vi.mock('@/utils/imageCompression', () => ({
 }));
 
 vi.mock('@/utils/operationCompletionsAccess', () => ({
-  createOperationCompletion: vi.fn(async () => undefined),
+  // Returns { id } like the real thing: the page keeps that id so the interval
+  // can point at the completion that closed it. A mock resolving undefined was
+  // lying about the contract, and only stopped passing when the caller started
+  // using the return value.
+  createOperationCompletion: vi.fn(async () => ({ id: 'completion-1' })),
   getOperationCompletionSummaries: vi.fn(),
 }));
 
@@ -166,13 +170,20 @@ function renderPage() {
   );
 }
 
-const recordButton = () => screen.getByRole('button', { name: /record completion/i });
+/**
+ * The untimed completion path — see the same note in e2e/operator-completion.
+ * `RECORD <n> FINISHED` requires a running interval now that starting is
+ * mandatory on the shop floor; this file is about completion mechanics, not
+ * time, so it takes the escape hatch that records the identical event with no
+ * interval attached.
+ */
+const recordButton = () => screen.getByRole('button', { name: /complete without timing/i });
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockDetail.mockResolvedValue(detail() as never);
   mockSummaries.mockResolvedValue(summary(0) as never);
-  mockCreate.mockResolvedValue(undefined as never);
+  mockCreate.mockResolvedValue({ id: 'completion-1' } as never);
   mockRevert.mockResolvedValue(undefined as never);
   mockAddNote.mockResolvedValue({ id: 'note1', media: [] } as never);
 });
@@ -220,18 +231,26 @@ describe('operation action page — completion (characterisation)', () => {
     );
   });
 
-  it('cannot record zero', async () => {
-    // The floor is unchanged: no zero-quantity completion. What changed is the
-    // button's label when the quantity is empty — with nothing to record and
-    // nothing typed there is no action to offer, so it is disabled either way.
+  it('offers no way to record zero', async () => {
+    // The floor is unchanged — no zero-quantity completion — but the shape of
+    // "no" changed with the timer. This used to assert a DISABLED save button,
+    // because completing was the only thing this screen could do and an empty
+    // quantity left nothing to offer. Starting needs no quantity, so with the
+    // field cleared there is now a real action available and the primary is
+    // START. What must stay true is that NEITHER completion path is reachable.
     const user = userEvent.setup();
     renderPage();
     const field = await screen.findByLabelText('Parts finished');
 
     await user.clear(field);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /save note/i })).toBeDisabled());
-    expect(screen.queryByRole('button', { name: /record completion/i })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /start this step/i })).toBeEnabled(),
+    );
+    expect(screen.queryByRole('button', { name: /^record /i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /complete without timing/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('saves a note alone when nothing was finished', async () => {
@@ -302,7 +321,12 @@ describe('operation action page — completion (characterisation)', () => {
     // The funnel's entire job is separating "tried" from "succeeded". A failed
     // completion that still logged would make the number a lie.
     let release: () => void = () => {};
-    mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
+    // Resolves to { id }, like the real function — the page reads it to link the
+    // interval to its completion. A void promise here breaks the caller, not the
+    // ordering property this test is actually about.
+    mockCreate.mockReturnValue(
+      new Promise<{ id: string }>((r) => (release = () => r({ id: 'completion-1' }))) as never,
+    );
     renderPage();
     await screen.findByLabelText('Parts finished');
 
@@ -338,7 +362,12 @@ describe('operation action page — completion (characterisation)', () => {
     // work because an image failed to upload would be worse, not safer.
     const user = userEvent.setup();
     let release: () => void = () => {};
-    mockCreate.mockReturnValue(new Promise<void>((r) => (release = () => r())) as never);
+    // Resolves to { id }, like the real function — the page reads it to link the
+    // interval to its completion. A void promise here breaks the caller, not the
+    // ordering property this test is actually about.
+    mockCreate.mockReturnValue(
+      new Promise<{ id: string }>((r) => (release = () => r({ id: 'completion-1' }))) as never,
+    );
     renderPage();
     await screen.findByLabelText('Parts finished');
 
@@ -463,6 +492,28 @@ describe('operation action page — completion (characterisation)', () => {
     await waitFor(() => expect(mockRevert).toHaveBeenCalledWith('op1'));
     expect(mockEvent).not.toHaveBeenCalledWith('co1', 'completion_recorded', expect.anything());
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('tells the job feed to reload after an undo', async () => {
+    // Undo voids the completion AND, through the cascade trigger, the time
+    // intervals it closed — so the Started/Finished pair is gone from the
+    // database. The feed loads its own data, so without this signal it keeps
+    // rendering rows that no longer exist and Undo reads as having retracted
+    // the count but kept the time. Recording already bumps it; undoing did not.
+    mockSummaries.mockResolvedValue(summary(4) as never);
+    renderPage();
+
+    const before = Number(
+      (await screen.findByTestId('job-feed')).getAttribute('data-refresh-signal'),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /undo all/i }));
+
+    await waitFor(() =>
+      expect(
+        Number(screen.getByTestId('job-feed').getAttribute('data-refresh-signal')),
+      ).toBeGreaterThan(before),
+    );
   });
 
   it('surfaces a failed undo without pretending it worked', async () => {

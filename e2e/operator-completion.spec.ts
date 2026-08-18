@@ -66,7 +66,21 @@ async function openTravelerWithStation(page: Page, jobNumber: string): Promise<v
 }
 
 const qtyField = (page: Page) => page.getByLabel('Parts finished');
-const recordButton = (page: Page) => page.getByRole('button', { name: /record completion/i });
+/**
+ * The untimed completion path, and that choice is deliberate.
+ *
+ * `RECORD <n> FINISHED` now requires a running interval — starting is mandatory
+ * on the shop floor, so the primary button is START until one is open. What THIS
+ * file tests is completion mechanics: default quantity, partials,
+ * over-completion, undo, and the note riding along. None of that is about time,
+ * and routing it through the timer would make it fail for reasons that have
+ * nothing to do with quantities. `Complete without timing` records exactly the
+ * same completion event with no interval attached.
+ *
+ * The timed path is covered end to end in e2e/operator-time-capture.spec.ts.
+ */
+const recordButton = (page: Page) =>
+  page.getByRole('button', { name: /complete without timing/i });
 const undoButton = (page: Page) => page.getByRole('button', { name: /undo all/i });
 const saveNoteButton = (page: Page) => page.getByRole('button', { name: /save note/i });
 const completeBanner = (page: Page) =>
@@ -160,19 +174,27 @@ test.describe('operator completion', () => {
   });
 
   test('will not record nothing', async ({ page }) => {
-    // The floor is unchanged: no zero-quantity completion. What changed is the
-    // button's LABEL when the quantity is empty — with nothing to record there is
-    // no completion to offer, so it presents as SAVE NOTE and is disabled until
-    // something is typed. Asserting the old label here is what made this spec
-    // fail in CI while the component test (already updated) passed.
+    // The floor is unchanged — no zero-quantity completion — but the shape of
+    // "no" moved twice, and both revisions are worth recording because each one
+    // broke this test for a different reason.
+    //
+    // It first asserted a DISABLED RECORD button. Then the label became SAVE
+    // NOTE when the quantity emptied, so it asserted a disabled SAVE NOTE. Now
+    // starting is mandatory and needs no quantity — so with the field cleared
+    // there IS a real action available and the primary is START. Nothing is
+    // disabled at all.
+    //
+    // What has to stay true through all three is the only thing worth asserting:
+    // NEITHER completion path is reachable with nothing to record.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openStep(page);
 
     await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
     await qtyField(page).fill('0');
 
+    await expect(page.getByRole('button', { name: /start this step/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: /^record \d+ finished/i })).toHaveCount(0);
     await expect(recordButton(page)).toHaveCount(0);
-    await expect(saveNoteButton(page)).toBeDisabled();
   });
 
   test('saves a note alone when nothing was finished', async ({ page }) => {

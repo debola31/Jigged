@@ -39,6 +39,7 @@ import OperatorDemoBar, {
   DEMO_BAR_HEIGHT,
 } from '@/components/operator/OperatorDemoBar';
 import { OperatorStationProvider, useStationContext } from '@/components/operator/OperatorStationContext';
+import { OperatorIntervalProvider } from '@/components/operator/OperatorIntervalContext';
 import { clearStoredStation } from '@/lib/operatorStationStorage';
 import { OperatorChromeProvider, useOperatorChrome, useOperatorNav } from '@/components/operator/OperatorChromeContext';
 import JiggedIcon from '@/components/branding/JiggedIcon';
@@ -370,6 +371,12 @@ export default function OperatorLayout({
     // own copy of the same request.
     <OperatorCompanyProvider>
       <OperatorStationProvider>
+        {/* Inside the station provider and outside the shell: the strip renders
+            inside the shell's content column, but the step screen consumes the
+            same state to decide between START and the running card. Two
+            independent fetches would disagree for a paint after every action,
+            which on this surface reads as the timer losing track. */}
+        <OperatorIntervalProvider>
         <OperatorChromeProvider>
           <OperatorShell
             userRole={userRole}
@@ -403,6 +410,7 @@ export default function OperatorLayout({
             surface="operator_tabbar"
           />
         </OperatorChromeProvider>
+        </OperatorIntervalProvider>
       </OperatorStationProvider>
     </OperatorCompanyProvider>
   );
@@ -703,6 +711,13 @@ function OperatorShell({
           Applies to every operator screen, deliberately — Jobs and Me had the same problem and
           nobody had noticed because nobody opens them on a monitor.
         */}
+        {/* NO RUNNING-TIMER STRIP, decided 2026-08-17. A bar above the job card
+            duplicated what the step screen's own clock and job feed already say,
+            and the shell is not where a step's state belongs. The cost is real
+            and accepted: with no notification channel either, nothing outside
+            the step screen indicates a timer is running, so a forgotten stop is
+            caught by the office Still-running list rather than by the operator.
+            See docs/modules/operator-view.md#recording-time. */}
         <Box sx={{ maxWidth: 680, mx: 'auto' }}>{children}</Box>
       </Box>
 

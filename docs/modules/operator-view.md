@@ -156,9 +156,13 @@ operator's own pace or standing ([guardrail](#surveillance-guardrail-non-negotia
 `sent_at` / `sent_by`, and `estimated_setup_minutes` / `estimated_run_minutes_per_unit`
 (**estimates only**, used for costing and quoting).
 
-**No actual-time columns and no `operator_sessions` table** — both were dropped by
-[`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql).
-There is no start/stop, no timer, no shift or clock-in.
+**Withdrawn 2026-08-16:** *"No actual-time columns … there is no start/stop, no timer."* True from
+[`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql) until
+[`20260816203641`](../../supabase/migrations/20260816203641_job_operation_intervals.sql), which
+adds recorded time back in a different shape. `operator_sessions` and `job_operations.actual_*`
+stay dropped and are not coming back — the new table is not that table (see
+[Recording time](#recording-time)). There is still **no shift and no clock-in**: this measures time
+on an operation, never attendance, and the two must not be conflated.
 
 **Completions** — `job_operation_completions`
 ([`20260721023953`](../../supabase/migrations/20260721023953_job_operation_completions.sql)):
@@ -265,6 +269,166 @@ described a guide offering a one-tap "switch & complete". No such control was ev
 `quantity_good = job_parts.quantity`, so every row satisfied the new invariant when the migration
 finished. The part rollup runs *inside* the trigger function, which is why the shipped guard is
 `pg_trigger_depth() > 4` rather than the `> 2` the sibling families use.
+
+---
+
+## Recording time
+
+`job_operation_intervals`
+([`20260816203641`](../../supabase/migrations/20260816203641_job_operation_intervals.sql)) — a span
+of recorded time on one operation. Added 2026-08-16, reversing
+[`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql) under
+the condition that migration's successor had written down in advance.
+
+**It is not `operator_sessions` under a new name**, and the differences are the reason this one can
+work where that one did not:
+
+| Decision | Why, and what it rejects |
+|---|---|
+| **Chained on the WORK CENTRE, one open interval per machine** | Cost is charged at `work_centers.labor_rate` through `job_operations.work_center_id`, so this measures **machine time, not operator attention**. Keyed on the operator instead, a machinist tending three spindles would have Mill-2 silently closed the moment they tapped into Lathe-1 — a *fabricated* stop, and the modal shape of a precision shop. Two partial unique indexes make an overlap unrepresentable. |
+| **No Stop on the happy path** | You stop by starting the next thing, by recording the completion, or by `Done for the day` / `Left it running`. The forgotten stop is the dominant failure mode in every product surveyed, and this surface has the weakest possible recovery channel — see below. |
+| **Never auto-closed** | An open interval stays open, loud on the office list, and excluded from every rollup until a human says when it ended. Fabricating an end is a silent runtime fallback for a data-at-rest problem. |
+| **Raw and adjusted are separate columns; `effective_*` is generated** | E2/Shoptech's shipped model — `Actual Clock In/Out` beside `Adjusted Clock In/Out`, only Adjusted editable. `started_at`/`ended_at` are not in the browser's UPDATE grant, so the raw pair is immutable by construction rather than by convention. Generating `effective_*` gives every reader one shape and no `COALESCE` to forget. |
+| **Writes are RPC-only** | The chain close crosses row ownership: the **shift handoff** — B starts on the machine A forgot to close — is routine, and under an own-rows UPDATE policy B is blocked by the unique index and denied by RLS, with no way forward. `start_operation_interval` crosses ownership by design; `close_operation_interval` asserts it, because an explicit close carries adjusted times and an unchecked id would let any member rewrite anyone's hours. |
+| **`capture_source` ships with the operator path** | `operator | sensor | system`. An interval left open overnight is exactly where a sensor interval will later contradict a labour one, and without a common shape there is nothing to express the disagreement *in*. |
+| **No setup/run phase control** | An 18-vendor sweep found nobody shipping a SETUP/RUN toggle inside a running timer: it is a UI mode that fails *silently* into the office's numbers. The split is solvable office-side from what this table already produces — `T = setup + q × cycle` across runs of the same part-operation, with the existing estimates as priors — at zero operator taps. **Deferred, not rejected.** |
+
+**Starting is mandatory, and the primary button is what enforces it.** One button changes meaning
+— `START THIS STEP` when idle, `RECORD <n> FINISHED` when running. Having both on screen at once
+was the original mistake: it let a step be completed without ever being timed, which made the timer
+optional in practice and left the data half-collected. The label **interpolates the quantity** into
+the verb rather than reading `COMPLETE`, because partial completion is the normal case and a bare
+"Complete" would misstate it.
+
+**`Complete without timing` is the deliberate escape hatch**, quiet but always present when there
+is a quantity to record. A hard block is the one shape that reliably corrupts this screen — it
+already carries an incident where a constraint that could not be satisfied led operators to type a
+false quantity to get past it. It records **no interval**, never a backdated one: a remembered
+start is a recall estimate, recall bias grows with the magnitude estimated, and an invented duration
+would corrupt exactly the data this feature exists to collect. An honest absence beats a plausible
+fabrication, and it is the same state an office-side completion already produces. `operation
+completed untimed` measures how often it is used — a rising rate means starting is too hard to
+reach, which is our problem and not the operator's.
+
+**The job feed is the record; the clock is only the readout.** Starting appends a *"Started Final
+Inspection · 11:06 PM"* entry and finishing appends a separate *"Finished … · 12:47 AM · 1h 41m"*
+above it — **two rows, never one that rewrites itself**, because a log entry that changes after the
+fact reads as the surface losing track. Each row carries **Adjust**, editing the end its own number
+came from, so a correction happens where the wrong figure is rather than in a dialog asking about
+both. Corrections write immediately (see the constraint note below); nothing is held in page state.
+
+**Withdrawn 2026-08-17, unshipped: a confirm sheet before recording.** It was built and removed the
+same day. The reasoning that made it *safe* still stands — what B4 deleted was a **post**-completion
+offer, and a pre-completion sheet writes nothing until confirmed, so it never reintroduced that bug
+— but safe is not the same as warranted. It put a third surface (strip, clock, sheet) in front of
+one fact, and once the feed carries the record there is nothing for a sheet to add. Completion is
+one tap again, with the inline composer riding along exactly as B4 requires.
+
+**Withdrawn 2026-08-17: the running-timer strip in the shell.** A bar above the job card duplicated
+what the step screen's own clock and feed already say. **The cost is real and was accepted
+knowingly:** with no notification channel either (see below), *nothing outside the step screen
+indicates a timer is running*, so a forgotten stop is caught by the office Still-running list the
+next morning rather than by the operator in the moment — which makes that correction a recall
+estimate. An E2E assertion checks the strip has not crept back.
+
+**Withdrawn 2026-08-18: `Stop without finishing`, and the `done_for_day` / `left_running` reasons
+behind it.** Built and removed. They asked the operator to classify a stop — a second decision on
+top of the one that matters — and an interval left open already says "nobody closed this" on the
+office Still-running list without anyone having to name why. `close_reason` is now only `completed`
+or `switched`, and `close_operation_interval` has no reason parameter at all.
+
+**So an interval closes exactly two ways: you record what you finished, or the chain closes it when
+the next start takes the work centre.** An operator who walks away leaves it running and corrects
+the times from the feed afterwards, which is the same correction path every other mistake uses. The
+accepted cost is that a deliberate lights-out run and a forgotten stop now look identical until
+someone says otherwise.
+
+**A `Finished` row says how many parts it produced**, resolved through
+`job_operation_intervals.completion_id` rather than stored, so it can never disagree with the
+completion itself. A row that says a step stopped but not what came off it withholds the half an
+operator scrolls back to check.
+
+**Undo retracts the time with the count — decided 2026-08-18.** Voiding a completion voids the
+intervals it closed, through a trigger on `job_operation_completions` rather than client code: it is
+atomic with the void, and `revertOperationCompletion` is called from both the operator undo and the
+office one, so neither caller has to know and a third cannot forget. Scoped by `completion_id`, so
+`switched` intervals — real work no completion ever claimed — survive.
+
+**The cost is accepted, not overlooked: real measured minutes are discarded because a COUNT was
+wrong.** An operator who types 10 instead of 12 loses the timing of work they genuinely did, and
+re-recording produces a fresh, shorter interval that understates it. The alternative — keeping the
+time and dropping the quantity — was rejected because a `Finished` row surviving its own completion
+claims production that was retracted, and once the row carries a quantity that is not clutter but a
+false statement.
+
+**The feed shows YOUR time entries and EVERYONE'S notes**, and the asymmetry is deliberate. A
+job-scoped feed naming when each person started would be a per-person time view available shop-wide
+— looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS
+enforces it.
+
+**`Complete without timing` appends a Finished row too, marked `not timed`.** It records no
+interval — a remembered start is a recall estimate, and inventing one would corrupt the data this
+feature exists to collect — but it is still work that happened, so it belongs in the log. It is
+rendered from the completion rather than an interval, with a check glyph instead of a clock (a clock
+on a row holding no duration would be the one part of this UI claiming something untrue), no
+duration, and no `Adjust` (there are no times behind it to correct). **Withdrawn:** *the escape
+hatch leaves no feed entry* — that was not a decision, it was a gap: the step flipped to complete
+with nothing saying so, so the operator who took the honest path got less acknowledgement than the
+one who timed it.
+
+Completions in the feed are the reader's **own**, with no actor name, exactly like the interval rows
+beside them — a job-scoped list of what each named person finished and when would be the per-person
+production log the guardrail refuses. A completion an interval already claims is shown once, as the
+timed row; the feed drops the duplicate by matching `completion_id`.
+
+**Times can only be adjusted once the interval is closed** — `job_op_intervals_adjust_only_when_
+closed`, and `Adjust` is absent from a running row rather than merely disabled. A running interval
+has no finish to check a new start against, so a correction made mid-run can be contradicted by the
+finish that follows, and the contradiction only becomes representable at close — after the UI has
+already said it saved. Recording the completion is what makes both ends known, which is what
+`AdjustTimesDialog` validates against each other.
+
+Ordering is enforced on the **effective** pair (`job_op_intervals_effective_ordered`), not the
+adjusted one. Checking only the adjusted pair short-circuits when just the start is corrected: on a
+closed 9:00–10:00 interval, an adjusted start of 11:00 was accepted and produced a −1h duration that
+[`get_operation_actuals`](../../supabase/migrations/20260816203641_job_operation_intervals.sql) would
+have summed into a negative actual.
+
+**Withdrawn:** *an adjusted START is allowed on a running interval; only the END is guarded* —
+wrong because it assumed the only risk was claiming a finish that never happened. The real risk is
+an unvalidatable start, and *"I actually started twenty minutes before I tapped"* being knowable
+immediately does not make it checkable immediately.
+
+**No dictate button, and no speech API — decided 2026-08-17.** `webkitSpeechRecognition` **fails in
+an installed PWA**, and even in plain Safari it needs Siri enabled and carries documented throttling
+and interim-result bugs in WebKit. Both mobile keyboards already ship a microphone, so a plain
+multiline field gives dictation on every phone with no permission prompt and no bundle.
+[`NoteCaptureFields`](../../components/operator/NoteCaptureFields.tsx) already promotes it —
+`MicHint` draws the iOS dictation glyph and says *"tap the ⌇ on your keyboard to talk instead of
+type"*, capped at five shows and dismissible.
+
+**The cap is per hook instance, which constrains where the composer may be mounted.** The confirm
+sheet renders the step screen's *existing* `useNoteCapture` object rather than creating its own —
+otherwise one visit would count two shows and retire the tip in half the time. A future surface
+that wants a composer should pass the caller's capture in, not call the hook again.
+
+**Why there is no "you left a timer running" notification.** iOS Web Push requires the site to be a
+Home Screen *web app*, and [`app/manifest.ts`](../../app/manifest.ts) sets `display: 'browser'`
+deliberately: standalone gives the icon a cookie jar separate from Safari, and since the Camera app
+opens the default browser, every scanned traveler QR would then land in a different session and
+start demanding a password. There is also no service worker at all. Even fully built the blended
+reach is ~48%, and the errors correlate the wrong way — the operator disciplined enough to install
+a PWA is the same one who remembers to close their interval. **The correction prompt arrives at the
+operator's next tap instead**, which is on-shift, phone in hand, and has a delivery receipt.
+
+**The office keeps the detection half.** `get_open_intervals` backs a Still-running list, which is
+also the *only* route to an interval whose owner has gone home — `close_operation_interval` refuses
+a non-owner by design, so without that list the row would be unreachable.
+
+**Costing is untouched.** Quoting and job cost still read `estimated_setup_minutes` /
+`estimated_run_minutes_per_unit` and the snapshot rates. Actuals are reported *beside* the
+estimate, never substituted into `true_cost_per_unit` — changing what a job costs is a separate and
+louder decision than measuring what it took.
 
 ---
 
@@ -516,13 +680,65 @@ No operator-facing surface may reflect an operator's pace or standing back at th
 another person — it is exactly where a leaderboard wants to grow, and a test asserts the absence.
 No points, badges, or leaderboards anywhere. There is no settings toggle for this.
 
-Actual time is **structurally unrepresentable** — `operator_sessions` and `job_operations.actual_*`
-were dropped ([`20260621132129`](../../supabase/migrations/20260621132129_drop_operator_time_tracking.sql))
-— so "actual vs quoted" cannot be built without a migration. The quoted
-`estimated_setup_minutes` / `estimated_run_minutes_per_unit` shown on the traveler and operation
-page stay: they are the engineer's routing estimate (an input to the job), the printed traveler
-carries identical figures, and there is no actual to compare against. **Capturing actual time and
-showing it to the operator is the trigger that reverses that decision.**
+**The rule, in the form that survives the arrival of recorded time:**
+
+> A number on an operator's screen may describe the job in front of them. It may never accumulate
+> across jobs to describe the person. **"It's private" is not an exemption — the mechanism is
+> attention to output, not observation.**
+
+That last clause is load-bearing and is not a hunch. Etkin 2016 (*J. Consumer Research*) Exp. 1 ran
+a private, self-only, goal-free, comparison-free counter, with participants told pay did not depend
+on speed: output rose ~26% (p = .010) while blind-rated quality **fell** — creativity 3.02→2.58
+(p = .014), care 2.83→2.54 (p = .035). On a shop floor that decrement is scrap, skipped inspection
+and rushed setups. Stress, anxiety, difficulty, distraction, interruption and evaluation
+apprehension were all ruled out as explanations, which is why "but nobody else sees it" does not
+rescue a tally. It is also a **one-way door**: removing the counter left people doing *less* than
+controls (p = .034). And **operator demand is not evidence of safety** — 88% of Etkin's
+participants wanted the count and predicted it would make the task more enjoyable (t = 6.06,
+p < .001); it made it less.
+
+*(Do not cite the Hawthorne effect for any of this. Levitt & List recovered the original
+illumination data and the canonical descriptions are fiction. Etkin isolates the count rather than
+the observation, which is the claim actually needed here.)*
+
+**Withdrawn 2026-08-16:** *"Actual time is structurally unrepresentable … capturing actual time and
+showing it to the operator is the trigger that reverses that decision."* The trigger fired, and
+[`20260816203641`](../../supabase/migrations/20260816203641_job_operation_intervals.sql) is the
+reversal. What the operator now sees is bounded by the rule above, and the bound is enforced in the
+schema rather than in review:
+
+| Operator sees | Operator never sees |
+|---|---|
+| The interval running **right now**, as a large monospace clock | A total across jobs, a weekly figure, an average, a rate |
+| Their own start and finish entries in the job feed, each correctable | Anyone else's start or finish, on any surface |
+| A journal of their own recorded intervals, each naming its job and step | A row count, an entry total, or any scalar over that journal |
+| Their own raw times beside their own corrections | Anyone else's times, or their own compared to the estimate |
+
+**The estimate is hidden from the step screen while an interval is running.** Alone it is the
+engineer's input to the job and the printed traveler carries the same figure. Beside a live counter
+it is a target, and a number about your own output next to a standard is the adjacent comparison
+that turns informational feedback into controlling feedback — the same Deci/Koestner/Ryan
+distinction that separates +0.66 from −0.44. This is the load-bearing half of the guardrail, and it
+is the half that must not move.
+
+**Withdrawn 2026-08-17: "the elapsed counter is secondary and monochrome; a start time is a fact,
+a hero counter is closer to Etkin's manipulation."** Wrong because it over-applied the evidence.
+Etkin's harmful counter was a tally of **output accumulating across a task**; a stopwatch on the
+operation in front of you accumulates nothing and — with the estimate gone — sits beside no
+standard. The clock is now a large centred monospace figure, matching what this app shipped before
+[`541ca291`](https://github.com/debola31/Jigged/commit/541ca291) removed it. It also earns the size
+operationally, which the first version undervalued: **an unmissable clock is the best defence
+against the forgotten start and the forgotten stop**, which is the failure mode the whole model
+fights. What did not change: no estimate beside it, no total across jobs, no average.
+
+**Aggregate-by-default is enforced by RLS, not convention.** `job_operation_intervals` has **no
+admin-readable path**: a row-returning SELECT policy exposing `operator_id` would *be* a per-person
+report, because PostgREST supplies the grouping for free. Admins read
+`get_operation_actuals` / `get_open_intervals`, which return no operator identity at all.
+`get_operator_time_detail` is the only path that names a person; it is admin-gated, demands a
+reason, and writes an `operator_time_access_log` row **before** it returns anything. If a future
+change removes any one of those three, it does not belong on the `function_execute_leaks()`
+allowlist.
 
 `operator_events` (funnel instrumentation: `app_opened`, `op_card_opened`, `prior_notes_opened`,
 `composer_focused`, `note_saved`, `note_saved_with_photo`, `station_selected`,
@@ -775,8 +991,8 @@ as possible.
 
 | Non-goal | Rationale |
 |---|---|
-| **No start / pause / resume** | Start/stop on the floor is unreliable; one finish trigger is all an operator must do. The operator records a *quantity*, not a state transition (`prd.md` §4.3). |
-| **No per-operation time tracking** | Same reason; costing and quoting use *estimated* times only. `operator_sessions` and `job_operations.actual_*` are gone. |
+| **No pause / resume** | **Amended 2026-08-16.** Start came back ([Recording time](#recording-time)); pause and resume did not, and will not. A paused state is one more thing to remember to undo, and the chain already expresses "I stopped doing this" as "I started doing something else". |
+| ~~**No per-operation time tracking**~~ | **Withdrawn 2026-08-16** — wrong because it read the 2026-06 evidence as "actual time cannot be captured" when what the evidence said was "a start/stop lifecycle the operator must maintain cannot be captured". The chain does not ask them to maintain one. **Costing and quoting still use estimated times only**; actuals are reported beside them and never substituted. |
 | **No manually-set WIP status** | WIP is **derived from recorded quantity**, never asserted by a human — see [Status model](#status-model). *Exception:* an **outside step** carries a `sent` waypoint, because the part is physically out of the shop and invisible while it is away — that exists for visibility, not to track in-shop WIP. |
 | **No permanent operator↔station assignment** | Operators roam; the station is chosen per device and changed from the header any time. |
 | **No shift management / clock-in** | Out of scope. Sign-in time is whatever Supabase Auth records, nothing more. |

@@ -19,6 +19,21 @@ export interface UseLoadResult<T> {
    * acting on the fresh data (errors are captured into `error`, never thrown).
    */
   reload: () => Promise<void>;
+  /**
+   * Re-run the loader WITHOUT re-entering the loading state — the current data
+   * stays on screen until the new data replaces it.
+   *
+   * Use this for a post-mutation refetch on a surface the user is looking at.
+   * `reload()` flips `loading` back to true, and any caller that early-returns a
+   * spinner on `loading` therefore BLANKS ITS WHOLE PAGE after every write: tap
+   * a button, watch the screen you were reading disappear and come back. That
+   * reads as a page reload and is worse than one, because it happens on every
+   * action rather than on navigation.
+   *
+   * Same stale-while-revalidate behaviour the hook already applies on a deps
+   * change; this just makes it available on demand.
+   */
+  refresh: () => Promise<void>;
 }
 
 /**
@@ -128,10 +143,15 @@ export function useLoad<T>(
     return load();
   }, [load]);
 
+  // No loading flip: the request-id guard in `load` already drops a stale
+  // response, so the only difference is that the screen keeps its content.
+  const refresh = useCallback((): Promise<void> => load(), [load]);
+
   return {
     data: state.data,
     loading: state.loading,
     error: state.error,
     reload,
+    refresh,
   };
 }

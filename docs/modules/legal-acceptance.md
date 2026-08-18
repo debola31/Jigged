@@ -190,5 +190,5 @@ their next login, and accepts through the same path as everyone else.
 | [`__tests__/lib/termsGate.test.ts`](../../__tests__/lib/termsGate.test.ts) | *routes the prompt must never cover*, *the cap* | 15 |
 | [`__tests__/utils/termsAccess.test.ts`](../../__tests__/utils/termsAccess.test.ts) | *who still has to accept* | 8 |
 | [`__tests__/components/legal/TermsGate.test.tsx`](../../__tests__/components/legal/TermsGate.test.tsx) | *when it blocks*, *the operator surface* | 12 |
-| [`api/tests/integration/test_terms_acceptances_rls.py`](../../api/tests/integration/test_terms_acceptances_rls.py) | RLS, append-only, cross-user isolation | 11 |
+| [`api/tests/integration/test_terms_acceptances_rls.py`](../../api/tests/integration/test_terms_acceptances_rls.py) | RLS, append-only, cross-user isolation | 12 |
 | [`e2e/terms-acceptance.spec.ts`](../../e2e/terms-acceptance.spec.ts) | the whole chain, once, for real | 1 |

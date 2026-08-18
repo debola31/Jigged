@@ -97,10 +97,29 @@ def test_the_record_cannot_be_edited_or_erased_by_the_browser(acceptance, seeded
 
 def test_the_record_is_append_only_even_for_service_role(supabase_admin, acceptance):
     """
-    Grants stop the browser; they do not stop service_role, which every backend
-    path runs as. Without the trigger, "append-only" would be a convention
-    rather than a property.
+    service_role is the most privileged role reachable over PostgREST, and every
+    backend path runs as it. It cannot edit or erase an acceptance.
+
+    TWO INDEPENDENT LAYERS REFUSE THIS, and the assertion deliberately does not
+    care which one fires. Through the API the GRANT is what bites first --
+    service_role holds SELECT and INSERT only, so PostgREST returns 42501 before
+    a statement ever reaches the table. The append-only TRIGGER sits behind that
+    as the backstop for anything running as the table's owner, where grants do
+    not apply: a migration, a psql session, or a future GRANT that re-opens the
+    door. That path is exercised directly against Postgres rather than here,
+    because no API caller can get far enough to reach it.
+
+    Pinning one specific mechanism would make this test fail the moment the other
+    one saves us, which is backwards. What matters is that the row is unchanged.
     """
+    before = (
+        supabase_admin.table("terms_acceptances")
+        .select("version, document_sha256")
+        .eq("id", acceptance["id"])
+        .single()
+        .execute()
+    ).data
+
     for op in ("update", "delete"):
         with pytest.raises(Exception) as exc:
             q = supabase_admin.table("terms_acceptances")
@@ -109,7 +128,35 @@ def test_the_record_is_append_only_even_for_service_role(supabase_admin, accepta
                 if op == "update"
                 else q.delete().eq("id", acceptance["id"]).execute()
             )
-        assert "append-only" in str(exc.value).lower(), f"{op} was not refused: {exc.value}"
+        refusal = str(exc.value).lower()
+        assert "append-only" in refusal or "42501" in refusal or "permission denied" in refusal, (
+            f"{op} was not refused at all: {exc.value}"
+        )
+
+    after = (
+        supabase_admin.table("terms_acceptances")
+        .select("version, document_sha256")
+        .eq("id", acceptance["id"])
+        .single()
+        .execute()
+    ).data
+    assert after == before, "the acceptance was mutated despite the refusals"
+
+
+def test_the_append_only_trigger_exists_behind_the_grant(supabase_admin):
+    """
+    The grant is what refuses an API caller, so the trigger above is never
+    reached from there -- and a backstop nobody can observe is a backstop nobody
+    maintains. This asserts it is actually installed, on both the row and the
+    statement, so a future migration that re-grants UPDATE does not silently
+    leave the record editable.
+
+    The statement-level TRUNCATE trigger is the one that matters most: TRUNCATE
+    bypasses RLS and does NOT fire row-level triggers, so it is the single
+    statement that would otherwise defeat every other control in the migration.
+    """
+    rows = supabase_admin.rpc("terms_acceptance_write_leaks", {}).execute().data
+    assert rows == [], f"terms_acceptances is writable: {rows}"
 
 
 def test_one_user_cannot_read_another_users_acceptance(acceptance, seeded_user_b):

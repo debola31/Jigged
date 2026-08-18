@@ -17,15 +17,13 @@ import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { recordTermsAcceptance } from '@/lib/legal/acceptClient';
 import { CURRENT_LEGAL_VERSIONS, LEGAL_LABELS, type LegalDocumentType } from '@/lib/legal/manifest';
-import type { TermsGateMode } from '@/lib/termsGate';
 
 interface Props {
   needs: LegalDocumentType[];
-  mode: TermsGateMode;
-  /** False once the operator's grace window has closed. */
-  canDefer: boolean;
+  /** Which screen is presenting this. Recorded as accepted_via and sent as the
+   *  `surface` property, so the row and the event always agree. */
+  surface: 'reacceptance_dashboard' | 'reacceptance_operator';
   onAccepted: () => void;
-  onDefer: () => void;
 }
 
 /**
@@ -47,20 +45,12 @@ interface Props {
  * session AND their station (AuthProvider.signOut clears the stored station),
  * so it must not sit next to the button they are reaching for every time.
  */
-export default function TermsAcceptanceDialog({
-  needs,
-  mode,
-  canDefer,
-  onAccepted,
-  onDefer,
-}: Props) {
+export default function TermsAcceptanceDialog({ needs, surface, onAccepted }: Props) {
   const { signOut } = useAuth();
   const [accepted, setAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isReacceptance = mode === 'blocking' ? 'reacceptance_dashboard' : 'reacceptance_operator';
-  const showDefer = mode === 'deferrable' && canDefer;
   const labels = needs.map((n) => LEGAL_LABELS[n]).join(' and ');
   const version = CURRENT_LEGAL_VERSIONS[needs[0] ?? 'tos'];
 
@@ -68,8 +58,8 @@ export default function TermsAcceptanceDialog({
     setSaving(true);
     setError(null);
     try {
-      await recordTermsAcceptance({ acceptedVia: isReacceptance, documentTypes: needs });
-      posthog.capture('terms accepted', { surface: isReacceptance, is_reacceptance: true });
+      await recordTermsAcceptance({ acceptedVia: surface, documentTypes: needs });
+      posthog.capture('terms accepted', { surface, is_reacceptance: true });
       onAccepted();
     } catch (err) {
       // Leave the dialog open with the box still ticked, so a retry is one tap.
@@ -117,7 +107,7 @@ export default function TermsAcceptanceDialog({
             onChange={setAccepted}
             disabled={saving}
             touch
-            surface={isReacceptance}
+            surface={surface}
           />
 
           <MissingFieldsNotice
@@ -127,7 +117,7 @@ export default function TermsAcceptanceDialog({
         </Stack>
       </DialogContent>
 
-      <DialogActions sx={{ flexDirection: 'column', gap: 1, p: 2, pt: 0 }}>
+      <DialogActions sx={{ flexDirection: 'column', gap: 2, p: 2, pt: 0 }}>
         <Button
           variant="contained"
           fullWidth
@@ -138,22 +128,29 @@ export default function TermsAcceptanceDialog({
           {saving ? <CircularProgress size={22} color="inherit" /> : 'I agree — continue'}
         </Button>
 
-        {showDefer ? (
-          <Button fullWidth disabled={saving} onClick={onDefer} sx={{ minHeight: 48 }}>
-            Remind me later
-          </Button>
-        ) : (
-          <Button
-            fullWidth
-            color="inherit"
-            disabled={saving}
-            onClick={() => signOut()}
-            sx={{ minHeight: 48 }}
-          >
-            Sign out
-          </Button>
-        )}
+        {/*
+          The only way out for someone who will not agree, so it must exist --
+          but it is deliberately small, low-contrast and set apart from the
+          full-width button above rather than stacked flush against it. A
+          mis-tap here costs an operator their SESSION and their STATION:
+          AuthProvider.signOut() clears the stored station on the way out, on
+          purpose, so that the next person to sign in on a shared shop phone
+          does not inherit the machine the last one was standing at and file
+          their notes against it. Preserving the station here would remove a
+          mis-tap's sting by reintroducing that mis-attribution hazard; making
+          the button hard to hit by accident costs nothing and keeps both.
+        */}
+        <Button
+          size="small"
+          color="inherit"
+          disabled={saving}
+          onClick={() => signOut()}
+          sx={{ textTransform: 'none', opacity: 0.7, minHeight: 36, mt: 1 }}
+        >
+          Sign out instead
+        </Button>
       </DialogActions>
+
     </Dialog>
   );
 }

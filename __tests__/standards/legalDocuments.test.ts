@@ -70,7 +70,6 @@ function fixture(overrides: {
           {
             version: 1,
             effective_date: '2026-08-18',
-            enforcement_starts_on: '2026-09-01',
             requires_reacceptance: true,
             sha256: sha256(html),
             bytes: Buffer.byteLength(html),
@@ -85,7 +84,6 @@ function fixture(overrides: {
           {
             version: 1,
             effective_date: '2026-06-20',
-            enforcement_starts_on: '2026-09-01',
             requires_reacceptance: true,
             sha256: sha256(privacyHtml),
             bytes: Buffer.byteLength(privacyHtml),
@@ -105,7 +103,7 @@ function fixture(overrides: {
 function kindsFor(overrides: Parameters<typeof fixture>[0]): LegalIssueKindList {
   const { root, cleanup } = fixture(overrides);
   try {
-    return scanLegalDocuments(root, { quiet: true, today: '2026-08-18' }).issues.map((i) => i.kind);
+    return scanLegalDocuments(root, { quiet: true }).issues.map((i) => i.kind);
   } finally {
     cleanup();
   }
@@ -132,7 +130,6 @@ describe('legalDocumentsCheck — the freeze comparison', () => {
   const base: LegalVersionEntry = {
     version: 1,
     effective_date: '2026-08-18',
-    enforcement_starts_on: '2026-09-01',
     requires_reacceptance: true,
     sha256: 'a'.repeat(64),
     bytes: 100,
@@ -154,9 +151,8 @@ describe('legalDocumentsCheck — the freeze comparison', () => {
     ]);
   });
 
-  it('catches a rewritten hash, a moved grace window, and a flipped re-acceptance flag', () => {
+  it('catches a rewritten hash and a flipped re-acceptance flag', () => {
     expect(entryDiffers({ ...base, sha256: 'b'.repeat(64) }, base)).toHaveLength(1);
-    expect(entryDiffers({ ...base, enforcement_starts_on: '2027-01-01' }, base)).toHaveLength(1);
     expect(entryDiffers({ ...base, requires_reacceptance: false }, base)).toHaveLength(1);
   });
 });
@@ -218,7 +214,7 @@ describe('legalDocumentsCheck — Tier 2 skips loudly rather than silently', () 
   it('reports that no freeze comparison happened when no base ref is given', () => {
     const { root, cleanup } = fixture({});
     try {
-      const result = scanLegalDocuments(root, { quiet: true, today: '2026-08-18' });
+      const result = scanLegalDocuments(root, { quiet: true });
       // The count is the honest signal: zero means the freeze check did not run.
       expect(result.frozenEntriesCompared).toBe(0);
       expect(result.baseRefUsed).toBeNull();

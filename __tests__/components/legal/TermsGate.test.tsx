@@ -152,29 +152,31 @@ describe('TermsGate — accepting', () => {
 describe('TermsGate — the operator surface', () => {
   beforeEach(() => mockPathname.mockReturnValue('/operator/c1'));
 
-  it('offers Remind me later on the shop floor, and Sign out on the dashboard', async () => {
+  /**
+   * Universal and blocking: there is no "remind me later" anywhere. Deferral was
+   * built to spare the shop floor an interruption and did the opposite -- it did
+   * not remove the prompt, it repeated it up to five times and then blocked
+   * anyway. One checkbox, once per published version, is strictly less friction.
+   */
+  it('offers no way to postpone', async () => {
     render(<TermsGate />);
     await dialog();
-    expect(screen.getByRole('button', { name: /remind me later/i })).toBeInTheDocument();
-    // Never both: a mis-tapped Sign out costs an operator their station.
-    expect(screen.queryByRole('button', { name: /^sign out$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /remind me later/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /later|postpone|skip/i })).not.toBeInTheDocument();
   });
 
-  it('closes when deferred, so a shift is never halted', async () => {
-    const user = userEvent.setup();
+  it('still leaves a way out, so nobody is trapped', async () => {
     render(<TermsGate />);
     await dialog();
-    await user.click(screen.getByRole('button', { name: /remind me later/i }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /sign out instead/i })).toBeInTheDocument();
   });
 
   /**
-   * THE SURVEILLANCE GUARDRAIL. Across every dismissal the operator sees the
-   * same screen and the same button. A disappearing affordance is not a
-   * read-back of behaviour; a number would be, and operator surfaces may not
-   * reflect an operator's own activity back at them.
+   * Nothing may reflect an operator's own activity back at them. With deferral
+   * gone there is no count to leak, but the assertion stays: it is cheap, and it
+   * is what would catch a well-meaning "you have been asked N times" line.
    */
-  it('never shows the operator how many times they have deferred', async () => {
+  it('never counts anything back at the operator', async () => {
     const { container } = render(<TermsGate />);
     await dialog();
     const text = container.textContent ?? '';
@@ -183,15 +185,13 @@ describe('TermsGate — the operator surface', () => {
     expect(text).not.toMatch(/\blast (chance|reminder)\b/i);
   });
 
-  it('stops offering the escape once the cap is spent', async () => {
-    window.localStorage.setItem(
-      'jigged.terms.deferrals.tos.1',
-      JSON.stringify({ count: 5, firstPromptedAt: '2026-09-01T00:00:00Z' }),
-    );
+  it('records the operator surface, not the dashboard one', async () => {
+    const user = userEvent.setup();
     render(<TermsGate />);
     await dialog();
-    expect(screen.queryByRole('button', { name: /remind me later/i })).not.toBeInTheDocument();
-    // Still not trapped — there are always exactly two ways out.
-    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /i agree to the terms/i }));
+    await user.click(screen.getByRole('button', { name: /i agree — continue/i }));
+    await waitFor(() => expect(mockRecord).toHaveBeenCalled());
+    expect(mockRecord.mock.calls[0][0]).toMatchObject({ acceptedVia: 'reacceptance_operator' });
   });
 });

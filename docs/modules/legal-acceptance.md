@@ -154,27 +154,32 @@ version" is to have nowhere to put one.
 `app/layout.tsx` inside `AuthProvider` — a system-admin-created owner passes
 through `/`, `/launch` and `/select-company` before reaching `AuthGuard`.
 
-| Surface | Behaviour |
-|---|---|
-| `/dashboard`, `/admin` | **Blocking.** The contract binds the shop, and the shop is bound by its admin's acceptance |
-| Everything else, incl. `/operator` | **Deferrable** — "Remind me later", capped at **14 days or 5 dismissals** |
+**The prompt is universal and blocking.** There is no "remind me later" and no
+grace window.
 
-The default direction is deliberate: keying on `/operator/` alone would
-hard-block an operator on `/launch`, `/select-company`, `/no-access` and the scan
-stubs, which is the mid-shift interruption the deferral exists to prevent.
+An earlier design gave operators a deferral capped at 14 days or 5 dismissals,
+on the reasoning that a legal modal mid-shift is friction where engagement is
+most fragile. It was removed because it did **the opposite of its purpose**: it
+never removed the prompt, it *repeated* it — the same operator met it up to five
+times and was blocked at the end anyway. One checkbox, once per published
+version (expected roughly annually), is strictly less interruption than that.
 
-**The dismissal count is never rendered.** Across every deferral the operator
-sees the same screen and the same button; the only visible change is the escape
-hatch disappearing at the end. A disappearing affordance is not a read-back of
-behaviour, and a number would be — see
-[operator-view.md](operator-view.md#surveillance-guardrail-non-negotiable). It is
-also deliberately **not** routed through `operator_events`.
+Deleting it also removed the only browser-writable state in the whole feature —
+a `localStorage` dismissal counter — from a design whose entire premise is that
+the browser cannot influence the record. And it removed the manifest's
+`enforcement_starts_on`, which existed solely to anchor that clock against a
+cleared browser, along with the "must not be in the past" guard rule that
+existed solely to keep *it* correct. Roughly 170 lines, and one whole class of
+date bug, deleted rather than maintained.
 
-The 14-day deadline counts from the **earlier** of the manifest's
-`enforcement_starts_on` and the device's first prompt, so clearing browser
-storage cannot hand someone a fresh window indefinitely. The 5-dismissal budget
-is a courtesy and lives in `localStorage`; clearing it buys five more taps inside
-a window the date has already closed.
+**The only secondary action is "Sign out instead"**, and it is deliberately
+small and set apart from the full-width agree button. A mis-tap costs an
+operator their session *and* their station: `AuthProvider.signOut()` clears the
+stored station on the way out, on purpose, so the next person on a shared shop
+phone does not inherit the machine the last one was standing at and file their
+notes against it. Preserving the station here would soften a mis-tap by
+reintroducing that mis-attribution hazard; making the button hard to hit by
+accident costs nothing and keeps both properties.
 
 ### It does not ask someone who has just agreed
 
@@ -219,9 +224,9 @@ their next login, and accepts through the same path as everyone else.
 | [`__tests__/standards/legalDocuments.test.ts`](../../__tests__/standards/legalDocuments.test.ts) | *the repo is clean*, *Tier 1 catches real breakage*, *export repairs are markup only* | 23 |
 | [`__tests__/app/legal/acceptRoute.test.ts`](../../__tests__/app/legal/acceptRoute.test.ts) | *the client cannot supply the IP*, *refusals* | 13 |
 | [`__tests__/lib/clientIp.test.ts`](../../__tests__/lib/clientIp.test.ts) | *source preference*, *absent or hostile input* | 17 |
-| [`__tests__/lib/termsGate.test.ts`](../../__tests__/lib/termsGate.test.ts) | *routes the prompt must never cover*, *the cap* | 15 |
+| [`__tests__/lib/termsGate.test.ts`](../../__tests__/lib/termsGate.test.ts) | *routes the prompt must never cover*, *which surface is asking* | 9 |
 | [`__tests__/utils/termsAccess.test.ts`](../../__tests__/utils/termsAccess.test.ts) | *who still has to accept* | 8 |
 | [`__tests__/components/legal/TermsGate.test.tsx`](../../__tests__/components/legal/TermsGate.test.tsx) | *when it blocks*, *the operator surface* | 12 |
 | [`__tests__/hooks/useTermsStatus.test.tsx`](../../__tests__/hooks/useTermsStatus.test.tsx) | *when it is allowed to ask* | 5 |
 | [`api/tests/integration/test_terms_acceptances_rls.py`](../../api/tests/integration/test_terms_acceptances_rls.py) | RLS, append-only, cross-user isolation | 12 |
-| [`e2e/terms-acceptance.spec.ts`](../../e2e/terms-acceptance.spec.ts) | the whole chain, once, for real | 1 |
+| [`e2e/terms-acceptance.spec.ts`](../../e2e/terms-acceptance.spec.ts) | the whole chain, once, for real | 3 |

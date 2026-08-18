@@ -70,7 +70,6 @@ export type LegalIssueKind =
   | 'bad-date-format'
   | 'effective-date-regressed'
   | 'effective-date-absent-from-body'
-  | 'enforcement-date-in-past'
   | 'orphan-file'
   | 'unknown-document-type'
   | 'missing-document-type'
@@ -96,7 +95,6 @@ export interface LegalIssue {
 export interface LegalVersionEntry {
   version: number;
   effective_date: string;
-  enforcement_starts_on: string;
   requires_reacceptance: boolean;
   sha256: string;
   bytes: number;
@@ -271,7 +269,6 @@ export function entryDiffers(a: LegalVersionEntry, b: LegalVersionEntry): string
   const keys: (keyof LegalVersionEntry)[] = [
     'version',
     'effective_date',
-    'enforcement_starts_on',
     'requires_reacceptance',
     'sha256',
     'bytes',
@@ -283,9 +280,6 @@ export function entryDiffers(a: LegalVersionEntry, b: LegalVersionEntry): string
 export interface ScanOptions {
   /** Git ref to freeze against. Omit to skip Tier 2 (logged, not silent). */
   baseRef?: string | null;
-  /** ISO date treated as "today" for the enforcement-date rule. Injected so the
-   *  test is not a time bomb that goes red the day after it is written. */
-  today?: string;
   /** Set false in tests that drive Tier 1 in isolation. */
   quiet?: boolean;
 }
@@ -293,7 +287,6 @@ export interface ScanOptions {
 export function scanLegalDocuments(repoRoot: string, opts: ScanOptions = {}): LegalScanResult {
   const issues: LegalIssue[] = [];
   const manifest = readManifest(repoRoot);
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
 
   let versionsScanned = 0;
   let bytesHashed = 0;
@@ -363,17 +356,12 @@ export function scanLegalDocuments(repoRoot: string, opts: ScanOptions = {}): Le
         });
       }
 
-      for (const [field, value] of [
-        ['effective_date', entry.effective_date],
-        ['enforcement_starts_on', entry.enforcement_starts_on],
-      ] as const) {
-        if (!ISO_DATE.test(value)) {
-          issues.push({
-            kind: 'bad-date-format',
-            target: label,
-            message: `${field} must be ISO YYYY-MM-DD, got "${value}".`,
-          });
-        }
+      if (!ISO_DATE.test(entry.effective_date)) {
+        issues.push({
+          kind: 'bad-date-format',
+          target: label,
+          message: `effective_date must be ISO YYYY-MM-DD, got "${entry.effective_date}".`,
+        });
       }
 
       if (previousDate && entry.effective_date < previousDate) {
@@ -631,26 +619,6 @@ export function scanLegalDocuments(repoRoot: string, opts: ScanOptions = {}): Le
       }
     }
 
-    // Only NEWLY-ADDED versions are held to the enforcement-date rule; an
-    // existing version's date is frozen above and may legitimately be past.
-    for (const [type, doc] of Object.entries(manifest.documents)) {
-      const baseVersions = new Set(
-        (base.documents[type]?.versions ?? []).map((v) => v.version),
-      );
-      for (const entry of doc.versions) {
-        if (baseVersions.has(entry.version)) continue;
-        if (ISO_DATE.test(entry.enforcement_starts_on) && entry.enforcement_starts_on < today) {
-          issues.push({
-            kind: 'enforcement-date-in-past',
-            target: `${type} v${entry.version}`,
-            message:
-              `enforcement_starts_on ${entry.enforcement_starts_on} is already past (${today}). ` +
-              `Operators would start beyond the grace window and be hard-blocked on first ` +
-              `sight, which is exactly what the deferral exists to prevent.`,
-          });
-        }
-      }
-    }
   }
 
   return {

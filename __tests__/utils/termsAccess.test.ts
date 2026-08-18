@@ -6,7 +6,6 @@ function version(n: number, over: Partial<LegalVersion> = {}): LegalVersion {
   return {
     version: n,
     effective_date: '2026-08-18',
-    enforcement_starts_on: '2026-09-01',
     requires_reacceptance: true,
     sha256: 'a'.repeat(64),
     bytes: 100,

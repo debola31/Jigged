@@ -6,7 +6,6 @@
         {
           "version": 1,
           "effective_date": "2026-08-18",
-          "enforcement_starts_on": "2026-09-01",
           "requires_reacceptance": true,
           "sha256": "26824e1103f9b8178e402f3417edf35e2be88151f86b29f48b9f321af1a2ca44",
           "bytes": 4806,
@@ -20,7 +19,6 @@
         {
           "version": 1,
           "effective_date": "2026-06-20",
-          "enforcement_starts_on": "2026-09-01",
           "requires_reacceptance": true,
           "sha256": "b9b7420fa888b52d1426412bfb3e701b8ed8814fc2a4da29f1292ee459f1f0ed",
           "bytes": 154273,

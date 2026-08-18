@@ -38,11 +38,6 @@ export interface LegalVersion {
   /** ISO date the document took effect. Display only; also present in the
    *  document body, which `effective_date_appears_in_body` asserts. */
   effective_date: string;
-  /** ISO date the operator grace window starts counting from. Distinct from
-   *  `effective_date`, which for an imported document may already be in the
-   *  past — and a past date would put every operator instantly beyond the
-   *  14-day cap, hard-blocking the shop floor on day one. */
-  enforcement_starts_on: string;
   /** Whether a bump to this version should prompt existing users at all. The
    *  privacy policy is a Termly export that regenerates on Termly's cadence,
    *  not ours; a sub-processor-list refresh must not push the whole customer

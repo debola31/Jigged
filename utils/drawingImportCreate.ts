@@ -15,6 +15,9 @@
  */
 
 import { createPart } from '@/utils/partsAccess';
+import { saveRoutingWithOperations } from '@/utils/routingsAccess';
+import { ensureStarterPricingTier } from '@/utils/partPricingTiersAccess';
+import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { uploadPartAttachment } from '@/utils/partAttachmentsAccess';
 import { upsertPartCustomerReference } from '@/utils/partCustomerReferencesAccess';
 import { valueOf, type DrawingRow, type DrawingRowValues } from '@/types/drawingImport';
@@ -23,6 +26,10 @@ export interface CreatedRow {
   stem: string;
   partId: string | null;
   partName: string;
+  /** Operations written for this part. 0 when the user skipped the work step. */
+  operationsAdded: number;
+  /** True once the part has both a cost basis and a markup — i.e. it can be quoted. */
+  quotable: boolean;
   /** What we did, so the summary can say it rather than implying everything was new. */
   action: 'created' | 'revived' | 'updated' | 'skipped' | 'failed';
   filesAttached: number;
@@ -37,6 +44,11 @@ export interface CreateOptions {
   customerId: string | null;
   /** Shop default, because a drawing never states one and `primary_unit` is NOT NULL. */
   defaultUnit: string;
+  /**
+   * The operations to give each part, by stem. Empty means "no routing" — a
+   * legitimate choice that leaves the part incomplete rather than blocking it.
+   */
+  operationsByStem?: Map<string, OperationRowData[]>;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -106,7 +118,7 @@ export async function createPartsFromRows(
   rows: DrawingRow[],
   options: CreateOptions,
 ): Promise<CreatedRow[]> {
-  const { companyId, customerId, defaultUnit, onProgress } = options;
+  const { companyId, customerId, defaultUnit, operationsByStem, onProgress } = options;
   const included = rows.filter((r) => !r.excluded);
   const out: CreatedRow[] = new Array(included.length);
 
@@ -128,9 +140,13 @@ export async function createPartsFromRows(
       partId: null,
       partName,
       action: 'failed',
+      operationsAdded: 0,
+      quotable: false,
       filesAttached: 0,
       fileErrors: [],
     };
+
+    const source = (valueOf(row, 'source') || 'made') as DrawingRowValues['source'];
 
     try {
       // "Couldn't check" is not "clear to create": an unresolved identity means we
@@ -161,7 +177,7 @@ export async function createPartsFromRows(
         const created = await serialise(() => createPart(companyId, {
           part_name: partName,
           description: valueOf(row, 'description'),
-          source: (valueOf(row, 'source') || 'made') as DrawingRowValues['source'],
+          source,
           is_stocked: false,
           primary_unit: valueOf(row, 'primary_unit') || defaultUnit,
           quantity: 0,
@@ -192,9 +208,52 @@ export async function createPartsFromRows(
       }
 
       if (result.partId) {
-        const { attached, errors } = await attachFiles(companyId, result.partId, row);
+        const partId = result.partId;
+        const operations = operationsByStem?.get(row.stem) ?? [];
+
+        // Files and work are independent, so they overlap. The routing has to land
+        // BEFORE the markup is seeded, though — see below.
+        const [{ attached, errors }] = await Promise.all([
+          attachFiles(companyId, partId, row),
+          (async () => {
+            if (operations.length === 0) return;
+            await saveRoutingWithOperations(
+              companyId,
+              partId,
+              null,
+              operations.map((o) => ({
+                tempId: o.tempId,
+                workCenterId: o.workCenterId,
+                workCenterName: o.workCenterName,
+                workCenterKind: o.workCenterKind,
+                setupMinutes: o.setupMinutes,
+                cycleMinutesPerUnit: o.cycleMinutesPerUnit,
+                laborRateOverride: o.laborRateOverride,
+                externalUnitPrice: o.externalUnitPrice,
+                instructions: o.instructions,
+              })),
+              new Set<string>(),
+            );
+            result.operationsAdded = operations.length;
+          })(),
+        ]);
         result.filesAttached = attached;
         result.fileErrors = errors;
+
+        /**
+         * The markup, LAST and only now.
+         *
+         * `ensureStarterPricingTier` deliberately no-ops when there is nothing to
+         * mark up — "is there a cost", not "is there a routing" — because a markup
+         * over a zero cost makes a part quotable for nothing, which is worse than
+         * not being quotable. So it has to run after the routing exists, and it
+         * correctly does nothing when the user skipped the work step.
+         *
+         * Its return value is the honest answer to "can this be quoted now?".
+         */
+        result.quotable = await ensureStarterPricingTier(companyId, partId, source).catch(
+          () => false,
+        );
       }
     } catch (err) {
       result.error = err instanceof Error ? err.message : 'Failed to create this part';
@@ -236,6 +295,9 @@ export function summarise(results: CreatedRow[]): string {
   if (counts.failed) parts.push(`${counts.failed} failed`);
   const files = results.reduce((n, r) => n + r.filesAttached, 0);
   const fileErrors = results.reduce((n, r) => n + r.fileErrors.length, 0);
+  const quotable = results.filter((r) => r.quotable).length;
   const tail = fileErrors > 0 ? `, ${fileErrors} file(s) not attached` : '';
-  return `${parts.join(', ') || 'nothing to do'} · ${files} file(s) attached${tail}`;
+  // Ready-to-quote leads, because it is the thing the whole flow is aimed at.
+  const ready = quotable > 0 ? `${quotable} ready to quote · ` : '';
+  return `${ready}${parts.join(', ') || 'nothing to do'} · ${files} file(s) attached${tail}`;
 }

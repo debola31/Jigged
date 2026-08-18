@@ -24,6 +24,7 @@ import StepLabel from '@mui/material/StepLabel';
 import Stepper from '@mui/material/Stepper';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { groupDrawingFiles } from '@/lib/drawingFileGroups';
@@ -34,8 +35,9 @@ import { assistRows } from '@/utils/drawingFieldsAssist';
 import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
 import DrawingReviewStep from '@/components/drawings/DrawingReviewStep';
+import DrawingWorkStep, { type WorkPlan } from '@/components/drawings/DrawingWorkStep';
 
-const STEPS = ['Add the files', 'Review the parts', 'Create'] as const;
+const STEPS = ['Add the files', 'Review the parts', 'How they are made', 'Create'] as const;
 
 export default function AddPartsFromDrawingsPage() {
   const params = useParams();
@@ -52,6 +54,7 @@ export default function AddPartsFromDrawingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
   const [assisted, setAssisted] = useState(false);
+  const [work, setWork] = useState<WorkPlan>({ stems: new Set(), operations: [] });
 
   /**
    * Read the dropped files, then resolve identity in ONE batched pass. Per-row
@@ -149,12 +152,17 @@ export default function AddPartsFromDrawingsPage() {
   const handleCreate = useCallback(async () => {
     setError(null);
     setBusy('Creating parts…');
-    setStep(2);
+    setStep(3);
     try {
+      // One routing, applied to the parts the user ticked.
+      const operationsByStem = new Map(
+        [...work.stems].map((stem) => [stem, work.operations]),
+      );
       const created = await createPartsFromRows(rows, {
         companyId,
         customerId,
         defaultUnit,
+        operationsByStem,
         onProgress: (done, total) => setProgress({ done, total }),
       });
       setResults(created);
@@ -165,6 +173,8 @@ export default function AddPartsFromDrawingsPage() {
         failed_count: created.filter((r) => r.action === 'failed').length,
         excluded_count: rows.length - created.length,
         files_attached: created.reduce((n, r) => n + r.filesAttached, 0),
+        with_operations: created.filter((r) => r.operationsAdded > 0).length,
+        quotable_count: created.filter((r) => r.quotable).length,
         used_ai: assisted,
         has_customer: !!customerId,
       });
@@ -174,7 +184,7 @@ export default function AddPartsFromDrawingsPage() {
       setBusy(null);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, assisted]);
+  }, [rows, companyId, customerId, defaultUnit, assisted, work]);
 
   const includedCount = useMemo(() => rows.filter((r) => !r.excluded).length, [rows]);
 
@@ -263,7 +273,7 @@ export default function AddPartsFromDrawingsPage() {
           onRowsChange={setRows}
           includedCount={includedCount}
           onBack={() => setStep(0)}
-          onCreate={handleCreate}
+          onCreate={() => setStep(2)}
           creating={!!busy}
           onAssist={handleAssist}
           assisted={assisted}
@@ -271,7 +281,20 @@ export default function AddPartsFromDrawingsPage() {
         />
       )}
 
-      {step === 2 && results && (
+      {step === 2 && (
+        <DrawingWorkStep
+          companyId={companyId}
+          rows={rows}
+          plan={work}
+          onPlanChange={setWork}
+          onBack={() => setStep(1)}
+          onCreate={handleCreate}
+          creating={!!busy}
+          includedCount={includedCount}
+        />
+      )}
+
+      {step === 3 && results && (
         <Card>
           <CardContent>
             {results ? (
@@ -279,6 +302,14 @@ export default function AddPartsFromDrawingsPage() {
                 <Typography variant="h6" gutterBottom>
                   {summarise(results)}
                 </Typography>
+                {results.length > 0 && !results.some((r) => r.quotable) && (
+                  <Alert severity="info" sx={{ my: 2 }}>
+                    <AlertTitle>Not quotable yet</AlertTitle>
+                    These parts have no priced work on them, so there is no cost to mark up. Add
+                    operations on a part — or come back through this flow and set the work — and
+                    they become quotable.
+                  </Alert>
+                )}
                 {results.some((r) => r.action === 'failed' || r.fileErrors.length > 0) && (
                   <Alert severity="warning" sx={{ my: 2 }}>
                     <AlertTitle>Some rows need another look</AlertTitle>
@@ -291,9 +322,30 @@ export default function AddPartsFromDrawingsPage() {
                       ))}
                   </Alert>
                 )}
-                <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
+                  {/* The point of the whole flow. Offered only for parts that can
+                      actually carry a price — seeding a quote with lines that throw
+                      on save would be worse than not offering it. */}
+                  {results.some((r) => r.quotable) && (
+                    <Button
+                      variant="contained"
+                      startIcon={<RequestQuoteIcon />}
+                      onClick={() => {
+                        const ids = results
+                          .filter((r) => r.quotable && r.partId)
+                          .map((r) => r.partId)
+                          .join(',');
+                        const customer = customerId ? `&customer=${customerId}` : '';
+                        router.push(
+                          `/dashboard/${companyId}/quotes/new?parts=${ids}${customer}`,
+                        );
+                      }}
+                    >
+                      Quote {results.filter((r) => r.quotable).length} of these
+                    </Button>
+                  )}
                   <Button
-                    variant="contained"
+                    variant={results.some((r) => r.quotable) ? 'outlined' : 'contained'}
                     onClick={() => router.push(`/dashboard/${companyId}/parts`)}
                   >
                     Go to Parts
@@ -303,6 +355,7 @@ export default function AddPartsFromDrawingsPage() {
                       setRows([]);
                       setResults(null);
                       setAssisted(false);
+                      setWork({ stems: new Set(), operations: [] });
                       setStep(0);
                     }}
                   >

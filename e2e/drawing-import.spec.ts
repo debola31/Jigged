@@ -88,20 +88,44 @@ test.describe('Add parts from drawings', () => {
       await expect(assist).toBeHidden({ timeout: 120_000 });
     }
 
-    // ── Step 4: create ──
+    // ── Step 4: how they are made ──
+    // The step that makes the whole flow worth having. Without a priced operation
+    // a made part has no cost basis, so every part lands incomplete and nothing
+    // can be quoted.
+    await page.getByRole('button', { name: /Create 3 parts/i }).click();
+    await expect(page.getByText(/How are these parts made/i)).toBeVisible();
+
+    await page.getByRole('button', { name: /Add Operation/i }).click();
+
+    // The seeded internal work centre carries a labour rate, so this operation is
+    // priced and the part's cost resolves.
+    // The picker renders each option as custom markup (name, kind, rate), so its
+    // accessible name is not just the work-centre name — filter, then take the
+    // first match rather than matching on a label that includes the rate.
+    const workCenter = page.getByRole('combobox', { name: /Work center/i });
+    await workCenter.fill('E2E Internal');
+    await page.getByRole('option').first().click();
+
+    await page.getByLabel(/Cycle minutes per unit/i).fill('5');
+    await page.getByLabel(/Setup minutes/i).fill('10');
+    await page.getByRole('button', { name: /Add to routing/i }).click();
+
+    // One routing, applied to all three parts.
+    await expect(page.getByText(/1 operation on 3 of 3 parts/i)).toBeVisible();
+
+    // ── Step 5: create ──
 
     const createButton = page.getByRole('button', { name: /Create 3 parts/i });
     await expect(createButton).toBeEnabled();
     await createButton.click();
 
-    // The summary says what happened rather than claiming everything was new.
-    await expect(page.getByText(/created/i).first()).toBeVisible({ timeout: 120_000 });
+    // THE PAYOFF: parts that can actually be quoted, not just filed.
+    await expect(page.getByText(/ready to quote/i)).toBeVisible({ timeout: 180_000 });
 
-    // ── Step 5: the parts really exist ──
+    // ── Step 6: hand off to a quote ──
 
-    await page.getByRole('button', { name: /Go to Parts/i }).click();
-    await expect(page).toHaveURL(/\/parts$/);
-    await expect(page.getByText('1011770').first()).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('button', { name: /Quote \d+ of these/i }).click();
+    await expect(page).toHaveURL(/\/quotes\/new\?parts=/);
   });
 
   /**

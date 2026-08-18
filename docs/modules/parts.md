@@ -621,11 +621,29 @@ another customer is never written to, and a failed lookup reports "we couldn't c
 `part_comments` would bury the value and a spec card is unverified, so the row reads
 `plate · AL · POWDERCOAT RAL 7035`.
 
+### The work step, and why it exists
+
+A made part has no cost until it has priced operations, so an import that stops at "parts created"
+produces a list of parts that cannot be quoted — which is the thing the flow is aimed at. Step 3
+asks how the parts are made, and applies **one routing to many parts**: typing a routing per part is
+the manual work the feature exists to remove.
+
+**There is no routing-template entity, deliberately.** It would be a routing without a part, and it
+duplicates something a shop can already say — *this part works like that one*. So the two ways in
+are copying from a part that already has a routing (the shop's own history is the template library)
+and building one inline. Rows stay individually editable afterwards.
+
+After the routing lands, `ensureStarterPricingTier` seeds the markup from the company defaults — it
+runs LAST because it deliberately no-ops when there is no cost to mark up, a markup over zero being
+worse than no markup at all. The step is skippable; parts are still created, just not yet quotable,
+and the summary says so rather than offering a quote that would fail on save.
+
 ### Not built yet
 
-The components panel (stock dedupe, placeholder children for `USE DRAWING` rows, the
-incomplete-package banner) and the quote handoff. `lib/drawingCutList.ts` already reads the table —
-2 of 96 corpus drawings carry one, both weldments — but nothing writes `parts_bom` from it.
+The components panel — stock dedupe and placeholder children for `USE DRAWING` rows.
+`lib/drawingCutList.ts` already reads the table (2 of 96 corpus drawings carry one, both weldments)
+but nothing writes `parts_bom` from it. Note a bought material with no procurement tier makes its
+parent LESS priceable, so those deduped materials need a cost before the BOM helps.
 
 ## Delete — archive (soft-delete), never blocks
 

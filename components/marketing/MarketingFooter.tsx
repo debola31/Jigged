@@ -39,6 +39,10 @@ export default function MarketingFooter() {
           {/* Right: legal line, aligned with the logo row */}
           <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '0.85rem' }}>
             &copy; 2026 Jigged{' · '}
+            <MuiLink component={Link} href="/pricing" underline="hover" sx={linkSx}>
+              Pricing
+            </MuiLink>
+            {' · '}
             <MuiLink component={Link} href="/terms" underline="hover" sx={linkSx}>
               Terms
             </MuiLink>

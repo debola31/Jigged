@@ -14,8 +14,17 @@ import MuiLink from '@mui/material/Link';
 import JiggedLogo from '@/components/branding/JiggedLogo';
 import { gradientButtonSx } from './marketingStyles';
 
+// "How it works" is root-relative, not a bare `#how-it-works`: this header renders on
+// every marketing route, and that section only exists on the landing page.
+//
+// Anything with a `#` stays a plain <a> (see the component= switch below) so it does a
+// full navigation rather than a Next soft nav. Soft-navigating from /pricing to
+// /#how-it-works scrolls to the anchor before the landing page's images have their
+// height, and you land a section or two past the target. A hard load lands correctly,
+// and on / itself the browser treats it as a same-page fragment jump with no reload.
 const navItems = [
-  { label: 'How it works', href: '#how-it-works' },
+  { label: 'How it works', href: '/#how-it-works' },
+  { label: 'Pricing', href: '/pricing' },
   { label: 'Log in', href: '/login' },
 ];
 
@@ -58,7 +67,7 @@ export default function MarketingHeader() {
           {navItems.map((item) => (
             <MuiLink
               key={item.label}
-              component={item.href.startsWith('#') ? 'a' : Link}
+              component={item.href.includes('#') ? 'a' : Link}
               href={item.href}
               underline="none"
               sx={{
@@ -111,7 +120,7 @@ export default function MarketingHeader() {
           {navItems.map((item) => (
             <ListItemButton
               key={item.label}
-              component={item.href.startsWith('#') ? 'a' : Link}
+              component={item.href.includes('#') ? 'a' : Link}
               href={item.href}
               onClick={() => setDrawerOpen(false)}
               sx={{ borderRadius: 2, mb: 0.5 }}

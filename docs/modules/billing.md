@@ -269,10 +269,17 @@ Writes go through the `apply_stripe_subscription(...)` RPC (guarded upsert):
 
 ## 6. Prices & the reserved customer
 
-- **`STRIPE_PRICE_ID`** = the default $300 monthly price every self-serve company
-  gets. The frontend never names a price.
-- **`STRIPE_FOUNDING_PRICE_ID`** = the reserved $250 founder price id. **Not read by
-  the app** — it's the value you copy into a company's `override_price_id`.
+- **`STRIPE_PRICE_ID`** = the default $399 monthly price every self-serve company
+  gets — `price_1U0afKHxiLXphzfAu8VRTtBy`, the `Jigged` product's `default_price`.
+  The frontend never names a price. The superseded **$300** price
+  (`price_1TxIBTHxiLXphzfAna1ebqwx`) is still `active` in Stripe and must not be
+  pointed back at; subscriptions created on it keep it. The public price shown on
+  `/pricing` is a hardcoded string in `lib/constants/marketing.ts` (rendered by
+  `components/marketing/PricingPageContent.tsx`) and is cited in the Terms of
+  Service — **a price change edits Stripe and that constant, in the same PR.**
+- **`STRIPE_FOUNDING_PRICE_ID`** = the reserved $250 founder price id
+  (`price_1TqnlLHxiLXphzfABIdDneFk`). **Not read by the app** — it's the value you
+  copy into a company's `override_price_id`.
 - To put a company on the reserved deal (e.g. Contour), set two columns
   (service-role): `override_price_id = <$250 price id>`, `override_trial_days = 0`.
   Then they self-serve via Settings → Subscribe → $250, no trial. Overrides are

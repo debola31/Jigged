@@ -178,3 +178,59 @@ export const FINAL_CTA = {
   primaryCta: { label: 'Request access', href: '/invite/early-access' },
   emailLabel: 'Or request early access and we’ll reach out:',
 };
+
+// ── Pricing page (/pricing) ─────────────────────────────────────────────────────────
+// THE PRICE BELOW IS PUBLIC COPY, AND IT IS ALSO CITED IN THE TERMS OF SERVICE. Stripe
+// is the source of truth for what anyone is actually charged, and nothing structurally
+// links this string to STRIPE_PRICE_ID — a price change means editing both, in the same
+// PR. As of 2026-08-18 they agree: the live default is $399/month
+// (price_1U0afKHxiLXphzfAu8VRTtBy, the Jigged product's default_price). The superseded
+// $300 price is still active in Stripe and must not be pointed back at. Raising the
+// price is a NEW Price object, never a mutation — docs/modules/billing.md §6.
+// The trial and cancellation claims below also come from that doc (§1, §8): 30-day
+// trial with card upfront, and Customer-Portal cancellation.
+export const PRICING = {
+  meta: {
+    // The root layout applies the '%s | Jigged' template — do NOT append the suffix
+    // here (/terms and /privacy do, and render "… – Jigged | Jigged").
+    title: 'Pricing — $399/month for your whole shop',
+    // Same ~155-char budget as MARKETING_META above. This is 122.
+    description:
+      'Jigged pricing: $399/month flat for your whole shop. Unlimited users, every feature included. 30-day trial, month to month.',
+  },
+  // Two display lines, split the way HERO is — the break is forced, not left to wrap.
+  headlineLead: 'Simple pricing.',
+  headlineEmphasis: 'Whole shop.',
+  amount: '$399',
+  period: '/month',
+  unit: 'per shop',
+  includes: [
+    'Unlimited users. Every feature included.',
+    'Quoting, jobs, operator workflows, inventory, shipping, QuickBooks.',
+    '30-day trial. Month to month. Cancel anytime.',
+  ],
+  cta: { label: 'Request access', href: '/invite/early-access' },
+  // Split so the address can be a mailto link; renders as one sentence.
+  contact: {
+    lead: 'Bigger shop or something unusual? Email',
+    email: 'hello@jigged.app',
+  },
+  faqHeading: 'Questions we get',
+  faq: [
+    {
+      q: 'Do you charge per user?',
+      a: 'No. Flat rate for the whole shop. We want your operators in Jigged, not locked out of it.',
+    },
+    {
+      q: 'Is there a long-term contract?',
+      a: 'No. Month to month, cancel anytime from your billing portal.',
+    },
+    {
+      q: 'What does setup look like?',
+      // "your existing files", not "exports": plenty of 5-50 person shops run on
+      // spreadsheets and have no ERP to export from. It also stays true as the importer
+      // grows past CSV (Excel, drawings) without naming a format we'd have to keep current.
+      a: 'We set up your shop with you: your parts, your customers, your open jobs loaded from your existing files before day one.',
+    },
+  ],
+};

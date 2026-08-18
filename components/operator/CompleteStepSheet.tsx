@@ -127,8 +127,13 @@ export default function CompleteStepSheet({
             <Box
               sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}
             >
+              {/* "9:12 AM → now", not "started 9:12 AM". Better copy for a
+                  sheet headed "Finishing" — the span is the thing being
+                  confirmed, not just its start — and it keeps this caption
+                  textually distinct from the step screen's, which sits directly
+                  behind this dialog and otherwise renders the same words. */}
               <Typography variant="body2" color="text.secondary">
-                started {formatClockTime(startedAt)}
+                {formatClockTime(startedAt)} → now
                 {adjusted && ' · adjusted'}
               </Typography>
               {onAdjust && (

@@ -174,19 +174,27 @@ test.describe('operator completion', () => {
   });
 
   test('will not record nothing', async ({ page }) => {
-    // The floor is unchanged: no zero-quantity completion. What changed is the
-    // button's LABEL when the quantity is empty — with nothing to record there is
-    // no completion to offer, so it presents as SAVE NOTE and is disabled until
-    // something is typed. Asserting the old label here is what made this spec
-    // fail in CI while the component test (already updated) passed.
+    // The floor is unchanged — no zero-quantity completion — but the shape of
+    // "no" moved twice, and both revisions are worth recording because each one
+    // broke this test for a different reason.
+    //
+    // It first asserted a DISABLED RECORD button. Then the label became SAVE
+    // NOTE when the quantity emptied, so it asserted a disabled SAVE NOTE. Now
+    // starting is mandatory and needs no quantity — so with the field cleared
+    // there IS a real action available and the primary is START. Nothing is
+    // disabled at all.
+    //
+    // What has to stay true through all three is the only thing worth asserting:
+    // NEITHER completion path is reachable with nothing to record.
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openStep(page);
 
     await expect(qtyField(page)).toBeVisible({ timeout: 30_000 });
     await qtyField(page).fill('0');
 
+    await expect(page.getByRole('button', { name: /start this step/i })).toBeEnabled();
+    await expect(page.getByRole('button', { name: /^record \d+ finished/i })).toHaveCount(0);
     await expect(recordButton(page)).toHaveCount(0);
-    await expect(saveNoteButton(page)).toBeDisabled();
   });
 
   test('saves a note alone when nothing was finished', async ({ page }) => {

@@ -206,6 +206,31 @@ which was always the point. Measured after the change: **gate 5s, trigger 5s.**
 >   bundle limit. Re-measure before treating it as a constraint, and do not repeat the mistake of
 >   narrowing the glob on the strength of it.
 
+> ### Correction, 2026-08-18 — limit #2 is resolved, and the glob is now narrowed
+>
+> The cap in limit #2 is **500 MB uncompressed**, and larger still on Fluid compute, which this
+> project already runs (`resourceConfig.fluid: true`). The 244 MB single-function measurement fits
+> with roughly 2× headroom, so the reason limit #2 was ever binding is gone. `vercel.json` now
+> declares `functions: { "api/index.py": … }` rather than `api/**`.
+>
+> **What forced the issue was cost, not the cap.** Four days into the first Pro billing cycle the team
+> had spent **$15.75 of its $20 credit, 99.6% of it Build CPU Minutes**. Measured over 79 deployments:
+> billed machine time averaged **7.82 min/build**, split 84s compile+install, 70s deploying outputs,
+> and **314s creating and uploading the build cache**. Every build installed the Python dependency
+> stack **11 times** — the same fan-out limit #1 describes, no longer failing, just billing.
+>
+> Two things worth carrying forward, because both cost time here:
+> - **Billed build duration is not `ready - buildingAt`.** That field stops at "Deployment completed"
+>   and undercounts by ~3×; the machine keeps running through cache creation. Measure first-event to
+>   last-event on `GET /v3/deployments/{id}/events?builds=1`.
+> - **The build cache has not been shown to pay for itself.** It costs 314s to accelerate a phase that
+>   takes 84s in total, so a perfect hit cannot save more than 84s. Settle it with one A/B against
+>   `VERCEL_FORCE_NO_BUILD_CACHE=1` before assuming it helps.
+>
+> The uv cache is content-addressed and deduplicated across entrypoints, so **do not expect narrowing
+> the glob to shrink the 265 MB build cache**. It removes 10 of 11 dependency installs and 10 of 11
+> uploaded bundles; the cache phase is a separate problem.
+
 **If deploys ever stop reaching production**, the first thing to check is whether the hook still
 exists (`vercel deploy-hooks list`) and matches the `VERCEL_DEPLOY_HOOK_URL` secret. Reverting
 `git.deploymentEnabled` in `vercel.json` restores Vercel's own auto-deploy immediately, at the cost of

@@ -586,7 +586,11 @@ export default function AcceptInvitePage() {
             */}
             {needsTerms !== 'no' && (
               <>
-                <TermsConsentCheckbox checked={termsAccepted} onChange={setTermsAccepted} />
+                <TermsConsentCheckbox
+              checked={termsAccepted}
+              onChange={setTermsAccepted}
+              surface="invite_accept"
+            />
                 <MissingFieldsNotice
                   items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}
                   title="Before you can join:"
@@ -728,7 +732,11 @@ export default function AcceptInvitePage() {
               }}
             />
 
-            <TermsConsentCheckbox checked={termsAccepted} onChange={setTermsAccepted} />
+            <TermsConsentCheckbox
+              checked={termsAccepted}
+              onChange={setTermsAccepted}
+              surface="invite_accept"
+            />
 
             <MissingFieldsNotice
               items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}

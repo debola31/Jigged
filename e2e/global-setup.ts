@@ -33,6 +33,9 @@
  * file or in CI.
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { TEST_EMAIL, TEST_PASSWORD } from './fixtures/test-data';
 
@@ -158,6 +161,46 @@ async function ensureCompanyBilling(
     .from('company_billing')
     .upsert({ company_id: companyId, billing_exempt: true }, { onConflict: 'company_id' });
   if (error) throw new Error(`company_billing upsert failed: ${error.message}`);
+}
+
+/**
+ * Seed the clickwrap acceptances the app now expects.
+ *
+ * Without this, TermsGate raises a focus-trapping modal over the first page of
+ * EVERY spec — auth.setup.ts saves a storage state and the whole downstream
+ * suite then clicks into a blocked screen. Same reason company_billing is
+ * exempted above: the seeder's job is to hand the specs a shop that is already
+ * set up, not to make each of them re-enact onboarding.
+ *
+ * Read from public/legal/manifest.json rather than hard-coded, so a version bump
+ * does not quietly leave every E2E run gated.
+ */
+async function ensureTermsAccepted(supabase: SupabaseClient, userId: string): Promise<void> {
+  const manifest = JSON.parse(
+    readFileSync(join(process.cwd(), 'public/legal/manifest.json'), 'utf-8'),
+  ) as { documents: Record<string, { current: number; versions: { version: number; sha256: string }[] }> };
+
+  for (const [documentType, doc] of Object.entries(manifest.documents)) {
+    const entry = doc.versions.find((v) => v.version === doc.current)!;
+    const { data: existing } = await supabase
+      .from('terms_acceptances')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('document_type', documentType)
+      .eq('version', entry.version)
+      .limit(1);
+    if (existing?.length) continue;
+
+    const { error } = await supabase.from('terms_acceptances').insert({
+      user_id: userId,
+      document_type: documentType,
+      version: entry.version,
+      document_sha256: entry.sha256,
+      accepted_via: 'invite_accept',
+      ip_source: 'unavailable',
+    });
+    if (error) throw new Error(`terms_acceptances insert failed: ${error.message}`);
+  }
 }
 
 /**
@@ -689,6 +732,7 @@ export default async function globalSetup(): Promise<void> {
   const companyId = await ensureCompany(supabase);
   await ensureUserCompanyAccess(supabase, user.id, companyId);
   await ensureCompanyBilling(supabase, companyId);
+  await ensureTermsAccepted(supabase, user.id);
 
   const vendorId = await ensureVendor(supabase, companyId);
   const wcInternalId = await ensureWorkCenter(

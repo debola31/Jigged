@@ -260,6 +260,7 @@ export default function SignUp() {
             checked={termsAccepted}
             onChange={setTermsAccepted}
             disabled={loading}
+            surface="signup"
           />
 
           <MissingFieldsNotice

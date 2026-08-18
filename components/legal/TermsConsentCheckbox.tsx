@@ -2,6 +2,8 @@
 
 import { useId } from 'react';
 
+import posthog from 'posthog-js';
+
 import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
 import MuiLink from '@mui/material/Link';
@@ -15,6 +17,9 @@ interface Props {
   disabled?: boolean;
   /** Larger hit area for the shop floor — a phone, one-handed, in a bright room. */
   touch?: boolean;
+  /** Which screen is presenting the documents. Matches the DB CHECK on
+   *  terms_acceptances.accepted_via, one spelling for both. */
+  surface: 'invite_accept' | 'signup' | 'reacceptance_dashboard' | 'reacceptance_operator';
 }
 
 /**
@@ -59,8 +64,19 @@ interface Props {
  * re-acceptance modal, navigating away dismisses the thing you are being asked
  * to read.
  */
-export default function TermsConsentCheckbox({ checked, onChange, disabled, touch }: Props) {
+export default function TermsConsentCheckbox({
+  checked,
+  onChange,
+  disabled,
+  touch,
+  surface,
+}: Props) {
   const labelId = useId();
+
+  // Whether anyone actually opens the documents is the legally interesting fact
+  // -- it goes to conspicuousness -- and nothing else in the product records it.
+  const opened = (documentType: 'tos' | 'privacy') => () =>
+    posthog.capture('terms document opened', { surface, document_type: documentType });
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
@@ -83,6 +99,7 @@ export default function TermsConsentCheckbox({ checked, onChange, disabled, touc
           href={LEGAL_ROUTES.tos}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={opened('tos')}
           underline="always"
         >
           {LEGAL_LABELS.tos}
@@ -92,6 +109,7 @@ export default function TermsConsentCheckbox({ checked, onChange, disabled, touc
           href={LEGAL_ROUTES.privacy}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={opened('privacy')}
           underline="always"
         >
           {LEGAL_LABELS.privacy}

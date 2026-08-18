@@ -321,10 +321,18 @@ screen holds, so a note jotted while the work was happening is carried in rather
 and because it is a modal overlay only one composer is ever on screen. The app shipped this shape
 once before as `JobCompleteModal`, removed with the timer rather than for any fault of its own.
 
-**No dictate button.** Both mobile keyboards ship a microphone, so a plain multiline field already
-gives dictation on every phone with no permission prompt and no bundle. `webkitSpeechRecognition`
-does exist in iOS Safari (14.5+) but requires the user to have Siri enabled and has documented
-throttling and interim-result bugs in WebKit — strictly worse than what the OS gives free.
+**No dictate button, and no speech API — decided 2026-08-17.** `webkitSpeechRecognition` **fails in
+an installed PWA**, and even in plain Safari it needs Siri enabled and carries documented throttling
+and interim-result bugs in WebKit. Both mobile keyboards already ship a microphone, so a plain
+multiline field gives dictation on every phone with no permission prompt and no bundle.
+[`NoteCaptureFields`](../../components/operator/NoteCaptureFields.tsx) already promotes it —
+`MicHint` draws the iOS dictation glyph and says *"tap the ⌇ on your keyboard to talk instead of
+type"*, capped at five shows and dismissible.
+
+**The cap is per hook instance, which constrains where the composer may be mounted.** The confirm
+sheet renders the step screen's *existing* `useNoteCapture` object rather than creating its own —
+otherwise one visit would count two shows and retire the tip in half the time. A future surface
+that wants a composer should pass the caller's capture in, not call the hook again.
 
 **Why there is no "you left a timer running" notification.** iOS Web Push requires the site to be a
 Home Screen *web app*, and [`app/manifest.ts`](../../app/manifest.ts) sets `display: 'browser'`

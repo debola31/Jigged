@@ -40,12 +40,18 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
  * rather than abandoned. Because this is a modal overlay only one of the two is
  * ever visible, which keeps B4's "never more than one composer on screen".
  *
- * NO DICTATE BUTTON, on purpose. Both mobile keyboards ship a microphone, so a
- * plain multiline field already gives dictation on every phone, with no
- * permission prompt and no bundle. `webkitSpeechRecognition` does exist in iOS
- * Safari (14.5+), but it requires the user to have Siri enabled and has
- * documented throttling and interim-result bugs in WebKit — worse than what the
- * OS gives free.
+ * Sharing the hook also protects the dictation tip's budget, which is a
+ * non-obvious consequence worth not breaking: `MicHint` is capped at five shows
+ * and the counter increments once per HOOK INSTANCE. Giving this sheet its own
+ * `useNoteCapture` would burn two shows for one visit and retire the tip in half
+ * the time.
+ *
+ * NO DICTATE BUTTON, and no speech API at all. `webkitSpeechRecognition` fails
+ * in an installed PWA, and even in plain Safari it needs Siri enabled and has
+ * documented throttling and interim-result bugs in WebKit. Both mobile keyboards
+ * already ship a microphone, so a plain multiline field gives dictation on every
+ * phone with no permission prompt and no bundle — and `NoteCaptureFields`
+ * already carries the `MicHint` that points operators at that key.
  */
 export interface CompleteStepSheetProps {
   open: boolean;

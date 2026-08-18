@@ -148,21 +148,35 @@ CREATE TABLE public.job_operation_intervals (
         CHECK ((ended_at IS NULL) = (close_reason IS NULL)),
     CONSTRAINT job_op_intervals_ordered
         CHECK (ended_at IS NULL OR ended_at > started_at),
-    CONSTRAINT job_op_intervals_adjusted_ordered
-        CHECK (adjusted_ended_at IS NULL
-               OR COALESCE(adjusted_started_at, started_at) < adjusted_ended_at),
-    -- An adjusted END may only exist on a closed interval: otherwise
-    -- effective_ended_at would claim a finish that never happened.
+    -- ORDERING IS CHECKED ON THE EFFECTIVE PAIR, not the adjusted one.
     --
-    -- An adjusted START is deliberately allowed WHILE RUNNING. "I actually
-    -- started twenty minutes before I tapped" is the single most common
-    -- correction there is, and it is knowable immediately — making the operator
-    -- wait until they finish to record it means holding it in their head, which
-    -- is how it turns into a recall estimate. An earlier draft of this constraint
-    -- blocked both and made the feed's Adjust affordance unimplementable on a
-    -- running interval.
-    CONSTRAINT job_op_intervals_adjusted_end_only_when_closed
-        CHECK (ended_at IS NOT NULL OR adjusted_ended_at IS NULL),
+    -- An earlier version of this checked `adjusted_ended_at IS NULL OR
+    -- COALESCE(adjusted_started_at, started_at) < adjusted_ended_at`, which
+    -- short-circuits the moment only the START is adjusted — so on a closed
+    -- 9:00–10:00 interval you could set adjusted_started_at to 11:00 and the row
+    -- was accepted with effective_started_at AFTER effective_ended_at. Verified:
+    -- it produced a -01:00:00 duration, which get_operation_actuals would have
+    -- summed into a negative actual on the office job page. Spelling out both
+    -- COALESCEs covers all four combinations of adjusted/raw.
+    CONSTRAINT job_op_intervals_effective_ordered
+        CHECK (COALESCE(adjusted_ended_at, ended_at) IS NULL
+               OR COALESCE(adjusted_started_at, started_at)
+                  < COALESCE(adjusted_ended_at, ended_at)),
+    -- NO ADJUSTMENT AT ALL UNTIL THE INTERVAL IS CLOSED — neither end.
+    --
+    -- **Withdrawn:** an adjusted START used to be allowed while running, on the
+    -- reasoning that "I actually started twenty minutes before I tapped" is
+    -- knowable immediately and holding it until finish turns it into a recall
+    -- estimate. Wrong, because a running interval has no end to check the new
+    -- start against: the constraint above can only order a pair, and while
+    -- ended_at IS NULL there is no pair. That let an operator set a start the
+    -- later finish would contradict, and the contradiction only became
+    -- representable at close — the wrong moment to discover it, and after the
+    -- UI had already told them it saved. Corrections now happen once, against a
+    -- known finish, where both ends can be validated together.
+    CONSTRAINT job_op_intervals_adjust_only_when_closed
+        CHECK (ended_at IS NOT NULL
+               OR (adjusted_started_at IS NULL AND adjusted_ended_at IS NULL)),
     CONSTRAINT job_op_intervals_note_not_blank
         CHECK (note IS NULL OR length(btrim(note)) > 0),
 

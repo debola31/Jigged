@@ -26,6 +26,13 @@ import type { OperationIntervalWithContext } from '@/types/operationInterval';
  * There is no actor name for the same reason there is no "edited by": the only
  * person who can see these is the person who made them, so naming them would be
  * telling an operator who they are.
+ *
+ * ADJUST APPEARS ONLY ONCE THE INTERVAL IS CLOSED. While the clock is running
+ * there is no finish to check a new start against, so a correction made then can
+ * be contradicted by the finish that follows — and `job_op_intervals_adjust_only
+ * _when_closed` would reject it anyway. Recording the completion is what makes
+ * both ends known, and both ends are what the dialog validates against each
+ * other. So a running start row is a read-only record of when work began.
  */
 export default function FeedTimeEntry({
   interval,
@@ -40,6 +47,12 @@ export default function FeedTimeEntry({
   const at =
     kind === 'start' ? interval.effective_started_at : (interval.effective_ended_at ?? null);
   if (!at) return null;
+
+  // Closed on the RAW end, not the effective one: effective_ended_at is
+  // COALESCE(adjusted, raw), so both are null together and either would work —
+  // but ended_at is the column the constraint names, so reading it keeps the
+  // affordance and the rule pointing at the same fact.
+  const closed = interval.ended_at != null;
 
   const label = interval.operation_name || 'this step';
   // The raw pair, shown only where it diverges from what is displayed. Stated as
@@ -70,9 +83,11 @@ export default function FeedTimeEntry({
           {wasAdjusted && ` · recorded ${formatClockTime(rawAt!)}`}
         </Typography>
       </Box>
-      <Button size="small" onClick={onAdjust} sx={{ minHeight: 44, flexShrink: 0 }}>
-        Adjust
-      </Button>
+      {closed && (
+        <Button size="small" onClick={onAdjust} sx={{ minHeight: 44, flexShrink: 0 }}>
+          Adjust
+        </Button>
+      )}
     </Box>
   );
 }

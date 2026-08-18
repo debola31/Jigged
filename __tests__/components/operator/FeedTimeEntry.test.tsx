@@ -60,6 +60,27 @@ describe('FeedTimeEntry', () => {
     expect(screen.queryByText(/part/)).not.toBeInTheDocument();
   });
 
+  it('offers no Adjust while the interval is still running', () => {
+    // A running interval has no finish to check a new start against, so a
+    // correction made now can be contradicted by the finish that follows —
+    // and job_op_intervals_adjust_only_when_closed would reject it anyway.
+    // ABSENT rather than disabled: a dead control invites tapping it.
+    render(
+      <FeedTimeEntry
+        interval={interval({ ended_at: null, effective_ended_at: null, close_reason: null, quantity_good: null })}
+        kind="start"
+        onAdjust={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/^Started /)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /adjust/i })).not.toBeInTheDocument();
+  });
+
+  it('offers Adjust once the interval is closed', () => {
+    render(<FeedTimeEntry interval={interval()} kind="start" onAdjust={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /adjust/i })).toBeInTheDocument();
+  });
+
   it('never puts a quantity or a duration on the START row', () => {
     // The start row is the moment work began. A count there would attach an
     // outcome to an event that has none yet.

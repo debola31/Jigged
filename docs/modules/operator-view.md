@@ -366,11 +366,23 @@ job-scoped feed naming when each person started would be a per-person time view 
 — looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS
 enforces it.
 
-**An adjusted START is allowed on a running interval; an adjusted END is not.** `job_op_intervals_
-adjusted_end_only_when_closed` guards only the end, which would otherwise claim a finish that never
-happened. *"I actually started twenty minutes before I tapped"* is knowable immediately, and making
-the operator hold it until they finish is how it becomes a recall estimate. An earlier draft blocked
-both and made the feed's Adjust unimplementable while running.
+**Times can only be adjusted once the interval is closed** — `job_op_intervals_adjust_only_when_
+closed`, and `Adjust` is absent from a running row rather than merely disabled. A running interval
+has no finish to check a new start against, so a correction made mid-run can be contradicted by the
+finish that follows, and the contradiction only becomes representable at close — after the UI has
+already said it saved. Recording the completion is what makes both ends known, which is what
+`AdjustTimesDialog` validates against each other.
+
+Ordering is enforced on the **effective** pair (`job_op_intervals_effective_ordered`), not the
+adjusted one. Checking only the adjusted pair short-circuits when just the start is corrected: on a
+closed 9:00–10:00 interval, an adjusted start of 11:00 was accepted and produced a −1h duration that
+[`get_operation_actuals`](../../supabase/migrations/20260816203641_job_operation_intervals.sql) would
+have summed into a negative actual.
+
+**Withdrawn:** *an adjusted START is allowed on a running interval; only the END is guarded* —
+wrong because it assumed the only risk was claiming a finish that never happened. The real risk is
+an unvalidatable start, and *"I actually started twenty minutes before I tapped"* being knowable
+immediately does not make it checkable immediately.
 
 **No dictate button, and no speech API — decided 2026-08-17.** `webkitSpeechRecognition` **fails in
 an installed PWA**, and even in plain Safari it needs Siri enabled and carries documented throttling

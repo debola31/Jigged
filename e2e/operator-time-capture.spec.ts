@@ -65,6 +65,10 @@ const startButton = (page: Page) => page.getByRole('button', { name: /start this
 // First is the NEWEST row (the feed sorts newest first), which is the interval
 // the test just started, so this is semantically right and not just a silencer.
 const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/i }).first();
+// UNSCOPED, deliberately: asserting Adjust is ABSENT has to look at every row.
+// `adjustButton(...).toHaveCount(0)` would pass on a `.first()` locator whether
+// there were no rows or several, so absence needs the un-narrowed one.
+const adjustButtons = (page: Page) => page.getByRole('button', { name: /^adjust$/i });
 // `RECORD <n> FINISHED` — the number is interpolated into the verb, so match on
 // the shape rather than a fixed quantity.
 const recordButton = (page: Page) => page.getByRole('button', { name: /^record \d+ finished/i });
@@ -198,14 +202,24 @@ test.describe('operator time capture', () => {
     await stopTimer(page);
   });
 
-  test('adjusting the start time keeps the recorded one', async ({ page }) => {
+  test('a running row offers no Adjust, and a finished one does', async ({ page }) => {
     await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
     await openIdleStep(page);
     await startButton(page).click();
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
 
-    // Adjust is on the FEED ROW that shows the wrong number, not beside the clock.
+    // The start row is a READ-ONLY record while the clock runs. There is no
+    // finish yet to check a new start against, so a correction made now can be
+    // contradicted by the finish that follows — and the DB would refuse it.
     await expect(feedStarted(page)).toBeVisible({ timeout: 30_000 });
+    await expect(adjustButtons(page)).toHaveCount(0);
+
+    // Recording is what makes both ends known, and that is what unlocks Adjust.
+    await qtyField(page).fill('1');
+    await recordButton(page).click();
+    await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
+    await expect(adjustButton(page)).toBeVisible({ timeout: 30_000 });
+
     await adjustButton(page).click();
     await expect(page.getByRole('heading', { name: /adjust times/i })).toBeVisible();
 
@@ -218,12 +232,19 @@ test.describe('operator time capture', () => {
     await expect(page.getByText(/^Recorded /)).toBeVisible();
 
     await page.getByRole('button', { name: /^save$/i }).click();
-    // Written immediately against the running interval — the DB constraint
-    // permits an adjusted START before the interval closes, precisely so this
-    // correction does not have to be held in page state until completion.
+    // The RAW value survives beside the corrected one — that is the whole point
+    // of the adjusted/effective split.
     await expect(page.getByText(/recorded \d/i).first()).toBeVisible({ timeout: 30_000 });
 
-    await stopTimer(page);
+    // Leave the seeded quantities as this file found them.
+    const undo = page.getByRole('button', { name: /undo all/i });
+    await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
+    if (await completeBanner(page).isVisible()) {
+      await completeBanner(page).click();
+    } else {
+      await undo.click();
+    }
+    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
   });
 
   test('recording a completion stops the timer', async ({ page }) => {

@@ -3756,7 +3756,6 @@ export type Database = {
         Args: {
           p_adjusted_ended_at?: string
           p_adjusted_started_at?: string
-          p_close_reason: string
           p_interval_id: string
           p_note?: string
         }

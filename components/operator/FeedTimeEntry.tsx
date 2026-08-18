@@ -62,7 +62,6 @@ export default function FeedTimeEntry({
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
           {formatClockTime(at)}
           {kind === 'finish' && duration != null && ` · ${formatDuration(duration)}`}
-          {kind === 'finish' && interval.close_reason === 'left_running' && ' · left running'}
           {wasAdjusted && ` · recorded ${formatClockTime(rawAt!)}`}
         </Typography>
       </Box>

@@ -18,8 +18,6 @@ import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import NoteAddIcon from '@mui/icons-material/NoteAdd';
@@ -69,7 +67,8 @@ import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
  * it is RECORD <n> FINISHED. Both on screen at once was the bug — it let a step
  * be completed without ever being timed, which made the timer optional in
  * practice. There is still no pause and no resume: you stop by starting the next
- * thing, by recording the completion, or with `Stop without finishing`.
+ * thing or by recording the completion — those are the only two ways an interval
+ * closes.
  *
  * TIME IS RECORDED IN THE JOB FEED BELOW — a "Started …" entry when the clock
  * starts and a "Finished …" entry when it stops, each adjustable from the row
@@ -117,7 +116,6 @@ export default function OperatorOperationActionPage() {
   // commits them. Null until they touch Adjust — an untouched interval writes no
   // adjusted values at all, so `adjusted_at` stays NULL and the row does not
   // claim to have been corrected when it was not.
-  const [stopAnchor, setStopAnchor] = useState<null | HTMLElement>(null);
 
   /**
    * A repaint tick for the hero clock — NOT a counter.
@@ -336,7 +334,7 @@ export default function OperatorOperationActionPage() {
       // row failed, which is the trade this page already refused once.
       if (running) {
         try {
-          await closeInterval(running.id, 'completed');
+          await closeInterval(running.id);
         } catch {
           // Deliberately swallowed at page level: "the completion worked, the
           // timer did not stop" is not something an operator can act on from
@@ -390,23 +388,6 @@ export default function OperatorOperationActionPage() {
     try {
       await startInterval(jobOperationId);
       // The feed gains a "Started …" entry — that is where the record lives now.
-      setFeedRefreshSignal((n) => n + 1);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  /** Close the running interval without completing the step. */
-  const handleStop = async (reason: 'done_for_day' | 'left_running') => {
-    setStopAnchor(null);
-    if (!running) return;
-    setActionLoading(true);
-    setError(null);
-    try {
-      await closeInterval(running.id, reason);
-      // The feed gains a "Finished …" entry, so it has to re-read.
       setFeedRefreshSignal((n) => n + 1);
     } catch (err) {
       setError(err);
@@ -928,14 +909,13 @@ export default function OperatorOperationActionPage() {
               >
                 {formatStopwatch(elapsedMs(running.effective_started_at, serverSkewMs))}
               </Typography>
-              {/* NO ADJUST HERE. Correcting a time happens in the job feed
-                  below, on the row that shows the wrong number — one place to
-                  fix it, next to the record being fixed, and it writes
-                  immediately rather than being held in page state until the
-                  completion lands. */}
-              <Typography variant="body2" color="text.secondary">
-                started {formatClockTime(running.effective_started_at)}
-              </Typography>
+              {/* NOTHING UNDER THE CLOCK. The start time and its Adjust both
+                  live on the feed's "Started …" entry below — one fact, one
+                  place, corrected where it is shown. The clock is the live
+                  readout and says only what the feed cannot: how long, right
+                  now. (The instant is still announced to screen readers via the
+                  aria-label above, which is not a duplicate because the ticking
+                  figure is not readable as a time.) */}
             </Box>
           )}
 
@@ -1040,37 +1020,6 @@ export default function OperatorOperationActionPage() {
                 Instrumented, so how often it is used is measurable: if it becomes
                 the normal path, the timer is too hard to reach and that is our
                 problem, not the operator's. */}
-            {/* STOPPING WITHOUT FINISHING, and this is now its only home.
-                It used to live in the running strip's overflow menu; removing
-                the strip took that route with it, and a timer you cannot stop
-                except by completing work you did not finish is worse than no
-                timer. `Left it running` is the lights-out case — it closes the
-                operator's labour without pretending the machine stopped. */}
-            {primaryAction === 'complete' && (
-              <Button
-                fullWidth
-                variant="text"
-                color="inherit"
-                onClick={(e) => setStopAnchor(e.currentTarget)}
-                disabled={actionLoading}
-                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
-              >
-                Stop without finishing
-              </Button>
-            )}
-            <Menu
-              anchorEl={stopAnchor}
-              open={Boolean(stopAnchor)}
-              onClose={() => setStopAnchor(null)}
-            >
-              <MenuItem onClick={() => handleStop('done_for_day')} sx={{ minHeight: 48 }}>
-                Done for the day
-              </MenuItem>
-              <MenuItem onClick={() => handleStop('left_running')} sx={{ minHeight: 48 }}>
-                Left it running
-              </MenuItem>
-            </Menu>
-
             {primaryAction === 'start' && canComplete && (
               <Button
                 fullWidth
@@ -1085,7 +1034,10 @@ export default function OperatorOperationActionPage() {
             )}
           </Box>
 
-          {qtyGood > 0 && (
+          {/* Hidden while a timer runs. Undoing earlier completions is not an
+              action anyone wants mid-operation, and beside a live clock it reads
+              as "undo what I am doing", which it is not. */}
+          {qtyGood > 0 && !running && (
             <Button
               fullWidth
               variant="text"

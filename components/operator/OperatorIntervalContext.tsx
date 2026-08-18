@@ -10,11 +10,7 @@ import {
   getMyOpenIntervals,
   startOperationInterval,
 } from '@/utils/operationIntervalsAccess';
-import type {
-  IntervalAdjustment,
-  IntervalCloseReason,
-  OperationIntervalWithContext,
-} from '@/types/operationInterval';
+import type { IntervalAdjustment, OperationIntervalWithContext } from '@/types/operationInterval';
 
 /**
  * The operator's open intervals, shared by the header strip and the step screen.
@@ -42,11 +38,7 @@ interface IntervalContextValue {
   /** The open interval on this operation, if the operator has one. */
   intervalFor: (jobOperationId: string) => OperationIntervalWithContext | null;
   start: (jobOperationId: string) => Promise<void>;
-  close: (
-    intervalId: string,
-    reason: Exclude<IntervalCloseReason, 'switched'>,
-    adjustment?: IntervalAdjustment,
-  ) => Promise<void>;
+  close: (intervalId: string, adjustment?: IntervalAdjustment) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -122,14 +114,9 @@ export function OperatorIntervalProvider({ children }: { children: ReactNode }) 
   );
 
   const close = useCallback(
-    async (
-      intervalId: string,
-      reason: Exclude<IntervalCloseReason, 'switched'>,
-      adjustment: IntervalAdjustment = {},
-    ) => {
-      await closeOperationInterval(intervalId, reason, adjustment);
+    async (intervalId: string, adjustment: IntervalAdjustment = {}) => {
+      await closeOperationInterval(intervalId, adjustment);
       posthog.capture('time interval closed', {
-        close_reason: reason,
         was_adjusted: Boolean(adjustment.adjustedStartedAt || adjustment.adjustedEndedAt),
       });
       await refresh();

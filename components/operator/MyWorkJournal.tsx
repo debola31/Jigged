@@ -142,12 +142,6 @@ function JournalRow({ entry }: { entry: OperationIntervalWithContext }) {
         </Typography>
       )}
 
-      {entry.close_reason === 'left_running' && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-          Left running
-        </Typography>
-      )}
-
       {entry.note && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           {entry.note}

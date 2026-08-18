@@ -22,7 +22,6 @@ import { toError, toFriendlyError, shouldReportSupabaseError } from '@/lib/supab
 import type { Database } from '@/types/database';
 import type {
   IntervalAdjustment,
-  IntervalCloseReason,
   OpenInterval,
   OperationActuals,
   OperationInterval,
@@ -117,21 +116,20 @@ export async function startOperationInterval(jobOperationId: string): Promise<Ru
 /**
  * Close an interval, optionally correcting its times and attaching a note.
  *
- * `switched` is not accepted: that reason belongs to the chain and only
- * `start_operation_interval` writes it. Closing an already-closed interval is a
- * no-op rather than an error, so a gloved double-tap and a retry after a dropped
- * cellular response are both harmless.
+ * Always closes as `completed` — there is no reason parameter, because
+ * recording what you finished is the only explicit way to close. `switched`
+ * belongs to the chain and only `start_operation_interval` writes it. Closing an
+ * already-closed interval is a no-op rather than an error, so a gloved
+ * double-tap and a retry after a dropped cellular response are both harmless.
  */
 export async function closeOperationInterval(
   intervalId: string,
-  closeReason: Exclude<IntervalCloseReason, 'switched'>,
   adjustment: IntervalAdjustment = {},
 ): Promise<void> {
   const supabase = getSupabase();
 
   const { error } = await supabase.rpc('close_operation_interval', {
     p_interval_id: intervalId,
-    p_close_reason: closeReason,
     p_adjusted_started_at: adjustment.adjustedStartedAt ?? undefined,
     p_adjusted_ended_at: adjustment.adjustedEndedAt ?? undefined,
     p_note: adjustment.note ?? undefined,

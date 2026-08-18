@@ -120,11 +120,17 @@ async function openIdleStep(page: Page): Promise<void> {
  * strict-mode violation inside a shared helper.
  */
 async function stopTimer(page: Page): Promise<void> {
-  // The step screen's own control. There is no running strip any more, so this
-  // is the only route to stopping without completing.
-  await page.getByRole('button', { name: /stop without finishing/i }).click();
-  await page.getByRole('menuitem', { name: /done for the day/i }).click();
+  // COMPLETE, THEN UNDO. There is no stop-without-completing control any more —
+  // an interval closes by being completed or by the chain, and nothing else. So
+  // the only way for a test to leave the timer closed AND the seeded quantities
+  // untouched is to record a completion and then void it. Undoing does not
+  // reopen the interval, which is what makes this a clean teardown.
+  await recordButton(page).click();
   await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
+  const undo = page.getByRole('button', { name: /undo all/i });
+  await undo.waitFor({ timeout: 30_000 });
+  await undo.click();
+  await expect(undo).toBeHidden({ timeout: 30_000 });
 }
 
 test.describe.configure({ mode: 'serial' });

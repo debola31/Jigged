@@ -290,7 +290,7 @@ work where that one did not:
 | **Never auto-closed** | An open interval stays open, loud on the office list, and excluded from every rollup until a human says when it ended. Fabricating an end is a silent runtime fallback for a data-at-rest problem. |
 | **Raw and adjusted are separate columns; `effective_*` is generated** | E2/Shoptech's shipped model — `Actual Clock In/Out` beside `Adjusted Clock In/Out`, only Adjusted editable. `started_at`/`ended_at` are not in the browser's UPDATE grant, so the raw pair is immutable by construction rather than by convention. Generating `effective_*` gives every reader one shape and no `COALESCE` to forget. |
 | **Writes are RPC-only** | The chain close crosses row ownership: the **shift handoff** — B starts on the machine A forgot to close — is routine, and under an own-rows UPDATE policy B is blocked by the unique index and denied by RLS, with no way forward. `start_operation_interval` crosses ownership by design; `close_operation_interval` asserts it, because an explicit close carries adjusted times and an unchecked id would let any member rewrite anyone's hours. |
-| **`capture_source` ships with the operator path** | `operator | sensor | system`. `left_running` overnight intervals are exactly where a sensor interval will later contradict a labour interval, and without a common shape there is nothing to express the disagreement *in*. |
+| **`capture_source` ships with the operator path** | `operator | sensor | system`. An interval left open overnight is exactly where a sensor interval will later contradict a labour one, and without a common shape there is nothing to express the disagreement *in*. |
 | **No setup/run phase control** | An 18-vendor sweep found nobody shipping a SETUP/RUN toggle inside a running timer: it is a UI mode that fails *silently* into the office's numbers. The split is solvable office-side from what this table already produces — `T = setup + q × cycle` across runs of the same part-operation, with the existing estimates as priors — at zero operator taps. **Deferred, not rejected.** |
 
 **Starting is mandatory, and the primary button is what enforces it.** One button changes meaning
@@ -331,9 +331,17 @@ indicates a timer is running*, so a forgotten stop is caught by the office Still
 next morning rather than by the operator in the moment — which makes that correction a recall
 estimate. An E2E assertion checks the strip has not crept back.
 
-Removing it also took the only `Done for the day` / `Left it running` control with it, so the step
-screen now carries **`Stop without finishing`** as a secondary. That is not a convenience: a timer
-that can only be stopped by completing work you did not finish is worse than no timer.
+**Withdrawn 2026-08-18: `Stop without finishing`, and the `done_for_day` / `left_running` reasons
+behind it.** Built and removed. They asked the operator to classify a stop — a second decision on
+top of the one that matters — and an interval left open already says "nobody closed this" on the
+office Still-running list without anyone having to name why. `close_reason` is now only `completed`
+or `switched`, and `close_operation_interval` has no reason parameter at all.
+
+**So an interval closes exactly two ways: you record what you finished, or the chain closes it when
+the next start takes the work centre.** An operator who walks away leaves it running and corrects
+the times from the feed afterwards, which is the same correction path every other mistake uses. The
+accepted cost is that a deliberate lights-out run and a forgotten stop now look identical until
+someone says otherwise.
 
 **The feed shows YOUR time entries and EVERYONE'S notes**, and the asymmetry is deliberate. A
 job-scoped feed naming when each person started would be a per-person time view available shop-wide

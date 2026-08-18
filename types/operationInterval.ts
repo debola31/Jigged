@@ -11,8 +11,16 @@
  * ONE shape and nobody has to remember the COALESCE.
  */
 
-/** Why an interval stopped. `switched` is written by the chain, never by a tap. */
-export type IntervalCloseReason = 'completed' | 'switched' | 'done_for_day' | 'left_running';
+/**
+ * Why an interval stopped, and there are only two ways.
+ *
+ * `completed` is the operator recording what they finished; `switched` is the
+ * chain closing this one because the next start took the work centre — written
+ * server-side, never by a tap. `done_for_day` and `left_running` were built and
+ * removed: they asked the operator to classify a stop, and an interval left open
+ * already says that on the office Still-running list.
+ */
+export type IntervalCloseReason = 'completed' | 'switched';
 
 /** Where the interval came from. Only `operator` is produced today. */
 export type IntervalCaptureSource = 'operator' | 'sensor' | 'system';

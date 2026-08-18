@@ -119,10 +119,10 @@ describe('startOperationInterval', () => {
 });
 
 describe('closeOperationInterval', () => {
-  it('sends the reason and both adjusted ends', async () => {
+  it('sends both adjusted ends, and no reason', async () => {
     responses['close_operation_interval'] = { data: null, error: null };
 
-    await closeOperationInterval('iv1', 'completed', {
+    await closeOperationInterval('iv1', {
       adjustedStartedAt: '2026-08-16T08:55:00Z',
       adjustedEndedAt: '2026-08-16T10:40:00Z',
       note: '  waiting on material  ',
@@ -131,10 +131,13 @@ describe('closeOperationInterval', () => {
     expect(rpcCalls[0].fn).toBe('close_operation_interval');
     expect(rpcCalls[0].args).toMatchObject({
       p_interval_id: 'iv1',
-      p_close_reason: 'completed',
       p_adjusted_started_at: '2026-08-16T08:55:00Z',
       p_adjusted_ended_at: '2026-08-16T10:40:00Z',
     });
+    // There is no reason to send. `done_for_day` and `left_running` were removed
+    // and `switched` belongs to the chain, so completion is the only explicit
+    // close and the parameter went with them.
+    expect(rpcCalls[0].args).not.toHaveProperty('p_close_reason');
   });
 
   it('omits the adjusted pair entirely when the operator did not touch it', async () => {
@@ -143,7 +146,7 @@ describe('closeOperationInterval', () => {
     // corrected when it was not.
     responses['close_operation_interval'] = { data: null, error: null };
 
-    await closeOperationInterval('iv1', 'done_for_day');
+    await closeOperationInterval('iv1');
 
     expect(rpcCalls[0].args.p_adjusted_started_at).toBeUndefined();
     expect(rpcCalls[0].args.p_adjusted_ended_at).toBeUndefined();

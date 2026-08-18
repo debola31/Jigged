@@ -98,15 +98,20 @@ CREATE TABLE public.job_operation_intervals (
     effective_ended_at timestamptz
         GENERATED ALWAYS AS (COALESCE(adjusted_ended_at, ended_at)) STORED,
 
-    -- How the interval ended. 'switched' is written by the chain (the next start
-    -- at this work centre); the other three are explicit operator acts.
-    -- 'left_running' is the lights-out case and exists so an unattended overnight
-    -- run is not indistinguishable from a forgotten stop.
+    -- How the interval ended, and there are only two ways. 'completed' is the
+    -- operator recording what they finished; 'switched' is the chain closing this
+    -- one because the next start took the work centre.
+    --
+    -- No 'done_for_day' and no 'left_running'. Both were built and removed: they
+    -- asked the operator to classify a stop, which is a second decision on top of
+    -- the one that matters, and an interval left open is already legible as
+    -- exactly that on the office Still-running list. An operator who walks away
+    -- leaves it running and corrects the times from the job feed afterwards.
     close_reason text,
 
     -- Ships now, with a reader now, so sensor rows land in THIS shape rather than
-    -- needing a parallel table later. left_running intervals are precisely where a
-    -- sensor interval will contradict a labour interval, and without a common
+    -- needing a parallel table later. An interval left open overnight is exactly
+    -- where a sensor interval will contradict a labour one, and without a common
     -- shape there is nothing to express the disagreement in.
     capture_source text NOT NULL DEFAULT 'operator',
 
@@ -125,8 +130,7 @@ CREATE TABLE public.job_operation_intervals (
     CONSTRAINT job_op_intervals_capture_source_check
         CHECK (capture_source IN ('operator', 'sensor', 'system')),
     CONSTRAINT job_op_intervals_close_reason_check
-        CHECK (close_reason IS NULL
-               OR close_reason IN ('completed', 'switched', 'done_for_day', 'left_running')),
+        CHECK (close_reason IS NULL OR close_reason IN ('completed', 'switched')),
     -- A closed interval has a reason and an open one does not: the two columns are
     -- one fact and may not disagree.
     CONSTRAINT job_op_intervals_close_reason_iff_ended
@@ -512,8 +516,8 @@ COMMENT ON FUNCTION public.start_operation_interval(uuid) IS
   'Opens a time interval on an operation, atomically closing whatever was open at the same work centre (close_reason=''switched'') regardless of who owned it — the shift handoff is routine, and an own-rows rule would dead-end it. Returns the new id, its server started_at, and now() so the client can compute clock skew rather than trusting the phone. Enforces company membership, company_can_write (RLS is bypassed here) and the external-op exclusion itself.';
 
 -- ── 6b. CLOSE ────────────────────────────────────────────────────────────────
--- The explicit closes: completed, done_for_day, left_running. 'switched' is not
--- accepted here — that reason belongs to the chain and only start_ writes it.
+-- THE ONLY EXPLICIT CLOSE: recording what was finished. 'switched' belongs to
+-- the chain and only start_ writes it.
 --
 -- OWNERSHIP IS ASSERTED IN-FUNCTION, and the asymmetry with start_ is deliberate.
 -- start_ crosses ownership because the machine has to be usable by the next
@@ -522,7 +526,6 @@ COMMENT ON FUNCTION public.start_operation_interval(uuid) IS
 -- and nothing to stop them.
 CREATE OR REPLACE FUNCTION public.close_operation_interval(
     p_interval_id uuid,
-    p_close_reason text,
     p_adjusted_started_at timestamptz DEFAULT NULL,
     p_adjusted_ended_at timestamptz DEFAULT NULL,
     p_note text DEFAULT NULL
@@ -537,10 +540,6 @@ DECLARE
     v_operator_id uuid;
     v_owner_id uuid;
 BEGIN
-    IF p_close_reason NOT IN ('completed', 'done_for_day', 'left_running') THEN
-        RAISE EXCEPTION 'Invalid close reason %', p_close_reason;
-    END IF;
-
     SELECT company_id, operator_id INTO v_company_id, v_owner_id
       FROM public.job_operation_intervals
      WHERE id = p_interval_id AND ended_at IS NULL AND voided_at IS NULL;
@@ -564,7 +563,7 @@ BEGIN
 
     UPDATE public.job_operation_intervals
        SET ended_at = now(),
-           close_reason = p_close_reason,
+           close_reason = 'completed',
            adjusted_started_at = p_adjusted_started_at,
            adjusted_ended_at = p_adjusted_ended_at,
            note = NULLIF(btrim(COALESCE(p_note, '')), '')
@@ -572,8 +571,8 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.close_operation_interval(uuid, text, timestamptz, timestamptz, text) IS
-  'Explicitly closes an interval (completed | done_for_day | left_running) with optional adjusted times and note. Asserts the caller OWNS the interval — unlike start_operation_interval, which crosses ownership by design — because with RLS bypassed an unchecked id parameter would let any member rewrite anyone''s recorded hours. Idempotent on an already-closed interval so a double-tap or a retry is not an error.';
+COMMENT ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text) IS
+  'Closes an interval as completed, with optional adjusted times and note. Asserts the caller OWNS the interval — unlike start_operation_interval, which crosses ownership by design — because with RLS bypassed an unchecked id parameter would let any member rewrite anyone''s recorded hours. Idempotent on an already-closed interval so a double-tap or a retry is not an error.';
 
 -- ── 6c. AGGREGATE READ: actual vs estimate, per operation ────────────────────
 -- The office reporting path, and it returns NO OPERATOR IDENTITY. That is the
@@ -741,7 +740,7 @@ COMMENT ON FUNCTION public.get_operator_time_detail(uuid, uuid, text) IS
 -- (issue #640). Revoke first, then grant back exactly what is needed.
 REVOKE EXECUTE ON FUNCTION public.start_operation_interval(uuid)
   FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.close_operation_interval(uuid, text, timestamptz, timestamptz, text)
+REVOKE EXECUTE ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text)
   FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.get_operation_actuals(uuid[])
   FROM PUBLIC, anon, authenticated;
@@ -754,7 +753,7 @@ REVOKE EXECUTE ON FUNCTION public.job_op_intervals_restrict_update()
 
 -- authenticated only. anon gets nothing: every one of these runs signed in.
 GRANT EXECUTE ON FUNCTION public.start_operation_interval(uuid) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.close_operation_interval(uuid, text, timestamptz, timestamptz, text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.close_operation_interval(uuid, timestamptz, timestamptz, text) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_operation_actuals(uuid[]) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_open_intervals(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_operator_time_detail(uuid, uuid, text) TO authenticated, service_role;
@@ -914,7 +913,7 @@ COMMENT ON TABLE public.job_operation_intervals IS
 COMMENT ON COLUMN public.job_operation_intervals.operator_id IS
   'Who was on it. An ATTRIBUTE, never the chain key — see the table comment. Not exposed by any aggregate reader; get_operator_time_detail is the only path that returns it, and it logs.';
 COMMENT ON COLUMN public.job_operation_intervals.capture_source IS
-  'operator | sensor | system. Ships with the operator path so sensor-derived intervals land in this same shape rather than a parallel table; left_running rows are where the two will first disagree.';
+  'operator | sensor | system. Ships with the operator path so sensor-derived intervals land in this same shape rather than a parallel table; an interval left open overnight is where the two will first disagree.';
 COMMENT ON COLUMN public.job_operation_intervals.adjusted_at IS
   'When the times were last corrected. NULL = never. Deliberately not updated_at (which this table also has, for bookkeeping): this is a claim made to other readers. Stamped by the guard trigger and granted to no browser role.';
 COMMENT ON TABLE public.operator_time_access_log IS
@@ -935,7 +934,7 @@ COMMENT ON TABLE public.operator_time_access_log IS
 --   DROP FUNCTION IF EXISTS public.get_operator_time_detail(uuid, uuid, text);
 --   DROP FUNCTION IF EXISTS public.get_open_intervals(uuid);
 --   DROP FUNCTION IF EXISTS public.get_operation_actuals(uuid[]);
---   DROP FUNCTION IF EXISTS public.close_operation_interval(uuid, text, timestamptz, timestamptz, text);
+--   DROP FUNCTION IF EXISTS public.close_operation_interval(uuid, timestamptz, timestamptz, text);
 --   DROP FUNCTION IF EXISTS public.start_operation_interval(uuid);
 --   DROP TABLE IF EXISTS public.job_operation_intervals;   -- takes its triggers
 --   DROP FUNCTION IF EXISTS public.job_op_intervals_restrict_update();

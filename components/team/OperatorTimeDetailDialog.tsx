@@ -153,7 +153,6 @@ export default function OperatorTimeDetailDialog({
                       ? ` – ${formatClockTime(row.effective_ended_at)}`
                       : ' – still running'}
                     {duration != null ? ` · ${formatDuration(duration)}` : ''}
-                    {row.close_reason === 'left_running' ? ' · left running' : ''}
                   </Typography>
                   {/* The audit surface is the one place BOTH pairs are the
                       answer: what was recorded, and what it was corrected to. */}

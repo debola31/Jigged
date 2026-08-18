@@ -7,7 +7,7 @@
   },
   "functions": {
     "api/**": {
-      "excludeFiles": "{.next,.git,node_modules}/**",
+      "excludeFiles": "{.next/**,.git/**,.vercel/**,node_modules/**,.claude/**,.agents/**,.github/**,docs/**,e2e/**,__tests__/**,supabase/**,api/tests/**,coverage/**,outputs/**,test-results/**,playwright-report/**,**/__pycache__/**,**/*.pyc}",
       "maxDuration": 60
     }
   },

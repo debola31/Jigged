@@ -206,6 +206,52 @@ which was always the point. Measured after the change: **gate 5s, trigger 5s.**
 >   bundle limit. Re-measure before treating it as a constraint, and do not repeat the mistake of
 >   narrowing the glob on the strength of it.
 
+> ### Correction, 2026-08-18 — limit #1 is misattributed, and it was measured
+>
+> **The `functions` glob does not create the fan-out, and narrowing it does nothing.** Limit #1 above
+> says `vercel build` "expands this repo's `functions: { "api/**" }` glob into one Serverless Function
+> per matched Python file". That reads as cause and effect, and it is not. Vercel's docs are explicit:
+> *"Without a detected Python framework preset, each `.py` file inside `/api` becomes a separate Vercel
+> Function"*, and the `functions` property is used to **configure** file-based functions, not to select
+> them. The `/api` directory convention is the cause; the glob is only the config key that happens to
+> match.
+>
+> Measured, not reasoned: narrowing the glob to `api/index.py` and deploying produced **12 Python
+> lambdas and 11 `uv.lock` installs — byte-identical to `api/**`** (`meta.lambdaRuntimeStats`,
+> `{"nodejs":3,"python":12}` on both). See PR #772.
+>
+> **The trap this creates.** Because the key only configures, narrowing it *silently unconfigures the
+> other eleven functions* — they keep existing, but lose `maxDuration: 60` and lose `excludeFiles`, so
+> they start bundling `api/tests/**`. Narrowing looks like a cleanup and is a regression. The glob must
+> stay wide enough to match every entrypoint.
+>
+> **What actually collapses the fan-out** is the framework preset: *"A Python framework preset takes
+> precedence over file-based functions… files under `/api` don't become separate Vercel Functions."*
+> That is a real change of shape for a project whose Vercel framework is `nextjs`, and Vercel points
+> Next.js + Python at [Services](https://vercel.com/docs/services) instead. Not a config tweak — treat
+> it as its own piece of work.
+>
+> **Limit #2 is resolved.** The cap is **500 MB uncompressed**, larger still on Fluid compute, which
+> this project already runs (`resourceConfig.fluid: true`). The 244 MB single-function measurement fits
+> with ~2× headroom, so the 225 MB figure that block flagged as stale is now settled — it just no
+> longer matters, because narrowing is not the lever anyone thought it was.
+>
+> **Why any of this got looked at.** Four days into the first Pro billing cycle the team had spent
+> **$15.75 of its $20 credit, 99.6% of it Build CPU Minutes**. Over 79 deployments, billed machine time
+> averaged **7.82 min/build**: 84s compile+install, 70s deploying outputs, and **314s creating and
+> uploading the build cache**. The build had not regressed — builds on Aug 12–14 ran *longer*, at
+> ~11 min. Hobby simply never billed for it.
+>
+> Two measurement traps worth carrying forward, because both cost time here:
+> - **Billed build duration is not `ready - buildingAt`.** That field stops at "Deployment completed"
+>   and undercounts by ~3×; the machine keeps running through cache creation. Measure first-event to
+>   last-event on `GET /v3/deployments/{id}/events?builds=1`.
+> - **The build cache has not been shown to pay for itself.** It costs 314s to accelerate a phase that
+>   takes 84s in total, so a perfect hit cannot save more than 84s. Settle it with one A/B against
+>   `VERCEL_FORCE_NO_BUILD_CACHE=1` before assuming it helps. And do not expect the *glob* to shrink it
+>   — uv's cache is content-addressed and deduplicated across entrypoints, so eleven venvs already
+>   shared one copy of each wheel.
+
 **If deploys ever stop reaching production**, the first thing to check is whether the hook still
 exists (`vercel deploy-hooks list`) and matches the `VERCEL_DEPLOY_HOOK_URL` secret. Reverting
 `git.deploymentEnabled` in `vercel.json` restores Vercel's own auto-deploy immediately, at the cost of

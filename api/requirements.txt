@@ -32,9 +32,10 @@ httpx>=0.27.0
 # Function calling Resend over fetch (see docs/modules/invitation-system.md).
 
 # Database
-# psycopg2-binary is NOT imported anywhere under api/ — grep it and you will find
-# nothing, which is exactly why it keeps looking removable. It is used by
-# scripts/sync_demo_template.py, which lives outside this directory but installs
-# from this file. Removing it breaks that script with an ImportError at line 26.
-psycopg2-binary>=2.9.0
+# psycopg2-binary MOVED to requirements-test.txt. The comment that used to sit here
+# justified it by scripts/sync_demo_template.py — a file that no longer exists. Its
+# only live users are three api/tests/integration/ tests and
+# scripts/load_pilot_data_to_jigged.py, which pip-installs it itself (see its
+# docstring). It was ~11 MB of wheel shipped into every Vercel function bundle for
+# an import that never happens at runtime.
 asyncpg>=0.29.0

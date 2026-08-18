@@ -1,0 +1,53 @@
+# What never needs to reach a Vercel build.
+#
+# EVERY DIRECTORY ENTRY IS ANCHORED WITH A LEADING SLASH, AND THAT IS LOAD-BEARING.
+# This file uses .gitignore syntax, where a bare name matches at ANY depth — so a
+# bare `supabase` would also match utils/supabase/, which app/auth/confirm/route.ts
+# and app/launch/page.tsx import. That would break `next build`, not just the
+# Python bundle. Anchoring pins each entry to the repo root.
+#
+# WHETHER THIS FILE APPLIES TO GIT DEPLOYMENTS IS UNSETTLED. Vercel's own docs
+# contradict each other — "only relevant when using Vercel CLI" (build features)
+# vs. an unqualified description under .vercelignore. It is definitely honoured by
+# `vercel build` / `vercel deploy` from a laptop. So nothing build-critical goes in
+# here; the function bundle is trimmed by `excludeFiles` in vercel.json, which is
+# documented and unambiguous. Confirm the git-deploy behaviour on a preview by
+# opening /_src and checking whether docs/ and e2e/ are present.
+#
+# The concrete reason this file exists at all: .claude/worktrees is 4.8 GB of git
+# worktrees. It is .gitignore'd, so a git deployment never sees it — but a local
+# `vercel build` does not read .gitignore, and .claude is not on Vercel's default
+# ignore list. Without this file, local verification globs 4.8 GB into the bundle,
+# which is a large part of why the local CLI and the hosted builder have never
+# agreed on function count or bundle size.
+
+# --- Local-only build/test artefacts. Also .gitignore'd. ---
+/.claude
+/.agents
+/.vscode
+/coverage
+/outputs
+/test-results
+/playwright-report
+/playwright
+/.pytest_cache
+/api/.cache
+/api/.pytest_cache
+/tsconfig.tsbuildinfo
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+
+# --- Committed, but read by neither `next build` nor the Python function. ---
+/api/tests          # 55 files; proven unreachable from api/index.py by import graph
+/__tests__          # vitest only; already in tsconfig "exclude"
+/e2e                # playwright only
+/docs
+/.github            # workflows run on GitHub, never on Vercel
+/supabase           # migrations + seed; CLI and CI only. NOT utils/supabase.
+
+# NOT ignored, deliberately:
+#   scripts/  — package.json's postinstall runs scripts/copy-scanner-wasm.mjs, which
+#               copies the zxing WASM into public/ and throws if it fails.
+#   public/   — app/(marketing)/privacy/page.tsx reads public/legal/privacy.html at
+#               build time, and Hero.tsx serves /wireframe-scene.mp4 + /screenshots.

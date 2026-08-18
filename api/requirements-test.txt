@@ -5,3 +5,11 @@ pytest-mock>=3.11.0
 httpx>=0.24.0
 factory-boy>=3.3.0
 responses>=0.23.0
+
+# Not a test framework, but test-only in practice: three integration tests
+# (test_create_location_tree, test_jobs_search_cap,
+# test_location_children_hold_no_stock) connect over raw libpq to assert things
+# the Supabase client cannot express, such as a raised exception class. Nothing
+# under api/ imports psycopg2 at runtime, so it does not belong in
+# requirements.txt where it was shipped into every Vercel function bundle.
+psycopg2-binary>=2.9.0

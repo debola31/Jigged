@@ -30,6 +30,7 @@ import NoteActionsMenu from '@/components/notes/NoteActionsMenu';
 import { useOperatorIdentity } from '@/hooks/useOperatorIdentity';
 import NewHelpfulBlock from '@/components/operator/NewHelpfulBlock';
 import { OperatorIdentityRow } from '@/components/operator/OperatorAccountBlock';
+import MyWorkJournal from '@/components/operator/MyWorkJournal';
 import NoteReactions from '@/components/operator/NoteReactions';
 import type { MyNote, NoteViewer } from '@/types/operator';
 
@@ -465,6 +466,13 @@ export default function MyWorkPage() {
           in the common case. */}
       <NewHelpful companyId={companyId} />
       <MyContribution companyId={companyId} />
+      {/* BELOW the notes, deliberately. What an operator contributed to the shop
+          leads; what they were clocked on follows. Reversing that order would
+          make the first thing this screen says about a person be how their time
+          was spent, which is the reading the whole surface is shaped to avoid.
+          Owns its own loading and empty states, and renders NOTHING when there
+          is no recorded time — see MyWorkJournal before adding anything to it. */}
+      <MyWorkJournal companyId={companyId} />
     </Box>
   );
 }

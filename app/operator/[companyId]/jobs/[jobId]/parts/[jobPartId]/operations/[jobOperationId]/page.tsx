@@ -19,6 +19,7 @@ import Collapse from '@mui/material/Collapse';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TextField from '@mui/material/TextField';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import NoteAddIcon from '@mui/icons-material/NoteAdd';
 import UndoIcon from '@mui/icons-material/Undo';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -48,19 +49,35 @@ import JobFeed from '@/components/operator/JobFeed';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
+import { useIntervalContext } from '@/components/operator/OperatorIntervalContext';
+import { elapsedMs, formatClockTime, formatStopwatch } from '@/lib/duration';
 
 /**
  * Action view for ONE specific operation on a job_part. Reached by tapping a
  * step on the traveler, or directly from the station-scoped jobs list.
  *
  * Operators record how many GOOD pieces they finished: one number field that
- * defaults to the full remaining balance, so RECORD COMPLETION completes the
- * operation by default and records a partial when the number is dialled down
- * (each event appends to job_operation_completions; a DB trigger derives the
- * op status). No "start", no pause/exit, no on-job timer (shop operators don't
- * reliably start/pause/resume, so we don't pretend to track that time). Undo
- * voids the recorded completions. Loads by job_operation_id so the exact step
- * the operator chose is the one actioned.
+ * defaults to the full remaining balance, so the completion records the whole
+ * step by default and a partial when the number is dialled down (each event
+ * appends to job_operation_completions; a DB trigger derives the op status).
+ * Undo voids the recorded completions. Loads by job_operation_id so the exact
+ * step the operator chose is the one actioned.
+ *
+ * ONE PRIMARY BUTTON THAT CHANGES MEANING: idle it is START THIS STEP, running
+ * it is RECORD <n> FINISHED. Both on screen at once was the bug — it let a step
+ * be completed without ever being timed, which made the timer optional in
+ * practice. There is still no pause and no resume: you stop by starting the next
+ * thing or by recording the completion — those are the only two ways an interval
+ * closes.
+ *
+ * TIME IS RECORDED IN THE JOB FEED BELOW — a "Started …" entry when the clock
+ * starts and a "Finished …" entry when it stops, each adjustable from the row
+ * that shows it. The clock here is the live readout; the feed is the record.
+ *
+ * `Complete without timing` is the deliberate escape hatch for the operator who
+ * did the work and forgot to start. It records NO interval rather than a
+ * backdated guess, because a remembered start is a recall estimate and inventing
+ * one would corrupt the data this feature exists to collect.
  *
  * Station guard: recording requires a selected station (StationSelector prompts
  * when none is set). If the step's work center doesn't match the operator's
@@ -84,6 +101,40 @@ export default function OperatorOperationActionPage() {
 
   const { stationId, stationName, initializing } = useStationContext();
   const nav = useOperatorNav();
+
+  // Shared with the header strip, so the two can never disagree about whether
+  // this step is running. See OperatorIntervalContext.
+  const {
+    intervalFor,
+    start: startInterval,
+    close: closeInterval,
+    serverSkewMs,
+  } = useIntervalContext();
+  const running = intervalFor(jobOperationId);
+
+  // Times the operator is about to record, editable before RECORD COMPLETION
+  // commits them. Null until they touch Adjust — an untouched interval writes no
+  // adjusted values at all, so `adjusted_at` stays NULL and the row does not
+  // claim to have been corrected when it was not.
+
+  /**
+   * A repaint tick for the hero clock — NOT a counter.
+   *
+   * The displayed figure is recomputed from the stored start instant on every
+   * render (see lib/duration), so this interval only has to say "paint again".
+   * Without it the clock renders once at 0:00 and never moves, which is exactly
+   * how it shipped in the first cut of this screen: the strip and the confirm
+   * sheet each had their own tick and this one did not, so the loudest element
+   * on the page was the only frozen one. Caught by a screenshot, not by a test —
+   * jsdom renders one frame and asserts on it, so a clock that never advances
+   * looks identical to a working one.
+   */
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setClockTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
 
   const [currentOperatorId, setCurrentOperatorId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -150,7 +201,7 @@ export default function OperatorOperationActionPage() {
   const {
     data: job,
     loading,
-    reload: loadJob,
+    refresh: loadJob,
   } = useLoad(
     () => getOperatorOperationDetail(jobOperationId, companyId),
     [jobOperationId, companyId],
@@ -214,6 +265,38 @@ export default function OperatorOperationActionPage() {
   const canComplete = Number(qtyValue) > 0;
   const noteOnly = !canComplete && capture.hasContent;
 
+  // This block only renders for an internal, incomplete op (see the
+  // isCompleted / isExternal branches below), so "nothing running" is the whole
+  // of the idle condition.
+  const showStart = !running;
+
+  /**
+   * What the single primary button does, in strict precedence order.
+   *
+   * `note` IS FIRST, AND THAT ORDERING IS LOAD-BEARING. An operator who cleared
+   * the quantity and typed something has finished zero pieces and is telling us
+   * why — "machine down", "waiting on material". That path exists precisely so
+   * nobody types a false quantity to get a note saved, and an earlier draft of
+   * this refactor put `start` first and made SAVE NOTE unreachable, which
+   * quietly reinstated the hole B4 was opened to close.
+   */
+  const primaryAction: 'note' | 'start' | 'complete' | 'none' = noteOnly
+    ? 'note'
+    : showStart
+      ? 'start'
+      : canComplete
+        ? 'complete'
+        : 'none';
+
+  /**
+   * Post-write refetch that KEEPS THE SCREEN UP.
+   *
+   * Both loaders use `refresh`, not `reload`. `reload` re-enters the loading
+   * state, and this page early-returns a full-height spinner on `loading` — so
+   * every completion replaced the entire screen with a spinner and brought it
+   * back, which is indistinguishable from a page reload and happened on every
+   * single action.
+   */
   const reloadAll = async () => {
     await Promise.all([loadJob(), loadSummary()]);
   };
@@ -233,7 +316,10 @@ export default function OperatorOperationActionPage() {
     setActionLoading(true);
     setError(null);
     try {
-      await createOperationCompletion({
+      // The id is kept so the interval can point at the completion that closed
+      // it — that link is what lets the feed show how many parts a "Finished"
+      // row represents, and what lets Undo retract the time along with the count.
+      const { id: completionId } = await createOperationCompletion({
         companyId,
         jobOperationId,
         jobPartId,
@@ -251,6 +337,23 @@ export default function OperatorOperationActionPage() {
         is_partial: qty < remaining,
       });
 
+      // THE INTERVAL CLOSES SECOND, AND ALSO NOT ATOMICALLY — same rule as the
+      // note below, for the same reason. The completion is the durable
+      // production fact and it has already landed. If this close then fails, the
+      // interval simply stays OPEN and turns up on the office's Still-running
+      // list, which is precisely what that list exists to catch. Wrapping the
+      // two in a transaction would roll back real finished work because a timing
+      // row failed, which is the trade this page already refused once.
+      if (running) {
+        try {
+          await closeInterval(running.id, completionId);
+        } catch {
+          // Deliberately swallowed at page level: "the completion worked, the
+          // timer did not stop" is not something an operator can act on from
+          // here, and it is already visible to the office.
+        }
+      }
+
       // ORDER IS LOAD-BEARING, AND DELIBERATELY NOT ATOMIC.
       //
       // The completion is already durable by the time we get here. The note is
@@ -261,6 +364,10 @@ export default function OperatorOperationActionPage() {
       //
       // So a note failure surfaces on its own and the step stays complete. The
       // operator can retype it; they cannot un-finish the part they finished.
+      // Bumped unconditionally: the completion closed an interval, which is a
+      // feed entry in its own right whether or not a note rode along with it.
+      setFeedRefreshSignal((n) => n + 1);
+
       if (capture.hasContent) {
         try {
           await capture.submit();
@@ -278,6 +385,43 @@ export default function OperatorOperationActionPage() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // Open an interval on this step.
+  //
+  // An explicit tap and NOT an effect on page view. Operators open a step to
+  // read the instructions and look at the drawing as often as to work it, so
+  // auto-starting on render would manufacture time nobody spent — and this page
+  // is also the landing target of a printed QR, which people scan to find out
+  // what a job is.
+  const handleStart = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      await startInterval(jobOperationId);
+      // The feed gains a "Started …" entry — that is where the record lives now.
+      setFeedRefreshSignal((n) => n + 1);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  /**
+   * Record the completion with NO interval — the forgot-to-start path.
+   *
+   * Deliberately writes nothing about time rather than a backdated guess: a
+   * remembered start is a recall estimate, and recall bias grows with the
+   * magnitude being estimated, so an invented duration would corrupt exactly the
+   * data this feature exists to collect. An op with no interval reports "no time
+   * recorded", which is the same honest state an office-side completion produces.
+   */
+  const handleCompleteWithoutTiming = async () => {
+    posthog.capture('operation completed untimed', {
+      is_partial: Number(qtyValue) < remaining,
+    });
+    await handleRecord();
   };
 
   // Save a note with NO completion.
@@ -311,6 +455,12 @@ export default function OperatorOperationActionPage() {
     try {
       await revertOperationCompletion(jobOperationId);
       setQtyDirty(false);
+      // The feed has to be told, exactly as recording tells it. Undo voids the
+      // completion AND — through the cascade trigger — the time intervals it
+      // closed, so the Started/Finished pair is gone from the database. Without
+      // this bump the feed keeps rendering rows that no longer exist, which
+      // reads as Undo having retracted the count but kept the time.
+      setFeedRefreshSignal((n) => n + 1);
       await reloadAll();
     } catch (err) {
       setError(err);
@@ -549,7 +699,16 @@ export default function OperatorOperationActionPage() {
           )}
 
 
-          {!isCompleted && job.estimated_minutes != null && job.estimated_minutes > 0 && (
+          {/* THE ESTIMATE IS HIDDEN WHILE A TIMER IS RUNNING, and that is a
+              guardrail rather than a layout choice. On its own the quoted figure
+              is the engineer's input to the job and the printed traveler carries
+              the same number. Beside a live elapsed counter it becomes a target,
+              and a number about the operator's own output sitting next to a
+              standard is exactly the adjacent comparison that turns informational
+              feedback into controlling feedback. The office still sees
+              estimate-vs-actual; the person doing the work does not.
+              See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable. */}
+          {!isCompleted && !running && job.estimated_minutes != null && job.estimated_minutes > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
               Estimated:{' '}
               {job.estimated_minutes < 60
@@ -732,6 +891,59 @@ export default function OperatorOperationActionPage() {
             </Typography>
           )}
 
+          {/* TIME. Starting is one tap on the step the operator was going to open
+              anyway, and stopping is a side effect of recording the completion
+              they were going to record anyway — there is no stopwatch screen to
+              remember to visit. */}
+          {!isExternal && running && (
+            <Box sx={{ textAlign: 'center', py: 1 }}>
+              {/* THE HERO CLOCK, and it is deliberately loud.
+                  Amended 2026-08-17. The first version made this a quiet caption,
+                  reasoning that a live counter reflects pace back at the operator.
+                  That over-applied the evidence: Etkin's harmful counter was a
+                  tally of OUTPUT accumulating across a task, whereas this is
+                  elapsed time on the one thing in front of you — it accumulates
+                  nothing and, with the estimate hidden below, sits beside no
+                  standard. The load-bearing half of the guardrail is the ADJACENT
+                  COMPARISON, and that is still gone.
+                  It also earns its size operationally: an unmissable clock is the
+                  best defence against the forgotten start and the forgotten stop,
+                  which is the failure mode this whole design fights. Matches the
+                  h2 monospace clock this app shipped before 541ca291 removed it. */}
+              <Typography
+                component="div"
+                variant="h2"
+                sx={{
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  // WHITE, AND FOR TWO REASONS. Contrast: #ffffff on the #111439
+                  // page is 17.75:1 where primary.main was 4.32:1 — AA-large
+                  // only, the weakest option in the palette, on a hero element
+                  // read at arm's length under shop lighting. And neutrality: a
+                  // colour with valence is the timer passing judgment. Green
+                  // reads "good", amber reads "caution", and both make the clock
+                  // an opinion about pace, which is the one thing this surface
+                  // must not be. Size, weight and monospace carry the prominence.
+                  color: 'text.primary',
+                  // Tabular figures so the width does not jitter every second.
+                  fontVariantNumeric: 'tabular-nums',
+                  lineHeight: 1.1,
+                }}
+                // Announced once, not on every tick — a per-second live region
+                // would make a screen reader unusable.
+                aria-label={`Timing this step, started ${formatClockTime(running.effective_started_at)}`}
+              >
+                {formatStopwatch(elapsedMs(running.effective_started_at, serverSkewMs))}
+              </Typography>
+              {/* NOTHING UNDER THE CLOCK. The start time and its Adjust both
+                  live on the feed's "Started …" entry below — one fact, one
+                  place, corrected where it is shown. The clock is the live
+                  readout and says only what the feed cannot: how long, right
+                  now. (The instant is still announced to screen readers via the
+                  aria-label above, which is not a duplicate because the ticking
+                  figure is not readable as a time.) */}
+            </Box>
+          )}
 
           {/* CAPTURE, MERGED INTO COMPLETION.
               Finishing a step and writing down what you learned are one act, one
@@ -765,32 +977,93 @@ export default function OperatorOperationActionPage() {
               again the action can drift off-screen, which is exactly how it broke
               the first time. Measure before adding anything above it. */}
           <Box>
-            {/* One button, and it says what it will do. The quantity field
-                defaults to the full remaining balance, so this records a full
-                completion by default and a partial when the number is dialled
-                down. With nothing finished but something typed it saves the note
-                alone — better than a dead button that does not explain itself. */}
+            {/* ONE PRIMARY, AND IT CHANGES MEANING WITH THE STATE.
+                Idle it is START; running it records what was finished. Having
+                both on screen at once was the bug: it let an operator complete a
+                step without ever timing it, which made the timer optional in
+                practice and left the data half-collected.
+
+                THE COMPLETION LABEL INTERPOLATES THE NUMBER — `RECORD 12
+                FINISHED`, not `COMPLETE`. Partial completion is the normal case
+                (3 of 12 is an event, not a finished step), so a bare "Complete"
+                would misstate the common outcome; and putting the figure in the
+                verb means the operator does no arithmetic to know what the tap
+                will write. Same reason Harvest labels its recovery actions
+                "Add 47 minutes as a new entry" rather than "Add".
+
+                Still falls back to SAVE NOTE at qty 0 — that path exists so
+                nobody types a false quantity to get a note saved, and it stays
+                reachable without a timer for exactly that reason. */}
             <Button
               fullWidth
               variant="contained"
               size="large"
               color="primary"
-              startIcon={canComplete ? <CheckCircleIcon /> : <NoteAddIcon />}
-              onClick={canComplete ? handleRecord : handleSaveNoteOnly}
-              disabled={actionLoading || (!canComplete && !noteOnly)}
+              startIcon={
+                primaryAction === 'start' ? (
+                  <PlayArrowIcon />
+                ) : primaryAction === 'complete' ? (
+                  <CheckCircleIcon />
+                ) : (
+                  <NoteAddIcon />
+                )
+              }
+              onClick={
+                primaryAction === 'start'
+                  ? handleStart
+                  : primaryAction === 'complete'
+                    ? handleRecord
+                    : handleSaveNoteOnly
+              }
+              disabled={actionLoading || primaryAction === 'none'}
               sx={{ minHeight: 64, fontSize: '1.15rem', fontWeight: 600 }}
             >
               {actionLoading ? (
                 <CircularProgress size={24} />
-              ) : canComplete ? (
-                'RECORD COMPLETION'
+              ) : primaryAction === 'start' ? (
+                'START THIS STEP'
+              ) : primaryAction === 'complete' ? (
+                `RECORD ${qtyValue} FINISHED`
               ) : (
                 'SAVE NOTE'
               )}
             </Button>
+
+            {/* THE ESCAPE HATCH, and it is deliberately quiet rather than absent.
+                A hard block is the one shape that reliably corrupts data here:
+                this page already carries an incident where a UI constraint that
+                could not be satisfied led operators to type a false quantity to
+                get past it. So an operator who did the work and forgot to start
+                can still record it.
+
+                It records NO INTERVAL rather than a backdated one. A remembered
+                start time is a recall estimate, and recall is biased upward with
+                the magnitude being estimated — inventing that number would poison
+                the very data this feature exists to collect. An honest absence is
+                better than a plausible fabrication, and it is the same shape an
+                office-side completion already produces.
+
+                Instrumented, so how often it is used is measurable: if it becomes
+                the normal path, the timer is too hard to reach and that is our
+                problem, not the operator's. */}
+            {primaryAction === 'start' && canComplete && (
+              <Button
+                fullWidth
+                variant="text"
+                color="inherit"
+                onClick={handleCompleteWithoutTiming}
+                disabled={actionLoading}
+                sx={{ mt: 1, minHeight: 44, opacity: 0.8 }}
+              >
+                Complete without timing
+              </Button>
+            )}
           </Box>
 
-          {qtyGood > 0 && (
+          {/* Hidden while a timer runs. Undoing earlier completions is not an
+              action anyone wants mid-operation, and beside a live clock it reads
+              as "undo what I am doing", which it is not. */}
+          {qtyGood > 0 && !running && (
             <Button
               fullWidth
               variant="text"

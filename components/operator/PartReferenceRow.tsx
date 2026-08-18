@@ -82,17 +82,30 @@ export default function PartReferenceRow({
         display: 'flex',
         alignItems: 'flex-start',
         gap: 1,
-        flexWrap: 'nowrap',
+        // WRAPS, amended 2026-08-18. This was `nowrap`, on the reasoning that
+        // the field should shrink rather than push the buttons to a second
+        // line. That holds only while the field can shrink ACCEPTABLY, and on a
+        // 390px phone it cannot: Files and Playbook are flexShrink: 0, so the
+        // field was left ~124px — enough to truncate its own label to "Parts
+        // finish…" and wrap "Completes this operation" onto three lines. Three
+        // wrapped caption lines cost more height than the wrapped button row
+        // does, so nowrap was buying vertical space it no longer saved.
+        // Wide screens still fit everything on one line.
+        flexWrap: 'wrap',
         mb: leading ? 1 : 3,
       }}
     >
-      {/* Takes whatever width is left, so the field shrinks rather than wrapping
-          the buttons onto a second line. */}
-      {leading && <Box sx={{ flex: 1, minWidth: 0 }}>{leading}</Box>}
+      {/* Grows into the space left by the buttons, but never below the width its
+          own label needs — past that the row wraps instead of truncating. */}
+      {leading && <Box sx={{ flex: '1 1 190px', minWidth: 190 }}>{leading}</Box>}
 
-      {/* Both outlined so they read as one family (per the design system —
-          grouped actions share a variant). Files leads its pair via bolder weight
-          + a count, not by being the only one with a border. */}
+      {/* WRAPS AS A PAIR. Without this Box the two buttons are independent flex
+          items, so a narrow screen breaks between them and strands Playbook
+          alone on its own line — they read as one family, so they should move as
+          one. Both outlined for the same reason (per the design system, grouped
+          actions share a variant); Files leads via bolder weight and a count,
+          not by being the only one with a border. */}
+      <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
       <Button
         variant="outlined"
         startIcon={<FolderOpenIcon />}
@@ -114,6 +127,7 @@ export default function PartReferenceRow({
       >
         {hasNotes ? `Playbook · ${noteCount}` : 'Playbook'}
       </Button>
+      </Box>
 
       {filesOpen && (
         <PartFilesSheet

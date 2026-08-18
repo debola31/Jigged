@@ -1085,6 +1085,138 @@ export type Database = {
           },
         ]
       }
+      job_operation_intervals: {
+        Row: {
+          adjusted_at: string | null
+          adjusted_by: string | null
+          adjusted_ended_at: string | null
+          adjusted_started_at: string | null
+          capture_source: string
+          close_reason: string | null
+          company_id: string
+          completion_id: string | null
+          created_at: string
+          effective_ended_at: string | null
+          effective_started_at: string | null
+          ended_at: string | null
+          id: string
+          job_operation_id: string
+          job_part_id: string
+          note: string | null
+          operator_id: string
+          started_at: string
+          updated_at: string
+          voided_at: string | null
+          voided_by: string | null
+          work_center_id: string | null
+        }
+        Insert: {
+          adjusted_at?: string | null
+          adjusted_by?: string | null
+          adjusted_ended_at?: string | null
+          adjusted_started_at?: string | null
+          capture_source?: string
+          close_reason?: string | null
+          company_id: string
+          completion_id?: string | null
+          created_at?: string
+          effective_ended_at?: string | null
+          effective_started_at?: string | null
+          ended_at?: string | null
+          id?: string
+          job_operation_id: string
+          job_part_id: string
+          note?: string | null
+          operator_id: string
+          started_at?: string
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+          work_center_id?: string | null
+        }
+        Update: {
+          adjusted_at?: string | null
+          adjusted_by?: string | null
+          adjusted_ended_at?: string | null
+          adjusted_started_at?: string | null
+          capture_source?: string
+          close_reason?: string | null
+          company_id?: string
+          completion_id?: string | null
+          created_at?: string
+          effective_ended_at?: string | null
+          effective_started_at?: string | null
+          ended_at?: string | null
+          id?: string
+          job_operation_id?: string
+          job_part_id?: string
+          note?: string | null
+          operator_id?: string
+          started_at?: string
+          updated_at?: string
+          voided_at?: string | null
+          voided_by?: string | null
+          work_center_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_op_intervals_adjusted_by_fk"
+            columns: ["adjusted_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_completion_fk"
+            columns: ["completion_id"]
+            isOneToOne: false
+            referencedRelation: "job_operation_completions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_job_part_fk"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_operation_fk"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_operator_fk"
+            columns: ["operator_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_voided_by_fk"
+            columns: ["voided_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_op_intervals_work_center_fk"
+            columns: ["work_center_id"]
+            isOneToOne: false
+            referencedRelation: "work_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_operations: {
         Row: {
           completed_at: string | null
@@ -1790,6 +1922,55 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operator_time_access_log: {
+        Row: {
+          accessed_at: string
+          accessed_by: string
+          company_id: string
+          id: string
+          reason: string
+          subject_operator_id: string
+        }
+        Insert: {
+          accessed_at?: string
+          accessed_by: string
+          company_id: string
+          id?: string
+          reason: string
+          subject_operator_id: string
+        }
+        Update: {
+          accessed_at?: string
+          accessed_by?: string
+          company_id?: string
+          id?: string
+          reason?: string
+          subject_operator_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operator_time_access_log_actor_fk"
+            columns: ["accessed_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_time_access_log_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "operator_time_access_log_subject_fk"
+            columns: ["subject_operator_id"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
             referencedColumns: ["id"]
           },
         ]
@@ -3581,6 +3762,16 @@ export type Database = {
         }
         Returns: Json
       }
+      close_operation_interval: {
+        Args: {
+          p_adjusted_ended_at?: string
+          p_adjusted_started_at?: string
+          p_completion_id?: string
+          p_interval_id: string
+          p_note?: string
+        }
+        Returns: undefined
+      }
       company_can_write: {
         Args: { check_company_id: string }
         Returns: boolean
@@ -3724,9 +3915,50 @@ export type Database = {
         Returns: string
       }
       generate_quote_number: { Args: { company_uuid: string }; Returns: string }
+      get_open_intervals: {
+        Args: { p_company_id: string }
+        Returns: {
+          capture_source: string
+          interval_id: string
+          job_id: string
+          job_number: string
+          job_operation_id: string
+          operation_name: string
+          part_name: string
+          started_at: string
+          work_center_name: string
+        }[]
+      }
+      get_operation_actuals: {
+        Args: { p_job_operation_ids: string[] }
+        Returns: {
+          actual_minutes: number
+          adjusted_count: number
+          first_started_at: string
+          interval_count: number
+          job_operation_id: string
+          last_ended_at: string
+          open_count: number
+        }[]
+      }
       get_operator_access_id: {
         Args: { check_company_id: string }
         Returns: string
+      }
+      get_operator_time_detail: {
+        Args: { p_company_id: string; p_operator_id: string; p_reason: string }
+        Returns: {
+          adjusted_at: string
+          close_reason: string
+          effective_ended_at: string
+          effective_started_at: string
+          ended_at: string
+          interval_id: string
+          job_number: string
+          job_operation_id: string
+          operation_name: string
+          started_at: string
+        }[]
       }
       get_priceable_part_ids: {
         Args: { p_company_id: string }
@@ -3920,6 +4152,14 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      start_operation_interval: {
+        Args: { p_job_operation_id: string }
+        Returns: {
+          interval_id: string
+          server_now: string
+          started_at: string
+        }[]
+      }
       sync_demo_access: {
         Args: { p_demo_company_id: string; p_source_company_id: string }
         Returns: undefined

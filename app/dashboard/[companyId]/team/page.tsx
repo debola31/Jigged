@@ -25,6 +25,7 @@ import Tooltip from '@mui/material/Tooltip';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SendIcon from '@mui/icons-material/Send';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CloseIcon from '@mui/icons-material/Close';
 import GroupIcon from '@mui/icons-material/Group';
 import BadgeIcon from '@mui/icons-material/Badge';
@@ -50,6 +51,7 @@ import ExportCsvButton from '@/components/common/ExportCsvButton';
 import AdminGuard from '@/components/auth/AdminGuard';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import type { TeamMember, Invitation, TeamRow } from '@/types/team';
+import OperatorTimeDetailDialog from '@/components/team/OperatorTimeDetailDialog';
 
 /**
  * Get the Edge Function URL for unified team endpoint.
@@ -126,6 +128,10 @@ export default function TeamPage() {
     message: string;
     severity: 'error' | 'success';
   }>({ open: false, message: '', severity: 'success' });
+
+  // The member whose recorded time is being looked at, or null. Every other
+  // reporting surface is aggregate; this one names a person and logs the ask.
+  const [timeDetailFor, setTimeDetailFor] = useState<{ id: string; name: string } | null>(null);
 
   // Invitations state
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -594,7 +600,30 @@ export default function TeamPage() {
 
   // Actions cell renderer for pending invitation rows
   const ActionsCellRenderer = useCallback((params: { data: TeamRow }) => {
-    if (params.data?.type !== 'invitation' || !params.data.invitation_id) return null;
+    // An accepted member gets the audited time-detail door. Deliberately ONE
+    // quiet icon and not a column of figures: every other reporting surface is
+    // aggregate by default, and this is the exception that records itself. See
+    // OperatorTimeDetailDialog.
+    if (params.data?.type !== 'invitation') {
+      if (!params.data?.id) return null;
+      return (
+        <Tooltip title="View recorded time (this is logged)">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              setTimeDetailFor({
+                id: params.data.id!,
+                name: params.data.name || params.data.email || 'This person',
+              });
+            }}
+          >
+            <AccessTimeIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      );
+    }
+    if (!params.data.invitation_id) return null;
     return (
       <Box sx={{ display: 'flex', gap: 0.5 }}>
         <Tooltip title="Resend invitation">
@@ -1219,6 +1248,18 @@ export default function TeamPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Mounted only while open, so its reason field is cleared between looks
+          — reusing a previous reason would understate the audit log. */}
+      {timeDetailFor && (
+        <OperatorTimeDetailDialog
+          open
+          onClose={() => setTimeDetailFor(null)}
+          companyId={companyId}
+          operatorId={timeDetailFor.id}
+          operatorName={timeDetailFor.name}
+        />
+      )}
     </Box>
     </AdminGuard>
   );

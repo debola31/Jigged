@@ -31,6 +31,28 @@ import { useNoteDwell } from '@/hooks/useNoteDwell';
 import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
+import FeedTimeEntry from '@/components/operator/FeedTimeEntry';
+import FeedUntimedEntry from '@/components/operator/FeedUntimedEntry';
+import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
+import { getMyIntervalsForJob, adjustOperationInterval } from '@/utils/operationIntervalsAccess';
+import { getMyCompletionsForJob } from '@/utils/operationCompletionsAccess';
+import type { JobFeedCompletion } from '@/utils/operationCompletionsAccess';
+import type { OperationIntervalWithContext } from '@/types/operationInterval';
+
+/** A note or one end of a recorded interval, merged into one chronological list. */
+type TimelineItem = {
+  key: string;
+  at: string;
+  note?: JobNote;
+  interval?: OperationIntervalWithContext;
+  edge?: 'start' | 'finish';
+  /** A completion no interval claims — the `Complete without timing` path. */
+  untimed?: JobFeedCompletion;
+};
+
+/** Stable empty array so useLoad's null does not remake the timeline every render. */
+const EMPTY_INTERVALS: OperationIntervalWithContext[] = [];
+const EMPTY_COMPLETIONS: JobFeedCompletion[] = [];
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 const THUMB = 76;
@@ -142,12 +164,41 @@ export default function JobFeed({
     data: loadedNotesData,
     loading,
     reload: load,
+    refresh: refreshNotes,
   } = useLoad(() => getJobNotes(jobId, companyId), [jobId, companyId], {
     onError: (err) => {
       setError(err instanceof Error ? err.message : 'Could not load the feed.');
     },
   });
   const loadedNotes = loadedNotesData ?? EMPTY_NOTES;
+
+  // The caller's OWN recorded time on this job. Notes here belong to everyone;
+  // time entries do not — see FeedTimeEntry for why that asymmetry is deliberate.
+  const { data: intervalsData, refresh: reloadIntervals } = useLoad(
+    () => getMyIntervalsForJob(companyId, jobId),
+    [companyId, jobId],
+  );
+  const intervals = intervalsData ?? EMPTY_INTERVALS;
+
+  // The caller's own completions, so the ones NO interval claims can still
+  // appear. Loaded separately rather than folded into the intervals query
+  // because it is the absence of an interval that makes a completion
+  // interesting here, and an absence cannot be expressed as a join to one.
+  const { data: completionsData, refresh: reloadCompletions } = useLoad(
+    () => getMyCompletionsForJob(companyId, jobId),
+    [companyId, jobId],
+  );
+  const completions = completionsData ?? EMPTY_COMPLETIONS;
+
+  // Which recorded time the operator is correcting, and WHICH END. Adjust is
+  // offered on the row showing the wrong number, so the dialog opens on that
+  // field rather than asking about both.
+  const [adjusting, setAdjusting] = useState<{
+    interval: OperationIntervalWithContext;
+    edge: 'start' | 'finish';
+  } | null>(null);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [adjustSaving, setAdjustSaving] = useState(false);
 
   // Merge optimistic posts ahead of the loaded feed, dropping any that the
   // latest load already includes (matched by id) so there are no duplicates.
@@ -157,6 +208,58 @@ export default function JobFeed({
     const stillPending = pendingNotes.filter((n) => !loadedIds.has(n.id));
     return [...stillPending, ...loadedNotes];
   }, [loadedNotes, pendingNotes]);
+
+  /**
+   * Notes and time events in one chronological list, newest first.
+   *
+   * An interval contributes TWO entries — a start and, once closed, a finish —
+   * because a feed is a log and a row that rewrites itself after the fact reads
+   * as the surface losing track. Each is keyed by interval id plus which end it
+   * represents, so the two never collide.
+   */
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = notes.map((note) => ({
+      key: `note-${note.id}`,
+      at: note.created_at,
+      note,
+    }));
+    for (const interval of intervals) {
+      items.push({
+        key: `start-${interval.id}`,
+        at: interval.effective_started_at,
+        interval,
+        edge: 'start',
+      });
+      if (interval.effective_ended_at) {
+        items.push({
+          key: `finish-${interval.id}`,
+          at: interval.effective_ended_at,
+          interval,
+          edge: 'finish',
+        });
+      }
+    }
+
+    // A completion an interval already claims is ALREADY on the timeline as that
+    // interval's Finished row, carrying the same quantity — so adding it again
+    // here would double every timed completion. What is left is the untimed
+    // ones. `intervals` is loaded pre-filtered to non-voided, which is also what
+    // makes a completion whose interval was voided fall through to untimed
+    // rather than vanishing.
+    const claimed = new Set(
+      intervals.map((i) => i.completion_id).filter((id): id is string => id != null),
+    );
+    for (const completion of completions) {
+      if (claimed.has(completion.id)) continue;
+      items.push({
+        key: `untimed-${completion.id}`,
+        at: completion.completed_at,
+        untimed: completion,
+      });
+    }
+
+    return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  }, [notes, intervals, completions]);
 
   // Resolved unconditionally, not just when the composer is shown: reactions need
   // the member id on the read-only traveler feed too, both to know whether the
@@ -183,8 +286,18 @@ export default function JobFeed({
     if (!refreshSignal) return;
     if (refreshSignal === lastRefresh.current) return;
     lastRefresh.current = refreshSignal;
-    load();
-  }, [refreshSignal, load]);
+    // `refresh`, not `load`: the parent bumps this right after a write, and
+    // blanking the feed to a spinner at the exact moment its new entry arrives
+    // is the worst possible time to do it.
+    refreshNotes();
+    // Intervals too: the parent bumps this after starting, stopping or
+    // completing, and those are feed entries now rather than just notes.
+    reloadIntervals();
+    // AND completions, or `Complete without timing` writes a row this feed never
+    // goes back for — it records no interval, so reloading intervals alone
+    // leaves the one path whose whole point is appearing here still invisible.
+    reloadCompletions();
+  }, [refreshSignal, refreshNotes, reloadIntervals, reloadCompletions]);
 
   // Fetch signed URLs for any media we don't already have a URL for.
   useEffect(() => {
@@ -283,13 +396,37 @@ export default function JobFeed({
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
             <CircularProgress size={20} />
           </Box>
-        ) : notes.length === 0 ? (
+        ) : timeline.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No activity yet.
           </Typography>
         ) : (
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-            {notes.map((note, idx) => (
+            {timeline.map((item, idx) => {
+              // A recorded start or finish. Rendered before the note branch so
+              // the rest of this block can keep assuming `note` exists.
+              if (item.untimed) {
+                return (
+                  <Box key={item.key}>
+                    {idx > 0 && <Divider sx={{ my: 1 }} />}
+                    <FeedUntimedEntry completion={item.untimed} />
+                  </Box>
+                );
+              }
+              if (item.interval && item.edge) {
+                return (
+                  <Box key={item.key}>
+                    {idx > 0 && <Divider sx={{ my: 1 }} />}
+                    <FeedTimeEntry
+                      interval={item.interval}
+                      kind={item.edge}
+                      onAdjust={() => setAdjusting({ interval: item.interval!, edge: item.edge! })}
+                    />
+                  </Box>
+                );
+              }
+              const note = item.note!;
+              return (
               <Box key={note.id}>
                 {idx > 0 && <Divider sx={{ my: 1 }} />}
                 <Box
@@ -398,10 +535,55 @@ export default function JobFeed({
                   />
                 )}
               </Box>
-            ))}
+              );
+            })}
           </Box>
         )}
       </CardContent>
+
+      {/* Correcting a recorded time, from the row that shows it. Mounted only
+          while open so its state seeds fresh on each use, and it writes
+          IMMEDIATELY — holding a correction in page state is how it gets lost.
+
+          ONLY REACHABLE ON A CLOSED INTERVAL: FeedTimeEntry hides Adjust while
+          the clock runs, so `effective_ended_at` is never null here. That is
+          what makes the dialog's `duration <= 0` guard meaningful — with one end
+          missing it has nothing to compare and silently permits an inversion,
+          which is the client half of job_op_intervals_effective_ordered. */}
+      {adjusting && (
+        <AdjustTimesDialog
+          open
+          onClose={() => {
+            setAdjusting(null);
+            setAdjustError(null);
+          }}
+          saving={adjustSaving}
+          saveError={adjustError}
+          onSave={async (next) => {
+            setAdjustSaving(true);
+            setAdjustError(null);
+            try {
+              await adjustOperationInterval(adjusting.interval.id, {
+                adjustedStartedAt: next.startedAt,
+                adjustedEndedAt: next.endedAt,
+              });
+              setAdjusting(null);
+              await reloadIntervals();
+            } catch (err) {
+              // STAYS OPEN. Closing here is what made a rejected write look
+              // identical to a successful one — the message went to a state
+              // nothing rendered and the operator's input was discarded with it.
+              setAdjustError(err instanceof Error ? err.message : 'Could not save those times.');
+            } finally {
+              setAdjustSaving(false);
+            }
+          }}
+          rawStartedAt={adjusting.interval.started_at}
+          rawEndedAt={adjusting.interval.ended_at}
+          effectiveStartedAt={adjusting.interval.effective_started_at}
+          effectiveEndedAt={adjusting.interval.effective_ended_at}
+        />
+      )}
 
       {/* Full-size photo viewer. */}
       <Dialog open={!!viewerUrl} onClose={() => setViewerUrl(null)} fullScreen>

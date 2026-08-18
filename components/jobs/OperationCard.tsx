@@ -24,12 +24,20 @@ import {
   getOperationCompletionEvents,
   voidOperationCompletion,
 } from '@/utils/operationCompletionsAccess';
+import type { OperationActuals } from '@/types/operationInterval';
 import { formatTime } from '@/types/routings';
+import { formatDuration } from '@/lib/duration';
 import OperationStatusChip from './OperationStatusChip';
 import OperationNotes from './OperationNotes';
 
 interface OperationCardProps {
   operation: JobOperation;
+  /**
+   * Recorded time for this op — aggregate, and carrying NO operator identity by
+   * construction (see get_operation_actuals). Absent means nothing was recorded,
+   * which is a different fact from zero and must render differently.
+   */
+  actuals?: OperationActuals;
   companyId: string;
   /** Good/target/remaining for this op (from completion events). */
   summary?: OperationCompletionSummary;
@@ -69,6 +77,7 @@ const STATUS_STYLES: Record<OperationStatus, { bg: string; border: string }> = {
 
 export default function OperationCard({
   operation,
+  actuals,
   companyId,
   summary,
   disabled = false,
@@ -189,13 +198,41 @@ export default function OperationCard({
             )}
           </Box>
           {!isExternal && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
               <AccessTimeIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
               <Typography variant="caption" color="text.secondary">
                 Est: {operation.estimated_setup_minutes > 0
                   ? `${formatTime(operation.estimated_setup_minutes)} setup, `
                   : ''}{formatTime(operation.estimated_run_minutes_per_unit)}/unit
               </Typography>
+              {/* ACTUAL, BESIDE THE ESTIMATE AND NEVER SUBSTITUTED INTO IT. This
+                  is the office computer, where the comparison is the whole point
+                  — it is the requote signal. The same juxtaposition is forbidden
+                  on the operator's step screen, which hides the estimate while a
+                  timer runs, because there the number describes the person doing
+                  the work rather than the job.
+
+                  NO COLOUR ENCODING BETTER OR WORSE, deliberately. Over the
+                  estimate is not a verdict: it is a question about the routing,
+                  the material or the fixture, and painting it red answers the
+                  question before anyone has asked it. Nobody is named here — the
+                  aggregate carries no operator identity by construction.
+
+                  ABSENT, not zero, when nothing was recorded: an operation with
+                  no intervals genuinely has no actual, and rendering 0m would be
+                  a fabricated number the estimating loop reads back later as
+                  measurement. */}
+              {actuals && actuals.interval_count > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  · Actual: {formatDuration(actuals.actual_minutes * 60_000)}
+                  {actuals.open_count > 0 && ' (+ still running)'}
+                </Typography>
+              )}
+              {actuals && actuals.interval_count === 0 && actuals.open_count > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  · Timing now
+                </Typography>
+              )}
             </Box>
           )}
           {isExternal && status === 'sent' && operation.sent_at && (

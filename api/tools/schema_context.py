@@ -209,10 +209,34 @@ SCHEMA_CONTEXT = """
     external: external_unit_price_snapshot * job_parts.quantity
   MATERIALS are not itemised per line anywhere. Get them by subtraction:
   material cost = job_parts.true_cost_per_unit * quantity - (labor summed as above).
-- status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'skipped'
-- started_at: TIMESTAMPTZ, completed_at: TIMESTAMPTZ
-- assigned_to: UUID, completed_by: UUID
+- status: TEXT -- one of: 'pending', 'in_progress', 'completed', 'sent'
+- completed_at: TIMESTAMPTZ, completed_by: UUID
+- sent_at: TIMESTAMPTZ, sent_by: UUID -- external ops only (send/receive lifecycle)
 - instructions: TEXT, notes: TEXT
+-- NOTE: started_at and assigned_to were DROPPED (20260708225938). They were listed
+-- here until 2026-08-16, so any query the model had learned using them returned a
+-- 400. RECORDED TIME now lives in job_operation_intervals (below), not on this table.
+
+### job_operation_intervals (recorded time on an operation — 20260816203641)
+- id: UUID (PK)
+- company_id: UUID (FK -> companies.id)
+- job_operation_id: UUID (FK -> job_operations.id)
+- job_part_id: UUID (FK -> job_parts.id)
+- work_center_id: UUID (nullable) -- the chain key: one OPEN interval per work centre
+- operator_id: UUID (FK -> user_company_access.id)
+- started_at / ended_at: TIMESTAMPTZ -- RAW, immutable. ended_at NULL = still running
+- adjusted_started_at / adjusted_ended_at: TIMESTAMPTZ (nullable) -- the operator's correction
+- effective_started_at / effective_ended_at: TIMESTAMPTZ (GENERATED COALESCE of the two)
+- close_reason: TEXT -- 'completed' | 'switched' | 'done_for_day' | 'left_running'
+- capture_source: TEXT -- 'operator' | 'sensor' | 'system'
+- voided_at / voided_by
+- ALWAYS read effective_*, never the raw pair, unless the question is specifically
+  about corrections. ALWAYS filter voided_at IS NULL.
+- An interval with ended_at IS NULL has NO duration. Exclude it from any SUM and
+  report it separately — do not clamp it to now(), which invents time nobody worked.
+- DO NOT aggregate by operator_id. Time is reported per job / operation / work
+  centre; per-person reporting goes through get_operator_time_detail(), which is
+  admin-gated and audited. See docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
 
 ### job_materials (expected-BOM snapshot for a specific job_part — NO company_id, join via jobs)
 - id: UUID (PK)

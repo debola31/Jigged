@@ -338,7 +338,11 @@ export default function AddPartsFromDrawingsPage() {
         </Alert>
       )}
 
-      {busy && (
+      {/*
+        Not while the workspace is up: it shows the read inline, and two progress
+        bars stacked made a background task look like a gate across the page.
+      */}
+      {busy && step !== 1 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="body2" sx={{ mb: 1 }}>

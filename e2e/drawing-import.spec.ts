@@ -101,11 +101,11 @@ test.describe('Add parts from drawings', () => {
     const assist = page.getByRole('button', { name: /Read the title blocks/i });
     await expect(assist).toBeHidden({ timeout: 120_000 });
 
-    // ── Work, entered on ONE part and spread ──
+    // ── Work, set once for the whole package ──
     // The thing that makes the flow worth having: without a priced operation a made
-    // part has no cost basis, so it lands incomplete and nothing can be quoted.
-    // Entry starts from a concrete part rather than an abstract routing.
-    await page.getByRole('button', { name: /Set up E2E-DRAW-1/i }).click();
+    // part has no cost basis, so it lands incomplete and nothing can be quoted. The
+    // common case is one kind of part made one way, so it takes no row-opening.
+    await page.getByRole('button', { name: /Set the work for every part/i }).click();
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
     // The seeded internal work centre carries a labour rate, so this operation is
@@ -121,9 +121,8 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Setup minutes/i).fill('10');
     await page.getByRole('button', { name: /Add to routing/i }).click();
 
-    // One entry, spread across the rest — 31 routings still cost one typing.
-    await expect(page.getByText(/1 of 3 have work/i)).toBeVisible();
-    await page.getByRole('button', { name: /Apply this work to the other 2 parts/i }).click();
+    // One entry, every part — 31 routings cost one typing.
+    await page.getByRole('button', { name: /Apply to all 3 parts/i }).click();
     await expect(page.getByText(/3 of 3 have work/i)).toBeVisible();
 
     // ── Create, and land IN the quote ──

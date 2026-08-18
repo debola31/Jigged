@@ -46,7 +46,6 @@ import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
-import LinearProgress from '@mui/material/LinearProgress';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -123,6 +122,9 @@ export default function DrawingWorkspaceStep({
   customerId,
 }: Props) {
   const [openStem, setOpenStem] = useState<string | null>(null);
+  /** The bulk editor, above the table — see the button that opens it. */
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkOps, setBulkOps] = useState<OperationRowData[]>([]);
 
   const included = useMemo(() => rows.filter((r) => !r.excluded), [rows]);
   const summary = useMemo(
@@ -130,6 +132,20 @@ export default function DrawingWorkspaceStep({
     [rows, fileCount],
   );
   const needsAttention = useMemo(() => rows.filter((r) => attention(r) !== null), [rows]);
+
+  /**
+   * The file signature the card just promised. A row prints its own files only
+   * when it breaks that promise — otherwise the column was the same three chips
+   * thirty-one times, which is how a table teaches people to stop reading it.
+   */
+  const commonFiles = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const key = [...new Set(r.group.files.map((f) => f.kind))].sort().join('+');
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+  }, [rows]);
 
   const update = (stem: string, change: (row: BuiltRow) => BuiltRow) =>
     onRowsChange(rows.map((r) => (r.stem === stem ? change(r) : r)));
@@ -163,6 +179,27 @@ export default function DrawingWorkspaceStep({
       );
     }
     onWorkChange(next);
+  };
+
+  /**
+   * Set the work for everything, without opening a row first.
+   *
+   * The common case by a distance is *these 31 parts are made the same way*, and
+   * making someone expand a row to say so put a click and a scroll in front of the
+   * one thing the whole screen exists for. Per-row editing stays for the outlier,
+   * which is what a row is good at.
+   */
+  const applyBulk = () => {
+    if (bulkOps.length === 0) return;
+    const next = new Map(work);
+    for (const row of included) {
+      next.set(
+        row.stem,
+        bulkOps.map((op) => ({ ...op, tempId: `tmp-${row.stem}-${op.tempId}` })),
+      );
+    }
+    onWorkChange(next);
+    setBulkOpen(false);
   };
 
   const withWork = included.filter((r) => (work.get(r.stem)?.length ?? 0) > 0).length;
@@ -199,24 +236,16 @@ export default function DrawingWorkspaceStep({
             {summary.exceptions.length > 0 && ` ${summary.exceptions.join('; ')}.`}
           </Typography>
 
+          {/*
+            A LINE, not a progress bar. Nothing here waits on it — descriptions
+            arrive while people work — and a bar reads as "wait for me".
+          */}
           {reading && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary">
-                <AutoAwesomeIcon sx={{ fontSize: 14, verticalAlign: 'text-bottom', mr: 0.5 }} />
-                Reading the title blocks for material and finish
-                {readProgress ? ` — ${readProgress.done} of ${readProgress.total}` : ''}. Carry on;
-                descriptions fill in as they arrive.
-              </Typography>
-              <LinearProgress
-                variant={readProgress ? 'determinate' : 'indeterminate'}
-                value={
-                  readProgress
-                    ? (100 * readProgress.done) / Math.max(readProgress.total, 1)
-                    : undefined
-                }
-                sx={{ mt: 0.5 }}
-              />
-            </Box>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+              <AutoAwesomeIcon sx={{ fontSize: 14, verticalAlign: 'text-bottom', mr: 0.5 }} />
+              Filling in material and finish
+              {readProgress ? ` — ${readProgress.done} of ${readProgress.total}` : ''}. Carry on.
+            </Typography>
           )}
 
           {assistFailed && !reading && (
@@ -237,6 +266,39 @@ export default function DrawingWorkspaceStep({
         </Alert>
       )}
 
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button variant="outlined" onClick={() => setBulkOpen((o) => !o)} disabled={creating}>
+              {withWork > 0 ? 'Change the work for every part' : 'Set the work for every part'}
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              Most packages are one kind of part made one way. Set it once here, then adjust any
+              part that differs on its own row.
+            </Typography>
+          </Box>
+
+          <Collapse in={bulkOpen} unmountOnExit>
+            <Box sx={{ mt: 2 }}>
+              <RoutingOperationsList
+                rows={bulkOps}
+                onChange={setBulkOps}
+                companyId={companyId}
+                disabled={creating}
+              />
+              <Button
+                variant="contained"
+                sx={{ mt: 1 }}
+                onClick={applyBulk}
+                disabled={creating || bulkOps.length === 0}
+              >
+                Apply to all {included.length} part{included.length === 1 ? '' : 's'}
+              </Button>
+            </Box>
+          </Collapse>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent sx={{ p: 0 }}>
           <TableContainer sx={{ maxHeight: '58vh' }}>
@@ -247,10 +309,8 @@ export default function DrawingWorkspaceStep({
                   <TableCell padding="checkbox" />
                   <TableCell>Part</TableCell>
                   <TableCell>Description</TableCell>
-                  <TableCell>Files</TableCell>
                   <TableCell>Work</TableCell>
                   <TableCell>Made of</TableCell>
-                  <TableCell>Needs a look</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -262,6 +322,9 @@ export default function DrawingWorkspaceStep({
                   const made = components.made.filter((m) => m.parentStem === row.stem);
                   const theirNumber = valueOf(row, 'customer_part_number');
                   const name = valueOf(row, 'part_name');
+                  const oddFiles =
+                    [...new Set(row.group.files.map((f) => f.kind))].sort().join('+') !==
+                    commonFiles;
 
                   return (
                     <Fragment key={row.stem}>
@@ -304,9 +367,24 @@ export default function DrawingWorkspaceStep({
                             repeats its neighbour teaches people to stop reading both.
                           */}
                           {customerId && theirNumber && theirNumber !== name && (
-                            <Typography variant="caption" color="text.secondary">
+                            <Typography variant="caption" color="text.secondary" display="block">
                               They call it {theirNumber}
                             </Typography>
+                          )}
+                          {/*
+                            Files and warnings live UNDER the name rather than in
+                            columns of their own. The card above already says what
+                            the package is made of, so a per-row column repeated it
+                            thirty-one times; here they appear only when this row
+                            differs from what the card promised.
+                          */}
+                          {oddFiles && (
+                            <Typography variant="caption" color="text.secondary" display="block">
+                              {row.group.files.map((f) => f.kind).join(' · ') || 'no readable file'}
+                            </Typography>
+                          )}
+                          {note && (
+                            <Chip size="small" color="warning" label={note} sx={{ mt: 0.5 }} />
                           )}
                         </TableCell>
                         <TableCell sx={{ minWidth: 220 }}>
@@ -318,13 +396,6 @@ export default function DrawingWorkspaceStep({
                             onChange={(e) => edit(row.stem, 'description', e.target.value)}
                             inputProps={{ 'aria-label': `Description for ${row.stem}` }}
                           />
-                        </TableCell>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            {row.group.files.map((f) => (
-                              <Chip key={f.name} size="small" label={f.kind} variant="outlined" />
-                            ))}
-                          </Box>
                         </TableCell>
                         <TableCell>
                           {ops.length > 0 ? (
@@ -355,13 +426,10 @@ export default function DrawingWorkspaceStep({
                             </Typography>
                           )}
                         </TableCell>
-                        <TableCell sx={{ maxWidth: 240 }}>
-                          {note && <Chip size="small" color="warning" label={note} />}
-                        </TableCell>
                       </TableRow>
 
                       <TableRow>
-                        <TableCell colSpan={8} sx={{ py: 0, border: 0 }}>
+                        <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
                           <Collapse in={open} unmountOnExit>
                             <Box sx={{ py: 2, px: 1 }}>
                               <Typography variant="subtitle2" sx={{ mb: 1 }}>

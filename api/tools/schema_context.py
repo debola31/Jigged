@@ -447,6 +447,15 @@ SENSITIVE_TABLES = frozenset({
     # ai_readonly_select policy. This entry is the whole-word backstop.
     "customer_carrier_accounts",
     "quickbooks_invoice_links",
+    # The clickwrap record: who accepted which legal document, from which IP.
+    # Blocked for the same reason as customer_carrier_accounts and for one more.
+    # It carries IP addresses and user agents, which are personal data nobody
+    # needs an AI summary of; and it is a legal audit trail, so putting it in
+    # reach of generated SQL creates a path by which a question about it lands
+    # in ai_chat_queries. Triple-blocked: absent from ALLOWED_TABLES, REVOKEd
+    # from jigged_ai_readonly in 20260818142814, and named here as the
+    # whole-word backstop.
+    "terms_acceptances",
     # Read-tracking and capture-funnel instrumentation. "Which operators read the
     # setup notes?" is a natural question for a shop owner to type, and answering
     # it is exactly what the product forbids: if an owner can audit who reads

@@ -63,9 +63,9 @@ The code is the source of truth; this doc has been wrong about both before.
 `parts_bom`, `parts_unit_conversions`, `quotes`, `quote_line_items`, `jobs`, `job_parts`, `job_operations`, `job_materials`, `work_centers`,
 `routings`, `routing_operations`, `inventory_transactions`.
 
-**`SENSITIVE_TABLES` — 14:** `user_company_access`, `user_preferences`, `system_admins`,
+**`SENSITIVE_TABLES` — 15:** `user_company_access`, `user_preferences`, `system_admins`,
 `auth_audit_log`, `ai_chat_queries`, `ai_config`, `saved_insights`, `demo_data_templates`,
-`quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`,
+`quickbooks_connections`, `quickbooks_customer_map`, `quickbooks_invoice_links`, `terms_acceptances`,
 **`customer_carrier_accounts`**, `note_views`, `operator_events`.
 
 **`note_views` and `operator_events` are excluded for a product reason, not just privacy hygiene.**

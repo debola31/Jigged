@@ -195,19 +195,23 @@ test.describe('clickwrap terms acceptance', () => {
       .eq('version', currentEntry('tos').version)
       .single();
 
-    // Append-only holds against service_role, which is the only role that can
-    // write at all.
+    // Refused, and the assertion deliberately does not pin WHICH layer refuses.
+    // Over PostgREST the GRANT bites first -- service_role holds SELECT and
+    // INSERT only, so it returns 42501 before a statement reaches the table --
+    // and the append-only trigger sits behind that for anything running as the
+    // table's owner. Requiring the trigger's message would make this fail the
+    // moment the outer defence does its job, which is backwards.
     const { error: updateError } = await a
       .from('terms_acceptances')
       .update({ version: 1 })
       .eq('id', before.data!.id);
-    expect(updateError?.message ?? '').toMatch(/append-only/i);
+    expect(updateError, 'update was not refused at all').not.toBeNull();
 
     const { error: deleteError } = await a
       .from('terms_acceptances')
       .delete()
       .eq('id', before.data!.id);
-    expect(deleteError?.message ?? '').toMatch(/append-only/i);
+    expect(deleteError, 'delete was not refused at all').not.toBeNull();
 
     const after = await a
       .from('terms_acceptances')

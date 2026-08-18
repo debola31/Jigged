@@ -61,40 +61,67 @@ async function attachFiles(
   partId: string,
   row: DrawingRow,
 ): Promise<{ attached: number; errors: string[] }> {
-  let attached = 0;
   const errors: string[] = [];
+  const files = row.group.files.filter((f) => ATTACHABLE.has(f.kind));
 
-  // Sequential: each upload has its own size-derived timeout, and a browser that
-  // opens 90 parallel uploads on shop wifi finishes none of them.
-  for (const entry of row.group.files) {
-    if (!ATTACHABLE.has(entry.kind)) continue;
-    try {
-      await uploadPartAttachment(companyId, partId, entry.file);
-      attached += 1;
-    } catch (err) {
-      errors.push(`${entry.name}: ${err instanceof Error ? err.message : 'upload failed'}`);
-    }
-  }
+  // A part's own files go up together — there are at most three or four, they are
+  // independent, and doing them one at a time was most of the wall clock on a
+  // 31-part package (93 round trips in a row). Concurrency ACROSS parts is bounded
+  // separately, so shop wifi never sees ninety at once.
+  const results = await Promise.all(
+    files.map(async (entry) => {
+      try {
+        await uploadPartAttachment(companyId, partId, entry.file);
+        return null;
+      } catch (err) {
+        return `${entry.name}: ${err instanceof Error ? err.message : 'upload failed'}`;
+      }
+    }),
+  );
 
-  return { attached, errors };
+  for (const failure of results) if (failure) errors.push(failure);
+  return { attached: files.length - errors.length, errors };
 }
+
+/**
+ * How many rows are in flight at once.
+ *
+ * Not unbounded: a 31-part package would open ~90 uploads simultaneously and shop
+ * wifi finishes none of them. Not one, either — that was the original shape and it
+ * made a package take minutes, almost all of it waiting on uploads that have
+ * nothing to do with each other.
+ */
+const ROW_CONCURRENCY = 4;
 
 /**
  * Create everything the user approved.
  *
- * Sequential by row on purpose. The identity guard already ran as one batched
- * pass, so what is left is writes — and a name collision between two rows of the
- * SAME package is only visible if they land one at a time.
+ * THE PART WRITE IS SERIALISED; EVERYTHING ELSE IS NOT. `createPart` resolves a
+ * name collision by reviving an archived row, so two rows racing on the same name
+ * could both think they created it. The identity guard already made names unique
+ * WITHIN a package, but it cannot see a part another tab created ten seconds ago —
+ * so the insert takes a lock and the slow work (references, uploads) runs free.
  */
 export async function createPartsFromRows(
   rows: DrawingRow[],
   options: CreateOptions,
 ): Promise<CreatedRow[]> {
   const { companyId, customerId, defaultUnit, onProgress } = options;
-  const out: CreatedRow[] = [];
   const included = rows.filter((r) => !r.excluded);
+  const out: CreatedRow[] = new Array(included.length);
 
-  for (const [index, row] of included.entries()) {
+  let done = 0;
+  // A promise chain the part-inserts queue behind, so they stay ordered while the
+  // uploads around them overlap.
+  let insertLock: Promise<unknown> = Promise.resolve();
+  const serialise = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = insertLock.then(work, work);
+    // Swallow on the CHAIN only — the caller still sees the rejection.
+    insertLock = next.catch(() => undefined);
+    return next;
+  };
+
+  async function runRow(row: DrawingRow, index: number): Promise<void> {
     const partName = resolveName(row);
     const result: CreatedRow = {
       stem: row.stem,
@@ -131,7 +158,7 @@ export async function createPartsFromRows(
          * The `create_new` and `name_taken` branches arrive with a different name
          * already resolved by `resolveName`, so the same call covers all three.
          */
-        const created = await createPart(companyId, {
+        const created = await serialise(() => createPart(companyId, {
           part_name: partName,
           description: valueOf(row, 'description'),
           source: (valueOf(row, 'source') || 'made') as DrawingRowValues['source'],
@@ -140,7 +167,7 @@ export async function createPartsFromRows(
           quantity: 0,
           reorder_point: null,
           preferred_vendor_id: null,
-        });
+        }));
         result.partId = created.id;
         // Report what HAPPENED, not what was intended: if the id came back as the
         // archived row we found, it was revived.
@@ -173,9 +200,25 @@ export async function createPartsFromRows(
       result.error = err instanceof Error ? err.message : 'Failed to create this part';
     }
 
-    out.push(result);
-    onProgress?.(index + 1, included.length);
+    // Written by index, so results keep the grid's order however they finish.
+    out[index] = result;
+    done += 1;
+    onProgress?.(done, included.length);
   }
+
+  // Fixed pool of workers pulling from a shared cursor — simpler than chunking,
+  // and a slow row cannot stall the batch behind it.
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(ROW_CONCURRENCY, included.length) }, async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= included.length) return;
+        await runRow(included[index], index);
+      }
+    }),
+  );
 
   return out;
 }

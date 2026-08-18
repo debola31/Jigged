@@ -267,10 +267,11 @@ export default function AddPartsFromDrawingsPage() {
           creating={!!busy}
           onAssist={handleAssist}
           assisted={assisted}
+          customerId={customerId}
         />
       )}
 
-      {step === 2 && (
+      {step === 2 && results && (
         <Card>
           <CardContent>
             {results ? (
@@ -309,11 +310,7 @@ export default function AddPartsFromDrawingsPage() {
                   </Button>
                 </Box>
               </>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                Creating parts…
-              </Typography>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       )}

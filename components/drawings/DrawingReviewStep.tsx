@@ -48,6 +48,8 @@ interface Props {
   creating: boolean;
   onAssist: () => void;
   assisted: boolean;
+  /** Null when the user did not say whose drawings these are. */
+  customerId: string | null;
 }
 
 /** What this row needs a human for, in words. `null` when it needs nothing. */
@@ -77,6 +79,7 @@ export default function DrawingReviewStep({
   creating,
   onAssist,
   assisted,
+  customerId,
 }: Props) {
   const update = (stem: string, change: (row: BuiltRow) => BuiltRow) =>
     onRowsChange(rows.map((r) => (r.stem === stem ? change(r) : r)));
@@ -120,8 +123,8 @@ export default function DrawingReviewStep({
           }
         >
           <AlertTitle>{assistCandidates} rows are missing material or finish</AlertTitle>
-          We can read those from the drawing. It costs about a penny a drawing and only runs when
-          you press the button.
+          We can look at those drawings more closely and add what they say to the description.
+          Nothing happens until you press the button.
         </Alert>
       )}
 
@@ -134,10 +137,19 @@ export default function DrawingReviewStep({
                   <TableCell padding="checkbox" />
                   <TableCell>Part name</TableCell>
                   <TableCell>Description</TableCell>
-                  <TableCell>Their number</TableCell>
+                  {/* Only meaningful once a customer is chosen: the column exists so
+                      a second customer using the same number does not collide with the
+                      first. With nobody selected there is nothing to keep apart. */}
+                  {customerId && (
+                    <Tooltip
+                      title="The number as this customer writes it. Kept separate from the part name so two customers can both use it."
+                    >
+                      <TableCell>Their number</TableCell>
+                    </Tooltip>
+                  )}
                   <TableCell>Make or buy</TableCell>
                   <TableCell>Files</TableCell>
-                  <TableCell>Read from</TableCell>
+                  <TableCell>Components</TableCell>
                   <TableCell>Needs a look</TableCell>
                 </TableRow>
               </TableHead>
@@ -180,15 +192,17 @@ export default function DrawingReviewStep({
                           onChange={(e) => edit(row.stem, 'description', e.target.value)}
                         />
                       </TableCell>
-                      <TableCell sx={{ minWidth: 140 }}>
-                        <TextField
-                          variant="standard"
-                          fullWidth
-                          placeholder="—"
-                          value={valueOf(row, 'customer_part_number')}
-                          onChange={(e) => edit(row.stem, 'customer_part_number', e.target.value)}
-                        />
-                      </TableCell>
+                      {customerId && (
+                        <TableCell sx={{ minWidth: 140 }}>
+                          <TextField
+                            variant="standard"
+                            fullWidth
+                            placeholder="—"
+                            value={valueOf(row, 'customer_part_number')}
+                            onChange={(e) => edit(row.stem, 'customer_part_number', e.target.value)}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell>
                         <ToggleButtonGroup
                           size="small"
@@ -208,21 +222,24 @@ export default function DrawingReviewStep({
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="caption" color="text.secondary">
-                          {row.readSource === 'none' ? '—' : row.readSource.toUpperCase()}
-                        </Typography>
-                      </TableCell>
-                      <TableCell sx={{ maxWidth: 260 }}>
-                        {/* Review by exception: a healthy row renders nothing here. */}
-                        {note && <Chip size="small" color="warning" label={note} />}
-                        {row.cutList && (
+                        {/* Information, not a problem — it belongs beside the files it
+                            came from, not in the column that means "act on this". */}
+                        {row.cutList ? (
                           <Chip
                             size="small"
                             variant="outlined"
-                            sx={{ ml: note ? 0.5 : 0 }}
-                            label={`${row.cutList.rows.length} components`}
+                            label={`${row.cutList.rows.length}`}
+                            title={`This drawing lists ${row.cutList.rows.length} components`}
                           />
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">
+                            —
+                          </Typography>
                         )}
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 260 }}>
+                        {/* Review by exception: a healthy row renders nothing at all. */}
+                        {note && <Chip size="small" color="warning" label={note} />}
                       </TableCell>
                     </TableRow>
                   );

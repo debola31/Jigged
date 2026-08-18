@@ -71,8 +71,10 @@ test.describe('Add parts from drawings', () => {
       '1011770',
     );
 
-    // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet.
-    await expect(page.getByText(/3 components/i)).toBeVisible();
+    // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet. The count sits
+    // in its own column beside the files, NOT in "Needs a look": it is information,
+    // and that column means "act on this".
+    await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
 
     // ── Step 3b: the OPTIONAL AI pass ──
     // A button, never a mount effect. Anthropic is mocked (see the file header), so

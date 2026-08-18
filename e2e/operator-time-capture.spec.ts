@@ -70,9 +70,17 @@ const adjustButton = (page: Page) => page.getByRole('button', { name: /^adjust$/
 const recordButton = (page: Page) => page.getByRole('button', { name: /^record \d+ finished/i });
 const completeBanner = (page: Page) =>
   page.getByRole('button', { name: /this step is complete/i });
-// The hero clock's caption. The clock itself is a bare HH:MM:SS and matching on
-// digits would be brittle.
-const runningOnStep = (page: Page) => page.getByText(/^started \d/i);
+/**
+ * Is a timer running on THIS step? The primary button is the state.
+ *
+ * This used to match the "started 11:06 PM" caption under the clock. That
+ * caption was removed on 2026-08-18 — the feed's "Started …" entry says it and
+ * is where it is corrected — so the locator matched nothing and every assertion
+ * built on it timed out. The button is a better signal anyway: it IS the running
+ * state rather than a label that happens to accompany it, and the clock itself
+ * is a bare HH:MM:SS that would be brittle to match on.
+ */
+const runningOnStep = (page: Page) => recordButton(page);
 // Feed entries. The record of a start/finish lives here, not in a header strip.
 //
 // `.first()` because the feed is JOB-scoped and every test in this file times a
@@ -157,8 +165,10 @@ test.describe('operator time capture', () => {
 
     await startButton(page).click();
 
-    // Leads with the fact, not the counter.
+    // The primary flipped, which is the whole point of making start mandatory:
+    // there is no completion action on screen until a timer is running.
     await expect(runningOnStep(page)).toBeVisible({ timeout: 30_000 });
+    await expect(startButton(page)).toHaveCount(0);
 
     // THE GUARDRAIL. A live elapsed figure beside a quoted standard is a pace
     // gauge with a target — see

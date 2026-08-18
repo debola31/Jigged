@@ -15,6 +15,12 @@ jobs:
         working-directory: ./
     steps:
       - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 so the legal-docs freeze check can resolve the PR
+          # base ref. With a shallow clone `git show <base>:public/legal/manifest.json`
+          # fails, Tier 2 skips, and an edit to a published legal document would
+          # sail through green — the one thing that check exists to stop.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -55,6 +61,23 @@ jobs:
         # describing an event nobody sends fails too, because a registry with one
         # wrong row stops being read.
         run: pnpm exec vitest run __tests__/standards/analyticsEvents.test.ts
+
+      - name: Legal docs check — a shipped version's bytes and metadata are frozen
+        # Named for the same reason as the two checks above. This one guards the
+        # invariant the whole clickwrap feature rests on: every terms_acceptances
+        # row stores a document_sha256, and that hash is only worth storing if the
+        # exact bytes it names can still be produced years later. Editing a
+        # published document in place invalidates every acceptance already recorded
+        # against it, silently — nothing else in the stack notices.
+        #
+        # BASE_REF is passed in rather than discovered, so the check never depends
+        # on whether a remote-tracking ref happens to be current. On a `push` (no
+        # pull_request payload) it is empty, Tier 2 skips with a warning, and only
+        # the on-disk hashes are verified — the freeze is a PR-time control, which
+        # scripts/legalDocumentsCheck.ts states in its header.
+        env:
+          LEGAL_DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: pnpm exec vitest run __tests__/standards/legalDocuments.test.ts
 
       - name: Run tests with coverage (enforced thresholds in vitest.config.ts)
         run: pnpm test --run --coverage

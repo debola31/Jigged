@@ -236,21 +236,11 @@ which was always the point. Measured after the change: **gate 5s, trigger 5s.**
 > with ~2× headroom, so the 225 MB figure that block flagged as stale is now settled — it just no
 > longer matters, because narrowing is not the lever anyone thought it was.
 >
-> **Why any of this got looked at.** Four days into the first Pro billing cycle the team had spent
-> **$15.75 of its $20 credit, 99.6% of it Build CPU Minutes**. Over 79 deployments, billed machine time
-> averaged **7.82 min/build**: 84s compile+install, 70s deploying outputs, and **314s creating and
-> uploading the build cache**. The build had not regressed — builds on Aug 12–14 ran *longer*, at
-> ~11 min. Hobby simply never billed for it.
->
-> Two measurement traps worth carrying forward, because both cost time here:
-> - **Billed build duration is not `ready - buildingAt`.** That field stops at "Deployment completed"
->   and undercounts by ~3×; the machine keeps running through cache creation. Measure first-event to
->   last-event on `GET /v3/deployments/{id}/events?builds=1`.
-> - **The build cache has not been shown to pay for itself.** It costs 314s to accelerate a phase that
->   takes 84s in total, so a perfect hit cannot save more than 84s. Settle it with one A/B against
->   `VERCEL_FORCE_NO_BUILD_CACHE=1` before assuming it helps. And do not expect the *glob* to shrink it
->   — uv's cache is content-addressed and deduplicated across entrypoints, so eleven venvs already
->   shared one copy of each wheel.
+> **Why any of this got looked at, and where the rest of it lives.** Four days into the first Pro
+> billing cycle the team had spent **$15.75 of its $20 credit, 99.6% of it Build CPU Minutes**. The
+> billing model, the measured phase breakdown, the build-cache A/B and the two measurement traps are
+> in [vercel-build-cost.md](vercel-build-cost.md). What belongs here is only the migration-adjacent
+> half: **Pro meters past the ceilings Hobby stopped at**, so a Spend Management cap is owed.
 
 **If deploys ever stop reaching production**, the first thing to check is whether the hook still
 exists (`vercel deploy-hooks list`) and matches the `VERCEL_DEPLOY_HOOK_URL` secret. Reverting

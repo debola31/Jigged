@@ -227,7 +227,10 @@ export const PRICING = {
     },
     {
       q: 'What does setup look like?',
-      a: 'We set up your shop with you: your parts, your customers, your open jobs loaded before day one.',
+      // "your existing files", not "exports": plenty of 5-50 person shops run on
+      // spreadsheets and have no ERP to export from. It also stays true as the importer
+      // grows past CSV (Excel, drawings) without naming a format we'd have to keep current.
+      a: 'We set up your shop with you: your parts, your customers, your open jobs loaded from your existing files before day one.',
     },
   ],
 };

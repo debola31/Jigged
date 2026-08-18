@@ -36,6 +36,13 @@ import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
 import DrawingReviewStep from '@/components/drawings/DrawingReviewStep';
 import DrawingWorkStep, { type WorkPlan } from '@/components/drawings/DrawingWorkStep';
+import {
+  planComponents,
+  applyComponentEdits,
+  NO_COMPONENT_EDITS,
+  type ComponentEdits,
+  type ComponentPlan,
+} from '@/lib/drawingComponents';
 
 const STEPS = ['Add the files', 'Review the parts', 'How they are made', 'Create'] as const;
 
@@ -55,6 +62,26 @@ export default function AddPartsFromDrawingsPage() {
   const [results, setResults] = useState<CreatedRow[] | null>(null);
   const [assisted, setAssisted] = useState(false);
   const [work, setWork] = useState<WorkPlan>({ stems: new Set(), operations: [] });
+  const [componentEdits, setComponentEdits] = useState<ComponentEdits>(NO_COMPONENT_EDITS);
+
+  /**
+   * DERIVED, not stored. Excluding a weldment has to drop its components, so the
+   * plan is a pure function of the rows — and the user's costs live apart, so that
+   * recompute cannot wipe them.
+   */
+  const components = useMemo(
+    () => applyComponentEdits(planComponents(rows), componentEdits),
+    [rows, componentEdits],
+  );
+
+  /** Fold a panel edit back into the stored answers rather than the derived plan. */
+  const handleComponentsChange = useCallback((next: ComponentPlan) => {
+    setComponentEdits({
+      costs: Object.fromEntries(next.materials.map((m) => [m.key, m.costPerUnit])),
+      units: Object.fromEntries(next.materials.map((m) => [m.key, m.unit])),
+      excluded: [...next.materials, ...next.made].filter((c) => !c.include).map((c) => c.key),
+    });
+  }, []);
 
   /**
    * Read the dropped files, then resolve identity in ONE batched pass. Per-row
@@ -163,6 +190,7 @@ export default function AddPartsFromDrawingsPage() {
         customerId,
         defaultUnit,
         operationsByStem,
+        components,
         onProgress: (done, total) => setProgress({ done, total }),
       });
       setResults(created);
@@ -174,6 +202,7 @@ export default function AddPartsFromDrawingsPage() {
         excluded_count: rows.length - created.length,
         files_attached: created.reduce((n, r) => n + r.filesAttached, 0),
         with_operations: created.filter((r) => r.operationsAdded > 0).length,
+        components_linked: created.reduce((n, r) => n + r.componentsLinked, 0),
         quotable_count: created.filter((r) => r.quotable).length,
         used_ai: assisted,
         has_customer: !!customerId,
@@ -184,7 +213,7 @@ export default function AddPartsFromDrawingsPage() {
       setBusy(null);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, assisted, work]);
+  }, [rows, companyId, customerId, defaultUnit, assisted, work, components]);
 
   const includedCount = useMemo(() => rows.filter((r) => !r.excluded).length, [rows]);
 
@@ -291,6 +320,8 @@ export default function AddPartsFromDrawingsPage() {
           onCreate={handleCreate}
           creating={!!busy}
           includedCount={includedCount}
+          components={components}
+          onComponentsChange={handleComponentsChange}
         />
       )}
 
@@ -356,6 +387,7 @@ export default function AddPartsFromDrawingsPage() {
                       setResults(null);
                       setAssisted(false);
                       setWork({ stems: new Set(), operations: [] });
+                      setComponentEdits(NO_COMPONENT_EDITS);
                       setStep(0);
                     }}
                   >

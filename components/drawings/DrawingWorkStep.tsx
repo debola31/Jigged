@@ -46,6 +46,8 @@ import { getAllParts } from '@/utils/partsAccess';
 import type { Part } from '@/types/part';
 import { valueOf } from '@/types/drawingImport';
 import type { BuiltRow } from '@/lib/drawingImportExtract';
+import DrawingComponentsPanel from '@/components/drawings/DrawingComponentsPanel';
+import type { ComponentPlan } from '@/lib/drawingComponents';
 
 export interface WorkPlan {
   /** Stems this routing applies to. */
@@ -62,6 +64,8 @@ interface Props {
   onCreate: () => void;
   creating: boolean;
   includedCount: number;
+  components: ComponentPlan;
+  onComponentsChange: (plan: ComponentPlan) => void;
 }
 
 const newTempId = () => `tmp-${Math.random().toString(36).slice(2)}`;
@@ -75,6 +79,8 @@ export default function DrawingWorkStep({
   onCreate,
   creating,
   includedCount,
+  components,
+  onComponentsChange,
 }: Props) {
   const included = useMemo(() => rows.filter((r) => !r.excluded), [rows]);
   const [copyFrom, setCopyFrom] = useState<Part | null>(null);
@@ -223,6 +229,12 @@ export default function DrawingWorkStep({
           )}
         </CardContent>
       </Card>
+
+      <DrawingComponentsPanel
+        plan={components}
+        onChange={onComponentsChange}
+        disabled={creating}
+      />
 
       <Card>
         <CardContent sx={{ p: 0 }}>

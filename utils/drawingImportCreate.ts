@@ -16,11 +16,21 @@
 
 import { createPart } from '@/utils/partsAccess';
 import { saveRoutingWithOperations } from '@/utils/routingsAccess';
-import { ensureStarterPricingTier } from '@/utils/partPricingTiersAccess';
+import { ensureStarterPricingTier, getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
+import { addBomLine } from '@/utils/bomAccess';
+import { getSupabase } from '@/lib/supabase';
+import { quantityFor, type ComponentPlan } from '@/lib/drawingComponents';
 import { uploadPartAttachment } from '@/utils/partAttachmentsAccess';
 import { upsertPartCustomerReference } from '@/utils/partCustomerReferencesAccess';
 import { valueOf, type DrawingRow, type DrawingRowValues } from '@/types/drawingImport';
+
+/** A component part as it exists in the database, with the unit it is measured in. */
+interface MaterialPart {
+  partId: string;
+  unit: string;
+  linkable: boolean;
+}
 
 export interface CreatedRow {
   stem: string;
@@ -28,6 +38,8 @@ export interface CreatedRow {
   partName: string;
   /** Operations written for this part. 0 when the user skipped the work step. */
   operationsAdded: number;
+  /** BOM lines written from this drawing's cut list. */
+  componentsLinked: number;
   /** True once the part has both a cost basis and a markup — i.e. it can be quoted. */
   quotable: boolean;
   /** What we did, so the summary can say it rather than implying everything was new. */
@@ -49,6 +61,8 @@ export interface CreateOptions {
    * legitimate choice that leaves the part incomplete rather than blocking it.
    */
   operationsByStem?: Map<string, OperationRowData[]>;
+  /** Cut-list components to create and link. Omit to skip components entirely. */
+  components?: ComponentPlan;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -118,9 +132,15 @@ export async function createPartsFromRows(
   rows: DrawingRow[],
   options: CreateOptions,
 ): Promise<CreatedRow[]> {
-  const { companyId, customerId, defaultUnit, operationsByStem, onProgress } = options;
+  const { companyId, customerId, defaultUnit, operationsByStem, components, onProgress } = options;
   const included = rows.filter((r) => !r.excluded);
   const out: CreatedRow[] = new Array(included.length);
+
+  // Shared materials exist before any parent references them, so two weldments
+  // asking for the same tube get one part rather than racing to create two.
+  const materialParts = components
+    ? await createMaterials(companyId, components, defaultUnit)
+    : new Map<string, MaterialPart>();
 
   let done = 0;
   // A promise chain the part-inserts queue behind, so they stay ordered while the
@@ -141,6 +161,7 @@ export async function createPartsFromRows(
       partName,
       action: 'failed',
       operationsAdded: 0,
+      componentsLinked: 0,
       quotable: false,
       filesAttached: 0,
       fileErrors: [],
@@ -251,9 +272,26 @@ export async function createPartsFromRows(
          *
          * Its return value is the honest answer to "can this be quoted now?".
          */
-        result.quotable = await ensureStarterPricingTier(companyId, partId, source).catch(
-          () => false,
-        );
+        // Components, before the markup: a BOM line changes what the cost IS, and
+        // the tier seeder reads that cost to decide whether there is anything to
+        // mark up.
+        if (components) {
+          result.componentsLinked = await linkComponents(
+            companyId,
+            partId,
+            row,
+            components,
+            materialParts,
+            defaultUnit,
+          );
+        }
+
+        // Seed a markup if there is now a cost to mark up. Its RETURN value is
+        // "did I write a tier", which is not the same question as "can this be
+        // quoted" — a part re-imported from a second package already has one, and
+        // reading the write as the answer reported it unquotable. Priceability is
+        // asked once, properly, after the batch.
+        await ensureStarterPricingTier(companyId, partId, source).catch(() => false);
       }
     } catch (err) {
       result.error = err instanceof Error ? err.message : 'Failed to create this part';
@@ -279,7 +317,263 @@ export async function createPartsFromRows(
     }),
   );
 
+  /**
+   * Ask the database which of these can actually be quoted, once, at the end.
+   *
+   * The same rule the parts list uses, so the summary and the list cannot
+   * disagree — and it is the honest answer for a part that was already priceable
+   * before this import touched it, which no per-row write result can give.
+   */
+  try {
+    const priceable = await getPriceablePartIds(companyId);
+    for (const result of out) {
+      if (result.partId) result.quotable = priceable.has(result.partId);
+    }
+  } catch {
+    // Never claim quotable on a failed check — the summary simply omits the
+    // offer, and the parts list will show the truth either way.
+  }
+
   return out;
+}
+
+/**
+ * Attach one parent's components: its pooled materials, and the made parts named
+ * on its own cut list.
+ *
+ * A material with no cost is deliberately NOT linked — see createMaterials. A MADE
+ * component always is, and always blocks: it is a part we are creating from a name
+ * on someone else's drawing, so it has no work and therefore no cost, and its
+ * parent's cost genuinely is unknown until someone says how it is made. That is a
+ * more honest answer than the parent quoting at a price that ignores it, but it is
+ * a change the user is told about before they commit rather than after.
+ */
+async function linkComponents(
+  companyId: string,
+  parentId: string,
+  row: DrawingRow,
+  plan: ComponentPlan,
+  materialParts: Map<string, MaterialPart>,
+  defaultUnit: string,
+): Promise<number> {
+  if (!row.cutList) return 0;
+  let linked = 0;
+
+  /**
+   * What is already attached, read once.
+   *
+   * A line that is already there IS attached — counting only the inserts reported
+   * "0 components attached" on every re-import while the BOM sat there correctly,
+   * which is the same mistake as reading a write result to answer a question about
+   * state. Reading first also keeps a re-import from leaning on a caught 23505.
+   */
+  const supabase = getSupabase();
+  const { data: existingLines } = await supabase
+    .from('parts_bom')
+    .select('child_part_id')
+    .eq('parent_part_id', parentId);
+  const alreadyAttached = new Set((existingLines ?? []).map((l) => l.child_part_id));
+
+  // Materials FIRST, one line per material rather than one per cut-list row: four
+  // rows of the same tube are one BOM line for the total length, and writing them
+  // per row means the second insert hits the unique constraint and every cut
+  // length after the first is silently lost.
+  for (const material of plan.materials) {
+    if (!material.include) continue;
+    const needed = quantityFor(material, row.stem);
+    if (needed <= 0) continue;
+    const created = materialParts.get(material.key);
+    // No cost means no link. The material still exists to be priced later.
+    if (!created?.linkable) continue;
+    if (alreadyAttached.has(created.partId)) {
+      linked += 1;
+      continue;
+    }
+    try {
+      await addBomLine(parentId, {
+        child_part_id: created.partId,
+        quantity: String(needed),
+        // The child's own unit. Anything else needs a conversion the shop has not
+        // defined, and the cost rollup raises rather than assuming one.
+        unit: created.unit,
+        consume_whole_units: false,
+        charge_basis: 'cost',
+      });
+      linked += 1;
+    } catch {
+      // One line that will not write costs this line, not the package.
+    }
+  }
+
+  for (const line of row.cutList.rows) {
+    const description = (line.description ?? '').trim();
+    if (!description || !line.madePart) continue;
+    const quantity = Number(line.quantity ?? '1') || 1;
+
+    try {
+      {
+        const wanted = plan.made.find(
+          (m) => m.parentStem === row.stem && m.description === description && m.include,
+        );
+        if (!wanted) continue;
+        // Find-or-create for the same reason as the materials: on a re-import
+        // this name already exists, and creating blindly loses the BOM line.
+        const child = await findOrCreateComponent(companyId, description, 'made', defaultUnit);
+        if (!child) continue;
+        if (alreadyAttached.has(child.id)) {
+          linked += 1;
+          continue;
+        }
+        await addBomLine(parentId, {
+          child_part_id: child.id,
+          quantity: String(quantity),
+          unit: child.unit,
+          consume_whole_units: false,
+          charge_basis: 'cost',
+        });
+        linked += 1;
+      }
+    } catch {
+      // One line that will not write costs this line, not the package.
+    }
+  }
+
+  return linked;
+}
+
+/**
+ * Create the shared materials FIRST, once, before any parent needs them.
+ *
+ * FIND-or-create, and the difference is not cosmetic. A shop's second package from
+ * the same customer reuses the same tube stock, so on that import every
+ * `createPart` here raises 23505 — and when this function treated that as failure
+ * the material dropped out of the map, every BOM line that referenced it was
+ * skipped, and the weldment quietly went back to costing labour only. No error
+ * surfaced; the cost was simply wrong. So the map is keyed on the part that EXISTS
+ * afterwards, however it got there.
+ *
+ * `linkable` follows the same rule: it asks whether the material HAS a cost basis,
+ * not whether this run wrote one. A material priced during the first import is
+ * still priced during the second.
+ *
+ * A material with no cost at all is deliberately NOT linked — it has no cost basis,
+ * and a BOM line to it would take its parent from quotable to not. It is still
+ * created (it is a real thing the shop buys) and can be priced later; the weldment
+ * keeps quoting in the meantime.
+ */
+async function createMaterials(
+  companyId: string,
+  plan: ComponentPlan,
+  defaultUnit: string,
+): Promise<Map<string, MaterialPart>> {
+  const supabase = getSupabase();
+  const out = new Map<string, MaterialPart>();
+
+  for (const material of plan.materials) {
+    if (!material.include) continue;
+    try {
+      // The unit the user declared for THIS material, because these sheets print
+      // "1803.2" beside a tube described in inches and the cost is per that unit.
+      const declaredUnit = material.unit || defaultUnit;
+      const part = await findOrCreateComponent(
+        companyId,
+        material.description,
+        'bought',
+        declaredUnit,
+      );
+      if (!part) continue;
+
+      // Does it have a cost basis already? Ask, rather than inferring it from
+      // whether this run happened to be the one that wrote it.
+      const { data: existingTiers, error: readError } = await supabase
+        .from('part_procurement_tiers')
+        .select('id')
+        .eq('part_id', part.id)
+        .limit(1);
+      if (readError) throw readError;
+
+      let linkable = (existingTiers ?? []).length > 0;
+
+      if (!linkable && material.costPerUnit !== null) {
+        // What the shop PAYS. Not a markup — a markup over an unknown cost is
+        // still unknown, which is the whole reason this field exists.
+        const { error } = await supabase.from('part_procurement_tiers').insert({
+          part_id: part.id,
+          min_quantity: 1,
+          cost_per_unit: material.costPerUnit,
+        });
+        if (error) throw error;
+        linkable = true;
+      }
+
+      /**
+       * A part the shop already measures in inches, against a drawing in mm, is a
+       * real disagreement and not ours to settle. The cost rollup refuses to guess
+       * a conversion — it raises — so linking here would break the parent's cost
+       * outright, and converting silently would scale it by 25.4. The material is
+       * created either way; it simply is not attached.
+       */
+      if (part.unit !== declaredUnit) linkable = false;
+
+      out.set(material.key, { partId: part.id, unit: part.unit, linkable });
+    } catch {
+      // A material that cannot be created must not take the whole package with it.
+      // Its parents simply keep the cost they had.
+    }
+  }
+
+  return out;
+}
+
+/**
+ * The material this name refers to, creating it only if it is not already there.
+ *
+ * Archived rows count as there: name is identity in this repo and reuse revives,
+ * so a material someone archived last quarter comes back rather than colliding
+ * forever against a unique constraint it cannot see.
+ */
+async function findOrCreateComponent(
+  companyId: string,
+  name: string,
+  source: 'bought' | 'made',
+  unit: string,
+): Promise<{ id: string; unit: string } | null> {
+  const supabase = getSupabase();
+
+  const { data: found, error: findError } = await supabase
+    .from('parts')
+    .select('id, deleted_at, primary_unit')
+    .eq('company_id', companyId)
+    .eq('part_name', name)
+    .limit(1);
+  if (findError) throw findError;
+
+  const existing = (found ?? [])[0];
+  if (existing) {
+    if (existing.deleted_at) {
+      const { error } = await supabase
+        .from('parts')
+        .update({ deleted_at: null })
+        .eq('id', existing.id);
+      if (error) throw error;
+    }
+    // Its OWN unit, not the one we asked for — a part that already exists is
+    // already measured in something, and the caller has to reckon with that.
+    // `primary_unit` is NOT NULL by CHECK; the generated type is merely wider.
+    return { id: existing.id, unit: existing.primary_unit ?? unit };
+  }
+
+  const part = await createPart(companyId, {
+    part_name: name,
+    description: '',
+    source,
+    is_stocked: false,
+    primary_unit: unit,
+    quantity: 0,
+    reorder_point: null,
+    preferred_vendor_id: null,
+  });
+  return { id: part.id, unit };
 }
 
 /** A one-line summary that never claims more than happened. */
@@ -297,7 +591,12 @@ export function summarise(results: CreatedRow[]): string {
   const fileErrors = results.reduce((n, r) => n + r.fileErrors.length, 0);
   const quotable = results.filter((r) => r.quotable).length;
   const tail = fileErrors > 0 ? `, ${fileErrors} file(s) not attached` : '';
+  // Say how many components were attached. It is the one part of this flow whose
+  // failure is otherwise silent — a BOM line that does not get written changes the
+  // part's cost and nothing on screen would have said so.
+  const linked = results.reduce((n, r) => n + r.componentsLinked, 0);
+  const components = linked > 0 ? ` · ${linked} component${linked === 1 ? '' : 's'} attached` : '';
   // Ready-to-quote leads, because it is the thing the whole flow is aimed at.
   const ready = quotable > 0 ? `${quotable} ready to quote · ` : '';
-  return `${ready}${parts.join(', ') || 'nothing to do'} · ${files} file(s) attached${tail}`;
+  return `${ready}${parts.join(', ') || 'nothing to do'} · ${files} file(s) attached${tail}${components}`;
 }

@@ -495,10 +495,14 @@ export default function JobFeed({
       </CardContent>
 
       {/* Correcting a recorded time, from the row that shows it. Mounted only
-          while open so its state seeds fresh on each use. Unlike the step
-          screen's pre-completion adjustment this writes IMMEDIATELY — the
-          interval already exists, and holding a correction in page state after
-          the fact is how it gets lost. */}
+          while open so its state seeds fresh on each use, and it writes
+          IMMEDIATELY — holding a correction in page state is how it gets lost.
+
+          ONLY REACHABLE ON A CLOSED INTERVAL: FeedTimeEntry hides Adjust while
+          the clock runs, so `effective_ended_at` is never null here. That is
+          what makes the dialog's `duration <= 0` guard meaningful — with one end
+          missing it has nothing to compare and silently permits an inversion,
+          which is the client half of job_op_intervals_effective_ordered. */}
       {adjusting && (
         <AdjustTimesDialog
           open

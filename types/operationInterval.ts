@@ -46,6 +46,15 @@ export interface OperationInterval {
   capture_source: IntervalCaptureSource;
   note: string | null;
   /**
+   * The completion that closed this interval, if one did.
+   *
+   * Null on an interval the chain closed ('switched') or one still running. The
+   * feed reads it to tell which completions are ALREADY represented by a
+   * Finished row, so the ones no interval claims can be rendered as untimed
+   * instead of being dropped or double-counted.
+   */
+  completion_id: string | null;
+  /**
    * How many good pieces the completion that closed this interval recorded.
    *
    * Null on an interval the chain closed, or one still running — nothing was

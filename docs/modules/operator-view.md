@@ -366,6 +366,21 @@ job-scoped feed naming when each person started would be a per-person time view 
 — looser than an admin gets, who must go through `get_operator_time_detail` and be logged. RLS
 enforces it.
 
+**`Complete without timing` appends a Finished row too, marked `not timed`.** It records no
+interval — a remembered start is a recall estimate, and inventing one would corrupt the data this
+feature exists to collect — but it is still work that happened, so it belongs in the log. It is
+rendered from the completion rather than an interval, with a check glyph instead of a clock (a clock
+on a row holding no duration would be the one part of this UI claiming something untrue), no
+duration, and no `Adjust` (there are no times behind it to correct). **Withdrawn:** *the escape
+hatch leaves no feed entry* — that was not a decision, it was a gap: the step flipped to complete
+with nothing saying so, so the operator who took the honest path got less acknowledgement than the
+one who timed it.
+
+Completions in the feed are the reader's **own**, with no actor name, exactly like the interval rows
+beside them — a job-scoped list of what each named person finished and when would be the per-person
+production log the guardrail refuses. A completion an interval already claims is shown once, as the
+timed row; the feed drops the duplicate by matching `completion_id`.
+
 **Times can only be adjusted once the interval is closed** — `job_op_intervals_adjust_only_when_
 closed`, and `Adjust` is absent from a running row rather than merely disabled. A running interval
 has no finish to check a new start against, so a correction made mid-run can be contradicted by the

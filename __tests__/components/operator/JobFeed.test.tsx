@@ -11,6 +11,8 @@ import {
 } from '@/utils/jobNoteMediaAccess';
 import { compressPhoto } from '@/utils/imageCompression';
 import { logOperatorEvent } from '@/utils/operatorEventsAccess';
+import { getMyIntervalsForJob } from '@/utils/operationIntervalsAccess';
+import { getMyCompletionsForJob } from '@/utils/operationCompletionsAccess';
 import type { JobNote } from '@/types/operator';
 
 vi.mock('@/utils/operatorAccess', () => ({
@@ -34,6 +36,16 @@ vi.mock('@/utils/imageCompression', () => ({
 // suite in __tests__/hooks/useNoteDwell.test.tsx.
 vi.mock('@/hooks/useNoteDwell', () => ({ useNoteDwell: () => ({ observe: () => () => {} }) }));
 vi.mock('@/utils/operatorEventsAccess', () => ({ logOperatorEvent: vi.fn() }));
+// Both time reads. Unmocked they hit a real getSupabase() with no env, useLoad
+// swallows the throw, and every time row silently never renders — which is
+// indistinguishable from the merge being wrong.
+vi.mock('@/utils/operationIntervalsAccess', () => ({
+  getMyIntervalsForJob: vi.fn(async () => []),
+  adjustOperationInterval: vi.fn(async () => undefined),
+}));
+vi.mock('@/utils/operationCompletionsAccess', () => ({
+  getMyCompletionsForJob: vi.fn(async () => []),
+}));
 
 const mock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -115,6 +127,8 @@ beforeEach(() => {
   window.localStorage.clear();
   mock(getCurrentMember).mockResolvedValue({ id: 'op1', name: 'Op', role: 'operator' });
   mock(getJobNotes).mockResolvedValue([]);
+  mock(getMyIntervalsForJob).mockResolvedValue([]);
+  mock(getMyCompletionsForJob).mockResolvedValue([]);
   mock(getJobNoteMediaUrl).mockResolvedValue('blob:thumb');
   mock(compressPhoto).mockResolvedValue({ file: new File(['x'], 'p.jpg', { type: 'image/jpeg' }) });
   mock(uploadJobNoteMediaFile).mockResolvedValue('company/jobs/job1/abcd_p.jpg');
@@ -389,5 +403,109 @@ describe('note actions', () => {
     // One mark for the one edited note — the counter deliberately does not
     // reset on an edit, so this is what tells a reader the words changed.
     expect(screen.getAllByText(/edited/)).toHaveLength(1);
+  });
+
+  describe('completions with no interval', () => {
+    const completion = (over = {}) => ({
+      id: 'c1',
+      job_operation_id: 'jo1',
+      quantity_good: 4,
+      completed_at: '2026-07-01T11:00:00.000Z',
+      operation_name: 'Final Inspection',
+      ...over,
+    });
+
+    const closedInterval = (over = {}) => ({
+      id: 'iv1',
+      job_operation_id: 'jo1',
+      job_part_id: 'jp1',
+      work_center_id: 'wc1',
+      started_at: '2026-07-01T09:00:00.000Z',
+      ended_at: '2026-07-01T11:00:00.000Z',
+      adjusted_started_at: null,
+      adjusted_ended_at: null,
+      adjusted_at: null,
+      effective_started_at: '2026-07-01T09:00:00.000Z',
+      effective_ended_at: '2026-07-01T11:00:00.000Z',
+      close_reason: 'completed',
+      capture_source: 'operator',
+      note: null,
+      completion_id: 'c1',
+      quantity_good: 4,
+      job_id: 'job1',
+      job_number: 'J-1',
+      operation_name: 'Final Inspection',
+      operation_sequence: 30,
+      part_name: 'Widget',
+      ...over,
+    });
+
+    it('shows a Complete-without-timing completion as a Finished row', async () => {
+      // Before this it produced NOTHING in the feed: the step flipped to
+      // complete with no record of it, while the timed path appended two rows.
+      mock(getMyCompletionsForJob).mockResolvedValue([completion()]);
+      render(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} />);
+
+      expect(await screen.findByText(/Finished Final Inspection/)).toBeInTheDocument();
+      expect(screen.getByText(/4 parts/)).toBeInTheDocument();
+    });
+
+    it('marks it "not timed" and offers no Adjust', async () => {
+      // The three things that make it read differently from a timed finish.
+      // There is no interval behind it, so Adjust would open a dialog over
+      // nothing, and a duration would be a number we do not have.
+      mock(getMyCompletionsForJob).mockResolvedValue([completion()]);
+      render(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} />);
+
+      expect(await screen.findByText(/not timed/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^adjust$/i })).not.toBeInTheDocument();
+    });
+
+    it('does NOT double-count a completion an interval already claims', async () => {
+      // The dedup. Both reads return the same completion — one directly, one
+      // through the interval that closed it — and it must appear once, as the
+      // TIMED row (with its duration and Adjust), never twice.
+      mock(getMyIntervalsForJob).mockResolvedValue([closedInterval()]);
+      mock(getMyCompletionsForJob).mockResolvedValue([completion()]);
+      render(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} />);
+
+      expect(await screen.findByText(/Finished Final Inspection/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Finished Final Inspection/)).toHaveLength(1);
+      expect(screen.queryByText(/not timed/)).not.toBeInTheDocument();
+      // Two, not one: a closed interval renders a Started row AND a Finished
+      // row, and both are adjustable.
+      expect(screen.getAllByRole('button', { name: /^adjust$/i })).toHaveLength(2);
+    });
+
+    it('goes back for completions when the parent signals a write', async () => {
+      // The parent bumps refreshSignal after Complete without timing. That path
+      // writes NO interval, so a feed that only re-reads intervals never picks
+      // it up and the one row this feature exists to add stays invisible until
+      // a remount.
+      mock(getMyCompletionsForJob).mockResolvedValue([]);
+      const { rerender } = render(
+        <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={0} />,
+      );
+      await waitFor(() => expect(mock(getMyCompletionsForJob)).toHaveBeenCalled());
+      expect(screen.queryByText(/not timed/)).not.toBeInTheDocument();
+
+      mock(getMyCompletionsForJob).mockResolvedValue([completion()]);
+      rerender(
+        <JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} refreshSignal={1} />,
+      );
+
+      expect(await screen.findByText(/not timed/)).toBeInTheDocument();
+    });
+
+    it('falls back to untimed when the interval that claimed it is gone', async () => {
+      // getMyIntervalsForJob filters voided rows out, so a completion whose
+      // interval was voided arrives here unclaimed. Showing it as untimed is
+      // right: the work happened, the timing no longer exists.
+      mock(getMyIntervalsForJob).mockResolvedValue([]);
+      mock(getMyCompletionsForJob).mockResolvedValue([completion()]);
+      render(<JobFeed jobId="job1" companyId="co1" operationContext={OP_CONTEXT} />);
+
+      expect(await screen.findByText(/not timed/)).toBeInTheDocument();
+    });
   });
 });

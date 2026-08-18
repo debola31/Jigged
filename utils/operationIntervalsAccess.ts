@@ -38,7 +38,7 @@ import type {
  * the shape you wanted.
  */
 const INTERVAL_COLUMNS =
-  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, job_operation_completions(quantity_good)' as const;
+  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, completion_id, job_operation_completions(quantity_good)' as const;
 
 /**
  * The same interval plus the job/step it belongs to.
@@ -49,7 +49,7 @@ const INTERVAL_COLUMNS =
  * which the interval row does not carry and the step route needs.
  */
 const INTERVAL_WITH_CONTEXT =
-  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, job_operation_completions(quantity_good), job_operations!inner(job_id, operation_name, sequence, jobs!inner(job_number)), job_parts!inner(parts(part_name))' as const;
+  'id, job_operation_id, job_part_id, work_center_id, started_at, ended_at, adjusted_started_at, adjusted_ended_at, adjusted_at, effective_started_at, effective_ended_at, close_reason, capture_source, note, completion_id, job_operation_completions(quantity_good), job_operations!inner(job_id, operation_name, sequence, jobs!inner(job_number)), job_parts!inner(parts(part_name))' as const;
 
 /** Flatten the nested join rows into the shape the UI reads. */
 function withContext(row: Record<string, unknown>): OperationIntervalWithContext {

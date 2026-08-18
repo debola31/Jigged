@@ -92,6 +92,9 @@ const runningOnStep = (page: Page) => recordButton(page);
 // "Started …" rows by the last test. That is the feed behaving correctly; these
 // assertions only care that the entry exists at all.
 const feedStarted = (page: Page) => page.getByText(/^Started /).first();
+// Unscoped, for asserting ABSENCE — see adjustButtons for why `.first()` will
+// not do that job.
+const feedStartedRows = (page: Page) => page.getByText(/^Started /);
 const feedFinished = (page: Page) => page.getByText(/^Finished /).first();
 const estimateLine = (page: Page) => page.getByText(/^Estimated:/);
 
@@ -289,6 +292,41 @@ test.describe('operator time capture', () => {
     // saying what had broken.
     await expect(feedFinished(page)).toBeHidden({ timeout: 30_000 });
     await expect(feedStarted(page)).toBeHidden();
+  });
+
+  test('Complete without timing lands in the feed, marked as untimed', async ({ page }) => {
+    // The escape hatch used to produce NOTHING in the feed: the step flipped to
+    // complete with no record of it, while the timed path appended two rows. An
+    // operator who forgot to start got no acknowledgement anything was kept.
+    await openTravelerWithStation(page, 'E2E-JS-NOTSTARTED');
+    await openIdleStep(page);
+    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+
+    await qtyField(page).fill('1');
+    await page.getByRole('button', { name: /complete without timing/i }).click();
+
+    // Present, and carrying what came off the step.
+    await expect(feedFinished(page)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/·\s*1 part\b/)).toBeVisible({ timeout: 30_000 });
+
+    // And distinguishable from a timed finish: says so, and has nothing to
+    // adjust because there is no interval behind it.
+    await expect(page.getByText(/not timed/i)).toBeVisible();
+    await expect(adjustButtons(page)).toHaveCount(0);
+
+    // No Started row was invented — recording a backdated guess is exactly what
+    // this path refuses to do.
+    await expect(feedStartedRows(page)).toHaveCount(0);
+
+    // Leave the seeded quantities as this file found them.
+    const undo = page.getByRole('button', { name: /undo all/i });
+    await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
+    if (await completeBanner(page).isVisible()) {
+      await completeBanner(page).click();
+    } else {
+      await undo.click();
+    }
+    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
   });
 
   test('the Me tab journal carries no aggregate figure', async ({ page }) => {

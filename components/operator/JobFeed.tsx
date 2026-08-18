@@ -32,8 +32,11 @@ import { useNoteCapture, useStepNoteWriter } from '@/hooks/useNoteCapture';
 import NoteCaptureFields from '@/components/operator/NoteCaptureFields';
 import type { JobNote, JobNoteMedia } from '@/types/operator';
 import FeedTimeEntry from '@/components/operator/FeedTimeEntry';
+import FeedUntimedEntry from '@/components/operator/FeedUntimedEntry';
 import AdjustTimesDialog from '@/components/operator/AdjustTimesDialog';
 import { getMyIntervalsForJob, adjustOperationInterval } from '@/utils/operationIntervalsAccess';
+import { getMyCompletionsForJob } from '@/utils/operationCompletionsAccess';
+import type { JobFeedCompletion } from '@/utils/operationCompletionsAccess';
 import type { OperationIntervalWithContext } from '@/types/operationInterval';
 
 /** A note or one end of a recorded interval, merged into one chronological list. */
@@ -43,10 +46,13 @@ type TimelineItem = {
   note?: JobNote;
   interval?: OperationIntervalWithContext;
   edge?: 'start' | 'finish';
+  /** A completion no interval claims — the `Complete without timing` path. */
+  untimed?: JobFeedCompletion;
 };
 
 /** Stable empty array so useLoad's null does not remake the timeline every render. */
 const EMPTY_INTERVALS: OperationIntervalWithContext[] = [];
+const EMPTY_COMPLETIONS: JobFeedCompletion[] = [];
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 const THUMB = 76;
@@ -174,6 +180,16 @@ export default function JobFeed({
   );
   const intervals = intervalsData ?? EMPTY_INTERVALS;
 
+  // The caller's own completions, so the ones NO interval claims can still
+  // appear. Loaded separately rather than folded into the intervals query
+  // because it is the absence of an interval that makes a completion
+  // interesting here, and an absence cannot be expressed as a join to one.
+  const { data: completionsData, refresh: reloadCompletions } = useLoad(
+    () => getMyCompletionsForJob(companyId, jobId),
+    [companyId, jobId],
+  );
+  const completions = completionsData ?? EMPTY_COMPLETIONS;
+
   // Which recorded time the operator is correcting, and WHICH END. Adjust is
   // offered on the row showing the wrong number, so the dialog opens on that
   // field rather than asking about both.
@@ -223,8 +239,27 @@ export default function JobFeed({
         });
       }
     }
+
+    // A completion an interval already claims is ALREADY on the timeline as that
+    // interval's Finished row, carrying the same quantity — so adding it again
+    // here would double every timed completion. What is left is the untimed
+    // ones. `intervals` is loaded pre-filtered to non-voided, which is also what
+    // makes a completion whose interval was voided fall through to untimed
+    // rather than vanishing.
+    const claimed = new Set(
+      intervals.map((i) => i.completion_id).filter((id): id is string => id != null),
+    );
+    for (const completion of completions) {
+      if (claimed.has(completion.id)) continue;
+      items.push({
+        key: `untimed-${completion.id}`,
+        at: completion.completed_at,
+        untimed: completion,
+      });
+    }
+
     return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  }, [notes, intervals]);
+  }, [notes, intervals, completions]);
 
   // Resolved unconditionally, not just when the composer is shown: reactions need
   // the member id on the read-only traveler feed too, both to know whether the
@@ -258,7 +293,11 @@ export default function JobFeed({
     // Intervals too: the parent bumps this after starting, stopping or
     // completing, and those are feed entries now rather than just notes.
     reloadIntervals();
-  }, [refreshSignal, refreshNotes, reloadIntervals]);
+    // AND completions, or `Complete without timing` writes a row this feed never
+    // goes back for — it records no interval, so reloading intervals alone
+    // leaves the one path whose whole point is appearing here still invisible.
+    reloadCompletions();
+  }, [refreshSignal, refreshNotes, reloadIntervals, reloadCompletions]);
 
   // Fetch signed URLs for any media we don't already have a URL for.
   useEffect(() => {
@@ -366,6 +405,14 @@ export default function JobFeed({
             {timeline.map((item, idx) => {
               // A recorded start or finish. Rendered before the note branch so
               // the rest of this block can keep assuming `note` exists.
+              if (item.untimed) {
+                return (
+                  <Box key={item.key}>
+                    {idx > 0 && <Divider sx={{ my: 1 }} />}
+                    <FeedUntimedEntry completion={item.untimed} />
+                  </Box>
+                );
+              }
               if (item.interval && item.edge) {
                 return (
                   <Box key={item.key}>

@@ -247,3 +247,75 @@ export async function getOperationCompletionEvents(
   }
   return rows;
 }
+
+/**
+ * ONE UNBROKEN LITERAL. Concatenating a select string widens its type to
+ * `string`, at which point the client stops type-checking it against
+ * types/database.ts and the row comes back as GenericStringError[].
+ */
+const FEED_COMPLETION =
+  'id, job_operation_id, quantity_good, completed_at, job_operations!inner(job_id, operation_name)' as const;
+
+/** A completion as the operator's job feed shows it. Carries no actor — see below. */
+export interface JobFeedCompletion {
+  id: string;
+  job_operation_id: string;
+  quantity_good: number;
+  completed_at: string;
+  operation_name: string;
+}
+
+/**
+ * The caller's OWN non-voided completions on this job, for the feed.
+ *
+ * OWN ONLY, and no actor name, exactly like the interval rows beside them. A
+ * job-scoped feed listing what each named person finished and when would be a
+ * per-person production log available shop-wide — the thing the surveillance
+ * guardrail refuses. The reader is the only person in it, so naming them would
+ * be telling an operator who they are. See
+ * docs/modules/operator-view.md#surveillance-guardrail-non-negotiable.
+ *
+ * Returns ALL of them, timed and untimed, because this query cannot tell the
+ * difference — a completion does not know whether an interval points at it. The
+ * feed drops the ones its already-loaded intervals claim, which is also what
+ * makes a completion whose interval was voided correctly reappear as untimed.
+ */
+export async function getMyCompletionsForJob(
+  companyId: string,
+  jobId: string,
+): Promise<JobFeedCompletion[]> {
+  const supabase = getSupabase();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from('job_operation_completions')
+    .select(FEED_COMPLETION)
+    .eq('company_id', companyId)
+    .eq('job_operations.job_id', jobId)
+    .eq('completed_by', user.id)
+    // Undo is a soft void, so an undone completion must not keep claiming work.
+    .is('voided_at', null)
+    .order('completed_at', { ascending: false });
+
+  if (error) {
+    throw toFriendlyError(error, {
+      entity: 'completion',
+      fallback: 'Could not load what you finished on this job.',
+    });
+  }
+
+  return (data ?? []).map((row) => {
+    const op = row.job_operations as { job_id: string; operation_name: string } | null;
+    return {
+      id: row.id,
+      job_operation_id: row.job_operation_id,
+      quantity_good: Number(row.quantity_good),
+      completed_at: row.completed_at,
+      operation_name: op?.operation_name ?? '',
+    };
+  });
+}

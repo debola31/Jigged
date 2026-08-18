@@ -15,7 +15,7 @@
  */
 
 import { createPart } from '@/utils/partsAccess';
-import { saveRoutingWithOperations } from '@/utils/routingsAccess';
+import { getRoutingForPart, saveRoutingWithOperations } from '@/utils/routingsAccess';
 import { ensureStarterPricingTier, getPriceablePartIds } from '@/utils/partPricingTiersAccess';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { addBomLine } from '@/utils/bomAccess';
@@ -250,10 +250,25 @@ export async function createPartsFromRows(
           attachFiles(companyId, partId, row),
           (async () => {
             if (operations.length === 0) return;
+
+            /**
+             * A part can hold only ONE routing (`routings_part_id_unique`), so
+             * passing null here created a second one for any part that already had
+             * it — re-importing a package raised 23505, the row's whole remaining
+             * work was skipped, and it still reported as "updated".
+             *
+             * A routing that already has operations is left ALONE. It is the
+             * shop's, possibly curated since, and quietly replacing it with the
+             * one typed on this screen is the same overwrite the update path
+             * already refuses for descriptions. An EMPTY routing row is reused.
+             */
+            const existing = await getRoutingForPart(partId);
+            if ((existing?.operations?.length ?? 0) > 0) return;
+
             await saveRoutingWithOperations(
               companyId,
               partId,
-              null,
+              existing?.id ?? null,
               operations.map((o) => ({
                 tempId: o.tempId,
                 workCenterId: o.workCenterId,
@@ -307,6 +322,10 @@ export async function createPartsFromRows(
       }
     } catch (err) {
       result.error = err instanceof Error ? err.message : 'Failed to create this part';
+      // A row that threw is FAILED, whatever it had managed before. Leaving the
+      // action as "updated" reported a success and a error message at once, and
+      // the summary counted it among the wins.
+      result.action = 'failed';
     }
 
     // Written by index, so results keep the grid's order however they finish.

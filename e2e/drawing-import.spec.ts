@@ -70,10 +70,13 @@ test.describe('Add parts from drawings', () => {
 
     await page.getByRole('button', { name: /^Read 4 files$/i }).click();
 
-    // ── Step 3: review ──
+    // ── The workspace ──
     // Deterministic + pdf.js, so allow for the PDF parse but no network.
     const rows = page.getByTestId('drawing-row');
     await expect(rows).toHaveCount(3, { timeout: 60_000 });
+
+    // What we made of the folder, said once, before any table is scanned.
+    await expect(page.getByText(/3 parts from 4 files\./i)).toBeVisible();
 
     // The extractor read this drawing's title block: the part number is the one on
     // the sheet, not the filename we copied it to.
@@ -98,13 +101,11 @@ test.describe('Add parts from drawings', () => {
     const assist = page.getByRole('button', { name: /Read the title blocks/i });
     await expect(assist).toBeHidden({ timeout: 120_000 });
 
-    // ── Step 4: how they are made ──
-    // The step that makes the whole flow worth having. Without a priced operation
-    // a made part has no cost basis, so every part lands incomplete and nothing
-    // can be quoted.
-    await page.getByRole('button', { name: /Next — how they are made/i }).click();
-    await expect(page.getByText(/How are these parts made/i)).toBeVisible();
-
+    // ── Work, entered on ONE part and spread ──
+    // The thing that makes the flow worth having: without a priced operation a made
+    // part has no cost basis, so it lands incomplete and nothing can be quoted.
+    // Entry starts from a concrete part rather than an abstract routing.
+    await page.getByRole('button', { name: /Set up E2E-DRAW-1/i }).click();
     await page.getByRole('button', { name: /Add Operation/i }).click();
 
     // The seeded internal work centre carries a labour rate, so this operation is
@@ -120,22 +121,16 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Setup minutes/i).fill('10');
     await page.getByRole('button', { name: /Add to routing/i }).click();
 
-    // One routing, applied to all three parts.
-    await expect(page.getByText(/1 operation on 3 of 3 parts/i)).toBeVisible();
+    // One entry, spread across the rest — 31 routings still cost one typing.
+    await expect(page.getByText(/1 of 3 have work/i)).toBeVisible();
+    await page.getByRole('button', { name: /Apply this work to the other 2 parts/i }).click();
+    await expect(page.getByText(/3 of 3 have work/i)).toBeVisible();
 
-    // ── Step 5: create ──
-
-    const createButton = page.getByRole('button', { name: /Create 3 parts/i });
-    await expect(createButton).toBeEnabled();
-    await createButton.click();
-
-    // THE PAYOFF: parts that can actually be quoted, not just filed.
-    await expect(page.getByText(/ready to quote/i)).toBeVisible({ timeout: 180_000 });
-
-    // ── Step 6: hand off to a quote ──
-
-    await page.getByRole('button', { name: /Quote \d+ of these/i }).click();
-    await expect(page).toHaveURL(/\/quotes\/new\?parts=/);
+    // ── Create, and land IN the quote ──
+    // The goal was never parts, so the primary action does both and the results
+    // screen is not something to click past.
+    await page.getByRole('button', { name: /Create 3 parts & start a quote/i }).click();
+    await expect(page).toHaveURL(/\/quotes\/new\?parts=/, { timeout: 180_000 });
   });
 
   /**
@@ -178,21 +173,23 @@ test.describe('Add parts from drawings', () => {
 
     // Nine cut-list rows on this sheet.
     await expect(page.getByTitle(/lists 9 components/i)).toBeVisible({ timeout: 60_000 });
-    await page.getByRole('button', { name: /Next — how they are made/i }).click();
+
+    // The cut list lives UNDER the part that lists it, not in a panel above the
+    // table — open the row and the work and the materials are together.
+    await page.getByRole('button', { name: /Set up E2E-WELDMENT/i }).click();
 
     // Twelve rows collapse to the distinct tube sizes, pooled across the drawing.
-    const materials = page.getByTestId('material-row');
-    await expect(materials).toHaveCount(2);
+    await expect(page.getByTestId('material-row')).toHaveCount(2);
 
-    // Before any cost is given, the panel names the part that will be held back
-    // rather than saying something vague about incompleteness.
-    await expect(page.getByText(/won't be quotable yet/i)).toBeVisible();
-
-    // The made components have no work, so they block regardless — untick them to
-    // isolate what a material cost actually changes.
+    // The made components have no work, so they hold the parent back regardless —
+    // untick them to isolate what a material cost actually changes.
     for (const pad of ['MOUNTING PADS', 'ROBOT RISER PAD', 'REGRIP PAD']) {
-      await page.getByRole('button', { name: new RegExp(pad, 'i') }).click();
+      await page.getByRole('checkbox', { name: new RegExp(pad, 'i') }).uncheck();
     }
+
+    // Two materials, neither priced yet, and the footer says so where the decision
+    // is made rather than in a banner scrolled past.
+    await expect(page.getByText(/2 materials still need a cost/i)).toBeVisible();
 
     // The unit is asked for, never guessed — these sheets print "1803.2" beside a
     // tube described in inches, and guessing would scale every cost by 25.4.
@@ -201,8 +198,8 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Cost per unit for 8" x 4" x 1\/4" WALL/i).fill('0.05');
     await page.getByLabel(/Cost per unit for 4" x 4" x 1\/4" WALL/i).fill('0.03');
 
-    // With every component either priced or excluded, nothing is held back.
-    await expect(page.getByText(/won't be quotable yet/i)).toHaveCount(0);
+    // Priced, so nothing is held back.
+    await expect(page.getByText(/still need a cost/i)).toHaveCount(0);
 
     // Give it work so it has a cost of its own too.
     await page.getByRole('button', { name: /Add Operation/i }).click();
@@ -212,7 +209,8 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Cycle minutes per unit/i).fill('30');
     await page.getByRole('button', { name: /Add to routing/i }).click();
 
-    await page.getByRole('button', { name: /Create 1 part/i }).click();
+    // Create WITHOUT quoting, because the receipt is what this test reads.
+    await page.getByRole('button', { name: /Create without quoting/i }).click();
     await expect(page.getByText(/ready to quote/i)).toBeVisible({ timeout: 180_000 });
 
     // The BOM lines are the point, and "ready to quote" cannot see them — this

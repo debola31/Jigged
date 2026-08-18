@@ -34,8 +34,7 @@ import { createPartsFromRows, summarise, type CreatedRow } from '@/utils/drawing
 import { assistRows } from '@/utils/drawingFieldsAssist';
 import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
-import DrawingReviewStep from '@/components/drawings/DrawingReviewStep';
-import DrawingWorkStep, { type WorkPlan } from '@/components/drawings/DrawingWorkStep';
+import DrawingWorkspaceStep, { type WorkByStem } from '@/components/drawings/DrawingWorkspaceStep';
 import {
   planComponents,
   applyComponentEdits,
@@ -44,7 +43,7 @@ import {
   type ComponentPlan,
 } from '@/lib/drawingComponents';
 
-const STEPS = ['Add the files', 'Review the parts', 'How they are made', 'Create'] as const;
+const STEPS = ['Add the files', 'Set them up', 'Create'] as const;
 
 export default function AddPartsFromDrawingsPage() {
   const params = useParams();
@@ -65,7 +64,9 @@ export default function AddPartsFromDrawingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
   const [assisted, setAssisted] = useState(false);
-  const [work, setWork] = useState<WorkPlan>({ stems: new Set(), operations: [] });
+  const [work, setWork] = useState<WorkByStem>(new Map());
+  const [fileCount, setFileCount] = useState(0);
+  const [assistFailed, setAssistFailed] = useState(false);
   const [componentEdits, setComponentEdits] = useState<ComponentEdits>(NO_COMPONENT_EDITS);
 
   /**
@@ -102,6 +103,7 @@ export default function AddPartsFromDrawingsPage() {
     setError(null);
     setBusy('Reading the title blocks…');
     try {
+      setAssistFailed(false);
       const outcome = await assistRows(companyId, target, (done, total) =>
         setProgress({ done, total }),
       );
@@ -127,6 +129,7 @@ export default function AddPartsFromDrawingsPage() {
         );
       }
     } catch (err) {
+      setAssistFailed(true);
       setError(err instanceof Error ? err.message : 'Could not read the title blocks.');
     } finally {
       setBusy(null);
@@ -147,6 +150,7 @@ export default function AddPartsFromDrawingsPage() {
         return;
       }
 
+      setFileCount(files.length);
       setBusy('Reading the drawings…');
       setProgress({ done: 0, total: groups.length });
       try {
@@ -220,21 +224,32 @@ export default function AddPartsFromDrawingsPage() {
     [companyId, customerId, defaultSource],
   );
 
-  const handleCreate = useCallback(async () => {
+  /** Straight into the quote, seeded with the parts that can actually carry a price. */
+  const goToQuote = useCallback(
+    (created: CreatedRow[]) => {
+      const ids = created
+        .filter((r) => r.quotable && r.partId)
+        .map((r) => r.partId)
+        .join(',');
+      if (!ids) return false;
+      const customer = customerId ? `&customer=${customerId}` : '';
+      router.push(`/dashboard/${companyId}/quotes/new?parts=${ids}${customer}`);
+      return true;
+    },
+    [companyId, customerId, router],
+  );
+
+  const handleCreate = useCallback(async (thenQuote: boolean) => {
     setError(null);
     setBusy('Creating parts…');
     setCreating(true);
-    setStep(3);
+    setStep(2);
     try {
-      // One routing, applied to the parts the user ticked.
-      const operationsByStem = new Map(
-        [...work.stems].map((stem) => [stem, work.operations]),
-      );
       const created = await createPartsFromRows(rows, {
         companyId,
         customerId,
         defaultUnit,
-        operationsByStem,
+        operationsByStem: work,
         components,
         onProgress: (done, total) => setProgress({ done, total }),
       });
@@ -250,7 +265,18 @@ export default function AddPartsFromDrawingsPage() {
         quotable_count: created.filter((r) => r.quotable).length,
         used_ai: assisted,
         has_customer: !!customerId,
+        then_quote: thenQuote,
       });
+
+      /**
+       * The goal was never parts. If they asked to quote and anything can carry a
+       * price, go — the results screen is a receipt, and standing between someone
+       * and the thing they came for is the step this redesign removed elsewhere.
+       *
+       * If NOTHING is quotable we stay put, because the quote form would throw on
+       * every line and "we couldn't" is better said here than there.
+       */
+      if (thenQuote) goToQuote(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create these parts.');
     } finally {
@@ -258,9 +284,7 @@ export default function AddPartsFromDrawingsPage() {
       setCreating(false);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, assisted, work, components]);
-
-  const includedCount = useMemo(() => rows.filter((r) => !r.excluded).length, [rows]);
+  }, [rows, companyId, customerId, defaultUnit, assisted, work, components, goToQuote]);
 
   // A hidden tab is not access control, but this page writes nothing on its own —
   // the flag gates the surface and the backend route gates the spend.
@@ -344,35 +368,27 @@ export default function AddPartsFromDrawingsPage() {
       )}
 
       {step === 1 && (
-        <DrawingReviewStep
+        <DrawingWorkspaceStep
+          companyId={companyId}
           rows={rows}
           onRowsChange={setRows}
+          fileCount={fileCount}
+          work={work}
+          onWorkChange={setWork}
+          components={components}
+          onComponentsChange={handleComponentsChange}
           onBack={() => setStep(0)}
-          onCreate={() => setStep(2)}
+          onCreate={handleCreate}
           creating={creating}
+          reading={!!busy && !creating}
+          readProgress={progress}
           onAssist={() => void runAssist(rows)}
-          assisted={assisted}
-          reading={!!busy}
+          assistFailed={assistFailed}
           customerId={customerId}
         />
       )}
 
-      {step === 2 && (
-        <DrawingWorkStep
-          companyId={companyId}
-          rows={rows}
-          plan={work}
-          onPlanChange={setWork}
-          onBack={() => setStep(1)}
-          onCreate={handleCreate}
-          creating={creating}
-          includedCount={includedCount}
-          components={components}
-          onComponentsChange={handleComponentsChange}
-        />
-      )}
-
-      {step === 3 && results && (
+      {step === 2 && results && (
         <Card>
           <CardContent>
             {results ? (
@@ -408,16 +424,7 @@ export default function AddPartsFromDrawingsPage() {
                     <Button
                       variant="contained"
                       startIcon={<RequestQuoteIcon />}
-                      onClick={() => {
-                        const ids = results
-                          .filter((r) => r.quotable && r.partId)
-                          .map((r) => r.partId)
-                          .join(',');
-                        const customer = customerId ? `&customer=${customerId}` : '';
-                        router.push(
-                          `/dashboard/${companyId}/quotes/new?parts=${ids}${customer}`,
-                        );
-                      }}
+                      onClick={() => goToQuote(results)}
                     >
                       Quote {results.filter((r) => r.quotable).length} of these
                     </Button>
@@ -433,7 +440,9 @@ export default function AddPartsFromDrawingsPage() {
                       setRows([]);
                       setResults(null);
                       setAssisted(false);
-                      setWork({ stems: new Set(), operations: [] });
+                      setWork(new Map());
+                      setFileCount(0);
+                      setAssistFailed(false);
                       setComponentEdits(NO_COMPONENT_EDITS);
                       setStep(0);
                     }}

@@ -455,6 +455,12 @@ export default function OperatorOperationActionPage() {
     try {
       await revertOperationCompletion(jobOperationId);
       setQtyDirty(false);
+      // The feed has to be told, exactly as recording tells it. Undo voids the
+      // completion AND — through the cascade trigger — the time intervals it
+      // closed, so the Started/Finished pair is gone from the database. Without
+      // this bump the feed keeps rendering rows that no longer exist, which
+      // reads as Undo having retracted the count but kept the time.
+      setFeedRefreshSignal((n) => n + 1);
       await reloadAll();
     } catch (err) {
       setError(err);

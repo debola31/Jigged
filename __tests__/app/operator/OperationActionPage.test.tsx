@@ -494,6 +494,28 @@ describe('operation action page — completion (characterisation)', () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
+  it('tells the job feed to reload after an undo', async () => {
+    // Undo voids the completion AND, through the cascade trigger, the time
+    // intervals it closed — so the Started/Finished pair is gone from the
+    // database. The feed loads its own data, so without this signal it keeps
+    // rendering rows that no longer exist and Undo reads as having retracted
+    // the count but kept the time. Recording already bumps it; undoing did not.
+    mockSummaries.mockResolvedValue(summary(4) as never);
+    renderPage();
+
+    const before = Number(
+      (await screen.findByTestId('job-feed')).getAttribute('data-refresh-signal'),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /undo all/i }));
+
+    await waitFor(() =>
+      expect(
+        Number(screen.getByTestId('job-feed').getAttribute('data-refresh-signal')),
+      ).toBeGreaterThan(before),
+    );
+  });
+
   it('surfaces a failed undo without pretending it worked', async () => {
     mockSummaries.mockResolvedValue(summary(4) as never);
     mockRevert.mockRejectedValue(new Error('could not undo') as never);

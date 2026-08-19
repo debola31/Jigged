@@ -1252,7 +1252,13 @@ export async function getPartCostExplain(
     .single();
 
   if (error) {
-    console.error('Error explaining part cost:', error);
+    // Same reason as get_priceable_part_ids: `.rpc()` is outside Sentry's
+    // Supabase integration, and the workspace swallows this into "no verdict",
+    // which renders as a part with no warnings at all. Unreported, that reads to
+    // the user as "this part is fine" while the list says Incomplete.
+    Sentry.captureException(toError(error, 'compute_part_cost_explain'), {
+      tags: { area: 'part-pricing' },
+    });
     throw error;
   }
 

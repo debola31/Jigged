@@ -24,7 +24,8 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 | `…/{vendorId}` | Header card; Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Linked Parts** accordion (`part_name`, `primary_unit`); **Linked Work Centers** accordion (`name`, `kind`). Delete archives and is never disabled. |
 | `…/{vendorId}/edit` | `VendorForm` edit mode — vendor row only; contact CRUD is separate. *(⚠ This doc previously omitted this page.)* |
 | `…/new` | `VendorForm` create mode plus an optional initial-contact sub-form; if filled, that contact is created `is_primary=true`. |
-| `…/import` | CSV upload → column mapping → validation → execute, via FastAPI `/api/vendors/import/{analyze,validate,execute}` (AI column mapping). Execute upserts `ON CONFLICT (company_id, name)` case-insensitively, so an existing vendor **updates in place**; within-CSV duplicate names collapse to one row. |
+
+*(There was a `…/import` page here — a vendor-specific CSV wizard. It is gone: vendors are imported through the one guided importer at `/dashboard/{companyId}/import` (see [data-import.md](data-import.md)), which writes via FastAPI `/api/vendors/import/execute`. That write upserts `ON CONFLICT (company_id, name)` case-insensitively, so an existing vendor **updates in place**; within-CSV duplicate names collapse to one row.)*
 
 **Decisions.** No "capabilities" checkboxes on a vendor — what it is used for is derived from inbound references, so it cannot drift from reality. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
 
@@ -37,14 +38,14 @@ Signatures live in [`utils/vendorsAccess.ts`](../../utils/vendorsAccess.ts) (11 
 - `checkVendorNameExists` is scoped to **live** rows (`deleted_at IS NULL`), so an archived name never falsely blocks a create.
 - `createVendor` on a `23505` collision with an **archived** vendor revives it (`reviveArchivedVendorByName` — un-archive plus apply the form values); a collision with a **live** vendor re-throws as a genuine duplicate.
 - `deleteVendor` and `bulkDeleteVendors` (100-row batches) stamp `deleted_at` via `.update()` — never a SQL `DELETE`, never blocked by a part or work-centre reference. Archive is universal; the standard is [architecture.md §16](../architecture.md).
-- ⚠ **`bulkImportVendors` has no callers** — `git grep` finds only its definition. Dead code, superseded by the FastAPI import route above. *(This doc previously presented it as "the direct-client path", implying a live second path.)*
+- **`bulkImportVendors` is gone.** It had no callers — `git grep` found only its definition — and was superseded by the FastAPI import route above. *(This doc once presented it as "the direct-client path", implying a live second path.)*
 
 ## Test coverage
 
 | Layer | File | Coverage |
 |---|---|---|
 | Vendor access | [`__tests__/utils/vendorsAccess.test.ts`](../../__tests__/utils/vendorsAccess.test.ts) | 9 tests across `getAllVendors`, `getVendor`, `createVendor`, `deleteVendor` |
-| Import API | [`api/tests/integration/test_vendors_import_api.py`](../../api/tests/integration/test_vendors_import_api.py) | 16 tests across `TestVendorsAnalyze`, `TestVendorsValidate`, `TestVendorsExecute` *(⚠ This doc previously tagged the import `automation-pending`; this suite exists.)* |
+| Import API | [`api/tests/integration/test_vendors_import_api.py`](../../api/tests/integration/test_vendors_import_api.py) | 14 tests across `TestVendorsValidate` and `TestVendorsExecute` *(⚠ This doc previously tagged the import `automation-pending`; this suite exists. It was 16 across three classes until `TestVendorsAnalyze` went with the `/analyze` endpoint.)* |
 
 ### Known gaps
 

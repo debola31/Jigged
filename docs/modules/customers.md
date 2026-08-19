@@ -299,7 +299,7 @@ So `discover_po_custom_field` **finds** the shop's field, matching on its **labe
 
 Six columns: **Name** (pinned), **Contact**, **Email**, **Phone** (all three derived from `primary_contact`, em-dash when absent), **Payment terms**, **Location** (derived from the default-billing address, `sortable: false`).
 
-Search is debounced 300 ms and matches **name only** — not contact or city. Sorting is server-side (the colId goes straight to `.order()`). Toolbar: Search · Import · New Customer, with Export CSV and Delete (n) appearing on selection. Empty state: *"No customers yet"* → *"Create your first customer or import from CSV."* (or *"No customers match your search."*).
+Search is debounced 300 ms and matches **name only** — not contact or city. Sorting is server-side (the colId goes straight to `.order()`). Toolbar: Search · New Customer, with Export CSV and Delete (n) appearing on selection. Empty state: *"No customers yet"* → *"Create your first customer."* (or *"No customers match your search."*), plus the shared `ImportAllDataLink`. *(The toolbar carried an **Import** button to a customers-specific wizard until that wizard was retired.)*
 
 ### Detail — `/dashboard/{companyId}/customers/{id}`
 
@@ -346,13 +346,20 @@ Archiving a customer does **not** archive its carrier accounts (a soft delete fi
 
 ## CSV import
 
-Two live paths, both hitting `/api/customers/import/execute`.
+One path: the guided importer at `/dashboard/{companyId}/import` (see
+[data-import.md](data-import.md)), hitting `/api/customers/import/execute`. *(There were two —
+a customers-specific `/customers/import` wizard hit the same execute route. It was removed, along
+with the `/analyze` and `/validate` endpoints only it called.)*
 
 **Mappable fields (11):** `name` (required), `contact_name`, `contact_phone`, `contact_email`, `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country`, **`default_payment_terms`**.
 
 **Not mappable:** credit status or note (so an import can never set or lift a hold), and no carrier-account field.
 
-The guided flow (`lib/dataImportSchema.ts`) exposes only `name` and `default_payment_terms` — a UI restriction, not a server limit.
+The guided flow (`lib/dataImportSchema.ts`) exposes only `name` and `default_payment_terms` at the
+Map step — a UI restriction, not a server limit: the AI maps the other nine and they ride through to
+execute. But since the retired wizard exposed all 11 for hand-correction, a mis-mapped
+`contact_email` or `postal_code` is currently **not** correctable in the UI. Widening
+`ENTITY_FIELDS` is tracked as a follow-up.
 
 The AI column mapper matches source headers against the schema *descriptions*, which deliberately carry legacy-ERP vocabulary: `default_payment_terms` notes *"Often exported as 'Terms', 'Terms Code' or 'Payment Terms'"*.
 

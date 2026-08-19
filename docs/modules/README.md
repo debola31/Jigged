@@ -24,7 +24,7 @@ the tests that pin them. **Priority and build status live in [prd.md](../prd.md)
 | [Billing & Subscriptions](billing.md) | Stripe-hosted Checkout + Customer Portal, and the DB-enforced entitlement gate (`company_can_write`) every tenant table must carry |
 | [Customers](customers.md) | Customer identity, contacts, addresses, standing terms, credit status — and **the freight model** (`customer_carrier_accounts` → job → frozen shipment) |
 | [Dashboard](dashboard.md) | The post-login overview: pinned metric scorecards, the Recent Activity feed, and the AI area it hosts |
-| [Data Import](data-import.md) | Guided onboarding import (Upload → Map → Review & Fix → Import) with idempotent natural-identity upsert; PRD and technical design in one doc. Flag `data_import` — opt-in per tenant while onboarding |
+| [Data Import](data-import.md) | Guided onboarding import (Upload → Map → Review & Fix → Import) with idempotent natural-identity upsert; PRD and technical design in one doc. On for every tenant — the `data_import` flag went when the per-entity CSV wizards did |
 | [Demo Mode](demo-mode.md) | The pre-populated sandbox inside a real company, and what Reset does and does not delete |
 | [Inventory](inventory.md) | Stock, units and conversion, the eleven material journeys, and QR-addressable storage locations. **Locations** sit behind flag `inventory_locations` (opt-in); the base inventory list does not |
 | [Invitation System](invitation-system.md) | Email invitations — the only way to add a team member. Referrals descoped (#338) |

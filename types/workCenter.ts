@@ -47,12 +47,6 @@ export interface WorkCenterWithRelations extends WorkCenter {
   vendor: { id: string; name: string } | null;
 }
 
-export interface WorkCenterImportResult {
-  imported: number;
-  skipped: number;
-  errors: { row: number; reason: string }[];
-}
-
 export const EMPTY_WORK_CENTER_FORM: WorkCenterFormData = {
   name: '',
   kind: 'internal',

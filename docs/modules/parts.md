@@ -282,7 +282,7 @@ called it *"a filtered view over `parts`"* since it was written. See
 | **Toolbar** | Add Part, Import, **Count Inventory** |
 | **Bulk (rows selected)** | **Delete (N)**, Export CSV |
 | **Pagination** | 25/page; selector 25 / 50 / 100 |
-| **Empty states** | `"No parts yet. Add your first part — made in-house or bought from a vendor."` (+ Import CSV / Add Part). Filtered-but-empty: `"No parts match these filters."` |
+| **Empty states** | `"No parts yet. Add your first part — made in-house or bought from a vendor."` (+ Add Part, and the `ImportAllDataLink` text link to the guided importer). Filtered-but-empty: `"No parts match these filters."` |
 
 ⚠ **Count Inventory is unconditional.** *(This doc previously said it appears only with the
 `inventory_locations` flag off.)* **Withdrawn:** gate it on the flag, since with locations on you
@@ -541,14 +541,17 @@ back-calculated markup will look unusual until a cost basis exists).
 
 ---
 
-## Bulk import — `/dashboard/{companyId}/parts/import`
+## Bulk import — how parts arrive from a CSV
 
-Upload CSV → AI column mapping (headers + the **first 5 rows** as samples, `rows.slice(0, 5)`) →
-review → validate → execute (created / updated / skipped / errors). The shared flow, confidence
-scoring and Review-and-Fix step are documented once in [data-import.md](data-import.md) — not
-repeated here.
+Parts are imported through the one guided importer at `/dashboard/{companyId}/import`; the flow,
+confidence scoring and Review-and-Fix step are documented once in
+[data-import.md](data-import.md) — not repeated here. **There is no parts-specific import page or
+Import button any more** — `/parts/import` and its `analyze` / `validate` endpoints were removed
+once the guided importer covered parts end to end.
 
-Endpoints: `POST /api/parts/import/{analyze,analyze-unified,validate,execute}`.
+Endpoint: `POST /api/parts/import/execute`, which the guided importer posts to. The rules below
+are what that write enforces (via `validate_import`, now an internal step of execute rather than a
+route of its own).
 
 **The parts-specific rule — what counts as a conflict:**
 
@@ -617,7 +620,6 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | Kind chips, PDF-inline vs STEP-3D vs DWG-download dispatch, delete visibility (uploader vs admin), rejected-file message | `__tests__/components/parts/FilesTab.test.tsx` → `FilesTab` (7 its) |
 | Fresh signed URL per attachment on key remount (no stale URL) | `__tests__/components/parts/workspace/tabs/AttachmentViewerModal.test.tsx` → `AttachmentViewerModal — parent key-remount fetches a fresh URL per attachment` (2 its) |
 | Create part → add routing → verify cost → pricing isolation (end-to-end) | `e2e/parts-and-routing.spec.ts` → `Parts and Routing workflow` |
-| CSV import end-to-end | `e2e/csv-import.spec.ts` → `CSV Import workflow`. ⚠ *This doc previously said the spec is `test.skip`-ped under CI and needs a live FastAPI backend. It now runs in CI: `e2e/run-stack.mjs` (via `pnpm test:e2e:local` and the E2E workflow) starts `e2e/mocks/anthropic-server.mjs` on port **9876** and points `ANTHROPIC_BASE_URL` at it, so no real Anthropic call is made.* |
 | Server-side reads of `parts_bom` | `__tests__/utils/bomAccess.test.ts` |
 
 Historical doc-vs-code divergences from the 2026 audit are on [#334]; automation gaps on [#367].

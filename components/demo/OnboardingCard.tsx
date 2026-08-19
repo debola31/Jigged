@@ -12,7 +12,6 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined';
 import { useRouter } from 'next/navigation';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 const DISMISSED_KEY = 'jigged_onboarding_dismissed';
 
@@ -91,9 +90,7 @@ function Step({
 
 export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardProps) {
   const { hasDemoCompany, isDemoMode, enterDemoMode, isCreating, isLoading } = useDemoMode();
-  const { features } = useCompanyFeatures();
   const router = useRouter();
-  const importEnabled = !!features.data_import;
   const [dismissed, setDismissedState] = useState(true);
 
   useEffect(() => {
@@ -111,7 +108,7 @@ export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardPro
   };
 
   // First-run onboarding checklist (research: a "Get started" checklist on the home page,
-  // not a permanent nav item). Steps are numbered; the import step leads when enabled.
+  // not a permanent nav item). Steps are numbered; the import step leads.
   let stepNumber = 0;
 
   return (
@@ -124,26 +121,22 @@ export default function OnboardingCard({ companyId, isEmpty }: OnboardingCardPro
           A couple of steps to set up your shop in Jigged.
         </Typography>
 
-        {importEnabled && (
-          <>
-            <Divider />
-            <Step
-              index={(stepNumber += 1)}
-              icon={<UploadFileIcon color="action" fontSize="small" />}
-              title="Import your existing data"
-              description="Bring your parts, vendors, work centers, routings, and BOMs into Jigged. We'll check everything first and show you exactly what will come in — nothing is saved until you say so."
-              action={
-                <Button
-                  variant="contained"
-                  startIcon={<UploadFileIcon />}
-                  onClick={() => router.push(`/dashboard/${companyId}/import`)}
-                >
-                  Import your data
-                </Button>
-              }
-            />
-          </>
-        )}
+        <Divider />
+        <Step
+          index={(stepNumber += 1)}
+          icon={<UploadFileIcon color="action" fontSize="small" />}
+          title="Import your existing data"
+          description="Bring your parts, vendors, work centers, routings, and BOMs into Jigged. We'll check everything first and show you exactly what will come in — nothing is saved until you say so."
+          action={
+            <Button
+              variant="contained"
+              startIcon={<UploadFileIcon />}
+              onClick={() => router.push(`/dashboard/${companyId}/import`)}
+            >
+              Import your data
+            </Button>
+          }
+        />
 
         <Divider />
         <Step

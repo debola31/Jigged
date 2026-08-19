@@ -15,7 +15,10 @@
 
 Supersedes FR-16 "Legacy Data Migration" in [docs/prd.md](../prd.md) and the retired data-health
 module note. Epic #492, sub-issues #519–#524; PRD issue #562; Phase 1 shipped on PR #561.
-Flag-gated: `data_import` ([lib/featureFlags.ts](../../lib/featureFlags.ts)).
+**Not flag-gated.** `data_import` was an opt-IN flag in
+[lib/featureFlags.ts](../../lib/featureFlags.ts) while this was the second importer; it was removed
+when the per-entity CSV wizards were retired, because gating the only remaining import path would
+leave a shop no way to bring its data in at all.
 
 ## Problem
 
@@ -69,7 +72,7 @@ check to drift from the first.
 *(This doc previously said "AI is used only for structure detection" and "the server keeps only
 the two steps"; there are three AI routes and one of them proposes fixes.)* All three live in
 [`api/routes/data_import_routes.py`](../../api/routes/data_import_routes.py), prefix
-`/api/data-import`, each gated by caller authorization + the `data_import` flag, rate-limited
+`/api/data-import`, each gated by caller authorization, rate-limited
 (`RateLimiter(max_requests=20, window_seconds=600)` per company), and **write-free**:
 
 | Route | Status | Caps (enforced in that file) |
@@ -82,8 +85,7 @@ Pinned model: `DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"`
 ([api/services/ai/model_config.py](../../api/services/ai/model_config.py)). *(The Phase 2 design
 doc said `claude-opus-4-8`; it never was.)*
 
-**No-write guarantee.** The AI routes only SELECT (verify access, read the flag, resolve the
-provider) — no table writes, no `auth.admin`, no on-disk cache of uploaded rows. Enforced by
+**No-write guarantee.** The AI routes only SELECT (verify access, resolve the provider) — no table writes, no `auth.admin`, no on-disk cache of uploaded rows. Enforced by
 `test_route_module_has_no_write_calls_or_import_route_imports` in
 [`api/tests/integration/test_data_import_api.py`](../../api/tests/integration/test_data_import_api.py).
 
@@ -376,8 +378,8 @@ permanent nav module for it beyond the utility entry below (the old "Data Health
 
 | Entry | Where | Rationale |
 |---|---|---|
-| First-run "Get started" checklist, leading with "Import your data" | `components/demo/OnboardingCard.tsx`, empty dashboard, flag-gated, hidden once the shop has data | Dynamics 365 Business Central's get-started banner-that-reveals-a-checklist; Appcues onboarding-checklist completion lift |
-| Empty module lists (Parts / Vendors / Work centers / Customers) | `components/import/ImportAllDataLink.tsx` | Links to the **same** unified importer ("Import all your data at once") |
+| First-run "Get started" checklist, leading with "Import your data" | `components/demo/OnboardingCard.tsx`, empty dashboard, hidden once the shop has data | Dynamics 365 Business Central's get-started banner-that-reveals-a-checklist; Appcues onboarding-checklist completion lift |
+| Empty module lists (Parts / Vendors / Work centers / Customers) | `components/data-import/ImportAllDataLink.tsx` | Since the per-entity wizards were retired this is the **only** in-page import affordance on those modules ("Import all your data at once") |
 | Recurring entry, non-empty shop | low-emphasis **"Import data"** in the sidebar utility area near Team/Settings (`components/layout/Sidebar.tsx`) | Persistent and consistent on every page, always findable, and quiet — out of the dashboard's KPI spotlight (NN/G "KPIs lead"; Stripe/Linear calm KPI row). Reads as utility, not a primary destination |
 
 Related data must be imported **together** to auto-resolve links and load in dependency order;
@@ -432,14 +434,16 @@ write plan out — never private helpers or DOM internals. Three seams:
 | Seam | Where | Coverage |
 |---|---|---|
 | Analyzer + review + impact + actions (primary) | `__tests__/lib/dataImportAnalyzer.test.ts`, `dataImportReview.test.ts`, `dataImportImpact.test.ts`, `dataImportActions.test.ts`, `dataImportEditing.test.ts`, `dataImportLinks.test.ts`, `dataImportReconcile.test.ts`, `dataImportIngest.test.ts` | classification, within-file duplicates, cross-file orphans with asymmetric keys, normalized matching (**no phantom orphan**), **a referenced file absent → one `not_checked`, never a silent 0 and never a phantom N**, required/blank columns, cost + quantity coverage, name variants, inactive flags, edges; `rowsAtRisk` (one row lost is one row), `losses`/`lossPhrase`; task-vs-notice split, consequence line, outlook; `buildImportPlan`, `summarizeResults`, `runImportPlan — progress`; `reconcile`, `filterWorkingByMode`; `findMissingParents`, `guessKind`, `createMissingParents` |
-| AI endpoints | `api/tests/integration/test_data_import_api.py`, `api/tests/unit/test_data_import_provider.py` | caller auth (401/403), the flag gate, the 413 size cap, suggest-fixes proposals only, and the static no-write check |
-| The `/import` wizard journey end-to-end | **not built — `automation-pending (#367)`** | *(This doc previously cited "one Playwright E2E that drives `/import`". `e2e/csv-import.spec.ts` drives the **per-entity** `/parts/import` wizard, not the unified one. The live write still owes one preview/local run — the one piece not verifiable headlessly.)* |
+| AI endpoints | `api/tests/integration/test_data_import_api.py`, `api/tests/unit/test_data_import_provider.py` | caller auth (401/403), **that there is no feature gate** (`test_endpoints_are_not_feature_gated`), the 413 size cap, suggest-fixes proposals only, and the static no-write check |
+| The `/import` wizard journey end-to-end | **not built — `automation-pending (#367)`** | *(This doc previously cited "one Playwright E2E that drives `/import`"; the spec it meant drove the **per-entity** `/parts/import` wizard and was deleted along with it. So there is now **no** Playwright coverage of any CSV import, which raises #367 from a gap to the only end-to-end check there is. The live write still owes one preview/local run — the one piece not verifiable headlessly.)* |
 
 ## Not built / out of scope
 
-- **Per-module toolbar Import buttons routing into the unified importer.** Not built — Parts,
-  Vendors, Work centers and Customers still push to their own `/…/import` wizards.
-  *(This doc previously described the reroute as a Phase 2 behaviour.)*
+- **Per-module toolbar Import buttons.** Resolved by removal rather than by rerouting: Parts,
+  Vendors, Work centers and Customers no longer carry an Import button at all, and their
+  `/…/import` wizards (plus `parts/bom/import`) are deleted. The empty-state
+  `ImportAllDataLink` and the sidebar entry are the ways in. *(This doc previously listed the
+  reroute as Not built, and before that described it as a Phase 2 behaviour.)*
 - **"Unchanged" and "Conflict" reconciliation buckets**, and **fuzzy link-to-existing** matching
   (only exact-normalized bucketing ships).
 - **An explicit "leave blank — intentional" decision.** Spec'd so that confirming a gap *downgrades*

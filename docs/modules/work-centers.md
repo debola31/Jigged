@@ -80,9 +80,10 @@ Internal shows a **Cost** column (`labor_rate` as `$X.XX/hr`); External shows **
 **Withdrawn:** a cross-kind Cost cell and a comparator pinning external rows — wrong because the two kinds
 never share a grid, so neither device has anything to reconcile.
 
-Search filters name (300ms debounce), default sort name asc, pagination 25/50/100. Toolbar: **Import**, **New
-Work Center**, `ExportCsvButton`, a `Delete (n)` bulk action once rows are selected, and — only with the
-search box empty — the shared `ImportAllDataLink`.
+Search filters name (300ms debounce), default sort name asc, pagination 25/50/100. Toolbar: **New Work
+Center**, `ExportCsvButton`, and a `Delete (n)` bulk action once rows are selected; the empty state carries
+the shared `ImportAllDataLink`. *(The toolbar carried an **Import** button to a work-centre-specific wizard
+until that wizard was retired in favour of the one guided importer.)*
 
 ### Detail — `/dashboard/{companyId}/work-centers/{workCenterId}`
 
@@ -117,18 +118,20 @@ supplies `routing_operations_count`.
   purchased. Sited in the office, not on the floor — filling it is deliberate paperwork.
 - **Description** — optional multiline.
 
-### Import — `/dashboard/{companyId}/work-centers/import`
+### Import
 
-CSV → AI-assisted column mapping → validation review → execute, through the **FastAPI** router
-`api/routes/work_centers_import_routes.py` (`/api/work-centers/import/{analyze,validate,execute}`) — a
-multi-step pipeline with conflict detection, not Supabase CRUD. External rows resolve `vendor_name` →
-`vendor_id` server-side; unresolved names become `unknown_vendor` conflicts, internal rows carrying a vendor
-become `vendor_forbidden_for_internal` errors. Execute upserts `ON CONFLICT (company_id, name)`, so re-import
+Work centres arrive through the one guided importer at `/dashboard/{companyId}/import` (see
+[data-import.md](data-import.md)), which writes via the **FastAPI** route
+`api/routes/work_centers_import_routes.py` → `/api/work-centers/import/execute` — a multi-step pipeline with
+conflict detection, not Supabase CRUD. External rows resolve `vendor_name` → `vendor_id` server-side;
+unresolved names become `unknown_vendor` conflicts, internal rows carrying a vendor become
+`vendor_forbidden_for_internal` errors. Execute upserts `ON CONFLICT (company_id, name)`, so re-import
 **updates in place** (idempotent) and within-CSV duplicate names collapse into one; it sets
 `deleted_at = None`, so re-importing an archived name revives it.
 
-That router is the **only live import path**. `bulkImportWorkCenters` mirrors the same rules client-side but
-has no callers and no tests. *(⚠ Previously called "the unit-covered reference logic".)*
+That route is the **only live import path**. *(A `/work-centers/import` wizard with its own `analyze` and
+`validate` endpoints existed alongside it, and a `bulkImportWorkCenters` access-layer function mirrored the
+same rules with no callers and no tests; both are gone.)*
 
 ---
 
@@ -143,10 +146,9 @@ has no callers and no tests. *(⚠ Previously called "the unit-covered reference
 | `createWorkCenter(companyId, formData)` | External clears `labor_rate`; inserts `metadata: {}`; blank machine details written as NULL. On a `23505` collision with an **archived** row, revives it (`reviveArchivedWorkCenterByName`); a **live** collision re-throws as a duplicate |
 | `updateWorkCenter(id, formData)` | Same kind normalization |
 | `deleteWorkCenter(id)` / `bulkDeleteWorkCenters(ids)` | Archive via `.update()`, the latter in 100-row batches; neither ever blocks |
-| `bulkImportWorkCenters(companyId, rows)` | Vendor-name resolution + de-dupe by name — **dead** (see Import) |
 
-**Named gap — dead exports, untracked.** `getAllWorkCenters` has test callers only; `getWorkCentersFlat` and
-`bulkImportWorkCenters` have **zero callers, tests included**; `getWorkCenter` has no non-test callers but is
+**Named gap — dead exports, untracked.** `getAllWorkCenters` has test callers only; `getWorkCentersFlat` has
+**zero callers, tests included**; `getWorkCenter` has no non-test callers but is
 the by-id read the archive story depends on, so keep it. Pruning was tracked in
 [#550](https://github.com/debola31/Jigged/issues/550), now **CLOSED**.
 *(⚠ Previously said `getWorkCentersFlat` had "no non-test callers"; it has none whatsoever.)*
@@ -162,7 +164,7 @@ audit are on [#345](https://github.com/debola31/Jigged/issues/345) (**CLOSED**).
 |---|---|
 | Per-kind + per-company scoping; by-id read; uniqueness lookup incl. `excludeId`; insert normalization (parsed `labor_rate`, nulled `vendor_id`); archive-not-delete single and bulk in 100-row batches; errors surface as a friendly throw | `__tests__/utils/workCentersAccess.test.ts` — `workCentersAccess` (13 `it`s) |
 | Blank machine details write as NULL; filled ones are trimmed and parsed | same file — `workCentersAccess machine details` (2 `it`s; 15 in the file) |
-| Validation: internal-without-vendor passes, external-without-vendor fails, unknown vendor is a conflict, internal-with-vendor is an error | `api/tests/integration/test_work_centers_import_api.py` — `TestWorkCentersValidate` (4 tests) |
+| Validation: internal-without-vendor passes, external-without-vendor fails, unknown vendor is a conflict, internal-with-vendor is an error | `api/tests/integration/test_work_centers_import_api.py` — `TestWorkCentersValidate` (4 tests, now calling `validate_import` directly since it is no longer a route) |
 | Execute inserts internal rows and resolves `vendor_name` → `vendor_id` for external ones | same file — `TestWorkCentersExecute` (2 tests) |
 | Both kinds cost as documented — internal by `labor_rate` × time, external by per-op `external_unit_price` with no setup | `__tests__/utils/routingCostCalculation.test.ts` — `calculateRoutingCost` (groups `internal operations`, `external operations`, `mixed internal + external routings`) |
 | Picking a work centre on a routing operation feeds the live part cost end-to-end — **internal only** (the spec selects a fixture named `E2E Internal WC`) | `e2e/parts-and-routing.spec.ts` — `Parts and Routing workflow` |

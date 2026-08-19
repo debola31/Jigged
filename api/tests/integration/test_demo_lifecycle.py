@@ -455,7 +455,7 @@ def test_entry_sync_propagates_a_flag_flipped_after_creation(supabase_admin, fla
     source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
 
     changed = dict(SOURCE_SETTINGS["features"])
-    changed["data_import"] = True            # newly enabled
+    changed["quickbooks_desktop"] = True     # newly enabled
     changed["inventory_locations"] = False   # newly disabled
     supabase_admin.table("companies").update(
         {"settings": {**SOURCE_SETTINGS, "features": changed}}
@@ -488,7 +488,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
 
     # An admin flips a flag on the source; entry re-syncs.
     supabase_admin.table("companies").update(
-        {"settings": {**SOURCE_SETTINGS, "features": {"data_import": True}}}
+        {"settings": {**SOURCE_SETTINGS, "features": {"quickbooks_desktop": True}}}
     ).eq("id", source_id).execute()
     flagged_demo["client"].rpc(
         "sync_demo_access",
@@ -496,7 +496,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
     ).execute()
 
     after = _settings(supabase_admin, demo_id)
-    assert after["features"] == {"data_import": True}, "the flag change should land"
+    assert after["features"] == {"quickbooks_desktop": True}, "the flag change should land"
     assert after["defaults"] == {"quote_validity_days": 30}, "demo-side edit was reverted"
     assert after["default_payment_terms"] == "Net 15", "demo-side edit was reverted"
 

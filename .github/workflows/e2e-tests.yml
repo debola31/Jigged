@@ -10,7 +10,12 @@ jobs:
   e2e:
     name: Playwright E2E (local Supabase)
     timeout-minutes: 25
-    runs-on: ubuntu-latest
+    # PINNED, not `-latest`. The install step below deliberately drops
+    # `--with-deps`, which turns "Chromium's launch libraries are already here"
+    # from something apt guaranteed into an assumption about a SPECIFIC image.
+    # Audited on ubuntu-24.04 x64 only — the ubuntu-24.04-arm64 image ships no
+    # Chrome/Chromium and would NOT satisfy it. Re-audit before changing this.
+    runs-on: ubuntu-24.04
     # Pull the Supabase stack from GHCR, not the CLI's default AWS public ECR:
     # shared GitHub-runner IPs trip public.ecr.aws's anonymous rate limit
     # ("toomanyrequests"), which flakes `supabase start`. GHCR mirrors the same
@@ -60,7 +65,45 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        # DELIBERATELY NOT `--with-deps`, and this is a considered deviation from
+        # Playwright's own GitHub Actions guidance rather than an oversight.
+        #
+        # Naming `chromium` does NOT narrow what that flag installs: Playwright's
+        # registry calls `targets.add("tools")` unconditionally, and `tools` is
+        # where all twelve font packages live. There is no flag that keeps the
+        # launch libraries and skips the fonts — it is all or nothing.
+        #
+        # The fonts are what cost us. On 2026-08-19 this step ran 1181s and 1358s
+        # (baseline 113s) fetching non-Latin fonts from the Ubuntu mirror, twice
+        # consuming the whole 25-minute job cap. One of those killed the run
+        # before a single test executed, and blocked a deploy recovery.
+        #
+        # Dropping the flag is safe here, measured rather than assumed:
+        #   * LAUNCH LIBRARIES — in run 32273804293 all 21 packages in Playwright's
+        #     chromium group reported "is already the newest version"; apt's own
+        #     summary was `0 upgraded, 9 newly installed` and all 9 were fonts.
+        #     They arrive with the image's preinstalled google-chrome-stable,
+        #     whose Depends closure covers 20 of the 21 (libdrm2 via libgbm1).
+        #   * FONTS — nothing in this suite can observe them. Zero
+        #     toHaveScreenshot/toMatchSnapshot across all specs, and Playwright's
+        #     text/role matching compares DOM strings, not glyphs (a tofu box has
+        #     the same textContent). The app self-hosts its faces via next/font,
+        #     so fontconfig is never consulted for body text.
+        #
+        # IF A LAUNCH LIBRARY EVER DOES GO MISSING, here is the signature, because
+        # it is not the obvious one: this step still exits 0 GREEN — the install's
+        # ldd check is swallowed into a "Playwright Host validation warning" — and
+        # the hard throw lands later at the first browser.launch(). Every spec then
+        # fails at once and presents as THE LOGIN FLOW failing, since auth.setup.ts
+        # is the `setup` project everything else depends on. The error names the
+        # missing .so and prints the apt line to fix it. Green install + red
+        # everything + a .so in the message = put `--with-deps` back.
+        #
+        # Bounded so a slow mirror fails THIS step instead of eating the job's
+        # budget. ~20x the expected ~30s; a stalled apt and a hung suite otherwise
+        # produce byte-identical `cancelled` jobs.
+        timeout-minutes: 10
+        run: pnpm exec playwright install chromium
 
       - name: Export Supabase + FastAPI + Next.js env
         # `supabase status -o env` emits API_URL / ANON_KEY / SERVICE_ROLE_KEY.

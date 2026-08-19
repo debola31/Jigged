@@ -144,10 +144,20 @@ test.describe('Add parts from drawings', () => {
     // Routed, not costed — so the flow must NOT claim these are ready to quote.
     await expect(page.getByText(/ready to quote/i)).toHaveCount(0);
 
-    // The quote button is STILL there, because a disabled control teaches nobody
-    // anything (interaction-standards §4 rule 1). Pressing it explains.
+    // The quote is reachable whether or not anything is priced yet: the parts that
+    // need attention are exactly the ones someone has to see, and the quote form
+    // names each gap and links to its part.
     await page.getByRole('button', { name: /Create a quote from these/i }).click();
-    await expect(page.getByText(/None of these can be quoted yet/i)).toBeVisible();
+    await expect(page.getByTestId('quote-part-option')).toHaveCount(3);
+    await expect(page.getByText(/3 of these have no price yet/i)).toBeVisible();
+    await page.getByRole('button', { name: /Start the quote/i }).click();
+    await expect(page).toHaveURL(/\/quotes\/new\?parts=/, { timeout: 60_000 });
+
+    // Every line links to its part, priced or not — the only route used to be
+    // inside the "no pricing tiers" warning, so a priced part had none at all.
+    await expect(page.getByRole('link', { name: /Open .* in a new tab/i }).first()).toBeVisible({
+      timeout: 60_000,
+    });
   });
 
   /**

@@ -34,6 +34,7 @@ import {
   type ResolvedMaterial,
 } from '@/utils/drawingImportCreate';
 import { isUsable } from '@/components/drawings/MaterialLines';
+import QuotePartPicker from '@/components/drawings/QuotePartPicker';
 import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
 import DrawingWorkspaceStep, { type WorkByStem } from '@/components/drawings/DrawingWorkspaceStep';
@@ -86,8 +87,8 @@ export default function AddPartsFromDrawingsPage() {
   // Distinct from `busy`: only the final write. The primary button reads from this,
   // and while the title blocks were being read it used to say "Creating…".
   const [creating, setCreating] = useState(false);
-  /** Set when someone presses Quote and nothing can carry a price — see §4. */
-  const [quoteBlocked, setQuoteBlocked] = useState(false);
+  /** Which created parts to put on the quote. Opened from the results screen. */
+  const [quotePicker, setQuotePicker] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
@@ -175,15 +176,10 @@ export default function AddPartsFromDrawingsPage() {
 
   /** Straight into the quote, seeded with the parts that can actually carry a price. */
   const goToQuote = useCallback(
-    (created: CreatedRow[]) => {
-      const ids = created
-        .filter((r) => r.quotable && r.partId)
-        .map((r) => r.partId)
-        .join(',');
-      if (!ids) return false;
+    (partIds: string[]) => {
+      if (partIds.length === 0) return;
       const customer = customerId ? `&customer=${customerId}` : '';
-      router.push(`/dashboard/${companyId}/quotes/new?parts=${ids}${customer}`);
-      return true;
+      router.push(`/dashboard/${companyId}/quotes/new?parts=${partIds.join(',')}${customer}`);
     },
     [companyId, customerId, router],
   );
@@ -302,24 +298,27 @@ export default function AddPartsFromDrawingsPage() {
         />
       )}
 
+      {results && quotePicker && (
+        <QuotePartPicker
+          open
+          parts={results}
+          onClose={() => setQuotePicker(false)}
+          onConfirm={(ids) => {
+            setQuotePicker(false);
+            goToQuote(ids);
+          }}
+        />
+      )}
+
       {step === 2 && results && (
         <Card>
           <CardContent>
             {(() => {
-              const quotableCount = results.filter((r) => r.quotable).length;
               return (
               <>
                 <Typography variant="h6" gutterBottom>
                   {summarise(results)}
                 </Typography>
-                {results.length > 0 && !results.some((r) => r.quotable) && (
-                  <Alert severity="info" sx={{ my: 2 }}>
-                    <AlertTitle>What is left before these can be quoted</AlertTitle>
-                    A part is quotable once something says what it costs — how long its stations
-                    take, or what its materials cost. Stations on their own are a route, not a
-                    price. Open any of these on the Parts page and add times to its operations.
-                  </Alert>
-                )}
                 {results.some((r) => r.action === 'failed' || r.fileErrors.length > 0) && (
                   <Alert severity="warning" sx={{ my: 2 }}>
                     <AlertTitle>Some rows need another look</AlertTitle>
@@ -330,13 +329,6 @@ export default function AddPartsFromDrawingsPage() {
                           <strong>{r.partName}</strong> — {r.error ?? r.fileErrors.join('; ')}
                         </Typography>
                       ))}
-                  </Alert>
-                )}
-                {quoteBlocked && (
-                  <Alert severity="warning" sx={{ my: 2 }} onClose={() => setQuoteBlocked(false)}>
-                    None of these can be quoted yet — a quote line needs a price, and these have no
-                    cost to mark up. Add times to their operations on the Parts page and they
-                    become quotable.
                   </Alert>
                 )}
                 <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
@@ -351,28 +343,29 @@ export default function AddPartsFromDrawingsPage() {
                     the user can go and change. So it stays live and explains on
                     attempt, which is rule 1 rather than rule 2.
                   */}
+                  {/*
+                    Every part goes to the quote, quotable or not.
+                    
+                    Filtering to the priceable ones silently dropped the rest, and
+                    the parts that need attention are exactly the ones someone
+                    needs to SEE — the quote form names each gap and links to the
+                    part, which is a better place to finish the job than a list
+                    that never mentioned them.
+                  */}
                   <Button
                     variant="contained"
                     startIcon={<RequestQuoteIcon />}
-                    onClick={() => {
-                      if (!goToQuote(results)) setQuoteBlocked(true);
-                    }}
+                    onClick={() => setQuotePicker(true)}
                   >
-                    {quotableCount > 0
-                      ? `Quote ${quotableCount} of these`
-                      : 'Create a quote from these'}
+                    Create a quote from these
                   </Button>
-                  <Button
-                    variant={results.some((r) => r.quotable) ? 'outlined' : 'contained'}
-                    onClick={() => router.push(`/dashboard/${companyId}/parts`)}
-                  >
+                  <Button onClick={() => router.push(`/dashboard/${companyId}/parts`)}>
                     Go to Parts
                   </Button>
                   <Button
                     onClick={() => {
                       setRows([]);
                       setResults(null);
-                      setQuoteBlocked(false);
                                       setWork(new Map());
                       setFileCount(0);
                       setMaterials(new Map());

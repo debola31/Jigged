@@ -29,6 +29,7 @@ import InputAdornment from '@mui/material/InputAdornment';
 import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 import type { QuoteFormData } from '@/types/quote';
 import {
@@ -1539,6 +1540,27 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                       autoFocus={idx === focusBlockIndex}
                     />
                   </Box>
+                  {/*
+                    Open the part, always — not only when something is wrong with
+                    it. The only route here used to be inside the "no pricing
+                    tiers" warning, so the moment a part WAS priced there was no
+                    way to look at it: to check a cost, a lead time, a drawing, or
+                    to fix a price that is merely wrong rather than missing. A new
+                    tab, because the quote in progress is not worth losing.
+                  */}
+                  {block.part && (
+                    <Tooltip title="Open this part in a new tab">
+                      <IconButton
+                        component={NextLink}
+                        href={`/dashboard/${companyId}/parts/${block.part.id}`}
+                        target="_blank"
+                        rel="noopener"
+                        aria-label={`Open ${block.part.part_name} in a new tab`}
+                      >
+                        <OpenInNewIcon />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   <IconButton
                     color="error"
                     onClick={() => removePartBlock(idx)}

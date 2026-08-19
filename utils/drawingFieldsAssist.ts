@@ -84,12 +84,26 @@ export async function assistRows(
 
   let done = 0;
   let cursor = 0;
+  /**
+   * A rejected SESSION is not a drawing that could not be read.
+   *
+   * Every row failing individually reported "29 of 29 could not be read", which
+   * sends someone to look at their drawings when the answer is that their token
+   * is stale — the commonest cause locally being a database reset, which drops
+   * `auth.sessions` while the browser still holds a perfectly well-formed JWT.
+   *
+   * So a 401/403 stops the batch: the remaining requests are aborted rather than
+   * fired to fail the same way, and the caller is told the one true thing.
+   */
+  const abort = new AbortController();
+  let rejected: 401 | 403 | null = null;
 
   const readOne = async (row: BuiltRow) => {
     outcome.askedAbout += 1;
     try {
       const response = await fetch(`${API_BASE_URL}/api/drawings/fields`, {
         method: 'POST',
+        signal: abort.signal,
         headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           company_id: companyId,
@@ -104,6 +118,11 @@ export async function assistRows(
           })),
         }),
       });
+      if (response.status === 401 || response.status === 403) {
+        rejected = response.status;
+        abort.abort();
+        return;
+      }
       if (!response.ok) throw new Error(String(response.status));
       const body = (await response.json()) as AssistResponse;
       outcome.dropped.push(...(body.dropped ?? []));
@@ -123,7 +142,10 @@ export async function assistRows(
         };
       }
       if (Object.keys(merged).length > 0) outcome.filled.set(row.stem, merged);
-    } catch {
+    } catch (err) {
+      // An abort means a sibling already found the real answer — not this row's
+      // failure, and counting it would inflate the tally we then show.
+      if ((err as { name?: string })?.name === 'AbortError') return;
       // One drawing failing must not abandon the other thirty.
       outcome.failed += 1;
     }
@@ -135,6 +157,7 @@ export async function assistRows(
   await Promise.all(
     Array.from({ length: Math.min(ASSIST_CONCURRENCY, candidates.length) }, async () => {
       for (;;) {
+        if (rejected) return;
         const index = cursor;
         cursor += 1;
         if (index >= candidates.length) return;
@@ -142,6 +165,14 @@ export async function assistRows(
       }
     }),
   );
+
+  if (rejected) {
+    throw new Error(
+      rejected === 401
+        ? 'Your session has expired. Sign out and back in, then read the drawings again — the parts on screen are unaffected.'
+        : 'This account cannot read drawings for this company. The parts on screen are unaffected.',
+    );
+  }
 
   return outcome;
 }

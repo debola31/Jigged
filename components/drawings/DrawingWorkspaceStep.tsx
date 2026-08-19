@@ -69,7 +69,11 @@ import type { OperationRowData } from '@/components/routings/RoutingOperationRow
 import { valueOf, type DrawingRowValues } from '@/types/drawingImport';
 import { unreadableMessage, type BuiltRow } from '@/lib/drawingImportExtract';
 import { summariseFiles } from '@/lib/drawingFileSummary';
-import { quantityFor, type ComponentPlan } from '@/lib/drawingComponents';
+import MaterialLines, {
+  newMaterialLine,
+  isUsable,
+  type MaterialLine,
+} from '@/components/drawings/MaterialLines';
 
 /** What work each part takes. Keyed by stem — one entry per part, not one plan. */
 export type WorkByStem = Map<string, OperationRowData[]>;
@@ -81,8 +85,10 @@ interface Props {
   fileCount: number;
   work: WorkByStem;
   onWorkChange: (next: WorkByStem) => void;
-  components: ComponentPlan;
-  onComponentsChange: (next: ComponentPlan) => void;
+  /** What each part is made of, keyed by stem — the user's own lines. */
+  materials: Map<string, MaterialLine[]>;
+  onMaterialsChange: (next: Map<string, MaterialLine[]>) => void;
+  defaultUnit: string;
   onBack: () => void;
   onCreate: () => void;
   creating: boolean;
@@ -110,8 +116,9 @@ export default function DrawingWorkspaceStep({
   fileCount,
   work,
   onWorkChange,
-  components,
-  onComponentsChange,
+  materials,
+  onMaterialsChange,
+  defaultUnit,
   onBack,
   onCreate,
   creating,
@@ -141,7 +148,7 @@ export default function DrawingWorkspaceStep({
    * looked broken. Work applies to every part; materials apply to the parts that
    * list components.
    */
-  const canOpen = (row: BuiltRow) => wantWork || (wantMaterials && !!row.cutList);
+  const canOpen = () => expandable;
 
   /**
    * Unticking the last one closes whatever row was open — otherwise a panel stays
@@ -234,27 +241,24 @@ export default function DrawingWorkspaceStep({
   };
 
   const withWork = included.filter((r) => (work.get(r.stem)?.length ?? 0) > 0).length;
-  const withCutList = included.filter((r) => r.cutList).length;
 
-  /** The pooled materials this particular part is built from. */
-  const materialsFor = (stem: string) =>
-    components.materials.filter((m) => m.usedBy.some((u) => u.stem === stem));
+  const setLines = (stem: string, lines: MaterialLine[]) => {
+    const next = new Map(materials);
+    if (lines.length === 0) next.delete(stem);
+    else next.set(stem, lines);
+    onMaterialsChange(next);
+  };
 
-  const setMaterial = (key: string, patch: Partial<ComponentPlan['materials'][number]>) =>
-    onComponentsChange({
-      ...components,
-      materials: components.materials.map((m) => (m.key === key ? { ...m, ...patch } : m)),
-    });
-
-  const setMade = (key: string, include: boolean) =>
-    onComponentsChange({
-      ...components,
-      made: components.made.map((m) => (m.key === key ? { ...m, include } : m)),
-    });
-
-  const unpricedMaterials = components.materials.filter(
-    (m) => m.include && m.costPerUnit === null,
-  ).length;
+  const materialCount = (stem: string) => (materials.get(stem) ?? []).filter(isUsable).length;
+  const totalMaterials = [...materials.values()].reduce(
+    (n, lines) => n + lines.filter(isUsable).length,
+    0,
+  );
+  const unpricedMaterials = [...materials.values()].reduce(
+    (n, lines) =>
+      n + lines.filter((l) => isUsable(l) && !l.part && l.costPerUnit.trim() === '').length,
+    0,
+  );
 
   return (
     <>
@@ -334,8 +338,6 @@ export default function DrawingWorkspaceStep({
                   const note = attention(row);
                   const ops = work.get(row.stem) ?? [];
                   const open = openStem === row.stem;
-                  const materials = materialsFor(row.stem);
-                  const made = components.made.filter((m) => m.parentStem === row.stem);
                   const theirNumber = valueOf(row, 'customer_part_number');
                   const name = valueOf(row, 'part_name');
                   const oddFiles =
@@ -350,7 +352,7 @@ export default function DrawingWorkspaceStep({
                       >
                         {expandable && (
                           <TableCell padding="checkbox">
-                            {canOpen(row) && (
+                            {canOpen() && (
                               <IconButton
                                 size="small"
                                 onClick={() => setOpenStem(open ? null : row.stem)}
@@ -417,12 +419,11 @@ export default function DrawingWorkspaceStep({
                                 onClick={() => setOpenStem(row.stem)}
                               />
                             )}
-                            {wantMaterials && row.cutList && (
+                            {wantMaterials && materialCount(row.stem) > 0 && (
                               <Chip
                                 size="small"
                                 variant="outlined"
-                                label={`${row.cutList.rows.length} component${row.cutList.rows.length === 1 ? '' : 's'}`}
-                                title={`This drawing lists ${row.cutList.rows.length} components`}
+                                label={`${materialCount(row.stem)} material${materialCount(row.stem) === 1 ? '' : 's'}`}
                                 onClick={() => setOpenStem(row.stem)}
                               />
                             )}
@@ -461,9 +462,9 @@ export default function DrawingWorkspaceStep({
                         </TableCell>
                       </TableRow>
 
-                      <TableRow sx={{ display: canOpen(row) ? undefined : 'none' }}>
+                      <TableRow sx={{ display: canOpen() ? undefined : 'none' }}>
                         <TableCell colSpan={4} sx={{ py: 0, border: 0 }}>
-                          <Collapse in={open && canOpen(row)} unmountOnExit>
+                          <Collapse in={open && canOpen()} unmountOnExit>
                             <Box sx={{ py: 2, px: 1 }}>
                               {wantWork && (
                                 <>
@@ -492,7 +493,7 @@ export default function DrawingWorkspaceStep({
                                 */}
                                 {ops.length > 0 && included.length > 1 && (
                                   <Button variant="contained" onClick={() => applyToAll(row.stem)}>
-                                    Apply this work to the other {included.length - 1} part
+                                    Apply this routing to the other {included.length - 1} part
                                     {included.length - 1 === 1 ? '' : 's'}
                                   </Button>
                                 )}
@@ -514,92 +515,18 @@ export default function DrawingWorkspaceStep({
                                 </>
                               )}
 
-                              {wantMaterials && (materials.length > 0 || made.length > 0) && (
+                              {wantMaterials && (
                                 <>
                                   {wantWork && <Divider sx={{ my: 2 }} />}
-
-                                  {materials.map((m) => {
-                                    const otherParts = new Set(
-                                      m.usedBy.map((u) => u.stem).filter((s) => s !== row.stem),
-                                    );
-                                    return (
-                                      <Box
-                                        key={m.key}
-                                        data-testid="material-row"
-                                        sx={{
-                                          display: 'flex',
-                                          gap: 2,
-                                          alignItems: 'center',
-                                          flexWrap: 'wrap',
-                                          mb: 1,
-                                        }}
-                                      >
-                                        <Checkbox
-                                          checked={m.include}
-                                          onChange={(e) =>
-                                            setMaterial(m.key, { include: e.target.checked })
-                                          }
-                                          inputProps={{ 'aria-label': `Include ${m.description}` }}
-                                        />
-                                        <Box sx={{ minWidth: 200 }}>
-                                          <Typography variant="body2">{m.description}</Typography>
-                                          <Typography variant="caption" color="text.secondary">
-                                            {quantityFor(m, row.stem)} needed here
-                                            {otherParts.size > 0 &&
-                                              ` · also used by ${otherParts.size} other part${
-                                                otherParts.size === 1 ? '' : 's'
-                                              }`}
-                                          </Typography>
-                                        </Box>
-                                        <TextField
-                                          size="small"
-                                          label="Unit"
-                                          sx={{ width: 110 }}
-                                          value={m.unit ?? ''}
-                                          onChange={(e) =>
-                                            setMaterial(m.key, { unit: e.target.value || null })
-                                          }
-                                          inputProps={{
-                                            'aria-label': `Unit for ${m.description}`,
-                                          }}
-                                        />
-                                        <TextField
-                                          size="small"
-                                          label="Cost per unit"
-                                          sx={{ width: 150 }}
-                                          value={m.costPerUnit ?? ''}
-                                          onChange={(e) => {
-                                            const raw = e.target.value.trim();
-                                            const n = Number(raw);
-                                            setMaterial(m.key, {
-                                              costPerUnit:
-                                                raw === '' || !Number.isFinite(n) ? null : n,
-                                            });
-                                          }}
-                                          inputProps={{
-                                            'aria-label': `Cost per unit for ${m.description}`,
-                                          }}
-                                        />
-                                      </Box>
-                                    );
-                                  })}
-
-                                  {made.map((c) => (
-                                    <Box
-                                      key={c.key}
-                                      sx={{ display: 'flex', gap: 1, alignItems: 'center' }}
-                                    >
-                                      <Checkbox
-                                        checked={c.include}
-                                        onChange={(e) => setMade(c.key, e.target.checked)}
-                                        inputProps={{ 'aria-label': c.description }}
-                                      />
-                                      <Typography variant="body2">{c.description}</Typography>
-                                      <Typography variant="caption" color="text.secondary">
-                                        made here — no work yet, so it holds this part back
-                                      </Typography>
-                                    </Box>
-                                  ))}
+                                  <MaterialLines
+                                    companyId={companyId}
+                                    lines={
+                                      materials.get(row.stem) ?? [newMaterialLine(defaultUnit)]
+                                    }
+                                    onChange={(next) => setLines(row.stem, next)}
+                                    defaultUnit={defaultUnit}
+                                    disabled={creating}
+                                  />
                                 </>
                               )}
                             </Box>
@@ -643,11 +570,9 @@ export default function DrawingWorkspaceStep({
           <Typography variant="caption" color="text.secondary" display="block">
             {included.length} part{included.length === 1 ? '' : 's'} with their drawings attached.
             {withWork > 0 && ` ${withWork} routed.`}
-            {withCutList > 0 &&
-              ` ${withCutList} list${withCutList === 1 ? 's' : ''} components${
-                unpricedMaterials > 0
-                  ? `, ${unpricedMaterials} material${unpricedMaterials === 1 ? '' : 's'} without a cost`
-                  : ''
+            {totalMaterials > 0 &&
+              ` ${totalMaterials} material${totalMaterials === 1 ? '' : 's'}${
+                unpricedMaterials > 0 ? `, ${unpricedMaterials} without a cost` : ''
               }.`}
           </Typography>
           <Typography variant="caption" color="text.secondary" display="block">

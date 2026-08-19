@@ -28,7 +28,7 @@
  * focus.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import CircularProgress from '@mui/material/CircularProgress';
@@ -40,6 +40,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
 import { getWorkCenterUsage } from '@/utils/workCenterUsageAccess';
@@ -354,8 +355,13 @@ export default function StationStrip({
           </Typography>
         ) : (
           value.map((op, i) => (
+            <Fragment key={op.tempId}>
+              {/* An arrow, because this is a ROUTE — the order is the point, and
+                  four chips in a row read as a set rather than a sequence. */}
+              {i > 0 && (
+                <ArrowForwardIcon sx={{ fontSize: 16, color: 'text.secondary' }} aria-hidden />
+              )}
             <Box
-              key={op.tempId}
               data-testid="route-step"
               sx={{
                 display: 'inline-flex',
@@ -399,6 +405,7 @@ export default function StationStrip({
                 <CloseIcon sx={{ fontSize: 14 }} />
               </IconButton>
             </Box>
+            </Fragment>
           ))
         )}
         {value.length > 0 && (

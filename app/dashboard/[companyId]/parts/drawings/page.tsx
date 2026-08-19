@@ -8,7 +8,7 @@
  * anything optional happens.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
@@ -27,19 +27,45 @@ import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import { groupDrawingFiles } from '@/lib/drawingFileGroups';
 import { buildRows, type BuiltRow } from '@/lib/drawingImportExtract';
 import { resolveIdentities } from '@/utils/drawingImportIdentity';
-import { createPartsFromRows, summarise, type CreatedRow } from '@/utils/drawingImportCreate';
+import {
+  createPartsFromRows,
+  summarise,
+  type CreatedRow,
+  type ResolvedMaterial,
+} from '@/utils/drawingImportCreate';
+import { isUsable } from '@/components/drawings/MaterialLines';
 import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
 import DrawingWorkspaceStep, { type WorkByStem } from '@/components/drawings/DrawingWorkspaceStep';
-import {
-  planComponents,
-  applyComponentEdits,
-  NO_COMPONENT_EDITS,
-  type ComponentEdits,
-  type ComponentPlan,
-} from '@/lib/drawingComponents';
+import type { MaterialLine } from '@/components/drawings/MaterialLines';
 
 const STEPS = ['Add the files', 'Set them up', 'Create'] as const;
+
+/**
+ * The user's material lines, as the writer needs them.
+ *
+ * Half-typed rows are dropped rather than written: an empty line is somebody
+ * mid-thought, not a material.
+ */
+function resolveMaterials(
+  byStem: Map<string, MaterialLine[]>,
+): Map<string, ResolvedMaterial[]> {
+  const out = new Map<string, ResolvedMaterial[]>();
+  for (const [stem, lines] of byStem) {
+    const usable = lines.filter(isUsable).map((l) => ({
+      partId: l.part?.id ?? null,
+      name: l.part ? l.part.part_name : l.name.trim(),
+      quantity: Number(l.quantity) || 0,
+      unit: l.unit.trim(),
+      costPerUnit:
+        l.costPerUnit.trim() === '' || !Number.isFinite(Number(l.costPerUnit))
+          ? null
+          : Number(l.costPerUnit),
+    }));
+    if (usable.length > 0) out.set(stem, usable);
+  }
+  return out;
+}
 
 export default function AddPartsFromDrawingsPage() {
   const params = useParams();
@@ -49,7 +75,12 @@ export default function AddPartsFromDrawingsPage() {
   const [step, setStep] = useState(0);
   const [rows, setRows] = useState<BuiltRow[]>([]);
   const [customerId, setCustomerId] = useState<string | null>(null);
-  const [defaultUnit, setDefaultUnit] = useState('ea');
+  /**
+   * `each`, not `ea`. The picker treats `ea` as a DEPRECATED ALIAS and shows it
+   * under "unknown" with a warning triangle — so the default we shipped was the
+   * one value the control complains about.
+   */
+  const [defaultUnit, setDefaultUnit] = useState('each');
   const [defaultSource, setDefaultSource] = useState<'made' | 'bought'>('made');
   const [busy, setBusy] = useState<string | null>(null);
   // Distinct from `busy`: only the final write. The primary button reads from this,
@@ -60,26 +91,13 @@ export default function AddPartsFromDrawingsPage() {
   const [results, setResults] = useState<CreatedRow[] | null>(null);
   const [work, setWork] = useState<WorkByStem>(new Map());
   const [fileCount, setFileCount] = useState(0);
-  const [componentEdits, setComponentEdits] = useState<ComponentEdits>(NO_COMPONENT_EDITS);
 
   /**
-   * DERIVED, not stored. Excluding a weldment has to drop its components, so the
-   * plan is a pure function of the rows — and the user's costs live apart, so that
-   * recompute cannot wipe them.
+   * What each part is made of, keyed by stem — the user's own lines, not the
+   * drawing's cut list. A cut list only exists on the odd weldment, so inferring
+   * meant "Add materials" had nothing to offer for most of a package.
    */
-  const components = useMemo(
-    () => applyComponentEdits(planComponents(rows), componentEdits),
-    [rows, componentEdits],
-  );
-
-  /** Fold a panel edit back into the stored answers rather than the derived plan. */
-  const handleComponentsChange = useCallback((next: ComponentPlan) => {
-    setComponentEdits({
-      costs: Object.fromEntries(next.materials.map((m) => [m.key, m.costPerUnit])),
-      units: Object.fromEntries(next.materials.map((m) => [m.key, m.unit])),
-      excluded: [...next.materials, ...next.made].filter((c) => !c.include).map((c) => c.key),
-    });
-  }, []);
+  const [materials, setMaterials] = useState<Map<string, MaterialLine[]>>(new Map());
 
   /**
    * Read the dropped files, then resolve identity in ONE batched pass. Per-row
@@ -179,7 +197,7 @@ export default function AddPartsFromDrawingsPage() {
         customerId,
         defaultUnit,
         operationsByStem: work,
-        components,
+        materialsByStem: resolveMaterials(materials),
         onProgress: (done, total) => setProgress({ done, total }),
       });
       setResults(created);
@@ -210,7 +228,7 @@ export default function AddPartsFromDrawingsPage() {
       setCreating(false);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, work, components]);
+  }, [rows, companyId, customerId, defaultUnit, work, materials]);
 
   // A hidden tab is not access control, but this page writes nothing on its own —
   // the flag gates the surface and the backend route gates the spend.
@@ -272,8 +290,9 @@ export default function AddPartsFromDrawingsPage() {
           fileCount={fileCount}
           work={work}
           onWorkChange={setWork}
-          components={components}
-          onComponentsChange={handleComponentsChange}
+          materials={materials}
+          onMaterialsChange={setMaterials}
+          defaultUnit={defaultUnit}
           onBack={() => setStep(0)}
           onCreate={handleCreate}
           creating={creating}
@@ -334,7 +353,7 @@ export default function AddPartsFromDrawingsPage() {
                       setResults(null);
                                       setWork(new Map());
                       setFileCount(0);
-                      setComponentEdits(NO_COMPONENT_EDITS);
+                      setMaterials(new Map());
                       setStep(0);
                     }}
                   >

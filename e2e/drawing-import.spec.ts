@@ -82,13 +82,6 @@ test.describe('Add parts from drawings', () => {
       '1011770',
     );
 
-    // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet. The count is
-    // information, not a problem, and it only appears once someone has said they
-    // want to deal with materials: the screen opens as parts and descriptions.
-    await expect(page.getByTitle(/lists 3 components/i)).toHaveCount(0);
-    await page.getByRole('checkbox', { name: /Add materials/i }).check();
-    await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
-
     // ── The drawing, beside the row it produced ──
     // Checking a package is a comparison, so both have to be on screen. No upload:
     // the row still holds the File, so this is an object URL.
@@ -122,7 +115,7 @@ test.describe('Add parts from drawings', () => {
     await page.getByTestId('station-option').first().click();
     await expect(page.getByTestId('route-step')).toHaveCount(1);
 
-    await page.getByRole('button', { name: /Apply this work to the other 2 parts/i }).click();
+    await page.getByRole('button', { name: /Apply this routing to the other 2 parts/i }).click();
     await expect(page.getByText(/3 routed/i)).toBeVisible();
 
     // ── Filing is the outcome ──
@@ -159,11 +152,14 @@ test.describe('Add parts from drawings', () => {
   });
 
   /**
-   * The weldment case. A cut list only helps if its materials carry a cost — a BOM
-   * line to a child with no cost basis makes the PARENT unpriceable, so attaching
-   * materials without prices would take a weldment that quotes and stop it.
+   * Materials are the SHOP's answer, not the drawing's.
+   *
+   * A cut list only exists on the odd weldment, so inferring meant "Add materials"
+   * had nothing to offer for most of a package. Any part can take a material now —
+   * and a material with no cost basis is deliberately NOT attached, because a BOM
+   * line to a child nothing can price takes its parent from quotable to not.
    */
-  test('a weldment gets its materials, and a cost is what makes them count', async ({ page }) => {
+  test('a part gets a material, and a cost is what makes it count', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/dashboard\//, { timeout: 30_000 });
 
@@ -177,37 +173,24 @@ test.describe('Add parts from drawings', () => {
 
     await expect(page.getByTestId('drawing-row')).toHaveCount(1, { timeout: 60_000 });
 
-    // Materials are opt-in, and the cut list lives UNDER the part that lists it
-    // rather than in a panel above the table.
     await page.getByRole('checkbox', { name: /Add materials/i }).check();
     await page.getByRole('checkbox', { name: /Add operations/i }).check();
-
-    // Nine cut-list rows on this sheet.
-    await expect(page.getByTitle(/lists 9 components/i)).toBeVisible();
     await page.getByRole('button', { name: /Set up E2E-WELDMENT/i }).click();
 
-    // Twelve rows collapse to the distinct tube sizes, pooled across the drawing.
-    await expect(page.getByTestId('material-row')).toHaveCount(2);
+    // One line is offered rather than an empty panel — the common case is that a
+    // part is made of something.
+    await expect(page.getByTestId('material-line')).toHaveCount(1);
 
-    // The made components have no work, so they hold the parent back regardless —
-    // untick them to isolate what a material cost actually changes.
-    for (const pad of ['MOUNTING PADS', 'ROBOT RISER PAD', 'REGRIP PAD']) {
-      await page.getByRole('checkbox', { name: new RegExp(pad, 'i') }).uncheck();
-    }
+    // A NEW material: nothing knows what it costs, so the field appears and says
+    // what happens if it is left blank.
+    await page.getByLabel(/New material name/i).fill('4140 BAR 2 IN');
+    await page.getByLabel(/^Quantity$/i).fill('3');
+    await page.getByLabel(/^Unit$/i).fill('ft');
+    await expect(page.getByText(/1 material, 1 without a cost/i)).toBeVisible();
+    await expect(page.getByText(/cannot be quoted/i)).toBeVisible();
 
-    // Two materials, neither priced yet, and the footer says so where the decision
-    // is made rather than in a banner scrolled past.
-    await expect(page.getByText(/2 materials without a cost/i)).toBeVisible();
-
-    // The unit is asked for, never guessed — these sheets print "1803.2" beside a
-    // tube described in inches, and guessing would scale every cost by 25.4.
-    await page.getByLabel(/^Unit for 8" x 4" x 1\/4" WALL$/i).fill('mm');
-    await page.getByLabel(/^Unit for 4" x 4" x 1\/4" WALL$/i).fill('mm');
-    await page.getByLabel(/Cost per unit for 8" x 4" x 1\/4" WALL/i).fill('0.05');
-    await page.getByLabel(/Cost per unit for 4" x 4" x 1\/4" WALL/i).fill('0.03');
-
-    // Priced, so nothing is held back.
-    await expect(page.getByText(/without a cost/i)).toHaveCount(0);
+    await page.getByLabel(/Cost per unit for 4140 BAR 2 IN/i).fill('12.5');
+    await expect(page.getByText(/1 material\./i)).toBeVisible();
 
     // Give it TIMED work, so this part really does resolve to a cost — the full
     // editor is a click away for anyone who already knows the numbers.
@@ -222,9 +205,9 @@ test.describe('Add parts from drawings', () => {
     await page.getByRole('button', { name: /^Create 1 part$/i }).click();
     await expect(page.getByText(/ready to quote/i)).toBeVisible({ timeout: 180_000 });
 
-    // The BOM lines are the point, and "ready to quote" cannot see them — this
-    // weldment is quotable on its labour alone, so the whole cut list once
-    // silently failed to attach while this test stayed green. Assert the count.
-    await expect(page.getByText(/2 components attached/i)).toBeVisible();
+    // The BOM line is the point, and "ready to quote" cannot see it — this part is
+    // quotable on its labour alone, so a material that silently failed to attach
+    // would leave this test green. Assert the count.
+    await expect(page.getByText(/1 component attached/i)).toBeVisible();
   });
 });

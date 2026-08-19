@@ -20,17 +20,20 @@ import { ensureStarterPricingTier, getPriceablePartIds } from '@/utils/partPrici
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { addBomLine } from '@/utils/bomAccess';
 import { getSupabase } from '@/lib/supabase';
-import { quantityFor, type ComponentPlan } from '@/lib/drawingComponents';
+/** A material line, resolved to something writable. */
+export interface ResolvedMaterial {
+  /** An existing part the user picked. */
+  partId: string | null;
+  /** A new material's name, when they typed one. */
+  name: string;
+  quantity: number;
+  unit: string;
+  /** Only used when the material is created here. */
+  costPerUnit: number | null;
+}
 import { uploadPartAttachment } from '@/utils/partAttachmentsAccess';
 import { upsertPartCustomerReference } from '@/utils/partCustomerReferencesAccess';
 import { valueOf, type DrawingRow, type DrawingRowValues } from '@/types/drawingImport';
-
-/** A component part as it exists in the database, with the unit it is measured in. */
-interface MaterialPart {
-  partId: string;
-  unit: string;
-  linkable: boolean;
-}
 
 export interface CreatedRow {
   stem: string;
@@ -61,8 +64,14 @@ export interface CreateOptions {
    * legitimate choice that leaves the part incomplete rather than blocking it.
    */
   operationsByStem?: Map<string, OperationRowData[]>;
-  /** Cut-list components to create and link. Omit to skip components entirely. */
-  components?: ComponentPlan;
+  /**
+   * What each part is made of, as the user entered it. Keyed by stem.
+   *
+   * Not derived from the drawing any more: a cut list only exists on the odd
+   * weldment, so inferring left most parts with nothing to offer. What a shop
+   * knows it buys is a better source than what a sheet happens to tabulate.
+   */
+  materialsByStem?: Map<string, ResolvedMaterial[]>;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -134,41 +143,32 @@ async function attachFiles(
  * made a package take minutes, almost all of it waiting on uploads that have
  * nothing to do with each other.
  */
-const ROW_CONCURRENCY = 4;
+const ROW_CONCURRENCY = 8;
 
 /**
  * Create everything the user approved.
  *
- * THE PART WRITE IS SERIALISED; EVERYTHING ELSE IS NOT. `createPart` resolves a
- * name collision by reviving an archived row, so two rows racing on the same name
- * could both think they created it. The identity guard already made names unique
- * WITHIN a package, but it cannot see a part another tab created ten seconds ago —
- * so the insert takes a lock and the slow work (references, uploads) runs free.
+ * NOTHING IS SERIALISED ANY MORE, and the reason it used to be is gone. The part
+ * insert queued behind a lock because `createPart` resolved a name collision by
+ * REVIVING an archived row — two rows racing on one name could both believe they
+ * had created it, and both would be updating the same revived row. Reuse now
+ * RECLAIMS instead: the archived holder is renamed and the insert retried, so a
+ * genuine race ends in a clean 23505 on one side rather than a silent merge.
+ *
+ * That lock cost 31 sequential round trips for a package that needs none — names
+ * are unique within a package by construction (the identity guard's `taken` set),
+ * so the writes have nothing to contend over.
  */
 export async function createPartsFromRows(
   rows: DrawingRow[],
   options: CreateOptions,
 ): Promise<CreatedRow[]> {
-  const { companyId, customerId, defaultUnit, operationsByStem, components, onProgress } = options;
+  const { companyId, customerId, defaultUnit, operationsByStem, materialsByStem, onProgress } =
+    options;
   const included = rows.filter((r) => !r.excluded);
   const out: CreatedRow[] = new Array(included.length);
 
-  // Shared materials exist before any parent references them, so two weldments
-  // asking for the same tube get one part rather than racing to create two.
-  const materialParts = components
-    ? await createMaterials(companyId, components, defaultUnit)
-    : new Map<string, MaterialPart>();
-
   let done = 0;
-  // A promise chain the part-inserts queue behind, so they stay ordered while the
-  // uploads around them overlap.
-  let insertLock: Promise<unknown> = Promise.resolve();
-  const serialise = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = insertLock.then(work, work);
-    // Swallow on the CHAIN only — the caller still sees the rejection.
-    insertLock = next.catch(() => undefined);
-    return next;
-  };
 
   async function runRow(row: DrawingRow, index: number): Promise<void> {
     const partName = resolveName(row);
@@ -212,7 +212,7 @@ export async function createPartsFromRows(
          * The `create_new` and `name_taken` branches arrive with a different name
          * already resolved by `resolveName`, so the same call covers all three.
          */
-        const created = await serialise(() => createPart(companyId, {
+        const created = await createPart(companyId, {
           part_name: partName,
           description: valueOf(row, 'description'),
           source,
@@ -221,7 +221,7 @@ export async function createPartsFromRows(
           quantity: 0,
           reorder_point: null,
           preferred_vendor_id: null,
-        }));
+        });
         result.partId = created.id;
         result.action = 'created';
       }
@@ -299,16 +299,15 @@ export async function createPartsFromRows(
          *
          * Its return value is the honest answer to "can this be quoted now?".
          */
-        // Components, before the markup: a BOM line changes what the cost IS, and
+        // Materials before the markup: a BOM line changes what the cost IS, and
         // the tier seeder reads that cost to decide whether there is anything to
         // mark up.
-        if (components) {
-          result.componentsLinked = await linkComponents(
+        const materials = materialsByStem?.get(row.stem) ?? [];
+        if (materials.length > 0) {
+          result.componentsLinked = await attachMaterials(
             companyId,
             partId,
-            row,
-            components,
-            materialParts,
+            materials,
             defaultUnit,
           );
         }
@@ -369,64 +368,78 @@ export async function createPartsFromRows(
 }
 
 /**
- * Attach one parent's components: its pooled materials, and the made parts named
- * on its own cut list.
+ * Write one parent's materials as BOM lines.
  *
- * A material with no cost is deliberately NOT linked — see createMaterials. A MADE
- * component always is, and always blocks: it is a part we are creating from a name
- * on someone else's drawing, so it has no work and therefore no cost, and its
- * parent's cost genuinely is unknown until someone says how it is made. That is a
- * more honest answer than the parent quoting at a price that ignores it, but it is
- * a change the user is told about before they commit rather than after.
+ * A material with no cost basis is deliberately NOT linked: a BOM line to a child
+ * nothing can price takes its parent from quotable to not, so attaching one would
+ * STOP a part that was quoting. The material is still created — it is a real thing
+ * the shop buys — and can be priced later.
+ *
+ * Units come from the CHILD PART, never from the line. `part_rollup_at_qty` raises
+ * rather than guess a conversion, so a mismatch breaks the parent's cost outright.
  */
-async function linkComponents(
+async function attachMaterials(
   companyId: string,
   parentId: string,
-  row: DrawingRow,
-  plan: ComponentPlan,
-  materialParts: Map<string, MaterialPart>,
+  materials: ResolvedMaterial[],
   defaultUnit: string,
 ): Promise<number> {
-  if (!row.cutList) return 0;
+  const supabase = getSupabase();
   let linked = 0;
 
-  /**
-   * What is already attached, read once.
-   *
-   * A line that is already there IS attached — counting only the inserts reported
-   * "0 components attached" on every re-import while the BOM sat there correctly,
-   * which is the same mistake as reading a write result to answer a question about
-   * state. Reading first also keeps a re-import from leaning on a caught 23505.
-   */
-  const supabase = getSupabase();
+  // What is already attached, read once. Counting only the inserts reported
+  // "0 materials" over a correct BOM on every re-import.
   const { data: existingLines } = await supabase
     .from('parts_bom')
     .select('child_part_id')
     .eq('parent_part_id', parentId);
   const alreadyAttached = new Set((existingLines ?? []).map((l) => l.child_part_id));
 
-  // Materials FIRST, one line per material rather than one per cut-list row: four
-  // rows of the same tube are one BOM line for the total length, and writing them
-  // per row means the second insert hits the unique constraint and every cut
-  // length after the first is silently lost.
-  for (const material of plan.materials) {
-    if (!material.include) continue;
-    const needed = quantityFor(material, row.stem);
-    if (needed <= 0) continue;
-    const created = materialParts.get(material.key);
-    // No cost means no link. The material still exists to be priced later.
-    if (!created?.linkable) continue;
-    if (alreadyAttached.has(created.partId)) {
-      linked += 1;
-      continue;
-    }
+  for (const material of materials) {
+    if (material.quantity <= 0) continue;
     try {
+      let childId = material.partId;
+      let childUnit = material.unit || defaultUnit;
+
+      if (childId) {
+        // An existing part is already measured in something.
+        const { data: existing, error } = await supabase
+          .from('parts')
+          .select('primary_unit')
+          .eq('id', childId)
+          .single();
+        if (error) throw error;
+        childUnit = existing.primary_unit ?? childUnit;
+      } else {
+        const name = material.name.trim();
+        if (!name) continue;
+        const created = await findOrCreateComponent(companyId, name, 'bought', childUnit);
+        if (!created) continue;
+        childId = created.id;
+        childUnit = created.unit;
+
+        if (material.costPerUnit !== null) {
+          // What the shop PAYS. Not a markup — a markup over an unknown cost is
+          // still unknown, which is why this is asked for at all.
+          const { error } = await supabase.from('part_procurement_tiers').insert({
+            part_id: childId,
+            min_quantity: 1,
+            cost_per_unit: material.costPerUnit,
+          });
+          if (error) throw error;
+        }
+      }
+
+      if (!childId) continue;
+      if (alreadyAttached.has(childId)) {
+        linked += 1;
+        continue;
+      }
+
       await addBomLine(parentId, {
-        child_part_id: created.partId,
-        quantity: String(needed),
-        // The child's own unit. Anything else needs a conversion the shop has not
-        // defined, and the cost rollup raises rather than assuming one.
-        unit: created.unit,
+        child_part_id: childId,
+        quantity: String(material.quantity),
+        unit: childUnit,
         consume_whole_units: false,
         charge_basis: 'cost',
       });
@@ -436,124 +449,7 @@ async function linkComponents(
     }
   }
 
-  for (const line of row.cutList.rows) {
-    const description = (line.description ?? '').trim();
-    if (!description || !line.madePart) continue;
-    const quantity = Number(line.quantity ?? '1') || 1;
-
-    try {
-      {
-        const wanted = plan.made.find(
-          (m) => m.parentStem === row.stem && m.description === description && m.include,
-        );
-        if (!wanted) continue;
-        // Find-or-create for the same reason as the materials: on a re-import
-        // this name already exists, and creating blindly loses the BOM line.
-        const child = await findOrCreateComponent(companyId, description, 'made', defaultUnit);
-        if (!child) continue;
-        if (alreadyAttached.has(child.id)) {
-          linked += 1;
-          continue;
-        }
-        await addBomLine(parentId, {
-          child_part_id: child.id,
-          quantity: String(quantity),
-          unit: child.unit,
-          consume_whole_units: false,
-          charge_basis: 'cost',
-        });
-        linked += 1;
-      }
-    } catch {
-      // One line that will not write costs this line, not the package.
-    }
-  }
-
   return linked;
-}
-
-/**
- * Create the shared materials FIRST, once, before any parent needs them.
- *
- * FIND-or-create, and the difference is not cosmetic. A shop's second package from
- * the same customer reuses the same tube stock, so on that import every
- * `createPart` here raises 23505 — and when this function treated that as failure
- * the material dropped out of the map, every BOM line that referenced it was
- * skipped, and the weldment quietly went back to costing labour only. No error
- * surfaced; the cost was simply wrong. So the map is keyed on the part that EXISTS
- * afterwards, however it got there.
- *
- * `linkable` follows the same rule: it asks whether the material HAS a cost basis,
- * not whether this run wrote one. A material priced during the first import is
- * still priced during the second.
- *
- * A material with no cost at all is deliberately NOT linked — it has no cost basis,
- * and a BOM line to it would take its parent from quotable to not. It is still
- * created (it is a real thing the shop buys) and can be priced later; the weldment
- * keeps quoting in the meantime.
- */
-async function createMaterials(
-  companyId: string,
-  plan: ComponentPlan,
-  defaultUnit: string,
-): Promise<Map<string, MaterialPart>> {
-  const supabase = getSupabase();
-  const out = new Map<string, MaterialPart>();
-
-  for (const material of plan.materials) {
-    if (!material.include) continue;
-    try {
-      // The unit the user declared for THIS material, because these sheets print
-      // "1803.2" beside a tube described in inches and the cost is per that unit.
-      const declaredUnit = material.unit || defaultUnit;
-      const part = await findOrCreateComponent(
-        companyId,
-        material.description,
-        'bought',
-        declaredUnit,
-      );
-      if (!part) continue;
-
-      // Does it have a cost basis already? Ask, rather than inferring it from
-      // whether this run happened to be the one that wrote it.
-      const { data: existingTiers, error: readError } = await supabase
-        .from('part_procurement_tiers')
-        .select('id')
-        .eq('part_id', part.id)
-        .limit(1);
-      if (readError) throw readError;
-
-      let linkable = (existingTiers ?? []).length > 0;
-
-      if (!linkable && material.costPerUnit !== null) {
-        // What the shop PAYS. Not a markup — a markup over an unknown cost is
-        // still unknown, which is the whole reason this field exists.
-        const { error } = await supabase.from('part_procurement_tiers').insert({
-          part_id: part.id,
-          min_quantity: 1,
-          cost_per_unit: material.costPerUnit,
-        });
-        if (error) throw error;
-        linkable = true;
-      }
-
-      /**
-       * A part the shop already measures in inches, against a drawing in mm, is a
-       * real disagreement and not ours to settle. The cost rollup refuses to guess
-       * a conversion — it raises — so linking here would break the parent's cost
-       * outright, and converting silently would scale it by 25.4. The material is
-       * created either way; it simply is not attached.
-       */
-      if (part.unit !== declaredUnit) linkable = false;
-
-      out.set(material.key, { partId: part.id, unit: part.unit, linkable });
-    } catch {
-      // A material that cannot be created must not take the whole package with it.
-      // Its parents simply keep the cost they had.
-    }
-  }
-
-  return out;
 }
 
 /**
@@ -589,17 +485,37 @@ async function findOrCreateComponent(
     return { id: existing.id, unit: existing.primary_unit ?? unit };
   }
 
-  const part = await createPart(companyId, {
-    part_name: name,
-    description: '',
-    source,
-    is_stocked: false,
-    primary_unit: unit,
-    quantity: 0,
-    reorder_point: null,
-    preferred_vendor_id: null,
-  });
-  return { id: part.id, unit };
+  try {
+    const part = await createPart(companyId, {
+      part_name: name,
+      description: '',
+      source,
+      is_stocked: false,
+      primary_unit: unit,
+      quantity: 0,
+      reorder_point: null,
+      preferred_vendor_id: null,
+    });
+    return { id: part.id, unit };
+  } catch (err) {
+    /**
+     * Lost a race for this name, and that is the ONE thing raising the row
+     * concurrency made possible: two parts made of the same new material both
+     * look, both find nothing, and both insert. The winner's row is the answer —
+     * re-read rather than treating it as this line's failure, which is how a
+     * material would silently go missing from the second part that used it.
+     */
+    if ((err as { code?: string })?.code !== '23505') throw err;
+    const { data: raced } = await supabase
+      .from('parts')
+      .select('id, primary_unit')
+      .eq('company_id', companyId)
+      .eq('part_name', name)
+      .is('deleted_at', null)
+      .limit(1);
+    const winner = (raced ?? [])[0];
+    return winner ? { id: winner.id, unit: winner.primary_unit ?? unit } : null;
+  }
 }
 
 /** A one-line summary that never claims more than happened. */

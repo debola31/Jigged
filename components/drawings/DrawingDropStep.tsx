@@ -9,7 +9,6 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -135,7 +134,7 @@ export default function DrawingDropStep({
           <Box sx={{ minWidth: 200 }}>
             <UnitOfMeasurementSelect
               value={defaultUnit}
-              onChange={(next) => onDefaultUnitChange(next ?? 'ea')}
+              onChange={(next) => onDefaultUnitChange(next ?? 'each')}
               companyId={companyId}
               required
             />
@@ -172,10 +171,15 @@ export default function DrawingDropStep({
 
           {/* Stated as a reason, never a rule: the shop does not own these drawings,
               and an ask aimed at their customer's customer should not be a wall. */}
-          <Alert severity="info" sx={{ mb: 3, textAlign: 'left' }}>
-            <strong>Include the DXF where you have it</strong> — we read more from it. PDFs alone
-            work too.
-          </Alert>
+          {/*
+            Still true with no AI in the flow, and for a better reason: a DXF
+            carries its title block as named ATTRIBUTES, which is an exact lookup
+            rather than a guess from geometry. It is a hint, though, not a warning
+            — the alert box gave it the weight of something going wrong.
+          */}
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 3 }}>
+            Include the DXF where you have it — we read more from it. PDFs alone work too.
+          </Typography>
 
           {/*
             Once files are chosen the question is "go", not "choose again" — two
@@ -204,14 +208,8 @@ export default function DrawingDropStep({
               </>
             ) : (
               <>
-                <Button
-                  variant="contained"
-                  size="large"
-                  disabled={disabled}
-                  onClick={() => onFiles(picked)}
-                >
-                  Read {picked.length} file{picked.length === 1 ? '' : 's'}
-                </Button>
+                {/* Secondary on the left, primary on the right — the expected
+                    action is where a reader's eye finishes. */}
                 <Button
                   onClick={() => {
                     setPicked([]);
@@ -220,6 +218,14 @@ export default function DrawingDropStep({
                   disabled={disabled}
                 >
                   Choose different files
+                </Button>
+                <Button
+                  variant="contained"
+                  size="large"
+                  disabled={disabled}
+                  onClick={() => onFiles(picked)}
+                >
+                  Read {picked.length} file{picked.length === 1 ? '' : 's'}
                 </Button>
               </>
             )}

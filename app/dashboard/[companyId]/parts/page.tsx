@@ -1,6 +1,6 @@
 'use client';
 
-import ImportAllDataLink from '@/components/import/ImportAllDataLink';
+import ImportAllDataLink from '@/components/data-import/ImportAllDataLink';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 
@@ -32,7 +32,6 @@ import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
-import UploadIcon from '@mui/icons-material/Upload';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
@@ -539,22 +538,13 @@ export default function PartsPage() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           Add your first part — made in-house or bought from a vendor.
         </Typography>
-        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-          <Button
-            variant="outlined"
-            startIcon={<UploadIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
-          >
-            Import CSV
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
-          >
-            Add Part
-          </Button>
-        </Box>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
+        >
+          Add Part
+        </Button>
         <ImportAllDataLink />
       </>
     );
@@ -672,14 +662,6 @@ export default function PartsPage() {
           onClick={() => router.push(`/dashboard/${companyId}/inventory/count?from=parts`)}
         >
           Count Inventory
-        </Button>
-
-        <Button
-          variant="outlined"
-          startIcon={<UploadIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/parts/import`)}
-        >
-          Import
         </Button>
 
         <Button

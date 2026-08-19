@@ -1,6 +1,6 @@
 'use client';
 
-import ImportAllDataLink from '@/components/import/ImportAllDataLink';
+import ImportAllDataLink from '@/components/data-import/ImportAllDataLink';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -16,7 +16,6 @@ import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
-import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleOutlineIcon from '@mui/icons-material/PeopleOutline';
 
@@ -323,14 +322,6 @@ export default function CustomersPage() {
         <Box sx={{ flex: 1 }} />
 
         <Button
-          variant="outlined"
-          startIcon={<UploadIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/customers/import`)}
-        >
-          Import
-        </Button>
-
-        <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => router.push(`/dashboard/${companyId}/customers/new`)}
@@ -352,29 +343,16 @@ export default function CustomersPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {searchDebounced
                 ? 'No customers match your search.'
-                : 'Create your first customer or import from CSV.'}
+                : 'Create your first customer.'}
             </Typography>
             {!searchDebounced && (
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<UploadIcon />}
-                  onClick={() =>
-                    router.push(`/dashboard/${companyId}/customers/import`)
-                  }
-                >
-                  Import CSV
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() =>
-                    router.push(`/dashboard/${companyId}/customers/new`)
-                  }
-                >
-                  Add Customer
-                </Button>
-              </Box>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => router.push(`/dashboard/${companyId}/customers/new`)}
+              >
+                Add Customer
+              </Button>
             )}
             {!searchDebounced && <ImportAllDataLink />}
           </CardContent>

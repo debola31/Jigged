@@ -12,56 +12,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from index import app
-from routes.import_routes import get_supabase
+from types import SimpleNamespace
+from fastapi import HTTPException
+from routes.import_routes import get_supabase, validate_import
+from models.import_models import ValidateRequest
+
+async def call_validate(request_data: dict):
+    """Exercise validate_import() the way execute_import does.
+
+    /validate stopped being an HTTP route when the per-entity import wizards were removed,
+    but the function is still load-bearing: execute_import calls it for the conflict report
+    before it writes. This mirrors httpx's response surface (`.status_code`, `.json()`) so
+    the rule assertions below did not have to change shape.
+    """
+    supabase = app.dependency_overrides[get_supabase]()
+    try:
+        result = await validate_import(ValidateRequest(**request_data), supabase=supabase)
+    except HTTPException as exc:
+        # Bind before the lambda: Python unbinds `exc` at the end of the except block.
+        status, detail = exc.status_code, exc.detail
+        return SimpleNamespace(status_code=status, json=lambda: {"detail": detail})
+    return SimpleNamespace(status_code=200, json=result.model_dump)
 
 
-# Mock AI provider for analyze endpoint
-class MockAIProvider:
-    """Mock AI provider that returns predictable mappings."""
-
-    provider_name = "mock-ai"
-
-    async def suggest_column_mappings(self, csv_headers, sample_rows, target_schema, column_samples=None):
-        """Return mock column mapping suggestions."""
-        suggestions = []
-
-        # Map common column names to DB fields
-        mapping_rules = {
-            "company name": ("name", 0.95),
-            "name": ("name", 0.90),
-            "city": ("city", 0.90),
-            "state": ("state", 0.90),
-            "phone": ("contact_phone", 0.85),
-            "email": ("contact_email", 0.85),
-        }
-
-        class Suggestion:
-            def __init__(self, csv_column, db_field, confidence, reasoning):
-                self.csv_column = csv_column
-                self.db_field = db_field
-                self.confidence = confidence
-                self.reasoning = reasoning
-
-        for header in csv_headers:
-            header_lower = header.lower().strip()
-            if header_lower in mapping_rules:
-                db_field, confidence = mapping_rules[header_lower]
-                suggestions.append(Suggestion(
-                    csv_column=header,
-                    db_field=db_field,
-                    confidence=confidence,
-                    reasoning=f"Matched '{header}' to {db_field}",
-                ))
-            else:
-                # Discard unmapped columns
-                suggestions.append(Suggestion(
-                    csv_column=header,
-                    db_field=None,
-                    confidence=0.0,
-                    reasoning=f"No matching field for '{header}'",
-                ))
-
-        return suggestions
 
 
 # Mock Supabase client for validate/execute endpoints
@@ -145,94 +118,6 @@ async def test_client():
     app.dependency_overrides.clear()
 
 
-class TestAnalyzeEndpoint:
-    """Tests for POST /api/customers/import/analyze"""
-
-    @pytest.mark.unit
-    async def test_analyze_returns_mappings(self, test_client):
-        """Returns 200 with column mappings when AI provider succeeds."""
-        request_data = {
-            "company_id": "test-company-id",
-            "headers": ["Company Name", "City", "Extra Column"],
-            "sample_rows": [
-                ["Acme Corp", "Springfield", "ignored"],
-                ["Widget Inc", "Chicago", "also ignored"],
-            ],
-        }
-
-        # Override get_supabase dependency
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
-
-        with patch("routes.import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
-            mock_get_provider.return_value = MockAIProvider()
-
-            response = await test_client.post(
-                "/api/customers/import/analyze",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "mappings" in data
-        assert "ai_provider" in data
-        assert data["ai_provider"] == "mock-ai"
-
-        # Check that mappings were returned
-        mappings = {m["csv_column"]: m["db_field"] for m in data["mappings"]}
-        assert mappings["Company Name"] == "name"
-        assert mappings["City"] == "city"
-        assert mappings["Extra Column"] is None  # Discarded
-
-    @pytest.mark.unit
-    async def test_analyze_returns_429_when_rate_limited(self, test_client):
-        """Returns 429 when rate limit is exceeded."""
-        request_data = {
-            "company_id": "rate-limited-company",
-            "headers": ["Code", "Name"],
-            "sample_rows": [["C1", "Test"]],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
-
-        with patch("routes.import_routes.ai_rate_limiter") as mock_limiter:
-            mock_limiter.check.return_value = False  # Rate limit exceeded
-
-            response = await test_client.post(
-                "/api/customers/import/analyze",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 429
-        assert "too many requests" in response.json()["detail"].lower()
-
-    @pytest.mark.unit
-    async def test_analyze_returns_500_when_ai_fails(self, test_client):
-        """Returns 500 when AI provider raises an error."""
-        request_data = {
-            "company_id": "test-company-id",
-            "headers": ["Code", "Name"],
-            "sample_rows": [["C1", "Test"]],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
-
-        with patch("routes.import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
-            mock_get_provider.side_effect = ValueError("AI provider not configured")
-
-            response = await test_client.post(
-                "/api/customers/import/analyze",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 500
-        assert "not configured" in response.json()["detail"]
 
 
 class TestValidateEndpoint:
@@ -254,10 +139,7 @@ class TestValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
 
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -285,10 +167,7 @@ class TestValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
 
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -314,10 +193,7 @@ class TestValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([])
 
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -350,10 +226,7 @@ class TestValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override(existing_customers)
 
-        response = await test_client.post(
-            "/api/customers/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 

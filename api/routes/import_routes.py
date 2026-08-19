@@ -1,116 +1,38 @@
 """Import routes for customer CSV import with AI-powered mapping."""
 
-import hashlib
-import json
 import logging
-import os
 
 import sentry_sdk
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends
 from supabase import Client
 
 from models.import_models import (
-    AnalyzeRequest,
-    AnalyzeResponse,
-    ColumnMapping,
     ValidateRequest,
     ValidateResponse,
     ValidationError,
     ConflictInfo,
     ExecuteRequest,
     ExecuteResponse,
-    ImportError,
     CUSTOMER_SCHEMA,
 )
-from services.ai import get_provider
-from utils.rate_limiter import RateLimiter
 from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/customers/import", tags=["import"])
 
-# Rate limiter: 10 AI calls per minute per company
-ai_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
 
-# Cache directory for AI responses (dev only - avoids repeated API calls)
-CACHE_DIR = Path(__file__).parent.parent / ".cache" / "ai_responses"
-CACHE_ENABLED = os.getenv("AI_CACHE_ENABLED", "true").lower() == "true"
 
 
-def _get_cache_key(company_id: str, headers: list[str]) -> str:
-    """Generate a cache key from company_id and headers."""
-    content = f"{company_id}:{','.join(sorted(headers))}"
-    return hashlib.md5(content.encode()).hexdigest()
 
 
-def _get_cached_response(cache_key: str) -> AnalyzeResponse | None:
-    """Try to get a cached response."""
-    if not CACHE_ENABLED:
-        return None
-
-    cache_file = CACHE_DIR / f"{cache_key}.json"
-    if cache_file.exists():
-        try:
-            with open(cache_file) as f:
-                data = json.load(f)
-            return AnalyzeResponse(**data)
-        except Exception:
-            return None
-    return None
 
 
-def _save_to_cache(cache_key: str, response: AnalyzeResponse) -> None:
-    """Save response to cache."""
-    if not CACHE_ENABLED:
-        return
-
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{cache_key}.json"
-        with open(cache_file, "w") as f:
-            json.dump(response.model_dump(), f, indent=2)
-    except Exception:
-        pass  # Silently fail cache writes
 
 
-def _get_column_samples(
-    headers: list[str],
-    sample_rows: list[list[str]],
-) -> dict[str, str]:
-    """Get one sample value per non-empty column.
 
-    Efficiently collects the first non-empty value found for each column.
-    This minimizes token usage while giving AI context about data format.
-
-    Args:
-        headers: All column headers
-        sample_rows: First 5 rows of sample data
-
-    Returns:
-        Dict mapping column name to one sample value (non-empty columns only)
-    """
-    samples: dict[str, str] = {}
-
-    for row in sample_rows:
-        for i, header in enumerate(headers):
-            # Skip if we already have a sample for this column
-            if header in samples:
-                continue
-
-            # Get value if exists and is non-empty
-            value = row[i].strip() if i < len(row) else ""
-            if value:
-                samples[header] = value
-
-        # Early exit if we have samples for all columns
-        if len(samples) == len(headers):
-            break
-
-    return samples
 
 
 def get_supabase() -> Client:
@@ -125,106 +47,11 @@ def get_supabase() -> Client:
     return supabase
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_csv(
-    request: AnalyzeRequest,
-    supabase: Client = Depends(get_supabase),
-):
-    """
-    Analyze CSV headers and sample data to suggest column mappings using AI.
-
-    This endpoint sends the CSV structure to an AI provider configured for the
-    company and returns suggested mappings with confidence scores.
-
-    Caching: Responses are cached by company_id + headers to avoid repeated
-    API calls during development. Set AI_CACHE_ENABLED=false to disable.
-    """
-    # Check cache first
-    cache_key = _get_cache_key(request.company_id, request.headers)
-    cached = _get_cached_response(cache_key)
-    if cached:
-        return cached
-
-    # Rate limiting
-    if not ai_rate_limiter.check(request.company_id):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests. Please wait before trying again.",
-        )
-
-    # Get sample values for non-empty columns (efficient token usage)
-    column_samples = _get_column_samples(
-        headers=request.headers,
-        sample_rows=request.sample_rows,
-    )
-
-    try:
-        # Get the configured AI provider for this company
-        provider = await get_provider(supabase, request.company_id, "csv_mapping")
-
-        # Get AI suggestions for ALL columns, with sample data for non-empty ones
-        suggestions = await provider.suggest_column_mappings(
-            csv_headers=request.headers,
-            sample_rows=request.sample_rows,
-            target_schema=CUSTOMER_SCHEMA,
-            column_samples=column_samples,
-        )
-
-        # Convert to response format
-        mappings = []
-        discarded_columns = []
-        mapped_db_fields = set()
-
-        for suggestion in suggestions:
-            needs_review = suggestion.confidence < 0.7
-
-            if suggestion.db_field is None:
-                discarded_columns.append(suggestion.csv_column)
-            else:
-                mapped_db_fields.add(suggestion.db_field)
-
-            mappings.append(
-                ColumnMapping(
-                    csv_column=suggestion.csv_column,
-                    db_field=suggestion.db_field,
-                    confidence=suggestion.confidence,
-                    reasoning=suggestion.reasoning,
-                    needs_review=needs_review,
-                )
-            )
-
-        # Check for unmapped required fields
-        required_fields = [
-            field for field, info in CUSTOMER_SCHEMA.items() if info.get("required")
-        ]
-        unmapped_required = [f for f in required_fields if f not in mapped_db_fields]
-
-        response = AnalyzeResponse(
-            mappings=mappings,
-            unmapped_required=unmapped_required,
-            discarded_columns=discarded_columns,
-            ai_provider=provider.provider_name,
-        )
-
-        # Save to cache for future requests
-        _save_to_cache(cache_key, response)
-
-        return response
-
-    except ValueError as e:
-        # AI provider configuration error
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        # Unexpected error
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
 
 
-@router.post("/validate", response_model=ValidateResponse)
+# No longer an HTTP route. The per-entity import wizards that called /validate are gone;
+# the only caller left is execute_import below, which needs the conflict report before it
+# writes. Kept as a plain function so that call keeps working.
 async def validate_import(
     request: ValidateRequest,
     supabase: Client = Depends(get_supabase),

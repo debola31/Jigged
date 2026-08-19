@@ -17,36 +17,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from index import app
-from routes.vendors_import_routes import get_supabase
+from types import SimpleNamespace
+from fastapi import HTTPException
+from routes.vendors_import_routes import get_supabase, validate_import
+from models.vendors_import_models import VendorValidateRequest
+
+async def call_validate(request_data: dict):
+    """Exercise validate_import() the way execute_import does.
+
+    /validate stopped being an HTTP route when the per-entity import wizards were removed,
+    but the function is still load-bearing: execute_import calls it for the conflict report
+    before it writes. This mirrors httpx's response surface (`.status_code`, `.json()`) so
+    the rule assertions below did not have to change shape.
+    """
+    supabase = app.dependency_overrides[get_supabase]()
+    try:
+        result = await validate_import(VendorValidateRequest(**request_data), supabase=supabase)
+    except HTTPException as exc:
+        # Bind before the lambda: Python unbinds `exc` at the end of the except block.
+        status, detail = exc.status_code, exc.detail
+        return SimpleNamespace(status_code=status, json=lambda: {"detail": detail})
+    return SimpleNamespace(status_code=200, json=result.model_dump)
 
 
-class MockAIProvider:
-    provider_name = "mock-ai"
-
-    async def suggest_column_mappings(self, csv_headers, sample_rows, target_schema, column_samples=None):
-        suggestions = []
-        mapping_rules = {
-            "vendor name": ("name", 0.95),
-            "name": ("name", 0.90),
-            "city": ("city", 0.90),
-            "state": ("state", 0.90),
-        }
-
-        class Suggestion:
-            def __init__(self, csv_column, db_field, confidence, reasoning):
-                self.csv_column = csv_column
-                self.db_field = db_field
-                self.confidence = confidence
-                self.reasoning = reasoning
-
-        for header in csv_headers:
-            header_lower = header.lower().strip()
-            if header_lower in mapping_rules:
-                db_field, confidence = mapping_rules[header_lower]
-                suggestions.append(Suggestion(header, db_field, confidence, "ok"))
-            else:
-                suggestions.append(Suggestion(header, None, 0.0, "skip"))
-        return suggestions
 
 
 class MockSupabaseTable:
@@ -137,28 +130,6 @@ async def test_client():
     app.dependency_overrides.clear()
 
 
-class TestVendorsAnalyze:
-    @pytest.mark.unit
-    async def test_analyze_returns_mappings(self, test_client):
-        request = {
-            "company_id": "co1",
-            "headers": ["Vendor Name", "City"],
-            "sample_rows": [["Acme", "Detroit"]],
-        }
-        app.dependency_overrides[get_supabase] = create_override()
-        with patch(
-            "routes.vendors_import_routes.get_provider",
-            new_callable=AsyncMock,
-        ) as mock_provider:
-            mock_provider.return_value = MockAIProvider()
-            response = await test_client.post(
-                "/api/vendors/import/analyze", json=request
-            )
-        app.dependency_overrides.clear()
-        assert response.status_code == 200
-        data = response.json()
-        mappings = {m["csv_column"]: m["db_field"] for m in data["mappings"]}
-        assert mappings["Vendor Name"] == "name"
 
 
 class TestVendorsValidate:
@@ -170,9 +141,7 @@ class TestVendorsValidate:
             "rows": [{"Name": "Acme"}, {"Name": "Beta"}],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         assert response.status_code == 200
         data = response.json()
@@ -191,9 +160,7 @@ class TestVendorsValidate:
             ],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         assert response.status_code == 200
         data = response.json()
@@ -215,9 +182,7 @@ class TestVendorsValidate:
             ],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         assert response.status_code == 200
         assert response.json()["proposed_merges"] == []
@@ -234,9 +199,7 @@ class TestVendorsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             existing_vendors=existing
         )
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         data = response.json()
         assert data["has_conflicts"] is False
@@ -260,9 +223,7 @@ class TestVendorsValidate:
             ],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         assert response.status_code == 200
         data = response.json()
@@ -289,9 +250,7 @@ class TestVendorsValidate:
             ],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        response = await test_client.post(
-            "/api/vendors/import/validate", json=request
-        )
+        response = await call_validate(request)
         app.dependency_overrides.clear()
         data = response.json()
         assert data["error_rows_count"] == 1

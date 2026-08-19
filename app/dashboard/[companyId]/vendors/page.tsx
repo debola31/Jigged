@@ -1,6 +1,6 @@
 'use client';
 
-import ImportAllDataLink from '@/components/import/ImportAllDataLink';
+import ImportAllDataLink from '@/components/data-import/ImportAllDataLink';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -18,7 +18,6 @@ import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
-import UploadIcon from '@mui/icons-material/Upload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import StorefrontIcon from '@mui/icons-material/Storefront';
@@ -320,14 +319,6 @@ export default function VendorsPage() {
         <Box sx={{ flex: 1 }} />
 
         <Button
-          variant="outlined"
-          startIcon={<UploadIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/vendors/import`)}
-        >
-          Import
-        </Button>
-
-        <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => router.push(`/dashboard/${companyId}/vendors/new`)}
@@ -348,25 +339,16 @@ export default function VendorsPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {searchDebounced
                 ? 'No vendors match your search.'
-                : 'Add your first vendor or import from CSV.'}
+                : 'Add your first vendor.'}
             </Typography>
             {!searchDebounced && (
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<UploadIcon />}
-                  onClick={() => router.push(`/dashboard/${companyId}/vendors/import`)}
-                >
-                  Import CSV
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => router.push(`/dashboard/${companyId}/vendors/new`)}
-                >
-                  Add Vendor
-                </Button>
-              </Box>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => router.push(`/dashboard/${companyId}/vendors/new`)}
+              >
+                Add Vendor
+              </Button>
             )}
             {!searchDebounced && <ImportAllDataLink />}
           </CardContent>

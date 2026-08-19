@@ -13,7 +13,6 @@
 export const PARTS_SUBROUTES: Record<string, string> = {
   new: 'New Part',
   edit: 'Edit Part',
-  import: 'Import Parts',
   drawings: 'Add parts from drawings',
   bom: 'Bill of Materials',
 };

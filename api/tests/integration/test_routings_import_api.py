@@ -13,7 +13,27 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from index import app
-from routes.routings_import_routes import get_supabase
+from types import SimpleNamespace
+from fastapi import HTTPException
+from routes.routings_import_routes import get_supabase, validate_import
+from models.routings_import_models import RoutingValidateRequest
+
+async def call_validate(request_data: dict):
+    """Exercise validate_import() the way execute_import does.
+
+    /validate stopped being an HTTP route when the per-entity import wizards were removed,
+    but the function is still load-bearing: execute_import calls it for the conflict report
+    before it writes. This mirrors httpx's response surface (`.status_code`, `.json()`) so
+    the rule assertions below did not have to change shape.
+    """
+    supabase = app.dependency_overrides[get_supabase]()
+    try:
+        result = await validate_import(RoutingValidateRequest(**request_data), supabase=supabase)
+    except HTTPException as exc:
+        # Bind before the lambda: Python unbinds `exc` at the end of the except block.
+        status, detail = exc.status_code, exc.detail
+        return SimpleNamespace(status_code=status, json=lambda: {"detail": detail})
+    return SimpleNamespace(status_code=200, json=result.model_dump)
 
 
 class MockSupabaseTable:
@@ -125,7 +145,7 @@ class TestRoutingsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             parts=PARTS, work_centers=WCS_INTERNAL
         )
-        r = await test_client.post("/api/routings/import/validate", json=request)
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         assert data["has_conflicts"] is False
@@ -141,7 +161,7 @@ class TestRoutingsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             parts=PARTS, work_centers=WCS_INTERNAL
         )
-        r = await test_client.post("/api/routings/import/validate", json=request)
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         assert any(
@@ -159,7 +179,7 @@ class TestRoutingsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             parts=PARTS, work_centers=WCS_INTERNAL + WCS_MISC
         )
-        r = await test_client.post("/api/routings/import/validate", json=request)
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         assert data["has_conflicts"] is False
@@ -177,7 +197,7 @@ class TestRoutingsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             parts=PARTS, work_centers=WCS_INTERNAL  # no MISCELLANEOUS
         )
-        r = await test_client.post("/api/routings/import/validate", json=request)
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         unknown = [
@@ -202,7 +222,7 @@ class TestRoutingsValidate:
         app.dependency_overrides[get_supabase] = create_override(
             parts=PARTS, work_centers=WCS_INTERNAL
         )
-        r = await test_client.post("/api/routings/import/validate", json=request)
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         errors = [

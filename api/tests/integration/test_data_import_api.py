@@ -83,9 +83,8 @@ class _Auth:
 
 
 class MockClient:
-    def __init__(self, has_access=True, features=None, user_id="user-1"):
+    def __init__(self, has_access=True, user_id="user-1"):
         self._has_access = has_access
-        self._features = features if features is not None else {"data_import": True}
         self.auth = _Auth(user_id)
         self.writes: list[str] = []
 
@@ -96,9 +95,10 @@ class MockClient:
     def table(self, name):
         if name == "user_company_access":
             data = [{"id": "acc-1"}] if self._has_access else []
-        elif name == "companies":
-            data = {"settings": {"features": self._features}}
         else:
+            # `companies` deliberately falls through to []: these routes no longer read
+            # settings at all. Data import is a global feature, so caller authorization is
+            # the whole gate — see test_endpoints_are_not_feature_gated below.
             data = []
         return _Table(name, data, self._record_write)
 
@@ -195,15 +195,18 @@ async def test_structure_no_company_access_is_403():
     assert resp.status_code == 403
 
 
-async def test_structure_feature_flag_off_is_403():
-    resp = await _post("/api/data-import/structure", _STRUCTURE_BODY, MockClient(features={}))
-    assert resp.status_code == 403
-    assert "not enabled" in resp.json()["detail"].lower()
-
-
-async def test_narrative_feature_flag_off_is_403():
-    resp = await _post("/api/data-import/narrative", _NARRATIVE_BODY, MockClient(features={}))
-    assert resp.status_code == 403
+async def test_endpoints_are_not_feature_gated():
+    """Data import used to be opt-IN per tenant (`settings.features.data_import`), and these
+    three routes 403'd without it. That gate is gone: the per-entity CSV wizards it coexisted
+    with were retired, so gating this flow would leave a shop no way to import at all. A
+    company with no feature settings whatsoever must now be served."""
+    for path, body in (
+        ("/api/data-import/structure", _STRUCTURE_BODY),
+        ("/api/data-import/narrative", _NARRATIVE_BODY),
+        ("/api/data-import/suggest-fixes", _SUGGEST_BODY),
+    ):
+        resp = await _post(path, body, MockClient())
+        assert resp.status_code == 200, f"{path} -> {resp.status_code} {resp.text}"
 
 
 async def test_suggest_fixes_flow():
@@ -214,11 +217,6 @@ async def test_suggest_fixes_flow():
     assert j["suggestions_available"] is True
     assert j["suggestions"][0]["finding_id"] == "f1"
     assert client.writes == []  # proposals only — no write
-
-
-async def test_suggest_fixes_feature_flag_off_is_403():
-    resp = await _post("/api/data-import/suggest-fixes", _SUGGEST_BODY, MockClient(features={}))
-    assert resp.status_code == 403
 
 
 async def test_structure_too_many_files_is_413():

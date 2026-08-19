@@ -11,21 +11,8 @@ from pydantic import BaseModel
 from models.import_models import ColumnMapping  # noqa: F401
 
 
-class WorkCenterAnalyzeRequest(BaseModel):
-    """Request to analyze CSV and get mapping suggestions for work centers."""
-
-    company_id: str
-    headers: list[str]
-    sample_rows: list[list[str]]  # First 5 rows of data
 
 
-class WorkCenterAnalyzeResponse(BaseModel):
-    """Response with AI-suggested column mappings for work centers."""
-
-    mappings: list[ColumnMapping]
-    unmapped_required: list[str]  # Required DB fields with no mapping
-    discarded_columns: list[str]  # CSV columns that won't be imported
-    ai_provider: str  # Which AI was used
 
 
 class WorkCenterConflictInfo(BaseModel):

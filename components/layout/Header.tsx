@@ -18,7 +18,10 @@ function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
   // pathname like /dashboard/[companyId]/customers/new -> segments = ['dashboard', companyId, 'customers', 'new']
 
-  // Unified data-import wizard: /dashboard/[companyId]/import (import right after companyId)
+  // The one data-import flow: /dashboard/[companyId]/import (import right after companyId).
+  // The per-entity `/parts/import`, `/customers/import`, `/vendors/import` and
+  // `/work-centers/import` wizards this used to share the word with are gone, so no
+  // module branch below needs to special-case an `import` segment any more.
   if (segments[2] === 'import') return 'Import your data';
 
   // Check for quotes routes first
@@ -46,10 +49,9 @@ function getPageTitle(pathname: string): string {
   // Check for customers routes
   if (segments.includes('customers')) {
     if (segments.includes('new')) return 'New Customer';
-    if (segments.includes('import')) return 'Import Customers';
     // Check if there's a customerId (detail page)
     const customersIndex = segments.indexOf('customers');
-    if (customersIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[customersIndex + 1])) {
+    if (customersIndex < segments.length - 1 && !['new', 'edit'].includes(segments[customersIndex + 1])) {
       return 'Customer Details';
     }
     return 'Customers';
@@ -94,9 +96,8 @@ function getPageTitle(pathname: string): string {
   if (segments.includes('vendors')) {
     if (segments.includes('new')) return 'New Vendor';
     if (segments.includes('edit')) return 'Edit Vendor';
-    if (segments.includes('import')) return 'Import Vendors';
     const vendorsIndex = segments.indexOf('vendors');
-    if (vendorsIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[vendorsIndex + 1])) {
+    if (vendorsIndex < segments.length - 1 && !['new', 'edit'].includes(segments[vendorsIndex + 1])) {
       return 'Vendor Details';
     }
     return 'Vendors';
@@ -106,9 +107,8 @@ function getPageTitle(pathname: string): string {
   if (segments.includes('work-centers')) {
     if (segments.includes('new')) return 'New Work Center';
     if (segments.includes('edit')) return 'Edit Work Center';
-    if (segments.includes('import')) return 'Import Work Centers';
     const wcIndex = segments.indexOf('work-centers');
-    if (wcIndex < segments.length - 1 && !['new', 'edit', 'import'].includes(segments[wcIndex + 1])) {
+    if (wcIndex < segments.length - 1 && !['new', 'edit'].includes(segments[wcIndex + 1])) {
       return 'Work Center Details';
     }
     return 'Work Centers';

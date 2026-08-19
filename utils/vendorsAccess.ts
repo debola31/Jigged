@@ -13,7 +13,6 @@ import type {
   Vendor,
   VendorFormData,
   VendorWithPrimaryContact,
-  VendorImportResult,
 } from '@/types/vendor';
 import type {
   VendorContact,
@@ -412,88 +411,4 @@ export async function bulkDeleteVendors(vendorIds: string[]): Promise<void> {
       });
     }
   }
-}
-
-/**
- * Bulk import vendors from CSV data. The merge-confirmation step (e.g.
- * "PerformCoat of Michigan LL → PerformCoat of Michigan LLC") is handled in
- * the API route before this is called — this layer only inserts what's
- * already been resolved.
- */
-export async function bulkImportVendors(
-  companyId: string,
-  rows: Array<{
-    name: string;
-    address_line1?: string;
-    address_line2?: string;
-    city?: string;
-    state?: string;
-    postal_code?: string;
-    country?: string;
-  }>,
-): Promise<VendorImportResult> {
-  const supabase = getSupabase();
-  const results: VendorImportResult = {
-    imported: 0,
-    skipped: 0,
-    errors: [],
-  };
-
-  const { data: existing } = await supabase
-    .from('vendors')
-    .select('name')
-    .eq('company_id', companyId);
-
-  const existingNames = new Set(
-    (existing || []).map((r: { name: string }) => r.name.toLowerCase()),
-  );
-  const importedNames = new Set<string>();
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const rowNum = i + 2;
-
-    if (!row.name?.trim()) {
-      results.errors.push({ row: rowNum, reason: 'Missing name' });
-      results.skipped++;
-      continue;
-    }
-
-    const nameKey = row.name.trim().toLowerCase();
-
-    if (existingNames.has(nameKey)) {
-      results.errors.push({ row: rowNum, reason: `Vendor "${row.name}" already exists` });
-      results.skipped++;
-      continue;
-    }
-    if (importedNames.has(nameKey)) {
-      results.errors.push({ row: rowNum, reason: `Duplicate vendor "${row.name}" in file` });
-      results.skipped++;
-      continue;
-    }
-
-    const trimmed = (s?: string) => (s && s.trim() !== '' ? s.trim() : null);
-
-    const { error } = await supabase.from('vendors').insert({
-      company_id: companyId,
-      name: row.name.trim(),
-      address_line1: trimmed(row.address_line1),
-      address_line2: trimmed(row.address_line2),
-      city: trimmed(row.city),
-      state: trimmed(row.state),
-      postal_code: trimmed(row.postal_code),
-      country: trimmed(row.country) || 'USA',
-    });
-
-    if (error) {
-      results.errors.push({ row: rowNum, reason: error.message });
-      results.skipped++;
-    } else {
-      results.imported++;
-      importedNames.add(nameKey);
-      existingNames.add(nameKey);
-    }
-  }
-
-  return results;
 }

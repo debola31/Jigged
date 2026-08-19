@@ -116,7 +116,7 @@ and stamps `last_company_id` on success. Two invariants it holds (rationale:
 Header (company name, user menu) + Sidebar (`SIDEBAR_WIDTH = 240` px,
 [`Sidebar.tsx`](../components/layout/Sidebar.tsx)). Nav order: Dashboard, Activity,
 Jobs, Quotes, Parts, Storage (`/inventory/locations`, flag `inventory_locations`),
-Work Centers, Vendors, Customers, Import data (flag `data_import`), Team (admin),
+Work Centers, Vendors, Customers, Import data, Team (admin),
 Settings (admin). *(Previously "Dashboard, Customers, Parts, Quotes, Jobs,
 Operations" — Operations became Work Centers, and six items were missing.)*
 Providers: `AuthProvider` (`useAuth()`), `ThemeProvider`.
@@ -403,7 +403,7 @@ the live list.
 | Route file | Prefix | Criteria met |
 |---|---|---|
 | `data_import_routes.py` | `/api/data-import` | AI — `structure`, `narrative`, `suggest-fixes`; the client drives analysis, then posts to the per-entity execute routes |
-| `import_routes.py` (customers), `parts_import_routes.py` (also `analyze-unified`), `vendors_import_routes.py`, `work_centers_import_routes.py`, `routings_import_routes.py`, `bom_import_routes.py` | `/api/<entity>/import` | AI + complex logic; each exposes `analyze` / `validate` / `execute` |
+| `import_routes.py` (customers), `parts_import_routes.py`, `vendors_import_routes.py`, `work_centers_import_routes.py`, `routings_import_routes.py`, `bom_import_routes.py` | `/api/<entity>/import` | Complex logic; each exposes **`execute` only**, all six posted to by the one guided importer. *(Each also exposed `analyze` and `validate` — plus `analyze-unified` on parts — for the per-entity CSV wizards; those went with the wizards. `validate_import` survives as an internal step of `execute`.)* |
 | `insights_routes.py` | `/api/insights` | AI. **One route: `POST /{company_id}/chat`.** Saved-insights CRUD is client-side under RLS; low-stock is the shortage lens on the parts page, not an alert feed. *(Previously claimed "Insights (dashboard, refresh, chat) — 3" plus a separate "Chat history — 1".)* |
 | `admin_routes.py` | `/api/admin` | Service role + system admin: AI model health, company CRUD, `PATCH /companies/{id}/features` (the flag editor) |
 | `quickbooks_routes.py` | `/api/quickbooks` | Third-party OAuth + service role: authorize/callback/status/terms/disconnect, PO-field refresh, invoice preflight + push |

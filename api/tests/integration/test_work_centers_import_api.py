@@ -13,32 +13,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from index import app
-from routes.work_centers_import_routes import get_supabase
+from types import SimpleNamespace
+from fastapi import HTTPException
+from routes.work_centers_import_routes import get_supabase, validate_import
+from models.work_centers_import_models import WorkCenterValidateRequest
+
+async def call_validate(request_data: dict):
+    """Exercise validate_import() the way execute_import does.
+
+    /validate stopped being an HTTP route when the per-entity import wizards were removed,
+    but the function is still load-bearing: execute_import calls it for the conflict report
+    before it writes. This mirrors httpx's response surface (`.status_code`, `.json()`) so
+    the rule assertions below did not have to change shape.
+    """
+    supabase = app.dependency_overrides[get_supabase]()
+    try:
+        result = await validate_import(WorkCenterValidateRequest(**request_data), supabase=supabase)
+    except HTTPException as exc:
+        # Bind before the lambda: Python unbinds `exc` at the end of the except block.
+        status, detail = exc.status_code, exc.detail
+        return SimpleNamespace(status_code=status, json=lambda: {"detail": detail})
+    return SimpleNamespace(status_code=200, json=result.model_dump)
 
 
-class MockAIProvider:
-    provider_name = "mock-ai"
-
-    async def suggest_column_mappings(self, csv_headers, sample_rows, target_schema, column_samples=None):
-        suggestions = []
-        rules = {
-            "name": ("name", 0.9),
-            "kind": ("kind", 0.9),
-            "vendor": ("vendor_name", 0.9),
-            "labor rate": ("labor_rate", 0.9),
-        }
-
-        class S:
-            def __init__(self, csv_column, db_field, confidence, reasoning):
-                self.csv_column = csv_column
-                self.db_field = db_field
-                self.confidence = confidence
-                self.reasoning = reasoning
-
-        for h in csv_headers:
-            db_field, conf = rules.get(h.lower().strip(), (None, 0.0))
-            suggestions.append(S(h, db_field, conf, "ok"))
-        return suggestions
 
 
 class MockSupabaseTable:
@@ -113,9 +110,7 @@ class TestWorkCentersValidate:
             "rows": [{"Name": "Mazak Lathe", "Kind": "internal", "Labor Rate": "135"}],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        r = await test_client.post(
-            "/api/work-centers/import/validate", json=request
-        )
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         assert r.status_code == 200
         data = r.json()
@@ -130,9 +125,7 @@ class TestWorkCentersValidate:
             "rows": [{"Name": "PerformCoat", "Kind": "external"}],
         }
         app.dependency_overrides[get_supabase] = create_override()
-        r = await test_client.post(
-            "/api/work-centers/import/validate", json=request
-        )
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         errors = [
@@ -153,9 +146,7 @@ class TestWorkCentersValidate:
         app.dependency_overrides[get_supabase] = create_override(
             existing_vendors=[{"id": "v1", "name": "Other Vendor"}]
         )
-        r = await test_client.post(
-            "/api/work-centers/import/validate", json=request
-        )
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         unknown = [
@@ -175,9 +166,7 @@ class TestWorkCentersValidate:
         app.dependency_overrides[get_supabase] = create_override(
             existing_vendors=[{"id": "v1", "name": "Acme"}]
         )
-        r = await test_client.post(
-            "/api/work-centers/import/validate", json=request
-        )
+        r = await call_validate(request)
         app.dependency_overrides.clear()
         data = r.json()
         errors = [

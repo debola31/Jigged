@@ -17,7 +17,6 @@ const stock = (over: Partial<MaterialStockFacts> & { partId: string }): Material
   partName: over.partId.toUpperCase(),
   primaryUnit: 'each',
   onHand: 0,
-  isStocked: true,
   isLocationTracked: false,
   isArchived: false,
   ...over,
@@ -146,9 +145,15 @@ describe('buildRequirement', () => {
     expect(r.shortBy).toBe(0);
   });
 
-  it('labels a never-stocked material rather than calling it short', () => {
-    const r = req({ bomQuantity: 5, orderQuantity: 1, stock: stock({ partId: 'p1', onHand: 0, isStocked: false }) });
-    expect(r.status).toBe('not_stocked');
+  /**
+   * Replaces "labels a never-stocked material rather than calling it short". `is_stocked` is
+   * gone — every part is stockable — so a child sitting at 0 against a real requirement IS short,
+   * and `not_stocked` is no longer a status the engine can produce.
+   */
+  it('calls a material at zero short rather than exempting it', () => {
+    const r = req({ bomQuantity: 5, orderQuantity: 1, stock: stock({ partId: 'p1', onHand: 0 }) });
+    expect(r.status).toBe('short');
+    expect(r.shortBy).toBe(5);
   });
 
   it('labels an archived material rather than dropping the row', () => {

@@ -50,7 +50,7 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => {
 // The Add picker offers the whole stocked catalogue. Without this it reaches the stubbed Supabase
 // client and the dialog renders its error state instead of a part list.
 vi.mock('@/utils/partsAccess', () => ({
-  getStockedParts: vi.fn(async () => [
+  getAllParts: vi.fn(async () => [
     { id: 'p1', part_name: 'RAW-STEEL-BLANK', primary_unit: 'ea' },
   ]),
 }));

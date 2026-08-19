@@ -219,13 +219,13 @@ def test_create_demo_company_seeds_the_graph(supabase_admin, demo):
 
 def test_seeded_part_quantities_are_derived_not_asserted(supabase_admin, demo):
     """`parts.quantity` is maintained from `part_location_stock` by trigger. If the seeder wrote
-    both — the mistake `auto_track_stocked_part` exists to make easy — every stocked part would
-    read double. Recompute the sum independently and compare."""
+    both — the mistake `seed_new_part_balance` exists to make easy — every part carrying stock
+    would read double. Recompute the sum independently and compare."""
     demo_id = demo["demo_id"]
 
     parts = (
         supabase_admin.table("parts")
-        .select("id, part_name, quantity, is_stocked")
+        .select("id, part_name, quantity")
         .eq("company_id", demo_id)
         .execute()
     ).data
@@ -245,9 +245,12 @@ def test_seeded_part_quantities_are_derived_not_asserted(supabase_admin, demo):
             f"{p['part_name']}: parts.quantity {p['quantity']} != "
             f"sum(part_location_stock) {summed.get(p['id'], 0.0)}"
         )
-        # Every balance row is a real holding (#657), so a stocked part with stock is non-zero.
-        if p["is_stocked"]:
-            assert float(p["quantity"]) > 0, f"{p['part_name']}: stocked but holds nothing"
+    # Every balance row is a real holding (#657), so a part with balance rows reads non-zero and
+    # a part with none reads exactly 0. `is_stocked` used to select which parts had to be
+    # positive; with the flag gone the balances themselves are the discriminator, which is a
+    # stronger assertion — it now covers every part rather than the flagged subset.
+    for part_id, total in summed.items():
+        assert total > 0, f"part {part_id}: has balance rows summing to {total}"
 
 
 def test_seeded_job_statuses_come_from_the_triggers(supabase_admin, demo):
@@ -384,7 +387,6 @@ def test_reset_preserves_membership_and_leaves_the_real_company_alone(supabase_a
             "company_id": source_id,
             "part_name": "REAL-PART-DO-NOT-TOUCH",
             "source": "bought",
-            "is_stocked": False,
             "primary_unit": "each",
         }
     ).execute()

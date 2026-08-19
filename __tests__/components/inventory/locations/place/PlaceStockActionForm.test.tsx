@@ -44,7 +44,7 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
 }));
 
 vi.mock('@/utils/partsAccess', () => ({
-  getStockedParts: vi.fn(async () => [
+  getAllParts: vi.fn(async () => [
     { id: 'p-steel', part_name: 'RAW-STEEL-BLANK', primary_unit: 'ea' },
     { id: 'p-brass', part_name: 'RAW-BRASS-ROD', primary_unit: 'ft' },
   ]),
@@ -66,7 +66,7 @@ import {
   getLocationContents,
   transferStock,
 } from '@/utils/inventoryLocationsAccess';
-import { getStockedParts } from '@/utils/partsAccess';
+import { getAllParts } from '@/utils/partsAccess';
 
 const DESTINATIONS = [
   { id: 'bin6', label: 'Cabinet 3 › Row 1 › Bin 6' },
@@ -112,7 +112,7 @@ describe('PlaceStockActionForm', () => {
     expect(screen.getByText('BUY-ORING-214')).toBeInTheDocument();
     // In the catalogue but not in this bin.
     expect(screen.queryByText('RAW-BRASS-ROD')).not.toBeInTheDocument();
-    expect(getStockedParts).not.toHaveBeenCalled();
+    expect(getAllParts).not.toHaveBeenCalled();
   });
 
   /**

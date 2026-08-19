@@ -13,7 +13,7 @@ const BOM_COLUMNS =
   'id, parent_part_id, child_part_id, quantity, unit, sequence, consume_whole_units, charge_basis, created_at, updated_at';
 
 const CHILD_PART_COLUMNS =
-  'id, part_name, description, primary_unit, is_stocked, source, costing_batch_quantity';
+  'id, part_name, description, primary_unit, source, costing_batch_quantity';
 
 const PARENT_PART_COLUMNS = 'id, part_name, description';
 
@@ -42,7 +42,6 @@ export async function getBomForPart(partId: string): Promise<BomLineWithChildPar
     part_name: string;
     description: string | null;
     primary_unit: string | null;
-    is_stocked: boolean;
     source: 'made' | 'bought';
     costing_batch_quantity: number | string | null;
   };

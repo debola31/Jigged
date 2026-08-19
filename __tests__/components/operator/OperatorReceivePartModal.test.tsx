@@ -6,12 +6,14 @@ import jiggedTheme from '@/lib/theme';
 
 import OperatorReceivePartModal from '@/components/operator/OperatorReceivePartModal';
 import { addStockAtLocation } from '@/utils/inventoryLocationsAccess';
-import { getStockedParts } from '@/utils/partsAccess';
+import { searchPartsForSelect } from '@/utils/partsAccess';
 import { uploadFileToStorage } from '@/utils/storageHelpers';
-import type { Part } from '@/types/part';
+import type { PartSelectOption } from '@/utils/partsAccess';
 
 vi.mock('@/utils/inventoryLocationsAccess', () => ({ addStockAtLocation: vi.fn() }));
-vi.mock('@/utils/partsAccess', () => ({ getStockedParts: vi.fn() }));
+// The picker is `PartAutocomplete`, which server-searches rather than bulk-loading — the modal
+// itself no longer reads parts at all. Mocking the search is therefore mocking the picker.
+vi.mock('@/utils/partsAccess', () => ({ searchPartsForSelect: vi.fn() }));
 // Mirrors OperatorLocationActionModal.test.tsx, because this modal now does the same thing:
 // storageHelpers reaches lib/supabase, which builds its client eagerly at import time whenever
 // `window` exists, and `compressPhoto` runs browser-image-compression, which needs a canvas jsdom
@@ -30,7 +32,7 @@ if (!URL.createObjectURL) URL.createObjectURL = vi.fn(() => 'blob:preview');
 if (!URL.revokeObjectURL) URL.revokeObjectURL = vi.fn();
 
 const part = (over: { id: string; part_name: string }) =>
-  ({ ...over, primary_unit: 'ea' }) as unknown as Part;
+  ({ ...over, primary_unit: 'ea' }) as unknown as PartSelectOption;
 
 const renderModal = (props: Partial<React.ComponentProps<typeof OperatorReceivePartModal>> = {}) =>
   render(
@@ -50,7 +52,7 @@ const renderModal = (props: Partial<React.ComponentProps<typeof OperatorReceiveP
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (getStockedParts as ReturnType<typeof vi.fn>).mockResolvedValue([
+  (searchPartsForSelect as ReturnType<typeof vi.fn>).mockResolvedValue([
     part({ id: 'pA', part_name: 'Part A' }),
     part({ id: 'pB', part_name: 'Part B' }),
     part({ id: 'pC', part_name: 'Part C' }), // already here → excluded
@@ -66,8 +68,10 @@ describe('OperatorReceivePartModal', () => {
   };
 
   /**
-   * "Already in the bin" is the only exclusion left. The other one — a part not tracked by place —
-   * went with `is_location_tracked` in 20260802015837: every part can be received anywhere now.
+   * "Already in the bin" is the only exclusion left, and it is now `PartAutocomplete`'s
+   * `excludeIds` rather than a filter in this component. The other one — a part not tracked by
+   * place — went with `is_location_tracked` in 20260802015837; the one after that was
+   * `is_stocked`, which used to keep this picker's bulk load down to a few hundred rows.
    */
   it('offers every part not already in the bin', async () => {
     renderModal();

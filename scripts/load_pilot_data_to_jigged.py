@@ -101,7 +101,7 @@ EXPECTED_HEADERS: dict[str, tuple[Path, set[str]]] = {
     "resources": (None, {"name", "labor_rate_per_hour"}),
     "parts": (
         None,
-        {"part_name", "source", "is_stocked", "primary_unit", "cost_per_unit", "legacy_id"},
+        {"part_name", "source", "primary_unit", "cost_per_unit", "legacy_id"},
     ),
     "routings": (
         None,
@@ -218,13 +218,6 @@ def parse_int(v) -> Optional[int]:
         return int(float(v))
     except (ValueError, TypeError):
         return None
-
-
-def parse_bool(v) -> bool:
-    if v is None:
-        return False
-    s = str(v).strip().lower()
-    return s in ("true", "1", "yes", "y", "t")
 
 
 def log(msg: str, indent: int = 0):
@@ -564,14 +557,14 @@ def load_parts(
         pid = str(uuid.uuid4())
         name_to_id[name] = pid
 
-        is_stocked = parse_bool(r.get("is_stocked"))
         primary_unit_raw = blank_to_none(r.get("primary_unit"))
         primary_unit = normalize_unit(primary_unit_raw) if primary_unit_raw else None
-        if is_stocked and not primary_unit:
+        # `parts_requires_unit` is an unconditional CHECK, and every part needs a logical unit
+        # for BOM math regardless. Default to EA so the BOM loader has something to align
+        # against. (This used to default only for is_stocked rows; the column is gone.)
+        if not primary_unit:
             primary_unit = "EA"
-        # Even non-stocked parts have a logical primary unit for BOM math.
-        # Default to EA so the BOM loader has something to align against.
-        name_to_unit[name] = primary_unit or "EA"
+        name_to_unit[name] = primary_unit
 
         # Defensive: legacy_id must be unique per company (or NULL)
         legacy_id = blank_to_none(r.get("legacy_id"))
@@ -594,7 +587,6 @@ def load_parts(
             company_id,
             name,
             blank_to_none(r.get("description")),
-            is_stocked,
             primary_unit,
             parse_numeric(r.get("quantity")) or 0,
             parse_numeric(r.get("reorder_point")),
@@ -620,7 +612,7 @@ def load_parts(
         """
         INSERT INTO parts (
             id, company_id, part_name, description,
-            is_stocked, primary_unit, quantity,
+            primary_unit, quantity,
             reorder_point, preferred_vendor_id, legacy_id, source
         )
         VALUES %s

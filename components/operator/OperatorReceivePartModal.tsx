@@ -10,15 +10,14 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Stack from '@mui/material/Stack';
-import Autocomplete from '@mui/material/Autocomplete';
 import Alert from '@mui/material/Alert';
 
 import { addStockAtLocation } from '@/utils/inventoryLocationsAccess';
-import { getStockedParts } from '@/utils/partsAccess';
+import type { PartSelectOption } from '@/utils/partsAccess';
+import PartAutocomplete from '@/components/parts/PartAutocomplete';
 import { getStandardUnitsForUnit } from '@/lib/unitPresets';
 import MovementPhotoField from '@/components/operator/MovementPhotoField';
 import { uploadMovementPhoto } from '@/utils/movementPhotoUpload';
-import type { Part } from '@/types/part';
 
 interface OperatorReceivePartModalProps {
   open: boolean;
@@ -34,11 +33,15 @@ interface OperatorReceivePartModalProps {
 }
 
 /**
- * Operator "receive a part into this bin" — pick a location-tracked part that
- * isn't already here, then add the received quantity. Only tracked parts are
- * offered, because the stock RPCs require a part to be location-tracked first
- * (that opt-in stays an admin action). Parts already in the bin are excluded —
- * top those up from their card instead.
+ * Operator "receive a part into this bin" — pick a part that isn't already here, then add the
+ * received quantity. Parts already in the bin are excluded — top those up from their card instead.
+ *
+ * The picker is `PartAutocomplete` (server-side search, 50 rows, debounced), NOT a bulk load.
+ * It used to read the whole stocked catalogue on open, which `is_stocked` bounded to a few
+ * hundred rows. Dropping that flag would have made the same code push the entire catalogue —
+ * 8k+ parts at a real shop — down to a personal phone on cellular every time this dialog opened.
+ * The device model (CLAUDE.md) treats this surface as bundle-expensive for exactly that reason,
+ * and `OperatorPartLookup` already set the precedent on the same screen.
  */
 export default function OperatorReceivePartModal({
   open,
@@ -50,9 +53,7 @@ export default function OperatorReceivePartModal({
   onClose,
   onDone,
 }: OperatorReceivePartModalProps) {
-  const [parts, setParts] = useState<Part[]>([]);
-  const [loadingParts, setLoadingParts] = useState(false);
-  const [part, setPart] = useState<Part | null>(null);
+  const [part, setPart] = useState<PartSelectOption | null>(null);
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
   const [notes, setNotes] = useState('');
@@ -67,26 +68,16 @@ export default function OperatorReceivePartModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset + load the offerable parts each time the dialog opens (house
-  // convention: Dialog onEnter, not a setState-in-effect).
-  const handleEnter = async () => {
+  // Reset each time the dialog opens (house convention: Dialog onEnter, not a
+  // setState-in-effect). Nothing is loaded here any more: the picker fetches its own options as
+  // you type, so opening this dialog costs no request at all.
+  const handleEnter = () => {
     setPart(null);
     setQuantity('');
     setUnit('');
     setNotes('');
     setPhoto(null);
     setError(null);
-    setLoadingParts(true);
-    try {
-      const all = await getStockedParts(companyId);
-      const exclude = new Set(excludePartIds);
-      // Every part has a place now, so there is nothing to filter on but what is already here.
-      setParts(all.filter((p) => !exclude.has(p.id)));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load parts.');
-    } finally {
-      setLoadingParts(false);
-    }
   };
 
   const unitOptions = useMemo(() => {
@@ -94,7 +85,7 @@ export default function OperatorReceivePartModal({
     return Array.from(new Set([pu, ...getStandardUnitsForUnit(pu)])).filter(Boolean);
   }, [part]);
 
-  const pickPart = (p: Part | null) => {
+  const pickPart = (p: PartSelectOption | null) => {
     setPart(p);
     setUnit(p?.primary_unit || 'ea');
   };
@@ -153,16 +144,17 @@ export default function OperatorReceivePartModal({
       <DialogTitle>Stock a part — {locationName}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <Autocomplete
-            options={parts}
-            loading={loadingParts}
+          {/* No `onCreateNew`: creating parts is not an operator's job — same call as
+              OperatorPartLookup. `excludeIds` drops what is already on this shelf. */}
+          <PartAutocomplete
+            companyId={companyId}
             value={part}
-            onChange={(_, v) => pickPart(v)}
-            getOptionLabel={(p) => p.part_name}
-            isOptionEqualToValue={(a, b) => a.id === b.id}
-            renderInput={(params) => <TextField {...params} label="Part" autoFocus required />}
-            noOptionsText="No more tracked parts to add here"
-            loadingText="Loading parts…"
+            onChange={pickPart}
+            excludeIds={excludePartIds}
+            label="Part"
+            size="medium"
+            autoFocus
+            required
           />
           <Stack direction="row" spacing={1}>
             <TextField

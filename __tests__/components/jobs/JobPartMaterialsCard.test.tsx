@@ -74,13 +74,17 @@ describe('JobPartMaterialsCard', () => {
   });
 
   /**
-   * This previously asserted a link to `/dashboard/co1/inventory/shortages` — a route that
-   * was **never built**, so the test was locking in a 404. Every job part with a shortage
-   * rendered a clickable chip that went nowhere.
+   * This chip has pointed at a dead target TWICE, which is why the assertion is now that it
+   * points at nothing at all.
    *
-   * The shop-wide shortage lens is the Parts stock filter, which reads `?status=`.
+   * It linked to `/dashboard/co1/inventory/shortages` — a route never built, so the test was
+   * locking in a 404 — and was then repointed at `/dashboard/co1/parts?status=low` once the
+   * Parts stock filter became the shop-wide shortage lens. That filter went with `is_stocked`:
+   * Parts is the item master and carries no quantities. An unknown query param does not 404, it
+   * is ignored, so a leftover href would now be a live 200 onto an unfiltered catalogue — the
+   * failure mode that hid the first dead link for two months.
    */
-  it('summarises how many materials are short, linked to the shop-wide shortage lens', async () => {
+  it('summarises how many materials are short, as plain text with no link', async () => {
     asMock(getJobPartMaterialCheck).mockResolvedValue([
       row({ partId: 'a', shortBy: 5, status: 'short' }),
       row({ partId: 'b', shortBy: 2, status: 'short' }),
@@ -89,7 +93,7 @@ describe('JobPartMaterialsCard', () => {
     renderCard();
 
     const chip = await screen.findByText('2 short');
-    expect(chip.closest('a')).toHaveAttribute('href', '/dashboard/co1/parts?status=low');
+    expect(chip.closest('a')).toBeNull();
   });
 
   /**
@@ -132,14 +136,14 @@ describe('JobPartMaterialsCard', () => {
     expect(await screen.findByText(/shortfall recorded/i)).toBeInTheDocument();
   });
 
-  // Dropping the row would be worse than showing it flagged.
-  it.each([
-    ['not_stocked' as const, /not stocked/i],
-    ['archived' as const, /archived material/i],
-  ])('keeps a %s material on the list, labelled', async (status, label) => {
-    asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'odd', status })]);
+  // Dropping the row would be worse than showing it flagged. `not_stocked` was the other member
+  // of this list until `is_stocked` was dropped and the status became unproducible.
+  it('keeps an archived material on the list, labelled', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([
+      row({ partId: 'odd', status: 'archived' }),
+    ]);
     renderCard();
-    expect(await screen.findByText(label)).toBeInTheDocument();
+    expect(await screen.findByText(/archived material/i)).toBeInTheDocument();
     expect(screen.getByText('ODD')).toBeInTheDocument();
   });
 

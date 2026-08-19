@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/utils/partsAccess', () => ({
-  getStockedParts: vi.fn(),
+  searchPartsForSelect: vi.fn(),
 }));
 vi.mock('@/utils/inventoryLocationsAccess', () => ({
   adjustStockAtLocation: vi.fn(),
@@ -55,7 +55,7 @@ import {
   loadCountCandidates,
   loadPartAtLocationCandidate,
 } from '@/utils/inventoryCountAccess';
-import { getStockedParts } from '@/utils/partsAccess';
+import { searchPartsForSelect } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
   getBalancesForParts,
@@ -258,7 +258,7 @@ describe('loadCountCandidates — one row per (part, place)', () => {
   });
 
   it("emits one row per place holding stock, each carrying THAT place's balance", async () => {
-    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    asMock(searchPartsForSelect).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
     asMock(getBalancesForParts).mockResolvedValue(
       new Map([['p1', [bal('loc-a', 'Shelf A', 800), bal('loc-b', 'Shelf B', 28)]]]),
     );
@@ -281,7 +281,7 @@ describe('loadCountCandidates — one row per (part, place)', () => {
    * of a shop counting for the first time would be missing from its own count sheet.
    */
   it('still emits a row for a part holding stock nowhere, at the system bucket', async () => {
-    asMock(getStockedParts).mockResolvedValue([part('p2', 'BRAND-NEW')]);
+    asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
     asMock(getBalancesForParts).mockResolvedValue(new Map());
 
     const rows = await loadCountCandidates('co1');
@@ -297,7 +297,7 @@ describe('loadCountCandidates — one row per (part, place)', () => {
    * target on the wrong shelf.
    */
   it('never emits a row for a place the part has left', async () => {
-    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    asMock(searchPartsForSelect).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
     // getBalancesForParts already filters `> 0`; assert we do not add the ghost back.
     asMock(getBalancesForParts).mockResolvedValue(new Map([['p1', [bal('loc-a', 'Shelf A', 800)]]]));
 
@@ -309,7 +309,7 @@ describe('loadCountCandidates — one row per (part, place)', () => {
 
   /** Two bins can share a leaf name, so the path is what tells the rows apart. */
   it("carries the full ancestor path as the row's label", async () => {
-    asMock(getStockedParts).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
+    asMock(searchPartsForSelect).mockResolvedValue([part('p1', 'BUY-ORING-214')]);
     asMock(getBalancesForParts).mockResolvedValue(
       new Map([['p1', [bal('loc-a', 'Shelf A', 5, ['Cabinet 3'])]]]),
     );
@@ -320,7 +320,7 @@ describe('loadCountCandidates — one row per (part, place)', () => {
 
   it('throws rather than quietly shortening the sheet when there is no system bucket', async () => {
     asMock(getLocations).mockResolvedValue([SHELF_A]);
-    asMock(getStockedParts).mockResolvedValue([part('p2', 'BRAND-NEW')]);
+    asMock(searchPartsForSelect).mockResolvedValue([part('p2', 'BRAND-NEW')]);
     asMock(getBalancesForParts).mockResolvedValue(new Map());
 
     await expect(loadCountCandidates('co1')).rejects.toThrow(/Unassigned/i);

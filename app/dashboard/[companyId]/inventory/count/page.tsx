@@ -17,10 +17,10 @@
  *  - It started as Scope → Sheet → **Review**. The review page restated deltas the counter
  *    would have understood better the instant they typed them, so it's gone — the variance now
  *    appears on the row as you type.
- *  - It was then rebuilt as a **single** page listing every stocked part. That over-corrected:
+ *  - It was then rebuilt as a **single** page listing every part. That over-corrected:
  *    a wall of empty inputs reads as "fill in this form", hides that counting one part is
  *    perfectly normal, and loses what choosing was quietly doing — making a count a bounded,
- *    finishable task. "I'm counting these five things" beats a row per stocked part.
+ *    finishable task. "I'm counting these five things" beats a row per part.
  *  - Review then came back as a **confirm dialog**, which turned out to be the same mistake in
  *    a smaller box: it showed rows still visible behind it, and its big-change warning fired on
  *    nearly every line. Removed. See `save()`.
@@ -52,8 +52,7 @@
  *
  * Both of those used to be justified by "`Unassigned` holds every part a real shop owns — 9,428 at
  * Contour". **That stopped being true in `20260802144310`**, which pruned the zero-balance residue
- * and added `CHECK (quantity > 0)`, so `trg_auto_track_stocked_part` no longer leaves a row per
- * stocked part. Contour's `Unassigned` holds **57** rows today, against a `LOCATION_PAGE_SIZE` of
+ * and added `CHECK (quantity > 0)`, so the seeding trigger no longer leaves a row per part. Contour's `Unassigned` holds **57** rows today, against a `LOCATION_PAGE_SIZE` of
  * 100 — the pager has never actually rendered in production. Both features stay: they are correct,
  * cheap and tested, and the bound is still real, just much further away than the prose claimed.
  *
@@ -94,6 +93,7 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import AddIcon from '@mui/icons-material/Add';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
@@ -118,6 +118,7 @@ import {
   type CountPlace,
 } from '@/utils/inventoryCountAccess';
 import PartAutocomplete, { type PartSelectOption } from '@/components/parts/PartAutocomplete';
+import { COUNT_PICKER_LIMIT } from '@/lib/queryLimits';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   LOCATION_PAGE_SIZE,
@@ -234,7 +235,7 @@ export default function InventoryCountPage() {
   /**
    * Which page of this bin we are looking at.
    *
-   * `Unassigned` holds every stocked part the shop owns, and it is the bin that most needs
+   * `Unassigned` holds every part that has not been put away, and it is the bin that most needs
    * emptying — so a hard cap of one page made the single most important place uncountable. The
    * justification for paging is query cost, not DOM weight: `getLocationContentsPage` pairs an
    * exact count with a range, and this is an office computer.
@@ -300,7 +301,8 @@ export default function InventoryCountPage() {
    *
    * Place-scoped mode filters server-side, so the raw keystrokes are debounced into this before
    * becoming a request. Company-wide mode filters `countable` in memory and ignores it — including
-   * **as a dependency**, which is what `placeSearch` below exists to guarantee.
+   * **as a dependency** — see the loader's note on why the term now reaches the server in
+   * both modes.
    */
   const [serverSearch, setServerSearch] = useState('');
 
@@ -392,21 +394,18 @@ export default function InventoryCountPage() {
   }, [companyId]);
 
   /**
-   * The loader's search and page, gated to the mode that actually has them.
+   * The loader's page, still gated to the mode that has one.
    *
-   * Only place-scoped mode reads a server-side term or turns pages, but both `serverSearch` and
-   * `page` are shared state, so listing them raw as dependencies made a company-wide keystroke
-   * re-run the loader for nothing: `loadCountCandidates` + `getBalancesForParts` + `getLocations`
-   * fetched the entire stocked catalogue a second time, returned the identical array, and replaced
-   * it — re-rendering every row for a filter `visible` had already applied in the browser 300ms
-   * earlier, with no spinner to show for it (`paging` only drives the place-scoped pager).
+   * `serverSearch` is NO LONGER gated, and that reversal is the point. It used to be
+   * `locationMode ? serverSearch : ''` because the company-wide sheet filtered in the browser, so
+   * feeding it a term re-ran `loadCountCandidates` + `getBalancesForParts` + `getLocations` only
+   * to receive the identical array back. That was true while `is_stocked` bounded the catalogue to
+   * a few hundred rows. It is gone, so the company-wide picker is server-searched too and the
+   * refetch a keystroke triggers is now the entire mechanism rather than waste.
    *
-   * Gating here rather than branching inside the effect keeps the fix provable: company-wide these
-   * are literal constants, so no keystroke CAN produce a new dependency value. The alternative —
-   * a ref remembering the last-loaded key — would put a general-purpose fetch dedupe in place of
-   * one specific fact, and it has to keep enumerating every dependency correctly forever.
+   * `page` stays gated: only the place-scoped sheet pages, and leaving it raw would make a
+   * company-wide keystroke reload at whatever page index the last bin visit left behind.
    */
-  const placeSearch = locationMode ? serverSearch : '';
   const placePage = locationMode ? page : 0;
 
   // ── Load ────────────────────────────────────────────────────────────────
@@ -417,7 +416,7 @@ export default function InventoryCountPage() {
       // page turn would throw away the toolbar and the pager you just pressed.
       setPaging(true);
       try {
-        // Place-scoped: read one page of THIS bin's contents. `placeSearch` is a dependency, so
+        // Place-scoped: read one page of THIS bin's contents. `serverSearch` is a dependency, so
         // typing re-runs this against the server — a bin's contents are not in memory to filter,
         // and only the server knows the `total` the pager reports.
         if (locationId) {
@@ -500,7 +499,7 @@ export default function InventoryCountPage() {
               ? [{ id: here.id, name: here.name, path: here.name }]
               : leaves,
             {
-              search: placeSearch,
+              search: serverSearch,
               offset: placePage * LOCATION_PAGE_SIZE,
               limit: LOCATION_PAGE_SIZE,
             },
@@ -531,7 +530,7 @@ export default function InventoryCountPage() {
         }
 
         const [found, locations] = await Promise.all([
-          loadCountCandidates(companyId),
+          loadCountCandidates(companyId, serverSearch),
           // For "+ Count it somewhere else" on the sheet. Found in the browser, not by a test:
           // `allLocations` was loaded only in the place-scoped and everywhere branches, so on the
           // company-wide sheet the picker rendered with an EMPTY option list — a control that
@@ -543,7 +542,7 @@ export default function InventoryCountPage() {
         setAllLocations(locations);
         rememberOpenedWith(found);
       } catch (e) {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your stocked parts.');
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : 'Could not load your parts.');
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -554,12 +553,11 @@ export default function InventoryCountPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, locationId, partIdParam, placeSearch, placePage, reloadKey, rememberOpenedWith]);
+  }, [companyId, locationId, partIdParam, serverSearch, placePage, reloadKey, rememberOpenedWith]);
 
-  // Debounce keystrokes into the server-side term. Only place-scoped mode reads it, but the timer
-  // is unconditional so the two modes don't need different effect shapes. Company-wide that costs
-  // one render whose `visible`/`groups` memos are already cached, and zero requests — `placeSearch`
-  // is what makes the second half of that true.
+  // Debounce keystrokes into the server-side term. BOTH modes read it now — the company-wide
+  // picker became server-searched when `is_stocked` stopped bounding the catalogue — so the
+  // 300ms here is what keeps a keystroke from being a query.
   useEffect(() => {
     const id = setTimeout(() => {
       const next = search.trim();
@@ -582,28 +580,29 @@ export default function InventoryCountPage() {
     return () => clearTimeout(id);
   }, [search]);
 
-  const visible = useMemo(() => {
-    // Already filtered by the server in place-scoped mode; re-filtering here would hide rows
-    // while a debounced request was still in flight.
-    if (locationMode) return candidates;
-    const q = search.trim().toLowerCase();
-    return q ? candidates.filter((c) => c.partName.toLowerCase().includes(q)) : candidates;
-  }, [candidates, search, locationMode]);
+  // The server filters BOTH modes now, so there is nothing left to narrow here. Re-filtering on
+  // the undebounced `search` would hide rows for 300ms while the matching request was still in
+  // flight — the list would empty out as you typed and refill when it landed.
+  const visible = candidates;
 
   /**
    * The picker's rows: ONE PER PART, not one per place.
    *
    * Ticking a part means "count this part wherever it is" — the sheet is what expands it into a
-   * row per place. Keeping the picker part-grained is deliberate: this list is unbounded,
-   * unvirtualised and filtered in the browser, so multiplying it by places-per-part would cost a
-   * lot and buy nothing. Nobody picks a *shelf* when deciding which parts to walk.
+   * row per place. Keeping the picker part-grained is deliberate: multiplying it by
+   * places-per-part would cost a lot and buy nothing. Nobody picks a *shelf* when deciding which
+   * parts to walk.
    *
-   * Unbounded is measured, not assumed. This filters on `is_stocked`, so the biggest real list is
-   * **722 rows** at Contour — not the 8,451-part catalogue, which is the number
-   * [#658](https://github.com/debola31/Jigged/issues/658) reached for. 722 unvirtualised rows on
-   * the office computer this screen is used from is a dense desktop table, which is fine. Revisit
-   * above ~5k stocked parts; server-side search here would trade an instant filter for a debounced
-   * round trip, and at 722 that is a worse screen, not a better one.
+   * This list is NO LONGER unbounded-and-browser-filtered, and the note that used to sit here is
+   * worth keeping as the reason. It said: the list is bounded because it filters on `is_stocked`,
+   * so the biggest real one is **722 rows** at Contour rather than the 8,451-part catalogue
+   * ([#658](https://github.com/debola31/Jigged/issues/658)); revisit above ~5k, because
+   * server-side search would trade an instant filter for a debounced round trip and at 722 that
+   * is the worse screen.
+   *
+   * Dropping `is_stocked` deleted the bound, not the reasoning — every part is stockable, so this
+   * became the 8,451-row case its own note said to revisit. It is now server-searched and capped
+   * at `COUNT_PICKER_LIMIT`, with the hint below telling you when you are seeing a capped view.
    */
   const groups = useMemo(() => groupByPart(visible), [visible]);
 
@@ -955,9 +954,7 @@ export default function InventoryCountPage() {
       setMoveTo(null);
       const { candidates: found, total } = await loadCountCandidatesForPlaces(
         [{ id: locationId, name: locationName, path: locationName }],
-        // `placeSearch`, not `serverSearch` — one name for one concept. Put-away only runs
-        // place-scoped, where the two are equal by construction.
-        { search: placeSearch },
+        { search: serverSearch },
       );
       setCandidates(found);
       setHereTotal(total);
@@ -966,7 +963,7 @@ export default function InventoryCountPage() {
       setSnack({
         msg:
           `Moved ${res.moved} ${res.moved === 1 ? 'part' : 'parts'} to ${moveTo.label}.` +
-          // Skipped means "nothing here to move" — a zero balance, which every stocked part has at
+          // Skipped means "nothing here to move" — a zero balance, which a part can have at
           // Unassigned whether or not it holds anything. Worth saying, not worth alarm.
           (res.skipped > 0 ? ` ${res.skipped} had nothing here to move.` : ''),
         severity: 'success',
@@ -991,9 +988,8 @@ export default function InventoryCountPage() {
    * system is wrong about where something lives.
    *
    * Three things it must not do, each of which would lose typed counts:
-   *  - touch the URL, or `serverSearch`: the loader effect depends on both (on `serverSearch` via
-   *    `placeSearch`, i.e. on the `?location&part=` sheet but not the `?part=` one) and its
-   *    part-scoped branches call `setEntries({})`, so either would wipe the sheet.
+   *  - touch the URL, or `serverSearch`: the loader effect depends on both, and its part-scoped
+   *    branches call `setEntries({})`, so either would wipe the sheet.
    *  - add a second row for a place already listed — two entries for one (part, place) commit
    *    twice to the same shelf, last write silently winning. Idempotent instead.
    *  - assume a zero balance. `loadPartAtLocationCandidate` READS it, so confirming an empty
@@ -1115,7 +1111,7 @@ export default function InventoryCountPage() {
 
       {/* ── Step 1: what are you counting? ───────────────────────────────────
           Suppressed entirely in part-scope: there is one row and it is already chosen. Leaving
-          it mounted also put "Nothing to count yet — mark a few parts as stocked" directly under
+          it mounted also put the "Nothing to count yet" card directly under
           the error Alert whenever the one-row load threw, since that path never reaches step 1. */}
       {step === 0 && !partFirst && (
         <Box>
@@ -1130,20 +1126,33 @@ export default function InventoryCountPage() {
               : 'One part or the whole shop — whatever you’re walking right now. You can always count the rest later.'}
           </Typography>
 
-          {/* The toolbar stays mounted in place-scoped mode even with no rows. The search runs
-              against the SERVER here, so a term that matches nothing emptied `countable`, which
-              unmounted the search field along with everything else — leaving no way to clear the
-              term you had just typed. Only the list area is allowed to go empty. */}
-          {candidates.length === 0 && !locationMode ? (
+          {/* The toolbar stays mounted whenever a search is running, in EITHER mode, even with no
+              rows. The search runs against the SERVER, so a term that matches nothing empties
+              `candidates` — and unmounting on that took the search field with it, leaving no way
+              to clear the term you had just typed. Only the list area is allowed to go empty.
+
+              `!serverSearch` is what widened this from place-scoped to both: the company-wide
+              picker became server-searched when `is_stocked` stopped bounding the catalogue, so it
+              inherited the same trap the same day. The card below is now strictly "this company
+              has no parts", which is the only thing an empty UNSEARCHED result can mean. */}
+          {candidates.length === 0 && !locationMode && !serverSearch ? (
             <Card elevation={2}>
               <CardContent sx={{ p: 6, textAlign: 'center' }}>
                 <Inventory2OutlinedIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
                 <Typography variant="h6" gutterBottom>
                   Nothing to count yet
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Mark a few parts as stocked and they&apos;ll show up here.
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Every part can hold stock, so anything in your catalogue shows up here. There
+                  isn&apos;t one yet.
                 </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
+                >
+                  Add a part
+                </Button>
               </CardContent>
             </Card>
           ) : (
@@ -1164,9 +1173,18 @@ export default function InventoryCountPage() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   sx={{ width: 300 }}
+                  /* Says so when the view is capped, because a capped list has one failure mode an
+                     unbounded one does not: the part you wanted is simply not on it, and nothing
+                     on screen would otherwise tell you. Only shown at the cap — below it, the list
+                     is everything that matched. */
+                  helperText={
+                    !locationMode && groups.length >= COUNT_PICKER_LIMIT
+                      ? `Showing the first ${COUNT_PICKER_LIMIT} — search to narrow.`
+                      : ' '
+                  }
                 />
-                {/* Only place-scoped. A shop-wide count already lists every stocked part, so
-                    there is nothing that could be missing from it. */}
+                {/* Only place-scoped. A shop-wide count reaches the whole catalogue through the
+                    search above, so there is nothing that could be missing from it. */}
                 {locationMode && (
                   <Box sx={{ width: 320 }}>
                     <PartAutocomplete
@@ -1174,7 +1192,6 @@ export default function InventoryCountPage() {
                       companyId={companyId}
                       value={null}
                       onChange={addPartHere}
-                      kind="stocked"
                       label="Found something not listed?"
                       size="small"
                       disabled={addingPart}
@@ -1329,7 +1346,7 @@ export default function InventoryCountPage() {
                   not indexes into this list.
 
                   The N that motivated this was 9,428 — `Unassigned` when the auto-track trigger
-                  left a row there for every stocked part. `20260802144310` ended that; the real
+                  left a row there for every part. `20260802144310` ended that; the real
                   figure is 57 at Contour, so this pager has never rendered in production. Kept
                   anyway: it is the right shape, and it costs nothing until it is needed. */}
               {locationMode && hereTotal > LOCATION_PAGE_SIZE && (
@@ -1369,7 +1386,7 @@ export default function InventoryCountPage() {
                     ? `Nothing matches “${search.trim()}”.`
                     : locationMode
                       ? `${locationName} is empty.`
-                      : 'Nothing to count yet — mark some parts as stocked first.'}
+                      : 'Nothing to count yet — add a part first.'}
                 </Alert>
               ) : (
               <Card elevation={2}>

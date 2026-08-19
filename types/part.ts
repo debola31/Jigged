@@ -2,14 +2,15 @@
  * Part record from database.
  *
  * Parts are the unified item master — both made items (with a routing) and
- * stocked inventory items (with a quantity-on-hand) live in this table. Two
- * orthogonal axes classify a row:
+ * bought items live in this table. ONE axis classifies a row:
  *   - source: 'made' (produced in-shop) | 'bought' (procured from a vendor)
- *   - is_stocked: whether the company tracks on-hand quantities for it
- * The UI displays these two fields directly. There is no derived "kind"
- * vocabulary (Custom Made / Sub-assembly / Raw Material / Service) — that
- * was removed because it added a translation layer over fields the user
- * already understands.
+ *
+ * There is no derived "kind" vocabulary (Custom Made / Sub-assembly / Raw
+ * Material / Service) — that was removed because it added a translation layer
+ * over fields the user already understands. `is_stocked` was the second axis
+ * until it was dropped: EVERY part is stockable and starts at quantity 0, so
+ * "does this part carry stock" is answered by the number itself rather than by
+ * a flag. Quantities and counting belong to Storage, not to the item master.
  */
 export interface Part {
   id: string;
@@ -17,7 +18,6 @@ export interface Part {
   part_name: string;
   description: string | null;
   source: 'made' | 'bought';
-  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   reorder_point: number | null;
@@ -135,7 +135,6 @@ export interface PartFormData {
   part_name: string;
   description: string;
   source: 'made' | 'bought';
-  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   reorder_point: number | null;
@@ -146,7 +145,6 @@ export const EMPTY_PART_FORM: PartFormData = {
   part_name: '',
   description: '',
   source: 'made',
-  is_stocked: false,
   primary_unit: null,
   quantity: 0,
   reorder_point: null,
@@ -169,7 +167,6 @@ export function partToFormData(
     part_name: part.part_name,
     description: part.description || '',
     source: part.source,
-    is_stocked: part.is_stocked,
     primary_unit: part.primary_unit,
     quantity: part.quantity,
     reorder_point: part.reorder_point,

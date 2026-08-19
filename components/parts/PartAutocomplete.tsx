@@ -28,7 +28,7 @@ export interface PartAutocompleteProps {
   value: PartSelectOption | null;
   onChange: (option: PartSelectOption | null) => void;
   /** Server-side filter: which subset of the parts table to search. */
-  kind?: 'all' | 'made' | 'stocked' | 'bought';
+  kind?: 'all' | 'made' | 'bought';
   /** Hide options whose id is in this list (e.g. already-picked siblings). */
   excludeIds?: string[];
   label: string;

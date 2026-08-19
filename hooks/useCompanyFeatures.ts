@@ -19,9 +19,15 @@ import { useLoad } from '@/hooks/useLoad';
  * Skeleton while `loading` is true, rather than flashing them in once the
  * data arrives.
  *
- * The fallback (no companyId / fetch failure) is "every flag false" —
- * safer than the alternative of leaking gated UI to a tenant that hasn't
- * opted in. The no-companyId guard lives inside the loader (not a synchronous
+ * The fallback (no companyId / fetch failure) is each flag's REGISTRY DEFAULT, not "every flag
+ * false". It was the latter, justified as safer than leaking gated UI to a tenant that had not
+ * opted in — true for opt-in flags, and wrong for opt-out ones: it renders a failed read as a
+ * definitive "this tenant does not have the feature", which is the "'couldn't check' is never
+ * 'denied'" rule in CLAUDE.md. Concretely, one failed `getCompany` used to bounce an operator off
+ * /inventory and hide Storage — now the only route to counting — and did the same to `ai_insights`
+ * long before that. Opt-in flags are unaffected: their default IS false.
+ *
+ * The no-companyId guard lives inside the loader (not a synchronous
  * setState in the effect body) so it doesn't trip set-state-in-effect.
  *
  * `companyName` rides along because `getCompany` already returns it. A separate
@@ -84,15 +90,16 @@ interface CompanyFeaturesResult {
   demoCompanyId: string | null;
 }
 
-function emptyFeatures(): Record<KnownFeatureKey, boolean> {
+function defaultFeatures(): Record<KnownFeatureKey, boolean> {
   const out = {} as Record<KnownFeatureKey, boolean>;
-  for (const f of KNOWN_FEATURES) out[f.key] = false;
+  for (const f of KNOWN_FEATURES) out[f.key] = f.defaultEnabled ?? false;
   return out;
 }
 
-// Stable "all flags false" map — computed once, shared as the loading/fallback
-// value so consumers don't see a new object identity each render.
-const EMPTY_FEATURES: Record<KnownFeatureKey, boolean> = emptyFeatures();
+// Stable registry-default map — computed once, shared as the loading/fallback value so consumers
+// don't see a new object identity each render. `loading` is still what gates a flash: this map is
+// what an unresolved read means, not what it proves.
+const EMPTY_FEATURES: Record<KnownFeatureKey, boolean> = defaultFeatures();
 const EMPTY_RESULT: CompanyFeaturesResult = {
   features: EMPTY_FEATURES,
   name: null,

@@ -117,7 +117,6 @@ export const PART_FIELDS: { key: string; label: string; required: boolean }[] = 
   { key: 'part_name', label: 'Part Name', required: true },
   { key: 'description', label: 'Description', required: false },
   { key: 'source', label: 'Made or Bought', required: false },
-  { key: 'is_stocked', label: 'Tracked as Stock', required: false },
   // Every part needs one — the parts table has an unconditional `parts_requires_unit` CHECK.
   { key: 'primary_unit', label: 'Unit of Measure', required: true },
   { key: 'quantity', label: 'Quantity on Hand', required: false },

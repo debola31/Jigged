@@ -110,7 +110,7 @@ import JobTagPicker, { loadJobsForPart, loadTaggableJobs } from '@/components/in
 import LocationPicker, {
   type LocationPickerOption,
 } from '@/components/inventory/locations/LocationPicker';
-import { getStockedParts } from '@/utils/partsAccess';
+import { getAllParts } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import {
   addStockAtLocation,
@@ -262,7 +262,7 @@ export default function PlaceStockActionForm({
       // Restricted to one part, even `Add` reads the BIN — it needs how much is already here to
       // show on the row, and it has no picker to fill from the catalogue.
       action === 'add' && !restrictTo
-        ? ({ kind: 'parts', parts: await getStockedParts(companyId) } as const)
+        ? ({ kind: 'parts', parts: await getAllParts(companyId) } as const)
         : ({ kind: 'contents', page: await getLocationContents(locationId) } as const),
     [action, companyId, locationId, restrictTo],
   );

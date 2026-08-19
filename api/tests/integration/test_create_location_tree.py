@@ -308,8 +308,8 @@ def test_refuses_to_give_children_to_a_place_holding_stock(db, shop):
     with db.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO parts (company_id, part_name, source, is_stocked, primary_unit, quantity)
-            VALUES (%s, %s, 'bought', true, 'each', 0) RETURNING id
+            INSERT INTO parts (company_id, part_name, source, primary_unit, quantity)
+            VALUES (%s, %s, 'bought', 'each', 0) RETURNING id
             """,
             (shop["company"], f"TREE-{shop['company'][:8]}"),
         )

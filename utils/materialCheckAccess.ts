@@ -77,7 +77,7 @@ async function loadStockFacts(childIds: string[]): Promise<Map<string, MaterialS
     chunk(childIds, CHUNK_IDS).map(async (ids) => {
       const { data, error } = await supabase
         .from('parts')
-        .select('id, part_name, primary_unit, quantity, is_stocked, deleted_at')
+        .select('id, part_name, primary_unit, quantity, deleted_at')
         .in('id', ids);
       if (error) {
         console.error('Error loading material stock facts:', error);
@@ -93,7 +93,6 @@ async function loadStockFacts(childIds: string[]): Promise<Map<string, MaterialS
       partName: row.part_name,
       primaryUnit: row.primary_unit,
       onHand: Number(row.quantity) || 0,
-      isStocked: Boolean(row.is_stocked),
       // Archived materials stay on the list, flagged. A BOM line silently vanishing from a
       // job's material list is worse than one shown as odd.
       isArchived: row.deleted_at !== null,

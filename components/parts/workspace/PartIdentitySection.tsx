@@ -12,8 +12,6 @@ import ErrorAlert from '@/components/common/ErrorAlert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
-import Switch from '@mui/material/Switch';
-import FormControlLabel from '@mui/material/FormControlLabel';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import BuildIcon from '@mui/icons-material/Build';
@@ -33,7 +31,7 @@ interface PartIdentitySectionProps {
   companyId: string;
   /** Existing-mode: the part being edited (auto-save on change/blur). */
   part?: Part;
-  /** Create-mode: seed defaults (e.g. from ?source=bought&stocked=1). */
+  /** Create-mode: seed defaults (e.g. from ?source=bought). */
   initialDefaults?: Partial<PartFormData>;
   /** Create-mode: called with the new part so the workspace can redirect. */
   onCreated?: (created: Part) => void;
@@ -73,7 +71,6 @@ export default function PartIdentitySection({
   const [creating, setCreating] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveState>('idle');
 
-  const showReorder = formData.is_stocked;
   // Preferred vendor lives on the Cost card (PartProcurementPricingPanel) for an
   // existing bought part — so we only surface it here in the CREATE flow, where
   // the Cost card doesn't exist yet. This avoids the two-controls-for-one-value
@@ -173,12 +170,12 @@ export default function PartIdentitySection({
       });
       // Captured here rather than in the workspace shell: this is the only place that
       // calls createPart, so it's the one point where "a part was created" is true.
-      // Properties are the shape choices that drive later journeys (a stocked bought
-      // part implies inventory + procurement; a made part implies a routing) — never
-      // the part name, which is customer-identifying.
+      // Properties are the shape choices that drive later journeys (a bought part implies
+      // procurement; a made part implies a routing) — never the part name, which is
+      // customer-identifying. `is_stocked` was here until the flag was dropped; every part
+      // is stockable now, so it had no variance left to measure.
       posthog.capture('part created', {
         source: formData.source,
-        is_stocked: formData.is_stocked,
         has_reorder_point: formData.reorder_point !== null,
         has_preferred_vendor: formData.preferred_vendor_id !== null,
       });
@@ -193,7 +190,7 @@ export default function PartIdentitySection({
 
   const fields = (
     <>
-      {/* Classification: Made/Bought + Stocked. Drives the fields below. */}
+      {/* Source: Made or Bought. The only classification axis since is_stocked was dropped. */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontWeight: 500 }}>
           Classification
@@ -228,17 +225,6 @@ export default function PartIdentitySection({
             </ToggleButton>
           </ToggleButtonGroup>
 
-          <FormControlLabel
-            control={
-              <Switch
-                checked={formData.is_stocked}
-                onChange={(_e, checked) => updateAndPersist({ is_stocked: checked })}
-                disabled={busy}
-                color="primary"
-              />
-            }
-            label="Stocked"
-          />
         </Stack>
       </Box>
 
@@ -280,23 +266,23 @@ export default function PartIdentitySection({
             placeholder="Brief description of this part"
           />
         </Grid>
-        {showReorder && (
-          <Grid size={{ xs: 12, sm: 6 }}>
-            <TextField
-              fullWidth
-              label="Reorder Point"
-              type="number"
-              value={formData.reorder_point ?? ''}
-              onChange={onReorderChange}
-              onBlur={handleBlur}
-              error={!!fieldErrors.reorder_point}
-              helperText={fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts.'}
-              disabled={busy}
-              InputLabelProps={{ shrink: true }}
-              inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
-            />
-          </Grid>
-        )}
+        {/* Unconditional since is_stocked was dropped: every part is stockable, so every part
+            can have a line under which it needs reordering. It was gated on the flag before. */}
+        <Grid size={{ xs: 12, sm: 6 }}>
+          <TextField
+            fullWidth
+            label="Reorder Point"
+            type="number"
+            value={formData.reorder_point ?? ''}
+            onChange={onReorderChange}
+            onBlur={handleBlur}
+            error={!!fieldErrors.reorder_point}
+            helperText={fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts.'}
+            disabled={busy}
+            InputLabelProps={{ shrink: true }}
+            inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}
+          />
+        </Grid>
         {showVendor && (
           <Grid size={{ xs: 12, sm: 6 }}>
             <VendorAutocomplete

@@ -5,7 +5,7 @@ import LoadFailedState from '@/components/common/LoadFailedState';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -21,14 +21,12 @@ import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import Chip from '@mui/material/Chip';
-import StockStatusChip, { deriveStockStatus, shortfall } from '@/components/inventory/StockStatusChip';
 
 /** Module scope so the memoised `columnDefs` doesn't have to carry it as a dependency. */
 const formatDate = (val: string | null | undefined): string => {
   if (!val) return '—';
   return new Date(val).toLocaleDateString();
 };
-import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
@@ -85,12 +83,6 @@ function buildPartsImpactLines(impact: PartsDeletionImpact | null): string[] {
 type PartRow = Part & { is_priceable: boolean };
 type SourceFilter = 'all' | 'made' | 'bought';
 type CompletenessFilter = 'all' | 'complete' | 'incomplete';
-/** `stocked` narrows to parts that carry stock at all; the rest are shortage lenses. */
-type StockFilter = 'all' | 'stocked' | 'low' | 'out';
-
-/** Only these arrive via `?status=` — anything else falls back to 'all' rather than
- *  leaving the grid silently filtered by a typo. */
-const STOCK_FILTERS: readonly StockFilter[] = ['all', 'stocked', 'low', 'out'];
 
 // Stable empty fallbacks so the filtered-rows memo doesn't recompute on every
 // render while the first load is in flight.
@@ -102,27 +94,12 @@ export default function PartsPage() {
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const searchParams = useSearchParams();
-
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   // Source filter is applied client-side after the fetch — `source` is a
   // stored column, but pulling all rows once and filtering locally keeps
   // the toggle instant. Shop-scale row counts make the cost negligible.
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  /**
-   * Stock filter, seeded from `?status=`. This is what makes Parts the shop-wide
-   * shortage view: `JobPartMaterialsCard`'s "N short" chip links to
-   * `/parts?status=low`, which used to point at `/inventory/shortages` — a route
-   * that was never built, so the chip 404'd. Derived from quantity +
-   * reorder_point at render, never stored, so it cannot drift.
-   */
-  const [stockFilter, setStockFilter] = useState<StockFilter>(() => {
-    const requested = searchParams.get('status');
-    return STOCK_FILTERS.includes(requested as StockFilter)
-      ? (requested as StockFilter)
-      : 'all';
-  });
   // Completeness = priceable (set up enough to quote). Drives the inline
   // incomplete marker + this filter, replacing the old Pricing column.
   const [completenessFilter, setCompletenessFilter] = useState<CompletenessFilter>('all');
@@ -162,9 +139,8 @@ export default function PartsPage() {
   // Written from an effect, never in the render body (the react-hooks/refs rule).
   const hasRowsRef = useRef(false);
 
-  // Pull every part the company owns (made + bought, stocked or not). The
-  // source filter narrows this client-side; the inventory page handles the
-  // stocked-only view. The priceable-id set is fetched in parallel — an
+  // Pull every part the company owns (made + bought). The source filter narrows this
+  // client-side. The priceable-id set is fetched in parallel — an
   // independent query, unaffected by search/sort; failure is non-fatal (an
   // empty set degrades the Pricing column to "no pricing" rather than blocking
   // the page). useLoad keeps every setState inside the async callback.
@@ -231,23 +207,11 @@ export default function PartsPage() {
     const bySource =
       sourceFilter === 'all' ? rows : rows.filter((r) => r.source === sourceFilter);
 
-    // Stock filters only ever narrow to stocked parts: a non-stocked part has no
-    // stock level, so it is neither "low" nor "out" — including it would invent a
-    // shortage for a made-to-order part.
-    const byStock =
-      stockFilter === 'all'
-        ? bySource
-        : bySource.filter((r) => {
-            if (!r.is_stocked) return false;
-            if (stockFilter === 'stocked') return true;
-            return deriveStockStatus(r.quantity, r.reorder_point) === stockFilter;
-          });
-
-    const stamped = byStock.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
+    const stamped = bySource.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
     if (completenessFilter === 'complete') return stamped.filter((r) => r.is_priceable);
     if (completenessFilter === 'incomplete') return stamped.filter((r) => !r.is_priceable);
     return stamped;
-  }, [rows, sourceFilter, stockFilter, priceableIds, completenessFilter]);
+  }, [rows, sourceFilter, priceableIds, completenessFilter]);
 
   const gridHeight = useMemo(() => {
     if (loading || filteredRows.length === 0) return 600;
@@ -353,13 +317,14 @@ export default function PartsPage() {
    * Column set is intentionally minimal: this page is a finder, the detail page is the workspace.
    * Engineering signals (routing, BOM, sub-assembly badges, calculated cost) live there.
    *
-   * The exception is the shortage lens. `?status=low` and `?status=out` are where an owner goes
-   * to answer "what do I need to buy", and a status chip alone does not answer it — you need the
-   * line you fell under and how far under you are. Those two columns appear ONLY on that lens,
-   * because on the full catalogue they would be empty for most rows.
+   * There are no quantity columns here, and that is the rule rather than an omission. Parts is
+   * the item master — what the shop makes and buys. How much of it is on the shelf, and where,
+   * belongs to Storage. This page carried On hand, a derived status chip, a stock filter and its
+   * two shortage-lens columns (Reorder at / Short by) until `is_stocked` was dropped; they went
+   * with it. Do not add "just a quantity column" back: it is the whole of the split this removed.
    *
-   * Memoised on `stockFilter`: without it AG Grid receives a new `columnDefs` array identity on
-   * every render and rebuilds the header.
+   * Constant identity (`[]`): AG Grid rebuilds the header whenever it receives a new `columnDefs`
+   * array, and nothing here varies per render any more.
    */
   const columnDefs = useMemo<ColDef<PartRow>[]>(() => [
     {
@@ -398,46 +363,8 @@ export default function PartsPage() {
       valueFormatter: (params) => params.value ?? '—',
     },
     {
-      // Stock on hand, with the unit folded in ("40 ea") rather than spending a
-      // whole column on it. Blank — not "0" — for parts that aren't stocked at
-      // all: a made-to-order part has no stock level, and printing 0 would read
-      // as "we're out" rather than "not applicable".
-      field: 'quantity',
-      headerName: 'On hand',
-      width: 130,
-      type: 'rightAligned',
-      // rowToPart in partsAccess coerces numeric columns at the access boundary,
-      // so params.value is already a real number.
-      valueFormatter: (params) => {
-        if (!params.data?.is_stocked) return '—';
-        const qty = ((params.value as number | null) ?? 0).toLocaleString(undefined, {
-          maximumFractionDigits: 4,
-        });
-        return params.data.primary_unit ? `${qty} ${params.data.primary_unit}` : qty;
-      },
-    },
-    {
-      // Derived at render from quantity + reorder_point — never stored, so it
-      // can't drift. This column is also the shop-wide shortage lens J4 links
-      // to via ?status=low; see the note on statusFilter above.
-      colId: 'status',
-      headerName: 'Status',
-      width: 140,
-      sortable: false,
-      cellStyle: { display: 'flex', alignItems: 'center' },
-      cellRenderer: (params: ICellRendererParams<PartRow>) => {
-        if (!params.data || !params.data.is_stocked) return null;
-        return (
-          <StockStatusChip
-            status={deriveStockStatus(params.data.quantity, params.data.reorder_point)}
-          />
-        );
-      },
-    },
-    {
-      // Outlined source chip — same visual treatment as the header card on
-      // the part detail page, just narrower (only the source dimension; stock
-      // level and status are their own columns above).
+      // Outlined source chip — same visual treatment as the header card on the part detail
+      // page. Source is the only classification axis a part has.
       field: 'source',
       headerName: 'Source',
       width: 130,
@@ -465,59 +392,19 @@ export default function PartsPage() {
         );
       },
     },
-    // ── Shortage-lens columns ────────────────────────────────────────────
-    ...(stockFilter === 'low' || stockFilter === 'out'
-      ? [
-          {
-            field: 'reorder_point' as const,
-            headerName: 'Reorder at',
-            width: 130,
-            type: 'rightAligned',
-            valueFormatter: (params: { value: unknown; data?: PartRow }) => {
-              if (params.value === null || params.value === undefined) return '—';
-              const n = (params.value as number).toLocaleString(undefined, {
-                maximumFractionDigits: 4,
-              });
-              return params.data?.primary_unit ? `${n} ${params.data.primary_unit}` : n;
-            },
-          },
-        ]
-      : []),
-    // "Short by" only on `low`. On `out` it would restate the reorder point on every row, since
-    // a part with nothing on hand is short by exactly that.
-    ...(stockFilter === 'low'
-      ? [
-          {
-            colId: 'short_by',
-            headerName: 'Short by',
-            width: 130,
-            type: 'rightAligned',
-            valueGetter: (params: { data?: PartRow }) =>
-              shortfall(params.data?.quantity, params.data?.reorder_point),
-            valueFormatter: (params: { value: unknown; data?: PartRow }) => {
-              if (params.value === null || params.value === undefined) return '—';
-              const n = (params.value as number).toLocaleString(undefined, {
-                maximumFractionDigits: 4,
-              });
-              return params.data?.primary_unit ? `${n} ${params.data.primary_unit}` : n;
-            },
-          },
-        ]
-      : []),
     {
       field: 'updated_at',
       headerName: 'Updated',
       width: 140,
       valueFormatter: (params) => formatDate(params.value as string | null | undefined),
     },
-  ], [stockFilter]);
+  ], []);
 
   const renderEmptyState = () => {
     const isFiltered =
       !!searchDebounced ||
       sourceFilter !== 'all' ||
-      completenessFilter !== 'all' ||
-      stockFilter !== 'all';
+      completenessFilter !== 'all';
     if (isFiltered) {
       return (
         <>
@@ -613,24 +500,6 @@ export default function PartsPage() {
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel id="parts-stock-label">Stock</InputLabel>
-          <Select
-            labelId="parts-stock-label"
-            value={stockFilter}
-            label="Stock"
-            onChange={(e) => {
-              setStockFilter(e.target.value as StockFilter);
-              clearSelection();
-            }}
-          >
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="stocked">Stocked</MenuItem>
-            <MenuItem value="low">Low stock</MenuItem>
-            <MenuItem value="out">Out of stock</MenuItem>
-          </Select>
-        </FormControl>
-
         {selectedIds.length > 0 && (
           <>
             <ExportCsvButton
@@ -650,28 +519,6 @@ export default function PartsPage() {
         )}
 
         <Box sx={{ flex: 1 }} />
-
-        {/* Unconditional now.
-
-            It used to render ONLY when locations were off, on the reasoning that with the flag
-            on you count a place rather than a catalogue and would reach it from the Storage
-            board. In practice that meant turning locations ON **removed** the entry point most
-            people look for, and left counting reachable from exactly one screen — the founder
-            looked for it here and concluded place-scoped counting did not exist.
-
-            Both are true at once: a place-scoped count starts from a place, and a shop-wide
-            count starts from the catalogue. This is the catalogue. `?from=parts` brings you
-            back here rather than to Storage.
-
-            This also drops the `featuresLoading` guard that existed only to stop the button
-            appearing and then vanishing — with nothing to gate on, there is nothing to wait for. */}
-        <Button
-          variant="outlined"
-          startIcon={<FactCheckOutlinedIcon />}
-          onClick={() => router.push(`/dashboard/${companyId}/inventory/count?from=parts`)}
-        >
-          Count Inventory
-        </Button>
 
         <Button
           variant="outlined"

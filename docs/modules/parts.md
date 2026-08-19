@@ -75,7 +75,6 @@ deal by overriding a price **on the quote**, never on the part. Both surfaces ar
 | part_name | Text | The part number, e.g. `AE36589E-RT` |
 | description | Text | Nullable |
 | source | Text | `made` \| `bought` (CHECK, default `made`). Made → routing + BOM; bought → procurement tiers |
-| is_stocked | Boolean | Carries on-hand inventory (default false) |
 | primary_unit | Text | Stocking/costing unit. Effectively NOT NULL via the `parts_requires_unit` CHECK |
 | quantity | Numeric | On-hand (default 0). Only ever changed through `inventory_transactions`, never the part form |
 | reorder_point | Numeric | Low-stock threshold, nullable |
@@ -258,40 +257,42 @@ admins can delete that attachment. Accepted — admins retain control.
 ### Parts list — `/dashboard/{companyId}/parts`
 
 AG Grid. Columns: **Part Name** (inline ⚠ marker when not yet priceable), **Description**,
-**On hand**, **Status**, **Source** (Made/Bought chip), **Updated**. No Category column (removed)
-and no Cost column — engineering/cost signals live on the detail page.
+**Source** (Made/Bought chip), **Updated**. No Category column (removed) and no Cost column —
+engineering/cost signals live on the detail page.
 
-**Parts is the single item master, including stock.** `/dashboard/{companyId}/inventory` was folded
-in on 2026-07-30 and now 307-redirects here (a plain `redirect`, not `permanentRedirect`, so nothing
-caches if it is ever revisited). **Withdrawn:** `/inventory` as its own list — wrong because it was
-`parts WHERE is_stocked` plus three columns with no unique capability, and its own module doc had
-called it *"a filtered view over `parts`"* since it was written. See
+**Parts is the item master. It carries no quantities.** `/dashboard/{companyId}/inventory` was
+folded in on 2026-07-30 and now 307-redirects here (a plain `redirect`, not `permanentRedirect`, so
+nothing caches if it is ever revisited). **Withdrawn:** `/inventory` as its own list — wrong because
+it was `parts WHERE is_stocked` plus three columns with no unique capability. See
 [inventory.md §5.12](inventory.md#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30).
+
+⚠ **The stock columns are gone, and that is the rule rather than an omission.** Until
+`parts.is_stocked` was dropped this grid also carried **On hand**, a derived **Status** chip, a
+**Stock filter** (All / Stocked / Low / Out, seeded from `?status=`) and two shortage-lens columns
+(**Reorder at**, **Short by**), plus a **Count Inventory** toolbar button. All of it moved to
+Storage, which went GA in the same change so it is somewhere every tenant can reach. Parts says what
+the shop makes and buys; Storage says how much there is and where. Do not add "just a quantity
+column" back — that split is the whole point of the removal.
 
 | Element | Behaviour + why |
 |---|---|
-| **On hand** | Folds the unit into the cell (`40 ea`) rather than spending a column. Shows `—` for a non-stocked part: a made-to-order part has no stock level, and `0` reads as *"we're out"* rather than *"not applicable"* |
-| **Status** | Derived at render from `quantity + reorder_point` via `deriveStockStatus` — never stored, so it cannot drift |
-| **Stock filter** | All / Stocked / Low / Out, seeded from `?status=`. This makes the page the **shop-wide shortage lens**: `JobPartMaterialsCard`'s *"N short"* chip links to `/parts?status=low`. Filters only ever narrow to *stocked* parts — a non-stocked part is neither low nor out, and including it would invent a shortage for a made-to-order part |
-| **Shortage-lens columns** | **Reorder at** appears only on `?status=low` and `?status=out`; **Short by** only on `low` (on `out` it would restate the reorder point on every row). A status chip alone does not answer "what do I need to buy" — you need the line you fell under and how far under. On the full catalogue they would be empty for most rows. `columnDefs` is memoised on `stockFilter`, else AG Grid rebuilds the header every render |
 | **Default sort** | Updated descending — people care about what they just worked on, not the alphabetical top; alphabetical is one click away. Server-side for the real columns (`part_name`, `source`, `updated_at`) |
 | **Search** | Server-side `ilike` across `part_name` **or** `description` |
 | **Client-side filters** | Source (All/Made/Bought), Completeness (All/Complete/Incomplete) |
 | **⚠ incomplete marker** | The marker and the Completeness filter read one set — `getPriceablePartIds` over the `get_priceable_part_ids` RPC, the same structural rule `getPartSetupStatus` applies on the detail page, so list and page can't disagree. Tooltip: *"Incomplete — needs setup before it can be quoted"*, with a legend under the grid spelling out what setup means (*"routing/materials, or a vendor cost"*) |
 | **Row click** | Opens the part workspace, `/parts/{id}?from=parts` — the `from` is what the workspace's Back link reads to name the list it came from |
-| **Toolbar** | Add Part, Import, **Count Inventory** |
+| **Toolbar** | Add Part, Import |
 | **Bulk (rows selected)** | **Delete (N)**, Export CSV |
 | **Pagination** | 25/page; selector 25 / 50 / 100 |
 | **Empty states** | `"No parts yet. Add your first part — made in-house or bought from a vendor."` (+ Import CSV / Add Part). Filtered-but-empty: `"No parts match these filters."` |
 
-⚠ **Count Inventory is unconditional.** *(This doc previously said it appears only with the
-`inventory_locations` flag off.)* **Withdrawn:** gate it on the flag, since with locations on you
-count a *place* and would reach it from the Storage board — wrong because turning locations **on**
-then *removed* the entry point most people look for and left counting reachable from exactly one
-screen; the founder looked here and concluded place-scoped counting did not exist. Both are true at
-once: a place-scoped count starts from a place, a shop-wide count starts from the catalogue, and
-this is the catalogue. `?from=parts` returns here. The `featuresLoading` guard went with it — it
-existed only to stop the button appearing and then vanishing.
+**Where Count Inventory went.** It sat on this toolbar, unconditionally, precisely because
+gating it on `inventory_locations` had once *removed* the entry point most people look for — the
+founder looked here and concluded place-scoped counting did not exist. Dropping the stock columns
+took the button with it, so that lesson had to be paid for a second way: `inventory_locations` is
+now **on by default**, which makes the Storage board a place every tenant actually has. Counting is
+reached from Storage, and from a part's own Inventory tab. `/inventory/count` itself is unchanged
+and still accepts `?from=`.
 
 ### Part create — `/dashboard/{companyId}/parts/new`
 
@@ -315,7 +316,7 @@ Tabs, URL-addressable via `?tab=`:
 | Tab | Slug | Shown |
 |---|---|---|
 | Workspace (default) | *(none)* | Always — identity, cost/pricing, routing, BOM |
-| Inventory | `inventory` | Only when `is_stocked` |
+| Inventory | `inventory` | Always — every part is stockable |
 | Usage | `usage` | Always — jobs and quotes referencing this part |
 | Files | `files` | Always |
 | Activity | `history` | Always. Slug stays `history` for deep-link back-compat |
@@ -566,12 +567,13 @@ Endpoints: `POST /api/parts/import/{analyze,analyze-unified,validate,execute}`.
 through `resolve_units_for_rows` — no unit at all is `missing_primary_unit`, a unit that won't
 normalize is `unknown_unit`.
 
-> **Withdrawn:** resolving units only for `is_stocked` rows — wrong because
+> **Withdrawn:** resolving units only for rows inferred as stocked — wrong because
 > `parts_requires_unit` makes a unit mandatory for **every** part, made or bought, stocked or not.
-> A filled unit on a non-stocked part was never resolved, so it fell into the "has a raw unit but no
+> A filled unit on such a part was never resolved, so it fell into the "has a raw unit but no
 > resolved unit" branch and was rejected as `unknown_unit` and skipped — even a perfectly good
-> "each". That is why filling in units still skipped ~7,700 parts of the Tangle export, whose parts
-> are `is_stocked = false`.
+> "each". That is why filling in units still skipped ~7,700 parts of the Tangle export. (The
+> inference this describes is itself gone now: `is_stocked` was dropped and every part is
+> stockable, so there is no stocked/non-stocked split for the importer to get wrong.)
 
 ---
 

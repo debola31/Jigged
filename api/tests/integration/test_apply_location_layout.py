@@ -130,11 +130,11 @@ def shop(db):
         rows = [location(f"Row {i + 1}", cabinet, i) for i in range(3)]
         foreign_cabinet = location("Their Cabinet", None, 0, other)
 
-        # quantity 0 at creation so auto_track_stocked_part seeds nothing; placement is explicit.
+        # quantity 0 at creation so seed_new_part_balance seeds nothing; placement is explicit.
         cur.execute(
             """
-            INSERT INTO parts (company_id, part_name, source, is_stocked, primary_unit, quantity)
-            VALUES (%s, %s, 'bought', true, 'each', 0) RETURNING id
+            INSERT INTO parts (company_id, part_name, source, primary_unit, quantity)
+            VALUES (%s, %s, 'bought', 'each', 0) RETURNING id
             """,
             (company, f"RESHAPE-{company[:8]}"),
         )

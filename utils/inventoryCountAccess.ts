@@ -1,7 +1,7 @@
 /**
  * Inventory count sheet — access layer (journey J9 in docs/modules/inventory.md).
  *
- * There is no count table. Loading a sheet is two batched reads (stocked parts, then all
+ * There is no count table. Loading a sheet is two batched reads (a page of parts, then all
  * their location balances in one query — never N+1 per part), and committing walks the lines
  * through `adjustStockAtLocation`, which already writes its `inventory_transactions` row — so
  * the count's audit trail comes free. There is one commit path, not two: since 20260802015837
@@ -11,8 +11,8 @@
  * independent fact, so line 50 failing doesn't invalidate lines 1-49.
  */
 import { getSupabase } from '@/lib/supabase';
-import { ID_CHUNK } from '@/lib/queryLimits';
-import { getStockedParts } from '@/utils/partsAccess';
+import { COUNT_PICKER_LIMIT, ID_CHUNK } from '@/lib/queryLimits';
+import { searchPartsForSelect } from '@/utils/partsAccess';
 import {
   adjustStockAtLocation,
   getBalancesForPart,
@@ -36,8 +36,8 @@ import type {
  *
  *  - one row per place holding `quantity > 0`, carrying THAT place's balance; plus
  *  - exactly one row at the company's system (`Unassigned`) bucket when a part holds stock
- *    nowhere — the opening count, since `trg_auto_track_stocked_part` seeds every stocked part
- *    there at 0.
+ *    nowhere — the opening count. `seed_new_part_balance` gives a part an opening balance only
+ *    when it is created carrying stock, so a part at 0 legitimately holds a row nowhere.
  *
  * The fallback row is the whole subtlety. Emitting rows only for places that hold stock would
  * make a part holding stock NOWHERE vanish from the sheet entirely — which deletes the opening
@@ -50,17 +50,32 @@ import type {
  * place while the real shelf kept its stale figure. That residue is deleted and the table now
  * CHECKs `quantity > 0`, so the rows this reads are exactly the places the part is.
  *
- * ## Cost
+ * ## Cost, and why this is server-searched
  *
- * No new query and no extra request: `getBalancesForParts` was already fetching every balance for
- * every stocked part to resolve one target per part. Only the row count changes, and only on the
- * sheet — the picker stays part-grained (see `groupByPart`).
+ * This used to read the whole stocked catalogue and filter it in the browser, which was
+ * defensible while `is_stocked` bounded it: the biggest real list was ~722 rows at Contour, not
+ * the 8,451-part catalogue. Dropping the flag removed that bound — every part is stockable now —
+ * so the same code would have loaded 8.4k rows unvirtualised AND fanned `getBalancesForParts` out
+ * from ~6 chunked queries to ~71.
+ *
+ * So the term goes to the server and the result is capped at `COUNT_PICKER_LIMIT`. Callers must
+ * surface the cap (see the picker's hint) rather than let a part silently not be there — the one
+ * failure mode a capped list has that an unbounded one does not.
+ *
+ * `searchPartsForSelect` is reused rather than reimplemented: it already does ILIKE over
+ * name + description, pages nothing, and returns exactly the four fields a candidate row needs.
+ * Its `updated_at DESC` ordering is what decides WHICH parts survive the cap (the ones being
+ * worked on), and the alphabetical sort below is what decides how they READ.
  */
 export async function loadCountCandidates(
   companyId: string,
   search: string = '',
+  limit: number = COUNT_PICKER_LIMIT,
 ): Promise<CountCandidate[]> {
-  const parts = await getStockedParts(companyId, search);
+  const found = await searchPartsForSelect(companyId, search, 'all', limit);
+  // Recently-touched decided the cut; part_name decides the reading order. A worksheet you walk
+  // is alphabetical or it is nothing.
+  const parts = [...found].sort((a, b) => a.part_name.localeCompare(b.part_name));
   if (parts.length === 0) return [];
 
   // `getBalancesForParts` already filters `quantity > 0`, pages past PostgREST's max_rows, and
@@ -77,7 +92,7 @@ export async function loadCountCandidates(
       partId: part.id,
       partName: part.part_name,
       description: part.description ?? null,
-      // Every stocked part has one — parts_requires_unit CHECKs it — but the column is
+      // Every part has one — parts_requires_unit CHECKs it — but the column is
       // nullable in the type, so fall back rather than render "null".
       unit: part.primary_unit ?? 'ea',
     };

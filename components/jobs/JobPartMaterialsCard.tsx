@@ -107,18 +107,18 @@ export default function JobPartMaterialsCard({
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Materials
           </Typography>
+          {/*
+            Deliberately NOT a link, and that is the third state this chip has had.
+            It pointed at `/inventory/shortages` (a route never built, so it 404'd), then at
+            `/dashboard/{id}/parts?status=low` once the Parts stock filter became the shop-wide
+            shortage lens. That filter is gone: Parts is the item master and carries no
+            quantities, so there is no shop-wide shortage lens to point at. An unknown query
+            param does not 404 — it is silently ignored — so keeping the href would have left a
+            chip that loads a full, unfiltered catalogue and looks like it worked. Plain text is
+            the honest answer until Storage grows a shortage view.
+          */}
           {shortCount > 0 && (
-            <Chip
-              size="small"
-              color="warning"
-              label={`${shortCount} short`}
-              component={NextLink}
-              // Was `/inventory/shortages` — a route that was never built, so this
-              // chip 404'd for anyone who clicked it. The shop-wide shortage lens is
-              // the Parts stock filter, which reads `?status=`.
-              href={`/dashboard/${companyId}/parts?status=low`}
-              clickable
-            />
+            <Chip size="small" color="warning" label={`${shortCount} short`} />
           )}
           {oddCount > 0 && (
             <Chip size="small" variant="outlined" label={`${oddCount} need attention`} />
@@ -185,9 +185,6 @@ function MaterialRow({ row, companyId }: { row: MaterialRequirement; companyId: 
             >
               <Chip size="small" color="warning" variant="outlined" label="Can't compare units" />
             </Tooltip>
-          )}
-          {row.status === 'not_stocked' && (
-            <Chip size="small" variant="outlined" label="Not stocked" />
           )}
           {row.status === 'archived' && (
             <Chip size="small" variant="outlined" label="Archived material" />

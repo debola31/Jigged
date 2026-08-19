@@ -254,7 +254,6 @@ export default function OperatorPartLookup({
         onChange={pick}
         // Stocked only: an operator looking for material means something the shop holds. A made
         // top-level product has no on-hand and would only pad the list.
-        kind="stocked"
         label="Find a part"
         // `medium`, not the shared default `small` — this is a phone in a workshop.
         size="medium"

@@ -497,7 +497,6 @@ export default function PartBomPanel({
           part_name: editingRow.child_part.part_name,
           description: editingRow.child_part.description,
           has_routing: false,
-          is_stocked: editingRow.child_part.is_stocked,
           source: editingRow.child_part.source,
           primary_unit: editingRow.child_part.primary_unit,
           quantity: 0,

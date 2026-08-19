@@ -21,6 +21,20 @@ test.describe('Parts and Routing workflow', () => {
     await navigateTo(page, 'Parts');
     await expect(page).toHaveURL(/\/parts/);
 
+    /*
+     * Parts is the item master and carries NO quantities — that is the rule the `is_stocked`
+     * removal established, and these four assertions are what hold it.
+     *
+     * Asserted here rather than in a jsdom unit test on purpose: there is no AG-Grid-in-jsdom
+     * precedent in this repo, and a grid rendered by a real browser is the only place a column
+     * header's absence means anything. Negative assertions are weak, so they are pinned where
+     * they are cheap and honest rather than given a fragile test file of their own.
+     */
+    await expect(page.getByRole('button', { name: /Count Inventory/i })).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: /^Stock$/i })).toHaveCount(0);
+    await expect(page.getByRole('columnheader', { name: /On hand/i })).toHaveCount(0);
+    await expect(page.getByRole('columnheader', { name: /^Status$/i })).toHaveCount(0);
+
     // "Add Part" navigates to the create-mode part workspace (/parts/new) —
     // the create modal was retired in the parts re-architecture. Identity
     // fields render directly on the page (the create view = the saved view).

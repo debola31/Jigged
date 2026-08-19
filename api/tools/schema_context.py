@@ -69,8 +69,7 @@ SCHEMA_CONTEXT = """
 - part_name: TEXT (unique per company)
 - description: TEXT
 - source: TEXT (CHECK 'made'|'bought'; default 'made') -- 'made' = produced in-shop (has a routing); 'bought' = procured from a vendor
-- is_stocked: BOOLEAN (default false) -- this part is tracked as on-hand stock
-- primary_unit: TEXT (required when is_stocked=true; e.g. 'ea', 'lb', 'ft')
+- primary_unit: TEXT (required for EVERY part; e.g. 'ea', 'lb', 'ft')
 - quantity: NUMERIC (default 0; current stock-on-hand, >= 0)
 - (Cost is computed live by compute_part_cost_at_qty(part_id, qty); no
   cost column on parts. For bought parts the cost comes from
@@ -78,11 +77,9 @@ SCHEMA_CONTEXT = """
 - reorder_point: NUMERIC (nullable; reorder when quantity drops to this)
 - preferred_vendor_id: UUID (FK -> vendors.id, nullable)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
-- The four (source, is_stocked) quadrants mean:
-    * (made,   false) → Custom Made (built to order)
-    * (made,   true)  → Sub-assembly (made AND stocked)
-    * (bought, true)  → Raw Material (vendor stock kept on hand)
-    * (bought, false) → Service / Drop-ship
+- There is no is_stocked column. EVERY part can carry stock and starts at quantity 0, so
+  "is this part stocked" is answered by quantity > 0, never by a flag. `source` is the only
+  classification axis: 'made' parts are produced in-shop, 'bought' parts are procured.
 
 ### part_pricing_tiers (volume-pricing tiers per part)
 - id: UUID (PK)
@@ -386,12 +383,11 @@ GROUP BY c.name
 ORDER BY revenue DESC
 LIMIT 5;
 
--- Stocked parts below their reorder point
+-- Parts below their reorder point
 SELECT part_name, quantity, reorder_point, primary_unit,
        (reorder_point - quantity) AS deficit
 FROM parts
 WHERE company_id = $1
-  AND is_stocked = true
   AND reorder_point IS NOT NULL
   AND quantity <= reorder_point
 ORDER BY (reorder_point - quantity) DESC;

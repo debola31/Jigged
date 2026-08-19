@@ -283,13 +283,15 @@ export default function PartWorkspace({
   // --- Tabs (URL-addressable via ?tab=) ---
   const visibleTabs = useMemo<PartTabDescriptor[]>(() => {
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
-    if (part?.is_stocked) tabs.push({ slug: 'inventory', label: 'Inventory' });
+    // Unconditional since is_stocked was dropped: every part is stockable, so every part
+    // has somewhere its stock lives — even when that is 0 at the Unassigned bucket.
+    tabs.push({ slug: 'inventory', label: 'Inventory' });
     tabs.push({ slug: 'usage', label: 'Usage' });
     tabs.push({ slug: 'files', label: 'Files' });
     // Slug stays 'history' so existing ?tab=history deep links keep working.
     tabs.push({ slug: 'history', label: 'Activity' });
     return tabs;
-  }, [part?.is_stocked]);
+  }, []);
 
   const tabParam = searchParams.get('tab') ?? 'workspace';
   const activeTab = visibleTabs.some((t) => t.slug === tabParam) ? tabParam : 'workspace';
@@ -330,7 +332,6 @@ export default function PartWorkspace({
   if (mode === 'create') {
     const createDefaults: Partial<PartFormData> = {};
     if (searchParams.get('source') === 'bought') createDefaults.source = 'bought';
-    if (searchParams.get('stocked') === '1') createDefaults.is_stocked = true;
 
     const handleCreated = (created: Part) => {
       const next = new URLSearchParams();
@@ -465,7 +466,7 @@ export default function PartWorkspace({
         />
       )}
 
-      {activeTab === 'inventory' && part.is_stocked && (
+      {activeTab === 'inventory' && (
         <InventoryTab
           part={part}
           partId={partId}

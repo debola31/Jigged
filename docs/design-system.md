@@ -148,7 +148,9 @@ dialogs and menus get solid `#111439` / `#1a1f4a` overrides instead.
 
 **Withdrawn:** the ladder "2 = standard cards · 3 = auth cards **and modals** · 4 = **app bar,
 floating elements**" — wrong at both ends. It omitted **0** and **1**, which are in use (flat
-`Accordion`s and `Paper` insets; the import `StatusCards`). Elevation 4 describes exactly one surface,
+`Accordion`s and `Paper` insets; [`RoutingViewer`](../components/routings/RoutingViewer.tsx) and
+[`UnitGridView`](../components/inventory/locations/UnitGridView.tsx) are `elevation={1}`). Elevation 4
+describes exactly one surface,
 [`app/admin/layout.tsx`](../app/admin/layout.tsx) — the operator app bar is `elevation={0}` and the
 dashboard [`Header`](../components/layout/Header.tsx) isn't an `AppBar` at all. And modals never sat
 on the ladder: `MuiDialog` takes a solid paper override instead, so its elevation is moot.
@@ -428,11 +430,11 @@ missing** — a greyed-out button with no explanation is a dead end. The standar
 - **[`MissingFieldsNotice`](../components/common/MissingFieldsNotice.tsx)** — render just above the
   submit button with an `items: string[]` of blocking reasons (returns `null` when empty), computed
   from the same conditions that drive the button's `disabled`. Callers:
-  [`FeedbackDialog`](../components/feedback/FeedbackDialog.tsx),
-  [`UnitOfMeasurementSelect`](../components/parts/UnitOfMeasurementSelect.tsx),
-  [`ConflictDialog`](../components/import/ConflictDialog.tsx). *(This doc cited `ConvertToJobModal`,
-  `MaterialRowEditor` and `CompanyShippingSettingsCard`; the first two exist but don't use the
-  notice, the third never existed.)*
+  [`FeedbackDialog`](../components/feedback/FeedbackDialog.tsx) and
+  [`UnitOfMeasurementSelect`](../components/parts/UnitOfMeasurementSelect.tsx). *(This doc cited
+  `ConvertToJobModal`, `MaterialRowEditor` and `CompanyShippingSettingsCard`; the first two exist
+  but don't use the notice, the third never existed. `ConflictDialog` was a third real caller until
+  the per-entity CSV import wizards were removed.)*
 - **Field-level markers** — also set `required` and `error`/`helperText` on the blocking inputs, so
   the error is visible at the field, not only in the summary.
 - **Typed inputs** — validate with [`lib/validators`](../lib/validators.ts) (`isValidEmail`,

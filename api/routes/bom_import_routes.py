@@ -11,21 +11,14 @@ of the child to see if `parent` is reachable. If yes, the edge would close a
 cycle.
 """
 
-import hashlib
-import json
 import logging
-import os
 
 import sentry_sdk
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends
 from supabase import Client
 
 from models.bom_import_models import (
-    ColumnMapping,
-    BomAnalyzeRequest,
-    BomAnalyzeResponse,
     BomValidateRequest,
     BomValidateResponse,
     BomValidationError,
@@ -33,83 +26,27 @@ from models.bom_import_models import (
     BomExecuteRequest,
     BomExecuteResponse,
     BomImportError,
-    BOM_SCHEMA,
 )
-from services.ai import get_provider
-from utils.rate_limiter import RateLimiter
 from utils.db_pagination import fetch_all_in
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/bom/import", tags=["bom-import"])
 
-# Rate limiter: 10 AI calls per minute per company
-ai_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
-# Cache directory for AI responses (dev only - avoids repeated API calls)
-CACHE_DIR = Path(__file__).parent.parent / ".cache" / "ai_responses" / "bom"
-CACHE_ENABLED = os.getenv("AI_CACHE_ENABLED", "true").lower() == "true"
+
+
 
 # Defensive bound for the recursive walk; matches the SQL trigger's bound.
 MAX_BOM_DEPTH = 50
 
 
-def _get_cache_key(company_id: str, headers: list[str]) -> str:
-    """Generate a cache key from company_id and headers."""
-    content = f"bom:{company_id}:{','.join(sorted(headers))}"
-    return hashlib.md5(content.encode()).hexdigest()
 
 
-def _get_cached_response(cache_key: str) -> BomAnalyzeResponse | None:
-    """Try to get a cached response."""
-    if not CACHE_ENABLED:
-        return None
-
-    cache_file = CACHE_DIR / f"{cache_key}.json"
-    if cache_file.exists():
-        try:
-            with open(cache_file) as f:
-                data = json.load(f)
-            return BomAnalyzeResponse(**data)
-        except Exception:
-            return None
-    return None
 
 
-def _save_to_cache(cache_key: str, response: BomAnalyzeResponse) -> None:
-    """Save response to cache."""
-    if not CACHE_ENABLED:
-        return
-
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{cache_key}.json"
-        with open(cache_file, "w") as f:
-            json.dump(response.model_dump(), f, indent=2)
-    except Exception:
-        pass
 
 
-def _get_column_samples(
-    headers: list[str],
-    sample_rows: list[list[str]],
-) -> dict[str, str]:
-    """Get one sample value per non-empty column."""
-    samples: dict[str, str] = {}
-
-    for row in sample_rows:
-        for i, header in enumerate(headers):
-            if header in samples:
-                continue
-
-            value = row[i].strip() if i < len(row) else ""
-            if value:
-                samples[header] = value
-
-        if len(samples) >= len(headers):
-            break
-
-    return samples
 
 
 def _walk_descendants_reaches(
@@ -150,88 +87,11 @@ def get_supabase() -> Client:
     return supabase
 
 
-@router.post("/analyze", response_model=BomAnalyzeResponse)
-async def analyze_csv(
-    request: BomAnalyzeRequest,
-    supabase: Client = Depends(get_supabase),
-):
-    """Analyze CSV headers and sample data to suggest column mappings for BOM rows."""
-    cache_key = _get_cache_key(request.company_id, request.headers)
-    cached = _get_cached_response(cache_key)
-    if cached:
-        return cached
-
-    if not ai_rate_limiter.check(request.company_id):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests. Please wait before trying again.",
-        )
-
-    column_samples = _get_column_samples(
-        headers=request.headers,
-        sample_rows=request.sample_rows,
-    )
-
-    try:
-        provider = await get_provider(supabase, request.company_id, "csv_mapping")
-
-        suggestions = await provider.suggest_column_mappings(
-            csv_headers=request.headers,
-            sample_rows=request.sample_rows,
-            target_schema=BOM_SCHEMA,
-            column_samples=column_samples,
-        )
-
-        mappings = []
-        discarded_columns = []
-        mapped_db_fields = set()
-
-        for suggestion in suggestions:
-            needs_review = suggestion.confidence < 0.7
-
-            if suggestion.db_field is None:
-                discarded_columns.append(suggestion.csv_column)
-            else:
-                mapped_db_fields.add(suggestion.db_field)
-
-            mappings.append(
-                ColumnMapping(
-                    csv_column=suggestion.csv_column,
-                    db_field=suggestion.db_field,
-                    confidence=suggestion.confidence,
-                    reasoning=suggestion.reasoning,
-                    needs_review=needs_review,
-                )
-            )
-
-        required_fields = [
-            field for field, info in BOM_SCHEMA.items() if info.get("required")
-        ]
-        unmapped_required = [f for f in required_fields if f not in mapped_db_fields]
-
-        response = BomAnalyzeResponse(
-            mappings=mappings,
-            unmapped_required=unmapped_required,
-            discarded_columns=discarded_columns,
-            ai_provider=provider.provider_name,
-        )
-
-        _save_to_cache(cache_key, response)
-
-        return response
-
-    except ValueError as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
 
 
-@router.post("/validate", response_model=BomValidateResponse)
+# No longer an HTTP route. The per-entity import wizards that called /validate are gone;
+# the only caller left is execute_import below, which needs the conflict report before it
+# writes. Kept as a plain function so that call keeps working.
 async def validate_import(
     request: BomValidateRequest,
     supabase: Client = Depends(get_supabase),

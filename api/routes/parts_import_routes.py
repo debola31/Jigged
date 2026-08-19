@@ -28,24 +28,16 @@ export updates parts in place rather than skipping or duplicating them. (No
 dependence on a `legacy_id` column; real ERP exports don't carry one.)
 """
 
-import hashlib
-import json
 import logging
-import os
 import re
 
 import sentry_sdk
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from supabase import Client
 
 from models.parts_import_models import (
-    PricingColumnPair,
-    PartAnalyzeRequest,
-    PartAnalyzeResponse,
-    ColumnMapping,
     PartValidateRequest,
     PartValidateResponse,
     PartValidationError,
@@ -53,146 +45,33 @@ from models.parts_import_models import (
     PartExecuteRequest,
     PartExecuteResponse,
     PartImportError,
-    PART_SCHEMA,
-    UNIFIED_PART_SCHEMA,
-    PRICING_COLUMN_PATTERNS,
     parse_bool,
 )
-from services.ai import get_provider
 from services.uom_normalizer import (
     normalize_uom_alias,
     resolve_units_for_rows,
 )
-from utils.rate_limiter import RateLimiter
 from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/parts/import", tags=["parts-import"])
 
-# Rate limiter: 10 AI calls per minute per company
-ai_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
-
-# Cache directory for AI responses (dev only - avoids repeated API calls)
-CACHE_DIR = Path(__file__).parent.parent / ".cache" / "ai_responses" / "parts"
-CACHE_ENABLED = os.getenv("AI_CACHE_ENABLED", "true").lower() == "true"
 
 
-def _get_cache_key(company_id: str, headers: list[str], variant: str = "parts") -> str:
-    """Generate a cache key from company_id and headers."""
-    content = f"{variant}:{company_id}:{','.join(sorted(headers))}"
-    return hashlib.md5(content.encode()).hexdigest()
 
 
-def _get_cached_response(cache_key: str) -> PartAnalyzeResponse | None:
-    """Try to get a cached response."""
-    if not CACHE_ENABLED:
-        return None
-
-    cache_file = CACHE_DIR / f"{cache_key}.json"
-    if cache_file.exists():
-        try:
-            with open(cache_file) as f:
-                data = json.load(f)
-            return PartAnalyzeResponse(**data)
-        except Exception:
-            return None
-    return None
 
 
-def _save_to_cache(cache_key: str, response: PartAnalyzeResponse) -> None:
-    """Save response to cache."""
-    if not CACHE_ENABLED:
-        return
-
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{cache_key}.json"
-        with open(cache_file, "w") as f:
-            json.dump(response.model_dump(), f, indent=2)
-    except Exception:
-        pass  # Silently fail cache writes
 
 
-def _detect_pricing_columns(headers: list[str]) -> list[PricingColumnPair]:
-    """Auto-detect pricing column pairs from headers."""
-    pricing_pairs: list[tuple[int, str, str]] = []  # (tier_num, qty_col, price_col)
-    headers_lower = {h.lower().replace(" ", ""): h for h in headers}
-    matched_columns: set[str] = set()
-
-    for qty_pattern, price_pattern in PRICING_COLUMN_PATTERNS:
-        qty_regex = re.compile(qty_pattern, re.IGNORECASE)
-        price_regex = re.compile(price_pattern, re.IGNORECASE)
-
-        for header_lower, original in headers_lower.items():
-            if original in matched_columns:
-                continue
-
-            qty_match = qty_regex.match(header_lower)
-            if qty_match:
-                tier_num = int(qty_match.group(1))
-                for price_lower, price_original in headers_lower.items():
-                    if price_original in matched_columns:
-                        continue
-
-                    price_match = price_regex.match(price_lower)
-                    if price_match and int(price_match.group(1)) == tier_num:
-                        pricing_pairs.append((tier_num, original, price_original))
-                        matched_columns.add(original)
-                        matched_columns.add(price_original)
-                        break
-
-    pricing_pairs.sort(key=lambda x: x[0])
-    return [
-        PricingColumnPair(qty_column=qty, price_column=price)
-        for _, qty, price in pricing_pairs
-    ]
 
 
-def _get_column_samples(
-    headers: list[str],
-    sample_rows: list[list[str]],
-    skip_columns: set[str],
-) -> dict[str, str]:
-    """Get one sample value per non-empty column."""
-    samples: dict[str, str] = {}
-
-    for row in sample_rows:
-        for i, header in enumerate(headers):
-            if header in skip_columns or header in samples:
-                continue
-
-            value = row[i].strip() if i < len(row) else ""
-            if value:
-                samples[header] = value
-
-        eligible_count = len(headers) - len(skip_columns)
-        if len(samples) >= eligible_count:
-            break
-
-    return samples
 
 
-def _transform_pricing_to_jsonb(
-    row: dict[str, str], pricing_columns: list[PricingColumnPair]
-) -> list[dict]:
-    """Transform pricing columns from a CSV row into JSONB array format."""
-    tiers = []
-    for pair in pricing_columns:
-        qty_str = row.get(pair.qty_column, "").strip()
-        price_str = row.get(pair.price_column, "").strip()
 
-        if qty_str and price_str:
-            try:
-                qty = int(float(qty_str))
-                price = round(float(price_str), 2)
-                if qty > 0 and price >= 0:
-                    tiers.append({"qty": qty, "price": price})
-            except ValueError:
-                continue
 
-    tiers.sort(key=lambda t: t["qty"])
-    return tiers
+
 
 
 def _has_routing_columns(mappings: dict[str, str]) -> bool:
@@ -210,16 +89,6 @@ def _has_routing_columns(mappings: dict[str, str]) -> bool:
     return bool(db_fields & routing_indicators)
 
 
-def _row_has_inventory_data(
-    row: dict[str, str],
-    reverse_mappings: dict[str, str],
-) -> bool:
-    """Detect if a row carries inventory data (quantity/unit/cost set)."""
-    for db_field in ("primary_unit", "quantity", "cost_per_unit"):
-        col = reverse_mappings.get(db_field)
-        if col and row.get(col, "").strip():
-            return True
-    return False
 
 
 def _row_has_procurement_data(
@@ -302,125 +171,15 @@ def _reject_customer_fields(request) -> None:
         )
 
 
-async def _run_analyze(
-    request: PartAnalyzeRequest,
-    supabase: Client,
-    schema: dict,
-    cache_variant: str,
-) -> PartAnalyzeResponse:
-    """Shared analyze implementation for both /analyze and /analyze-unified."""
-    cache_key = _get_cache_key(request.company_id, request.headers, variant=cache_variant)
-    cached = _get_cached_response(cache_key)
-    if cached:
-        return cached
-
-    if not ai_rate_limiter.check(request.company_id):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many requests. Please wait before trying again.",
-        )
-
-    pricing_columns = _detect_pricing_columns(request.headers)
-    pricing_column_names: set[str] = set()
-    for pair in pricing_columns:
-        pricing_column_names.add(pair.qty_column)
-        pricing_column_names.add(pair.price_column)
-
-    column_samples = _get_column_samples(
-        headers=request.headers,
-        sample_rows=request.sample_rows,
-        skip_columns=pricing_column_names,
-    )
-
-    headers_for_ai = [h for h in request.headers if h not in pricing_column_names]
-
-    try:
-        provider = await get_provider(supabase, request.company_id, "csv_mapping")
-
-        suggestions = await provider.suggest_column_mappings(
-            csv_headers=headers_for_ai,
-            sample_rows=request.sample_rows,
-            target_schema=schema,
-            column_samples=column_samples,
-        )
-
-        mappings = []
-        discarded_columns = []
-        mapped_db_fields = set()
-
-        for suggestion in suggestions:
-            needs_review = suggestion.confidence < 0.7
-
-            if suggestion.db_field is None:
-                discarded_columns.append(suggestion.csv_column)
-            else:
-                mapped_db_fields.add(suggestion.db_field)
-
-            mappings.append(
-                ColumnMapping(
-                    csv_column=suggestion.csv_column,
-                    db_field=suggestion.db_field,
-                    confidence=suggestion.confidence,
-                    reasoning=suggestion.reasoning,
-                    needs_review=needs_review,
-                )
-            )
-
-        for col in pricing_column_names:
-            if col not in discarded_columns:
-                discarded_columns.append(col)
-
-        required_fields = [
-            field for field, info in schema.items() if info.get("required")
-        ]
-        unmapped_required = [f for f in required_fields if f not in mapped_db_fields]
-
-        response = PartAnalyzeResponse(
-            mappings=mappings,
-            pricing_columns=pricing_columns,
-            unmapped_required=unmapped_required,
-            discarded_columns=discarded_columns,
-            ai_provider=provider.provider_name,
-        )
-
-        _save_to_cache(cache_key, response)
-
-        return response
-
-    except ValueError as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        )
 
 
-@router.post("/analyze", response_model=PartAnalyzeResponse)
-async def analyze_csv(
-    request: PartAnalyzeRequest,
-    supabase: Client = Depends(get_supabase),
-):
-    """Analyze CSV headers for the standard parts import (PART_SCHEMA)."""
-    return await _run_analyze(request, supabase, PART_SCHEMA, "parts")
 
 
-@router.post("/analyze-unified", response_model=PartAnalyzeResponse)
-async def analyze_csv_unified(
-    request: PartAnalyzeRequest,
-    supabase: Client = Depends(get_supabase),
-):
-    """Analyze CSV headers for the unified parts import (UNIFIED_PART_SCHEMA).
-
-    Unified imports may include any combination of inventory fields, classification
-    flags, and routing-operation columns on the same row.
-    """
-    return await _run_analyze(request, supabase, UNIFIED_PART_SCHEMA, "parts_unified")
 
 
-@router.post("/validate", response_model=PartValidateResponse)
+# No longer an HTTP route. The per-entity import wizards that called /validate are gone;
+# the only caller left is execute_import below, which needs the conflict report before it
+# writes. Kept as a plain function so that call keeps working.
 async def validate_import(
     request: PartValidateRequest,
     supabase: Client = Depends(get_supabase),

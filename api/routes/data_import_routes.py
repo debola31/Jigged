@@ -10,7 +10,7 @@ two steps that need the secret API key, each with a tiny payload:
   2. ``POST /narrative`` — the client-computed findings -> grounded plain-English prose.
 
 Both perform NO writes to any table and call no ``auth.admin``; their only database access
-is SELECTs (verify caller access, read the company feature flag, resolve the AI provider).
+is SELECTs (verify caller access, resolve the AI provider).
 They deliberately import no ``*_import_routes`` / execute path.
 """
 
@@ -44,14 +44,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/data-import", tags=["data-import"])
 
-FEATURE_FLAG = "data_import"
-
 MAX_FILES = 12
 MAX_HEADERS_PER_FILE = 300
 MAX_FINDINGS = 500  # findings are aggregated (small); bound the AI prompt anyway
 
 # Best-effort per-company limiter (weak on serverless cold starts; the meaningful bound
-# is the feature flag + caller authorization).
+# is caller authorization plus the fact that every call needs a human to upload files).
 _limiter = RateLimiter(max_requests=20, window_seconds=600)
 
 
@@ -95,34 +93,10 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
     return user_id
 
 
-def _feature_enabled(company_id: str, client: Client) -> bool:
-    """Opt-IN gate: true only when companies.settings.features.data_import is set.
-
-    Fails CLOSED on read error — an advisory extra shouldn't dark-launch on a DB blip.
-    """
-    try:
-        resp = (
-            client.table("companies")
-            .select("settings")
-            .eq("id", company_id)
-            .single()
-            .execute()
-        )
-        settings = (resp.data or {}).get("settings") or {}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to read company feature flags: %s", e)
-        return False
-    features = settings.get("features") or {}
-    raw = features.get(FEATURE_FLAG)
-    return raw is True or raw == "true"
-
-
 async def _authorize(request: Request, company_id: str) -> Client:
-    """Shared gate for both endpoints: caller auth + opt-in flag + rate limit."""
+    """Shared gate for both endpoints: caller auth + rate limit."""
     client = _service_client()
     await _verify_company_access(request, company_id, client)
-    if not _feature_enabled(company_id, client):
-        raise HTTPException(status_code=403, detail="Data import is not enabled for this company.")
     if not _limiter.check(company_id):
         raise HTTPException(
             status_code=429,

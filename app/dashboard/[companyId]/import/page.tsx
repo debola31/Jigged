@@ -25,7 +25,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import AIAnalysisLoading from '@/components/import/AIAnalysisLoading';
+import AIAnalysisLoading from '@/components/data-import/AIAnalysisLoading';
 import MultiFileDropzone from '@/components/data-import/MultiFileDropzone';
 import ColumnMappingStep from '@/components/data-import/ColumnMappingStep';
 import ImportReviewView from '@/components/data-import/ImportReviewView';

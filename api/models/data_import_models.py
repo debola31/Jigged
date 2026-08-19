@@ -84,7 +84,7 @@ class ErpAlternative(BaseModel):
 
 
 class ErpDetection(BaseModel):
-    """Detected source ERP. Mirrors MappingSuggestion's 0.0-1.0 confidence contract."""
+    """Detected source ERP. Confidence is 0.0-1.0, as everywhere in this layer."""
 
     source: str = "unknown"  # e.g. "jobboss2" | "e2" | "tangle" | "unknown" | free-form
     display_name: str = "Unknown"

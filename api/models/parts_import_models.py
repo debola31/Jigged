@@ -43,22 +43,8 @@ class PricingColumnPair(BaseModel):
     price_column: str
 
 
-class PartAnalyzeRequest(BaseModel):
-    """Request to analyze CSV and get mapping suggestions for parts."""
-
-    company_id: str
-    headers: list[str]
-    sample_rows: list[list[str]]  # First 5 rows of data
 
 
-class PartAnalyzeResponse(BaseModel):
-    """Response with AI-suggested column mappings for parts."""
-
-    mappings: list[ColumnMapping]
-    pricing_columns: list[PricingColumnPair]  # Auto-detected pricing column pairs
-    unmapped_required: list[str]  # Required DB fields with no mapping
-    discarded_columns: list[str]  # CSV columns that won't be imported
-    ai_provider: str  # Which AI was used
 
 
 class PartConflictInfo(BaseModel):

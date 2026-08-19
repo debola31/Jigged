@@ -16,61 +16,29 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from index import app
-from routes.parts_import_routes import get_supabase
+from types import SimpleNamespace
+from fastapi import HTTPException
+from routes.parts_import_routes import get_supabase, validate_import
+from models.parts_import_models import PartValidateRequest
+
+async def call_validate(request_data: dict):
+    """Exercise validate_import() the way execute_import does.
+
+    /validate stopped being an HTTP route when the per-entity import wizards were removed,
+    but the function is still load-bearing: execute_import calls it for the conflict report
+    before it writes. This mirrors httpx's response surface (`.status_code`, `.json()`) so
+    the rule assertions below did not have to change shape.
+    """
+    supabase = app.dependency_overrides[get_supabase]()
+    try:
+        result = await validate_import(PartValidateRequest(**request_data), supabase=supabase)
+    except HTTPException as exc:
+        # Bind before the lambda: Python unbinds `exc` at the end of the except block.
+        status, detail = exc.status_code, exc.detail
+        return SimpleNamespace(status_code=status, json=lambda: {"detail": detail})
+    return SimpleNamespace(status_code=200, json=result.model_dump)
 
 
-# Mock AI provider for analyze endpoint
-class MockAIProvider:
-    """Mock AI provider that returns predictable mappings."""
-
-    provider_name = "mock-ai"
-
-    async def suggest_column_mappings(self, csv_headers, sample_rows, target_schema, column_samples=None):
-        """Return mock column mapping suggestions."""
-        suggestions = []
-
-        # Map common column names to DB fields
-        mapping_rules = {
-            "part name": ("part_name", 0.95),
-            "part_no": ("part_name", 0.90),
-            "customer name": ("customer_name", 0.95),
-            "description": ("description", 0.90),
-            "notes": ("notes", 0.85),
-            "primary unit": ("primary_unit", 0.90),
-            "unit": ("primary_unit", 0.85),
-            "quantity": ("quantity", 0.90),
-            "qty on hand": ("quantity", 0.85),
-            "cost per unit": ("cost_per_unit", 0.90),
-            "cost": ("cost_per_unit", 0.80),
-            "preferred vendor": ("preferred_vendor_name", 0.85),
-        }
-
-        class Suggestion:
-            def __init__(self, csv_column, db_field, confidence, reasoning):
-                self.csv_column = csv_column
-                self.db_field = db_field
-                self.confidence = confidence
-                self.reasoning = reasoning
-
-        for header in csv_headers:
-            header_lower = header.lower().strip()
-            if header_lower in mapping_rules:
-                db_field, confidence = mapping_rules[header_lower]
-                suggestions.append(Suggestion(
-                    csv_column=header,
-                    db_field=db_field,
-                    confidence=confidence,
-                    reasoning=f"Matched '{header}' to {db_field}",
-                ))
-            else:
-                suggestions.append(Suggestion(
-                    csv_column=header,
-                    db_field=None,
-                    confidence=0.0,
-                    reasoning=f"No matching field for '{header}'",
-                ))
-
-        return suggestions
 
 
 # Mock Supabase client for validate/execute endpoints
@@ -251,96 +219,6 @@ async def test_client():
     app.dependency_overrides.clear()
 
 
-class TestPartsAnalyzeEndpoint:
-    """Tests for POST /api/parts/import/analyze"""
-
-    @pytest.mark.unit
-    async def test_analyze_returns_mappings(self, test_client):
-        """Returns 200 with column mappings when AI provider succeeds."""
-        request_data = {
-            "company_id": "test-company-id",
-            "headers": ["Part Name", "Description", "Material Cost", "Extra Column"],
-            "sample_rows": [
-                ["PART001", "Test Part", "10.50", "ignored"],
-                ["PART002", "Another Part", "15.00", "also ignored"],
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-
-        with patch("routes.parts_import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
-            mock_get_provider.return_value = MockAIProvider()
-
-            response = await test_client.post(
-                "/api/parts/import/analyze",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "mappings" in data
-        assert "pricing_columns" in data
-        assert "ai_provider" in data
-        assert data["ai_provider"] == "mock-ai"
-
-    @pytest.mark.unit
-    async def test_analyze_detects_pricing_columns(self, test_client):
-        """Auto-detects pricing column pairs like qty1/price1."""
-        request_data = {
-            "company_id": "test-company-id",
-            "headers": ["Part Name", "qty1", "price1", "qty2", "price2"],
-            "sample_rows": [
-                ["PART001", "1", "10.00", "10", "8.00"],
-                ["PART002", "1", "15.00", "10", "12.00"],
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-
-        with patch("routes.parts_import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
-            mock_get_provider.return_value = MockAIProvider()
-
-            response = await test_client.post(
-                "/api/parts/import/analyze",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert len(data["pricing_columns"]) == 2
-
-    @pytest.mark.unit
-    async def test_analyze_unified_endpoint(self, test_client):
-        """The /analyze-unified endpoint also returns mappings (uses UNIFIED_PART_SCHEMA)."""
-        request_data = {
-            "company_id": "test-company-id",
-            "headers": ["Part Name", "Primary Unit", "Quantity"],
-            "sample_rows": [
-                ["PART001", "lbs", "100"],
-            ],
-        }
-
-        app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-
-        with patch("routes.parts_import_routes.get_provider", new_callable=AsyncMock) as mock_get_provider:
-            mock_get_provider.return_value = MockAIProvider()
-
-            response = await test_client.post(
-                "/api/parts/import/analyze-unified",
-                json=request_data,
-            )
-
-        app.dependency_overrides.clear()
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "mappings" in data
 
 
 class TestPartsValidateEndpoint:
@@ -365,10 +243,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -398,10 +273,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -431,10 +303,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -471,7 +340,7 @@ class TestPartsValidateEndpoint:
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
-        response = await test_client.post("/api/parts/import/validate", json=request_data)
+        response = await call_validate(request_data)
         app.dependency_overrides.clear()
 
         assert response.status_code == 200
@@ -528,10 +397,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -563,7 +429,7 @@ class TestPartsValidateEndpoint:
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override(existing_parts, [])
-        response = await test_client.post("/api/parts/import/validate", json=request_data)
+        response = await call_validate(request_data)
         app.dependency_overrides.clear()
 
         assert response.status_code == 200
@@ -591,10 +457,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -615,10 +478,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -640,10 +500,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -696,10 +553,7 @@ class TestPartsValidateEndpoint:
             existing_parts=[], existing_vendors=existing_vendors
         )
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -728,10 +582,7 @@ class TestPartsValidateEndpoint:
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
 
-        response = await test_client.post(
-            "/api/parts/import/validate",
-            json=request_data,
-        )
+        response = await call_validate(request_data)
 
         app.dependency_overrides.clear()
 
@@ -1324,7 +1175,6 @@ class TestPartsExecuteEndpoint:
                 # importer should accept it and translate true→'made',
                 # false→'bought'.
                 "Is Manufacturable": "is_manufacturable",
-                "Is Stockable": "is_stockable",
                 "Unit": "primary_unit",
             },
             "pricing_columns": [],
@@ -1332,13 +1182,11 @@ class TestPartsExecuteEndpoint:
                 {
                     "Part Name": "SUB-ASSY-LEGACY",
                     "Is Manufacturable": "true",
-                    "Is Stockable": "true",
                     "Unit": "pcs",
                 },
                 {
                     "Part Name": "BOUGHT-LEGACY",
                     "Is Manufacturable": "false",
-                    "Is Stockable": "true",
                     "Unit": "pcs",
                 },
             ],

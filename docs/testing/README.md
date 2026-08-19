@@ -125,8 +125,11 @@ proves the wiring. If it passes, the fixtures are sound and a failure elsewhere 
 
 Stated rather than implied, and deliberately without counts:
 
-- **`csv-import.spec.ts` is CI-skipped** — it needs the FastAPI backend for AI column analysis.
-  Run it locally with the backend up, or filter with `--grep-invert "CSV Import"`.
+- **No E2E covers CSV import at all.** The one spec that did drove the retired per-entity
+  `/parts/import` wizard and was deleted with it; the guided importer at `/import` has never had
+  one — it is the `automation-pending (#367)` case below, and now the largest of them. *(This entry
+  previously said the spec was CI-skipped for want of a FastAPI backend; it ran in CI from the point
+  `e2e/run-stack.mjs` landed until the wizard was removed.)*
 - **Reload-persistence E2E coverage is partial.** Many write paths cite a unit test plus an
   `automation-pending (#367)` tag instead; #367 is open and is the tracking issue.
 - **Operator login and QR post-login routing have no automated coverage** (`postLoginPath`).

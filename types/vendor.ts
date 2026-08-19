@@ -49,12 +49,6 @@ export interface VendorWithPrimaryContact extends Vendor {
   primary_contact: VendorContact | null;
 }
 
-export interface VendorImportResult {
-  imported: number;
-  skipped: number;
-  errors: { row: number; reason: string }[];
-}
-
 export const EMPTY_VENDOR_FORM: VendorFormData = {
   name: '',
   address_line1: '',

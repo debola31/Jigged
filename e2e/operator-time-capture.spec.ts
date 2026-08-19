@@ -143,19 +143,54 @@ async function stopTimer(page: Page): Promise<void> {
   await recordButton(page).click();
   await expect(runningOnStep(page)).toBeHidden({ timeout: 30_000 });
 
-  // WHICHEVER BRANCH THE PAGE LANDS ON. The quantity defaults to the remaining
-  // balance, so this usually completes the step OUTRIGHT — and a full completion
-  // flips the page to the complete banner instead of "Undo all (n)". They are
-  // the same action wearing different words, and which one appears depends on
-  // seeded quantities this file does not control.
+  await returnStepToIdle(page);
+}
+
+/**
+ * Put the step back to "nothing running", WHICHEVER control the page is
+ * currently offering — re-deciding on every attempt.
+ *
+ * WHICHEVER BRANCH THE PAGE LANDS ON. The quantity defaults to the remaining
+ * balance, so a record usually completes the step OUTRIGHT — and a full
+ * completion flips the page to the complete banner instead of "Undo all (n)".
+ * They are the same action wearing different words, and which one appears
+ * depends on seeded quantities this file does not control.
+ *
+ * WHY THIS IS A RETRY LOOP AND NOT AN `if`. The two controls are mutually
+ * exclusive once the page settles, but it passes THROUGH states on the way
+ * there: immediately after the record, "Undo all (n)" is still mounted and
+ * DISABLED while the write is in flight, and the complete banner has not
+ * rendered yet. A check-then-act read taken inside that window commits to the
+ * Undo branch, and then `click()` parks on a disabled button for the whole
+ * 120s test timeout — Playwright is waiting for an element that will never
+ * become enabled because the page has moved on to the other control.
+ *
+ * That is exactly how this flaked on `main` on 2026-08-19 (E2E run 32275027423,
+ * which blocked a production deploy). The trace reads:
+ *
+ *     locator resolved to <button disabled ... Mui-disabled ...>
+ *     - element was detached from the DOM, retrying
+ *
+ * `toPass` re-runs the DECISION as well as the action, and the short per-click
+ * timeout fails fast into the next attempt instead of swallowing the run. The
+ * early return on `startButton` makes it idempotent, so a retry after a click
+ * that did land is a no-op rather than a second undo.
+ */
+async function returnStepToIdle(page: Page): Promise<void> {
   const undo = page.getByRole('button', { name: /undo all/i });
   await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
-  if (await completeBanner(page).isVisible()) {
-    await completeBanner(page).click();
-  } else {
-    await undo.click();
-  }
-  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+
+  await expect(async () => {
+    // Already idle — a previous attempt landed, or there was nothing to undo.
+    if (await startButton(page).isVisible()) return;
+
+    if (await completeBanner(page).isVisible()) {
+      await completeBanner(page).click({ timeout: 5_000 });
+    } else {
+      await undo.click({ timeout: 5_000 });
+    }
+    await expect(startButton(page)).toBeVisible({ timeout: 10_000 });
+  }).toPass({ timeout: 60_000 });
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -240,14 +275,7 @@ test.describe('operator time capture', () => {
     await expect(page.getByText(/recorded \d/i).first()).toBeVisible({ timeout: 30_000 });
 
     // Leave the seeded quantities as this file found them.
-    const undo = page.getByRole('button', { name: /undo all/i });
-    await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
-    if (await completeBanner(page).isVisible()) {
-      await completeBanner(page).click();
-    } else {
-      await undo.click();
-    }
-    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+    await returnStepToIdle(page);
   });
 
   test('recording a completion stops the timer', async ({ page }) => {
@@ -319,14 +347,7 @@ test.describe('operator time capture', () => {
     await expect(feedStartedRows(page)).toHaveCount(0);
 
     // Leave the seeded quantities as this file found them.
-    const undo = page.getByRole('button', { name: /undo all/i });
-    await undo.or(completeBanner(page)).first().waitFor({ timeout: 30_000 });
-    if (await completeBanner(page).isVisible()) {
-      await completeBanner(page).click();
-    } else {
-      await undo.click();
-    }
-    await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
+    await returnStepToIdle(page);
   });
 
   test('the Me tab journal carries no aggregate figure', async ({ page }) => {

@@ -37,6 +37,7 @@
     "jspdf-autotable": "^5.0.7",
     "next": "16.2.11",
     "online-3d-viewer": "^0.18.0",
+    "pdfjs-dist": "^6.2.108",
     "posthog-js": "^1.408.1",
     "posthog-node": "^5.46.1",
     "qrcode": "^1.5.4",

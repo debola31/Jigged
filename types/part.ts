@@ -79,7 +79,7 @@ export interface PartNote {
  * closed set is enforced by a DB CHECK. `other` is defensive — the upload
  * validator only admits pdf/step/dwg, so it isn't reachable on the happy path.
  */
-export type PartAttachmentKind = 'pdf' | 'step' | 'dwg' | 'other';
+export type PartAttachmentKind = 'pdf' | 'step' | 'dwg' | 'dxf' | 'other';
 
 /**
  * An engineering file attached to a part — a drawing (PDF), CAD model (STEP), or

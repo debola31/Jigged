@@ -207,6 +207,9 @@ export interface Citation {
  * else in backticks is a column name, a flag, an env var or prose.
  */
 const CODE_PATH_PREFIXES = [
+  // Legal documents: cited by docs/modules/legal-acceptance.md and the export
+  // changelog. Without this prefix those citations are silently UNCHECKED.
+  'public/legal/',
   '__tests__/',
   'e2e/',
   'api/',

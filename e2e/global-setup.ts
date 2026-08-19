@@ -35,6 +35,7 @@
 
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 import { TEST_EMAIL, TEST_PASSWORD } from './fixtures/test-data';
+import { ensureTermsAccepted } from './fixtures/terms';
 
 /** Stable identifiers the specs match against. Changing these is a breaking
  *  change to every spec. */
@@ -687,6 +688,7 @@ export default async function globalSetup(): Promise<void> {
   const companyId = await ensureCompany(supabase);
   await ensureUserCompanyAccess(supabase, user.id, companyId);
   await ensureCompanyBilling(supabase, companyId);
+  await ensureTermsAccepted(supabase, user.id);
 
   const vendorId = await ensureVendor(supabase, companyId);
   const wcInternalId = await ensureWorkCenter(
@@ -785,6 +787,8 @@ export default async function globalSetup(): Promise<void> {
     // The count sheet and the Storage board are both behind this. Without it
     // `inventory-count.spec.ts` lands on a redirect.
     inventory_locations: true,
+    // The Parts page renders "Add from Drawings" only behind this flag, so
+    // `drawing-import.spec.ts` cannot find the button without it.
   });
 
   // A part in TWO places — the shape the count sheet exists to handle, and the one

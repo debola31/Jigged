@@ -655,10 +655,11 @@ describe('partsAccess utilities', () => {
     });
 
     it('re-throws a duplicate-name error when no archived part matches (a live duplicate)', async () => {
-      // 23505 with no archived same-name row → reviveArchivedPartByName returns null,
-      // so the duplicate is surfaced (a genuine live duplicate). It now arrives as a real Error
-      // carrying user-facing copy rather than the raw Supabase object, which `err instanceof
-      // Error` rejected — the reason "Failed to create part" reached the user instead.
+      // 23505 with nothing to reclaim → `reclaim_part_name` returns false, so the
+      // duplicate is surfaced. That is the LIVE collision, and it is the one case the
+      // full unique constraint still exists to catch. It arrives as a real Error
+      // carrying user-facing copy rather than the raw Supabase object, which `err
+      // instanceof Error` rejected — "Failed to create part" reached the user instead.
       mockQueryBuilder.data = null;
       mockQueryBuilder.error = { message: 'Insert failed', code: '23505' };
 
@@ -668,6 +669,66 @@ describe('partsAccess utilities', () => {
       expect(rejection.code).toBe('23505');
       expect(rejection.cause).toEqual({ message: 'Insert failed', code: '23505' });
     });
+
+  /**
+   * Re-using an archived part's name creates a NEW part.
+   *
+   * It used to revive: the archived row came back wearing the new form's values,
+   * carrying whatever stock, costs and BOM history it was archived holding. That
+   * is right for a shop re-importing its own catalogue and wrong for one importing
+   * a customer's drawings, where the number belongs to whoever sent it.
+   *
+   * The archived row gives the name up instead, and ONLY here on the collision.
+   * Renaming at archive time would rewrite how every past quote and invoice reads,
+   * because those still resolve `parts.part_name` live.
+   */
+  describe('reclaiming an archived name', () => {
+    const mockFormData: PartFormData = {
+      part_name: 'NEW001',
+      description: 'New Part',
+      source: 'made',
+      is_stocked: false,
+      primary_unit: 'ea',
+      quantity: 0,
+      reorder_point: null,
+      preferred_vendor_id: null,
+    };
+
+    it('moves the archived namesake aside and inserts again', async () => {
+      // The first insert collides with the archived row.
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = { message: 'duplicate key', code: '23505' };
+
+      // Reclaiming frees the name, so the retry is an INSERT that succeeds. An
+      // UPDATE of the archived row would have come back with the OLD id, which is
+      // exactly the behaviour being removed.
+      mockSupabase.rpc.mockImplementationOnce(async () => {
+        mockQueryBuilder.data = { id: 'brand-new', part_name: 'NEW001' };
+        mockQueryBuilder.error = null;
+        return { data: true, error: null };
+      });
+
+      const result = await createPart('company-1', mockFormData);
+
+      expect(mockSupabase.rpc).toHaveBeenCalledWith('reclaim_part_name', {
+        p_company_id: 'company-1',
+        p_name: 'NEW001',
+      });
+      expect(result.id).toBe('brand-new');
+    });
+
+    it('surfaces the duplicate when the collision was with a LIVE part', async () => {
+      mockQueryBuilder.data = null;
+      mockQueryBuilder.error = { message: 'duplicate key', code: '23505' };
+      // Nothing archived to reclaim. Two live parts of one name stays an error —
+      // that is the case the full unique constraint still exists to catch.
+      mockSupabase.rpc.mockImplementationOnce(async () => ({ data: false, error: null }));
+
+      const rejection = await createPart('company-1', mockFormData).catch((e) => e);
+      expect(rejection).toBeInstanceOf(Error);
+      expect(rejection.message).toMatch(/already exists/i);
+    });
+  });
 
     it('tells a lapsed shop about its subscription instead of "Failed to create part"', async () => {
       // The screenshot this whole change came from.

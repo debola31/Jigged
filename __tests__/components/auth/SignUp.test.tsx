@@ -33,6 +33,9 @@ describe('SignUp', () => {
     email?: string;
     password?: string;
     confirm?: string;
+    /** Leave the clickwrap box unticked. Submit stays disabled, which is the
+     *  point of the tests that pass this. */
+    skipTerms?: boolean;
   } = {}) {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText(/first name/i), opts.firstName ?? 'Ada');
@@ -43,8 +46,12 @@ describe('SignUp', () => {
       screen.getByLabelText(/confirm password/i),
       opts.confirm ?? opts.password ?? 'hunter22',
     );
+    if (!opts.skipTerms) await user.click(termsBox());
     await user.click(screen.getByRole('button', { name: /create account/i }));
   }
+
+  const termsBox = () => screen.getByRole('checkbox', { name: /i agree to the terms/i });
+  const submitButton = () => screen.getByRole('button', { name: /create account/i });
 
   it('renders the create-account form', () => {
     render(<SignUp />);
@@ -64,6 +71,9 @@ describe('SignUp', () => {
     await user.type(screen.getByLabelText(/email/i), 'a@b.co');
     await user.type(screen.getByLabelText(/^password/i), 'hunter22');
     await user.type(screen.getByLabelText(/confirm password/i), 'hunter22');
+    // Consent is now a precondition for submit being clickable at all, so this
+    // test has to give it before it can exercise the name validation behind it.
+    await user.click(termsBox());
     await user.click(screen.getByRole('button', { name: /create account/i }));
 
     expect(
@@ -153,6 +163,91 @@ describe('SignUp', () => {
       expect(call.options.data.first_name).toBe('Grace');
       expect(call.options.data.last_name).toBe('Hopper');
       expect(call.options.data.display_name).toBe('Grace Hopper');
+    });
+  });
+
+  describe('clickwrap consent', () => {
+    it('starts with the agreement box unchecked', () => {
+      // A pre-ticked box is not assent, and is the most common reason a
+      // clickwrap is held unenforceable.
+      render(<SignUp />);
+      expect(termsBox()).not.toBeChecked();
+    });
+
+    it('keeps Create Account disabled until the terms box is ticked', async () => {
+      const user = userEvent.setup();
+      render(<SignUp />);
+      expect(submitButton()).toBeDisabled();
+      await user.click(termsBox());
+      expect(submitButton()).toBeEnabled();
+    });
+
+    it('does not create an account while the box is unticked', async () => {
+      const user = userEvent.setup();
+      render(<SignUp />);
+      // Deliberately does NOT click submit: the button is disabled, and
+      // user-event refuses a pointer interaction on it. That refusal IS the
+      // assertion -- a filled-in form with no consent cannot be sent at all.
+      await user.type(screen.getByLabelText(/first name/i), 'Ada');
+      await user.type(screen.getByLabelText(/last name/i), 'Lovelace');
+      await user.type(screen.getByLabelText(/email/i), 'ada@example.com');
+      await user.type(screen.getByLabelText(/^password/i), 'hunter22');
+      await user.type(screen.getByLabelText(/confirm password/i), 'hunter22');
+
+      expect(submitButton()).toBeDisabled();
+      expect(sharedSupabase.auth.signUp).not.toHaveBeenCalled();
+    });
+
+    /**
+     * interaction-standards.md permits a real `disabled` prop for "a stable lock
+     * whose disabled state is itself meaningful, paired with a VISIBLE reason
+     * (not hover-only)". Here the unticked box, labelled with the very sentence
+     * being agreed to and sitting directly above the button, IS that reason --
+     * so the separate "Before you can accept:" notice was restating what the
+     * control already said. This asserts the reason is on screen and reachable,
+     * which is what the standard actually requires.
+     */
+    it('explains the disabled button with the labelled checkbox itself', () => {
+      render(<SignUp />);
+      // MUI renders the input visually-hidden behind a styled span, so presence
+      // plus accessible name is the meaningful probe, not toBeVisible().
+      const box = termsBox();
+      expect(box).toBeInTheDocument();
+      expect(box).toHaveAccessibleName(/agree to the terms of service and privacy policy/i);
+      expect(screen.getByRole('link', { name: /terms of service/i })).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
+      // And not by restating it in a separate notice above the button.
+      expect(screen.queryByText(/before you can/i)).not.toBeInTheDocument();
+    });
+
+    /**
+     * The "linked inline directly beside it" half of the requirement. Consent is
+     * only informed if the documents are reachable from the control itself.
+     */
+    it('links both documents inline in the label', () => {
+      render(<SignUp />);
+      expect(screen.getByRole('link', { name: /terms of service/i })).toHaveAttribute(
+        'href',
+        '/terms',
+      );
+      expect(screen.getByRole('link', { name: /privacy policy/i })).toHaveAttribute(
+        'href',
+        '/privacy',
+      );
+    });
+
+    /**
+     * THE FORGERY CASE. FormControlLabel wraps the input in a <label>, so a
+     * click anywhere inside toggles the box. If opening the Terms also ticked
+     * the box, the user would return to a record of assent they never gave.
+     */
+    it('does not tick the box when the user opens a document to read it', async () => {
+      const user = userEvent.setup();
+      render(<SignUp />);
+      await user.click(screen.getByRole('link', { name: /terms of service/i }));
+      expect(termsBox()).not.toBeChecked();
+      await user.click(screen.getByRole('link', { name: /privacy policy/i }));
+      expect(termsBox()).not.toBeChecked();
     });
   });
 });

@@ -1,0 +1,62 @@
+{
+  "documents": {
+    "tos": {
+      "current": 1,
+      "versions": [
+        {
+          "version": 1,
+          "effective_date": "2026-08-18",
+          "requires_reacceptance": true,
+          "sha256": "26824e1103f9b8178e402f3417edf35e2be88151f86b29f48b9f321af1a2ca44",
+          "bytes": 4806,
+          "effective_date_appears_in_body": true
+        }
+      ]
+    },
+    "privacy": {
+      "current": 1,
+      "versions": [
+        {
+          "version": 1,
+          "effective_date": "2026-06-20",
+          "requires_reacceptance": true,
+          "sha256": "b9b7420fa888b52d1426412bfb3e701b8ed8814fc2a4da29f1292ee459f1f0ed",
+          "bytes": 154273,
+          "effective_date_appears_in_body": true
+        }
+      ]
+    }
+  },
+  "incorporated": [
+    {
+      "id": "common-paper-cloud-service-agreement",
+      "version": "2.1",
+      "path": "docs/legal-archive/common-paper-cloud-service-agreement-v2.1.html",
+      "source_url": "https://commonpaper.com/standards/cloud-service-agreement/2.1/",
+      "retrieved_at": "2026-08-18",
+      "sha256": "b4242769bf8b13da82539ecf93ee3fcb9314ee47f0014bf0f842b4208fc7a5ba",
+      "bytes": 118455,
+      "incorporated_by": [
+        {
+          "document_type": "tos",
+          "version": 1
+        }
+      ]
+    }
+  ],
+  "source_exports": [
+    {
+      "id": "jigged-tos-common-paper-export",
+      "for": {
+        "document_type": "tos",
+        "version": 1
+      },
+      "path": "docs/legal-archive/jigged-tos-v1-common-paper-export.raw.html",
+      "extracted_from": "Jigged Common Paper TOS - 08182026 - HTML.docx",
+      "sha256": "27ab3b5750300a2dca54b2990d1449cda38abbb35144271e15c15d4ae0596c24",
+      "bytes": 4898,
+      "repairs": 5,
+      "changelog": "docs/legal-archive/tos-v1-export-repairs.md"
+    }
+  ]
+}

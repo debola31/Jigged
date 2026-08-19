@@ -50,7 +50,13 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import posthog from 'posthog-js';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import * as Sentry from '@sentry/nextjs';
+
 import { getSupabase } from '@/lib/supabase';
+import { toError } from '@/lib/supabaseErrors';
+import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
+import { recordTermsAcceptance } from '@/lib/legal/acceptClient';
+import { fetchAcceptedVersions, documentsNeedingAcceptance } from '@/utils/termsAccess';
 import { setLastCompany, homePathForRole, hasAnyCompanyAccess } from '@/utils/companyAccess';
 import { getEdgeFunctionUrl } from '@/lib/supabase';
 import { AuthLayout } from '@/components/auth';
@@ -88,6 +94,15 @@ export default function AcceptInvitePage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  /**
+   * Whether this person still owes an agreement. THREE states, never a boolean:
+   * 'unknown' means the check did not complete, and on this surface that fails
+   * toward SHOWING the box. An extra row in an append-only table costs nothing;
+   * a missing one costs the record. (The gate makes the opposite call, because
+   * there the failure would be blocking someone out.)
+   */
+  const [needsTerms, setNeedsTerms] = useState<'yes' | 'no' | 'unknown'>('unknown');
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
   const [showPassword, setShowPassword] = useState(false);
@@ -356,6 +371,26 @@ export default function AcceptInvitePage() {
       // Set as last company
       await setLastCompany(userId, companyId);
 
+      // The clickwrap record. Placed HERE -- after access, before the redirect --
+      // and deliberately best-effort.
+      //
+      // The ordering above is load-bearing (see the header comment) and
+      // accept_invitation is not idempotent, so access must not become
+      // contingent on a later write. If this fails, the invitee is a member with
+      // no acceptance row, which TermsGate notices on their very next page load
+      // and collects through the same server path, with NO special case. That
+      // one-code-path property is exactly what makes best-effort safe here.
+      //
+      // captureException IS correct: this is a fetch, not a Supabase .from(), so
+      // the Sentry Supabase integration does not cover it.
+      try {
+        await recordTermsAcceptance({ acceptedVia: 'invite_accept', companyId });
+      } catch (termsErr) {
+        Sentry.captureException(toError(termsErr, 'Failed to record terms acceptance'), {
+          tags: { area: 'legal-acceptance', surface: 'invite_accept' },
+        });
+      }
+
       posthog.identify(userId, { email: invitation.email });
       posthog.capture('invitation accepted', {
         role: invitation.role,
@@ -372,10 +407,30 @@ export default function AcceptInvitePage() {
     }
   }
 
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    fetchAcceptedVersions(userId)
+      .then((rows) => {
+        if (!cancelled) setNeedsTerms(documentsNeedingAcceptance(rows).length ? 'yes' : 'no');
+      })
+      .catch(() => {
+        // "Couldn't check" is never "already agreed".
+        if (!cancelled) setNeedsTerms('unknown');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   /** Existing account: one tap, nothing to fill in. */
   async function handleJoin() {
     // Name comes from what their account already knows. Falls back to the local part of the
     // invited email so the team list never shows a blank row.
+    if (needsTerms !== 'no' && !termsAccepted) {
+      setError('Please agree to the Terms of Service and Privacy Policy');
+      return;
+    }
     const fromMetadata = `${firstName.trim()} ${lastName.trim()}`.trim();
     const fullName = fromMetadata || (invitation?.email.split('@')[0] ?? '');
     await acceptAndRedirect(fullName);
@@ -403,6 +458,10 @@ export default function AcceptInvitePage() {
     }
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+    if (!termsAccepted) {
+      setError('Please agree to the Terms of Service and Privacy Policy');
       return;
     }
 
@@ -515,10 +574,31 @@ export default function AcceptInvitePage() {
               </Typography>
             )}
 
+            {/*
+              An existing user joining a SECOND company has already agreed, as a
+              natural person, to the current documents -- consent is by the
+              person, not by the membership, so re-asking someone who is already
+              current reads as broken software. The box appears only when they
+              are genuinely behind. An UNKNOWN status fails toward SHOWING it:
+              an extra row in an append-only table costs nothing, a missing one
+              costs the record.
+            */}
+            {needsTerms !== 'no' && (
+              <>
+                <TermsConsentCheckbox
+              checked={termsAccepted}
+              onChange={setTermsAccepted}
+              surface="invite_accept"
+            />
+              </>
+            )}
+
             <Button
               variant="contained"
               fullWidth
               size="large"
+              disabled={needsTerms !== 'no' && !termsAccepted}
+              sx={{ mt: 2 }}
               onClick={grantedCompanyId
                 ? () => router.replace(homePathForRole(invitation?.role, grantedCompanyId))
                 : handleJoin}
@@ -647,11 +727,19 @@ export default function AcceptInvitePage() {
               }}
             />
 
+            <TermsConsentCheckbox
+              checked={termsAccepted}
+              onChange={setTermsAccepted}
+              surface="invite_accept"
+            />
+
             <Button
               type="submit"
               variant="contained"
               fullWidth
               size="large"
+              disabled={!termsAccepted}
+              sx={{ mt: 2 }}
             >
               Accept Invitation
             </Button>

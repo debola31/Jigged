@@ -1,7 +1,8 @@
 // Typed Supabase client (typed-client rollout). Aliased so the 30 call
 // sites stay untouched. See CLAUDE.md "Typed Supabase client".
 import { getSupabase } from '@/lib/supabase';
-import { assertDeleted, toFriendlyError } from '@/lib/supabaseErrors';
+import * as Sentry from '@sentry/nextjs';
+import { assertDeleted, toError, toFriendlyError } from '@/lib/supabaseErrors';
 import type { Database } from '@/types/database';
 
 // Insert payload for the parts table. company_id is supplied at the call
@@ -750,13 +751,18 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
     .single();
 
   if (error) {
-    // A unique part_name collision (23505) with an ARCHIVED part means the user is
-    // reusing a name they previously archived. Name is the natural identity here, so
-    // revive that row (un-archive + apply the new form values) instead of blocking. A
-    // collision with a LIVE part is a genuine duplicate — re-throw the original error.
+    // A `part_name` collision (23505) with an ARCHIVED part used to REVIVE it: the
+    // archived row came back wearing the new form's values. That is right for a shop
+    // re-importing its own catalogue and wrong for one importing a customer's
+    // drawings, where the number belongs to whoever sent it — and it meant a part
+    // could quietly inherit an unrelated part's history.
+    //
+    // Now the archived row gives the name up (`<name> (archived)`) and this insert is
+    // retried, so reuse CREATES. A collision with a LIVE part is a genuine duplicate
+    // and the original error stands.
     if (error.code === '23505') {
-      const revived = await reviveArchivedPartByName(companyId, formData);
-      if (revived) return revived;
+      const retried = await createAfterReclaimingName(companyId, insertPayload, formData);
+      if (retried) return retried;
     }
     console.error('Error creating part:', error);
     throw toFriendlyError(error, { entity: 'part' });
@@ -769,44 +775,47 @@ export async function createPart(companyId: string, formData: PartFormData): Pro
 }
 
 /**
- * Revive the archived part that holds `formData.part_name` for this company, applying
- * the new form values and clearing `deleted_at`. Returns the revived part, or null when
- * the colliding row is *live* (a real duplicate the caller should surface as an error).
- * There is at most one row per (company_id, part_name) — the full unique constraint.
+ * Move an archived namesake aside, then insert again.
+ *
+ * Returns the new part, or null when nothing was reclaimed — which means the
+ * collision was with a LIVE part and the caller's duplicate error is correct.
+ *
+ * The rename is deliberately NOT done when a part is archived. Quotes, jobs,
+ * packing slips and QuickBooks pushes all read `parts.part_name` live, so renaming
+ * eagerly would stamp "(archived)" across the history of every part a shop ever
+ * retired. Doing it here means only a name somebody is actively taking moves, and
+ * in that case the shop has just reassigned the number on purpose.
  */
-async function reviveArchivedPartByName(
+async function createAfterReclaimingName(
   companyId: string,
+  insertPayload: ReturnType<typeof formDataToInsert> & { company_id: string },
   formData: PartFormData,
 ): Promise<Part | null> {
   const supabase = getSupabase();
-  const name = formData.part_name.trim();
 
-  const { data: existing } = await supabase
-    .from('parts')
-    .select('id, deleted_at')
-    .eq('company_id', companyId)
-    .eq('part_name', name)
-    .maybeSingle();
-
-  // No archived match (or the collision was with a live part) → let the caller throw.
-  if (!existing || existing.deleted_at === null) return null;
+  const { data: reclaimed, error: reclaimError } = await supabase.rpc('reclaim_part_name', {
+    p_company_id: companyId,
+    p_name: formData.part_name.trim(),
+  });
+  // `.rpc()` is outside the Supabase integration's automatic capture, so this one
+  // reports itself. A failure here is not "the name was live" — it is a broken
+  // reclaim, and swallowing it would surface as a confusing duplicate error.
+  if (reclaimError) {
+    Sentry.captureException(toError(reclaimError, 'reclaim_part_name'));
+    return null;
+  }
+  if (!reclaimed) return null;
 
   const { data, error } = await supabase
     .from('parts')
-    .update({
-      ...formDataToInsert(formData),
-      deleted_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', existing.id)
+    .insert(insertPayload)
     .select(PART_COLUMNS)
     .single();
 
   if (error) {
-    console.error('Error reviving archived part:', error);
+    console.error('Error creating part after reclaiming its name:', error);
     throw toFriendlyError(error, { entity: 'part' });
   }
-
   return rowToPart(data as PartRow);
 }
 

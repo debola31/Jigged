@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+
 import TermlyContent from '@/components/marketing/TermlyContent';
+import LegalDocumentHeader from '@/components/marketing/LegalDocumentHeader';
+import { loadLegalDocument } from '@/lib/legal/documents';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy – Jigged',
@@ -9,10 +10,14 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
-  const html = readFileSync(
-    join(process.cwd(), 'public', 'legal', 'privacy.html'),
-    'utf-8'
-  );
+  const doc = loadLegalDocument('privacy');
 
-  return <TermlyContent html={html} />;
+  return (
+    <TermlyContent
+      html={doc.html}
+      header={
+        <LegalDocumentHeader type="privacy" version={doc.version.version} isCurrent={doc.isCurrent} />
+      }
+    />
+  );
 }

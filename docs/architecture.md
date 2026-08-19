@@ -141,7 +141,7 @@ every list also by `deleted_at IS NULL` (§16).
 |---|---|
 | `getAllX(companyId)` | Full list, **batched 1000 rows/request** past the PostgREST row cap. |
 | `getX(id)` / `getXWithRelations(id)` | By-id — deliberately does **not** filter `deleted_at`. |
-| `createX` / `updateX` | Create revives an archived same-name row on `23505` (§16). |
+| `createX` / `updateX` | Create revives an archived same-name row on `23505` — except `createPart`, which reclaims the name and creates (§16). |
 | `softDeleteX` / `bulkSoftDeleteX` | Stamps `deleted_at`; bulk writes chunk at **100 ids**. |
 
 **Server-side pagination exists only where a list is genuinely unbounded** — today
@@ -371,6 +371,17 @@ above.)*
 | **Supabase service-role key** | Needs `auth.admin.*` or `auth.users`, unreachable with the anon key | Admin company management |
 | **Complex multi-step business logic** | Validation pipelines, conflict detection, batch/transactional guarantees beyond one RPC | Import validate/execute |
 | **Third-party secret or inbound webhook** | A restricted vendor key can't live client-side, and the vendor must POST to a URL we own | Stripe checkout/portal/webhook, QuickBooks OAuth |
+
+**Service-role work from the Next server is not by itself a FastAPI trigger.** The criterion above
+is about `auth.admin.*` and `auth.users`, which genuinely need the Python client. A plain
+service-role table write that also needs *user-scoped* auth is better placed in a Next Route Handler
+or server action — [`app/actions/waitlist.ts`](../app/actions/waitlist.ts) and
+[`app/legal/accept/route.ts`](../app/legal/accept/route.ts) both do this. Two reasons it matters:
+every FastAPI auth helper in this repo is **company-scoped**, and a user-scoped write (terms
+acceptance happens before a company exists) has no helper to reuse; and a value that lives in the
+Next bundle — the legal document hash — would otherwise have to be agreed across two deployments
+built from one commit. Note `vercel.json` rewrites `/api/:path*` to the Python function, so such a
+handler must live outside `/api`.
 
 #### 8.2 When to Use Supabase Client (Frontend)
 
@@ -602,11 +613,24 @@ only ever **one row per name**, and reusing an archived name **revives** it:
 
 - **Import** (`api/routes/*_import_routes.py`): each upsert payload sets
   `deleted_at = None`, so `DO UPDATE` un-archives and updates the row.
-- **Manual create** (`createPart` / `createVendor` / `createCustomer` /
-  `createWorkCenter`): the `checkXNameExists` pre-check is scoped to **live** rows
-  so an archived name doesn't falsely block; on the insert's `23505` the create
-  path calls `reviveArchivedXByName`. A collision with a **live** row is still a
-  genuine duplicate error.
+- **Manual create** (`createVendor` / `createCustomer` / `createWorkCenter`): the
+  `checkXNameExists` pre-check is scoped to **live** rows so an archived name
+  doesn't falsely block; on the insert's `23505` the create path calls
+  `reviveArchivedXByName`. A collision with a **live** row is still a genuine
+  duplicate error.
+- **Parts are the exception, since 2026-08-18.** `createPart` calls
+  `reclaim_part_name(company_id, name)`, which renames an ARCHIVED holder to
+  `<name> (archived)` (then `(archived 2)`, …) and retries the insert, so reuse
+  **creates**. Reviving gave a part built from someone else's drawing the archived
+  part's stock, costs and BOM edges. `parts_import_routes.py` reclaims the batch's
+  names before its upsert so the two paths cannot disagree.
+
+  **The rename is lazy on purpose.** Part names are read live by quotes, jobs,
+  packing slips and QuickBooks (§15's remaining gap), so renaming at archive time
+  would restamp the history of every part a shop ever retired. Reclaiming only when
+  a name is actually taken confines it to numbers deliberately reassigned. There is
+  consequently **no way back for an archived part in the UI** — reuse no longer
+  revives one, and no Trash/Restore surface exists.
 
 **Parts also detach BOM edges on archive.** Archiving must honestly change derived
 numbers (no silent read-path fallback). The `archive_parts(uuid[])` RPC, in one
@@ -644,7 +668,7 @@ retention/purge job must carry the `company_id` tenant predicate under RLS.
 
 | Entity | "Delete" behaviour | Reuse-by-name | Notes |
 |---|---|---|---|
-| parts | archive; `archive_parts` RPC also strips BOM-child edges | revives | impact dialog shows quote/job/BOM-cost counts |
+| parts | archive; `archive_parts` RPC also strips BOM-child edges | **creates new** (`reclaim_part_name` renames the archived holder) | impact dialog shows quote/job/BOM-cost counts |
 | customers, vendors, work_centers | archive (`UPDATE deleted_at`) | revives | import upsert + manual create both revive |
 | customer_contacts, customer_carrier_accounts | archive (`archiveCustomerContact` / `archiveCarrierAccount`) | n/a — customer-scoped, no company-wide name key | children of a customer; their list reads filter, and documents' retained FKs still resolve |
 | jobs | archive (`UPDATE deleted_at`) | n/a | `cancelled` production status is separate; records-of-value guards removed |

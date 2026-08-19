@@ -512,7 +512,9 @@ export default function PartWorkspace({
             </Box>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            You can bring it back by re-creating or re-importing the same name.
+            Quotes, jobs and BOMs that use it keep working — it just stops appearing in
+            lists, searches and pickers. Re-using the name later creates a NEW part rather
+            than bringing this one back.
           </Typography>
         </DialogContent>
         <DialogActions>

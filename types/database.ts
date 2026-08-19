@@ -2091,6 +2091,64 @@ export type Database = {
           },
         ]
       }
+      part_customer_references: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_drawing_number: string | null
+          customer_id: string
+          customer_part_number: string
+          customer_revision: string | null
+          id: string
+          part_id: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_drawing_number?: string | null
+          customer_id: string
+          customer_part_number: string
+          customer_revision?: string | null
+          id?: string
+          part_id: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_drawing_number?: string | null
+          customer_id?: string
+          customer_part_number?: string
+          customer_revision?: string | null
+          id?: string
+          part_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_customer_references_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_customer_references_customer_fk"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_customer_references_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       part_location_stock: {
         Row: {
           company_id: string
@@ -3297,6 +3355,56 @@ export type Database = {
         }
         Relationships: []
       }
+      terms_acceptances: {
+        Row: {
+          accepted_at: string
+          accepted_via: string
+          company_id: string | null
+          document_sha256: string
+          document_type: string
+          id: string
+          ip_address: unknown
+          ip_source: string | null
+          user_agent: string | null
+          user_id: string
+          version: number
+        }
+        Insert: {
+          accepted_at?: string
+          accepted_via: string
+          company_id?: string | null
+          document_sha256: string
+          document_type: string
+          id?: string
+          ip_address?: unknown
+          ip_source?: string | null
+          user_agent?: string | null
+          user_id: string
+          version: number
+        }
+        Update: {
+          accepted_at?: string
+          accepted_via?: string
+          company_id?: string | null
+          document_sha256?: string
+          document_type?: string
+          id?: string
+          ip_address?: unknown
+          ip_source?: string | null
+          user_agent?: string | null
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "terms_acceptances_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_company_access: {
         Row: {
           company_id: string
@@ -4070,6 +4178,7 @@ export type Database = {
           viewer_name: string
         }[]
       }
+      part_has_cost_basis: { Args: { p_part_id: string }; Returns: boolean }
       part_playbook_notes: {
         Args: {
           p_exclude_job_id?: string
@@ -4118,6 +4227,10 @@ export type Database = {
         Returns: {
           role_name: string
         }[]
+      }
+      reclaim_part_name: {
+        Args: { p_company_id: string; p_name: string }
+        Returns: boolean
       }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }
@@ -4177,6 +4290,13 @@ export type Database = {
           table_name: string
         }[]
       }
+      terms_acceptance_write_leaks: {
+        Args: never
+        Returns: {
+          detail: string
+          leak_kind: string
+        }[]
+      }
       transfer_stock: {
         Args: {
           p_converted_quantity: number
@@ -4194,6 +4314,13 @@ export type Database = {
       viewer_excluded_from_metrics: {
         Args: { p_access_id: string }
         Returns: boolean
+      }
+      work_center_usage: {
+        Args: { p_company_id: string }
+        Returns: {
+          uses: number
+          work_center_id: string
+        }[]
       }
     }
     Enums: {

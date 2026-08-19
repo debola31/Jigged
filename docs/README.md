@@ -47,7 +47,9 @@ criterion · [inventory.md](modules/inventory.md)
 **Office and platform:** [dashboard.md](modules/dashboard.md) ·
 [ai-insights.md](modules/ai-insights.md) — its table allow/denylist is a security boundary ·
 [data-import.md](modules/data-import.md) · [demo-mode.md](modules/demo-mode.md) ·
-[invitation-system.md](modules/invitation-system.md)
+[invitation-system.md](modules/invitation-system.md) ·
+[legal-acceptance.md](modules/legal-acceptance.md) — the clickwrap record, and why a shipped
+legal document is frozen
 
 ## Testing and runbooks
 

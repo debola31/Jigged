@@ -119,6 +119,20 @@ test.describe('Add parts from drawings', () => {
     // Every row now carries the station count — one entry, three routings.
     await expect(page.getByText(/^1 station$/)).toHaveCount(3);
 
+    // And unticking is the way back. "Apply to the other 30" is one click that
+    // writes thirty routings; without this, undoing it meant opening every part.
+    await page.getByRole('checkbox', { name: /Add operations/i }).uncheck();
+    await expect(page.getByText(/^1 station$/)).toHaveCount(0);
+    await page.getByRole('checkbox', { name: /Add operations/i }).check();
+    await expect(page.getByText(/^1 station$/)).toHaveCount(0);
+
+    // Re-route so the rest of the journey still has work on it.
+    await page.getByRole('button', { name: /Set up E2E-DRAW-1/i }).click();
+    await page.getByRole('textbox', { name: /Search work centres/i }).first().fill('E2E Internal');
+    await page.getByTestId('station-option').first().click();
+    await page.getByRole('button', { name: /Apply this routing to the other 2 parts/i }).click();
+    await expect(page.getByText(/^1 station$/)).toHaveCount(3);
+
     // ── Filing is the outcome ──
     // No quote hand-off: a part is only quotable once someone says how long its
     // stations take, and an untimed operation is deliberately not a cost basis.

@@ -155,7 +155,23 @@ export default function DrawingWorkspaceStep({
    * expanded with nothing in it. Done here rather than in an effect watching the
    * flags: this IS the moment the decision is made.
    */
+  /**
+   * Unticking a box CLEARS what it added, and that is the point of it.
+   *
+   * "Apply this routing to the other 30 parts" is one click that writes thirty
+   * routings, and until now nothing undid it — you would have opened each part and
+   * cleared it by hand, which is worse than the typing the button saved. Unticking
+   * the box that produced them is the reverse of the box that produced them.
+   *
+   * Safe to be blunt about: nothing has been created yet, so this discards a plan
+   * rather than data, and re-applying is the same handful of clicks it was.
+   */
   const setWants = (work: boolean, materials: boolean) => {
+    if (!work && wantWork) {
+      onWorkChange(new Map());
+      setRowTimes(new Set());
+    }
+    if (!materials && wantMaterials) onMaterialsChange(new Map());
     setWantWork(work);
     setWantMaterials(materials);
     if (!work && !materials) setOpenStem(null);

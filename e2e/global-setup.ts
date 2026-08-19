@@ -793,7 +793,6 @@ export default async function globalSetup(): Promise<void> {
     inventory_locations: true,
     // The Parts page renders "Add from Drawings" only behind this flag, so
     // `drawing-import.spec.ts` cannot find the button without it.
-    drawing_import: true,
   });
 
   // A part in TWO places — the shape the count sheet exists to handle, and the one

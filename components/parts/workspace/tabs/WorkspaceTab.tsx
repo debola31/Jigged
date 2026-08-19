@@ -103,7 +103,7 @@ export default function WorkspaceTab({
         item(g.part_id, g.part_name, 'leaf', 'has no vendor cost'),
       ),
       ...pricingGaps.missing_op_rates.map((g) =>
-        item(g.part_id, g.part_name, 'op', 'has an operation with no labour rate'),
+        item(g.part_id, g.part_name, 'op', 'has an operation with no rate or no time'),
       ),
     ];
   }, [pricingGaps, partId]);

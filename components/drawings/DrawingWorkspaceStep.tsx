@@ -42,6 +42,8 @@ import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import FormGroup from '@mui/material/FormGroup';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import Divider from '@mui/material/Divider';
@@ -60,6 +62,7 @@ import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 import RoutingOperationsList from '@/components/routings/RoutingOperationsList';
+import StationStrip from '@/components/drawings/StationStrip';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { valueOf, type DrawingRowValues } from '@/types/drawingImport';
 import { unreadableMessage, type BuiltRow } from '@/lib/drawingImportExtract';
@@ -79,11 +82,8 @@ interface Props {
   components: ComponentPlan;
   onComponentsChange: (next: ComponentPlan) => void;
   onBack: () => void;
-  onCreate: (thenQuote: boolean) => void;
+  onCreate: () => void;
   creating: boolean;
-  /** True while title blocks are still being read. Never blocks anything. */
-  reading: boolean;
-  readProgress: { done: number; total: number } | null;
   onAssist: () => void;
   assistFailed: boolean;
   customerId: string | null;
@@ -115,16 +115,49 @@ export default function DrawingWorkspaceStep({
   onBack,
   onCreate,
   creating,
-  reading,
-  readProgress,
   onAssist,
   assistFailed,
   customerId,
 }: Props) {
   const [openStem, setOpenStem] = useState<string | null>(null);
+  /**
+   * Filing is the whole job for most people, so the screen opens as a plain list
+   * of parts and descriptions — nothing to expand, no columns about work.
+   *
+   * Operations and materials are each a separate decision with a separate cost:
+   * stations are recall, material costs are a lookup, and TIMES are a consensus
+   * nobody reaches at an import screen. Asking for them up front made a two-minute
+   * job look like an afternoon. Ticking a box is the user saying "I want to do
+   * that part now", and only then does the table grow the column and the rows
+   * become expandable.
+   */
+  const [wantWork, setWantWork] = useState(false);
+  const [wantMaterials, setWantMaterials] = useState(false);
+  const expandable = wantWork || wantMaterials;
+
+  /**
+   * Unticking the last one closes whatever row was open — otherwise a panel stays
+   * expanded with nothing in it. Done here rather than in an effect watching the
+   * flags: this IS the moment the decision is made.
+   */
+  const setWants = (work: boolean, materials: boolean) => {
+    setWantWork(work);
+    setWantMaterials(materials);
+    if (!work && !materials) setOpenStem(null);
+  };
   /** The bulk editor, above the table — see the button that opens it. */
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkOps, setBulkOps] = useState<OperationRowData[]>([]);
+  /**
+   * Times are opt-in, per editor.
+   *
+   * Which stations a part visits is recall; how long it takes there is a
+   * consensus the shop may not have reached. Defaulting to the six-field editor
+   * asked the slow question first and invited a made-up number, so the strip is
+   * the default and the full editor is a link away for anyone who does know.
+   */
+  const [bulkTimes, setBulkTimes] = useState(false);
+  const [rowTimes, setRowTimes] = useState<Set<string>>(new Set());
 
   const included = useMemo(() => rows.filter((r) => !r.excluded), [rows]);
   const summary = useMemo(
@@ -237,18 +270,10 @@ export default function DrawingWorkspaceStep({
           </Typography>
 
           {/*
-            A LINE, not a progress bar. Nothing here waits on it — descriptions
-            arrive while people work — and a bar reads as "wait for me".
+            The read has already finished by the time this renders — descriptions
+            are settled, not arriving. This is only the way back when it failed.
           */}
-          {reading && (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-              <AutoAwesomeIcon sx={{ fontSize: 14, verticalAlign: 'text-bottom', mr: 0.5 }} />
-              Filling in material and finish
-              {readProgress ? ` — ${readProgress.done} of ${readProgress.total}` : ''}. Carry on.
-            </Typography>
-          )}
-
-          {assistFailed && !reading && (
+          {assistFailed && (
             <Button size="small" startIcon={<AutoAwesomeIcon />} onClick={onAssist} sx={{ mt: 1 }}>
               Read the title blocks again
             </Button>
@@ -268,34 +293,91 @@ export default function DrawingWorkspaceStep({
 
       <Card sx={{ mb: 2 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Button variant="outlined" onClick={() => setBulkOpen((o) => !o)} disabled={creating}>
-              {withWork > 0 ? 'Change the work for every part' : 'Set the work for every part'}
-            </Button>
-            <Typography variant="caption" color="text.secondary">
-              Most packages are one kind of part made one way. Set it once here, then adjust any
-              part that differs on its own row.
-            </Typography>
-          </Box>
+          <FormGroup row sx={{ gap: 3 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={wantWork}
+                  onChange={(e) => setWants(e.target.checked, wantMaterials)}
+                  disabled={creating}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2">Add operations</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Which stations each part goes through
+                  </Typography>
+                </Box>
+              }
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={wantMaterials}
+                  onChange={(e) => setWants(wantWork, e.target.checked)}
+                  disabled={creating}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2">Add materials</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {withCutList > 0
+                      ? `${withCutList} drawing${withCutList === 1 ? '' : 's'} list${withCutList === 1 ? 's' : ''} components`
+                      : 'None of these drawings list components'}
+                  </Typography>
+                </Box>
+              }
+            />
+          </FormGroup>
 
-          <Collapse in={bulkOpen} unmountOnExit>
+          {wantWork && (
             <Box sx={{ mt: 2 }}>
-              <RoutingOperationsList
-                rows={bulkOps}
-                onChange={setBulkOps}
-                companyId={companyId}
-                disabled={creating}
-              />
-              <Button
-                variant="contained"
-                sx={{ mt: 1 }}
-                onClick={applyBulk}
-                disabled={creating || bulkOps.length === 0}
-              >
-                Apply to all {included.length} part{included.length === 1 ? '' : 's'}
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Button variant="outlined" onClick={() => setBulkOpen((o) => !o)} disabled={creating}>
+                  {withWork > 0 ? 'Change the work for every part' : 'Set the work for every part'}
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  Most packages are one kind of part made one way. Set it once here, then adjust any
+                  part that differs on its own row.
+                </Typography>
+              </Box>
+
+              <Collapse in={bulkOpen} unmountOnExit>
+                <Box sx={{ mt: 2 }}>
+                  {bulkTimes ? (
+                    <RoutingOperationsList
+                      rows={bulkOps}
+                      onChange={setBulkOps}
+                      companyId={companyId}
+                      disabled={creating}
+                    />
+                  ) : (
+                    <StationStrip
+                      companyId={companyId}
+                      value={bulkOps}
+                      onChange={setBulkOps}
+                      disabled={creating}
+                      subject="these parts"
+                    />
+                  )}
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1.5, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="contained"
+                      onClick={applyBulk}
+                      disabled={creating || bulkOps.length === 0}
+                    >
+                      Apply to all {included.length} part{included.length === 1 ? '' : 's'}
+                    </Button>
+                    <Button size="small" onClick={() => setBulkTimes((t) => !t)} disabled={creating}>
+                      {bulkTimes ? 'Just the stations' : 'Set times and rates too'}
+                    </Button>
+                  </Box>
+                </Box>
+              </Collapse>
             </Box>
-          </Collapse>
+          )}
         </CardContent>
       </Card>
 
@@ -305,12 +387,13 @@ export default function DrawingWorkspaceStep({
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell padding="checkbox" />
+                  {/* No caret column until there is something behind it. */}
+                  {expandable && <TableCell padding="checkbox" />}
                   <TableCell padding="checkbox" />
                   <TableCell>Part</TableCell>
                   <TableCell>Description</TableCell>
-                  <TableCell>Work</TableCell>
-                  <TableCell>Made of</TableCell>
+                  {wantWork && <TableCell>Work</TableCell>}
+                  {wantMaterials && <TableCell>Made of</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -333,15 +416,17 @@ export default function DrawingWorkspaceStep({
                         sx={{ opacity: row.excluded ? 0.4 : 1 }}
                         data-testid="drawing-row"
                       >
-                        <TableCell padding="checkbox">
-                          <IconButton
-                            size="small"
-                            onClick={() => setOpenStem(open ? null : row.stem)}
-                            aria-label={`Set up ${row.stem}`}
-                          >
-                            {open ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
-                          </IconButton>
-                        </TableCell>
+                        {expandable && (
+                          <TableCell padding="checkbox">
+                            <IconButton
+                              size="small"
+                              onClick={() => setOpenStem(open ? null : row.stem)}
+                              aria-label={`Set up ${row.stem}`}
+                            >
+                              {open ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
+                            </IconButton>
+                          </TableCell>
+                        )}
                         <TableCell padding="checkbox">
                           <Tooltip title={row.excluded ? 'Include this part' : 'Leave this one out'}>
                             <Checkbox
@@ -397,64 +482,94 @@ export default function DrawingWorkspaceStep({
                             inputProps={{ 'aria-label': `Description for ${row.stem}` }}
                           />
                         </TableCell>
-                        <TableCell>
-                          {ops.length > 0 ? (
-                            <Chip
-                              size="small"
-                              color="success"
-                              label={`${ops.length} operation${ops.length === 1 ? '' : 's'}`}
-                              onClick={() => setOpenStem(row.stem)}
-                            />
-                          ) : (
-                            <Button size="small" onClick={() => setOpenStem(row.stem)}>
-                              Add work
-                            </Button>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {row.cutList ? (
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              label={`${row.cutList.rows.length}`}
-                              title={`This drawing lists ${row.cutList.rows.length} components`}
-                              onClick={() => setOpenStem(row.stem)}
-                            />
-                          ) : (
-                            <Typography variant="caption" color="text.secondary">
-                              —
-                            </Typography>
-                          )}
-                        </TableCell>
+                        {wantWork && (
+                          <TableCell>
+                            {ops.length > 0 ? (
+                              <Chip
+                                size="small"
+                                color="success"
+                                label={`${ops.length} station${ops.length === 1 ? '' : 's'}`}
+                                onClick={() => setOpenStem(row.stem)}
+                              />
+                            ) : (
+                              <Button size="small" onClick={() => setOpenStem(row.stem)}>
+                                Add work
+                              </Button>
+                            )}
+                          </TableCell>
+                        )}
+                        {wantMaterials && (
+                          <TableCell>
+                            {row.cutList ? (
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                label={`${row.cutList.rows.length}`}
+                                title={`This drawing lists ${row.cutList.rows.length} components`}
+                                onClick={() => setOpenStem(row.stem)}
+                              />
+                            ) : (
+                              <Typography variant="caption" color="text.secondary">
+                                —
+                              </Typography>
+                            )}
+                          </TableCell>
+                        )}
                       </TableRow>
 
-                      <TableRow>
+                      <TableRow sx={{ display: expandable ? undefined : 'none' }}>
                         <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
-                          <Collapse in={open} unmountOnExit>
+                          <Collapse in={open && expandable} unmountOnExit>
                             <Box sx={{ py: 2, px: 1 }}>
+                              {wantWork && (
+                                <>
                               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                                 How {name} is made
                               </Typography>
-                              <RoutingOperationsList
-                                rows={ops}
-                                onChange={(next) => setWork(row.stem, next)}
-                                companyId={companyId}
-                                disabled={creating}
-                              />
-                              {ops.length > 0 && included.length > 1 && (
+                              {rowTimes.has(row.stem) ? (
+                                <RoutingOperationsList
+                                  rows={ops}
+                                  onChange={(next) => setWork(row.stem, next)}
+                                  companyId={companyId}
+                                  disabled={creating}
+                                />
+                              ) : (
+                                <StationStrip
+                                  companyId={companyId}
+                                  value={ops}
+                                  onChange={(next) => setWork(row.stem, next)}
+                                  disabled={creating}
+                                  subject={name}
+                                />
+                              )}
+                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 1.5, flexWrap: 'wrap' }}>
+                                {ops.length > 0 && included.length > 1 && (
+                                  <Button size="small" onClick={() => applyToAll(row.stem)}>
+                                    Apply this work to the other {included.length - 1} part
+                                    {included.length - 1 === 1 ? '' : 's'}
+                                  </Button>
+                                )}
                                 <Button
                                   size="small"
-                                  sx={{ mt: 1 }}
-                                  onClick={() => applyToAll(row.stem)}
+                                  onClick={() =>
+                                    setRowTimes((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(row.stem)) next.delete(row.stem);
+                                      else next.add(row.stem);
+                                      return next;
+                                    })
+                                  }
+                                  disabled={creating}
                                 >
-                                  Apply this work to the other {included.length - 1} part
-                                  {included.length - 1 === 1 ? '' : 's'}
+                                  {rowTimes.has(row.stem) ? 'Just the stations' : 'Set times and rates'}
                                 </Button>
+                              </Box>
+                                </>
                               )}
 
-                              {(materials.length > 0 || made.length > 0) && (
+                              {wantMaterials && (materials.length > 0 || made.length > 0) && (
                                 <>
-                                  <Divider sx={{ my: 2 }} />
+                                  {wantWork && <Divider sx={{ my: 2 }} />}
                                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
                                     What {name} is made of
                                   </Typography>
@@ -564,32 +679,38 @@ export default function DrawingWorkspaceStep({
         <Button onClick={onBack} disabled={creating}>
           Back
         </Button>
-        <Box sx={{ flex: 1, minWidth: 260 }}>
+        <Box sx={{ flex: 1, minWidth: 280 }}>
+          {/*
+            Filing IS the outcome, and the copy says so rather than reporting a
+            shortfall. Getting thirty-one parts in with their drawings attached is
+            the work this feature removes; times are a consensus the shop may not
+            have reached today, and a screen that reads as incomplete until they
+            have is a screen that invites a made-up number.
+          */}
           <Typography variant="caption" color="text.secondary" display="block">
-            {withWork === 0
-              ? 'No work set yet — parts will be created, but none will be quotable.'
-              : `${withWork} of ${included.length} have work.`}
+            {included.length} part{included.length === 1 ? '' : 's'} with their drawings attached.
+            {withWork > 0 && ` ${withWork} routed.`}
             {withCutList > 0 &&
-              ` ${withCutList} list components${
+              ` ${withCutList} list${withCutList === 1 ? 's' : ''} components${
                 unpricedMaterials > 0
-                  ? `, ${unpricedMaterials} material${unpricedMaterials === 1 ? '' : 's'} still need a cost`
+                  ? `, ${unpricedMaterials} material${unpricedMaterials === 1 ? '' : 's'} without a cost`
                   : ''
               }.`}
           </Typography>
+          <Typography variant="caption" color="text.secondary" display="block">
+            You can add work and materials now or later — nothing here has to be finished today.
+          </Typography>
         </Box>
-        <Button size="large" onClick={() => onCreate(false)} disabled={creating}>
-          {creating ? 'Creating…' : 'Create without quoting'}
-        </Button>
-        {/* The goal was never parts. Never disabled — interaction-standards §4. */}
+        {/* Never disabled — interaction-standards §4. */}
         <Button
           variant="contained"
           size="large"
-          onClick={() => onCreate(true)}
+          onClick={onCreate}
           disabled={creating}
         >
           {creating
             ? 'Creating…'
-            : `Create ${included.length} part${included.length === 1 ? '' : 's'} & start a quote`}
+            : `Create ${included.length} part${included.length === 1 ? '' : 's'}`}
         </Button>
       </Box>
     </>

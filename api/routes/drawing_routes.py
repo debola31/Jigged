@@ -40,8 +40,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/drawings", tags=["drawings"])
 
-FEATURE_FLAG = "drawing_import"
-
 # A folder of drawings is one user action, and the shared data-import limiter
 # (20 per 10 minutes) would 429 partway through a 31-part package — at drawing 21,
 # with no way to finish. This one is sized so a large package completes and a
@@ -183,38 +181,16 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
     return user_id
 
 
-def _feature_enabled(company_id: str, client: Client) -> bool:
-    """Opt-IN gate. Fails CLOSED on a read error.
-
-    This flag gates SPEND, not just a surface: every call bills Anthropic credits
-    per drawing, so a DB blip must not dark-launch it.
-    """
-    try:
-        resp = (
-            client.table("companies")
-            .select("settings")
-            .eq("id", company_id)
-            .single()
-            .execute()
-        )
-        settings = (resp.data or {}).get("settings") or {}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to read company feature flags: %s", e)
-        return False
-    features = settings.get("features") or {}
-    raw = features.get(FEATURE_FLAG)
-    return raw is True or raw == "true"
-
-
 async def _authorize(request: Request, company_id: str) -> Client:
-    """Service client, then caller auth, then the opt-in flag, then the limiter."""
+    """Service client, then caller auth, then the limiter.
+
+    There is no feature flag any more — the surface shipped. Membership and the
+    rate limit are what stand between a caller and the spend, and both are per
+    company, so a hostile caller cannot burn another shop's credits or their own
+    faster than 200 drawings per ten minutes.
+    """
     client = _service_client()
     await _verify_company_access(request, company_id, client)
-    if not _feature_enabled(company_id, client):
-        raise HTTPException(
-            status_code=403,
-            detail="Adding parts from drawings is not enabled for this company.",
-        )
     if not _limiter.check(company_id):
         raise HTTPException(
             status_code=429,

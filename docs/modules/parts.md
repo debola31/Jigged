@@ -579,14 +579,22 @@ normalize is `unknown_unit`.
 
 ## Add parts from drawings — `/dashboard/{companyId}/parts/drawings`
 
-Flag-gated on `drawing_import`. Drop a folder of engineering drawings, review one row per part,
+On for every company — no flag. Drop a folder of engineering drawings, review one row per part,
 create. Built because a shop that receives 31 drawings from a customer types 31 parts by hand.
+
+**Filing is the outcome.** The screen opens as a plain list of parts and descriptions; operations
+and materials are each an opt-in checkbox that grows a column and makes the rows expandable. Times
+are a consensus a shop reaches on its own schedule, and a screen that reads as unfinished until they
+have is a screen that invites a made-up cycle time — which reaches a customer looking exactly like a
+real one.
 
 **The deterministic pass runs in the browser and costs nothing.** `lib/dxfTextExtract.ts` or
 `lib/pdfTextExtract.ts` produce `(text, x, y, height)` items; `lib/drawingText.ts` assigns them to
 title-block roles; `lib/drawingCutList.ts` reads a weldment's bill of materials. No file ever leaves
-the tab. The AI pass is a separate **button** — per [CLAUDE.md](../../CLAUDE.md), an Anthropic call
-needs a user action — and it sends only the extracted strings, never the drawing.
+the tab. The AI pass runs as part of the **Read the files** press — per [CLAUDE.md](../../CLAUDE.md) an
+Anthropic call needs a user action, and that press is one; the rule bans lifecycle hooks, not
+chaining. It sends only the extracted strings, never the drawing, and it finishes BEFORE the
+workspace appears so descriptions never rewrite themselves under someone's cursor.
 
 Measured on 63 drawings resembling what a precision shop quotes: deterministic alone reaches 54%
 recall at 67% precision; deterministic plus `claude-sonnet-4-6` reaches 90% at 89% for about

@@ -60,7 +60,6 @@ import {
   type PartsDeletionImpact,
 } from '@/utils/partsAccess';
 import { getPriceablePartIds } from '@/utils/partPricingTiersAccess';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { Part } from '@/types/part';
@@ -103,7 +102,6 @@ export default function PartsPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
-  const { features } = useCompanyFeatures();
 
   const searchParams = useSearchParams();
 
@@ -684,16 +682,13 @@ export default function PartsPage() {
           Import
         </Button>
 
-        {/* Flag-gated by rendering nothing, the way ImportAllDataLink does. */}
-        {features.drawing_import && (
-          <Button
-            variant="outlined"
-            startIcon={<DescriptionOutlinedIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/parts/drawings`)}
-          >
-            Add from Drawings
-          </Button>
-        )}
+        <Button
+          variant="outlined"
+          startIcon={<DescriptionOutlinedIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/parts/drawings`)}
+        >
+          Add from Drawings
+        </Button>
 
         <Button
           variant="contained"

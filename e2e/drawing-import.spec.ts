@@ -18,10 +18,8 @@ import path from 'path';
  * as invention and this spec would prove nothing.
  *
  * Prerequisites:
- * - The `drawing_import` feature flag must be on for the test company. The
- *   run-stack script seeds it; if running `playwright test` by hand, enable it:
- *     UPDATE companies SET settings =
- *       jsonb_set(COALESCE(settings,'{}'::jsonb),'{features,drawing_import}','true'::jsonb,true);
+ * - No feature flag. The surface ships on for every company, so there is nothing
+ *   to seed and nothing to forget.
  *
  * Fixtures are REAL drawings from a customer package, because the bugs this flow
  * had were all things synthetic files do not do: an ATTDEF prompt in group code 3,
@@ -84,9 +82,11 @@ test.describe('Add parts from drawings', () => {
       '1011770',
     );
 
-    // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet. The count sits
-    // in its own column beside the files, NOT in "Needs a look": it is information,
-    // and that column means "act on this".
+    // E2E-DRAW-2 carries a weldment cut list — 3 rows on this sheet. The count is
+    // information, not a problem, and it only appears once someone has said they
+    // want to deal with materials: the screen opens as parts and descriptions.
+    await expect(page.getByTitle(/lists 3 components/i)).toHaveCount(0);
+    await page.getByRole('checkbox', { name: /Add materials/i }).check();
     await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
 
     // ── Step 3b: the AI pass, which has already run ──
@@ -101,35 +101,33 @@ test.describe('Add parts from drawings', () => {
     const assist = page.getByRole('button', { name: /Read the title blocks/i });
     await expect(assist).toBeHidden({ timeout: 120_000 });
 
-    // ── Work, set once for the whole package ──
-    // The thing that makes the flow worth having: without a priced operation a made
-    // part has no cost basis, so it lands incomplete and nothing can be quoted. The
-    // common case is one kind of part made one way, so it takes no row-opening.
+    // ── Routing by tapping stations, no numbers ──
+    // Which stations a part visits is recall; how long it takes there is a
+    // consensus the shop may not have reached. So the fast path asks only the
+    // first, and the part comes out routed but NOT costed.
+    // Operations are opt-in: the screen opens as a plain list of parts, because
+    // filing is the whole job for most imports.
+    await page.getByRole('checkbox', { name: /Add operations/i }).check();
     await page.getByRole('button', { name: /Set the work for every part/i }).click();
-    await page.getByRole('button', { name: /Add Operation/i }).click();
 
-    // The seeded internal work centre carries a labour rate, so this operation is
-    // priced and the part's cost resolves.
-    // The picker renders each option as custom markup (name, kind, rate), so its
-    // accessible name is not just the work-centre name — filter, then take the
-    // first match rather than matching on a label that includes the rate.
-    const workCenter = page.getByRole('combobox', { name: /Work center/i });
-    await workCenter.fill('E2E Internal');
-    await page.getByRole('option').first().click();
+    // Search filters the strip in place — no dropdown, no second surface.
+    await page.getByRole('textbox', { name: /Search work centres/i }).fill('E2E Internal');
+    await page.getByTestId('station-option').first().click();
+    await expect(page.getByTestId('route-step')).toHaveCount(1);
 
-    await page.getByLabel(/Cycle minutes per unit/i).fill('5');
-    await page.getByLabel(/Setup minutes/i).fill('10');
-    await page.getByRole('button', { name: /Add to routing/i }).click();
-
-    // One entry, every part — 31 routings cost one typing.
     await page.getByRole('button', { name: /Apply to all 3 parts/i }).click();
-    await expect(page.getByText(/3 of 3 have work/i)).toBeVisible();
+    await expect(page.getByText(/3 routed/i)).toBeVisible();
 
-    // ── Create, and land IN the quote ──
-    // The goal was never parts, so the primary action does both and the results
-    // screen is not something to click past.
-    await page.getByRole('button', { name: /Create 3 parts & start a quote/i }).click();
-    await expect(page).toHaveURL(/\/quotes\/new\?parts=/, { timeout: 180_000 });
+    // ── Filing is the outcome ──
+    // No quote hand-off: a part is only quotable once someone says how long its
+    // stations take, and an untimed operation is deliberately not a cost basis.
+    await page.getByRole('button', { name: /^Create 3 parts$/i }).click();
+    // "created" on a fresh database, "updated" when the suite has run before —
+    // both are the flow finishing, and pinning one made the second run a failure.
+    await expect(page.getByText(/3 (created|updated)/i)).toBeVisible({ timeout: 180_000 });
+
+    // Routed, not costed — so the flow must NOT claim these are ready to quote.
+    await expect(page.getByText(/ready to quote/i)).toHaveCount(0);
   });
 
   /**
@@ -170,11 +168,15 @@ test.describe('Add parts from drawings', () => {
       .setInputFiles([path.join(FIXTURES, 'E2E-WELDMENT.dxf')]);
     await page.getByRole('button', { name: /^Read 1 files$/i }).click();
 
-    // Nine cut-list rows on this sheet.
-    await expect(page.getByTitle(/lists 9 components/i)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('drawing-row')).toHaveCount(1, { timeout: 60_000 });
 
-    // The cut list lives UNDER the part that lists it, not in a panel above the
-    // table — open the row and the work and the materials are together.
+    // Materials are opt-in, and the cut list lives UNDER the part that lists it
+    // rather than in a panel above the table.
+    await page.getByRole('checkbox', { name: /Add materials/i }).check();
+    await page.getByRole('checkbox', { name: /Add operations/i }).check();
+
+    // Nine cut-list rows on this sheet.
+    await expect(page.getByTitle(/lists 9 components/i)).toBeVisible();
     await page.getByRole('button', { name: /Set up E2E-WELDMENT/i }).click();
 
     // Twelve rows collapse to the distinct tube sizes, pooled across the drawing.
@@ -188,7 +190,7 @@ test.describe('Add parts from drawings', () => {
 
     // Two materials, neither priced yet, and the footer says so where the decision
     // is made rather than in a banner scrolled past.
-    await expect(page.getByText(/2 materials still need a cost/i)).toBeVisible();
+    await expect(page.getByText(/2 materials without a cost/i)).toBeVisible();
 
     // The unit is asked for, never guessed — these sheets print "1803.2" beside a
     // tube described in inches, and guessing would scale every cost by 25.4.
@@ -198,9 +200,11 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Cost per unit for 4" x 4" x 1\/4" WALL/i).fill('0.03');
 
     // Priced, so nothing is held back.
-    await expect(page.getByText(/still need a cost/i)).toHaveCount(0);
+    await expect(page.getByText(/without a cost/i)).toHaveCount(0);
 
-    // Give it work so it has a cost of its own too.
+    // Give it TIMED work, so this part really does resolve to a cost — the full
+    // editor is a click away for anyone who already knows the numbers.
+    await page.getByRole('button', { name: /Set times and rates/i }).click();
     await page.getByRole('button', { name: /Add Operation/i }).click();
     const workCenter = page.getByRole('combobox', { name: /Work center/i });
     await workCenter.fill('E2E Internal');
@@ -208,8 +212,7 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/Cycle minutes per unit/i).fill('30');
     await page.getByRole('button', { name: /Add to routing/i }).click();
 
-    // Create WITHOUT quoting, because the receipt is what this test reads.
-    await page.getByRole('button', { name: /Create without quoting/i }).click();
+    await page.getByRole('button', { name: /^Create 1 part$/i }).click();
     await expect(page.getByText(/ready to quote/i)).toBeVisible({ timeout: 180_000 });
 
     // The BOM lines are the point, and "ready to quote" cannot see them — this

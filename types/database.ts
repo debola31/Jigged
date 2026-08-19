@@ -4021,6 +4021,13 @@ export type Database = {
         Args: { p_access_id: string }
         Returns: boolean
       }
+      work_center_usage: {
+        Args: { p_company_id: string }
+        Returns: {
+          uses: number
+          work_center_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

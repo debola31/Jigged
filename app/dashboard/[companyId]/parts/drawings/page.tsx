@@ -17,7 +17,6 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import CircularProgress from '@mui/material/CircularProgress';
 import LinearProgress from '@mui/material/LinearProgress';
 import Step from '@mui/material/Step';
 import StepLabel from '@mui/material/StepLabel';
@@ -25,7 +24,6 @@ import Stepper from '@mui/material/Stepper';
 import Typography from '@mui/material/Typography';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { groupDrawingFiles } from '@/lib/drawingFileGroups';
 import { buildRows, type BuiltRow } from '@/lib/drawingImportExtract';
 import { resolveIdentities } from '@/utils/drawingImportIdentity';
@@ -48,7 +46,6 @@ export default function AddPartsFromDrawingsPage() {
   const params = useParams();
   const router = useRouter();
   const companyId = params.companyId as string;
-  const { features, loading: featuresLoading } = useCompanyFeatures();
 
   const [step, setStep] = useState(0);
   const [rows, setRows] = useState<BuiltRow[]>([]);
@@ -197,21 +194,21 @@ export default function AddPartsFromDrawingsPage() {
           with_components: withIdentity.filter((r) => r.cutList).length,
           has_customer: !!customerId,
         });
-        setStep(1);
-
         /**
-         * Then read the drawings closely, as part of the SAME press.
+         * Read the title blocks BEFORE showing the workspace, not behind it.
          *
-         * This does not break the no-AI-on-load rule: the rule is about lifecycle
+         * This does not break the no-AI-on-load rule: that rule is about lifecycle
          * hooks — mount, effect, poll — and this is a button the user pressed with
-         * files they chose. What it is not is a second button asking permission
-         * for something they already asked for.
+         * files they chose.
          *
-         * It runs AFTER the rows are on screen, so the deterministic result is
-         * never held hostage to it, and a failure leaves the offer standing rather
-         * than losing the import.
+         * It used to fill descriptions in while the table was already up, which
+         * looked responsive and was worse: rows rewrote themselves under a cursor
+         * that might be in one of them. A field changing while you read it is the
+         * kind of thing that makes someone stop trusting the screen. So the wait
+         * is honest and up front, and what lands is settled.
          */
         await runAssist(withIdentity);
+        setStep(1);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not read those files.');
       } finally {
@@ -238,7 +235,7 @@ export default function AddPartsFromDrawingsPage() {
     [companyId, customerId, router],
   );
 
-  const handleCreate = useCallback(async (thenQuote: boolean) => {
+  const handleCreate = useCallback(async () => {
     setError(null);
     setBusy('Creating parts…');
     setCreating(true);
@@ -264,18 +261,16 @@ export default function AddPartsFromDrawingsPage() {
         quotable_count: created.filter((r) => r.quotable).length,
         used_ai: assisted,
         has_customer: !!customerId,
-        then_quote: thenQuote,
       });
 
       /**
-       * The goal was never parts. If they asked to quote and anything can carry a
-       * price, go — the results screen is a receipt, and standing between someone
-       * and the thing they came for is the step this redesign removed elsewhere.
+       * No automatic hand-off to a quote.
        *
-       * If NOTHING is quotable we stay put, because the quote form would throw on
-       * every line and "we couldn't" is better said here than there.
+       * Filing is the outcome this flow promises, and a part is only quotable once
+       * someone has said how long its stations take — which is a consensus, not a
+       * form field. The results screen offers the quote when there is genuinely
+       * something to quote, and says nothing when there is not.
        */
-      if (thenQuote) goToQuote(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create these parts.');
     } finally {
@@ -283,28 +278,10 @@ export default function AddPartsFromDrawingsPage() {
       setCreating(false);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, assisted, work, components, goToQuote]);
+  }, [rows, companyId, customerId, defaultUnit, assisted, work, components]);
 
   // A hidden tab is not access control, but this page writes nothing on its own —
   // the flag gates the surface and the backend route gates the spend.
-  if (featuresLoading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
-  if (!features.drawing_import) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="info">
-          <AlertTitle>Not enabled for this company</AlertTitle>
-          Adding parts from drawings is off. An admin can turn it on in company settings.
-        </Alert>
-      </Box>
-    );
-  }
-
   return (
     <Box sx={{ p: 3 }}>
       {/*
@@ -326,11 +303,7 @@ export default function AddPartsFromDrawingsPage() {
         </Alert>
       )}
 
-      {/*
-        Not while the workspace is up: it shows the read inline, and two progress
-        bars stacked made a background task look like a gate across the page.
-      */}
-      {busy && step !== 1 && (
+      {busy && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="body2" sx={{ mb: 1 }}>
@@ -372,8 +345,6 @@ export default function AddPartsFromDrawingsPage() {
           onBack={() => setStep(0)}
           onCreate={handleCreate}
           creating={creating}
-          reading={!!busy && !creating}
-          readProgress={progress}
           onAssist={() => void runAssist(rows)}
           assistFailed={assistFailed}
           customerId={customerId}

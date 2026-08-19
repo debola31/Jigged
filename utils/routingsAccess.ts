@@ -322,7 +322,8 @@ function formDataToOpInsert(
 ): Omit<RoutingOperationInsert, 'routing_id' | 'sequence' | 'metadata'> {
   return {
     work_center_id: formData.work_center_id,
-    setup_minutes: parseNumOrNull(formData.setup_minutes) ?? 0,
+    // Blank means unknown, not zero — see saveRoutingWithOperations.
+    setup_minutes: parseNumOrNull(formData.setup_minutes),
     cycle_minutes_per_unit: parseNumOrNull(formData.cycle_minutes_per_unit),
     labor_rate_override: parseNumOrNull(formData.labor_rate_override),
     external_unit_price: parseNumOrNull(formData.external_unit_price),
@@ -500,7 +501,13 @@ export async function saveRoutingWithOperations(
       const isExisting = originalOperationIds.has(op.tempId);
       const payload = {
         work_center_id: op.workCenterId,
-        setup_minutes: op.setupMinutes ?? 0,
+        // NOT `?? 0`. Zero setup is a real answer — plenty of operations have
+        // none — but it is a different answer from "nobody has said yet", and
+        // coercing turned the second into the first. That mattered the moment a
+        // part could be routed before it was timed: an operation stored as 0/0
+        // with a labour rate computes $0.00 and no longer looks unknown to
+        // `get_priceable_part_ids`, so the part reads as ready to quote for free.
+        setup_minutes: op.setupMinutes,
         cycle_minutes_per_unit: op.cycleMinutesPerUnit,
         labor_rate_override: op.laborRateOverride,
         external_unit_price: op.externalUnitPrice,

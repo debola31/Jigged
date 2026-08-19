@@ -158,6 +158,20 @@ test.describe('Add parts from drawings', () => {
     await expect(page.getByRole('link', { name: /Open .* in a new tab/i }).first()).toBeVisible({
       timeout: 60_000,
     });
+
+    // These parts have no tiers, so each line says so and offers the two ways out.
+    await expect(page.getByText(/This part has no pricing tiers yet/i).first()).toBeVisible();
+
+    // Taking one of them ANSWERS it. The warning used to keep complaining after a
+    // price was typed, which reads as "you did it wrong". A price needs a quantity
+    // first — the field is disabled until the line says how many.
+    await page.getByLabel(/^Order quantity$/i).first().fill('10');
+    await page.getByLabel(/^Unit price$/i).first().fill('42.50');
+    await expect(page.getByText(/This part has no pricing tiers yet/i)).toHaveCount(2);
+
+    // And prices can be re-read WITHOUT a reload, which is what makes fixing a
+    // part in another tab safe — a reload would throw away this quote.
+    await expect(page.getByRole('button', { name: /Recheck prices/i })).toBeVisible();
   });
 
   /**

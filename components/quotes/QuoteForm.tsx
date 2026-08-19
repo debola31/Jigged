@@ -28,6 +28,7 @@ import InputLabel from '@mui/material/InputLabel';
 import InputAdornment from '@mui/material/InputAdornment';
 import Collapse from '@mui/material/Collapse';
 import AddIcon from '@mui/icons-material/Add';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
@@ -1500,6 +1501,14 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             // fires and the user isn't trapped typing a quantity that
             // can't resolve to a line price.
             const hasUsableTier = block.tiers.some((t) => t.unit_price !== null);
+            /**
+             * A typed price IS a price, so the warning has nothing left to warn
+             * about — it offered two ways out and then kept complaining after one
+             * of them was taken, which reads as "you did it wrong".
+             */
+            const hasTypedPrice = block.rows.some(
+              (r) => r.price_touched && r.unit_price.trim() !== '',
+            );
             // Unit symbol for the order-qty field (e.g. "in") so a fractional
             // quantity isn't ambiguous. null for count/unitless parts.
             const orderQtyUnitLabel = quantityUnitSuffix(block.part?.primary_unit);
@@ -1578,7 +1587,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
 
                 {block.error && <Alert severity="error">{block.error}</Alert>}
 
-                {!block.loading && block.part && !hasUsableTier && !block.error && (
+                {!block.loading && block.part && !hasUsableTier && !hasTypedPrice && !block.error && (
                   <Alert severity="warning">
                     This part has no pricing tiers yet.{' '}
                     <Link
@@ -2032,15 +2041,40 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
             );
           })}
 
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={addPartBlock}
-            sx={{ mt: partBlocks.length > 0 ? 3 : 0 }}
-          >
-            Add part
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mt: partBlocks.length > 0 ? 3 : 0 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={addPartBlock}
+            >
+              Add part
+            </Button>
+
+            {/*
+              The other half of the part links above.
+              
+              Fixing a price means opening the part in another tab, and the only
+              way to see the result here was to RELOAD — which throws away the
+              quote being written: the lines chosen, the quantities typed, the
+              customer picked. So the prices are re-read in place instead.
+              `loadTiersForBlock` replaces a block's tiers and nothing else, so
+              every typed price and quantity survives.
+            */}
+            {partBlocks.some((b) => b.part) && (
+              <Button
+                size="small"
+                startIcon={<RefreshIcon />}
+                onClick={() => {
+                  partBlocks.forEach((b, i) => {
+                    if (b.part) void loadTiersForBlock(i, b.part.id);
+                  });
+                }}
+              >
+                Recheck prices
+              </Button>
+            )}
+          </Box>
         </CardContent>
       </Card>
 

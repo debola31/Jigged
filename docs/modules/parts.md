@@ -125,6 +125,22 @@ routing + BOM.
 > and was folded into it — there is no standalone migration file to look up. *(This doc previously
 > cited migration `20260514`; no such file exists.)*
 
+**A cost basis is something that says what a part COSTS, and silence is not zero.** For a bought
+part that is a procurement tier; for a made part, priced operations or BOM children. Two rules make
+that literal rather than aspirational, and both replaced a state where a part computed **$0.00 and
+read as ready to quote**:
+
+- `part_has_cost_basis` — a made part with no operations and no BOM children has no basis
+  ([`20260816231611`](../../supabase/migrations/20260816231611_part_cost_basis_predicate.sql)).
+  Measured in production before it: **3,300 live parts across two companies** in exactly that state.
+- An operation with a rate but **no times** is not a cost either
+  ([`20260819011705`](../../supabase/migrations/20260819011705_untimed_operation_is_not_a_cost.sql)).
+  `part_rollup_at_qty` COALESCEs both times to 0, so a part routed through four stations priced out
+  at nothing. Either time alone is a real answer — a setup-only operation is a fixed charge, a
+  cycle-only one is the ordinary case — so only *both* being null counts as silence. `saveRouting-
+  WithOperations` stopped coercing a blank setup to `0` for the same reason: blank means nobody has
+  said, and zero is a claim.
+
 **Single-direction flow.** `markup_percent` in → `unit_price` out, always against the *current*
 cost basis (routing + BOM for made; procurement tiers for bought). A cost change moves unit prices.
 **There is no lock concept on the part** — if you need a price stable across routing changes, lock
@@ -581,26 +597,21 @@ normalize is `unknown_unit`.
 
 On for every company — no flag. Drop a folder of engineering drawings, review one row per part,
 create. Built because a shop that receives 31 drawings from a customer types 31 parts by hand.
+Measured on the real package: **93 files become 31 parts, and the read is instant.**
 
-**Filing is the outcome.** The screen opens as a plain list of parts and descriptions; operations
-and materials are each an opt-in checkbox that grows a column and makes the rows expandable. Times
-are a consensus a shop reaches on its own schedule, and a screen that reads as unfinished until they
-have is a screen that invites a made-up cycle time — which reaches a customer looking exactly like a
-real one.
+**Filing is the outcome, and the screen says so.** It opens as a plain list of parts and
+descriptions — no columns about work, nothing to expand. **Add operations** and **Add materials**
+are checkboxes; ticking one grows its column and makes the rows expandable, and *unticking it clears
+what it added*, which is the only undo "apply to the other 30 parts" has.
 
-**The deterministic pass runs in the browser and costs nothing.** `lib/dxfTextExtract.ts` or
-`lib/pdfTextExtract.ts` produce `(text, x, y, height)` items; `lib/drawingText.ts` assigns them to
-title-block roles; `lib/drawingCutList.ts` reads a weldment's bill of materials. No file ever leaves
-the tab. The AI pass runs as part of the **Read the files** press — per [CLAUDE.md](../../CLAUDE.md) an
-Anthropic call needs a user action, and that press is one; the rule bans lifecycle hooks, not
-chaining. It sends only the extracted strings, never the drawing, and it finishes BEFORE the
-workspace appears so descriptions never rewrite themselves under someone's cursor.
+**No AI.** Names, descriptions and cut lists all come from the deterministic pass, which runs in the
+tab and touches no network — so the import waits on nothing, costs nothing, and cannot half-fail.
+`api/routes/drawing_routes.py` and the title-block model remain, unreferenced, for when this is
+revisited; the measurement that justified them is in the PR.
 
-Measured on 63 drawings resembling what a precision shop quotes: deterministic alone reaches 54%
-recall at 67% precision; deterministic plus `claude-sonnet-4-6` reaches 90% at 89% for about
-$0.016 a drawing. Across every model and run, no returned value was ever absent from the file —
-`api/routes/drawing_routes.py` validates each one against the strings it was sent and drops
-anything else, which is what makes the arm safe rather than lucky.
+**The deterministic pass runs in the browser.** `lib/dxfTextExtract.ts` or `lib/pdfTextExtract.ts`
+produce `(text, x, y, height)` items; `lib/drawingText.ts` assigns them to title-block roles;
+`lib/drawingCutList.ts` reads a weldment's bill of materials. No file ever leaves the tab.
 
 ### What the rules are, and why
 
@@ -619,39 +630,65 @@ only what was printed. A group with both reads the DXF. A PDF with no text opera
 says so rather than showing a blank row — the row is still created with its files attached.
 
 **Identity keys on `(customer_id, customer_part_number)`, never on `part_name`.** Two OEMs
-legitimately use the same number, and name reuse revives an archived part, so a name-keyed import
-would merge one customer's part onto another's. See `part_customer_references` above and
-`utils/drawingImportIdentity.ts`: an archived match becomes a choice, a live part belonging to
-another customer is never written to, and a failed lookup reports "we couldn't check" rather than
-"clear to create".
+legitimately use the same number, so a name-keyed import would merge one customer's part onto
+another's. See `part_customer_references` above and `utils/drawingImportIdentity.ts`: a live part
+belonging to another customer is never written to (the row is renamed and says so), and a failed
+lookup reports "we couldn't check" rather than "clear to create". An archived namesake is not a
+match at all — reuse **reclaims** rather than revives (§16), so the archived row is renamed aside
+and this import gets a clean part.
 
 **Material and finish compose into the description.** `parts` has no material column;
 `part_comments` would bury the value and a spec card is unverified, so the row reads
-`plate · AL · POWDERCOAT RAL 7035`.
+`plate · AL · ZINC PLUS TRIVALENT CHROMATE`.
 
-### The work step, and why it exists
+**The drawing sits beside the row it produced.** `DrawingFilePanel` renders the PDF through pdf.js
+with zoom and drag-to-pan, and the STEP model through the part page's own viewer — from the `File`
+still held in memory, so no upload and no network. Checking a package is a comparison, so the panel
+follows the selected row rather than covering it.
 
-A made part has no cost until it has priced operations, so an import that stops at "parts created"
-produces a list of parts that cannot be quoted — which is the thing the flow is aimed at. Step 3
-asks how the parts are made, and applies **one routing to many parts**: typing a routing per part is
-the manual work the feature exists to remove.
+### Routing without timing, and why they are separate
 
-**There is no routing-template entity, deliberately.** It would be a routing without a part, and it
-duplicates something a shop can already say — *this part works like that one*. So the two ways in
-are copying from a part that already has a routing (the shop's own history is the template library)
-and building one inline. Rows stay individually editable afterwards.
+**Which stations a part visits is recall; how long it takes there is a consensus.** Anyone who knows
+the part says "mill, lathe, deburr" without pausing; times get agreed, sometimes measured, sometimes
+argued. Bundling them made the fast answer wait on the slow one — and under time pressure that
+produces a typed-in cycle time nobody believes, which reaches a customer looking exactly like a real
+one.
 
-After the routing lands, `ensureStarterPricingTier` seeds the markup from the company defaults — it
-runs LAST because it deliberately no-ops when there is no cost to mark up, a markup over zero being
-worse than no markup at all. The step is skippable; parts are still created, just not yet quotable,
-and the summary says so rather than offering a quote that would fail on save.
+So `StationStrip` asks only the first: one line of work centres that bleeds off the right edge,
+ordered by how often this shop has actually routed through each (`work_center_usage`), so the six it
+really uses are already in view. Search filters the strip in place; arrows and arrow-keys-plus-Enter
+are the other two doors. No numbers at all. Work is entered on ONE part and spread with **Apply this
+routing to the other N parts** — starting from a concrete part rather than an abstract routing,
+because people reason far more reliably from *this part works like so*. "Set times and rates" swaps
+in the full editor for anyone who already knows.
 
-### Not built yet
+**The part comes out routed, NOT costed, and the database agrees.** An operation with no times is
+not a cost basis — see [architecture.md §16](../architecture.md) and
+`20260819011705_untimed_operation_is_not_a_cost.sql`. Before that rule it computed $0.00 and read as
+ready to quote.
 
-The components panel — stock dedupe and placeholder children for `USE DRAWING` rows.
-`lib/drawingCutList.ts` already reads the table (2 of 96 corpus drawings carry one, both weldments)
-but nothing writes `parts_bom` from it. Note a bought material with no procurement tier makes its
-parent LESS priceable, so those deduped materials need a cost before the BOM helps.
+### Materials are entered, not inferred
+
+A cut list only exists on the odd weldment, so deriving materials meant "Add materials" had nothing
+to offer for twenty-nine parts out of thirty-one. Any part takes a material now (`MaterialLines`):
+pick one the shop already buys and it brings its own price, or type a new one and give it a cost.
+The cost field appears only for a new material, and says what happens if it is left blank — **a BOM
+line to a child with no cost basis takes its parent from quotable to not**, so a priceless material
+is created but deliberately not attached.
+
+Units come from the child part, never from the line: `part_rollup_at_qty` raises rather than guess a
+conversion, and these sheets print `1803.2` beside a tube described in inches.
+
+### Ending in a quote
+
+Creating is one press, and every created part can go on a quote — priced or not. `QuotePartPicker`
+lists them all (ticked by default), marks which lines will want a number, and hands the lot to
+`/quotes/new?parts=…`. Filtering to the priceable ones silently dropped exactly the parts that
+needed attention.
+
+The quote form is where that work finishes: every line links to its part in a new tab, and
+**Recheck prices** re-reads each block in place. A reload would have thrown away the quote being
+written, which is why the prices are re-read rather than the page refreshed.
 
 ## Delete — archive (soft-delete), never blocks
 

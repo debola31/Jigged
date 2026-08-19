@@ -12,7 +12,6 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import posthog from 'posthog-js';
 
-import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { recordTermsAcceptance } from '@/lib/legal/acceptClient';
@@ -108,11 +107,6 @@ export default function TermsAcceptanceDialog({ needs, surface, onAccepted }: Pr
             disabled={saving}
             touch
             surface={surface}
-          />
-
-          <MissingFieldsNotice
-            items={accepted ? [] : ['Agree to the updated documents']}
-            title="Before you can continue:"
           />
         </Stack>
       </DialogContent>

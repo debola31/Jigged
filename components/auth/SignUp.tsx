@@ -18,7 +18,6 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { getSupabase } from '@/lib/supabase';
 import { isValidEmail } from '@/lib/validators';
 import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
-import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 
 /**
  * Self-serve signup.
@@ -261,11 +260,6 @@ export default function SignUp() {
             onChange={setTermsAccepted}
             disabled={loading}
             surface="signup"
-          />
-
-          <MissingFieldsNotice
-            items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}
-            title="Before you can create an account:"
           />
 
           <Button

@@ -55,7 +55,6 @@ import * as Sentry from '@sentry/nextjs';
 import { getSupabase } from '@/lib/supabase';
 import { toError } from '@/lib/supabaseErrors';
 import TermsConsentCheckbox from '@/components/legal/TermsConsentCheckbox';
-import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import { recordTermsAcceptance } from '@/lib/legal/acceptClient';
 import { fetchAcceptedVersions, documentsNeedingAcceptance } from '@/utils/termsAccess';
 import { setLastCompany, homePathForRole, hasAnyCompanyAccess } from '@/utils/companyAccess';
@@ -591,10 +590,6 @@ export default function AcceptInvitePage() {
               onChange={setTermsAccepted}
               surface="invite_accept"
             />
-                <MissingFieldsNotice
-                  items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}
-                  title="Before you can join:"
-                />
               </>
             )}
 
@@ -736,11 +731,6 @@ export default function AcceptInvitePage() {
               checked={termsAccepted}
               onChange={setTermsAccepted}
               surface="invite_accept"
-            />
-
-            <MissingFieldsNotice
-              items={termsAccepted ? [] : ['Agree to the Terms of Service and Privacy Policy']}
-              title="Before you can accept:"
             />
 
             <Button

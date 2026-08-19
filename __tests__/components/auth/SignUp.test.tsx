@@ -198,11 +198,26 @@ describe('SignUp', () => {
       expect(sharedSupabase.auth.signUp).not.toHaveBeenCalled();
     });
 
-    it('says why the button is disabled, rather than leaving it unexplained', () => {
+    /**
+     * interaction-standards.md permits a real `disabled` prop for "a stable lock
+     * whose disabled state is itself meaningful, paired with a VISIBLE reason
+     * (not hover-only)". Here the unticked box, labelled with the very sentence
+     * being agreed to and sitting directly above the button, IS that reason --
+     * so the separate "Before you can accept:" notice was restating what the
+     * control already said. This asserts the reason is on screen and reachable,
+     * which is what the standard actually requires.
+     */
+    it('explains the disabled button with the labelled checkbox itself', () => {
       render(<SignUp />);
-      expect(
-        screen.getByText(/agree to the terms of service and privacy policy/i),
-      ).toBeInTheDocument();
+      // MUI renders the input visually-hidden behind a styled span, so presence
+      // plus accessible name is the meaningful probe, not toBeVisible().
+      const box = termsBox();
+      expect(box).toBeInTheDocument();
+      expect(box).toHaveAccessibleName(/agree to the terms of service and privacy policy/i);
+      expect(screen.getByRole('link', { name: /terms of service/i })).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
+      // And not by restating it in a separate notice above the button.
+      expect(screen.queryByText(/before you can/i)).not.toBeInTheDocument();
     });
 
     /**

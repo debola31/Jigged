@@ -240,7 +240,6 @@ export default function DrawingWorkspaceStep({
     onWorkChange(next);
   };
 
-  const withWork = included.filter((r) => (work.get(r.stem)?.length ?? 0) > 0).length;
 
   const setLines = (stem: string, lines: MaterialLine[]) => {
     const next = new Map(materials);
@@ -250,26 +249,35 @@ export default function DrawingWorkspaceStep({
   };
 
   const materialCount = (stem: string) => (materials.get(stem) ?? []).filter(isUsable).length;
-  const totalMaterials = [...materials.values()].reduce(
-    (n, lines) => n + lines.filter(isUsable).length,
-    0,
-  );
-  const unpricedMaterials = [...materials.values()].reduce(
-    (n, lines) =>
-      n + lines.filter((l) => isUsable(l) && !l.part && l.costPerUnit.trim() === '').length,
-    0,
-  );
-
   return (
     <>
-      {/* What we made of the folder, before anything asks for attention. */}
+      {/*
+        What we made of the folder, and the way out of it, on one line.
+        The actions used to sit under the table — thirty-one rows below the only
+        thing most people came to press, and paired with a paragraph restating
+        counts the row above already showed.
+      */}
       <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6">{summary.headline}</Typography>
-          <Typography variant="body2" color="text.secondary">
-            {summary.majority}
-            {summary.exceptions.length > 0 && ` ${summary.exceptions.join('; ')}.`}
-          </Typography>
+        <CardContent
+          sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}
+        >
+          <Box sx={{ flex: 1, minWidth: 260 }}>
+            <Typography variant="h6">{summary.headline}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {summary.majority}
+              {summary.exceptions.length > 0 && ` ${summary.exceptions.join('; ')}.`}
+            </Typography>
+          </Box>
+
+          <Button onClick={onBack} disabled={creating}>
+            Back
+          </Button>
+          {/* Never disabled — interaction-standards §4. */}
+          <Button variant="contained" size="large" onClick={onCreate} disabled={creating}>
+            {creating
+              ? 'Creating…'
+              : `Create ${included.length} part${included.length === 1 ? '' : 's'}`}
+          </Button>
         </CardContent>
       </Card>
 
@@ -551,46 +559,6 @@ export default function DrawingWorkspaceStep({
       )}
       </Box>
 
-      {/*
-        One line of consequence, where the decision is made. Not a banner at the
-        top: by the time someone reaches the button they have scrolled past it.
-      */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 3, flexWrap: 'wrap' }}>
-        <Button onClick={onBack} disabled={creating}>
-          Back
-        </Button>
-        <Box sx={{ flex: 1, minWidth: 280 }}>
-          {/*
-            Filing IS the outcome, and the copy says so rather than reporting a
-            shortfall. Getting thirty-one parts in with their drawings attached is
-            the work this feature removes; times are a consensus the shop may not
-            have reached today, and a screen that reads as incomplete until they
-            have is a screen that invites a made-up number.
-          */}
-          <Typography variant="caption" color="text.secondary" display="block">
-            {included.length} part{included.length === 1 ? '' : 's'} with their drawings attached.
-            {withWork > 0 && ` ${withWork} routed.`}
-            {totalMaterials > 0 &&
-              ` ${totalMaterials} material${totalMaterials === 1 ? '' : 's'}${
-                unpricedMaterials > 0 ? `, ${unpricedMaterials} without a cost` : ''
-              }.`}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block">
-            You can add work and materials now or later — nothing here has to be finished today.
-          </Typography>
-        </Box>
-        {/* Never disabled — interaction-standards §4. */}
-        <Button
-          variant="contained"
-          size="large"
-          onClick={onCreate}
-          disabled={creating}
-        >
-          {creating
-            ? 'Creating…'
-            : `Create ${included.length} part${included.length === 1 ? '' : 's'}`}
-        </Button>
-      </Box>
     </>
   );
 }

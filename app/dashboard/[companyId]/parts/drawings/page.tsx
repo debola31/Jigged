@@ -86,6 +86,8 @@ export default function AddPartsFromDrawingsPage() {
   // Distinct from `busy`: only the final write. The primary button reads from this,
   // and while the title blocks were being read it used to say "Creating…".
   const [creating, setCreating] = useState(false);
+  /** Set when someone presses Quote and nothing can carry a price — see §4. */
+  const [quoteBlocked, setQuoteBlocked] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
@@ -303,17 +305,19 @@ export default function AddPartsFromDrawingsPage() {
       {step === 2 && results && (
         <Card>
           <CardContent>
-            {results ? (
+            {(() => {
+              const quotableCount = results.filter((r) => r.quotable).length;
+              return (
               <>
                 <Typography variant="h6" gutterBottom>
                   {summarise(results)}
                 </Typography>
                 {results.length > 0 && !results.some((r) => r.quotable) && (
                   <Alert severity="info" sx={{ my: 2 }}>
-                    <AlertTitle>Not quotable yet</AlertTitle>
-                    These parts have no priced work on them, so there is no cost to mark up. Add
-                    operations on a part — or come back through this flow and set the work — and
-                    they become quotable.
+                    <AlertTitle>What is left before these can be quoted</AlertTitle>
+                    A part is quotable once something says what it costs — how long its stations
+                    take, or what its materials cost. Stations on their own are a route, not a
+                    price. Open any of these on the Parts page and add times to its operations.
                   </Alert>
                 )}
                 {results.some((r) => r.action === 'failed' || r.fileErrors.length > 0) && (
@@ -328,19 +332,36 @@ export default function AddPartsFromDrawingsPage() {
                       ))}
                   </Alert>
                 )}
+                {quoteBlocked && (
+                  <Alert severity="warning" sx={{ my: 2 }} onClose={() => setQuoteBlocked(false)}>
+                    None of these can be quoted yet — a quote line needs a price, and these have no
+                    cost to mark up. Add times to their operations on the Parts page and they
+                    become quotable.
+                  </Alert>
+                )}
                 <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-                  {/* The point of the whole flow. Offered only for parts that can
-                      actually carry a price — seeding a quote with lines that throw
-                      on save would be worse than not offering it. */}
-                  {results.some((r) => r.quotable) && (
-                    <Button
-                      variant="contained"
-                      startIcon={<RequestQuoteIcon />}
-                      onClick={() => goToQuote(results)}
-                    >
-                      Quote {results.filter((r) => r.quotable).length} of these
-                    </Button>
-                  )}
+                  {/*
+                    THE POINT OF THE WHOLE FLOW, and it is always here.
+                    
+                    A disabled button would have been the obvious way to say "not
+                    yet", and interaction-standards §4 argues against it: a
+                    disabled control is not focusable, so keyboard and screen
+                    reader users never learn it exists or why, and the state this
+                    button would express is not a stable lock — it is something
+                    the user can go and change. So it stays live and explains on
+                    attempt, which is rule 1 rather than rule 2.
+                  */}
+                  <Button
+                    variant="contained"
+                    startIcon={<RequestQuoteIcon />}
+                    onClick={() => {
+                      if (!goToQuote(results)) setQuoteBlocked(true);
+                    }}
+                  >
+                    {quotableCount > 0
+                      ? `Quote ${quotableCount} of these`
+                      : 'Create a quote from these'}
+                  </Button>
                   <Button
                     variant={results.some((r) => r.quotable) ? 'outlined' : 'contained'}
                     onClick={() => router.push(`/dashboard/${companyId}/parts`)}
@@ -351,6 +372,7 @@ export default function AddPartsFromDrawingsPage() {
                     onClick={() => {
                       setRows([]);
                       setResults(null);
+                      setQuoteBlocked(false);
                                       setWork(new Map());
                       setFileCount(0);
                       setMaterials(new Map());
@@ -361,7 +383,8 @@ export default function AddPartsFromDrawingsPage() {
                   </Button>
                 </Box>
               </>
-            ) : null}
+              );
+            })()}
           </CardContent>
         </Card>
       )}

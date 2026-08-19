@@ -116,7 +116,8 @@ test.describe('Add parts from drawings', () => {
     await expect(page.getByTestId('route-step')).toHaveCount(1);
 
     await page.getByRole('button', { name: /Apply this routing to the other 2 parts/i }).click();
-    await expect(page.getByText(/3 routed/i)).toBeVisible();
+    // Every row now carries the station count — one entry, three routings.
+    await expect(page.getByText(/^1 station$/)).toHaveCount(3);
 
     // ── Filing is the outcome ──
     // No quote hand-off: a part is only quotable once someone says how long its
@@ -128,6 +129,11 @@ test.describe('Add parts from drawings', () => {
 
     // Routed, not costed — so the flow must NOT claim these are ready to quote.
     await expect(page.getByText(/ready to quote/i)).toHaveCount(0);
+
+    // The quote button is STILL there, because a disabled control teaches nobody
+    // anything (interaction-standards §4 rule 1). Pressing it explains.
+    await page.getByRole('button', { name: /Create a quote from these/i }).click();
+    await expect(page.getByText(/None of these can be quoted yet/i)).toBeVisible();
   });
 
   /**
@@ -186,11 +192,12 @@ test.describe('Add parts from drawings', () => {
     await page.getByLabel(/New material name/i).fill('4140 BAR 2 IN');
     await page.getByLabel(/^Quantity$/i).fill('3');
     await page.getByLabel(/^Unit$/i).fill('ft');
-    await expect(page.getByText(/1 material, 1 without a cost/i)).toBeVisible();
+    // A new material has no price on file, and the field says what that costs.
     await expect(page.getByText(/cannot be quoted/i)).toBeVisible();
-
     await page.getByLabel(/Cost per unit for 4140 BAR 2 IN/i).fill('12.5');
-    await expect(page.getByText(/1 material\./i)).toBeVisible();
+    await expect(page.getByText(/cannot be quoted/i)).toHaveCount(0);
+    // The row counts what the user added, not what the sheet tabulated.
+    await expect(page.getByText(/^1 material$/)).toBeVisible();
 
     // Give it TIMED work, so this part really does resolve to a cost — the full
     // editor is a click away for anyone who already knows the numbers.

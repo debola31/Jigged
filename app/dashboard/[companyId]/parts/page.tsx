@@ -3,6 +3,7 @@
 import ImportAllDataLink from '@/components/data-import/ImportAllDataLink';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { selectPartRows, type CompletenessFilter } from '@/lib/partsCompleteness';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -77,17 +78,16 @@ function buildPartsImpactLines(impact: PartsDeletionImpact | null): string[] {
   return lines;
 }
 
-// Augment Part with the "would the quote form accept this without a
-// warning" flag. Computed at render time from the priceableIds set so AG
-// Grid sees the change as row-data, not a stale closure.
-type PartRow = Part & { is_priceable: boolean };
+// Augment Part with the "would the quote form accept this without a warning" flag.
+// Computed at render time from the priceableIds set so AG Grid sees the change as
+// row-data, not a stale closure.
+/** `is_priceable: null` = verdict unavailable (still loading, or the RPC failed) — never "no". */
+type PartRow = Part & { is_priceable: boolean | null };
 type SourceFilter = 'all' | 'made' | 'bought';
-type CompletenessFilter = 'all' | 'complete' | 'incomplete';
 
 // Stable empty fallbacks so the filtered-rows memo doesn't recompute on every
 // render while the first load is in flight.
 const EMPTY_PARTS: Part[] = [];
-const EMPTY_PRICEABLE: Set<string> = new Set();
 
 export default function PartsPage() {
   const router = useRouter();
@@ -140,24 +140,14 @@ export default function PartsPage() {
   const hasRowsRef = useRef(false);
 
   // Pull every part the company owns (made + bought). The source filter narrows this
-  // client-side. The priceable-id set is fetched in parallel — an
-  // independent query, unaffected by search/sort; failure is non-fatal (an
-  // empty set degrades the Pricing column to "no pricing" rather than blocking
-  // the page). useLoad keeps every setState inside the async callback.
+  // client-side. useLoad keeps every setState inside the async callback.
   const {
     data: partsData,
     loading,
     error: loadError,
     reload: fetchParts,
   } = useLoad(
-    () =>
-      Promise.all([
-        getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort),
-        getPriceablePartIds(companyId).catch((err) => {
-          console.error('Error fetching priceable part ids:', err);
-          return new Set<string>();
-        }),
-      ]),
+    () => getAllParts(companyId, searchDebounced, sortModel.field, sortModel.sort),
     // Spread sortModel into its two primitives rather than passing the object —
     // useLoad wants primitive deps (see the warning in hooks/useLoad.ts).
     [companyId, searchDebounced, sortModel.field, sortModel.sort],
@@ -181,15 +171,31 @@ export default function PartsPage() {
       },
     },
   );
-  const rows = partsData?.[0] ?? EMPTY_PARTS;
+  const rows = partsData ?? EMPTY_PARTS;
   useEffect(() => {
     hasRowsRef.current = rows.length > 0;
   });
-  // Set of part ids the quote form accepts without warning (≥1 tier with a
-  // non-null computed cost) — single source of truth (get_priceable_part_ids
-  // RPC), matching QuoteForm.hasUsableTier so the Pricing column and the quote
-  // warning can't disagree.
-  const priceableIds = partsData?.[1] ?? EMPTY_PRICEABLE;
+
+  /**
+   * Set of part ids the quote form accepts without warning — single source of
+   * truth (`get_priceable_part_ids` RPC), matching QuoteForm.hasUsableTier so
+   * the incomplete marker and the quote warning can't disagree.
+   *
+   * Its OWN load, keyed on the company alone. It used to ride in a Promise.all
+   * with the rows, under their deps — so a whole-company priceability walk
+   * re-ran on every debounced keystroke and every sort click, for an answer that
+   * none of those inputs can change.
+   *
+   * `null` means WE DO NOT KNOW (still loading, or the load failed) and is not
+   * the same as "no part is priceable". Reading a failure as an empty set is
+   * exactly what drew ⚠ Incomplete on every part in production on 2026-08-19.
+   */
+  const { data: priceableIds } = useLoad(() => getPriceablePartIds(companyId), [companyId], {
+    // Non-fatal: the marker goes quiet rather than lying. Sentry already has the
+    // exception from the access layer; this is the local breadcrumb.
+    onError: (error) => console.error('Error fetching priceable part ids:', error),
+  });
+  const priceabilityKnown = priceableIds !== null;
 
   // Clear selection when the search query or source filter changes — the rows
   // on screen change, so any ids selected before may no longer be visible.
@@ -203,14 +209,15 @@ export default function PartsPage() {
   // Apply source filter client-side and stamp each row with is_priceable
   // from the RPC set so the grid, gridHeight, and empty-state checks all
   // see the same row set. The map runs O(n) — fine at shop scale.
+  //
+  // `is_priceable: null` when the verdict hasn't arrived: the marker renders
+  // nothing, and the completeness filter can't partition rows it has no verdict
+  // for, so it stands down to "all" rather than silently emptying the grid.
   const filteredRows = useMemo<PartRow[]>(() => {
     const bySource =
       sourceFilter === 'all' ? rows : rows.filter((r) => r.source === sourceFilter);
 
-    const stamped = bySource.map((r) => ({ ...r, is_priceable: priceableIds.has(r.id) }));
-    if (completenessFilter === 'complete') return stamped.filter((r) => r.is_priceable);
-    if (completenessFilter === 'incomplete') return stamped.filter((r) => !r.is_priceable);
-    return stamped;
+    return selectPartRows(bySource, priceableIds, completenessFilter);
   }, [rows, sourceFilter, priceableIds, completenessFilter]);
 
   const gridHeight = useMemo(() => {
@@ -339,7 +346,7 @@ export default function PartsPage() {
         if (!params.data) return (params.value as string) ?? '';
         return (
           <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
-            {!params.data.is_priceable && (
+            {params.data.is_priceable === false && (
               <Tooltip title="Incomplete — needs setup before it can be quoted">
                 <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main', flexShrink: 0 }} />
               </Tooltip>
@@ -477,7 +484,9 @@ export default function PartsPage() {
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 170 }}>
+        {/* Disabled while the priceability verdict is unavailable — a filter that
+            cannot partition its rows would just empty the grid and blame the shop. */}
+        <FormControl size="small" sx={{ minWidth: 170 }} disabled={!priceabilityKnown}>
           <InputLabel id="parts-completeness-label">Completeness</InputLabel>
           <Select
             labelId="parts-completeness-label"
@@ -528,13 +537,18 @@ export default function PartsPage() {
         </Button>
       </Box>
 
-      {/* Legend for the inline incomplete marker. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2, color: 'text.secondary' }}>
-        <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main' }} />
-        <Typography variant="caption">
-          Incomplete — needs setup (routing/materials, or a vendor cost) before it can be quoted.
-        </Typography>
-      </Box>
+      {/* Legend for the inline incomplete marker — only while there are verdicts to
+          explain. With none, it would describe a ⚠ that isn't on any row. */}
+      {priceabilityKnown && (
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2, color: 'text.secondary' }}
+        >
+          <WarningAmberIcon fontSize="small" sx={{ color: 'warning.main' }} />
+          <Typography variant="caption">
+            Incomplete — needs setup (routing/materials, or a vendor cost) before it can be quoted.
+          </Typography>
+        </Box>
+      )}
 
       {!loading && filteredRows.length === 0 ? (
         <Card elevation={2}>

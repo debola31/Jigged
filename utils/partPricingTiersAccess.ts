@@ -1,6 +1,8 @@
+import * as Sentry from '@sentry/nextjs';
+
 import { getSupabase } from '@/lib/supabase';
 import { toFriendlyError } from '@/lib/supabaseErrors';
-import { friendlyErrorMessage } from '@/lib/supabaseErrors';
+import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import type {
   PartPricingTier,
   PartPricingTierInput,
@@ -227,7 +229,14 @@ export async function getPriceablePartIds(companyId: string): Promise<Set<string
     p_company_id: companyId,
   });
   if (error) {
-    console.error('Error fetching priceable part ids:', error);
+    // `.rpc()` is deliberately excluded from Sentry's Supabase integration, so
+    // nothing files this unless we do. It went unfiled once already: on
+    // 2026-08-19 this RPC hit the 8s statement timeout (57014) for a whole
+    // afternoon, the parts list drew every part as Incomplete, and the only
+    // trace anywhere was a console line in one user's browser.
+    Sentry.captureException(toError(error, 'get_priceable_part_ids'), {
+      tags: { area: 'part-pricing' },
+    });
     throw error;
   }
   return new Set((data ?? []) as string[]);

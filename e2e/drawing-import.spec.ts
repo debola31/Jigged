@@ -99,8 +99,10 @@ test.describe('Add parts from drawings', () => {
     // E2E-DRAW-1 arrived as a DXF and a PDF, so both are offered and the PDF —
     // the sheet a person reads — is the one shown.
     await expect(panel.getByRole('button', { name: /^pdf$/i })).toBeVisible();
-    await expect(panel.locator('iframe')).toBeVisible();
-    await panel.getByRole('button', { name: /Close the drawing/i }).click();
+    // Rendered through pdf.js so it can zoom and pan, not handed to a browser frame.
+    await expect(panel.locator('canvas')).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByRole('button', { name: /Zoom in/i })).toBeVisible();
+    await panel.getByRole('button', { name: /Hide the drawing/i }).click();
     await expect(page.getByTestId('drawing-file-panel')).toHaveCount(0);
 
     // ── Routing by tapping stations, no numbers ──
@@ -149,7 +151,7 @@ test.describe('Add parts from drawings', () => {
     // A STEP model on its own: nothing in it to read.
     const fileInput = page.locator('input[type="file"][accept=".pdf,.dxf,.step,.stp"]');
     await fileInput.setInputFiles([path.join(FIXTURES, 'E2E-DRAW-1.dxf')]);
-    await page.getByRole('button', { name: /^Read 1 files$/i }).click();
+    await page.getByRole('button', { name: /^Read 1 file$/i }).click();
 
     await expect(page.getByTestId('drawing-row')).toHaveCount(1, { timeout: 60_000 });
     // Healthy row: review by exception means no chip at all.
@@ -171,7 +173,7 @@ test.describe('Add parts from drawings', () => {
     await page
       .locator('input[type="file"][accept=".pdf,.dxf,.step,.stp"]')
       .setInputFiles([path.join(FIXTURES, 'E2E-WELDMENT.dxf')]);
-    await page.getByRole('button', { name: /^Read 1 files$/i }).click();
+    await page.getByRole('button', { name: /^Read 1 file$/i }).click();
 
     await expect(page.getByTestId('drawing-row')).toHaveCount(1, { timeout: 60_000 });
 

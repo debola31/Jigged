@@ -18,22 +18,26 @@
  * URL — the drawing appears instantly and nothing has been created yet, which is
  * the whole promise of the review step.
  *
- * DXF AND STEP ARE NOT RENDERED, and say so rather than showing an empty frame.
- * A DXF viewer is its own piece of work (fonts have to be self-hosted or no text
- * draws at all), and on real packages the PDF is the human-readable sheet anyway —
- * the DXF is what the extractor reads, not what a person does.
+ * PDF AND STEP BOTH RENDER — the sheet through pdf.js with zoom and pan, the model
+ * through the same viewer the part page uses. DXF does not: that viewer is its own
+ * piece of work (fonts have to be self-hosted or no text draws at all), and on a
+ * real package the DXF is what the EXTRACTOR reads while the PDF is what a person
+ * does.
+ *
+ * NOTHING HERE DOWNLOADS. These files came off this machine ten seconds ago; an
+ * "open in a new tab" and a download button offered someone their own file back.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import DrawingPdfView from '@/components/drawings/DrawingPdfView';
+import StepViewer from '@/components/parts/workspace/tabs/StepViewer';
 import Card from '@mui/material/Card';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import CloseIcon from '@mui/icons-material/Close';
-import DownloadIcon from '@mui/icons-material/Download';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight';
 
 import type { BuiltRow } from '@/lib/drawingImportExtract';
 import type { DrawingFile } from '@/types/drawingImport';
@@ -44,8 +48,8 @@ interface Props {
   onClose: () => void;
 }
 
-/** Only a PDF renders in a frame today — see the module comment. */
-const isViewable = (f: DrawingFile) => f.kind === 'pdf';
+/** What we can actually draw — see the module comment for why DXF is not here. */
+const isViewable = (f: DrawingFile) => f.kind === 'pdf' || f.kind === 'step';
 
 export default function DrawingFilePanel({ row, onClose }: Props) {
   const files = row.group.files;
@@ -56,29 +60,6 @@ export default function DrawingFilePanel({ row, onClose }: Props) {
     const byName = files.find((f) => f.name === selectedName);
     return byName ?? files.find(isViewable) ?? files[0] ?? null;
   }, [files, selectedName]);
-
-  // DERIVED, not stored: the URL is a pure function of the chosen file, and
-  // setting it from an effect meant a render pass with the frame pointing at the
-  // previous drawing.
-  const url = useMemo(
-    () => (selected ? URL.createObjectURL(selected.file) : null),
-    [selected],
-  );
-
-  // The effect exists only to hand the blob back — a 31-part package would
-  // otherwise leave 31 drawings held in memory for the tab's lifetime.
-  useEffect(() => {
-    if (!url) return;
-    return () => URL.revokeObjectURL(url);
-  }, [url]);
-
-  const download = () => {
-    if (!url || !selected) return;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = selected.name;
-    a.click();
-  };
 
   return (
     <Card
@@ -106,23 +87,15 @@ export default function DrawingFilePanel({ row, onClose }: Props) {
         <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>
           {valueOf(row, 'part_name')}
         </Typography>
-        {url && (
-          <>
-            <Tooltip title="Open in a new tab">
-              <IconButton size="small" href={url} target="_blank" rel="noopener noreferrer">
-                <OpenInNewIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Download">
-              <IconButton size="small" onClick={download}>
-                <DownloadIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </>
-        )}
-        <IconButton size="small" onClick={onClose} aria-label="Close the drawing">
-          <CloseIcon fontSize="small" />
-        </IconButton>
+        {/*
+          A collapse, not a close — an X here sat inches from the X that drops a
+          part, and the two would have meant very different things.
+        */}
+        <Tooltip title="Hide the drawing">
+          <IconButton size="small" onClick={onClose} aria-label="Hide the drawing">
+            <KeyboardDoubleArrowRightIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
 
       {files.length > 1 && (
@@ -141,14 +114,11 @@ export default function DrawingFilePanel({ row, onClose }: Props) {
         </Box>
       )}
 
-      <Box sx={{ flex: 1, minHeight: 420, display: 'flex' }}>
-        {selected && isViewable(selected) && url ? (
-          <Box
-            component="iframe"
-            src={url}
-            title={`${selected.name} preview`}
-            sx={{ flex: 1, border: 0, backgroundColor: '#fff' }}
-          />
+      <Box sx={{ flex: 1, minHeight: 460, display: 'flex', flexDirection: 'column' }}>
+        {selected?.kind === 'pdf' ? (
+          <DrawingPdfView key={selected.name} file={selected.file} />
+        ) : selected?.kind === 'step' ? (
+          <StepViewer key={selected.name} file={selected.file} height="100%" />
         ) : (
           <Box
             sx={{
@@ -164,14 +134,9 @@ export default function DrawingFilePanel({ row, onClose }: Props) {
           >
             <Typography variant="body2" color="text.secondary">
               {selected
-                ? `${selected.kind.toUpperCase()} files don’t preview here yet — open or download it to look.`
+                ? `A ${selected.kind.toUpperCase()} is what we read, not what you look at — open the PDF for the sheet.`
                 : 'This part arrived with no files.'}
             </Typography>
-            {selected && (
-              <Button variant="outlined" startIcon={<DownloadIcon />} onClick={download}>
-                Download {selected.name}
-              </Button>
-            )}
           </Box>
         )}
       </Box>

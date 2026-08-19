@@ -134,6 +134,16 @@ export default function DrawingWorkspaceStep({
   const expandable = wantWork || wantMaterials;
 
   /**
+   * A row opens only if opening it shows something.
+   *
+   * "Add materials" put a chevron on all thirty-one parts when two of them have a
+   * cut list, so twenty-nine of them expanded to an empty box and the feature
+   * looked broken. Work applies to every part; materials apply to the parts that
+   * list components.
+   */
+  const canOpen = (row: BuiltRow) => wantWork || (wantMaterials && !!row.cutList);
+
+  /**
    * Unticking the last one closes whatever row was open — otherwise a panel stays
    * expanded with nothing in it. Done here rather than in an effect watching the
    * flags: this IS the moment the decision is made.
@@ -309,7 +319,7 @@ export default function DrawingWorkspaceStep({
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  {/* No caret column until there is something behind it. */}
+                  {/* No caret column until something can open. */}
                   {expandable && <TableCell padding="checkbox" />}
                   <TableCell>Part</TableCell>
                   <TableCell>Description</TableCell>
@@ -340,13 +350,15 @@ export default function DrawingWorkspaceStep({
                       >
                         {expandable && (
                           <TableCell padding="checkbox">
-                            <IconButton
-                              size="small"
-                              onClick={() => setOpenStem(open ? null : row.stem)}
-                              aria-label={`Set up ${row.stem}`}
-                            >
-                              {open ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
-                            </IconButton>
+                            {canOpen(row) && (
+                              <IconButton
+                                size="small"
+                                onClick={() => setOpenStem(open ? null : row.stem)}
+                                aria-label={`Set up ${row.stem}`}
+                              >
+                                {open ? <KeyboardArrowDownIcon /> : <KeyboardArrowRightIcon />}
+                              </IconButton>
+                            )}
                           </TableCell>
                         )}
                         <TableCell sx={{ minWidth: 180 }}>
@@ -409,7 +421,7 @@ export default function DrawingWorkspaceStep({
                               <Chip
                                 size="small"
                                 variant="outlined"
-                                label={`${row.cutList.rows.length}`}
+                                label={`${row.cutList.rows.length} component${row.cutList.rows.length === 1 ? '' : 's'}`}
                                 title={`This drawing lists ${row.cutList.rows.length} components`}
                                 onClick={() => setOpenStem(row.stem)}
                               />
@@ -426,15 +438,21 @@ export default function DrawingWorkspaceStep({
                                 <DescriptionOutlinedIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            {/* Drop the row outright. An include checkbox left
-                                thirty-one ticked boxes on screen to express a
-                                default nobody changes. */}
+                            {/*
+                              An X, not a bin. Nothing has been created yet, so
+                              this drops a row from a list rather than deleting a
+                              part — a bin would claim stakes the screen does not
+                              have. It reads destructive on APPROACH instead: the
+                              hover turns it red, and the panel's own X became a
+                              collapse so the two cannot be confused.
+                            */}
                             <Tooltip title="Leave this one out">
                               <IconButton
                                 size="small"
                                 onClick={() => onRowsChange(rows.filter((r) => r.stem !== row.stem))}
                                 disabled={creating}
                                 aria-label={`Remove ${name}`}
+                                sx={{ '&:hover': { color: 'error.light' } }}
                               >
                                 <CloseIcon fontSize="small" />
                               </IconButton>
@@ -443,9 +461,9 @@ export default function DrawingWorkspaceStep({
                         </TableCell>
                       </TableRow>
 
-                      <TableRow sx={{ display: expandable ? undefined : 'none' }}>
+                      <TableRow sx={{ display: canOpen(row) ? undefined : 'none' }}>
                         <TableCell colSpan={4} sx={{ py: 0, border: 0 }}>
-                          <Collapse in={open && expandable} unmountOnExit>
+                          <Collapse in={open && canOpen(row)} unmountOnExit>
                             <Box sx={{ py: 2, px: 1 }}>
                               {wantWork && (
                                 <>

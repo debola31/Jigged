@@ -101,9 +101,22 @@ A thin header — per-part, per-quantity pricing lives on the line items.
 | `customer_id` | Required |
 | `lead_time_text` | Free text as stated ("2–3 weeks", "In stock"). **Quote-level default**; a line item can override per part. Does **not** drive the job due date |
 | `payment_terms` | Required. A single free-text string, no enum |
+| `customer_note` | Optional free-text note **to the customer**, printed on the PDF below the total. Capped at 500 chars (`quotes_customer_note_length`; `MAX_QUOTE_CUSTOMER_NOTE_LENGTH` in [types/quote.ts](../../types/quote.ts) is the same number). **There is no internal counterpart** — see below |
 | `expiration_date` | Defaults to `created_at + 10 days`. Labelled **"Quote valid until"** on the form and `Valid Until:` on the PDF; the column keeps its original name |
 | `status`, `status_changed_at` | `active` \| `expired` |
 | `converted_at` | First conversion only |
+
+**The note to the customer is customer-facing, and only that.** A `quotes.notes` column once
+existed, labelled "Internal Notes" on the form, and was removed on 2026-01-02 (`595733c0`) along
+with `jobs.notes`, `parts.notes` and `routings.notes`. It never printed. `customer_note` is not
+that column returning: it exists to be printed, the form says so where it is typed, and there is
+deliberately no visibility flag — a field that can only ever be shown cannot leak by having a
+boolean set the wrong way. Internal commentary belongs in the `notes` feed, which has no quote FK.
+
+It takes **no prefill** and raises **no drift chip**: a note is written for one quote, so it is not
+a standing term. If shops start retyping the same boilerplate, a shop-wide default belongs in
+`companies.settings` following `readCompanyDefaultPaymentTerms`'s resolve-once-at-create discipline
+([lib/companyDefaults.ts](../../lib/companyDefaults.ts)) — never a read-time lookup.
 
 **Payment terms prefill from the customer's standing commercial contract.**
 `default_payment_terms` rides along on the detail select so the page can compare what was used

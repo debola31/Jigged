@@ -62,6 +62,13 @@ export interface Quote {
   // that's entered manually at conversion.
   lead_time_text: string | null;
   payment_terms: string | null;
+  // Free-text note from the shop TO THE CUSTOMER, printed on the quote PDF
+  // below the grand total. Customer-facing by definition — there is no internal
+  // counterpart, and internal commentary belongs in the `notes` feed. NOT a
+  // revival of the `quotes.notes` column removed in January 2026: that one was
+  // internal and never printed. Capped at MAX_QUOTE_CUSTOMER_NOTE_LENGTH, which
+  // the quotes_customer_note_length CHECK enforces at rest.
+  customer_note: string | null;
   expiration_date: string | null;
   status: QuoteStatus;
   status_changed_at: string | null;
@@ -308,6 +315,10 @@ export interface QuoteFormData {
   lead_time_text: string;
   // Payment terms shown on the quote (preset or custom free text). '' = unset.
   payment_terms: string;
+  // Note to the customer, printed on the PDF. '' = unset, and unlike
+  // lead_time_text/payment_terms it is OPTIONAL — a quote with nothing to say
+  // says nothing rather than being blocked at validation.
+  customer_note: string;
   expiration_date: string; // ISO date (YYYY-MM-DD)
   status?: QuoteStatus;
 }
@@ -359,6 +370,18 @@ export interface CompanyMember {
 export const DEFAULT_QUOTE_VALIDITY_DAYS = 10;
 
 /**
+ * How long a quote's note to the customer may be.
+ *
+ * The same number the `quotes_customer_note_length` CHECK enforces
+ * (20260819175206_add_quote_customer_note.sql) — declared once here so the
+ * form's maxLength and the database agree by construction rather than by
+ * coincidence. It is a printed-document limit, not a storage one: the note
+ * shares a page with the line items, and past roughly this length it stops
+ * being the "short note to the customer" it is offered as.
+ */
+export const MAX_QUOTE_CUSTOMER_NOTE_LENGTH = 500;
+
+/**
  * Expiration date for a NEW quote: today + `validityDays`. The validity window
  * is company-configurable (companies.settings.defaults.quote_validity_days,
  * read via readQuoteValidityDays); callers that don't have the company row pass
@@ -380,6 +403,7 @@ export const EMPTY_QUOTE_FORM: QuoteFormData = {
   parts: [],
   lead_time_text: '',
   payment_terms: '',
+  customer_note: '',
   expiration_date: defaultExpirationDate(),
 };
 
@@ -419,6 +443,7 @@ export function quoteToFormData(quote: QuoteWithRelations): QuoteFormData {
       })),
     lead_time_text: quote.lead_time_text ?? '',
     payment_terms: quote.payment_terms ?? '',
+    customer_note: quote.customer_note ?? '',
     expiration_date: quote.expiration_date || defaultExpirationDate(),
     status: quote.status,
   };

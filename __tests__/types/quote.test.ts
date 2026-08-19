@@ -134,6 +134,48 @@ describe('calculateTotalPrice', () => {
   });
 });
 
+describe('quoteToFormData — customer note', () => {
+  // The form binds this to a TextField, which cannot hold null. If the mapping ever leaks a null
+  // through, React flips the input from controlled to uncontrolled on the first quote that has no
+  // note — every one of them, on the edit path.
+  function quoteWithNote(note: string | null): QuoteWithRelations {
+    return {
+      id: 'quote-1',
+      company_id: 'company-1',
+      quote_number: 'Q-0001',
+      customer_id: 'customer-1',
+      billing_address_id: 'addr-1',
+      shipping_address_id: 'addr-1',
+      contact_id: 'contact-1',
+      lead_time_text: '14 days',
+      payment_terms: 'Net 30',
+      customer_note: note,
+      expiration_date: '2099-12-31',
+      status: 'active',
+      status_changed_at: null,
+      converted_at: null,
+      created_by: null,
+      created_at: '2026-06-01T00:00:00Z',
+      updated_at: '2026-06-01T00:00:00Z',
+      line_items: [],
+    } as unknown as QuoteWithRelations;
+  }
+
+  it('round-trips a note the shop wrote', () => {
+    expect(quoteToFormData(quoteWithNote('Prices exclude freight.')).customer_note).toBe(
+      'Prices exclude freight.',
+    );
+  });
+
+  it("maps a quote with no note to '' rather than null", () => {
+    expect(quoteToFormData(quoteWithNote(null)).customer_note).toBe('');
+  });
+
+  it("preserves the shop's own line breaks", () => {
+    expect(quoteToFormData(quoteWithNote('One.\nTwo.')).customer_note).toBe('One.\nTwo.');
+  });
+});
+
 describe('quoteToFormData', () => {
   function makeQuote(lineItems: QuoteWithRelations['line_items']): QuoteWithRelations {
     return {
@@ -146,6 +188,7 @@ describe('quoteToFormData', () => {
       contact_id: 'contact-1',
       lead_time_text: '14 days',
       payment_terms: 'Net 30',
+      customer_note: null,
       expiration_date: '2099-12-31',
       status: 'active',
       status_changed_at: null,

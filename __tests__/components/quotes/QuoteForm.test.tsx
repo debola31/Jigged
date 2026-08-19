@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, routerMocks, resetRouterMocks } from '../../test-utils';
 import userEvent from '@testing-library/user-event';
 import QuoteForm from '@/components/quotes/QuoteForm';
-import type { QuoteFormData } from '@/types/quote';
+import { MAX_QUOTE_CUSTOMER_NOTE_LENGTH, type QuoteFormData } from '@/types/quote';
 
 // Quote access — primary surface under test
 const createQuote = vi.fn();
@@ -129,6 +129,7 @@ const initialBlank: QuoteFormData = {
   parts: [],
   lead_time_text: '',
   payment_terms: '',
+  customer_note: '',
   expiration_date: '',
 };
 
@@ -142,6 +143,9 @@ const initialPopulated: QuoteFormData = {
   // Payment terms are required to submit a quote, so the "populated/complete"
   // fixture carries one.
   payment_terms: 'Net 30',
+  // Deliberately absent: the note is the one optional field in the Terms card, so the
+  // "complete" fixture proves a quote submits without one.
+  customer_note: '',
   expiration_date: '',
 };
 
@@ -280,6 +284,73 @@ describe('QuoteForm', () => {
         '/dashboard/test-company-id/quotes/new-quote-id',
       );
     });
+  });
+
+  it('sends the note to the customer through to createQuote', async () => {
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create quote/i })).toBeEnabled();
+    });
+
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText(/note to customer/i),
+      'Prices exclude freight and sales tax.',
+    );
+    await user.click(screen.getByRole('button', { name: /create quote/i }));
+
+    await waitFor(() => {
+      expect(createQuote).toHaveBeenCalledTimes(1);
+    });
+    const [, payload] = createQuote.mock.calls[0];
+    expect(payload.customer_note).toBe('Prices exclude freight and sales tax.');
+  });
+
+  it('leaves the note optional — a quote submits with the box untouched', async () => {
+    // Lead time and payment terms block submit when empty. The note must not: most quotes have
+    // nothing extra to say, and a required note would be answered with a full stop.
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /create quote/i })).toBeEnabled();
+    });
+
+    expect(screen.getByLabelText(/note to customer/i)).toHaveValue('');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /create quote/i }));
+
+    await waitFor(() => {
+      expect(createQuote).toHaveBeenCalledTimes(1);
+    });
+    expect(createQuote.mock.calls[0][1].customer_note).toBe('');
+  });
+
+  it('says on the field itself that the note prints, because that is the whole promise', async () => {
+    // The label and helper text ARE the visibility contract — there is no eye icon or
+    // internal/external toggle to get backwards. If this wording goes, a shop can no longer tell
+    // from the form that what it types reaches the customer.
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/note to customer/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/prints on the quote pdf/i)).toBeInTheDocument();
+  });
+
+  it('caps the note at the same length the database enforces', async () => {
+    render(<QuoteForm mode="create" initialData={initialPopulated} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/note to customer/i)).toBeInTheDocument();
+    });
+    // Same constant as the quotes_customer_note_length CHECK, so the form refuses what the
+    // database would reject rather than surfacing a 23514 after a full save.
+    expect(screen.getByLabelText(/note to customer/i)).toHaveAttribute(
+      'maxlength',
+      String(MAX_QUOTE_CUSTOMER_NOTE_LENGTH),
+    );
   });
 
   it('accepts a fractional order quantity (parts sold by length/weight) and forwards it', async () => {

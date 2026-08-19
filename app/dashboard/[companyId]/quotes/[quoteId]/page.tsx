@@ -843,6 +843,29 @@ export default function QuoteDetailPage() {
         </Grid>
       </Grid>
 
+      {/* Note to the customer — between the total and the preparer credit, which is exactly where
+          the PDF prints it. This page mirrors the printed document deliberately (see "Prepared by"
+          below and the header comment on "Created by"), so someone checking a quote before sending
+          it reads the blocks in the order the customer will. Rendering it up in the compact terms
+          stack would break that and squeeze a paragraph into a list of one-line meta.
+
+          Absent when blank rather than shown as an empty heading, matching the PDF. */}
+      {quote.customer_note?.trim() && (
+        <Box sx={{ mt: 3 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ fontWeight: 600, letterSpacing: 0.5 }}
+          >
+            NOTES
+          </Typography>
+          {/* pre-wrap: the shop's own line breaks are meaningful and the PDF honours them too. */}
+          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+            {quote.customer_note}
+          </Typography>
+        </Box>
+      )}
+
       {/* Prepared by — relocated from the header, mirroring the PDF footer. */}
       {(quote.created_by_member?.name || quote.created_by_member?.email) && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 3 }}>

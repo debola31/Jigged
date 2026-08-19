@@ -402,6 +402,72 @@ export async function generateQuotePdf(
     cursorY += 20;
   }
 
+  // ---------- Notes to the customer ----------
+  // Below the total, above the footer: the customer reads the price, then the caveat that qualifies
+  // it ("Prices exclude freight", "Tooling quoted separately"). That is where every comparable
+  // document puts it, and it is the only gap in this layout that does not push something else down.
+  //
+  // **This block must stay ahead of the footer loop below.** That loop walks `getNumberOfPages()`
+  // and stamps every page, so a page added here still gets its rule, preparer credit and page
+  // number; a page added after it would print bare.
+  //
+  // There is no internal counterpart to guard against. `quotes.customer_note` is customer-facing by
+  // definition — the form says so where it is typed — so there is no visibility flag to check and
+  // no way to leak a private remark onto a document by getting a boolean backwards.
+  const customerNote = (quote.customer_note ?? '').trim();
+  if (customerNote !== '') {
+    // **Set the body font BEFORE measuring.** `splitTextToSize` wraps against whatever font the
+    // document is currently in, and at this point that is still the grand total's bold 13pt.
+    // Measuring there and drawing at normal 10pt is silently wrong in the safe direction — every
+    // line breaks about a third short of the right margin, so the note reads as a ragged narrow
+    // column and runs onto more lines than it needs. Nothing overflows, which is exactly why it
+    // survived a mocked test suite: only a real render shows it.
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+
+    // The user's own line breaks are meaningful — a shop writing three caveats writes three lines —
+    // so paragraphs are split first and each is wrapped to the text column independently. A blank
+    // line survives as a blank line rather than being collapsed away.
+    const noteLines = customerNote.split('\n').flatMap((paragraph) => {
+      const trimmed = paragraph.trimEnd();
+      return trimmed === '' ? [''] : (doc.splitTextToSize(trimmed, usableWidth) as string[]);
+    });
+
+    // The footer's rule sits 14pt above the baseline at `pageHeight - MARGIN`; nothing may cross it.
+    const footerTop = pageHeight - MARGIN - 14;
+    const LINE_HEIGHT = 13;
+
+    // Keep the heading with at least its first line — a NOTES label stranded alone at the foot of
+    // page 1 with the note itself on page 2 reads as a formatting fault.
+    if (cursorY + 16 + LINE_HEIGHT > footerTop) {
+      doc.addPage();
+      cursorY = MARGIN;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+    doc.text('NOTES', MARGIN, cursorY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(40);
+    let noteY = cursorY + 16;
+    for (const line of noteLines) {
+      // Per-line rather than measuring the block once: the 500-char cap
+      // (MAX_QUOTE_CUSTOMER_NOTE_LENGTH, enforced at rest by
+      // quotes_customer_note_length) means a note cannot actually outrun a fresh page today, but a
+      // block that paginates by construction cannot be broken by raising that cap later.
+      if (noteY > footerTop) {
+        doc.addPage();
+        noteY = MARGIN;
+      }
+      if (line !== '') doc.text(line, MARGIN, noteY);
+      noteY += LINE_HEIGHT;
+    }
+    cursorY = noteY + 4;
+  }
+
   // ---------- Footer (every page) ----------
   // The company name and quote dates already sit in the header, so the footer carries the preparer
   // credit (relocated from the old top "CREATED BY" column) on the left and, on the right, the

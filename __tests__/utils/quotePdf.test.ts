@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Hoisted mocks so they're set up before imports resolve.
-const { jsPDFCtor, autoTableFn } = vi.hoisted(() => {
+const { jsPDFCtor, autoTableFn, docInstance: sharedDoc } = vi.hoisted(() => {
   const saveMock = vi.fn();
   const textMock = vi.fn();
   const lineMock = vi.fn();
@@ -43,7 +43,7 @@ const { jsPDFCtor, autoTableFn } = vi.hoisted(() => {
   });
   const autoTableFn = vi.fn();
 
-  return { jsPDFCtor, autoTableFn };
+  return { jsPDFCtor, autoTableFn, docInstance };
 });
 
 vi.mock('jspdf', () => ({
@@ -74,6 +74,7 @@ const baseQuote: QuoteWithRelations = {
   contact_id: 'contact-1',
   lead_time_text: '14 days',
   payment_terms: null,
+  customer_note: null,
   expiration_date: '2099-12-31',
   status: 'active',
   status_changed_at: null,
@@ -715,5 +716,188 @@ describe('generateQuotePdf — company logo', () => {
     await generateQuotePdf(baseQuote, { ...baseCompany, logo_url: 'co/company/logo.png' });
     const docInstance = jsPDFCtor.mock.results[0].value;
     expect(docInstance.addImage).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * The note to the customer — the one block on this document the shop writes in its own words.
+ *
+ * Two things are worth pinning down by test rather than by care. The block sits BELOW the total and
+ * ABOVE the footer loop, and the ordering is load-bearing in both directions: printed before the
+ * total it stops being the caveat that qualifies a price, and emitted after the footer loop any
+ * page it adds would print with no rule, no preparer credit and no page number.
+ *
+ * The other is that it is absent, not empty, when there is nothing to say. A quote is a document a
+ * shop hands to a customer, and a bare NOTES heading over blank space reads as something lost in
+ * transit.
+ */
+describe('generateQuotePdf — note to the customer', () => {
+  // The shared docInstance is created once in vi.hoisted and `vi.clearAllMocks()` clears call
+  // history WITHOUT restoring implementations, so a mockReturnValue set here would leak into
+  // whatever runs next. Every test sets what it needs and afterEach puts the default back.
+  const DEFAULT_SPLIT = ['wrapped'];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    sharedDoc.splitTextToSize.mockReturnValue(DEFAULT_SPLIT);
+  });
+
+  /** Every string the document drew, in draw order. */
+  const drawnText = (): string[] => {
+    return sharedDoc.text.mock.calls
+      .map((c: unknown[]) => c[0])
+      .filter((t: unknown): t is string => typeof t === 'string');
+  };
+
+  /** The y coordinate of the first call that drew `text`. */
+  const yOf = (text: string): number => {
+    const call = sharedDoc.text.mock.calls.find((c: unknown[]) => c[0] === text);
+    return call?.[2] as number;
+  };
+
+  it('prints the note under a NOTES heading', async () => {
+    const note = 'Prices exclude freight and sales tax.';
+    sharedDoc.splitTextToSize.mockReturnValue([note]);
+
+    await generateQuotePdf({ ...baseQuote, customer_note: note }, baseCompany);
+
+    const rendered = drawnText();
+    expect(rendered).toContain('NOTES');
+    expect(rendered).toContain(note);
+  });
+
+  it('prints the note BELOW the grand total, which is what makes it a caveat on the price', async () => {
+    const note = 'Tooling quoted separately.';
+    sharedDoc.splitTextToSize.mockReturnValue([note]);
+
+    // baseQuote has one part at one quantity, so it is a firm quote and prints a Total.
+    await generateQuotePdf({ ...baseQuote, customer_note: note }, baseCompany);
+
+    expect(drawnText()).toContain('Total');
+    expect(yOf('NOTES')).toBeGreaterThan(yOf('Total'));
+    expect(yOf(note)).toBeGreaterThan(yOf('NOTES'));
+  });
+
+  it('omits the block entirely when there is no note', async () => {
+    await generateQuotePdf(baseQuote, baseCompany);
+    expect(drawnText()).not.toContain('NOTES');
+  });
+
+  it('omits the block when the note is only whitespace, rather than printing a bare heading', async () => {
+    await generateQuotePdf({ ...baseQuote, customer_note: '   \n  \t ' }, baseCompany);
+    expect(drawnText()).not.toContain('NOTES');
+  });
+
+  it("keeps the shop's own line breaks as separate lines", async () => {
+    // Each paragraph is wrapped independently, so splitTextToSize is called once per line.
+    sharedDoc.splitTextToSize.mockImplementation((t: string) => [t]);
+
+    await generateQuotePdf(
+      { ...baseQuote, customer_note: 'Freight excluded.\nTooling separate.' },
+      baseCompany,
+    );
+
+    const rendered = drawnText();
+    expect(rendered).toContain('Freight excluded.');
+    expect(rendered).toContain('Tooling separate.');
+    // Two distinct baselines, not one overprinted row.
+    expect(yOf('Tooling separate.')).toBeGreaterThan(yOf('Freight excluded.'));
+  });
+
+  it('starts a new page rather than printing the note over the footer', async () => {
+    // 40 lines cannot fit between the total (~y 440) and the footer rule (y 738) at 13pt.
+    const many = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    sharedDoc.splitTextToSize.mockReturnValue(many);
+
+    await generateQuotePdf({ ...baseQuote, customer_note: 'long' }, baseCompany);
+
+    expect(sharedDoc.addPage).toHaveBeenCalled();
+    // Nothing was drawn below the footer rule at pageHeight - MARGIN - 14 = 738.
+    const noteYs = sharedDoc.text.mock.calls
+      .filter((c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).startsWith('line '))
+      .map((c: unknown[]) => c[2] as number);
+    expect(noteYs.length).toBe(40);
+    expect(Math.max(...noteYs)).toBeLessThanOrEqual(738);
+  });
+
+  it('emits the block BEFORE the footer loop, so a page it adds still gets stamped', async () => {
+    // The other half of the ordering this describe calls load-bearing — and the half that was
+    // stated in prose above and asserted nowhere. The footer reads getNumberOfPages() ONCE and then
+    // stamps exactly that many pages. Move this block below that loop and a note long enough to
+    // paginate ships the customer a page with no rule, no preparer credit, and "Page 1 of 1"
+    // printed on a two-page document.
+    //
+    // Only call ORDER can see it: addPage is an inert vi.fn() and getNumberOfPages is pinned to 1,
+    // so page identity is invisible to every coordinate- or text-based assertion in this file.
+    const many = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    sharedDoc.splitTextToSize.mockReturnValue(many);
+
+    await generateQuotePdf({ ...baseQuote, customer_note: 'long' }, baseCompany);
+
+    expect(sharedDoc.addPage).toHaveBeenCalled();
+    const lastAddPage = sharedDoc.addPage.mock.invocationCallOrder.at(-1) as number;
+    const firstPageCountRead = sharedDoc.getNumberOfPages.mock.invocationCallOrder[0] as number;
+    expect(lastAddPage).toBeLessThan(firstPageCountRead);
+  });
+
+  it('draws the note ahead of the footer, on every quote and not only paginating ones', async () => {
+    // The cheap companion to the test above, which needs a note long enough to paginate before it
+    // has anything to bite on. This one holds for the one-line note that most quotes will carry.
+    sharedDoc.splitTextToSize.mockReturnValue(['a note line']);
+
+    await generateQuotePdf({ ...baseQuote, customer_note: 'a note line' }, baseCompany);
+
+    const rendered = drawnText();
+    const notesAt = rendered.indexOf('NOTES');
+    const footerAt = rendered.findIndex((t: string) => /Page \d+ of \d+/.test(t));
+    expect(notesAt).toBeGreaterThanOrEqual(0);
+    expect(footerAt).toBeGreaterThanOrEqual(0);
+    expect(notesAt).toBeLessThan(footerAt);
+  });
+
+  it('measures the wrap in the body font, not the one the total left behind', async () => {
+    // splitTextToSize wraps against the document's CURRENT font. The grand total draws in bold
+    // 13pt immediately above, so measuring before switching to the note's normal 10pt breaks every
+    // line about a third short of the right margin — a real defect that overflows nothing and so
+    // shows up in no mocked assertion. This pins the ordering instead.
+    sharedDoc.splitTextToSize.mockReturnValue(['a line']);
+
+    await generateQuotePdf({ ...baseQuote, customer_note: 'a line' }, baseCompany);
+
+    const firstSplitAt = sharedDoc.splitTextToSize.mock.invocationCallOrder[0];
+    const sizeSetToBodyBefore = sharedDoc.setFontSize.mock.calls
+      .map((c: unknown[], i: number) => ({
+        size: c[0],
+        order: sharedDoc.setFontSize.mock.invocationCallOrder[i],
+      }))
+      .filter((x: { size: unknown; order: number }) => x.order < firstSplitAt)
+      .pop();
+
+    expect(sizeSetToBodyBefore?.size).toBe(10);
+  });
+
+  it('never strands the NOTES heading at the foot of a page without its first line', async () => {
+    sharedDoc.splitTextToSize.mockReturnValue(['the note']);
+    // Push the table's end down so the heading cannot fit above the footer rule. finalY is shared
+    // mutable state on the hoisted doc, so the restore goes in a finally: a bare reassignment after
+    // the assertions leaks 730 into every test that runs after a failure here, and the next red
+    // test would be someone else's.
+    const originalFinalY = sharedDoc.lastAutoTable.finalY;
+    sharedDoc.lastAutoTable.finalY = 730;
+
+    try {
+      await generateQuotePdf({ ...baseQuote, customer_note: 'the note' }, baseCompany);
+
+      expect(sharedDoc.addPage).toHaveBeenCalled();
+      // Heading and first line landed on the same (new) page, in order and above the rule.
+      expect(yOf('NOTES')).toBeLessThan(yOf('the note'));
+      expect(yOf('the note')).toBeLessThanOrEqual(738);
+    } finally {
+      sharedDoc.lastAutoTable.finalY = originalFinalY;
+    }
   });
 });

@@ -272,8 +272,6 @@ export default function StationStrip({
                     data-testid="station-option"
                     sx={{
                       flex: 'none',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start',
                       textTransform: 'none',
                       whiteSpace: 'nowrap',
                       px: 1.25,
@@ -285,21 +283,13 @@ export default function StationStrip({
                       color: 'text.primary',
                     }}
                   >
+                    {/*
+                      The name only. A rate under every station was 25 prices on a
+                      screen where nobody is pricing anything — and this control
+                      exists precisely because times and money come later.
+                    */}
                     <Box component="span" sx={{ fontSize: '0.87rem', fontWeight: 500 }}>
                       {s.name}
-                    </Box>
-                    <Box
-                      component="span"
-                      sx={{
-                        fontSize: '0.7rem',
-                        color: s.kind === 'internal' ? 'text.secondary' : 'secondary.light',
-                      }}
-                    >
-                      {s.kind === 'internal'
-                        ? s.laborRate != null
-                          ? `$${s.laborRate}/hr`
-                          : 'no rate set'
-                        : `outside${s.vendorName ? ` · ${s.vendorName}` : ''}`}
                     </Box>
                   </Button>
                 );

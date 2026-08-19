@@ -89,18 +89,6 @@ test.describe('Add parts from drawings', () => {
     await page.getByRole('checkbox', { name: /Add materials/i }).check();
     await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
 
-    // ── Step 3b: the AI pass, which has already run ──
-    // It is chained to the "Read the files" press rather than being a second
-    // button — the no-AI-on-load rule is about lifecycle hooks, and that press is
-    // a user action. Anthropic is mocked (see the file header), so this exercises
-    // the real route, gates and fidelity check for no credits, and the mock echoes
-    // a material back OUT OF THE STRINGS IT WAS SENT because the route drops
-    // anything that was not on the drawing.
-    //
-    // The offer only remains as a RETRY, so its absence is the success condition.
-    const assist = page.getByRole('button', { name: /Read the title blocks/i });
-    await expect(assist).toBeHidden({ timeout: 120_000 });
-
     // ── Routing by tapping stations, no numbers ──
     // Which stations a part visits is recall; how long it takes there is a
     // consensus the shop may not have reached. So the fast path asks only the
@@ -108,14 +96,17 @@ test.describe('Add parts from drawings', () => {
     // Operations are opt-in: the screen opens as a plain list of parts, because
     // filing is the whole job for most imports.
     await page.getByRole('checkbox', { name: /Add operations/i }).check();
-    await page.getByRole('button', { name: /Set the work for every part/i }).click();
+
+    // Work is entered ON a part, then spread — "apply this to the other 30" reads
+    // as a consequence of something concrete.
+    await page.getByRole('button', { name: /Set up E2E-DRAW-1/i }).click();
 
     // Search filters the strip in place — no dropdown, no second surface.
-    await page.getByRole('textbox', { name: /Search work centres/i }).fill('E2E Internal');
+    await page.getByRole('textbox', { name: /Search work centres/i }).first().fill('E2E Internal');
     await page.getByTestId('station-option').first().click();
     await expect(page.getByTestId('route-step')).toHaveCount(1);
 
-    await page.getByRole('button', { name: /Apply to all 3 parts/i }).click();
+    await page.getByRole('button', { name: /Apply this work to the other 2 parts/i }).click();
     await expect(page.getByText(/3 routed/i)).toBeVisible();
 
     // ── Filing is the outcome ──
@@ -204,7 +195,7 @@ test.describe('Add parts from drawings', () => {
 
     // Give it TIMED work, so this part really does resolve to a cost — the full
     // editor is a click away for anyone who already knows the numbers.
-    await page.getByRole('button', { name: /Set times and rates/i }).click();
+    await page.getByRole('button', { name: /Set times and rates/i }).first().click();
     await page.getByRole('button', { name: /Add Operation/i }).click();
     const workCenter = page.getByRole('combobox', { name: /Work center/i });
     await workCenter.fill('E2E Internal');

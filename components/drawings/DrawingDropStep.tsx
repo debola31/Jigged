@@ -14,9 +14,13 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
-import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import IconButton from '@mui/material/IconButton';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemText from '@mui/material/ListItemText';
+import CloseIcon from '@mui/icons-material/Close';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
@@ -213,12 +217,47 @@ export default function DrawingDropStep({
             onChange={(e) => take(e.target.files)}
           />
 
+          {/*
+            The files themselves, not a count of them. A folder picked from a
+            customer's package usually has something in it that should not be
+            there — a spreadsheet, an old revision, the one drawing for a part
+            they already make — and a chip reading "93 files ready" gives nobody
+            a way to see that, let alone drop it.
+          */}
           {picked.length > 0 && (
-            <Box sx={{ mt: 3 }}>
-              <Chip
-                color="success"
-                label={`${picked.length} file${picked.length === 1 ? '' : 's'} ready`}
-              />
+            <Box sx={{ mt: 3, textAlign: 'left' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                {picked.length} file{picked.length === 1 ? '' : 's'} ready
+              </Typography>
+              <List
+                dense
+                disablePadding
+                sx={{ maxHeight: 260, overflowY: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}
+              >
+                {picked.map((file, i) => (
+                  <ListItem
+                    key={`${file.name}-${i}`}
+                    disableGutters
+                    sx={{ px: 1.5, py: 0.25 }}
+                    secondaryAction={
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        aria-label={`Remove ${file.name}`}
+                        disabled={disabled}
+                        onClick={() => setPicked((prev) => prev.filter((_, n) => n !== i))}
+                      >
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemText
+                      primary={file.name}
+                      primaryTypographyProps={{ variant: 'body2', noWrap: true }}
+                    />
+                  </ListItem>
+                ))}
+              </List>
             </Box>
           )}
         </Box>

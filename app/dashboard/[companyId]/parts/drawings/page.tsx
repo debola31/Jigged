@@ -28,7 +28,6 @@ import { groupDrawingFiles } from '@/lib/drawingFileGroups';
 import { buildRows, type BuiltRow } from '@/lib/drawingImportExtract';
 import { resolveIdentities } from '@/utils/drawingImportIdentity';
 import { createPartsFromRows, summarise, type CreatedRow } from '@/utils/drawingImportCreate';
-import { assistRows } from '@/utils/drawingFieldsAssist';
 import { valueOf } from '@/types/drawingImport';
 import DrawingDropStep from '@/components/drawings/DrawingDropStep';
 import DrawingWorkspaceStep, { type WorkByStem } from '@/components/drawings/DrawingWorkspaceStep';
@@ -59,10 +58,8 @@ export default function AddPartsFromDrawingsPage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CreatedRow[] | null>(null);
-  const [assisted, setAssisted] = useState(false);
   const [work, setWork] = useState<WorkByStem>(new Map());
   const [fileCount, setFileCount] = useState(0);
-  const [assistFailed, setAssistFailed] = useState(false);
   const [componentEdits, setComponentEdits] = useState<ComponentEdits>(NO_COMPONENT_EDITS);
 
   /**
@@ -83,55 +80,6 @@ export default function AddPartsFromDrawingsPage() {
       excluded: [...next.materials, ...next.made].filter((c) => !c.include).map((c) => c.key),
     });
   }, []);
-
-  /**
-   * Read the title blocks closely.
-   *
-   * Takes its rows as an ARGUMENT rather than reading state: it runs immediately
-   * after `setRows`, and React has not re-rendered yet, so `rows` here would be
-   * the previous import's — or on the first run, empty.
-   *
-   * Reached two ways, both of them a press the user made: the button on step 1
-   * (which does this as part of reading the files) and the offer on step 2, which
-   * stands as the retry when this fails.
-   */
-  const runAssist = useCallback(async (target: BuiltRow[]) => {
-    setError(null);
-    setBusy('Reading the title blocks…');
-    try {
-      setAssistFailed(false);
-      const outcome = await assistRows(companyId, target, (done, total) =>
-        setProgress({ done, total }),
-      );
-      setRows((current) =>
-        current.map((r) => {
-          const filled = outcome.filled.get(r.stem);
-          return filled ? { ...r, fields: { ...r.fields, ...filled } } : r;
-        }),
-      );
-      setAssisted(true);
-      // `dropped_count` is the fidelity check firing. It has never fired in
-      // measurement, so a non-zero here is the signal that something changed.
-      posthog.capture('drawing title blocks read', {
-        asked_count: outcome.askedAbout,
-        filled_count: outcome.filled.size,
-        skipped_count: outcome.skipped,
-        failed_count: outcome.failed,
-        dropped_count: outcome.dropped.length,
-      });
-      if (outcome.failed > 0) {
-        setError(
-          `${outcome.filled.size} of ${outcome.askedAbout} drawings filled in. ${outcome.failed} could not be read — the rest are unaffected.`,
-        );
-      }
-    } catch (err) {
-      setAssistFailed(true);
-      setError(err instanceof Error ? err.message : 'Could not read the title blocks.');
-    } finally {
-      setBusy(null);
-      setProgress(null);
-    }
-  }, [companyId]);
 
   /**
    * Read the dropped files, then resolve identity in ONE batched pass. Per-row
@@ -194,20 +142,6 @@ export default function AddPartsFromDrawingsPage() {
           with_components: withIdentity.filter((r) => r.cutList).length,
           has_customer: !!customerId,
         });
-        /**
-         * Read the title blocks BEFORE showing the workspace, not behind it.
-         *
-         * This does not break the no-AI-on-load rule: that rule is about lifecycle
-         * hooks — mount, effect, poll — and this is a button the user pressed with
-         * files they chose.
-         *
-         * It used to fill descriptions in while the table was already up, which
-         * looked responsive and was worse: rows rewrote themselves under a cursor
-         * that might be in one of them. A field changing while you read it is the
-         * kind of thing that makes someone stop trusting the screen. So the wait
-         * is honest and up front, and what lands is settled.
-         */
-        await runAssist(withIdentity);
         setStep(1);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not read those files.');
@@ -216,7 +150,6 @@ export default function AddPartsFromDrawingsPage() {
         setProgress(null);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [companyId, customerId, defaultSource],
   );
 
@@ -259,7 +192,6 @@ export default function AddPartsFromDrawingsPage() {
         with_operations: created.filter((r) => r.operationsAdded > 0).length,
         components_linked: created.reduce((n, r) => n + r.componentsLinked, 0),
         quotable_count: created.filter((r) => r.quotable).length,
-        used_ai: assisted,
         has_customer: !!customerId,
       });
 
@@ -278,7 +210,7 @@ export default function AddPartsFromDrawingsPage() {
       setCreating(false);
       setProgress(null);
     }
-  }, [rows, companyId, customerId, defaultUnit, assisted, work, components]);
+  }, [rows, companyId, customerId, defaultUnit, work, components]);
 
   // A hidden tab is not access control, but this page writes nothing on its own —
   // the flag gates the surface and the backend route gates the spend.
@@ -345,8 +277,6 @@ export default function AddPartsFromDrawingsPage() {
           onBack={() => setStep(0)}
           onCreate={handleCreate}
           creating={creating}
-          onAssist={() => void runAssist(rows)}
-          assistFailed={assistFailed}
           customerId={customerId}
         />
       )}
@@ -402,10 +332,8 @@ export default function AddPartsFromDrawingsPage() {
                     onClick={() => {
                       setRows([]);
                       setResults(null);
-                      setAssisted(false);
-                      setWork(new Map());
+                                      setWork(new Map());
                       setFileCount(0);
-                      setAssistFailed(false);
                       setComponentEdits(NO_COMPONENT_EDITS);
                       setStep(0);
                     }}

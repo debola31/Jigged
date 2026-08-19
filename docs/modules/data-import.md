@@ -444,6 +444,12 @@ write plan out — never private helpers or DOM internals. Three seams:
   `/…/import` wizards (plus `parts/bom/import`) are deleted. The empty-state
   `ImportAllDataLink` and the sidebar entry are the ways in. *(This doc previously listed the
   reroute as Not built, and before that described it as a Phase 2 behaviour.)*
+- **A Map step covering every importable field.** `ENTITY_FIELDS` is a review-relevant slice —
+  customers get `name` + `default_payment_terms`, vendors `name` alone. The AI maps the rest
+  against the full `ENTITY_SCHEMAS` and they ride through to `execute`, so richer columns do
+  import; but a mis-mapped one is not correctable, and since the per-entity wizards (which
+  exposed all 11 customer fields) are gone, there is no fallback surface.
+  [#777](https://github.com/debola31/Jigged/issues/777).
 - **"Unchanged" and "Conflict" reconciliation buckets**, and **fuzzy link-to-existing** matching
   (only exact-normalized bucketing ships).
 - **An explicit "leave blank — intentional" decision.** Spec'd so that confirming a gap *downgrades*

@@ -359,7 +359,7 @@ The guided flow (`lib/dataImportSchema.ts`) exposes only `name` and `default_pay
 Map step — a UI restriction, not a server limit: the AI maps the other nine and they ride through to
 execute. But since the retired wizard exposed all 11 for hand-correction, a mis-mapped
 `contact_email` or `postal_code` is currently **not** correctable in the UI. Widening
-`ENTITY_FIELDS` is tracked as a follow-up.
+`ENTITY_FIELDS` is [#777](https://github.com/debola31/Jigged/issues/777).
 
 The AI column mapper matches source headers against the schema *descriptions*, which deliberately carry legacy-ERP vocabulary: `default_payment_terms` notes *"Often exported as 'Terms', 'Terms Code' or 'Payment Terms'"*.
 

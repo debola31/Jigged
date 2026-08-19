@@ -33,6 +33,7 @@ import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CategoryIcon from '@mui/icons-material/Category';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -682,6 +683,14 @@ export default function PartsPage() {
         </Button>
 
         <Button
+          variant="outlined"
+          startIcon={<DescriptionOutlinedIcon />}
+          onClick={() => router.push(`/dashboard/${companyId}/parts/drawings`)}
+        >
+          Add from Drawings
+        </Button>
+
+        <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => router.push(`/dashboard/${companyId}/parts/new?from=parts`)}
@@ -774,6 +783,8 @@ export default function PartsPage() {
         entityLabel="part"
         count={selectedIds.length}
         impactLines={buildPartsImpactLines(deleteDialog.impact)}
+        // Re-using the name now creates a NEW part — see reclaim_part_name.
+        revivableByName={false}
       />
 
       <Snackbar

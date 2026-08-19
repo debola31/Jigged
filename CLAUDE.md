@@ -119,8 +119,13 @@ Full standard, including which tables carry it: [architecture.md §16](docs/arch
 
 - **Every list / search / picker / count / dashboard query must filter `deleted_at IS NULL`.**
   By-id reads (a detail page, a document's retained FK) intentionally must **not**.
-- **Name is identity: reuse revives, never duplicates.** Keep `(company_id, name)` unique
-  constraints FULL, not partial — importers upsert on them; revive on `23505`.
+- **Name is identity, and the constraints stay FULL, not partial** — importers upsert on them and
+  PostgREST cannot target a partial index. What a `23505` MEANS then differs by entity:
+  customers, vendors and work centres **revive** the archived row; **parts do not** — the archived
+  namesake is renamed `<name> (archived)` and a NEW part takes the name
+  ([`reclaim_part_name`](supabase/migrations/20260818141141_reclaim_archived_part_name.sql)).
+  The rename happens on the collision, never on archive: quote lines and job parts store no name
+  snapshot, so renaming eagerly would rewrite how every past document reads.
 - Don't re-introduce records-of-value delete guards. An invoiced job archives like anything else.
 
 **Nothing enforces this** ([#687](https://github.com/debola31/Jigged/issues/687)), and it is the

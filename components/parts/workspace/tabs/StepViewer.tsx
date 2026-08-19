@@ -6,8 +6,17 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 
 interface StepViewerProps {
-  /** Signed URL of the STEP file to render. */
-  url: string;
+  /** Signed URL of a STORED STEP file. */
+  url?: string;
+  /**
+   * A STEP file that has not been uploaded yet — the drawings import renders one
+   * straight off the user's disk. An object URL will NOT do here: the engine
+   * infers the format from the URL's extension and a blob URL has none, so the
+   * file goes in as a file.
+   */
+  file?: File;
+  /** Defaults to the part page's 75vh; the import panel fills its own box. */
+  height?: string | number;
 }
 
 /**
@@ -21,7 +30,7 @@ interface StepViewerProps {
  * WebGL context is freed on unmount via `Destroy()` to avoid leaks across the
  * modal's repeated open/close.
  */
-export default function StepViewer({ url }: StepViewerProps) {
+export default function StepViewer({ url, file, height = '75vh' }: StepViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +57,8 @@ export default function StepViewer({ url }: StepViewerProps) {
             }
           },
         });
-        viewer.LoadModelFromUrlList([url]);
+        if (file) viewer.LoadModelFromFileList([file]);
+        else if (url) viewer.LoadModelFromUrlList([url]);
         observer = new ResizeObserver(() => viewer?.Resize());
         observer.observe(container);
       } catch {
@@ -64,10 +74,10 @@ export default function StepViewer({ url }: StepViewerProps) {
       observer?.disconnect();
       viewer?.Destroy();
     };
-  }, [url]);
+  }, [url, file]);
 
   return (
-    <Box sx={{ position: 'relative', width: '100%', height: '75vh' }}>
+    <Box sx={{ position: 'relative', width: '100%', height }}>
       {loading && !error && (
         <Box
           sx={{

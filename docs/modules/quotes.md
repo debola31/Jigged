@@ -212,7 +212,15 @@ the Qty box out of line with the Unit price box the moment a price was edited. T
 re-centre themselves against one input's height instead.
 Prices resolve synchronously off the tiers already loaded with the part — no per-quantity round
 trip, so typing a quantity updates the row immediately.
-The block warns when the part has no priced tiers, linking to the part page.
+The block warns when the part has no priced tiers, linking to the part page — and the warning
+CLEARS once a unit price is typed, because it offered two ways out and then kept complaining after
+one of them was taken.
+
+**Every block links to its part, priced or not** (open-in-new-tab beside the picker). That link used
+to live only inside the no-tiers warning, so the moment a part *was* priced there was no route to it
+at all — not to check a cost, a lead time or a drawing. And **Recheck prices** re-reads every
+block's tiers in place: fixing a price on the part page means another tab, and a reload to see the
+result would throw away the quote being written.
 
 There is **no separate "Pricing tiers (reference)" section** — the editable quantity rows
 replaced it, on the form and on the detail view.
@@ -590,7 +598,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 
 **Inline create**
 
-- [ ] **Given** the quote form, **when** + New Customer or + New Part is used, **then** the entity is created, auto-selected, and a part with no tiers keeps the block's "no pricing tiers yet" warning — *automation-pending (#367)*.
+- [ ] **Given** the quote form, **when** + New Customer or + New Part is used, **then** the entity is created, auto-selected, and a part with no tiers keeps the block's "no pricing tiers yet" warning until a unit price is typed — *automation-pending (#367)*.
 
 ---
 

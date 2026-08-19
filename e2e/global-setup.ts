@@ -791,6 +791,8 @@ export default async function globalSetup(): Promise<void> {
     // The count sheet and the Storage board are both behind this. Without it
     // `inventory-count.spec.ts` lands on a redirect.
     inventory_locations: true,
+    // The Parts page renders "Add from Drawings" only behind this flag, so
+    // `drawing-import.spec.ts` cannot find the button without it.
   });
 
   // A part in TWO places — the shape the count sheet exists to handle, and the one

@@ -346,3 +346,101 @@ def test_a_bought_child_at_price_is_satisfied_by_its_own_tier(
         admin.table("part_pricing_tiers").delete().eq("part_id", bought_id).execute()
         admin.table("part_procurement_tiers").delete().eq("part_id", bought_id).execute()
         admin.table("parts").delete().eq("id", bought_id).execute()
+
+
+# ── An operation nobody has timed ───────────────────────────────────────────
+
+
+def _add_untimed_routing(admin: Client, company_id: str, part_id: str, wc_id: str) -> str:
+    """A routing whose operation names a station and says nothing about time.
+
+    This is what the drawings import produces when a shop routes a part before it
+    has agreed cycle times — stations are recall, times are a consensus.
+    """
+    routing = (
+        admin.table("routings")
+        .insert({"company_id": company_id, "part_id": part_id, "name": "R-untimed"})
+        .execute()
+    )
+    admin.table("routing_operations").insert(
+        {
+            "routing_id": routing.data[0]["id"],
+            "work_center_id": wc_id,
+            "sequence": 10,
+            "setup_minutes": None,
+            "cycle_minutes_per_unit": None,
+        }
+    ).execute()
+    return routing.data[0]["id"]
+
+
+def test_untimed_operation_is_not_priceable_in_either_view(
+    admin: Client, env: PriceabilityEnv
+):
+    """A rate with no time multiplies out to $0.00, and zero is a price.
+
+    `part_rollup_at_qty` COALESCEs both times to 0, so before this rule a part
+    routed through a station with a labour rate cost exactly nothing and read as
+    ready to quote. Both the list and the detail view must refuse it.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    part_id = _make_part(admin, env.company_id, f"UNTIMED-{suffix}")
+    wc_id = (
+        admin.table("work_centers")
+        .select("id")
+        .eq("company_id", env.company_id)
+        .limit(1)
+        .execute()
+        .data[0]["id"]
+    )
+    _add_untimed_routing(admin, env.company_id, part_id, wc_id)
+    _apply_default(admin, env, part_id)
+
+    detail = _detail_explain(admin, part_id)
+    assert detail["is_priceable"] is False
+    # And it says WHY, rather than reporting a clean zero.
+    assert len(detail["missing_op_rates"]) == 1
+
+    assert part_id not in _list_priceable(admin, env.company_id)
+
+
+def test_a_time_on_either_field_is_a_real_answer(admin: Client, env: PriceabilityEnv):
+    """Setup-only and cycle-only are both legitimate; only silence is silence.
+
+    A setup-only operation is a fixed charge and a cycle-only one is the ordinary
+    case with no setup. Requiring both would reject real routings.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    wc_id = (
+        admin.table("work_centers")
+        .select("id")
+        .eq("company_id", env.company_id)
+        .limit(1)
+        .execute()
+        .data[0]["id"]
+    )
+
+    for label, times in (
+        ("SETUPONLY", {"setup_minutes": 30, "cycle_minutes_per_unit": None}),
+        ("CYCLEONLY", {"setup_minutes": None, "cycle_minutes_per_unit": 2}),
+    ):
+        part_id = _make_part(admin, env.company_id, f"{label}-{suffix}")
+        routing = (
+            admin.table("routings")
+            .insert(
+                {"company_id": env.company_id, "part_id": part_id, "name": f"R-{label}"}
+            )
+            .execute()
+        )
+        admin.table("routing_operations").insert(
+            {
+                "routing_id": routing.data[0]["id"],
+                "work_center_id": wc_id,
+                "sequence": 10,
+                **times,
+            }
+        ).execute()
+        _apply_default(admin, env, part_id)
+
+        assert _detail_explain(admin, part_id)["is_priceable"] is True, label
+        assert part_id in _list_priceable(admin, env.company_id), label

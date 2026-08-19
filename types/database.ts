@@ -3358,6 +3358,56 @@ export type Database = {
         }
         Relationships: []
       }
+      terms_acceptances: {
+        Row: {
+          accepted_at: string
+          accepted_via: string
+          company_id: string | null
+          document_sha256: string
+          document_type: string
+          id: string
+          ip_address: unknown
+          ip_source: string | null
+          user_agent: string | null
+          user_id: string
+          version: number
+        }
+        Insert: {
+          accepted_at?: string
+          accepted_via: string
+          company_id?: string | null
+          document_sha256: string
+          document_type: string
+          id?: string
+          ip_address?: unknown
+          ip_source?: string | null
+          user_agent?: string | null
+          user_id: string
+          version: number
+        }
+        Update: {
+          accepted_at?: string
+          accepted_via?: string
+          company_id?: string | null
+          document_sha256?: string
+          document_type?: string
+          id?: string
+          ip_address?: unknown
+          ip_source?: string | null
+          user_agent?: string | null
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "terms_acceptances_company_fk"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_company_access: {
         Row: {
           company_id: string
@@ -4241,6 +4291,13 @@ export type Database = {
         Args: never
         Returns: {
           table_name: string
+        }[]
+      }
+      terms_acceptance_write_leaks: {
+        Args: never
+        Returns: {
+          detail: string
+          leak_kind: string
         }[]
       }
       transfer_stock: {

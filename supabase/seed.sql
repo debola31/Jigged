@@ -1448,3 +1448,38 @@ begin
   perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_a, 0.6, 'Shelf A');
   perform pg_temp.put_away('60000000-0000-0000-0000-000000000005', v_unassigned, v_shelf_b, 1.0, 'Shelf B');
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Clickwrap acceptances for every seeded login
+-- ---------------------------------------------------------------------------
+-- Without these, TermsGate raises a blocking modal over the first page a seeded
+-- user opens, and `pnpm dev` against a local stack is gated before you can look
+-- at anything. Same reasoning as the billing exemption: a seed's job is to hand
+-- you a shop that is already set up, not to make you re-enact onboarding.
+--
+-- The hash MUST match public/legal/manifest.json. scripts/legalDocumentsCheck.ts
+-- guards the manifest against the files, but nothing ties this file to either --
+-- so on a version bump, update these two rows. A stale hash here is harmless
+-- (the gate compares the VERSION, not the hash) but it is a lie in a table whose
+-- whole point is not lying, so keep it right.
+insert into public.terms_acceptances
+  (user_id, company_id, document_type, version, document_sha256, accepted_via, ip_source)
+select
+  u.id,
+  null,
+  d.document_type,
+  d.version,
+  d.sha256,
+  'invite_accept',
+  'unavailable'
+from auth.users u
+cross join (values
+  ('tos',     1, '26824e1103f9b8178e402f3417edf35e2be88151f86b29f48b9f321af1a2ca44'),
+  ('privacy', 1, 'b9b7420fa888b52d1426412bfb3e701b8ed8814fc2a4da29f1292ee459f1f0ed')
+) as d(document_type, version, sha256)
+where not exists (
+  select 1 from public.terms_acceptances t
+  where t.user_id = u.id
+    and t.document_type = d.document_type
+    and t.version = d.version
+);

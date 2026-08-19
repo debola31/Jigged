@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+import { ensureTermsAccepted } from './fixtures/terms';
+
 /**
  * E2E: someone who already uses Jigged is invited to a SECOND company.
  *
@@ -111,6 +113,10 @@ test.describe('existing user invited to a second company', () => {
   test.beforeAll(async () => {
     const a = admin();
     multiUserId = await findOrCreateUser(a);
+    // This spec provisions its own user, so global-setup's seeding does not reach
+    // them. Without this the gate disables the Join button and the click below
+    // times out with no visible cause.
+    await ensureTermsAccepted(a, multiUserId);
     homeCompanyId = await findOrCreateCompany(a, HOME_COMPANY);
     secondCompanyId = await findOrCreateCompany(a, SECOND_COMPANY);
 

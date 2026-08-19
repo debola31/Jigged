@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { DM_Sans, Space_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider, AuthProvider } from "@/components/providers";
+import TermsGate from "@/components/legal/TermsGate";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -109,6 +110,7 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             {children}
+            <TermsGate />
           </AuthProvider>
         </ThemeProvider>
         <Analytics />

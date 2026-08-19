@@ -8,9 +8,18 @@ import LegalPageContainer from './LegalPageContainer';
  * Termly outputs light-themed HTML with data-custom-class attributes and inline styles.
  * This component overrides those styles to match Jigged's dark UI.
  */
-export default function TermlyContent({ html }: { html: string }) {
+export default function TermlyContent({
+  html,
+  header,
+}: {
+  html: string;
+  /** Rendered above the document, inside the container — the version line and,
+   *  for an archived version, the supersession banner. */
+  header?: React.ReactNode;
+}) {
   return (
     <LegalPageContainer>
+      {header}
       <Box
         sx={{
           // Override Termly's light-theme data-custom-class styles

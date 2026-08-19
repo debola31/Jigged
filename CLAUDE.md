@@ -203,6 +203,20 @@ no broken page. It is an *allowlist*, so the cheap way to green it is to add you
 without a sentence in the PR saying why the browser needs it. **A `DROP FUNCTION` destroys both the
 ACL and the `COMMENT`** — any migration that drops and recreates one must re-issue both.
 
+### Legal documents are frozen once shipped
+
+`public/legal/` holds the Terms of Service and Privacy Policy as **versioned files**, with the
+version, effective date and SHA-256 of each in `public/legal/manifest.json`. Every
+`terms_acceptances` row stores that hash, so **editing a published document silently invalidates
+every acceptance already recorded against it.**
+
+**Never edit a shipped version.** Publish a new one: add the file, add a manifest entry, bump
+`current`. **Never delete a version file** — a stored hash you cannot produce bytes for is an
+assertion you cannot substantiate. [`scripts/legalDocumentsCheck.ts`](scripts/legalDocumentsCheck.ts)
+fails CI on an edited entry, a hash that does not match the bytes, or an undeclared file under
+`public/legal/`. It compares against the **PR base ref**, so it does not cover a direct push to
+`main`. Full standard: [legal-acceptance.md](docs/modules/legal-acceptance.md).
+
 ### Billing write-gate (new tenant tables)
 
 Every browser-writable tenant table carries `billing_gate_*` restrictive RLS calling

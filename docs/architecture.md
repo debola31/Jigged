@@ -372,6 +372,17 @@ above.)*
 | **Complex multi-step business logic** | Validation pipelines, conflict detection, batch/transactional guarantees beyond one RPC | Import validate/execute |
 | **Third-party secret or inbound webhook** | A restricted vendor key can't live client-side, and the vendor must POST to a URL we own | Stripe checkout/portal/webhook, QuickBooks OAuth |
 
+**Service-role work from the Next server is not by itself a FastAPI trigger.** The criterion above
+is about `auth.admin.*` and `auth.users`, which genuinely need the Python client. A plain
+service-role table write that also needs *user-scoped* auth is better placed in a Next Route Handler
+or server action — [`app/actions/waitlist.ts`](../app/actions/waitlist.ts) and
+[`app/legal/accept/route.ts`](../app/legal/accept/route.ts) both do this. Two reasons it matters:
+every FastAPI auth helper in this repo is **company-scoped**, and a user-scoped write (terms
+acceptance happens before a company exists) has no helper to reuse; and a value that lives in the
+Next bundle — the legal document hash — would otherwise have to be agreed across two deployments
+built from one commit. Note `vercel.json` rewrites `/api/:path*` to the Python function, so such a
+handler must live outside `/api`.
+
 #### 8.2 When to Use Supabase Client (Frontend)
 
 Everything else: single-table CRUD, list queries with search/sort/pagination,

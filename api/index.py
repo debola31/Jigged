@@ -116,6 +116,7 @@ from routes.admin_routes import router as system_admin_router
 from routes.quickbooks_routes import router as quickbooks_router
 from routes.quickbooks_desktop_routes import router as quickbooks_desktop_router
 from routes.data_import_routes import router as data_import_router
+from routes.drawing_routes import router as drawing_router
 from routes.stripe_routes import router as stripe_router
 
 app.include_router(import_router)
@@ -130,6 +131,7 @@ app.include_router(system_admin_router)
 app.include_router(quickbooks_router)
 app.include_router(quickbooks_desktop_router)
 app.include_router(data_import_router)
+app.include_router(drawing_router)
 app.include_router(stripe_router)
 
 

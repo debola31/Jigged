@@ -28,6 +28,7 @@ the tests that pin them. **Priority and build status live in [prd.md](../prd.md)
 | [Demo Mode](demo-mode.md) | The pre-populated sandbox inside a real company, and what Reset does and does not delete |
 | [Inventory](inventory.md) | Stock, units and conversion, the eleven material journeys, and QR-addressable storage locations. **Locations** sit behind flag `inventory_locations` (opt-in); the base inventory list does not |
 | [Invitation System](invitation-system.md) | Email invitations — the only way to add a team member. Referrals descoped (#338) |
+| [Legal Acceptance](legal-acceptance.md) | Clickwrap consent, the frozen document versions, and the append-only acceptance record |
 | [QuickBooks Desktop](quickbooks-desktop.md) | Pushing invoices into a locally installed QuickBooks Desktop via Conductor: the Web Connector round trip, the unknown-outcome state machine, and the four places its behaviour is the mirror image of QuickBooks Online |
 | [Invoicing](invoicing.md) | Many invoices per job (progressive, ship-capped, price-locked) and the QuickBooks Online integration that owns the document and its numbering |
 | [Jobs](jobs.md) | The job record and its three independent status axes; operations, outside-vendor steps, materials, attachments |

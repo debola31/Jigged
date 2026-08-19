@@ -93,8 +93,14 @@ describe('validatePartAttachmentFile', () => {
     expect(validatePartAttachmentFile(makeFile(name, 1024))).toBeNull();
   });
 
+  it('accepts a DXF — the file the title-block extractor reads', () => {
+    expect(validatePartAttachmentFile(makeFile('1011770.dxf', 4 * 1024 * 1024))).toBeNull();
+    // Same ceiling as a CAD model: a dense D-size sheet is a few MB of text.
+    expect(validatePartAttachmentFile(makeFile('huge.dxf', 200 * 1024 * 1024))).toMatch(/DXF/);
+  });
+
   it('rejects a disallowed extension', () => {
-    expect(validatePartAttachmentFile(makeFile('photo.png', 1024))).toMatch(/PDF, STEP/);
+    expect(validatePartAttachmentFile(makeFile('photo.png', 1024))).toMatch(/Only PDF, DXF, STEP/);
   });
 
   it('rejects a PDF over the 25 MB cap', () => {
@@ -165,7 +171,7 @@ describe('uploadPartAttachment', () => {
 
   it('throws (and never uploads) when the file is invalid', async () => {
     await expect(uploadPartAttachment('c1', 'p1', makeFile('photo.png', 10))).rejects.toThrow(
-      /PDF, STEP/,
+      /Only PDF, DXF, STEP/,
     );
     expect(mockUploadFileToStorage).not.toHaveBeenCalled();
   });

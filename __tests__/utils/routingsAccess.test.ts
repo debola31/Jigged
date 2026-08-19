@@ -105,7 +105,7 @@ describe('routingsAccess', () => {
   });
 
   describe('createRoutingOperation', () => {
-    it('parses numeric form fields and falls back to 0 for setup_minutes', async () => {
+    it('parses numeric form fields and keeps a blank setup as UNKNOWN', async () => {
       // First .from() call is for getNextOperationSequence -> maybeSingle returns {sequence: 20}
       // Second .from() call is for the insert .single() returning the inserted row.
       // The shared builder lets both calls run through the chain; we control via .data switch.
@@ -130,7 +130,16 @@ describe('routingsAccess', () => {
       const insertCall = (mockQueryBuilder.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(insertCall.routing_id).toBe('r1');
       expect(insertCall.sequence).toBe(30);
-      expect(insertCall.setup_minutes).toBe(0);
+      /**
+       * Blank means nobody has said, and that is not zero.
+       *
+       * It used to coerce to 0, which reads as "this operation has no setup" —
+       * a real and different claim. It stopped being harmless once a part could
+       * be routed before it was timed: an operation stored as 0 with a labour
+       * rate computes $0.00 and stops looking unknown to the priceability rule,
+       * so the part reads as ready to quote for nothing.
+       */
+      expect(insertCall.setup_minutes).toBeNull();
       expect(insertCall.cycle_minutes_per_unit).toBe(2.5);
       expect(insertCall.labor_rate_override).toBeNull();
       expect(insertCall.instructions).toBe('do the thing');

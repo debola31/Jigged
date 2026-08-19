@@ -56,6 +56,8 @@ That shape is this repo's main defence against silent breakage, and it is the on
 | `tenant_tables_missing_write_gate()` | Every `company_id` table is billing-gated or explicitly exempt |
 | `definer_writers_missing_write_gate()` | A definer function writing a gated table calls `company_can_write` |
 | `note_counter_write_leaks()` | Only `notes.body` is browser-updatable; the view counters are not |
+| [`legalDocumentsCheck.ts`](../../scripts/legalDocumentsCheck.ts) | A published legal document's bytes AND its metadata are frozen; every file under `public/legal` is declared; the frozen text says the same words as the vendor export it came from |
+| `terms_acceptance_write_leaks()` | No browser role can write `terms_acceptances`, and only `authenticated` can read it |
 | [`schemaEmbedCheck.ts`](../../scripts/schemaEmbedCheck.ts) | Every PostgREST `.select()` embed matches the real schema |
 | [`interactionStandardsCheck.ts`](../../scripts/interactionStandardsCheck.ts) | No value-like placeholders, grey delete icons, or off-theme contained buttons |
 | `types/database.ts` regen diff (in `test.yml`) | The committed types match what the migrations produce |
@@ -123,8 +125,11 @@ proves the wiring. If it passes, the fixtures are sound and a failure elsewhere 
 
 Stated rather than implied, and deliberately without counts:
 
-- **`csv-import.spec.ts` is CI-skipped** — it needs the FastAPI backend for AI column analysis.
-  Run it locally with the backend up, or filter with `--grep-invert "CSV Import"`.
+- **No E2E covers CSV import at all.** The one spec that did drove the retired per-entity
+  `/parts/import` wizard and was deleted with it; the guided importer at `/import` has never had
+  one — it is the `automation-pending (#367)` case below, and now the largest of them. *(This entry
+  previously said the spec was CI-skipped for want of a FastAPI backend; it ran in CI from the point
+  `e2e/run-stack.mjs` landed until the wizard was removed.)*
 - **Reload-persistence E2E coverage is partial.** Many write paths cite a unit test plus an
   `automation-pending (#367)` tag instead; #367 is open and is the tracking issue.
 - **Operator login and QR post-login routing have no automated coverage** (`postLoginPath`).

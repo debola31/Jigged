@@ -100,7 +100,7 @@ describe('WorkspaceTab completeness banner', () => {
       missing_leaves: [],
     });
 
-    expect(screen.getByText(/This part has an operation with no labour rate/i)).toBeInTheDocument();
+    expect(screen.getByText(/This part has an operation with no rate or no time/i)).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'PARENT' })).not.toBeInTheDocument();
   });
 

@@ -41,6 +41,9 @@ const KIND_RULES: Record<Exclude<PartAttachmentKind, 'other'>, KindRule> = {
   pdf: { extensions: ['pdf'], maxBytes: PDF_MAX_BYTES, label: 'PDF' },
   step: { extensions: ['step', 'stp'], maxBytes: MODEL_MAX_BYTES, label: 'STEP' },
   dwg: { extensions: ['dwg'], maxBytes: MODEL_MAX_BYTES, label: 'DWG' },
+  // A DXF is text, not a compiled model, so it sits between the two: a D-size
+  // sheet with a dense border runs to a few MB, nowhere near a STEP solid.
+  dxf: { extensions: ['dxf'], maxBytes: MODEL_MAX_BYTES, label: 'DXF' },
 };
 
 const ALLOWED_EXTENSIONS = Object.values(KIND_RULES).flatMap((r) => r.extensions);
@@ -75,7 +78,7 @@ export function detectAttachmentKind(fileName: string): PartAttachmentKind {
 export function validatePartAttachmentFile(file: File): string | null {
   const ext = fileExtension(file.name);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
-    return 'Only PDF, STEP (.step/.stp), and DWG files can be attached.';
+    return 'Only PDF, DXF, STEP (.step/.stp), and DWG files can be attached.';
   }
   const kind = detectAttachmentKind(file.name) as Exclude<PartAttachmentKind, 'other'>;
   const rule = KIND_RULES[kind];

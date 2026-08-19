@@ -12,6 +12,7 @@ import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturi
 import AccountMenu from '@/components/layout/AccountMenu';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { usePageTitle } from './PageTitleProvider';
+import { PARTS_SUBROUTES } from '@/lib/partsSubroutes';
 
 function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
@@ -34,14 +35,14 @@ function getPageTitle(pathname: string): string {
     return 'Quotes';
   }
 
-  // Check for parts routes
+  // Named sub-routes under /parts. A part ID is anything NOT in here, so a new
+  // page added without a line below silently titles itself "Part Details" — which
+  // is how /parts/drawings shipped calling itself that.
   if (segments.includes('parts')) {
-    if (segments.includes('new')) return 'New Part';
-    if (segments.includes('edit')) return 'Edit Part';
     const partsIndex = segments.indexOf('parts');
-    if (partsIndex < segments.length - 1 && !['new', 'edit'].includes(segments[partsIndex + 1])) {
-      return 'Part Details';
-    }
+    const child = segments[partsIndex + 1];
+    if (child && child in PARTS_SUBROUTES) return PARTS_SUBROUTES[child];
+    if (child) return 'Part Details';
     return 'Parts';
   }
 

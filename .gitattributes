@@ -1,0 +1,4 @@
+# Legal documents are hashed byte-for-byte and the hash is committed in
+# public/legal/manifest.json. Line-ending normalization would change every
+# hash on a checkout with core.autocrlf enabled, so these files are binary-exact.
+public/legal/** -text

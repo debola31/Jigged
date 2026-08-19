@@ -414,6 +414,7 @@ describe('quotesAccess utilities', () => {
       parts: [{ part_id: 'part-1', order_quantity: 100 }],
       lead_time_text: '14 business days',
       payment_terms: '',
+      customer_note: '',
       expiration_date: '',
     };
 
@@ -522,6 +523,49 @@ describe('quotesAccess utilities', () => {
       expect(insertSpy.mock.calls[0][0].lead_time_text).toBe('2–3 weeks');
     });
 
+    it('persists the note to the customer verbatim', async () => {
+      const insertSpy = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: { id: 'quote-new', company_id: 'company-1' },
+            error: null,
+          }),
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) =>
+        table === 'quotes' ? { insert: insertSpy } : mockQueryBuilder,
+      );
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await createQuote('company-1', {
+        ...baseForm,
+        customer_note: 'Prices exclude freight and sales tax.',
+      });
+      expect(insertSpy.mock.calls[0][0].customer_note).toBe(
+        'Prices exclude freight and sales tax.',
+      );
+    });
+
+    it('stores a whitespace-only note as null, so the PDF prints no empty heading', async () => {
+      const insertSpy = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({
+            data: { id: 'quote-new', company_id: 'company-1' },
+            error: null,
+          }),
+        }),
+      });
+      (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) =>
+        table === 'quotes' ? { insert: insertSpy } : mockQueryBuilder,
+      );
+      getTiersWithComputedPricesMock.mockResolvedValue([]);
+      insertLineItemForPartMock.mockResolvedValue({});
+
+      await createQuote('company-1', { ...baseForm, customer_note: '   \n  ' });
+      expect(insertSpy.mock.calls[0][0].customer_note).toBeNull();
+    });
+
     it('stores a blank lead time as null', async () => {
       const insertSpy = vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
@@ -583,6 +627,7 @@ describe('quotesAccess utilities', () => {
       parts: [{ part_id: 'part-1', order_quantity: 200 }],
       lead_time_text: '14 business days',
       payment_terms: '',
+      customer_note: '',
       expiration_date: '',
     };
 
@@ -932,6 +977,7 @@ describe('quotesAccess utilities', () => {
       parts: [],
       lead_time_text: '14 business days',
       payment_terms: '',
+      customer_note: '',
       expiration_date: '',
     };
 
@@ -1385,6 +1431,7 @@ describe('quotesAccess utilities', () => {
       parts: [{ part_id: 'part-1', order_quantity: 10 }],
       lead_time_text: '14 business days',
       payment_terms: '',
+      customer_note: '',
       expiration_date,
     });
 
@@ -1415,6 +1462,31 @@ describe('quotesAccess utilities', () => {
       expect(payload.expiration_date).toBe(futureDate);
       // A real transition (expired → active) stamps status_changed_at.
       expect(payload.status_changed_at).toEqual(expect.any(String));
+    });
+
+    it('writes a note added on the edit path — the way an existing quote gains one', async () => {
+      // The likelier route than create: a quote already sent picks up "we should have said
+      // freight is extra". createQuote's coverage does not reach this write.
+      const { updateSpy } = stubUpdateQuoteCapture('active');
+
+      await updateQuote('quote-1', {
+        ...formWith(futureDate),
+        customer_note: 'Prices exclude freight and sales tax.',
+      });
+
+      expect(updateSpy.mock.calls[0][0].customer_note).toBe(
+        'Prices exclude freight and sales tax.',
+      );
+    });
+
+    it('clears a note back to null when the shop empties the box', async () => {
+      const { updateSpy } = stubUpdateQuoteCapture('active');
+
+      await updateQuote('quote-1', { ...formWith(futureDate), customer_note: '  ' });
+
+      // null, not '' — the PDF and the detail page both test truthiness, and a blank string
+      // would print a NOTES heading over nothing.
+      expect(updateSpy.mock.calls[0][0].customer_note).toBeNull();
     });
 
     it('keeps an expired quote expired when the saved date is still in the past', async () => {

@@ -423,6 +423,10 @@ export async function createQuote(
   const leadTimeText = nullIfBlank(formData.lead_time_text);
   const expirationDate = formData.expiration_date || null;
   const paymentTerms = nullIfBlank(formData.payment_terms);
+  // A whitespace-only note stores NULL, not '  ': the PDF and the detail page
+  // both decide whether to render a NOTES block by truthiness, and a blank
+  // string would print an empty heading.
+  const customerNote = nullIfBlank(formData.customer_note);
 
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -452,6 +456,7 @@ export async function createQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: paymentTerms,
+      customer_note: customerNote,
       expiration_date: expirationDate,
       status: 'active',
       created_by: user?.id ?? null,
@@ -580,6 +585,7 @@ export async function updateQuote(
       shipping_address_id: nullIfEmpty(formData.shipping_address_id),
       lead_time_text: leadTimeText,
       payment_terms: nullIfBlank(formData.payment_terms),
+      customer_note: nullIfBlank(formData.customer_note),
       expiration_date: newExpiration,
       status: nextStatus,
       ...(nextStatus !== existing.status

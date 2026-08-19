@@ -144,7 +144,7 @@ fails, and so does a listed property nothing passes.
 | `invitation accepted` | An invitee completes acceptance | `role`, `existing_user` | [accept-invite/page.tsx](../app/accept-invite/[invitationId]/page.tsx) |
 | `terms accepted` | Someone ticks the clickwrap box and it is recorded. One event per click, NOT per document: one tick writes a row for each document in a single call, and firing twice would double the denominator for a single act of assent | `surface`, `is_reacceptance` | [TermsAcceptanceDialog.tsx](../components/legal/TermsAcceptanceDialog.tsx) |
 | `terms document opened` | A legal document is opened from beside the checkbox. **Whether anyone actually reads them is the legally interesting fact** — it goes to conspicuousness, and nothing else in the product records it | `surface`, `document_type` | [TermsConsentCheckbox.tsx](../components/legal/TermsConsentCheckbox.tsx) |
-| `quote created` | A new quote is saved | `line_item_count`, `custom_priced_line_count`, `customer_id` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
+| `quote created` | A new quote is saved | `line_item_count`, `custom_priced_line_count`, `customer_id`, `has_customer_note` | [QuoteForm.tsx](../components/quotes/QuoteForm.tsx) |
 | `quote converted to job` | A quote is accepted and becomes a job | `quote_id`, `part_count`, `is_hot` | [ConvertToJobModal.tsx](../components/quotes/ConvertToJobModal.tsx) |
 | `job created from purchase order` | A job is created directly from a PO | `part_count`, `total_value`, `is_hot` | [AcceptPurchaseOrderModal.tsx](../components/jobs/AcceptPurchaseOrderModal.tsx) |
 | `jobs bulk cancelled` | Several jobs are cancelled in one action | `count` | [jobs/page.tsx](../app/dashboard/[companyId]/jobs/page.tsx) |

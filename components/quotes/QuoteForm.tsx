@@ -32,7 +32,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
-import type { QuoteFormData } from '@/types/quote';
+import { MAX_QUOTE_CUSTOMER_NOTE_LENGTH, type QuoteFormData } from '@/types/quote';
 import {
   getCompanyDefaultPaymentTerms,
 } from '@/utils/companyAccess';
@@ -515,6 +515,21 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partBlocks.length, partBlocks.map((b) => b.part?.id ?? '').join(',')]);
+
+  /**
+   * The note field's helper line, which does two jobs and only one of them at a time.
+   *
+   * Normally it states the promise — this prints — because the label and this line ARE the
+   * visibility contract; there is no eye icon or internal/external switch to read. The character
+   * count replaces it only as the cap gets close: a permanent "0/500" under a box most quotes
+   * leave blank is noise, while silently refusing the 501st keystroke with nothing on screen is
+   * the kind of small mystery that makes software feel broken.
+   */
+  const customerNoteLength = formData.customer_note.length;
+  const customerNoteHelper =
+    customerNoteLength > MAX_QUOTE_CUSTOMER_NOTE_LENGTH - 100
+      ? `Prints on the quote PDF, below the total — ${customerNoteLength}/${MAX_QUOTE_CUSTOMER_NOTE_LENGTH} characters`
+      : 'Prints on the quote PDF, below the total — e.g. “Prices exclude freight and sales tax.”';
 
   const handleFieldChange = (field: keyof QuoteFormData, value: string | QuoteFormData['parts']) => {
     setFormData((prev) => ({ ...prev, [field]: value } as QuoteFormData));
@@ -1125,6 +1140,9 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           // price — the amount is the customer's business data.
           custom_priced_line_count: payload.parts.filter((p) => p.override).length,
           customer_id: formData.customer_id,
+          // Whether the shop wrote a note — never what it says. The note is
+          // addressed to the customer and is their business data.
+          has_customer_note: formData.customer_note.trim() !== '',
         });
         onSave?.();
         router.push(`/dashboard/${companyId}/quotes/${quote.id}`);
@@ -1422,6 +1440,31 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
                     ? standingTermsHelper('payment_terms', '')
                     : undefined
                 }
+              />
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              {/* The note the customer actually reads. Optional, and the only
+                  field in this card that is — lead time and payment terms are
+                  answers every quote owes, whereas a quote with nothing extra
+                  to say should not be blocked into inventing something.
+
+                  NOT in STANDING_TERM_FIELDS, and deliberately: a note is
+                  written for THIS quote, so it takes no prefill from the
+                  customer record and raises no drift chip when that record
+                  later changes. There is also no internal twin — the label and
+                  helper text promise this prints, and that promise is the whole
+                  feature. Internal commentary has the notes feed. */}
+              <TextField
+                label="Note to customer"
+                size="small"
+                fullWidth
+                multiline
+                rows={3}
+                value={formData.customer_note}
+                onChange={(e) => handleFieldChange('customer_note', e.target.value)}
+                helperText={customerNoteHelper}
+                slotProps={{ htmlInput: { maxLength: MAX_QUOTE_CUSTOMER_NOTE_LENGTH } }}
+                InputLabelProps={{ shrink: true }}
               />
             </Grid>
           </Grid>

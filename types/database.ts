@@ -2948,6 +2948,7 @@ export type Database = {
           created_by: string | null
           customer_id: string | null
           customer_name: string | null
+          customer_note: string | null
           deleted_at: string | null
           expiration_date: string | null
           id: string
@@ -2971,6 +2972,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          customer_note?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
           id?: string
@@ -2994,6 +2996,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string | null
           customer_name?: string | null
+          customer_note?: string | null
           deleted_at?: string | null
           expiration_date?: string | null
           id?: string

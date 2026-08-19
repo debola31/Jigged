@@ -479,11 +479,16 @@ Pass the semantic `color`; `size="small"` is the default. Enforcement is the com
 (`variant` is not an accepted prop) — `automation-pending (#367)` for a lint against raw `<Chip>`.
 
 **Exempt (intentionally custom, do not force onto `StatusChip`):** chips with a bespoke palette for a
-domain reason — stock level ([`StockStatusChip`](../components/inventory/StockStatusChip.tsx)), part
-classification ([`PartClassificationChips`](../components/parts/PartClassificationChips.tsx)),
-work-centre kind — and the `HOT` rush badge ([`JobHotBadge`](../components/jobs/JobHotBadge.tsx)),
-which deliberately mutes to outlined for historical jobs. These use custom hex/rgba, not the semantic
-palette, and are not on/off status badges.
+domain reason — work-centre kind, the Made/Bought source chip on the Parts grid — and the `HOT` rush
+badge ([`JobHotBadge`](../components/jobs/JobHotBadge.tsx)), which deliberately mutes to outlined for
+historical jobs. These use custom hex/rgba, not the semantic palette, and are not on/off status
+badges.
+
+`StockStatusChip` and `PartClassificationChips` were the other two named here. Both were deleted with
+`parts.is_stocked`: the Parts grid gave up its On hand and Status columns (quantities are Storage's
+job), which left the stock chip with no consumer, and the classification chip had already lost its
+last one — with `is_stocked` gone it rendered a single Made/Bought chip that the grid draws inline
+anyway. The part page's Inventory tab derives its own low-stock chip.
 
 ### Tabs vs. segmented toggles (role-based)
 
@@ -766,7 +771,7 @@ promised a **QR code in the `md=6` right slot, "always visible, no toggle"** on 
 PDFs and in the scanner. Real right-hand slots: Jobs → `JobBillingShippingCard`, Customers →
 contacts, Vendors → address.)*
 
-**Deviation is fine for** content-driven branching (Parts' stocked vs made-to-order) and document
+**Deviation is fine for** content-driven branching (Parts' made vs bought) and document
 chrome (Quotes' Email / View PDF). **Known gap:** Work Centers fits none of the three — it is a
 reference entity whose right-hand slot never had content, so Pattern A collapsed to two stacked
 full-width cards. New detail pages default to one of the three; if none fits, that's a signal to push

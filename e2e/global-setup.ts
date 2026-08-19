@@ -293,7 +293,6 @@ interface PartSpec {
   part_name: string;
   description: string;
   source: 'made' | 'bought';
-  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   /** Persisted as a NULL-vendor procurement tier at min_quantity=1 for
@@ -325,7 +324,6 @@ async function ensurePart(
         part_name: spec.part_name,
         description: spec.description,
         source: spec.source,
-        is_stocked: spec.is_stocked,
         primary_unit: spec.primary_unit,
         quantity: spec.quantity,
       })
@@ -708,7 +706,6 @@ export default async function globalSetup(): Promise<void> {
     part_name: PART_MFG_NAME,
     description: 'E2E made part with routing',
     source: 'made',
-    is_stocked: false,
     // parts_requires_unit CHECK constraint (20260602…) makes primary_unit
     // NOT NULL for every part. 'ea' is the canonical unit for discrete parts.
     primary_unit: 'ea',
@@ -719,7 +716,6 @@ export default async function globalSetup(): Promise<void> {
     part_name: PART_RAW_NAME,
     description: 'E2E stocked raw material',
     source: 'bought',
-    is_stocked: true,
     primary_unit: 'lbs',
     quantity: 100,
     cost_per_unit: 5.5,
@@ -728,7 +724,6 @@ export default async function globalSetup(): Promise<void> {
     part_name: PART_SUB_NAME,
     description: 'E2E sub-assembly (BOM child of MFG-001)',
     source: 'made',
-    is_stocked: true,
     primary_unit: 'ea',
     quantity: 10,
     cost_per_unit: 12.0,
@@ -738,7 +733,6 @@ export default async function globalSetup(): Promise<void> {
     part_name: PART_LENGTH_NAME,
     description: 'E2E made part sold by length (inches)',
     source: 'made',
-    is_stocked: false,
     primary_unit: 'inches',
     quantity: 0,
     cost_per_unit: null,
@@ -850,10 +844,9 @@ async function ensureSplitStock(supabase: SupabaseClient, companyId: string): Pr
     part_name: E2E_SPLIT_PART,
     description: 'Split across two shelves, for the count sheet',
     source: 'bought',
-    is_stocked: true,
     primary_unit: 'each',
-    // Zero, so no Unassigned row is created at all: since 20260802144310 `auto_track_stocked_part`
-    // only seeds a row for a non-zero quantity, and the table CHECKs `quantity > 0`. The spec then
+    // Zero, so no Unassigned row is created at all: `seed_new_part_balance` only seeds a row for
+    // a non-zero quantity, and the table CHECKs `quantity > 0` (20260802144310). The spec then
     // sees exactly the two shelf rows the upserts below create — naturally, rather than because a
     // filter was hiding a third.
     quantity: 0,

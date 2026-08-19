@@ -26,7 +26,7 @@ import { resolveMovementAttribution } from '@/utils/movementAttribution';
 import { orIlikeValue } from '@/utils/searchFilter';
 
 const PART_COLUMNS =
-  'id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, created_at, updated_at';
+  'id, company_id, part_name, description, source, primary_unit, quantity, reorder_point, preferred_vendor_id, costing_batch_quantity, created_at, updated_at';
 
 interface PartRow {
   id: string;
@@ -34,7 +34,6 @@ interface PartRow {
   part_name: string;
   description: string | null;
   source: 'made' | 'bought';
-  is_stocked: boolean;
   primary_unit: string | null;
   quantity: number;
   reorder_point: number | null;
@@ -54,7 +53,6 @@ function rowToPart(row: PartRow): Part {
     part_name: row.part_name,
     description: row.description,
     source: row.source,
-    is_stocked: row.is_stocked,
     primary_unit: row.primary_unit,
     quantity: Number(row.quantity ?? 0),
     reorder_point: row.reorder_point !== null ? Number(row.reorder_point) : null,
@@ -108,53 +106,6 @@ export async function getAllParts(
 
     if (error) {
       console.error('Error fetching parts batch:', error);
-      throw error;
-    }
-
-    allData = [...allData, ...((data as PartRow[]) || [])];
-    hasMore = (data?.length || 0) === BATCH_SIZE;
-    offset += BATCH_SIZE;
-  }
-
-  return allData.map(rowToPart);
-}
-
-/**
- * Stocked subset of getAllParts (is_stocked=true). Used by inventory-
- * mental-model views and by callers that need to pick a material part.
- *
- * Replaces the prior `getStockableParts` (renamed in chunk 11 alongside
- * the is_stockable → is_stocked column rename).
- */
-export async function getStockedParts(
-  companyId: string,
-  search: string = '',
-  sortField: string = 'part_name',
-  sortDirection: 'asc' | 'desc' = 'asc',
-): Promise<Part[]> {
-  const supabase = getSupabase();
-  const BATCH_SIZE = 1000;
-  let allData: PartRow[] = [];
-  let offset = 0;
-  let hasMore = true;
-
-  while (hasMore) {
-    let query = supabase
-      .from('parts')
-      .select(PART_COLUMNS)
-      .eq('company_id', companyId)
-      .is('deleted_at', null)
-      .eq('is_stocked', true)
-      .order(sortField, { ascending: sortDirection === 'asc' })
-      .range(offset, offset + BATCH_SIZE - 1);
-
-    if (search.trim()) {
-      query = query.or(`part_name.ilike.${orIlikeValue(search)},description.ilike.${orIlikeValue(search)}`);
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error fetching stocked parts:', error);
       throw error;
     }
 
@@ -577,7 +528,6 @@ export interface PartSelectOption {
   part_name: string;
   description: string | null;
   has_routing: boolean;
-  is_stocked: boolean;
   /**
    * Whether stock for this part is held per-location (`part_location_stock`) rather than as the
    * single `quantity` above.
@@ -602,7 +552,6 @@ const PART_SELECT_COLUMNS = `
   id,
   part_name,
   description,
-  is_stocked,
   source,
   primary_unit,
   quantity,
@@ -617,7 +566,6 @@ function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
     part_name: p.part_name as string,
     description: p.description as string | null,
     has_routing: Array.isArray(routings) ? routings.length > 0 : !!routings,
-    is_stocked: p.is_stocked as boolean,
     source: p.source as 'made' | 'bought',
     primary_unit: p.primary_unit as string | null,
     quantity: Number(p.quantity ?? 0),
@@ -625,47 +573,9 @@ function rowToPartSelectOption(p: Record<string, unknown>): PartSelectOption {
   };
 }
 
-export async function getPartsForSelect(
-  companyId: string,
-  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
-): Promise<PartSelectOption[]> {
-  const supabase = getSupabase();
-  const BATCH_SIZE = 1000;
-  let allData: Array<Record<string, unknown>> = [];
-  let offset = 0;
-  let hasMore = true;
-
-  while (hasMore) {
-    let query = supabase
-      .from('parts')
-      .select(PART_SELECT_COLUMNS)
-      .eq('company_id', companyId)
-      .is('deleted_at', null)
-      .order('part_name', { ascending: true })
-      .range(offset, offset + BATCH_SIZE - 1);
-
-    if (kind === 'stocked') query = query.eq('is_stocked', true);
-    else if (kind === 'made') query = query.eq('source', 'made');
-    else if (kind === 'bought') query = query.eq('source', 'bought');
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error fetching parts for select:', error);
-      throw error;
-    }
-
-    allData = [...allData, ...((data as Array<Record<string, unknown>>) || [])];
-    hasMore = (data?.length || 0) === BATCH_SIZE;
-    offset += BATCH_SIZE;
-  }
-
-  return allData.map(rowToPartSelectOption);
-}
-
 /**
- * Server-side search variant of `getPartsForSelect` for autocomplete pickers
- * over very large parts tables. Returns at most `limit` rows matching `query`
+ * Server-side search for autocomplete pickers over very large parts tables.
+ * Returns at most `limit` rows matching `query`
  * (ILIKE on part_name + description), **ordered most-recently-updated first**
  * (part_name as the tiebreak). When `query` is empty, returns the `limit` most
  * recently updated parts — so on focus the picker shows the parts the user is
@@ -677,7 +587,7 @@ export async function getPartsForSelect(
 export async function searchPartsForSelect(
   companyId: string,
   query: string,
-  kind: 'all' | 'made' | 'stocked' | 'bought' = 'all',
+  kind: 'all' | 'made' | 'bought' = 'all',
   limit: number = 50,
 ): Promise<PartSelectOption[]> {
   const supabase = getSupabase();
@@ -694,8 +604,7 @@ export async function searchPartsForSelect(
     .order('part_name', { ascending: true })
     .limit(limit);
 
-  if (kind === 'stocked') q = q.eq('is_stocked', true);
-  else if (kind === 'made') q = q.eq('source', 'made');
+  if (kind === 'made') q = q.eq('source', 'made');
   else if (kind === 'bought') q = q.eq('source', 'bought');
 
   const trimmed = query.trim();
@@ -814,7 +723,6 @@ function formDataToInsert(formData: PartFormData): Omit<PartsInsert, 'company_id
     part_name: formData.part_name.trim(),
     description: formData.description.trim() || null,
     source: formData.source,
-    is_stocked: formData.is_stocked,
     primary_unit: formData.primary_unit?.trim() || null,
     reorder_point: formData.reorder_point,
     preferred_vendor_id: formData.preferred_vendor_id || null,

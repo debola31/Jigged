@@ -103,7 +103,6 @@ export function buildRequirement(args: {
   let status: MaterialRequirement['status'];
   if (stock.isArchived) status = 'archived';
   else if (basis.kind === 'incomparable') status = 'incomparable';
-  else if (!stock.isStocked) status = 'not_stocked';
   else status = (shortBy ?? 0) > 0 ? 'short' : 'ok';
 
   return {

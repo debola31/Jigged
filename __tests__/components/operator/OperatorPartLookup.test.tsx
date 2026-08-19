@@ -24,8 +24,8 @@ vi.mock('@/utils/inventoryLocationsAccess', async (importOriginal) => ({
  *
  * What is worth testing here is the *answer* — where the part is, and the untracked-vs-empty
  * distinction — not MUI's Autocomplete, which `PartAutocomplete` owns and quotes/jobs already
- * exercise. The stub also records the props this component relies on, so the two that carry real
- * meaning can be asserted: `kind="stocked"` and the ABSENCE of `onCreateNew`.
+ * exercise. The stub also records the props this component relies on, so the one that carries
+ * real meaning can be asserted: the ABSENCE of `onCreateNew`.
  */
 let nextPick: PartSelectOption | null = null;
 const pickerProps: Record<string, unknown> = {};
@@ -175,13 +175,16 @@ describe('OperatorPartLookup — J11, "is this part in storage, and where?"', ()
   });
 
   /**
-   * Two picker props carry real meaning rather than styling, so they are pinned:
-   * a made top-level product has no on-hand and would only pad the list, and creating parts is
-   * not an operator's job — the same call the board makes by withholding "Add storage".
+   * Creating parts is not an operator's job — the same call the board makes by withholding
+   * "Add storage".
+   *
+   * This also pinned `kind="stocked"`, on the reasoning that a made top-level product has no
+   * on-hand and would only pad the list. That prop is gone with `is_stocked`: every part is
+   * stockable, so there is no subset to narrow to and the picker searches the catalogue.
    */
-  it('searches stocked parts only, and never offers to create one', async () => {
+  it('never offers to create a part', async () => {
     renderLookup();
-    expect(pickerProps.kind).toBe('stocked');
+    expect(pickerProps.kind).toBeUndefined();
     expect(pickerProps.onCreateNew).toBeUndefined();
   });
 });

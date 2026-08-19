@@ -4,8 +4,7 @@
  * A flag gates a not-yet-general feature to specific tenants by setting
  * `settings.features.<key> = true` on that company's row (UI + access-layer
  * gate; DB columns/triggers ship to everyone). Shipments + invoicing used to
- * be gated this way; they're now core (always on) and the flag was removed —
- * `inventory_locations` is the remaining opt-in example.
+ * be gated this way; they're now core (always on) and the flag was removed.
  *
  * Most flags are opt-IN (default off): a company must be explicitly enabled.
  * A flag can instead be opt-OUT (default on) via `defaultEnabled: true` on its
@@ -13,16 +12,20 @@
  * per-tenant kill-switch (e.g. `ai_insights`). An opt-out flag stays on until
  * a company's row explicitly stores the key as `false`.
  *
- * Toggle for a pilot tenant:
+ * Toggle for a pilot tenant (an opt-IN flag — `machine_maintenance` here):
  *   UPDATE public.companies
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
- *                               '{features,inventory_locations}', 'true')
+ *                               '{features,machine_maintenance}', 'true')
  *    WHERE id = '<pilot-company-uuid>';
  *
  * Rollback:
  *   UPDATE public.companies
- *      SET settings = settings #- '{features,inventory_locations}'
+ *      SET settings = settings #- '{features,machine_maintenance}'
  *    WHERE id = '<pilot-company-uuid>';
+ *
+ * Mind the direction on an opt-OUT flag: DELETING the key restores the default, which for
+ * `inventory_locations` or `ai_insights` means turning the feature back ON. Killing one of those
+ * for a tenant means storing an explicit `'false'`, not removing the key.
  */
 
 import type { Company } from '@/utils/companyAccess';
@@ -56,7 +59,14 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     key: 'inventory_locations',
     label: 'Inventory Locations',
     description:
-      'QR-addressable storage locations with per-location stock: the Locations manager + visual builder, per-part location tracking, and bin scanning. The base inventory list is unaffected.',
+      'Storage: QR-addressable locations with per-location stock — the Locations manager + visual builder, the operator Inventory tab, and bin scanning. On by default; turning it off hides Storage for this tenant but does not change where stock lives (every part has a place regardless).',
+    // GA with a kill-switch, as of the is_stocked removal. Two reasons it stopped being opt-in:
+    // the pilot gate had already lost its meaning (20260802015837 removed the flag check from
+    // the seeding trigger, so every company has an Unassigned bucket and balance rows whether
+    // or not this is on — the flag governs only whether a shop MANAGES places), and Parts gave
+    // up its On hand / Status columns and Count Inventory button in the same change. Leaving
+    // this off by default would have moved those workflows somewhere most tenants cannot reach.
+    defaultEnabled: true,
   },
   {
     key: 'ai_insights',
@@ -114,10 +124,18 @@ export function isFeatureEnabled(
   return readFeatureFlag(company, feature, descriptor?.defaultEnabled ?? false);
 }
 
+/**
+ * Storage is opt-OUT: enabled for every tenant unless their company row explicitly sets
+ * settings.features.inventory_locations = false.
+ *
+ * The `true` here is not decoration — this helper takes its own default rather than reading
+ * the descriptor, so adding `defaultEnabled: true` to KNOWN_FEATURES without changing this line
+ * would leave `isFeatureEnabled()` and this function disagreeing about the same flag.
+ */
 export function isInventoryLocationsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
 ): boolean {
-  return readFeatureFlag(company, 'inventory_locations');
+  return readFeatureFlag(company, 'inventory_locations', true);
 }
 
 /**

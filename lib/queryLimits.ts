@@ -42,3 +42,22 @@ export const ID_CHUNK = 120;
  * escalation and the debounce/page-reset guard it needs.
  */
 export const JOB_SEARCH_LIMIT = ID_CHUNK;
+
+/**
+ * How many parts the shop-wide count picker offers at once.
+ *
+ * A product limit wearing a transport limit's clothes, and it lives here so a test that mocks
+ * the count access layer can still read it — the page renders the "showing the first N" hint
+ * from this number, and importing it from the module under mock made the hint unrenderable.
+ *
+ * The picker used to be unbounded and filtered in the browser, which `parts.is_stocked` kept
+ * honest: the biggest real list was ~722 rows. Dropping that column made every part stockable
+ * and the same code would have loaded an 8,451-part catalogue unvirtualised, then fanned
+ * `getBalancesForParts` out over ~71 `ID_CHUNK` pages instead of ~6.
+ *
+ * 200 is chosen against `ID_CHUNK`, not against the URL: the balances read that follows chunks
+ * at 120, so this is two round trips, and it is comfortably more rows than anyone ticks in one
+ * counting session. The page MUST say when it is capped — a capped list's one failure mode is
+ * that the part you wanted is silently not on it.
+ */
+export const COUNT_PICKER_LIMIT = 200;

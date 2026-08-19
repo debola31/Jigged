@@ -315,25 +315,28 @@ class TestPartsValidateEndpoint:
         assert data["valid_rows_count"] == 0
 
     @pytest.mark.unit
-    async def test_validate_resolves_unit_on_a_NON_stocked_part(self, test_client):
-        """A filled unit on a made/non-stocked part must resolve — not be skipped as unknown_unit.
+    async def test_validate_resolves_unit_on_a_made_part(self, test_client):
+        """A filled unit on a made part must resolve — not be skipped as unknown_unit.
 
         UOM resolution used to run only for rows inferred as *stocked*. A "made"
-        part (is_stocked=false) with a perfectly good unit like "each" therefore
-        never got resolved, hit the "raw unit present but not resolved" branch,
-        and was rejected as unknown_unit. That silently skipped ~7,700 parts of a
-        real is_stocked=false export even after the owner filled every unit. Now
-        resolution runs for every row; "each" resolves via the alias table.
+        part with a perfectly good unit like "each" therefore never got resolved,
+        hit the "raw unit present but not resolved" branch, and was rejected as
+        unknown_unit. That silently skipped ~7,700 parts of a real export even
+        after the owner filled every unit. Now resolution runs for every row;
+        "each" resolves via the alias table.
+
+        The row no longer carries a Stocked column at all — `is_stocked` is gone —
+        so this is now simply a made part with a unit, which is the case that broke.
         """
         request_data = {
             "company_id": "test-company-id",
             "mappings": {
                 "Part Name": "part_name",
-                "Stocked": "is_stocked",
+                "Source": "source",
                 "Unit": "primary_unit",
             },
             "pricing_columns": [],
-            "rows": [{"Part Name": "MADE-001", "Stocked": "false", "Unit": "each"}],
+            "rows": [{"Part Name": "MADE-001", "Source": "made", "Unit": "each"}],
         }
 
         app.dependency_overrides[get_supabase] = create_mock_supabase_override([], [])
@@ -716,10 +719,15 @@ class TestPartsExecuteEndpoint:
         assert all("deleted_at" not in row for row in parts_rows)
 
     @pytest.mark.unit
-    async def test_execute_imports_stocked_part_with_unit_and_quantity(
+    async def test_execute_imports_part_with_unit_and_quantity(
         self, test_client
     ):
-        """Importing a part with primary_unit + quantity sets is_stocked=true and source='bought'."""
+        """A procurement-only row (unit + quantity + cost, no operations) imports as source='bought'.
+
+        This also asserted `is_stocked=true`, inferred from those same three fields. The column is
+        gone — every part can carry stock — so the quantity itself is the answer, and it lands as a
+        balance rather than on the part row (see below).
+        """
         insert_log: list = []
 
         request_data = {
@@ -762,7 +770,7 @@ class TestPartsExecuteEndpoint:
         parts_inserts = [r for r in insert_log if r["table"] == "parts"]
         assert len(parts_inserts) == 1
         inserted = parts_inserts[0]["data"][0]
-        assert inserted["is_stocked"] is True
+        assert "is_stocked" not in inserted
         # Procurement-only row (no operation columns) ⇒ source='bought'.
         assert inserted["source"] == "bought"
         assert inserted["primary_unit"] == "pounds"
@@ -1102,8 +1110,13 @@ class TestPartsExecuteEndpoint:
         assert len(parts_upserts) == 1
 
     @pytest.mark.unit
-    async def test_execute_sub_assembly_classification_new_headers(self, test_client):
-        """Explicit source='made' + is_stocked=true (sub-assembly) using the new headers."""
+    async def test_execute_explicit_source_header_is_honoured(self, test_client):
+        """An explicit `source` column wins over inference.
+
+        This was "sub-assembly classification": explicit source='made' PLUS is_stocked=true, one
+        of four (source, is_stocked) quadrants. With the flag dropped there is one axis left, so
+        what remains to assert is that the explicit header is honoured.
+        """
         insert_log: list = []
 
         request_data = {
@@ -1111,7 +1124,6 @@ class TestPartsExecuteEndpoint:
             "mappings": {
                 "Part Name": "part_name",
                 "Source": "source",
-                "Is Stocked": "is_stocked",
                 "Unit": "primary_unit",
             },
             "pricing_columns": [],
@@ -1119,7 +1131,6 @@ class TestPartsExecuteEndpoint:
                 {
                     "Part Name": "SUB-ASSY-001",
                     "Source": "made",
-                    "Is Stocked": "true",
                     "Unit": "pcs",
                 },
             ],
@@ -1143,7 +1154,7 @@ class TestPartsExecuteEndpoint:
         parts_inserts = [r for r in insert_log if r["table"] == "parts"]
         inserted = parts_inserts[0]["data"][0]
         assert inserted["source"] == "made"
-        assert inserted["is_stocked"] is True
+        assert "is_stocked" not in inserted
 
     @pytest.mark.unit
     async def test_execute_legacy_is_manufacturable_alias_maps_to_source(
@@ -1164,7 +1175,6 @@ class TestPartsExecuteEndpoint:
                 # importer should accept it and translate true→'made',
                 # false→'bought'.
                 "Is Manufacturable": "is_manufacturable",
-                "Is Stockable": "is_stockable",
                 "Unit": "primary_unit",
             },
             "pricing_columns": [],
@@ -1172,13 +1182,11 @@ class TestPartsExecuteEndpoint:
                 {
                     "Part Name": "SUB-ASSY-LEGACY",
                     "Is Manufacturable": "true",
-                    "Is Stockable": "true",
                     "Unit": "pcs",
                 },
                 {
                     "Part Name": "BOUGHT-LEGACY",
                     "Is Manufacturable": "false",
-                    "Is Stockable": "true",
                     "Unit": "pcs",
                 },
             ],
@@ -1206,9 +1214,9 @@ class TestPartsExecuteEndpoint:
         bought_row = next(r for r in rows if r["part_name"] == "BOUGHT-LEGACY")
 
         assert sub_row["source"] == "made"
-        assert sub_row["is_stocked"] is True
         assert bought_row["source"] == "bought"
-        assert bought_row["is_stocked"] is True
+        assert "is_stocked" not in sub_row
+        assert "is_stocked" not in bought_row
         # New columns should be set on the inserted rows; the legacy boolean
         # columns must NOT be passed through to the parts table (they don't
         # exist anymore).

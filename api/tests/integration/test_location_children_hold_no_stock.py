@@ -109,12 +109,12 @@ def shop(db):
         stocked = location("Shelf X")
         bare = location("Yard")
 
-        # quantity 0 at creation so auto_track_stocked_part seeds nothing; the placement is then
+        # quantity 0 at creation so seed_new_part_balance seeds nothing; the placement is then
         # explicit. parts.quantity is a rollup, so it becomes 100 by trigger.
         cur.execute(
             """
-            INSERT INTO parts (company_id, part_name, source, is_stocked, primary_unit, quantity)
-            VALUES (%s, %s, 'bought', true, 'each', 0) RETURNING id
+            INSERT INTO parts (company_id, part_name, source, primary_unit, quantity)
+            VALUES (%s, %s, 'bought', 'each', 0) RETURNING id
             """,
             (company, f"CONTAINER-{company[:8]}"),
         )

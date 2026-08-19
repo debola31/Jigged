@@ -1,19 +1,16 @@
 """Pydantic models for Parts CSV import API.
 
 The unified Parts importer absorbs the previous `inventory_items` import path.
-Every imported row lives in one of four valid quadrants formed by the
-(source, is_stocked) pair:
+Every imported row is classified on ONE axis, `source`:
 
-  - source='made',   !is_stocked → Custom Made
-  - source='made',    is_stocked → Sub-assembly
-  - source='bought',  is_stocked → Raw Material
-  - source='bought', !is_stocked → Service / Drop-ship
+  - source='made'   → produced in-shop (will have a routing)
+  - source='bought' → procured from a vendor
 
-The legacy boolean columns (`is_manufacturable`, `is_stockable`) were renamed
-in the 20260504 source-enum-and-stocked-rename migration. The importer still
-accepts them as legacy column-mapping aliases for one-version compatibility
-with already-prepared CSVs — see the validate/execute routes for the
-deprecation log entry that gets written for each legacy-mapped row.
+There used to be a second axis, `is_stocked`, giving four quadrants (Custom Made /
+Sub-assembly / Raw Material / Service+Drop-ship). The column was dropped: every part
+can carry stock and starts at quantity 0, so a CSV no longer says whether a part is
+"stocked" — it says how much of it there is. `is_manufacturable` and `is_stockable`,
+the legacy boolean columns this importer accepted as aliases, are gone with it.
 """
 
 from enum import Enum
@@ -75,7 +72,7 @@ class PartValidationError(BaseModel):
 
     error_type values:
       - "missing_part_name", "invalid_price", "invalid_qty"
-      - "missing_primary_unit": is_stocked=true but primary_unit absent
+      - "missing_primary_unit": primary_unit absent (required for every part)
       - "invalid_quantity": quantity is negative
       - "invalid_cost": cost_per_unit (CSV column) is negative — execute
         routes this into a part_procurement_tiers row when source='bought'.
@@ -204,15 +201,10 @@ PART_SCHEMA = {
         "required": False,
         "description": "'made' if produced in-shop (with a routing); 'bought' if procured from a vendor.",
     },
-    "is_stocked": {
-        "type": "boolean",
-        "required": False,
-        "description": "Whether this part is tracked as stock-on-hand. Defaults to true for raw materials and sub-assemblies.",
-    },
     "primary_unit": {
         "type": "string",
-        # Required for EVERY part, not just stocked ones: the parts table has an
-        # unconditional `parts_requires_unit` CHECK (primary_unit IS NOT NULL).
+        # Required for EVERY part: the parts table has an unconditional
+        # `parts_requires_unit` CHECK (primary_unit IS NOT NULL).
         # This said False, so a unit-less row passed validate and then failed the
         # batch insert with a 500.
         "required": True,

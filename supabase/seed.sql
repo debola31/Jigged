@@ -302,41 +302,46 @@ on conflict (id) do nothing;
 
 -- ── Parts ────────────────────────────────────────────────────────────────────
 -- part uuid: 60000000-…-0000000000NN  (NN 01..18). Made-part routing uuid: 70000000-…-NN.
--- Bought parts (raw blanks + components), stocked, with a preferred vendor.
-insert into public.parts (id, company_id, part_name, description, source, is_stocked, primary_unit, quantity, reorder_point, preferred_vendor_id) values
-  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought',true,'ea',240,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought',true,'ea',180,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought',true,'ea',120,10,'30000000-0000-0000-0000-000000000001'),
-  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought',true,'ea',600,10,'30000000-0000-0000-0000-000000000004'),
-  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought',true,'ea',1500,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought',true,'ea',5000,10,'30000000-0000-0000-0000-000000000002'),
-  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought',true,'ea',2200,10,'30000000-0000-0000-0000-000000000002'),
+-- Bought parts (raw blanks + components), with a preferred vendor.
+insert into public.parts (id, company_id, part_name, description, source, primary_unit, quantity, reorder_point, preferred_vendor_id) values
+  ('60000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','RAW-AL6061-BLANK','Aluminum 6061 machining blank','bought','ea',240,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','RAW-STEEL-BLANK','Steel A36 plate blank','bought','ea',180,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','RAW-SS304-BLANK','Stainless 304 rod blank','bought','ea',120,10,'30000000-0000-0000-0000-000000000001'),
+  ('60000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','BUY-BEARING-608ZZ','Ball bearing 608ZZ','bought','ea',600,10,'30000000-0000-0000-0000-000000000004'),
+  ('60000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','BUY-ORING-214','O-ring #214 Buna-N','bought','ea',1500,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000006','22222222-2222-2222-2222-222222222222','BUY-SHCS-M5x16','M5x16 socket head cap screw','bought','ea',5000,10,'30000000-0000-0000-0000-000000000002'),
+  ('60000000-0000-0000-0000-000000000007','22222222-2222-2222-2222-222222222222','BUY-DOWEL-3MM','Dowel pin 3mm x 16','bought','ea',2200,10,'30000000-0000-0000-0000-000000000002'),
   -- reorder_point 75 against 60 on hand, so this part sits in the LOW band. Deliberate: see the
   -- note below the insert.
-  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought',true,'ea',60,75,'30000000-0000-0000-0000-000000000005'),
-  -- Machined sub-components (made, stocked).
-  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made',true,'ea',25,10,null),
-  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made',true,'ea',40,10,null),
-  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made',true,'ea',30,10,null),
+  ('60000000-0000-0000-0000-000000000008','22222222-2222-2222-2222-222222222222','BUY-MOTOR-12V','12V DC gearmotor','bought','ea',60,75,'30000000-0000-0000-0000-000000000005'),
+  -- Machined sub-components (made).
+  ('60000000-0000-0000-0000-000000000009','22222222-2222-2222-2222-222222222222','SUB-HOUSING','Pump housing, machined','made','ea',25,10,null),
+  ('60000000-0000-0000-0000-000000000010','22222222-2222-2222-2222-222222222222','SUB-SHAFT','Drive shaft, turned','made','ea',40,10,null),
+  ('60000000-0000-0000-0000-000000000011','22222222-2222-2222-2222-222222222222','SUB-COVER','End cover, anodized','made','ea',30,10,null),
   -- Second LOW-band part (35 on hand, reorder at 50), so the filter shows a list rather than a
   -- single row.
-  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made',true,'ea',35,50,null),
-  -- Sub-assemblies (made, stocked).
-  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made',true,'ea',12,10,null),
-  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made',true,'ea',8,10,null),
-  -- Top-level sellable products (made, not stocked).
-  ('60000000-0000-0000-0000-000000000015','22222222-2222-2222-2222-222222222222','PROD-PUMP-100','Hydraulic Pump P-100','made',false,'ea',0,null,null),
-  ('60000000-0000-0000-0000-000000000016','22222222-2222-2222-2222-222222222222','PROD-ACTUATOR-200','Linear Actuator A-200','made',false,'ea',0,null,null),
-  ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222','PROD-MANIFOLD-300','Valve Manifold M-300','made',false,'ea',0,null,null),
-  ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made',false,'in',0,null,null)
+  ('60000000-0000-0000-0000-000000000012','22222222-2222-2222-2222-222222222222','SUB-BRACKET','Mounting bracket','made','ea',35,50,null),
+  -- Sub-assemblies (made).
+  ('60000000-0000-0000-0000-000000000013','22222222-2222-2222-2222-222222222222','ASM-PUMPCORE','Pump core assembly','made','ea',12,10,null),
+  ('60000000-0000-0000-0000-000000000014','22222222-2222-2222-2222-222222222222','ASM-GEARBOX','Gearbox subassembly','made','ea',8,10,null),
+  -- Top-level sellable products (made, no opening stock -- they are built to order).
+  ('60000000-0000-0000-0000-000000000015','22222222-2222-2222-2222-222222222222','PROD-PUMP-100','Hydraulic Pump P-100','made','ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000016','22222222-2222-2222-2222-222222222222','PROD-ACTUATOR-200','Linear Actuator A-200','made','ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000017','22222222-2222-2222-2222-222222222222','PROD-MANIFOLD-300','Valve Manifold M-300','made','ea',0,null,null),
+  ('60000000-0000-0000-0000-000000000018','22222222-2222-2222-2222-222222222222','PROD-RAIL-CUT','Cut-to-length guide rail (per inch)','made','in',0,null,null)
 on conflict (id) do nothing;
 
 -- Why two parts carry a reorder_point ABOVE their quantity
 -- ────────────────────────────────────────────────────────
--- Stock status is derived at render: 0 ⇒ out, 0 < qty <= reorder_point ⇒ low, else in stock
--- (`components/inventory/StockStatusChip.tsx`). Before this, the seed could not produce a single
--- `low` part, so the "Low" chip and the `/parts?status=low` filter — which is the shop-wide
--- shortage view — were invisible in every dev and preview environment.
+-- Low stock is derived at render: 0 < qty <= reorder_point ⇒ low. Before this, the seed could not
+-- produce a single `low` part, so every surface that says so was invisible in dev and preview.
+--
+-- Those surfaces moved when is_stocked was dropped. The Parts list no longer carries an On hand
+-- column, a status chip or a stock filter at all — quantities are Storage's job — and
+-- `StockStatusChip` went with them. What still reads the low band is the part page's Inventory
+-- tab (`components/parts/workspace/tabs/InventoryTab.tsx`, which derives the same comparison
+-- inline) and the low-stock alert lists. Keeping these two parts in the band is what keeps those
+-- testable.
 --
 -- It wasn't simply missing data. Job material consumption below ran
 -- `set quantity = greatest(0, quantity - used)`, which drove ASM-GEARBOX, ASM-PUMPCORE,
@@ -506,7 +511,7 @@ select '22222222-2222-2222-2222-222222222222', p.id, p.part_name, 'addition', p.
        'Opening stock receipt', '11111111-1111-1111-1111-111111111111', now() - interval '120 days'
 from public.parts p
 where p.company_id = '22222222-2222-2222-2222-222222222222'
-  and p.is_stocked = true and p.quantity > 0
+  and p.quantity > 0
 on conflict do nothing;
 
 -- =============================================================================
@@ -677,10 +682,16 @@ declare jp record; e record; v_num text; used numeric;
 begin
   select job_number into v_num from public.jobs where id = p_job;
   for jp in select id, part_id, quantity from public.job_parts where job_id = p_job loop
-    for e in select b.child_part_id, b.quantity q, b.unit, p.part_name, p.is_stocked
+    for e in select b.child_part_id, b.quantity q, b.unit, p.part_name, p.quantity on_hand
              from public.parts_bom b join public.parts p on p.id = b.child_part_id
              where b.parent_part_id = jp.part_id loop
-      if not e.is_stocked then continue; end if;
+      -- Was `if not e.is_stocked then continue`. Every part is stockable now, so the question
+      -- is no longer "is this a stocked KIND of part" but "is there anything here to issue" —
+      -- which also keeps the invariant that a depletion ledger row means stock actually left.
+      -- Deleting the guard outright would look equivalent (the balance delete/update below
+      -- no-op when there is no row) but would write a depletion against a part holding
+      -- nothing: a ledger that lies, in the canonical dev dataset.
+      if e.on_hand <= 0 then continue; end if;
       used := e.q * jp.quantity;
       insert into public.inventory_transactions (company_id, part_id, item_name, type, quantity, unit, converted_quantity, job_id, notes, created_by, created_at)
       values ('22222222-2222-2222-2222-222222222222', e.child_part_id, e.part_name, 'depletion', used, e.unit, used, p_job,
@@ -1410,7 +1421,7 @@ begin
    where id = v_company;
 
   -- No backfill needed any more. `enable_location_tracking_for_company` was dropped in
-  -- 20260802015837: every part is seeded into Unassigned by `auto_track_stocked_part` the
+  -- 20260802015837: every part is seeded into Unassigned by `seed_new_part_balance` the
   -- moment it is inserted, for every company, flag or no flag. All this block needs is the
   -- bucket's id — and note the flag write above now governs only whether this shop MANAGES
   -- places, not whether its stock has one.

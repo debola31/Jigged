@@ -1,12 +1,10 @@
 """Import routes for parts CSV import with AI-powered mapping.
 
 The unified Parts importer absorbs the previous inventory_items import path.
-A row is classified by the (source, is_stocked) pair:
+A row is classified on ONE axis, `source`:
 
-  - source='made',   !is_stocked → Custom Made (built to order)
-  - source='made',    is_stocked → Sub-assembly
-  - source='bought',  is_stocked → Raw Material
-  - source='bought', !is_stocked → Service / Drop-ship
+  - source='made'   → produced in-shop (built to order, will have a routing)
+  - source='bought' → procured from a vendor
 
 Auto-classification rules at execute time (when no explicit source mapping is
 provided):
@@ -14,18 +12,15 @@ provided):
     quantity, reorder_point) are present and there are NO operation columns
   - source='made'   if any operation columns are present, or if no procurement
     fields are set
-  - is_stocked is true when primary_unit / quantity / cost_per_unit are present
 
-Legacy column-mapping aliases. The previous (is_manufacturable, is_stockable)
-booleans were renamed by the 20260504 source-enum migration. To stay
-compatible with already-prepared CSVs for one version, the importer accepts
-`is_manufacturable` and `is_stockable` as legacy aliases:
-  - is_manufacturable=true  → source='made'
-  - is_manufacturable=false → source='bought'
-  - is_stockable value passes through to is_stocked
-Each legacy-mapped row writes a deprecation entry to the import-event log
-(visible in server logs). Plan to remove the alias once the pilot customer's
-CSVs use the new headers.
+`is_stocked` was a second axis, giving four quadrants (Custom Made /
+Sub-assembly / Raw Material / Service+Drop-ship), and the importer inferred it
+from a three-tier chain: explicit column, then the legacy `is_stockable` alias,
+then a guess from whether primary_unit / quantity / cost_per_unit were present.
+All of it is gone with the column. Every part can carry stock and starts at
+quantity 0, so a CSV says how MUCH of a part there is (`quantity`) and never
+whether it is "a stocked part" — which also retires the legacy
+`is_manufacturable` / `is_stockable` aliases and their deprecation log entry.
 
 Idempotent by part number: every row is upserted ON CONFLICT
 (company_id, part_name), the table's real unique key — so re-importing the same
@@ -225,10 +220,8 @@ async def validate_import(
         vendor_column = reverse_mappings.get("preferred_vendor_name")
         # New (chunk 11) columns:
         source_column = reverse_mappings.get("source")
-        is_stocked_column = reverse_mappings.get("is_stocked")
-        # Legacy aliases (kept one-version for CSVs already prepared with the
-        # old headers — see module docstring):
-        legacy_is_stockable_column = reverse_mappings.get("is_stockable")
+        # Legacy alias (kept one-version for CSVs already prepared with the
+        # old header — see module docstring):
         legacy_is_manufacturable_column = reverse_mappings.get("is_manufacturable")
         description_column = reverse_mappings.get("description")
 
@@ -261,7 +254,7 @@ async def validate_import(
         # which meant a filled unit on a NON-stocked ("made") part was never resolved: it then hit
         # the "have a raw unit but no resolved unit" branch and was rejected as `unknown_unit` and
         # skipped — even a perfectly good "each". That's why filling units still skipped ~7,700
-        # parts on the Tangle export (its parts are is_stocked=false). resolve_units_for_rows
+        # parts on the Tangle export (whose parts were all non-stocked). resolve_units_for_rows
         # returns 1-based indices into the rows we pass, so add batch_offset to get row_number.
         if request.pre_resolved_uoms:
             uom_resolutions: dict[int, Optional[str]] = dict(request.pre_resolved_uoms)
@@ -469,15 +462,14 @@ async def execute_import(
 ):
     """Execute the parts import.
 
-    - Auto-classifies rows by (source, is_stocked):
+    - Auto-classifies rows by source:
       - source='made'   if any operation columns are present, OR if there are
         no procurement fields (cost/unit/qty/reorder)
       - source='bought' if procurement fields are present and there are no
         operation columns
-      - is_stocked=true if primary_unit / quantity / cost_per_unit are present
-    - Accepts the legacy headers `is_manufacturable` and `is_stockable` as
-      column-mapping aliases (one-version compat). Each legacy-mapped row
-      writes a deprecation log entry. See the module docstring.
+    - Accepts the legacy header `is_manufacturable` as a column-mapping alias
+      (one-version compat). Each legacy-mapped row writes a deprecation log
+      entry. See the module docstring.
     - Resolves preferred_vendor_name to vendor_id (rows that failed validation
       have already been excluded from the write set).
     - Idempotent: every row is upserted ON CONFLICT (company_id, part_name), the
@@ -535,14 +527,12 @@ async def execute_import(
         vendor_column = reverse_mappings.get("preferred_vendor_name")
         # New (chunk 11) columns:
         source_column = reverse_mappings.get("source")
-        is_stocked_column = reverse_mappings.get("is_stocked")
-        # Legacy aliases (one-version compat — see module docstring):
-        legacy_is_stockable_column = reverse_mappings.get("is_stockable")
+        # Legacy alias (one-version compat — see module docstring):
         legacy_is_manufacturable_column = reverse_mappings.get("is_manufacturable")
-        if legacy_is_stockable_column or legacy_is_manufacturable_column:
+        if legacy_is_manufacturable_column:
             logger.warning(
-                "Parts import using legacy headers is_manufacturable/is_stockable. "
-                "These are deprecated; use 'source' (made|bought) and 'is_stocked' instead. "
+                "Parts import using the legacy header is_manufacturable. "
+                "It is deprecated; use 'source' (made|bought) instead. "
                 "company_id=%s",
                 request.company_id,
             )
@@ -635,25 +625,13 @@ async def execute_import(
                 except ValueError:
                     reorder_val = None
 
-            # Auto-classification: (source, is_stocked).
+            # Auto-classification: source, and only source.
             #
-            # is_stocked: explicit > legacy is_stockable > inferred from
-            # primary_unit/quantity/cost.
-            explicit_stocked: Optional[bool] = None
-            if is_stocked_column:
-                explicit_stocked = parse_bool(row.get(is_stocked_column, ""))
-            elif legacy_is_stockable_column:
-                explicit_stocked = parse_bool(
-                    row.get(legacy_is_stockable_column, "")
-                )
-
-            inferred_stocked = bool(
-                primary_unit or quantity_val is not None or cost_val is not None
-            )
-            is_stocked_val = (
-                explicit_stocked if explicit_stocked is not None else inferred_stocked
-            )
-
+            # There was a parallel three-tier chain here for is_stocked (explicit column >
+            # legacy is_stockable alias > inferred from primary_unit/quantity/cost). The
+            # column is gone: every part can carry stock and starts at 0, so `quantity`
+            # already says everything the flag was guessing at.
+            #
             # source: explicit 'source' column > legacy is_manufacturable
             # alias > inferred from operation columns vs procurement fields.
             explicit_source: Optional[str] = None
@@ -681,17 +659,14 @@ async def execute_import(
                 else:
                     source_val = "made"
 
-            part_data["is_stocked"] = is_stocked_val
             part_data["source"] = source_val
 
-            if legacy_is_stockable_column or legacy_is_manufacturable_column:
+            if legacy_is_manufacturable_column:
                 logger.info(
-                    "Parts import row %s used legacy header(s) "
-                    "is_manufacturable/is_stockable (deprecated). Mapped to "
-                    "source=%s, is_stocked=%s. company_id=%s",
+                    "Parts import row %s used the legacy header is_manufacturable "
+                    "(deprecated). Mapped to source=%s. company_id=%s",
                     row_number,
                     source_val,
-                    is_stocked_val,
                     request.company_id,
                 )
 

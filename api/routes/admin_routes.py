@@ -159,10 +159,13 @@ async def list_companies(request: Request):
             settings = company.get("settings") or {}
             settings = settings if isinstance(settings, dict) else {}
             features = _normalize_features(settings.get("features"))
-            # ai_insights is opt-out (GA feature + kill-switch): report it ON
-            # for companies that never set it, so the admin toggle mirrors the
-            # effective state (see lib/featureFlags.ts defaultEnabled).
+            # Opt-out flags (GA feature + kill-switch): report them ON for companies that never
+            # set them, so the admin toggle mirrors the effective state rather than showing an
+            # off switch for a feature the tenant can see. Must stay in step with
+            # `defaultEnabled` in lib/featureFlags.ts — these are the two places that each carry
+            # the default, and only the TS side has a test pinning them together.
             features.setdefault("ai_insights", True)
+            features.setdefault("inventory_locations", True)
 
             ai_limits = settings.get("ai_limits") or {}
             raw_limit = ai_limits.get("chat_per_hour")

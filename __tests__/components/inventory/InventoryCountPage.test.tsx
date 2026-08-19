@@ -80,6 +80,7 @@ import {
   getLocations,
 } from '@/utils/inventoryLocationsAccess';
 import type { CountCandidate } from '@/types/inventoryCount';
+import { COUNT_PICKER_LIMIT } from '@/lib/queryLimits';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
@@ -299,63 +300,75 @@ describe('choosing what to count', () => {
     expect(screen.queryByRole('button', { name: /back to storage/i })).not.toBeInTheDocument();
   });
 
-  it('shows an empty state when nothing is stocked', async () => {
+  it('shows an empty state when the company has no parts at all', async () => {
     asMock(loadCountCandidates).mockResolvedValue([]);
     renderPage();
     expect(await screen.findByText(/nothing to count yet/i)).toBeInTheDocument();
   });
 
   /**
-   * The company-wide picker filters in memory, and that is the whole point of it.
+   * The company-wide picker is SERVER-searched, and this reverses what these two tests used to
+   * pin. The originals asserted the opposite — that a keystroke never reaches the server, and
+   * that the list narrows in the same tick with no `waitFor` — and one of them said in as many
+   * words that wiring `serverSearch` through to `loadCountCandidates` "turns this into a 300ms
+   * round trip and this test goes red, which is the intended alarm rather than an inconvenience".
    *
-   * `serverSearch` used to be a raw dependency of the loader effect, so a keystroke here re-ran
-   * the entire company-wide load — `loadCountCandidates` + balances + locations — 300ms later, to
-   * arrive at the identical array and replace it. Nothing read the result: `visible` had already
-   * filtered `candidates` synchronously from `search`. Pure waste, and silent, because `paging`
-   * only drives the place-scoped pager so there was no spinner to notice.
+   * The alarm fired, and the answer this time is that the premise expired. That guarantee was
+   * affordable because `parts.is_stocked` bounded the list to a few hundred rows, so filtering in
+   * memory cost nothing. Dropping the column made every part stockable and the same code would
+   * have pulled an 8,451-part catalogue into the browser unvirtualised, then fanned the balances
+   * read out over ~71 chunked queries. An instant filter over a list that takes seconds to arrive
+   * is not the better screen.
    *
-   * Nothing in this file typed into the company-wide box before, which is how it shipped.
-   *
-   * Clearing the mocks after the mount load is what makes this a ratchet — a call-count assertion
-   * on the raw mock would pass today on the mount load alone. Waiting well past the 300ms debounce
-   * is deliberate: the point is that nothing happens when the timer fires.
+   * What replaces it is pinned below: the term reaches the server, debounced, once per settled
+   * term — and the cap is stated on screen, since a capped list can silently lack the part you
+   * wanted.
    */
-  it('filters company-wide in the browser, without going back to the server', async () => {
+  it('sends the search term to the server rather than filtering in the browser', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
     asMock(loadCountCandidates).mockClear();
-    asMock(getLocations).mockClear();
-    asMock(getBalancesForParts).mockClear();
-
     await user.type(screen.getByPlaceholderText(/search parts/i), '4140');
-    await new Promise((resolve) => setTimeout(resolve, 700));
 
-    expect(loadCountCandidates).not.toHaveBeenCalled();
-    expect(getLocations).not.toHaveBeenCalled();
-    expect(getBalancesForParts).not.toHaveBeenCalled();
+    await waitFor(() => expect(loadCountCandidates).toHaveBeenCalledWith('co1', '4140'));
   });
 
   /**
-   * The interaction the above buys, pinned so it cannot be traded away by accident.
-   *
-   * There is no `waitFor` and no `findBy` here, and their ABSENCE is the assertion: the list must
-   * narrow in the same tick as the keystroke. Wiring `serverSearch` through to
-   * `loadCountCandidates` — the shape #658 proposed — turns this into a 300ms round trip and this
-   * test goes red, which is the intended alarm rather than an inconvenience.
+   * The debounce is what makes the round trip affordable: a settled term is one request, not one
+   * per keystroke. Without it every letter of a part number is a query plus a balances fan-out.
    */
-  it('narrows the list as you type, with no wait', async () => {
+  it('coalesces keystrokes into a single request', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
+    asMock(loadCountCandidates).mockClear();
     await user.type(screen.getByPlaceholderText(/search parts/i), '4140');
+    await new Promise((resolve) => setTimeout(resolve, 700));
 
-    expect(screen.getByText('4140 bar')).toBeInTheDocument();
-    expect(screen.queryByText('6061 plate')).not.toBeInTheDocument();
+    expect(asMock(loadCountCandidates).mock.calls).toHaveLength(1);
+  });
+
+  /**
+   * A capped list has one failure mode an unbounded one does not: the part you wanted is simply
+   * not on it, and nothing on screen would otherwise say so. Only shown AT the cap — below it the
+   * list is everything that matched, and a standing "showing the first 200" would be a lie.
+   */
+  it('says so when the view is capped, and stays quiet when it is not', async () => {
+    asMock(loadCountCandidates).mockResolvedValue(
+      Array.from({ length: COUNT_PICKER_LIMIT }, (_, i) =>
+        cand({ partId: `p${i}`, partName: `PART-${i}` }),
+      ),
+    );
+    renderPage();
+    expect(
+      await screen.findByText(new RegExp(`showing the first ${COUNT_PICKER_LIMIT}`, 'i')),
+    ).toBeInTheDocument();
   });
 });
+
 
 describe('inline feedback', () => {
   /** Both parts on the sheet, ready to type into. */

@@ -154,7 +154,7 @@ PostgREST `.in()`. **Measured on the local gateway 2026-08-01 with real UUIDs:
 200 ids → 200 OK, 220 ids → 414 URI Too Long**; 120 leaves headroom for the select
 list and extra filters instead of sitting under the cliff. **Withdrawn:** the old
 value of 500 "kept the IN () list well inside PostgREST's URL limits" — wrong by
-more than double, so any shop with ~200+ stocked parts got a hard 414 on every
+more than double, so any shop with ~200+ parts carrying stock got a hard 414 on every
 chunk. One home, because four files had independently picked the same wrong number.
 
 #### 6.1 The typed client and `types/database.ts`

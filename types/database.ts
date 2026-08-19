@@ -2298,7 +2298,6 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
-          is_stocked: boolean
           part_name: string
           preferred_vendor_id: string | null
           primary_unit: string | null
@@ -2314,7 +2313,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_stocked?: boolean
           part_name: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null
@@ -2330,7 +2328,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          is_stocked?: boolean
           part_name?: string
           preferred_vendor_id?: string | null
           primary_unit?: string | null

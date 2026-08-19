@@ -31,11 +31,15 @@ export type UnitBasis =
 /**
  * Why a material row reads the way it does.
  *
- * `not_stocked` and `archived` exist so those rows are *shown and labelled* rather than
- * dropped — a BOM line vanishing from a material list is worse than one flagged as odd.
- * Both are excluded from shortage totals.
+ * `archived` exists so those rows are *shown and labelled* rather than dropped — a BOM line
+ * vanishing from a material list is worse than one flagged as odd — and is excluded from
+ * shortage totals.
+ *
+ * `not_stocked` was a third such status until `parts.is_stocked` was dropped. Every part is
+ * stockable now, so a child sitting at 0 against a real requirement is genuinely `short`
+ * rather than unanswerable, and the status became unreachable by construction.
  */
-export type RequirementStatus = 'ok' | 'short' | 'incomparable' | 'not_stocked' | 'archived';
+export type RequirementStatus = 'ok' | 'short' | 'incomparable' | 'archived';
 
 /** Stock facts about a BOM child, which `getBomForPart` deliberately does not return. */
 export interface MaterialStockFacts {
@@ -44,7 +48,6 @@ export interface MaterialStockFacts {
   primaryUnit: string | null;
   /** `parts.quantity` — authoritative for BOTH engines (a trigger rolls up bin balances). */
   onHand: number;
-  isStocked: boolean;
   isArchived: boolean;
 }
 

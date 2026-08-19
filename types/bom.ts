@@ -87,7 +87,6 @@ export interface BomLineWithChildPart extends BomLine {
     part_name: string;
     description: string | null;
     primary_unit: string | null;
-    is_stocked: boolean;
     source: 'made' | 'bought';
     /**
      * Batch qty at which this (made) child's cost is amortized when consumed as

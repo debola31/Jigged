@@ -89,6 +89,20 @@ test.describe('Add parts from drawings', () => {
     await page.getByRole('checkbox', { name: /Add materials/i }).check();
     await expect(page.getByTitle(/lists 3 components/i)).toBeVisible();
 
+    // ── The drawing, beside the row it produced ──
+    // Checking a package is a comparison, so both have to be on screen. No upload:
+    // the row still holds the File, so this is an object URL.
+    await expect(page.getByTestId('drawing-file-panel')).toHaveCount(0);
+    await page.getByRole('button', { name: /Open the drawing for 1011770/i }).click();
+    const panel = page.getByTestId('drawing-file-panel');
+    await expect(panel).toBeVisible();
+    // E2E-DRAW-1 arrived as a DXF and a PDF, so both are offered and the PDF —
+    // the sheet a person reads — is the one shown.
+    await expect(panel.getByRole('button', { name: /^pdf$/i })).toBeVisible();
+    await expect(panel.locator('iframe')).toBeVisible();
+    await panel.getByRole('button', { name: /Close the drawing/i }).click();
+    await expect(page.getByTestId('drawing-file-panel')).toHaveCount(0);
+
     // ── Routing by tapping stations, no numbers ──
     // Which stations a part visits is recall; how long it takes there is a
     // consensus the shop may not have reached. So the fast path asks only the

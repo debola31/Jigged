@@ -60,9 +60,11 @@ import Typography from '@mui/material/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import CloseIcon from '@mui/icons-material/Close';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 
 import RoutingOperationsList from '@/components/routings/RoutingOperationsList';
 import StationStrip from '@/components/drawings/StationStrip';
+import DrawingFilePanel from '@/components/drawings/DrawingFilePanel';
 import type { OperationRowData } from '@/components/routings/RoutingOperationRow';
 import { valueOf, type DrawingRowValues } from '@/types/drawingImport';
 import { unreadableMessage, type BuiltRow } from '@/lib/drawingImportExtract';
@@ -150,6 +152,12 @@ export default function DrawingWorkspaceStep({
    * the default and the full editor is a link away for anyone who does know.
    */
   const [rowTimes, setRowTimes] = useState<Set<string>>(new Set());
+  /**
+   * Which row's drawing is on screen. One panel, not one per row: the question is
+   * always "does THIS row match its sheet", so it follows the selection and
+   * checking a package becomes clicking down the table.
+   */
+  const [viewingStem, setViewingStem] = useState<string | null>(null);
 
   /**
    * Every row on screen is going to be created. Leaving one out removes it from
@@ -162,6 +170,10 @@ export default function DrawingWorkspaceStep({
     [rows, fileCount],
   );
   const needsAttention = useMemo(() => rows.filter((r) => attention(r) !== null), [rows]);
+  const viewing = useMemo(
+    () => rows.find((r) => r.stem === viewingStem) ?? null,
+    [rows, viewingStem],
+  );
 
   /**
    * The file signature the card just promised. A row prints its own files only
@@ -290,7 +302,8 @@ export default function DrawingWorkspaceStep({
         </CardContent>
       </Card>
 
-      <Card>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'stretch', flexDirection: { xs: 'column', md: 'row' } }}>
+      <Card sx={{ flex: 1, minWidth: 0 }}>
         <CardContent sx={{ p: 0 }}>
           <TableContainer sx={{ maxHeight: '58vh' }}>
             <Table size="small" stickyHeader>
@@ -401,6 +414,18 @@ export default function DrawingWorkspaceStep({
                                 onClick={() => setOpenStem(row.stem)}
                               />
                             )}
+                            <Tooltip title="Look at the drawing">
+                              <IconButton
+                                size="small"
+                                onClick={() =>
+                                  setViewingStem(viewingStem === row.stem ? null : row.stem)
+                                }
+                                aria-label={`Open the drawing for ${name}`}
+                                color={viewingStem === row.stem ? 'primary' : 'default'}
+                              >
+                                <DescriptionOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                             {/* Drop the row outright. An include checkbox left
                                 thirty-one ticked boxes on screen to express a
                                 default nobody changes. */}
@@ -571,6 +596,15 @@ export default function DrawingWorkspaceStep({
           </TableContainer>
         </CardContent>
       </Card>
+
+      {viewing && (
+        <DrawingFilePanel
+          key={viewing.stem}
+          row={viewing}
+          onClose={() => setViewingStem(null)}
+        />
+      )}
+      </Box>
 
       {/*
         One line of consequence, where the decision is made. Not a banner at the

@@ -133,9 +133,87 @@ export function parseTrackingPlan(markdown: string): TrackingPlan {
 // ============== Source parsing ==============
 
 /**
+ * Replaces the body of every `//` and block comment with spaces, leaving newlines in place.
+ *
+ * **Length is preserved exactly**, character for character, so every index and line number
+ * computed against the result still points at the right place in the original file.
+ *
+ * WHY THIS EXISTS. `splitTopLevel` and `matchBrace` below both walk raw characters and track
+ * string state, and neither knows what a comment is. That is not a cosmetic gap — prose inside a
+ * properties object silently changes what the scanner believes was captured, in four distinct ways:
+ *
+ *   - a comma in a comment ("Whether they wrote a note, never what it says") splits a segment in
+ *     half, and the real key that followed it stops being seen at all;
+ *   - an apostrophe ("the shop's own wording") opens a string that never closes, swallowing every
+ *     real comma until the next apostrophe and taking those keys with it;
+ *   - a brace in a comment ("returns } when empty") ends the object early;
+ *   - and prose shaped like `word: value` after a comma is read AS a key, so the check demands a
+ *     registry row for a property that does not exist.
+ *
+ * The first three hide properties. Hiding is the dangerous direction: an undocumented property
+ * that the scanner cannot see produces no `undocumented-property` violation, so a capture carrying
+ * something it should not — a customer's email, say — ships green past the one check meant to
+ * catch it. That is the whole point of this file, defeated by a comma.
+ *
+ * Blanking once here fixes every downstream walker at the same time, which is why it is not done
+ * inside `splitTopLevel`: `matchBrace` and the event-name match need it too.
+ *
+ * Regex literals are NOT tracked, so `/a\/\/b/` would be read as starting a comment. No call site
+ * has ever put a regex in a properties object, the pre-existing scanner mishandled them just as
+ * badly, and `analyticsEvents.test.ts` asserts this pass leaves today's tree byte-identical.
+ */
+export function blankComments(source: string): string {
+  let out = '';
+  let quote: string | null = null;
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+
+    if (quote) {
+      out += ch;
+      if (ch === '\\') out += source[++i] ?? '';
+      else if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+
+    if (ch === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') {
+        out += ' ';
+        i++;
+      }
+      // Loop exited on the newline (or end of file); put it back so line numbers survive.
+      if (i < source.length) out += '\n';
+      continue;
+    }
+
+    if (ch === '/' && source[i + 1] === '*') {
+      const close = source.indexOf('*/', i + 2);
+      const stop = close === -1 ? source.length : close + 2;
+      for (let k = i; k < stop; k++) out += source[k] === '\n' ? '\n' : ' ';
+      i = stop - 1;
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
+/**
  * Splits an object-literal body on top-level commas, stepping over nested
  * braces/brackets/parens and over string and template-literal contents so a
  * comma inside `` `a, b` `` or `f(x, y)` does not split a key off.
+ *
+ * Comments are already blank by the time this runs — `extractCaptures` puts the source through
+ * `blankComments` first. Do not add comment handling here; it belongs in one place, because
+ * `matchBrace` needs it just as much.
  */
 function splitTopLevel(body: string): string[] {
   const parts: string[] = [];
@@ -189,9 +267,18 @@ function matchBrace(source: string, open: number): number {
 }
 
 const CALL = 'posthog.capture(';
-const KEY = /^\s*(?:\/\/[^\n]*\n\s*)*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::|$)/;
+// A leading-comment skip used to live in this pattern, and it was the tell that comments were
+// meant to be supported here all along — it just could not help, because `splitTopLevel` had
+// already severed the key from its comment before this ran. `blankComments` leaves whitespace
+// where the prose was, so plain `\s*` covers it now.
+const KEY = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::|$)/;
 
-export function extractCaptures(source: string, relPath: string): CaptureSite[] {
+export function extractCaptures(rawSource: string, relPath: string): CaptureSite[] {
+  // Everything below walks characters and tracks string state; none of it knows what a comment is.
+  // Blanking first is what lets a call site explain itself in prose without changing what this
+  // file believes was captured. Offsets and line numbers are unaffected — see `blankComments`.
+  const source = blankComments(rawSource);
+
   const sites: CaptureSite[] = [];
   let idx = source.indexOf(CALL);
 

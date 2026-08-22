@@ -1140,7 +1140,7 @@ export default function QuoteForm({ mode, initialData, quoteId, onCancel, onSave
           // price — the amount is the customer's business data.
           custom_priced_line_count: payload.parts.filter((p) => p.override).length,
           customer_id: formData.customer_id,
-          // Whether the shop wrote a note — never what it says. The note is
+          // Whether the shop wrote a note, never what it says. The note is
           // addressed to the customer and is their business data.
           has_customer_note: formData.customer_note.trim() !== '',
         });

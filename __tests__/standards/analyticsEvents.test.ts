@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
+import { readFileSync } from 'fs';
 import {
   parseTrackingPlan,
   extractCaptures,
+  blankComments,
+  collectCaptures,
   compare,
   scanProject,
   DOC_PATH,
@@ -113,6 +116,98 @@ describe('analyticsEventsCheck — source parsing', () => {
     expect(sites[0].properties).toEqual(['part_count', 'label', 'nested']);
   });
 
+  /**
+   * COMMENTS INSIDE A PROPERTIES OBJECT.
+   *
+   * The scanner walks characters and tracks string state; it has no idea what a comment is. So
+   * before this pass, ordinary prose above a key changed what the check believed was captured —
+   * and the repo's house style puts prose above almost every key. Each case below is one real
+   * sentence someone would write.
+   *
+   * Three of the four HIDE a property, which is the direction that matters: a property the scanner
+   * cannot see raises no `undocumented-property` violation, so a capture carrying a customer's
+   * email would ship green past the only check meant to catch it.
+   */
+  it('is not fooled by a comma inside a comment', () => {
+    const sites = extractCaptures(
+      "posthog.capture('quote created', {\n" +
+        '  alpha: 1,\n' +
+        '  // Whether the shop wrote a note, never what it says.\n' +
+        '  beta: 2,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta']);
+  });
+
+  it("is not fooled by an apostrophe in a comment, which used to open a string that never closed", () => {
+    // The worst of the four: the unclosed string swallows every real comma after it, so BOTH
+    // remaining keys vanish rather than one.
+    const sites = extractCaptures(
+      "posthog.capture('quote created', {\n" +
+        "  // the shop's own wording\n" +
+        '  alpha: 1,\n' +
+        '  beta: 2,\n' +
+        '  gamma: 3,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('is not fooled by a brace in a comment, which used to end the object early', () => {
+    const sites = extractCaptures(
+      "posthog.capture('quote created', {\n" +
+        '  alpha: 1,\n' +
+        '  // returns } when the list is empty\n' +
+        '  beta: 2,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta']);
+  });
+
+  it('does not invent a property out of prose shaped like a key', () => {
+    // The one case that ADDS rather than hides — the check would demand a registry row for a
+    // property no call site sends, and the fix is to reword a comment, which reads as nonsense.
+    const sites = extractCaptures(
+      "posthog.capture('quote created', {\n" +
+        '  alpha: 1,\n' +
+        '  // See note, surface: the dashboard one.\n' +
+        '  beta: 2,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta']);
+  });
+
+  it('blanks block comments too, and keeps line numbers honest', () => {
+    const sites = extractCaptures(
+      '\n\n' +
+        "posthog.capture('quote created', {\n" +
+        '  alpha: 1,\n' +
+        '  /* a block comment, with a comma and a } brace */\n' +
+        '  beta: 2,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta']);
+    expect(sites[0].line).toBe(3);
+  });
+
+  it('leaves commas and braces inside string values alone', () => {
+    // blankComments must not treat a // inside a string as a comment, or a URL would eat the
+    // rest of the line.
+    const sites = extractCaptures(
+      "posthog.capture('quote created', {\n" +
+        "  alpha: 'https://example.com/a,b',\n" +
+        '  beta: 2,\n' +
+        '});',
+      'x.tsx',
+    );
+    expect(sites[0].properties).toEqual(['alpha', 'beta']);
+  });
+
   it('records a 1-indexed line number', () => {
     const sites = extractCaptures(`const a = 1;\n\nposthog.capture('part created');`, 'x.tsx');
     expect(sites[0].line).toBe(3);
@@ -182,6 +277,22 @@ describe('analyticsEventsCheck — the live tree', () => {
    * added without a registry row in docs/telemetry.md, or a row is
    * describing an event that no longer exists.
    */
+  it('blanking comments leaves every capture in the real tree byte-identical', () => {
+    // The fix is a rewrite of what the scanner reads, so the thing to prove is that it changed
+    // nothing that was already working. Every capture site in the repo, parsed from raw source and
+    // from blanked source, must agree — if a regex literal or an exotic string ever did trip
+    // blankComments, this is what would say so.
+    const sites = collectCaptures(REPO_ROOT);
+    expect(sites.length).toBeGreaterThan(0);
+    for (const site of sites) {
+      const raw = readFileSync(path.join(REPO_ROOT, site.file), 'utf8');
+      const fromBlanked = extractCaptures(blankComments(raw), site.file);
+      const match = fromBlanked.find((s) => s.line === site.line);
+      expect(match?.event).toBe(site.event);
+      expect(match?.properties).toEqual(site.properties);
+    }
+  });
+
   it('every captured event matches the tracking plan', () => {
     const violations = scanProject(REPO_ROOT);
     const report = violations

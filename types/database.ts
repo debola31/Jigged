@@ -1238,6 +1238,7 @@ export type Database = {
           sequence: number
           status: string
           updated_at: string | null
+          vendor_service_id: string | null
           work_center_id: string | null
           work_center_kind_snapshot: string | null
         }
@@ -1261,6 +1262,7 @@ export type Database = {
           sequence: number
           status?: string
           updated_at?: string | null
+          vendor_service_id?: string | null
           work_center_id?: string | null
           work_center_kind_snapshot?: string | null
         }
@@ -1284,6 +1286,7 @@ export type Database = {
           sequence?: number
           status?: string
           updated_at?: string | null
+          vendor_service_id?: string | null
           work_center_id?: string | null
           work_center_kind_snapshot?: string | null
         }
@@ -1307,6 +1310,13 @@ export type Database = {
             columns: ["routing_operation_id"]
             isOneToOne: false
             referencedRelation: "routing_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_operations_vendor_service_id_fkey"
+            columns: ["vendor_service_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_services"
             referencedColumns: ["id"]
           },
           {
@@ -3060,7 +3070,8 @@ export type Database = {
           sequence: number
           setup_minutes: number | null
           updated_at: string | null
-          work_center_id: string
+          vendor_service_id: string | null
+          work_center_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -3074,7 +3085,8 @@ export type Database = {
           sequence?: number
           setup_minutes?: number | null
           updated_at?: string | null
-          work_center_id: string
+          vendor_service_id?: string | null
+          work_center_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -3088,7 +3100,8 @@ export type Database = {
           sequence?: number
           setup_minutes?: number | null
           updated_at?: string | null
-          work_center_id?: string
+          vendor_service_id?: string | null
+          work_center_id?: string | null
         }
         Relationships: [
           {
@@ -3096,6 +3109,13 @@ export type Database = {
             columns: ["routing_id"]
             isOneToOne: false
             referencedRelation: "routings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routing_operations_vendor_service_id_fkey"
+            columns: ["vendor_service_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_services"
             referencedColumns: ["id"]
           },
           {
@@ -3537,6 +3557,57 @@ export type Database = {
           },
         ]
       }
+      vendor_services: {
+        Row: {
+          company_id: string
+          created_at: string
+          deleted_at: string | null
+          description: string | null
+          id: string
+          name: string
+          unit_price: number | null
+          updated_at: string
+          vendor_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          id?: string
+          name: string
+          unit_price?: number | null
+          updated_at?: string
+          vendor_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+          unit_price?: number | null
+          updated_at?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_services_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_services_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendors: {
         Row: {
           address_line1: string | null
@@ -3691,7 +3762,6 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
-          kind: string
           labor_rate: number | null
           make: string | null
           metadata: Json | null
@@ -3700,7 +3770,6 @@ export type Database = {
           purchased_on: string | null
           serial_number: string | null
           updated_at: string
-          vendor_id: string | null
           year_built: number | null
         }
         Insert: {
@@ -3709,7 +3778,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          kind?: string
           labor_rate?: number | null
           make?: string | null
           metadata?: Json | null
@@ -3718,7 +3786,6 @@ export type Database = {
           purchased_on?: string | null
           serial_number?: string | null
           updated_at?: string
-          vendor_id?: string | null
           year_built?: number | null
         }
         Update: {
@@ -3727,7 +3794,6 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
-          kind?: string
           labor_rate?: number | null
           make?: string | null
           metadata?: Json | null
@@ -3736,7 +3802,6 @@ export type Database = {
           purchased_on?: string | null
           serial_number?: string | null
           updated_at?: string
-          vendor_id?: string | null
           year_built?: number | null
         }
         Relationships: [
@@ -3745,13 +3810,6 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "work_centers_vendor_id_fkey"
-            columns: ["vendor_id"]
-            isOneToOne: false
-            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]

@@ -415,7 +415,6 @@ class TestWorkCentersRLS:
                 {
                     "company_id": seeded_company_b_graph["company_id"],
                     "name": "RLS Attack WC",
-                    "kind": "internal",
                     "labor_rate": 0,
                 }
             )

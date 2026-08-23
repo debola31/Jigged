@@ -100,8 +100,10 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
         supabase_admin.table("parts_bom").delete().in_("child_part_id", part_ids).execute()
         supabase_admin.table("part_procurement_tiers").delete().in_("part_id", part_ids).execute()
         supabase_admin.table("parts_unit_conversions").delete().in_("part_id", part_ids).execute()
+    # vendor_services before vendors: vendor_services.vendor_id RESTRICTs, so a
+    # vendor that performs a service cannot be deleted while the service stands.
     for t in ("part_pricing_tiers", "parts", "work_center_attachments", "work_centers",
-              "customers", "vendors"):
+              "customers", "vendor_services", "vendors"):
         wipe_company(t)
     # inventory_locations.parent_id RESTRICTs itself — children before parents.
     supabase_admin.table("inventory_locations").delete().eq(
@@ -204,6 +206,7 @@ def test_create_demo_company_seeds_the_graph(supabase_admin, demo):
         ("inventory_locations", 10),
         ("vendors", 3),
         ("work_centers", 6),
+        ("vendor_services", 1),
         ("parts", 20),
         ("part_location_stock", 10),
         ("customers", 4),

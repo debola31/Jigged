@@ -118,7 +118,7 @@ def env(admin: Client):
     wc_id = (
         admin.table("work_centers")
         .insert(
-            {"company_id": company_id, "name": "Mill", "kind": "internal", "labor_rate": 60}
+            {"company_id": company_id, "name": "Mill", "labor_rate": 60}
         )
         .execute()
         .data[0]["id"]
@@ -309,7 +309,6 @@ def test_an_uncostable_part_still_goes_on_a_job(admin: Client, env: JobEnv):
             {
                 "company_id": env.company_id,
                 "name": "Unrated",
-                "kind": "internal",
                 "labor_rate": None,
             }
         )

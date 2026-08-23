@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -26,6 +26,7 @@ import {
 import { getOperationCompletionSummaries } from '@/utils/operationCompletionsAccess';
 import { getOperationActuals } from '@/utils/operationIntervalsAccess';
 import type { OperationActuals } from '@/types/operationInterval';
+import { useSearchParams } from 'next/navigation';
 import OperationCard from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
 
@@ -85,6 +86,30 @@ export default function OperationsPanel({
   // Reloaded alongside the summaries: an operator's RECORD COMPLETION closes
   // their interval, so the two move together.
   const opIdsKey = operations.map((op) => op.id).sort().join(',');
+
+  /**
+   * `?op=<job_operation_id>` scroll-and-highlight.
+   *
+   * The Vendors page shows what is out at a vendor but deliberately cannot act
+   * on it, so every row there links HERE. Landing at the top of a job with
+   * fourteen operations and telling someone to find the anodize step is how a
+   * read-only view becomes a dead end. This puts the control under the cursor.
+   *
+   * The outline is left in place rather than faded on a timer: it marks WHICH
+   * row you were sent to, and that stays true for as long as the page is open.
+   */
+  const searchParams = useSearchParams();
+  const highlightOpId = searchParams.get('op');
+  const opRefs = useRef(new Map<string, HTMLDivElement>());
+  const scrolledForRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!highlightOpId || scrolledForRef.current === highlightOpId) return;
+    const el = opRefs.current.get(highlightOpId);
+    if (!el) return; // operations not rendered yet — a later render retries
+    scrolledForRef.current = highlightOpId;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [highlightOpId, opIdsKey]);
   const { data: actualsData, reload: reloadActuals } = useLoad(
     () => getOperationActuals(opIdsKey ? opIdsKey.split(',') : []),
     [opIdsKey],
@@ -264,8 +289,24 @@ export default function OperationsPanel({
           {/* Operation Cards */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {operations.map((operation) => (
-              <OperationCard
+              <Box
                 key={operation.id}
+                ref={(el: HTMLDivElement | null) => {
+                  if (el) opRefs.current.set(operation.id, el);
+                  else opRefs.current.delete(operation.id);
+                }}
+                sx={
+                  operation.id === highlightOpId
+                    ? {
+                        outline: '2px solid',
+                        outlineColor: 'primary.main',
+                        outlineOffset: 2,
+                        borderRadius: 1,
+                      }
+                    : undefined
+                }
+              >
+              <OperationCard
                 operation={operation}
                 companyId={job.company_id}
                 summary={summaryByOp.get(operation.id)}
@@ -282,6 +323,7 @@ export default function OperationsPanel({
                   onOperationUpdate();
                 }}
               />
+              </Box>
             ))}
           </Box>
         </CardContent>

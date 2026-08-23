@@ -14,15 +14,11 @@ import Typography from '@mui/material/Typography';
 import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import Tabs from '@mui/material/Tabs';
-import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
-import StorefrontIcon from '@mui/icons-material/Storefront';
 
-import OutsideWorkPanel from '@/components/jobs/OutsideWorkPanel';
 
 import { AgGridReact } from 'ag-grid-react';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -42,23 +38,38 @@ import {
   getAllVendorsWithPrimaryContact,
   bulkDeleteVendors,
 } from '@/utils/vendorsAccess';
+import { getVendorServicesForCompany } from '@/utils/vendorServicesAccess';
+import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
+import type { ICellRendererParams } from 'ag-grid-community';
+import Chip from '@mui/material/Chip';
 import type { VendorWithPrimaryContact } from '@/types/vendor';
+
+/**
+ * A vendor row plus the three read-only signals the grid shows beside it.
+ *
+ * All three come from two small company-wide queries joined in the browser:
+ * live services, and the OPEN outside ops the Jobs list already fetches for its
+ * At-vendor chip. Deliberately NOT per-row aggregates — that shape is what
+ * timed out on 2026-08-19, and a shop has tens of services, not thousands.
+ */
+interface VendorRow extends VendorWithPrimaryContact {
+  service_names: string[];
+  out_now: number;
+  /** Days since the earliest still-out sent_at, or null when nothing is out. */
+  oldest_out_days: number | null;
+}
 
 // Stable empty fallback so derived data doesn't churn the memo identity while
 // the first load is in flight.
-const EMPTY_VENDORS: VendorWithPrimaryContact[] = [];
+const EMPTY_VENDORS: VendorRow[] = [];
 
 export default function VendorsPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
 
-  // Vendor directory vs. the company-wide "Outside work" queue (external-vendor
-  // operations sent out / at a vendor). Outside processing is vendor work, so it
-  // lives here rather than as a pseudo job-type on the Jobs list.
-  const [view, setView] = useState<'directory' | 'outside'>('directory');
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
   const [sortModel, setSortModel] = useState<{ field: string; sort: 'asc' | 'desc' }>({
@@ -67,7 +78,7 @@ export default function VendorsPage() {
   });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const gridRef = useRef<AgGridReact<VendorWithPrimaryContact>>(null);
+  const gridRef = useRef<AgGridReact<VendorRow>>(null);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean }>({ open: false });
   const [deleting, setDeleting] = useState(false);
@@ -87,14 +98,53 @@ export default function VendorsPage() {
     data: vendorsData,
     loading,
     reload: fetchRows,
-  } = useLoad(
-    () =>
-      getAllVendorsWithPrimaryContact(
-        companyId,
-        searchDebounced,
-        sortModel.field,
-        sortModel.sort,
-      ),
+  } = useLoad<VendorRow[]>(
+    async () => {
+      const [vendors, services, outside] = await Promise.all([
+        getAllVendorsWithPrimaryContact(
+          companyId,
+          searchDebounced,
+          sortModel.field,
+          sortModel.sort,
+        ),
+        getVendorServicesForCompany(companyId),
+        getOutsideOpsForCompany(companyId),
+      ]);
+
+      const servicesByVendor = new Map<string, string[]>();
+      for (const svc of services) {
+        const list = servicesByVendor.get(svc.vendor_id) ?? [];
+        list.push(svc.name);
+        servicesByVendor.set(svc.vendor_id, list);
+      }
+
+      // Only ops actually AT the vendor count as "out now" — a pending op is
+      // still on your bench. Same reason `oldest_out` reads sent_at and nothing
+      // else: it answers "who has had my parts longest", which is a question
+      // about shipped work.
+      const outNow = new Map<string, number>();
+      const oldestSent = new Map<string, string>();
+      for (const op of outside) {
+        if (op.status !== 'sent' || !op.vendor_id) continue;
+        outNow.set(op.vendor_id, (outNow.get(op.vendor_id) ?? 0) + 1);
+        if (op.sent_at) {
+          const current = oldestSent.get(op.vendor_id);
+          if (!current || op.sent_at < current) oldestSent.set(op.vendor_id, op.sent_at);
+        }
+      }
+
+      return vendors.map((v) => {
+        const sentAt = oldestSent.get(v.id);
+        return {
+          ...v,
+          service_names: servicesByVendor.get(v.id) ?? [],
+          out_now: outNow.get(v.id) ?? 0,
+          oldest_out_days: sentAt
+            ? Math.floor((Date.now() - new Date(sentAt).getTime()) / 86_400_000)
+            : null,
+        };
+      });
+    },
     [companyId, searchDebounced, sortModel],
     {
       onError: (err) => {
@@ -126,7 +176,7 @@ export default function VendorsPage() {
     return Math.max(headerHeight + rowHeight * displayedRows + paginationHeight, 400);
   }, [loading, rows.length]);
 
-  const handleGridReady = (event: GridReadyEvent<VendorWithPrimaryContact>) => {
+  const handleGridReady = (event: GridReadyEvent<VendorRow>) => {
     event.api.applyColumnState({
       state: [{ colId: 'name', sort: 'asc' }],
       defaultState: { sort: null },
@@ -146,7 +196,7 @@ export default function VendorsPage() {
     }
   };
 
-  const handleSelectionChanged = (event: SelectionChangedEvent<VendorWithPrimaryContact>) => {
+  const handleSelectionChanged = (event: SelectionChangedEvent<VendorRow>) => {
     const selectedNodes = event.api.getSelectedNodes();
     const selectedData = selectedNodes
       .map((node) => node.data?.id)
@@ -154,13 +204,13 @@ export default function VendorsPage() {
     setSelectedIds(selectedData);
   };
 
-  const handleRowClicked = (event: RowClickedEvent<VendorWithPrimaryContact>) => {
+  const handleRowClicked = (event: RowClickedEvent<VendorRow>) => {
     if (event.data) {
       router.push(`/dashboard/${companyId}/vendors/${event.data.id}`);
     }
   };
 
-  const handleCellKeyDown = (event: CellKeyDownEvent<VendorWithPrimaryContact>) => {
+  const handleCellKeyDown = (event: CellKeyDownEvent<VendorRow>) => {
     const keyboardEvent = event.event as KeyboardEvent | undefined;
     if (keyboardEvent?.key === 'Enter' && event.data) {
       router.push(`/dashboard/${companyId}/vendors/${event.data.id}`);
@@ -201,13 +251,68 @@ export default function VendorsPage() {
     return new Date(val).toLocaleDateString();
   };
 
-  const columnDefs: ColDef<VendorWithPrimaryContact>[] = [
+  const columnDefs: ColDef<VendorRow>[] = [
     {
       field: 'name',
       headerName: 'Name',
       flex: 1.5,
       minWidth: 200,
       pinned: 'left' as const,
+    },
+    // ── The three read-only signals ────────────────────────────────────────
+    // Read-only on purpose: this page answers "what is happening with my
+    // vendors"; the job page is where you act. Every one of these is derived,
+    // so none can drift from the truth the way a stored flag would.
+    {
+      colId: 'services',
+      headerName: 'Services',
+      flex: 1.2,
+      minWidth: 180,
+      sortable: false,
+      valueGetter: (params) => {
+        const names = params.data?.service_names ?? [];
+        if (names.length === 0) return '—';
+        // Two names plus a count: the full list belongs on the vendor page, and
+        // a wrapped cell of six process names is unreadable at a glance.
+        return names.length <= 2
+          ? names.join(', ')
+          : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+      },
+    },
+    {
+      colId: 'out_now',
+      headerName: 'Out now',
+      width: 130,
+      comparator: (a, b) => (a ?? 0) - (b ?? 0),
+      valueGetter: (params) => params.data?.out_now ?? 0,
+      cellRenderer: (params: ICellRendererParams<VendorRow>) => {
+        const n = params.data?.out_now ?? 0;
+        if (n === 0) return '—';
+        return (
+          <Chip size="small" color="warning" variant="outlined" label={`${n} out`} />
+        );
+      },
+    },
+    {
+      colId: 'oldest_out',
+      headerName: 'Oldest out',
+      width: 140,
+      comparator: (a, b) => (a ?? -1) - (b ?? -1),
+      valueGetter: (params) => params.data?.oldest_out_days ?? null,
+      cellRenderer: (params: ICellRendererParams<VendorRow>) => {
+        const days = params.data?.oldest_out_days;
+        if (days === null || days === undefined) return '—';
+        // Red past three weeks. A number that only counts up is not an alarm;
+        // the threshold is what makes it one.
+        return (
+          <Box
+            component="span"
+            sx={{ color: days > 21 ? 'error.main' : 'inherit', fontWeight: days > 21 ? 600 : 400 }}
+          >
+            {`${days} day${days === 1 ? '' : 's'}`}
+          </Box>
+        );
+      },
     },
     {
       colId: 'contact',
@@ -250,25 +355,12 @@ export default function VendorsPage() {
 
   return (
     <Box>
-      {/* View switch (role standard: Tabs for switching between named views).
-          Directory = the vendor list; Outside processing = the company-wide queue
-          of external-vendor operations to send out / receive. */}
-      <Tabs
-        value={view}
-        onChange={(_e, next: 'directory' | 'outside') => setView(next)}
-        // mt: -2 matches the Team page: icon+label tabs are taller (MUI labelIcon),
-        // so pull the strip up into the layout's top padding to close the gap
-        // between the header and the tabs.
-        sx={{ mt: -2, mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="directory" icon={<StorefrontIcon />} iconPosition="start" label="Directory" />
-        <Tab value="outside" icon={<LocalShippingIcon />} iconPosition="start" label="Outside processing" />
-      </Tabs>
-
-      {view === 'outside' ? (
-        <OutsideWorkPanel companyId={companyId} />
-      ) : (
-      <>
+      {/* The Directory / Outside processing tab strip is GONE, and with it the
+          only surface that let you send and receive from the Vendors page. The
+          job page owns those actions and always did; this page owns the
+          read-only answer to "what is out, and who has had it longest". The
+          cross-job worklist that used to live here is answered on the Jobs list,
+          which already flags a job whose parts are at a vendor. */}
       <Box
         sx={{
           display: 'flex',
@@ -368,7 +460,7 @@ export default function VendorsPage() {
               },
             }}
           >
-            <AgGridReact<VendorWithPrimaryContact>
+            <AgGridReact<VendorRow>
               ref={gridRef}
               rowData={rows}
               columnDefs={columnDefs}
@@ -401,8 +493,6 @@ export default function VendorsPage() {
             />
           </Box>
         </Card>
-      )}
-      </>
       )}
 
       <DeleteImpactDialog

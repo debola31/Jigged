@@ -23,6 +23,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
 import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
+import { getVendorService } from '@/utils/vendorServicesAccess';
 import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
 import MachineManualsManager from '@/components/maintenance/MachineManualsManager';
 
@@ -41,14 +42,28 @@ export default function WorkCenterDetailPage() {
 
   // useLoad keeps every setState inside the async callback, so the load effect
   // can't trip set-state-in-effect.
-  const { data: workCenter, loading } = useLoad(
-    () => getWorkCenterWithRelations(workCenterId),
+  //
+  // The second read is the migration affordance. Every outsourced process kept
+  // its uuid when it moved to vendor_services, so an old
+  // /work-centers/{id} bookmark, or a link in someone's email, still names a
+  // real thing — it is just no longer a work centre. Resolving that id against
+  // the new table lets the page forward rather than saying "not found", which
+  // for a shop owner reads as data loss.
+  const { data, loading } = useLoad(
+    async () => {
+      const wc = await getWorkCenterWithRelations(workCenterId);
+      if (wc) return { workCenter: wc, movedService: null };
+      const service = await getVendorService(workCenterId);
+      return { workCenter: null, movedService: service };
+    },
     [workCenterId],
     {
       onError: (err) =>
         setError(err instanceof Error ? err.message : 'Failed to load work center'),
     },
   );
+  const workCenter = data?.workCenter ?? null;
+  const movedService = data?.movedService ?? null;
 
   const handleDelete = async () => {
     setActionLoading(true);
@@ -71,6 +86,33 @@ export default function WorkCenterDetailPage() {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  // This id is a vendor service now. Say so and hand over the link, rather than
+  // bouncing silently — someone who bookmarked "PerformCoat Anodize" as a work
+  // centre should learn where it went, not just arrive somewhere else.
+  if (!workCenter && movedService) {
+    return (
+      <Box>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            <strong>{movedService.name}</strong> is an outside process, not a work center. It
+            now lives on the vendor that performs it.
+          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={() =>
+              router.push(
+                `/dashboard/${companyId}/vendors/${movedService.vendor_id}`,
+              )
+            }
+          >
+            Go to the vendor
+          </Button>
+        </Alert>
       </Box>
     );
   }

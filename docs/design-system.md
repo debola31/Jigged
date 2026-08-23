@@ -332,8 +332,9 @@ the set by order, weight, an icon, or a count, not by giving one a border and th
 
 - **Send-to-vendor waypoint** — "Mark Sent Out" is `outlined color="warning"`: a reversible "parts
   left the shop" step, deliberately amber, paired with a blue primary "Mark Received"
-  ([`OutsideWorkPanel`](../components/jobs/OutsideWorkPanel.tsx),
-  [`OperationCard`](../components/jobs/OperationCard.tsx)).
+  ([`OperationCard`](../components/jobs/OperationCard.tsx)). *(Also cited `OutsideWorkPanel` until
+  2026-08-23; that panel is deleted — the Vendors page is read-only now and the job page owns both
+  buttons.)*
 - **Fill state** — `success.main` for "has stock", a hollow `text.disabled` outline for "empty"
   (`FillDot`, a 7px dot). **Scoped to the dot, and 2026-08-10 is why that scope is written down:**
   the storage grid took the same rule to a 44px cell and rendered an occupied bin as a solid

@@ -1084,7 +1084,7 @@ export async function getOutsideOpsForCompany(
     .from('job_operations')
     .select(`
       id, job_id, job_part_id, operation_name, status, sent_at, sent_by,
-      vendor_service:vendor_services!inner(name, vendor:vendors(name)),
+      vendor_service:vendor_services!inner(name, vendor:vendors(id, name)),
       job_part:job_parts!inner(parts(part_name)),
       jobs!inner(job_number, due_date, is_hot, company_id, production_status, deleted_at)
     `)
@@ -1107,7 +1107,7 @@ export async function getOutsideOpsForCompany(
     status: string;
     sent_at: string | null;
     sent_by: string | null;
-    vendor_service: OneOrMany<{ name: string; vendor: OneOrMany<{ name: string }> }>;
+    vendor_service: OneOrMany<{ name: string; vendor: OneOrMany<{ id: string; name: string }> }>;
     job_part: OneOrMany<{ parts: OneOrMany<{ part_name: string }> }>;
     jobs: OneOrMany<{ job_number: string; due_date: string | null; is_hot: boolean }>;
   };
@@ -1142,6 +1142,7 @@ export async function getOutsideOpsForCompany(
       job_number: job?.job_number ?? '',
       part_name: part?.part_name ?? null,
       operation_name: r.operation_name,
+      vendor_id: vendor?.id ?? null,
       vendor_name: vendor?.name ?? null,
       status: r.status === 'sent' ? 'sent' : 'pending',
       sent_at: r.sent_at,

@@ -378,16 +378,20 @@ heat-treat). It is a first-class routing step, not paperwork.
 Out** / **Mark Received** there too — the shop floor drives the send, not just the office —
 plus the "Outside process" badge + vendor); the printed traveler (heavy black outline + bold text, border-only and
 low-ink after a shop-owner ink complaint, with `OUTSIDE — ship to {vendor}` in the Notes column,
-where internal steps show setup·cycle); and the company-wide **Outside processing** queue — a
-**tab on the Vendors page** (Directory / Outside processing), grouped **Not sent** / **At vendor**,
-sorted by job due date (hot first), with inline Mark Sent Out / Mark Received / Undo
-([`OutsideWorkPanel.tsx`](../../components/jobs/OutsideWorkPanel.tsx), backed by
-`getOutsideOpsForCompany`).
+where in-house steps show setup·cycle).
 
-**Why the queue lives under Vendors, not Jobs:** outside processing is vendor work, not a job type,
-and this matches how job-shop ERPs (SyteLine, Infor, Oracle) surface it — in the vendor/purchasing
-context. No readiness/predecessor logic: it informs the shipping lead, replacing the
-hand-highlighted traveler and the paper slip.
+> **⚠ Corrected 2026-08-23 — the company-wide queue is gone.** There was an **Outside processing**
+> tab on the Vendors page (`OutsideWorkPanel.tsx`) carrying inline Mark Sent Out / Mark Received /
+> Undo across every job, and this doc argued at length for siting it under Vendors "because outside
+> processing is vendor work". Both the tab and the component are **deleted**. The argument was
+> answering the wrong question: the actions were never exclusive to it — the job operation card has
+> carried all three at full fidelity throughout — so the tab was a *duplicate* action surface, and a
+> second place to act on the same row is a liability rather than a convenience. What it uniquely
+> offered was a cross-job worklist, and the Jobs list already answers that with its **At vendor**
+> chip on any job whose parts are out. Vendors keeps the vendor-shaped half of the question, read
+> only: `Services`, `Out now` and `Oldest out` columns on the list, and an **Open jobs** card on the
+> vendor, whose rows deep-link to `?op=` on the job so acting is one click rather than a hunt.
+> `getOutsideOpsForCompany` survives — it backs all of the above.
 
 **Audit:** send/receive are **not** written as notes — `sent_at`/`sent_by` and
 `completed_at`/`completed_by` *are* the record. The **/activity** feed derives vendor-tagged

@@ -343,15 +343,19 @@ to the remaining balance), **Mark Sent Out** / **Mark Received** for outside ops
 Neither `startJobOperation` nor `skipJobOperation` exists, and nothing enforces exclusivity —
 `in_progress` is derived from partial completion quantity, not asserted.)*
 
-`completeJobOperation` and `undoJobOperation` both **throw for an external work centre**, routing
+`completeJobOperation` and `undoJobOperation` both **throw for an outside op**, routing
 the user to the send/receive controls instead.
 
 ---
 
 ## Outside (external-vendor) operations
 
-An operation at a work centre with `kind='external'` is performed by an outside vendor (anodizing,
-plating, heat-treat). It is a first-class routing step, not paperwork.
+An operation carrying a `vendor_service_id` is performed by an outside vendor (anodizing, plating,
+heat-treat). It is a first-class routing step, not paperwork.
+
+> **⚠ Corrected 2026-08-23.** This section previously identified an outside op by
+> `work_centers.kind='external'`. That column is **dropped** — an op is outside work iff it targets a
+> vendor service. See [vendor-services.md](vendor-services.md).
 
 **Lifecycle — a send/receive axis on `job_operations.status`:**
 
@@ -365,7 +369,7 @@ plating, heat-treat). It is a first-class routing step, not paperwork.
   throw); **never auto-skipped** — the snapshot creates it `pending` and nothing advances it
   without a human action.
 - Exempt from the quantity-derived status recompute: `compute_job_operation_status` returns the
-  stored status for an external work centre. Without that branch a part-quantity edit would
+  stored status when `vendor_service_id` is set. Without that branch a part-quantity edit would
   recompute a `sent` op back to `pending` and lose the send stamp.
 - Undo steps back one state: received → `sent` (or → `pending` for a legacy op that never went
   through send); `sent` → `pending`.

@@ -39,7 +39,8 @@ the tests that pin them. **Priority and build status live in [prd.md](../prd.md)
 | [Routings](routings.md) | A part's linear operation sequence and its materials, cloned onto each job |
 | [Shipments](shipments.md) | Packing slips (one job each) and the derived fulfillment status |
 | [Vendors](vendors.md) | Suppliers and outsourced-process providers, their contacts, and the outside-processing worklist |
-| [Work Centers](work-centers.md) | Units of production capacity, internal and external. **Owns the definitions other docs borrow:** a *station* (operator view) and a *machine* (maintenance) are both `work_centers` rows, plus the `operation_types` → `work_centers` terminology history |
+| [Vendor Services](vendor-services.md) | Processes an outside vendor performs on your parts. **Replaces "external work centers"** — the rows moved and `work_centers.kind` was dropped |
+| [Work Centers](work-centers.md) | Units of **in-house** production capacity. **Owns the definitions other docs borrow:** a *station* (operator view) and a *machine* (maintenance) are both `work_centers` rows, plus the `operation_types` → `work_centers` terminology history |
 
 *Operations is not a module.* `operation_types` was dropped when `work_centers` replaced it, and its spec was
 folded into [Work Centers](work-centers.md).

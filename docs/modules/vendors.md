@@ -2,7 +2,11 @@
 
 # Vendors Module
 
-Master list of external suppliers and outsourced-process providers. **Built; in production.** No dependencies to create. Consumed by [Parts](parts.md) (`parts.preferred_vendor_id`) and [Work Centers](work-centers.md) (`work_centers.vendor_id` — **that doc owns the work-centre side**, not restated here).
+Master list of external suppliers and outsourced-process providers. **Built; in production.** No dependencies to create. Consumed by [Parts](parts.md) (`parts.preferred_vendor_id`) and [Vendor Services](vendor-services.md) (`vendor_services.vendor_id` — **that doc owns the services side**, not restated here).
+
+> **⚠ Corrected 2026-08-23.** This doc previously pointed at `work_centers.vendor_id` for the
+> outsourced side. That column is **dropped**: a vendor's processes are `vendor_services` rows now,
+> owned by the vendor. The "Linked Work Centers" accordion on the detail page is a Services list.
 
 ## Data model
 
@@ -27,7 +31,7 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 
 *(There was a `…/import` page here — a vendor-specific CSV wizard. It is gone: vendors are imported through the one guided importer at `/dashboard/{companyId}/import` (see [data-import.md](data-import.md)), which writes via FastAPI `/api/vendors/import/execute`. That write upserts `ON CONFLICT (company_id, name)` case-insensitively, so an existing vendor **updates in place**; within-CSV duplicate names collapse to one row.)*
 
-**Decisions.** No "capabilities" checkboxes on a vendor — what it is used for is derived from inbound references, so it cannot drift from reality. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
+**Decisions.** No "capabilities" checkboxes on a vendor — what it is used for is derived from inbound references, so it cannot drift from reality. Services are that derived truth made first-class: they are the processes the vendor performs, stored once, not a duplicated flag. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
 
 ## Access layer
 
@@ -59,5 +63,6 @@ Signatures live in [`utils/vendorsAccess.ts`](../../utils/vendorsAccess.ts) (11 
 ## See also
 
 - [Parts](parts.md) — preferred-vendor link.
-- [Work Centers](work-centers.md) — owns external work centres and their vendor reference.
+- [Vendor Services](vendor-services.md) — owns a vendor's processes and their pricing.
+- [Work Centers](work-centers.md) — in-house capacity, which no longer references a vendor.
 - [Jobs](jobs.md#outside-external-vendor-operations) — the outside-operation lifecycle behind the Outside processing tab.

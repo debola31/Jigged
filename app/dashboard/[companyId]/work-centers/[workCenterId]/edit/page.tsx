@@ -19,7 +19,6 @@ export default function WorkCenterEditPage() {
   const workCenterId = params.workCenterId as string;
 
   const [initialData, setInitialData] = useState<WorkCenterFormData | null>(null);
-  const [routingOperationsCount, setRoutingOperationsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +31,6 @@ export default function WorkCenterEditPage() {
           setInitialData(EMPTY_WORK_CENTER_FORM);
         } else {
           setInitialData(workCenterToFormData(wc));
-          setRoutingOperationsCount(wc.routing_operations_count);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
@@ -77,7 +75,6 @@ export default function WorkCenterEditPage() {
         mode="edit"
         initialData={initialData}
         workCenterId={workCenterId}
-        routingOperationsCount={routingOperationsCount}
         onSuccess={() =>
           router.push(`/dashboard/${companyId}/work-centers/${workCenterId}`)
         }

@@ -122,32 +122,28 @@ export default function RoutingOperationRowEditor({
     setTouched(false);
   }, [initial]);
 
-  // Add-mode only: when the user picks a work center, pre-populate the
-  // labor-rate field with the work center's default rate. Editing the
-  // field then becomes an "override for this operation"; leaving the
-  // populated value alone saves no override (handleSave compares against
-  // the work center rate before writing). Edit mode keeps the existing
-  // override value untouched — switching work centers isn't allowed in
-  // edit mode anyway.
-  useEffect(() => {
+  /**
+   * Add-mode only: picking a target pre-populates whichever money field applies
+   * — a station's hourly rate, or a service's price per piece. Editing that
+   * value then means "override for this step"; leaving it alone saves NO
+   * override (handleSave compares against the target's own number first), so
+   * the step keeps following the station or vendor when their price moves.
+   *
+   * Done in the picker's onChange rather than an effect on `workCenter`: these
+   * are two pieces of state moving together in response to one user action, and
+   * an effect for that is a cascading render the lint rule exists to stop.
+   * Edit mode leaves both alone — the target is locked there anyway.
+   */
+  const handleTargetChange = (next: StepTargetOption | null) => {
+    setWorkCenter(next);
     if (isEdit) return;
-    if (workCenter && workCenter.target === 'station' && workCenter.labor_rate !== null) {
-      setLaborOverrideStr(String(workCenter.labor_rate));
-    } else {
-      setLaborOverrideStr('');
-    }
-  }, [workCenter, isEdit]);
-
-  // Same pre-fill for the outside price, so picking a service shows what that
-  // vendor charges rather than an empty box the user has to go look up.
-  useEffect(() => {
-    if (isEdit) return;
-    if (workCenter && workCenter.target === 'service' && workCenter.unit_price !== null) {
-      setExternalUnitPriceStr(String(workCenter.unit_price));
-    } else {
-      setExternalUnitPriceStr('');
-    }
-  }, [workCenter, isEdit]);
+    setLaborOverrideStr(
+      next?.target === 'station' && next.labor_rate !== null ? String(next.labor_rate) : '',
+    );
+    setExternalUnitPriceStr(
+      next?.target === 'service' && next.unit_price !== null ? String(next.unit_price) : '',
+    );
+  };
 
   const isExternal = workCenter?.target === 'service';
 
@@ -253,7 +249,7 @@ export default function RoutingOperationRowEditor({
               wc.vendor_name ? `${wc.name} · ${wc.vendor_name}` : wc.name
             }
             value={workCenter}
-            onChange={(_, newValue) => setWorkCenter(newValue)}
+            onChange={(_, newValue) => handleTargetChange(newValue)}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             disabled={isEdit}
             renderOption={(props, option) => (

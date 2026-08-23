@@ -178,7 +178,7 @@ export function calculateRoutingTime(
   let setupTime = 0;
 
   for (const op of operations) {
-    if (op.vendor_service_id !== null) continue;
+    if (op.vendor_service_id) continue;
     runTime += (op.cycle_minutes_per_unit || 0) * quantity;
     setupTime += op.setup_minutes || 0;
   }

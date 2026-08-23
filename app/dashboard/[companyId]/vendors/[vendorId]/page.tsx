@@ -38,11 +38,11 @@ import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
+import { getVendorServicesForVendor } from '@/utils/vendorServicesAccess';
 import {
   getVendor,
   deleteVendor,
   getPartsByPreferredVendor,
-  getWorkCentersByVendor,
 } from '@/utils/vendorsAccess';
 import {
   getContactsForVendor,
@@ -59,17 +59,17 @@ interface LinkedPart {
   primary_unit: string | null;
 }
 
-interface LinkedWorkCenter {
+interface LinkedService {
   id: string;
   name: string;
-  kind: 'internal' | 'external';
+  unit_price: number | null;
 }
 
 // Stable empty fallbacks so the derived lists keep a constant identity while
 // the first load is in flight (and on a vendor with no linked records).
 const EMPTY_CONTACTS: VendorContact[] = [];
 const EMPTY_PARTS: LinkedPart[] = [];
-const EMPTY_WORK_CENTERS: LinkedWorkCenter[] = [];
+const EMPTY_SERVICES: LinkedService[] = [];
 
 export default function VendorDetailPage() {
   const params = useParams();
@@ -104,11 +104,11 @@ export default function VendorDetailPage() {
     async () => {
       const v = await getVendor(vendorId);
       if (!v) {
-        return { vendor: null, parts: EMPTY_PARTS, wcs: EMPTY_WORK_CENTERS, contacts: EMPTY_CONTACTS };
+        return { vendor: null, parts: EMPTY_PARTS, services: EMPTY_SERVICES, contacts: EMPTY_CONTACTS };
       }
       const [parts, wcs, contacts] = await Promise.all([
         getPartsByPreferredVendor(vendorId),
-        getWorkCentersByVendor(vendorId),
+        getVendorServicesForVendor(vendorId),
         getContactsForVendor(vendorId),
       ]);
       return { vendor: v, parts, wcs, contacts };
@@ -122,7 +122,7 @@ export default function VendorDetailPage() {
   const vendor = data?.vendor ?? null;
   const contacts = data?.contacts ?? EMPTY_CONTACTS;
   const linkedParts = data?.parts ?? EMPTY_PARTS;
-  const linkedWorkCenters = data?.wcs ?? EMPTY_WORK_CENTERS;
+  const services = data?.services ?? EMPTY_SERVICES;
 
   // Contact mutations re-run the full loader (reload). Cheap at vendor scale and
   // keeps a single read path rather than a separate contacts-only fetch.
@@ -222,7 +222,7 @@ export default function VendorDetailPage() {
   }
 
   const supplies = linkedParts.length > 0;
-  const outside = linkedWorkCenters.length > 0;
+  const outside = services.length > 0;
   const hasReferences = supplies || outside;
 
   const contactBeingDeleted = deleteContactId
@@ -553,31 +553,34 @@ export default function VendorDetailPage() {
                 </AccordionDetails>
               </Accordion>
 
+              {/* Services, where the "Work centers performing outside ops"
+                  accordion used to be. Same information, named for what it is:
+                  the processes this vendor performs. A full Services card with
+                  prices, usage counts and its own add/edit flow replaces this
+                  list on the vendor page proper. */}
               <Accordion disableGutters elevation={0} defaultExpanded={outside}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="subtitle1" fontWeight={500}>
-                    Work centers performing outside ops at this vendor (
-                    {linkedWorkCenters.length})
+                    Services ({services.length})
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails sx={{ pt: 0 }}>
-                  {linkedWorkCenters.length === 0 ? (
+                  {services.length === 0 ? (
                     <Typography variant="body2" color="text.secondary">
-                      No work centers reference this vendor.
+                      No outside processes recorded for this vendor.
                     </Typography>
                   ) : (
                     <List dense disablePadding>
-                      {linkedWorkCenters.map((wc) => (
-                        <ListItem key={wc.id} disablePadding>
-                          <ListItemButton
-                            component={NextLink}
-                            href={`/dashboard/${companyId}/work-centers/${wc.id}`}
-                          >
-                            <ListItemText
-                              primary={wc.name}
-                              secondary={wc.kind === 'external' ? 'External' : 'Internal'}
-                            />
-                          </ListItemButton>
+                      {services.map((svc) => (
+                        <ListItem key={svc.id}>
+                          <ListItemText
+                            primary={svc.name}
+                            secondary={
+                              svc.unit_price !== null
+                                ? `$${Number(svc.unit_price).toFixed(2)} / pc`
+                                : 'No price set'
+                            }
+                          />
                         </ListItem>
                       ))}
                     </List>
@@ -655,7 +658,7 @@ export default function VendorDetailPage() {
                 : null}
               {supplies && outside ? ' and ' : ''}
               {outside
-                ? `${linkedWorkCenters.length} work center${linkedWorkCenters.length === 1 ? '' : 's'}`
+                ? `${services.length} service${services.length === 1 ? '' : 's'}`
                 : null}
               {' '}— kept for history.
             </Alert>

@@ -1059,7 +1059,7 @@ describe('admin op guards refuse external (outside-vendor) ops', () => {
     job_id: 'job-1',
     job_part_id: 'jp-1',
     jobs: { production_status: 'in_progress' },
-    work_center: { kind: 'external' },
+    vendor_service_id: 'vs-1',
   };
 
   it('completeJobOperation throws for an external op (never completes via the internal path)', async () => {
@@ -1069,7 +1069,7 @@ describe('admin op guards refuse external (outside-vendor) ops', () => {
   });
 
   it('undoJobOperation throws for an external op (undo goes through its own lifecycle)', async () => {
-    mockQueryBuilder.data = { work_center: { kind: 'external' } };
+    mockQueryBuilder.data = { vendor_service_id: 'vs-1' };
     await expect(undoJobOperation('op-1')).rejects.toThrow(/outside/i);
   });
 });

@@ -61,21 +61,25 @@ import {
 } from '@/utils/operatorAccess';
 import { createOperationCompletion } from '@/utils/operationCompletionsAccess';
 
-// Shape loadOpOutsideContext expects from its single() read (job_operations with
-// jobs + work_center joins). Override fields per test.
+// Shape loadOpOutsideContext expects from its single() read (job_operations
+// with its jobs + vendor_service joins). `outside: false` models an in-house op,
+// which carries no vendor_service at all — that absence IS the discriminator.
 function outsideOpRow(over: Partial<{
   id: string; job_id: string; job_part_id: string; status: string; sent_at: string | null;
-  kind: 'internal' | 'external'; vendor: { name: string } | null;
+  outside: boolean; vendor: { name: string } | null;
 }> = {}) {
-  const kind = over.kind ?? 'external';
+  const outside = over.outside ?? true;
   return {
     id: over.id ?? 'op-1',
     job_id: over.job_id ?? 'job-1',
     job_part_id: over.job_part_id ?? 'jp-1',
     status: over.status ?? 'pending',
     sent_at: over.sent_at ?? null,
+    vendor_service_id: outside ? 'vs-1' : null,
     jobs: { company_id: 'c1' },
-    work_center: { kind, vendor: over.vendor ?? (kind === 'external' ? { name: 'AcmeCoat' } : null) },
+    vendor_service: outside
+      ? { vendor: over.vendor ?? { name: 'AcmeCoat' } }
+      : null,
   };
 }
 
@@ -419,7 +423,7 @@ describe('external operation lifecycle', () => {
   // completed through the internal path.
   describe('createOperationCompletion guard', () => {
     it('throws for an external op (never completes via the internal path)', async () => {
-      mockQueryBuilder.data = { work_center: { kind: 'external' } };
+      mockQueryBuilder.data = { vendor_service_id: 'vs-1' };
       await expect(
         createOperationCompletion({ companyId: 'c1', jobOperationId: 'op-1', jobPartId: 'jp-1', quantityGood: 5 }),
       ).rejects.toThrow(/outside/i);
@@ -429,19 +433,19 @@ describe('external operation lifecycle', () => {
 
   describe('markOperationSent', () => {
     it('rejects an internal op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'pending' });
+      mockQueryBuilder.data = outsideOpRow({ outside: false, status: 'pending' });
       await expect(markOperationSent('op-1')).rejects.toThrow(/outside/i);
       expect(mockQueryBuilder.update).not.toHaveBeenCalled();
     });
 
     it('rejects an external op that is not pending', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent' });
       await expect(markOperationSent('op-1')).rejects.toThrow(/awaiting send/i);
       expect(mockQueryBuilder.update).not.toHaveBeenCalled();
     });
 
     it('sets status=sent + sent_at + sent_by for an external pending op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'pending' });
       await markOperationSent('op-1');
       const payload = mockQueryBuilder.update.mock.calls[0][0];
       expect(payload.status).toBe('sent');
@@ -452,12 +456,12 @@ describe('external operation lifecycle', () => {
 
   describe('markOperationReceived', () => {
     it('rejects an internal op', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'internal', status: 'sent' });
+      mockQueryBuilder.data = outsideOpRow({ outside: false, status: 'sent' });
       await expect(markOperationReceived('op-1')).rejects.toThrow(/outside/i);
     });
 
     it('completes from sent WITHOUT re-stamping send', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
       await markOperationReceived('op-1');
       const payload = mockQueryBuilder.update.mock.calls[0][0];
       expect(payload.status).toBe('completed');
@@ -467,7 +471,7 @@ describe('external operation lifecycle', () => {
     });
 
     it('completes from pending AND back-fills the send stamp (sent is optional)', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'pending' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'pending' });
       await markOperationReceived('op-1');
       const payload = mockQueryBuilder.update.mock.calls[0][0];
       expect(payload.status).toBe('completed');
@@ -478,19 +482,19 @@ describe('external operation lifecycle', () => {
 
   describe('revertOperationCompletion (external branches)', () => {
     it('received (completed WITH sent_at) steps back to sent', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'completed', sent_at: '2026-07-10T00:00:00Z' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'completed', sent_at: '2026-07-10T00:00:00Z' });
       await revertOperationCompletion('op-1');
       expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'sent' });
     });
 
     it('legacy completed WITHOUT sent_at steps back to pending', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'completed', sent_at: null });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'completed', sent_at: null });
       await revertOperationCompletion('op-1');
       expect(mockQueryBuilder.update.mock.calls[0][0]).toMatchObject({ status: 'pending' });
     });
 
     it('sent (un-send) steps back to pending and clears the send stamp', async () => {
-      mockQueryBuilder.data = outsideOpRow({ kind: 'external', status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
+      mockQueryBuilder.data = outsideOpRow({ outside: true, status: 'sent', sent_at: '2026-07-10T00:00:00Z' });
       await revertOperationCompletion('op-1');
       const payload = mockQueryBuilder.update.mock.calls[0][0];
       expect(payload.status).toBe('pending');
@@ -509,22 +513,23 @@ describe('getOutsideOpsForCompany', () => {
     status: 'pending',
     sent_at: null,
     sent_by: null,
-    work_center: { kind: 'external', vendor: { name: 'AcmeCoat' } },
+    vendor_service_id: 'vs-1',
+    vendor_service: { name: 'Anodize', vendor: { name: 'AcmeCoat' } },
     job_part: { parts: { part_name: 'Bracket' } },
     jobs: { job_number: 'J-1', due_date: '2026-07-20', is_hot: false, company_id: 'c1', production_status: 'in_progress', deleted_at: null },
     ...over,
   });
 
-  it('filters to external ops, maps vendor/part, and groups by status', async () => {
+  it('filters to outside ops, maps vendor/part, and groups by status', async () => {
     mockQueryBuilder.data = [
       outsideRow({ id: 'op-pending', status: 'pending' }),
       outsideRow({ id: 'op-sent', status: 'sent', sent_at: '2026-07-15T00:00:00Z' }),
     ];
     const result = await getOutsideOpsForCompany('c1');
 
-    // Scoped to the company + external work centers.
+    // Scoped to the company. The !inner join on vendor_services is itself the
+    // outside-op filter, so there is no kind predicate left to assert.
     expect(mockSupabase.from).toHaveBeenCalledWith('job_operations');
-    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('work_center.kind', 'external');
     expect(mockQueryBuilder.is).toHaveBeenCalledWith('jobs.deleted_at', null);
     expect(mockQueryBuilder.in).toHaveBeenCalledWith('status', ['pending', 'sent']);
 
@@ -719,14 +724,16 @@ describe('reactions', () => {
 // cosmetic: an operator who picks an archived machine lands on a station that no
 // longer exists and has no way back except clearing site data.
 describe('station selection', () => {
-  it('offers only live internal machines — archived ones are gone from the shop', async () => {
+  it('offers only live machines — archived ones are gone from the shop', async () => {
     mockQueryBuilder.data = [{ id: 'wc1', name: 'Anca Grinder' }];
 
     await getStationOperationTypes('c1');
 
     expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'c1');
-    expect(mockQueryBuilder.eq).toHaveBeenCalledWith('kind', 'internal');
     expect(mockQueryBuilder.is).toHaveBeenCalledWith('deleted_at', null);
+    // No kind filter, and none is possible: work_centers holds only in-house
+    // stations now, so an outside process cannot reach the picker at all.
+    expect(mockQueryBuilder.eq).not.toHaveBeenCalledWith('kind', 'internal');
   });
 
   it('resolves a live station to its name', async () => {

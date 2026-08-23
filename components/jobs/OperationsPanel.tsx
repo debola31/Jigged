@@ -168,7 +168,7 @@ export default function OperationsPanel({
       // Outside ops step back through their own lifecycle (received → sent →
       // pending); internal ops void their completion events.
       const op = operations.find((o) => o.id === operationId);
-      if (op?.work_center?.kind === 'external') {
+      if (op?.vendor_service_id ?? op?.vendor_service) {
         await revertOperationCompletion(operationId);
       } else {
         await undoJobOperation(operationId);

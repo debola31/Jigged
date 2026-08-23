@@ -38,12 +38,17 @@ export default function RoutingViewer({ routing }: RoutingViewerProps) {
           ) : (
             <List dense disablePadding>
               {routing.operations.map((op, idx) => {
-                const isExternal = op.work_center?.kind === 'external';
+                const vs = op.vendor_service;
+                const isExternal = vs !== null;
+                // The step's override, else the service's own price — the same
+                // COALESCE the cost engine applies, so this line cannot claim
+                // "no price" for a step that is in fact priced by its vendor.
+                const effectivePrice = op.external_unit_price ?? vs?.unit_price ?? null;
                 const secondaryText = isExternal
-                  ? `Vendor ${op.work_center?.vendor?.name ?? 'unknown'} • ${
-                      op.external_unit_price && op.external_unit_price > 0
-                        ? `$${op.external_unit_price.toFixed(2)}/unit`
-                        : 'No unit price'
+                  ? `${vs?.vendor?.name ?? 'Vendor'} • ${
+                      effectivePrice && effectivePrice > 0
+                        ? `$${effectivePrice.toFixed(2)}/pc`
+                        : 'No price'
                     }`
                   : `Setup ${formatTime(op.setup_minutes)} • Run ${formatTime(
                       op.cycle_minutes_per_unit,

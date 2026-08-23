@@ -177,7 +177,8 @@ describe('getActivityStream', () => {
         sent_at: '2026-07-23T04:00:00Z',
         job_id: 'j1',
         jobs: { job_number: 'J-1' },
-        work_center: { kind: 'external', vendor: { name: 'ProFinish Coatings' } },
+        vendor_service_id: 'vs-1',
+        vendor_service: { vendor: { name: 'ProFinish Coatings' } },
       },
     ];
     const ops = await getActivityStream('c1', { types: ['operation'] });

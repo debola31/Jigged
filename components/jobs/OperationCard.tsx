@@ -97,10 +97,10 @@ export default function OperationCard({
   const styles = STATUS_STYLES[status];
 
   // Outside (external-vendor) op: the part is finished elsewhere, so it uses a
-  // send/receive lifecycle instead of quantity completions. Null kind (deleted
-  // work center) reads as internal.
-  const isExternal = operation.work_center?.kind === 'external';
-  const vendorName = operation.work_center?.vendor?.name ?? null;
+  // send/receive lifecycle instead of quantity completions. The column is the
+  // discriminator — an op is outside work iff it targets a vendor service.
+  const isExternal = Boolean(operation.vendor_service_id ?? operation.vendor_service);
+  const vendorName = operation.vendor_service?.vendor?.name ?? null;
 
   // Quantity-completion progress (internal ops only — external ops have no
   // completion events).

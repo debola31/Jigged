@@ -14,8 +14,6 @@ import Typography from '@mui/material/Typography';
 import InputAdornment from '@mui/material/InputAdornment';
 import Alert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
-import Tabs from '@mui/material/Tabs';
-import Tab from '@mui/material/Tab';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -36,19 +34,19 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
 import {
-  getWorkCentersByKind,
+  getWorkCentersFlat,
   bulkDeleteWorkCenters,
 } from '@/utils/workCentersAccess';
-import { getAllVendors } from '@/utils/vendorsAccess';
-import { usePageTitle } from '@/components/layout/PageTitleProvider';
+
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
-import type { WorkCenter, WorkCenterKind } from '@/types/workCenter';
-import type { Vendor } from '@/types/vendor';
+import type { WorkCenter } from '@/types/workCenter';
+import NextLink from 'next/link';
+import MuiLink from '@mui/material/Link';
 
-interface WorkCenterRow extends WorkCenter {
-  vendor_name: string | null;
-}
+// The row shape is just the work centre now. It used to carry a joined
+// vendor_name for the External tab, which no longer exists.
+type WorkCenterRow = WorkCenter;
 
 // Stable empty fallback so derived data doesn't churn the memo identity while
 // the first load is in flight.
@@ -71,11 +69,9 @@ export default function WorkCentersPage() {
   const router = useRouter();
   const params = useParams();
   const companyId = params.companyId as string;
-  const { setTitle } = usePageTitle();
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [activeKind, setActiveKind] = useState<WorkCenterKind>('internal');
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const gridRef = useRef<AgGridReact<WorkCenterRow>>(null);
@@ -94,30 +90,17 @@ export default function WorkCentersPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Reflect the active tab in the global app bar title (cleared on unmount so
-  // other pages fall back to their pathname title).
-  useEffect(() => {
-    setTitle(activeKind === 'internal' ? 'Work Centers — Internal' : 'Work Centers — External');
-    return () => setTitle(null);
-  }, [activeKind, setTitle]);
-
   const {
     data: workCentersData,
     loading,
     reload: fetchRows,
   } = useLoad<WorkCenterRow[]>(
     async () => {
-      const [workCenters, vendors] = await Promise.all([
-        getWorkCentersByKind(companyId, activeKind, searchDebounced),
-        getAllVendors(companyId),
-      ]);
-      const vendorById = new Map<string, Vendor>(vendors.map((v) => [v.id, v]));
-      return workCenters.map((wc) => ({
-        ...wc,
-        vendor_name: wc.vendor_id ? vendorById.get(wc.vendor_id)?.name ?? null : null,
-      }));
+      // One list, one query. The vendor lookup that used to hang off this read
+      // is gone with the External tab — a work centre has no vendor now.
+      return getWorkCentersFlat(companyId, { search: searchDebounced });
     },
-    [companyId, searchDebounced, activeKind],
+    [companyId, searchDebounced],
     {
       onError: (err) => {
         console.error('Error fetching work centers:', err);
@@ -233,20 +216,6 @@ export default function WorkCentersPage() {
       valueFormatter: (params) => formatDate(params.value),
     };
 
-    if (activeKind === 'external') {
-      return [
-        nameCol,
-        {
-          field: 'vendor_name',
-          headerName: 'Vendor',
-          width: 240,
-          valueFormatter: (params) => params.value || '—',
-        },
-        descriptionCol,
-        updatedCol,
-      ];
-    }
-
     return [
       nameCol,
       {
@@ -265,23 +234,10 @@ export default function WorkCentersPage() {
       descriptionCol,
       updatedCol,
     ];
-  }, [activeKind]);
+  }, []);
 
   return (
     <Box>
-      <Tabs
-        value={activeKind}
-        onChange={(_e, value) => {
-          setActiveKind(value as WorkCenterKind);
-          setSearch('');
-          clearSelection();
-        }}
-        sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab value="internal" label="Internal" />
-        <Tab value="external" label="External" />
-      </Tabs>
-
       <Box
         sx={{
           display: 'flex',
@@ -340,11 +296,16 @@ export default function WorkCentersPage() {
         </Button>
       </Box>
 
-      {activeKind === 'external' && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          External work centers are priced per routing operation, not by an hourly rate.
-        </Typography>
-      )}
+      {/* Outsourced processes are not work centres and are not on this page.
+          Pointing at where they went beats leaving someone hunting for the
+          External tab they used yesterday. */}
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Outside processes are set up on the vendor that performs them —{' '}
+        <MuiLink component={NextLink} href={`/dashboard/${companyId}/vendors`}>
+          Vendors
+        </MuiLink>
+        .
+      </Typography>
 
       {!loading && rows.length === 0 ? (
         <Card elevation={2}>
@@ -353,12 +314,12 @@ export default function WorkCentersPage() {
               sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }}
             />
             <Typography variant="h6" color="text.secondary" gutterBottom>
-              No {activeKind} work centers yet
+              No work centers yet
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {searchDebounced
-                ? `No ${activeKind} work centers match your search.`
-                : 'Add your first work center.'}
+                ? 'No work centers match your search.'
+                : 'Add your first machine or station.'}
             </Typography>
             {!searchDebounced && (
               <Button

@@ -271,8 +271,9 @@ export async function createPartsFromRows(
               operations.map((o) => ({
                 tempId: o.tempId,
                 workCenterId: o.workCenterId,
+                vendorServiceId: o.vendorServiceId,
                 workCenterName: o.workCenterName,
-                workCenterKind: o.workCenterKind,
+                vendorName: o.vendorName,
                 setupMinutes: o.setupMinutes,
                 cycleMinutesPerUnit: o.cycleMinutesPerUnit,
                 laborRateOverride: o.laborRateOverride,

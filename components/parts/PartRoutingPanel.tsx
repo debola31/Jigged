@@ -34,14 +34,16 @@ function rowFromOperation(op: RoutingOperationWithWorkCenter): OperationRowData 
   return {
     tempId: op.id,
     workCenterId: op.work_center_id,
-    workCenterName: op.work_center?.name ?? 'Unknown work center',
-    workCenterKind: op.work_center?.kind ?? 'internal',
-    vendorName: op.work_center?.vendor?.name ?? null,
+    vendorServiceId: op.vendor_service_id,
+    workCenterName:
+      op.vendor_service?.name ?? op.work_center?.name ?? 'Unknown step',
+    vendorName: op.vendor_service?.vendor?.name ?? null,
     setupMinutes: op.setup_minutes,
     cycleMinutesPerUnit: op.cycle_minutes_per_unit,
     laborRateOverride: op.labor_rate_override,
     workCenterLaborRate: op.work_center?.labor_rate ?? null,
     externalUnitPrice: op.external_unit_price,
+    vendorServiceUnitPrice: op.vendor_service?.unit_price ?? null,
     instructions: op.instructions,
   };
 }
@@ -109,8 +111,9 @@ export default function PartRoutingPanel({
             nextOps.map((o) => ({
               tempId: o.tempId,
               workCenterId: o.workCenterId,
+              vendorServiceId: o.vendorServiceId,
               workCenterName: o.workCenterName,
-              workCenterKind: o.workCenterKind,
+              vendorName: o.vendorName,
               setupMinutes: o.setupMinutes,
               cycleMinutesPerUnit: o.cycleMinutesPerUnit,
               laborRateOverride: o.laborRateOverride,

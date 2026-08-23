@@ -728,21 +728,18 @@ async function fetchNoteActivity(
   return items;
 }
 
-type WcRel = {
-  kind: 'internal' | 'external';
-  vendor: { name: string } | { name: string }[] | null;
-} | {
-  kind: 'internal' | 'external';
-  vendor: { name: string } | { name: string }[] | null;
-}[] | null;
+type VendorRel = { name: string } | { name: string }[] | null;
+type VsRel = { vendor: VendorRel } | { vendor: VendorRel }[] | null;
 
 type OperationActivityRow = {
   id: string;
   completed_at: string | null;
   sent_at?: string | null;
   job_id: string;
+  /** Non-null iff this op was performed by an outside vendor. */
+  vendor_service_id: string | null;
   jobs: { job_number: string } | { job_number: string }[] | null;
-  work_center: WcRel;
+  vendor_service: VsRel;
 };
 
 function opActivityHref(companyId: string, jobId: string): string {
@@ -846,23 +843,26 @@ async function fetchOperationActivity(
   perSource: number,
 ): Promise<ActivityItem[]> {
   const supabase = getSupabase();
-  const WC_SELECT = 'work_center:work_centers(kind, vendor:vendors(name))';
+  // The vendor comes through the SERVICE now. `vendor_service_id` on the row is
+  // what says "this was outside work"; the join only supplies the name.
+  const VS_SELECT = 'vendor_service:vendor_services(vendor:vendors(name))';
 
   let completedQ = supabase
     .from('job_operations')
-    .select(`id, completed_at, job_id, jobs!inner(job_number, company_id), ${WC_SELECT}`)
+    .select(`id, completed_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), ${VS_SELECT}`)
     .eq('jobs.company_id', companyId)
     .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(perSource);
   if (before) completedQ = completedQ.lt('completed_at', before);
 
-  // Sent (at-vendor) events — external ops only.
+  // Sent (at-vendor) events — outside ops only. The !inner join on
+  // vendor_services is itself the filter: only an outside op has one, so the
+  // separate .eq('kind','external') this used to need is gone.
   let sentQ = supabase
     .from('job_operations')
-    .select(`id, sent_at, job_id, jobs!inner(job_number, company_id), work_center:work_centers!inner(kind, vendor:vendors(name))`)
+    .select(`id, sent_at, job_id, vendor_service_id, jobs!inner(job_number, company_id), vendor_service:vendor_services!inner(vendor:vendors(name))`)
     .eq('jobs.company_id', companyId)
-    .eq('work_center.kind', 'external')
     .not('sent_at', 'is', null)
     .order('sent_at', { ascending: false })
     .limit(perSource);
@@ -871,19 +871,22 @@ async function fetchOperationActivity(
   const [completed, sent] = await Promise.all([completedQ, sentQ]);
   const items: ActivityItem[] = [];
 
-  const vendorOf = (wc: WcRel): string | undefined => {
-    const w = firstRel(wc);
-    return w ? firstRel(w.vendor)?.name : undefined;
+  const vendorOf = (vs: VsRel): string | undefined => {
+    const v = firstRel(vs);
+    return v ? firstRel(v.vendor)?.name : undefined;
   };
 
   for (const r of (completed.data ?? []) as unknown as OperationActivityRow[]) {
     if (!r.completed_at) continue;
-    const isExternal = firstRel(r.work_center)?.kind === 'external';
+    // Boolean(), not `!== null`: a select that omits the column yields
+    // undefined, and `undefined !== null` is true — which would label every
+    // in-house completion as 'received from vendor'.
+    const isExternal = Boolean(r.vendor_service_id);
     items.push({
       id: `op-comp-${r.id}`,
       type: 'operation',
       action: isExternal ? 'received' : 'completed',
-      vendorName: isExternal ? vendorOf(r.work_center) : undefined,
+      vendorName: isExternal ? vendorOf(r.vendor_service) : undefined,
       entityNumber: firstRel(r.jobs)?.job_number ?? '',
       timestamp: r.completed_at,
       href: opActivityHref(companyId, r.job_id),
@@ -896,7 +899,7 @@ async function fetchOperationActivity(
       id: `op-sent-${r.id}`,
       type: 'operation',
       action: 'sent',
-      vendorName: vendorOf(r.work_center),
+      vendorName: vendorOf(r.vendor_service),
       entityNumber: firstRel(r.jobs)?.job_number ?? '',
       timestamp: r.sent_at,
       href: opActivityHref(companyId, r.job_id),

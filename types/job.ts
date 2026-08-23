@@ -43,12 +43,18 @@ export interface JobOperation {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /** Non-null iff this op is performed by an outside vendor. */
+  vendor_service_id?: string | null;
   work_center?: {
     id: string;
     name: string;
     labor_rate: number | null;
-    kind: 'internal' | 'external';
-    /** Present for external work centers (kind='external' requires a vendor). */
+  } | null;
+  /** The outside process, when `vendor_service_id` is set. */
+  vendor_service?: {
+    id: string;
+    name: string;
+    unit_price: number | null;
     vendor?: { id: string; name: string } | null;
   } | null;
 }

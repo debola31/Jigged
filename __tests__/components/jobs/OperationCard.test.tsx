@@ -125,7 +125,9 @@ describe('OperationCard — always-expandable + note count', () => {
 describe('OperationCard — external (outside-vendor) operations', () => {
   const externalOp = (over: Partial<JobOperation> = {}): JobOperation =>
     op({
-      work_center: { id: 'wc-x', name: 'Coating', labor_rate: null, kind: 'external', vendor: { id: 'v1', name: 'AcmeCoat' } },
+      work_center: null,
+      vendor_service_id: 'vs-1',
+      vendor_service: { id: 'vs-1', name: 'Anodize', unit_price: null, vendor: { id: 'v1', name: 'AcmeCoat' } },
       ...over,
     } as Partial<JobOperation>);
 
@@ -166,7 +168,7 @@ describe('OperationCard — external (outside-vendor) operations', () => {
   });
 
   it('an internal op shows Mark Complete (no send/receive) and no Pending chip', () => {
-    renderExternal(op({ status: 'pending', work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50, kind: 'internal' } as JobOperation['work_center'] }));
+    renderExternal(op({ status: 'pending', vendor_service_id: null, vendor_service: null, work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50 } }));
     expect(screen.getByRole('button', { name: /Mark Complete/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Mark Sent Out/i })).not.toBeInTheDocument();
     // A pending op reads as "not done" from the Mark Complete button, so the
@@ -179,7 +181,9 @@ describe('OperationCard — external (outside-vendor) operations', () => {
       op({
         status: 'completed',
         completed_at: '2026-07-15T00:00:00Z',
-        work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50, kind: 'internal' } as JobOperation['work_center'],
+        vendor_service_id: null,
+        vendor_service: null,
+        work_center: { id: 'wc-i', name: 'Mill', labor_rate: 50 },
       }),
     );
     // Only 'pending' is suppressed; real states (Completed / In Progress / At

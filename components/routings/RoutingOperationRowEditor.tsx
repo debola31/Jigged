@@ -9,23 +9,30 @@ import {
   Chip,
   Typography,
 } from '@mui/material';
-import type { WorkCenterKind } from '@/types/workCenter';
 import { parseOptionalNumber, numberToInputString } from '@/lib/validators';
 
 /**
- * Picker option shape supplied to the editor — matches the shape returned by
- * `getWorkCentersForRouting` (work_center + flattened vendor name).
+ * Picker option shape — one list holding both kinds of thing a step can target.
+ *
+ * `target` is the discriminator, and it is what the editor branches on. It is
+ * derived by the list builder from which access function supplied the row
+ * (`getWorkCentersForRouting` vs `getVendorServicesForRouting`), never guessed
+ * from a name or a null.
  */
-export interface WorkCenterOption {
+export interface StepTargetOption {
   id: string;
   name: string;
-  kind: WorkCenterKind;
+  target: 'station' | 'service';
+  /** Stations only — the hourly rate the labour field pre-fills from. */
   labor_rate: number | null;
+  /** Services only — the price per piece the price field pre-fills from. */
+  unit_price: number | null;
+  /** Services only — who performs it. */
   vendor_name: string | null;
 }
 
 export interface OperationEditorValue {
-  workCenter: WorkCenterOption | null;
+  workCenter: StepTargetOption | null;
   /** Internal: setup minutes per batch. */
   setupMinutes: number | null;
   /** Internal: cycle minutes per unit. */
@@ -38,7 +45,7 @@ export interface OperationEditorValue {
 }
 
 interface RoutingOperationRowEditorProps {
-  workCenters: WorkCenterOption[];
+  workCenters: StepTargetOption[];
   /** When provided, the editor is in edit mode (work center picker is locked). */
   initial?: OperationEditorValue;
   onSave: (value: OperationEditorValue) => void;
@@ -59,8 +66,28 @@ function initialLaborStr(initial: OperationEditorValue | undefined): string {
   if (!initial) return '';
   if (initial.laborRateOverride !== null) return numToStr(initial.laborRateOverride);
   const wc = initial.workCenter;
-  if (wc && wc.kind === 'internal' && wc.labor_rate !== null) {
+  if (wc && wc.target === 'station' && wc.labor_rate !== null) {
     return String(wc.labor_rate);
+  }
+  return '';
+}
+
+/**
+ * Seed value for the price-per-piece field, the exact mirror of
+ * `initialLaborStr` above.
+ *
+ * The field shows the SERVICE's price and only persists an override when the
+ * user changes it, so a step that agrees with the vendor's price stores null
+ * and follows that price when it moves. Copying the number down instead would
+ * mean raising a vendor's price moved nothing — the opposite of what the
+ * adjacent labour field does, on a screen where both are visible.
+ */
+function initialPriceStr(initial: OperationEditorValue | undefined): string {
+  if (!initial) return '';
+  if (initial.externalUnitPrice !== null) return numToStr(initial.externalUnitPrice);
+  const wc = initial.workCenter;
+  if (wc && wc.target === 'service' && wc.unit_price !== null) {
+    return String(wc.unit_price);
   }
   return '';
 }
@@ -73,14 +100,14 @@ export default function RoutingOperationRowEditor({
   index,
 }: RoutingOperationRowEditorProps) {
   const isEdit = !!initial;
-  const [workCenter, setWorkCenter] = useState<WorkCenterOption | null>(
+  const [workCenter, setWorkCenter] = useState<StepTargetOption | null>(
     initial?.workCenter ?? null,
   );
   const [setupStr, setSetupStr] = useState(numToStr(initial?.setupMinutes));
   const [cycleStr, setCycleStr] = useState(numToStr(initial?.cycleMinutesPerUnit));
   const [laborOverrideStr, setLaborOverrideStr] = useState(initialLaborStr(initial));
   const [externalUnitPriceStr, setExternalUnitPriceStr] = useState(
-    numToStr(initial?.externalUnitPrice),
+    initialPriceStr(initial),
   );
   const [instructions, setInstructions] = useState(initial?.instructions ?? '');
   const [touched, setTouched] = useState(false);
@@ -90,7 +117,7 @@ export default function RoutingOperationRowEditor({
     setSetupStr(numToStr(initial?.setupMinutes));
     setCycleStr(numToStr(initial?.cycleMinutesPerUnit));
     setLaborOverrideStr(initialLaborStr(initial));
-    setExternalUnitPriceStr(numToStr(initial?.externalUnitPrice));
+    setExternalUnitPriceStr(initialPriceStr(initial));
     setInstructions(initial?.instructions ?? '');
     setTouched(false);
   }, [initial]);
@@ -104,14 +131,25 @@ export default function RoutingOperationRowEditor({
   // edit mode anyway.
   useEffect(() => {
     if (isEdit) return;
-    if (workCenter && workCenter.kind === 'internal' && workCenter.labor_rate !== null) {
+    if (workCenter && workCenter.target === 'station' && workCenter.labor_rate !== null) {
       setLaborOverrideStr(String(workCenter.labor_rate));
     } else {
       setLaborOverrideStr('');
     }
   }, [workCenter, isEdit]);
 
-  const isExternal = workCenter?.kind === 'external';
+  // Same pre-fill for the outside price, so picking a service shows what that
+  // vendor charges rather than an empty box the user has to go look up.
+  useEffect(() => {
+    if (isEdit) return;
+    if (workCenter && workCenter.target === 'service' && workCenter.unit_price !== null) {
+      setExternalUnitPriceStr(String(workCenter.unit_price));
+    } else {
+      setExternalUnitPriceStr('');
+    }
+  }, [workCenter, isEdit]);
+
+  const isExternal = workCenter?.target === 'service';
 
   const wcError = touched && !workCenter;
 
@@ -139,12 +177,21 @@ export default function RoutingOperationRowEditor({
     if (!workCenter) return;
     if (isExternal) {
       if (extUnitPriceError || !externalHasAny) return;
+      // Mirrors the labour-rate rule below: the field is pre-filled with the
+      // service's price, so an "override" only means anything once the user
+      // changes it. Matching (or clearing) persists null and the step inherits
+      // whatever the vendor's price becomes.
+      const servicePrice = workCenter.unit_price;
+      const externalUnitPrice =
+        externalUnitPriceParsed === null || externalUnitPriceParsed === servicePrice
+          ? null
+          : externalUnitPriceParsed;
       onSave({
         workCenter,
         setupMinutes: null,
         cycleMinutesPerUnit: null,
         laborRateOverride: null,
-        externalUnitPrice: externalUnitPriceParsed,
+        externalUnitPrice,
         instructions: instructions.trim() || null,
       });
     } else {
@@ -199,8 +246,11 @@ export default function RoutingOperationRowEditor({
             size="small"
             openOnFocus
             options={workCenters}
+            groupBy={(wc) =>
+              wc.target === 'service' ? 'Outside — at a vendor' : 'In-house'
+            }
             getOptionLabel={(wc) =>
-              wc.vendor_name ? `${wc.name} (${wc.vendor_name})` : wc.name
+              wc.vendor_name ? `${wc.name} · ${wc.vendor_name}` : wc.name
             }
             value={workCenter}
             onChange={(_, newValue) => setWorkCenter(newValue)}
@@ -212,13 +262,6 @@ export default function RoutingOperationRowEditor({
                   <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>
                     {option.name}
                   </Typography>
-                  <Chip
-                    label={option.kind}
-                    size="small"
-                    variant="outlined"
-                    color={option.kind === 'external' ? 'secondary' : 'default'}
-                    sx={{ height: 18, fontSize: '0.7rem' }}
-                  />
                   {option.vendor_name && (
                     <Typography variant="caption" color="text.secondary">
                       {option.vendor_name}
@@ -231,10 +274,10 @@ export default function RoutingOperationRowEditor({
               <TextField
                 {...params}
                 autoFocus={!isEdit}
-                label="Work center"
-                placeholder="Pick a work center…"
+                label="Step"
+                placeholder="Pick a work center or outside service…"
                 error={wcError}
-                helperText={wcError ? 'Pick a work center to continue.' : ' '}
+                helperText={wcError ? 'Pick a work center or outside service to continue.' : ' '}
               />
             )}
           />
@@ -243,11 +286,11 @@ export default function RoutingOperationRowEditor({
 
       {isExternal ? (
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-          {/* External (vendor) work bills once per part — a unit price only,
-              no setup cost (setup is an internal-only concept). */}
+          {/* Outside work bills once per part — a price per piece only, no
+              setup cost (setup is an in-house concept). */}
           <TextField
             size="small"
-            label="Vendor unit price ($)"
+            label="Price per piece ($)"
             type="text"
             inputMode="decimal"
             value={externalUnitPriceStr}
@@ -257,7 +300,13 @@ export default function RoutingOperationRowEditor({
               if (v === '' || /^\d*\.?\d*$/.test(v)) setExternalUnitPriceStr(v);
             }}
             error={!!extUnitPriceError}
-            helperText={extUnitPriceError ? 'Enter a non-negative number.' : ' '}
+            helperText={
+              extUnitPriceError
+                ? 'Enter a non-negative number.'
+                : workCenter?.unit_price !== null && workCenter?.unit_price !== undefined
+                  ? `${workCenter.vendor_name ?? 'This vendor'} charges $${workCenter.unit_price}. Change it only for this step.`
+                  : ' '
+            }
             sx={{ flex: 1, minWidth: 180 }}
           />
         </Box>

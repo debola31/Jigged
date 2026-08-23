@@ -171,16 +171,23 @@ export async function calculateRoutingCost(
   if (routing) {
     for (const op of routing.operations) {
       const wc = op.work_center;
-      const operationName = wc?.name || 'Unknown Operation';
+      const vs = op.vendor_service;
+      const operationName = vs?.name || wc?.name || 'Unknown Operation';
 
-      if (wc?.kind === 'external') {
-        // External (vendor) work bills once per part — a unit price only, no
-        // setup cost (setup is an internal-only concept).
-        const unitPrice = op.external_unit_price !== null ? Number(op.external_unit_price) : null;
+      if (vs) {
+        // Outside work bills once per part — a price per piece only, no setup
+        // cost (setup is an in-house concept). The step's own price wins; the
+        // service's is inherited when the step never set one, matching
+        // COALESCE(external_unit_price, vendor_services.unit_price) in
+        // part_rollup_at_qty. Reading only the step here would have made this
+        // screen disagree with the money.
+        const stepPrice = op.external_unit_price !== null ? Number(op.external_unit_price) : null;
+        const servicePrice = vs.unit_price !== null ? Number(vs.unit_price) : null;
+        const unitPrice = stepPrice ?? servicePrice;
         if (unitPrice === null) {
           warnings.push({
             type: 'missing_external_pricing',
-            message: `${operationName}: external op has no unit price`,
+            message: `${operationName}: no price per piece (neither on the step nor on the service)`,
             node_id: op.id,
           });
           continue;

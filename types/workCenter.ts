@@ -1,19 +1,16 @@
 /**
- * Work Center — a capacity bucket where routing operations run.
+ * Work Center — a unit of IN-HOUSE production capacity: a machine, cell or
+ * station with an hourly labor rate. An operator "station" IS one of these rows.
  *
- * Replaces the old `operation_types` table. Adds `kind` ('internal' | 'external')
- * so external vendor work (heat treat, coating) lives in the same table as
- * in-house machines, and the routing operation can reference either kind by
- * a single `work_center_id` column.
+ * Outsourced processes are NOT here. They were once `kind='external'` rows in
+ * this table pointing at a vendor; they are now `vendor_services`, owned by the
+ * vendor that performs them — see `types/vendorService.ts`. A routing operation
+ * targets exactly one of the two.
  */
-export type WorkCenterKind = 'internal' | 'external';
-
 export interface WorkCenter {
   id: string;
   company_id: string;
   name: string;
-  kind: WorkCenterKind;
-  vendor_id: string | null;
   labor_rate: number | null;
   description: string | null;
   // Optional machine attributes (Machine Maintenance). Never required, never
@@ -31,8 +28,6 @@ export interface WorkCenter {
 
 export interface WorkCenterFormData {
   name: string;
-  kind: WorkCenterKind;
-  vendor_id: string | null;
   labor_rate: string;
   description: string;
   make: string;
@@ -44,13 +39,10 @@ export interface WorkCenterFormData {
 
 export interface WorkCenterWithRelations extends WorkCenter {
   routing_operations_count: number;
-  vendor: { id: string; name: string } | null;
 }
 
 export const EMPTY_WORK_CENTER_FORM: WorkCenterFormData = {
   name: '',
-  kind: 'internal',
-  vendor_id: null,
   labor_rate: '',
   description: '',
   make: '',
@@ -63,8 +55,6 @@ export const EMPTY_WORK_CENTER_FORM: WorkCenterFormData = {
 export function workCenterToFormData(workCenter: WorkCenter): WorkCenterFormData {
   return {
     name: workCenter.name,
-    kind: workCenter.kind,
-    vendor_id: workCenter.vendor_id,
     labor_rate: workCenter.labor_rate !== null ? String(workCenter.labor_rate) : '',
     description: workCenter.description || '',
     make: workCenter.make || '',

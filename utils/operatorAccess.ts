@@ -1171,9 +1171,11 @@ export async function getStationOperationTypes(
     .from('work_centers')
     .select('id, name')
     .eq('company_id', companyId)
-    // Operators only run internal stations; external/vendor work centers are
-    // handled through the routing/job workflow, not picked at the station.
-    .eq('kind', 'internal')
+    // No kind filter any more, and none is possible: every work_centers row is
+    // an in-house station now. Outsourced processes are vendor_services, a
+    // different table an operator can never be standing at. This also closes an
+    // old leak — getStationName never had the kind filter this query did, so a
+    // stale external id in localStorage used to resolve to a usable station.
     // Archived machines are gone from the shop's point of view. Without this the
     // picker offers a machine nobody can be standing at, and selecting one is
     // unrecoverable from the floor.

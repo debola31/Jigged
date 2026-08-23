@@ -35,15 +35,27 @@ import type {
 // ============================================
 
 const ROUTING_OP_COLUMNS =
-  'id, routing_id, work_center_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, instructions, metadata, created_at, updated_at';
+  'id, routing_id, work_center_id, vendor_service_id, sequence, setup_minutes, cycle_minutes_per_unit, labor_rate_override, external_unit_price, instructions, metadata, created_at, updated_at';
 
-const WC_JOIN = 'work_center:work_centers(id, name, kind, labor_rate, vendor:vendors(id, name))';
+// Both targets are joined on every routing read. Exactly one resolves per row
+// (routing_operations_exactly_one_target), so this is two LEFT JOINs rather
+// than a choice — the caller reads `vendor_service` first and its presence IS
+// the "outside work" test.
+const WC_JOIN = 'work_center:work_centers(id, name, labor_rate)';
+const VS_JOIN =
+  'vendor_service:vendor_services(id, name, unit_price, vendor:vendors(id, name))';
+const TARGET_JOINS = `${WC_JOIN}, ${VS_JOIN}`;
 
 interface WCJoinShape {
   id: string;
   name: string;
-  kind: 'internal' | 'external';
   labor_rate: number | null;
+}
+
+interface VSJoinShape {
+  id: string;
+  name: string;
+  unit_price: number | null;
   vendor: { id: string; name: string } | { id: string; name: string }[] | null;
 }
 
@@ -52,12 +64,23 @@ function shapeWorkCenterJoin(
 ): RoutingOperationWithWorkCenter['work_center'] {
   const single = Array.isArray(wc) ? wc[0] : wc;
   if (!single) return null;
+  return {
+    id: single.id,
+    name: single.name,
+    labor_rate: single.labor_rate !== null ? Number(single.labor_rate) : null,
+  };
+}
+
+function shapeVendorServiceJoin(
+  vs: VSJoinShape | VSJoinShape[] | null,
+): RoutingOperationWithWorkCenter['vendor_service'] {
+  const single = Array.isArray(vs) ? vs[0] : vs;
+  if (!single) return null;
   const vendor = Array.isArray(single.vendor) ? single.vendor[0] : single.vendor;
   return {
     id: single.id,
     name: single.name,
-    kind: single.kind,
-    labor_rate: single.labor_rate !== null ? Number(single.labor_rate) : null,
+    unit_price: single.unit_price !== null ? Number(single.unit_price) : null,
     vendor: vendor ?? null,
   };
 }
@@ -253,7 +276,7 @@ async function loadRoutingGraph(
 
   const { data: ops, error: opsError } = await supabase
     .from('routing_operations')
-    .select(`${ROUTING_OP_COLUMNS}, ${WC_JOIN}`)
+    .select(`${ROUTING_OP_COLUMNS}, ${TARGET_JOINS}`)
     .eq('routing_id', routing.id)
     .order('sequence', { ascending: true })
     .order('created_at', { ascending: true });
@@ -263,10 +286,14 @@ async function loadRoutingGraph(
     throw opsError;
   }
 
-  type OpRow = RoutingOperation & { work_center: WCJoinShape | WCJoinShape[] | null };
+  type OpRow = RoutingOperation & {
+    work_center: WCJoinShape | WCJoinShape[] | null;
+    vendor_service: VSJoinShape | VSJoinShape[] | null;
+  };
   const operations = ((ops || []) as OpRow[]).map((row) => ({
     ...row,
     work_center: shapeWorkCenterJoin(row.work_center),
+    vendor_service: shapeVendorServiceJoin(row.vendor_service),
   })) as RoutingOperationWithWorkCenter[];
 
   return {
@@ -321,7 +348,12 @@ function formDataToOpInsert(
   formData: RoutingOperationFormData,
 ): Omit<RoutingOperationInsert, 'routing_id' | 'sequence' | 'metadata'> {
   return {
-    work_center_id: formData.work_center_id,
+    // Exactly one target, per routing_operations_exactly_one_target. The form
+    // carries whichever the user picked; the other is explicitly NULL rather
+    // than omitted, so an edit that switches a step from a station to a service
+    // clears the old target instead of tripping the CHECK.
+    work_center_id: formData.vendor_service_id ? null : formData.work_center_id,
+    vendor_service_id: formData.vendor_service_id || null,
     // Blank means unknown, not zero — see saveRoutingWithOperations.
     setup_minutes: parseNumOrNull(formData.setup_minutes),
     cycle_minutes_per_unit: parseNumOrNull(formData.cycle_minutes_per_unit),
@@ -407,9 +439,13 @@ export async function deleteRoutingOperation(operationId: string): Promise<void>
  */
 export interface PendingOperation {
   tempId: string;
-  workCenterId: string;
+  /** Exactly one of workCenterId / vendorServiceId is set. */
+  workCenterId: string | null;
+  vendorServiceId: string | null;
+  /** The station's or the service's name, for display in the builder. */
   workCenterName: string;
-  workCenterKind: 'internal' | 'external';
+  /** The vendor performing it, when this step is outside work. */
+  vendorName: string | null;
   setupMinutes: number | null;
   cycleMinutesPerUnit: number | null;
   laborRateOverride: number | null;
@@ -500,7 +536,10 @@ export async function saveRoutingWithOperations(
     for (const op of pendingOperations) {
       const isExisting = originalOperationIds.has(op.tempId);
       const payload = {
-        work_center_id: op.workCenterId,
+        // Exactly one target — the other is written NULL, not omitted, so
+        // re-pointing an existing step clears the target it no longer uses.
+        work_center_id: op.vendorServiceId ? null : op.workCenterId,
+        vendor_service_id: op.vendorServiceId,
         // NOT `?? 0`. Zero setup is a real answer — plenty of operations have
         // none — but it is a different answer from "nobody has said yet", and
         // coercing turned the second into the first. That mattered the moment a

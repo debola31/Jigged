@@ -154,32 +154,13 @@ export async function getPartsByPreferredVendor(
   }>;
 }
 
-/**
- * Linked work_centers (vendor_id backlink) for the vendor detail page.
+/*
+ * `getWorkCentersByVendor` lived here — the vendor_id backlink into
+ * work_centers that fed the vendor page's "Work centers performing outside ops"
+ * accordion. Both are gone: a vendor's outsourced processes are its SERVICES
+ * now, read through `utils/vendorServicesAccess.ts`, and work_centers no longer
+ * carries a vendor_id at all.
  */
-export async function getWorkCentersByVendor(
-  vendorId: string,
-): Promise<Array<{ id: string; name: string; kind: 'internal' | 'external' }>> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from('work_centers')
-    .select('id, name, kind')
-    .eq('vendor_id', vendorId)
-    .is('deleted_at', null)
-    .order('name', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching work centers by vendor:', error);
-    throw error;
-  }
-
-  return (data || []) as Array<{
-    id: string;
-    name: string;
-    kind: 'internal' | 'external';
-  }>;
-}
 
 /**
  * Check if a *live* vendor name already exists for a company. Archived vendors are

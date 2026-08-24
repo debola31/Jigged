@@ -97,8 +97,9 @@ order):
 3. Links the user to the company via `user_company_access` (role=admin).
 4. Seeds the per-spec data graph:
    - 1 vendor — `E2E Test Vendor`
-   - 2 work centers — `E2E Internal WC` (internal, labor_rate=100) and
-     `E2E External WC` (external, vendor=above)
+   - 1 work center — `E2E Internal WC` (labor_rate=100)
+   - 1 vendor service — `E2E Anodize` ($4.50/pc, on the vendor above). An
+     outside process is a service now, not a work centre with a kind.
    - 1 customer — `E2E Test Customer`
    - 3 parts — `E2E-MFG-001` (manufacturable), `E2E-RAW-001` (stocked
      raw), `E2E-SUB-001` (BOM child)

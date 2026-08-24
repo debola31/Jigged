@@ -241,7 +241,7 @@ test.describe('Add parts from drawings', () => {
     // editor is a click away for anyone who already knows the numbers.
     await page.getByRole('button', { name: /Set times and rates/i }).first().click();
     await page.getByRole('button', { name: /Add Operation/i }).click();
-    const workCenter = page.getByRole('combobox', { name: /Work center/i });
+    const workCenter = page.getByRole('combobox', { name: /^Step$/ });
     await workCenter.fill('E2E Internal');
     await page.getByRole('option').first().click();
     await page.getByLabel(/Cycle minutes per unit/i).fill('30');

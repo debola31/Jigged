@@ -42,7 +42,9 @@ import { ensureTermsAccepted } from './fixtures/terms';
 const COMPANY_NAME = 'E2E Test Company';
 const VENDOR_NAME = 'E2E Test Vendor';
 const WC_INTERNAL_NAME = 'E2E Internal WC';
-const WC_EXTERNAL_NAME = 'E2E External WC';
+/** An outside process is a vendor SERVICE now, not a work centre. Named for the
+ *  process, because that is what a service is — the vendor is its parent row. */
+const VENDOR_SERVICE_NAME = 'E2E Anodize';
 const CUSTOMER_NAME = 'E2E Test Customer';
 const PART_MFG_NAME = 'E2E-MFG-001';
 const PART_RAW_NAME = 'E2E-RAW-001';
@@ -238,8 +240,6 @@ async function ensureWorkCenter(
   supabase: SupabaseClient,
   companyId: string,
   name: string,
-  kind: 'internal' | 'external',
-  vendorId: string | null,
   laborRate: number | null,
 ): Promise<string> {
   const { data: existing, error: lookupErr } = await supabase
@@ -256,14 +256,43 @@ async function ensureWorkCenter(
     .insert({
       company_id: companyId,
       name,
-      kind,
-      vendor_id: vendorId,
       labor_rate: laborRate,
-      description: `E2E seed (${kind})`,
+      description: 'E2E seed (in-house station)',
     })
     .select('id')
     .single();
   if (error || !data) throw new Error(`work_center insert failed: ${error?.message}`);
+  return data.id;
+}
+
+/** The outside half of the seed: one service, owned by the seeded vendor. */
+async function ensureVendorService(
+  supabase: SupabaseClient,
+  companyId: string,
+  vendorId: string,
+  name: string,
+): Promise<string> {
+  const { data: existing, error: lookupErr } = await supabase
+    .from('vendor_services')
+    .select('id')
+    .eq('vendor_id', vendorId)
+    .eq('name', name)
+    .maybeSingle();
+  if (lookupErr) throw new Error(`vendor_service lookup failed: ${lookupErr.message}`);
+  if (existing) return existing.id;
+
+  const { data, error } = await supabase
+    .from('vendor_services')
+    .insert({
+      company_id: companyId,
+      vendor_id: vendorId,
+      name,
+      unit_price: 4.5,
+      description: 'E2E seed (outside process)',
+    })
+    .select('id')
+    .single();
+  if (error || !data) throw new Error(`vendor_service insert failed: ${error?.message}`);
   return data.id;
 }
 
@@ -691,15 +720,8 @@ export default async function globalSetup(): Promise<void> {
   await ensureTermsAccepted(supabase, user.id);
 
   const vendorId = await ensureVendor(supabase, companyId);
-  const wcInternalId = await ensureWorkCenter(
-    supabase,
-    companyId,
-    WC_INTERNAL_NAME,
-    'internal',
-    null,
-    100,
-  );
-  await ensureWorkCenter(supabase, companyId, WC_EXTERNAL_NAME, 'external', vendorId, null);
+  const wcInternalId = await ensureWorkCenter(supabase, companyId, WC_INTERNAL_NAME, 100);
+  await ensureVendorService(supabase, companyId, vendorId, VENDOR_SERVICE_NAME);
   const customerId = await ensureCustomer(supabase, companyId);
 
   const mfgPartId = await ensurePart(supabase, companyId, {

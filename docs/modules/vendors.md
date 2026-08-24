@@ -25,7 +25,7 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 | Route | Contents |
 |---|---|
 | `/dashboard/{companyId}/vendors` | **One grid, no tabs** *(⚠ Corrected 2026-08-23: the Directory / Outside processing tab strip and its actionable queue are **deleted** — see [jobs.md](jobs.md#outside-external-vendor-operations).)* AG Grid: Name, **Services** (derived, read-only), Primary Contact (`name · email`), Location (`city, state`), Updated. No send/receive lives on this page. Search name + city, sort name asc, pagination 25/50/100, bulk CSV export, bulk archive, row click → detail. |
-| `…/{vendorId}` | Header card; **Services** card — name and price per piece, **edited in place** ([`VendorServicesCard`](../../components/vendors/VendorServicesCard.tsx)); Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Parts supplied** card; **Open jobs** card — read-only, *At {vendor} now* sorted **oldest sent first** (chase order) and *Waiting to go out*, every row deep-linking to `?op=` on the job. Delete archives and is never disabled. |
+| `…/{vendorId}` | Header card; **Services** card — name, description and price per piece, **edited in place** ([`VendorServicesCard`](../../components/vendors/VendorServicesCard.tsx)); Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Parts supplied** card; **Open jobs** card — read-only, *At {vendor} now* sorted **oldest sent first** (chase order) and *Waiting to go out*, every row deep-linking to `?op=` on the job. Delete archives and is never disabled. |
 | `…/{vendorId}/edit` | `VendorForm` edit mode — vendor row only; contact CRUD is separate. *(⚠ This doc previously omitted this page.)* |
 | `…/new` | `VendorForm` create mode plus an optional initial-contact sub-form; if filled, that contact is created `is_primary=true`. |
 
@@ -33,9 +33,11 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 
 **Decisions.** No "capabilities" checkboxes on a vendor — what it is used for is derived from inbound references, so it cannot drift from reality. Services are that derived truth made first-class: they are the processes the vendor performs, stored once, not a duplicated flag.
 
-**A service is a name and a price, and the UI is sized to that.** There is no service detail page and no form route: editing happens inline on the vendor, because sending someone to a separate screen for two fields makes them leave the vendor they were looking at and gives them a back button to find their way home from. A shop owner adding three processes in a row does that whole interaction on one card.
+**A service is a name, a description and a price, and the UI is sized to that.** There is no service detail page and no form route: editing happens inline on the vendor, because sending someone to a separate screen for three fields makes them leave the vendor they were looking at and gives them a back button to find their way home from. A shop owner adding three processes in a row does that whole interaction on one card.
 
-**Withdrawn 2026-08-23**, all on the same reasoning — a count that costs a query per page load to decorate a list of three rows: a *Used on* and *Out now* column on the Services card, and *Out now* / *Oldest out* columns on the directory. The vendor's **Open jobs** card answers "what is out at this vendor" properly, and the Jobs list already flags a job whose parts are at one. A **Notes for whoever ships it** field went with them; the `description` column stays and its value is carried through an edit, because ten shops wrote notes on a service before that field existed. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
+*(The description field was briefly labelled **Notes for whoever ships it**, which read as an optional aside rather than part of what a service IS, and was cut on that basis. It is back as plain **Description** — the label was the problem, not the field.)*
+
+**Withdrawn 2026-08-23**, all on the same reasoning — a count that costs a query per page load to decorate a list of three rows: a *Used on* and *Out now* column on the Services card, and *Out now* / *Oldest out* columns on the directory. The vendor's **Open jobs** card answers "what is out at this vendor" properly, and the Jobs list already flags a job whose parts are at one. Outside processing lives on Vendors rather than as a pseudo job-type on the Jobs list, because it is vendor work.
 
 ## Access layer
 

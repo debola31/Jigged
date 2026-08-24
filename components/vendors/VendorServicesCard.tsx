@@ -37,11 +37,11 @@ import { parseOptionalNumber } from '@/lib/validators';
 /**
  * A vendor's services, edited in place.
  *
- * There is no detail page and no form route, deliberately: a service is a name
- * and a price. A dedicated page for two fields makes the user leave the vendor
- * they are looking at, and gives them a back button to find their way home
- * from — for a shop owner adding three processes in a row, that is the whole
- * interaction.
+ * There is no detail page and no form route, deliberately: a service is a name,
+ * a description and a price. A dedicated page for three fields makes the user
+ * leave the vendor they are looking at, and gives them a back button to find
+ * their way home from — for a shop owner adding three processes in a row, that
+ * is the whole interaction.
  *
  * There is also NO vendor field anywhere here, and that absence is the rehome:
  * you no longer pick a supplier from a list, you are standing on one.
@@ -74,6 +74,7 @@ export default function VendorServicesCard({
 }: Props) {
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [nameError, setNameError] = useState('');
   const [priceError, setPriceError] = useState('');
@@ -83,6 +84,7 @@ export default function VendorServicesCard({
 
   const openAdd = () => {
     setName('');
+    setDescription('');
     setPrice('');
     setNameError('');
     setPriceError('');
@@ -91,6 +93,7 @@ export default function VendorServicesCard({
 
   const openEdit = (service: VendorService) => {
     setName(service.name);
+    setDescription(service.description ?? '');
     setPrice(service.unit_price !== null ? String(service.unit_price) : '');
     setNameError('');
     setPriceError('');
@@ -134,7 +137,7 @@ export default function VendorServicesCard({
         return;
       }
 
-      const formData = { name: trimmed, unit_price: price, description: '' };
+      const formData = { name: trimmed, unit_price: price, description };
 
       if (editor.mode === 'add') {
         await createVendorService(companyId, vendorId, formData);
@@ -143,13 +146,7 @@ export default function VendorServicesCard({
         // feature exists to move — 89% of outside steps were unpriced.
         posthog.capture('vendor service created', { has_price: price.trim().length > 0 });
       } else if (editor.mode === 'edit') {
-        // `description` is not editable here — the field was removed — so the
-        // existing value is passed through rather than blanked. Ten shops have
-        // notes on a service they wrote before this screen existed.
-        await updateVendorService(editor.service.id, {
-          ...formData,
-          description: editor.service.description ?? '',
-        });
+        await updateVendorService(editor.service.id, formData);
       }
 
       close();
@@ -202,6 +199,16 @@ export default function VendorServicesCard({
         helperText={nameError || 'What this vendor does to your parts.'}
         disabled={saving}
         sx={{ flex: 1, minWidth: 200 }}
+      />
+      <TextField
+        size="small"
+        label="Description"
+        placeholder="Type II clear, racked"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        disabled={saving}
+        helperText="Spec, callout, packaging — whatever the person boxing these needs."
+        sx={{ flex: 1.4, minWidth: 220 }}
       />
       <TextField
         size="small"
@@ -308,9 +315,14 @@ export default function VendorServicesCard({
                         flexWrap: 'wrap',
                       }}
                     >
-                      <Typography sx={{ flex: 1, minWidth: 160, fontWeight: 500 }}>
-                        {svc.name}
-                      </Typography>
+                      <Box sx={{ flex: 1, minWidth: 180 }}>
+                        <Typography sx={{ fontWeight: 500 }}>{svc.name}</Typography>
+                        {svc.description && (
+                          <Typography variant="body2" color="text.secondary">
+                            {svc.description}
+                          </Typography>
+                        )}
+                      </Box>
                       <Typography
                         variant="body2"
                         color={svc.unit_price !== null ? 'text.primary' : 'text.secondary'}

@@ -34,11 +34,6 @@ export interface VendorService {
 export interface VendorServiceFormData {
   name: string;
   unit_price: string;
-  /**
-   * Carried, not edited. The vendor page has no notes field — a service is a
-   * name and a price — but ten shops wrote notes on one before that was true,
-   * so an edit passes the existing value through rather than blanking it.
-   */
   description: string;
 }
 

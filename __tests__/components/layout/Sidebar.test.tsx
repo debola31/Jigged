@@ -8,13 +8,9 @@ vi.mock('@/hooks/useUserRole', () => ({
   useUserRole: () => mockUseUserRole(),
 }));
 
-// Mock useCompanyFeatures — without it, the hook calls getCompany() which
-// transitively creates a Supabase client and fails when env vars aren't
-// set in the test runner. We only want to verify rendering logic here.
-const mockUseCompanyFeatures = vi.fn();
-vi.mock('@/hooks/useCompanyFeatures', () => ({
-  useCompanyFeatures: () => mockUseCompanyFeatures(),
-}));
+// No useCompanyFeatures mock: the Sidebar stopped calling that hook when the last flag-gated nav
+// item (Storage, on `inventory_locations`) went unconditional in Aug 2026. An inert mock left
+// behind here would keep passing against a component that no longer reads it.
 
 // Mock CompanySwitcher to avoid its own dependencies
 vi.mock('@/components/layout/CompanySwitcher', () => ({
@@ -25,20 +21,10 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseUserRole.mockReset();
-    // Default: features finished loading, nothing enabled. Individual
-    // tests override to flip the Shipments flag on/off.
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: false },
-      loading: false,
-    });
   });
 
   it('renders all menu items for admin', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: false, inventory_locations: true },
-      loading: false,
-    });
 
     render(<Sidebar />);
 
@@ -50,6 +36,10 @@ describe('Sidebar', () => {
     // holds the quantities — i.e. Parts *is* the inventory — so keeping the old word here
     // would have the two labels swapped relative to their meanings: inventory = the items,
     // storage = the places. Sits between Parts and Work Centers.
+    //
+    // Unconditional: no mocked feature state is set up anywhere in this file, so this also proves
+    // Storage renders on first paint with no flag read at all. It used to sit behind
+    // `inventory_locations` and hold its slot with a Skeleton while that resolved.
     expect(screen.getByText('Storage')).toBeInTheDocument();
     expect(screen.queryByText('Inventory')).not.toBeInTheDocument();
     expect(screen.getByText('Work Centers')).toBeInTheDocument();
@@ -76,20 +66,6 @@ describe('Sidebar', () => {
     );
   });
 
-  it('hides Storage when the locations flag is off — such a shop has no places at all', () => {
-    mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: false, inventory_locations: false },
-      loading: false,
-    });
-
-    render(<Sidebar />);
-
-    expect(screen.queryByText('Storage')).not.toBeInTheDocument();
-    // Parts is still the item master either way — the count moves to its toolbar.
-    expect(screen.getByText('Parts')).toBeInTheDocument();
-  });
-
   it('hides Team and Settings for user role', () => {
     mockUseUserRole.mockReturnValue({ role: 'user', isAdmin: false, loading: false });
 
@@ -113,15 +89,12 @@ describe('Sidebar', () => {
     }
   });
 
-  // The Shipments nav item (the only feature-flag-gated entry) was removed
-  // when the standalone Shipments page was retired — a slip now lives on its
-  // job. The flag-gating + skeleton tests went with it.
+  // The Shipments nav item was removed when the standalone Shipments page was retired — a slip
+  // now lives on its job. Storage, gated on `inventory_locations`, was the last flag-gated entry
+  // and went unconditional in Aug 2026; the flag-gating and Skeleton machinery went with it, so
+  // MenuItem no longer carries a `featureFlag` field at all.
   it('does not render a Shipments nav item', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { shipments: true },
-      loading: false,
-    });
 
     render(<Sidebar />);
 

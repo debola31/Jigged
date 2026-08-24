@@ -41,12 +41,13 @@ Detailed specs live in [modules/](modules/).
 
 **Shop floor:** [operator-view.md](modules/operator-view.md) — screens, quantity capture, the
 notes read-back loop, and the operator journeys ·
-[machine-maintenance.md](modules/machine-maintenance.md) — flag-gated pilot with a written kill
-criterion · [inventory.md](modules/inventory.md)
+[machine-maintenance.md](modules/machine-maintenance.md) — the per-machine logbook, core since its
+pilot flag retired · [inventory.md](modules/inventory.md)
 
 **Office and platform:** [dashboard.md](modules/dashboard.md) ·
 [ai-insights.md](modules/ai-insights.md) — its table allow/denylist is a security boundary ·
 [data-import.md](modules/data-import.md) · [demo-mode.md](modules/demo-mode.md) ·
+[feature-flags.md](modules/feature-flags.md) — what a per-tenant flag is, and how to retire one ·
 [invitation-system.md](modules/invitation-system.md) ·
 [legal-acceptance.md](modules/legal-acceptance.md) — the clickwrap record, and why a shipped
 legal document is frozen

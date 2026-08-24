@@ -26,13 +26,6 @@ vi.mock('@/utils/inventoryCountAccess', () => ({
   commitCount: vi.fn(),
 }));
 
-// The back link's destination depends on the locations flag, and the real hook calls getCompany(),
-// which transitively builds a Supabase client and fails without env vars. Defaults to flag-on
-// because that is the configuration every other test in this file assumes.
-const mockUseCompanyFeatures = vi.fn(() => ({
-  features: { inventory_locations: true },
-  loading: false,
-}));
 /**
  * Stub the shared picker, the way the operator lookup tests do. What matters here is that
  * choosing a part puts a row on the sheet, not MUI's Autocomplete — and the real one imports
@@ -48,9 +41,9 @@ vi.mock('@/components/parts/PartAutocomplete', () => ({
   ),
 }));
 
-vi.mock('@/hooks/useCompanyFeatures', () => ({
-  useCompanyFeatures: () => mockUseCompanyFeatures(),
-}));
+// No useCompanyFeatures mock: the page stopped reading feature flags when `inventory_locations`
+// was retired (Aug 2026). Every `returnTo` arm now resolves from the URL alone, which is also why
+// the Back button no longer needs a hide-until-resolved guard.
 
 // The page reaches the locations access layer for put-away; unmocked it builds a real Supabase
 // client at import time and the whole file fails to load.
@@ -180,13 +173,6 @@ const chooseParts = async (user: ReturnType<typeof userEvent.setup>, ...partName
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // `clearAllMocks` clears call records but NOT implementations, so a `mockReturnValue` set inside
-  // one test leaks into every test after it. The flag-off back-link test sets one, so the flag-on
-  // default is re-pinned here rather than relied on from the `vi.fn(impl)` above.
-  mockUseCompanyFeatures.mockReturnValue({
-    features: { inventory_locations: true },
-    loading: false,
-  });
   window.localStorage.clear();
   /*
    * Two parts, one place each — still the majority shape a real shop returns (9 of the 14 stocked
@@ -274,10 +260,11 @@ describe('choosing what to count', () => {
    * to Parts, so anyone who reached counting from the Storage board was silently returned to a
    * different page than the one they left.
    *
-   * Both flag states are asserted deliberately: with locations OFF the only entry point is the
-   * `Count Inventory` button on the Parts toolbar, so sending those shops to Storage would just
-   * relocate the bug — `/inventory/locations` redirects them straight back out. A test of one state
-   * would have passed against the old hardcoded link.
+   * Withdrawn: a second case asserted the flag-OFF destination, because a shop without
+   * `inventory_locations` had no board and sending it to Storage would just relocate the bug. That
+   * flag was retired Aug 2026 — every shop has a board — so the Storage default is now correct for
+   * everyone and there is no second state to assert. The `?from=` arms below carry what is left of
+   * the "destination is not derivable" case.
    */
   it('returns to the storage board it was entered from', async () => {
     const user = userEvent.setup();
@@ -285,19 +272,6 @@ describe('choosing what to count', () => {
     renderPage();
     await user.click(await screen.findByRole('button', { name: /back to storage/i }));
     expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations');
-  });
-
-  it('returns to parts when the shop has no storage board', async () => {
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { inventory_locations: false },
-      loading: false,
-    });
-    const user = userEvent.setup();
-    asMock(loadCountCandidates).mockResolvedValue([cand({ partId: 'p1', partName: '4140 bar' })]);
-    renderPage();
-    await user.click(await screen.findByRole('button', { name: /back to parts/i }));
-    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts');
-    expect(screen.queryByRole('button', { name: /back to storage/i })).not.toBeInTheDocument();
   });
 
   it('shows an empty state when the company has no parts at all', async () => {
@@ -489,16 +463,6 @@ describe('saving', () => {
       expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations'),
     );
     expect(mockPush).not.toHaveBeenCalledWith('/dashboard/co1/inventory');
-  });
-
-  /** Same exit, and the same trap: with no board to return to, Parts is the correct landing. */
-  it('returns to parts after saving when the shop has no storage board', async () => {
-    mockUseCompanyFeatures.mockReturnValue({
-      features: { inventory_locations: false },
-      loading: false,
-    });
-    await enterAndSave('4140 bar', '38');
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts'));
   });
 
   // Save saves. The confirm dialog that used to sit here restated rows still visible behind it

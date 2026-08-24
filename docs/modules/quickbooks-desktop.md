@@ -191,8 +191,28 @@ instructions, which is why hosted QuickBooks (Rightworks) is a documentation cha
 code change.
 
 **Cost:** Conductor bills **$49/month per active company file connection**. Sample files and trials
-are free. The `quickbooks_desktop` feature flag gates the backend connect endpoint, not just the UI —
-this is the first flag in the repo with a direct per-use bill attached.
+are free.
+
+**Nothing gates connecting.** Any admin of any company can start a Desktop connection self-serve from
+Settings. `verify_company_access(request, company_id, require_admin=True)` is the only check on
+`POST /api/quickbooks-desktop/{id}/connect`, and the endpoint runs as `service_client()`, so the
+[billing write-gate](billing.md) does not apply either — a tenant whose Stripe subscription lapsed can
+still connect. The link it mints is a working one: the shop opens it on the Windows box, the Web
+Connector completes, the connection is live and billable, and nothing downstream can refuse it.
+
+**Withdrawn:** *the `quickbooks_desktop` flag gates the backend connect endpoint, not just the UI — the
+first flag in the repo with a direct per-use bill attached* — the flag was retired in Aug 2026 with the
+rest of the registry cleanup, an explicit accepted cost decision, so the sentence now describes a fence
+that is not there.
+
+Damage control is the `disconnect` route, which does call `qbd.delete_end_user` — a connection made by
+mistake is recoverable for whatever Conductor prorates. **Nothing else watches the account:** no alert on
+a new end user, no cap, and no reconciliation between Conductor's active connections and
+`quickbooks_desktop_connections`, so the bill is discovered by reading the invoice. The flag's two backend
+tests were deleted with it, which leaves `test_connect_requires_admin` in
+[`test_quickbooks_desktop_lifecycle.py`](../../api/tests/integration/test_quickbooks_desktop_lifecycle.py)
+load-bearing in a way it was not before: it is the only automated thing standing between a non-admin and a
+billable connection.
 
 ---
 

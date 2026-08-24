@@ -112,14 +112,18 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
     wipe_company("inventory_locations")
 
 
-# A source flag set chosen to cover the case that is easy to get wrong: an opt-IN flag turned on
-# AND an opt-OUT flag explicitly turned off. `readFeatureFlag` resolves an omitted key to the
-# descriptor's default, so squashing "absent" into "false" would silently re-enable ai_insights
-# for a tenant that had killed it.
+# A source flag set chosen to cover the case that is easy to get wrong: a flag EXPLICITLY turned
+# off, alongside one that is simply ABSENT. `readFeatureFlag` resolves an omitted key to the
+# descriptor's default, and every registered flag now defaults ON — so squashing "absent" into
+# "false" would kill a feature the tenant can see, and squashing "false" into "absent" would
+# silently re-enable one they had killed. The mirror must preserve the difference, not merely the
+# truthiness.
+#
+# `dashboard_revenue` is deliberately left OUT of this dict: its absence is the second half of the
+# assertion. (The opt-IN half this comment used to describe went with the `machine_maintenance` and
+# `quickbooks_desktop` flags in Aug 2026 — no registered flag is opt-in today.)
 SOURCE_SETTINGS = {
     "features": {
-        "inventory_locations": True,
-        "machine_maintenance": True,
         "ai_insights": False,
     },
     "ai_limits": {"chat_per_hour": 100},
@@ -441,8 +445,9 @@ def test_reset_rejects_a_caller_who_is_not_the_user(supabase_admin, demo):
 
 def test_create_mirrors_source_feature_flags(supabase_admin, flagged_demo):
     """The demo stands in for the user's own company, so it must show the same product
-    surface. Copied verbatim: an explicit `false` has to survive as `false`, because an
-    absent key resolves to the descriptor default and ai_insights defaults to ON."""
+    surface. Copied verbatim: an explicit `false` has to survive as `false` AND an absent key has
+    to stay absent, because an absent key resolves to the descriptor default and every registered
+    flag defaults ON."""
     demo_features = _settings(supabase_admin, flagged_demo["demo_id"]).get("features")
     assert demo_features == SOURCE_SETTINGS["features"]
 
@@ -460,8 +465,8 @@ def test_entry_sync_propagates_a_flag_flipped_after_creation(supabase_admin, fla
     source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
 
     changed = dict(SOURCE_SETTINGS["features"])
-    changed["quickbooks_desktop"] = True     # newly enabled
-    changed["inventory_locations"] = False   # newly disabled
+    changed["ai_insights"] = True            # newly enabled (was an explicit false)
+    changed["dashboard_revenue"] = False     # newly disabled (was absent, i.e. default on)
     supabase_admin.table("companies").update(
         {"settings": {**SOURCE_SETTINGS, "features": changed}}
     ).eq("id", source_id).execute()
@@ -493,7 +498,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
 
     # An admin flips a flag on the source; entry re-syncs.
     supabase_admin.table("companies").update(
-        {"settings": {**SOURCE_SETTINGS, "features": {"quickbooks_desktop": True}}}
+        {"settings": {**SOURCE_SETTINGS, "features": {"dashboard_revenue": False}}}
     ).eq("id", source_id).execute()
     flagged_demo["client"].rpc(
         "sync_demo_access",
@@ -501,7 +506,7 @@ def test_mirror_leaves_the_demo_editable_settings_blocks_alone(supabase_admin, f
     ).execute()
 
     after = _settings(supabase_admin, demo_id)
-    assert after["features"] == {"quickbooks_desktop": True}, "the flag change should land"
+    assert after["features"] == {"dashboard_revenue": False}, "the flag change should land"
     assert after["defaults"] == {"quote_validity_days": 30}, "demo-side edit was reverted"
     assert after["default_payment_terms"] == "Net 15", "demo-side edit was reverted"
 
@@ -512,7 +517,7 @@ def test_reset_re_mirrors_flags(supabase_admin, flagged_demo):
     source_id, demo_id = flagged_demo["source_id"], flagged_demo["demo_id"]
 
     supabase_admin.table("companies").update(
-        {"settings": {"features": {"machine_maintenance": True}}}
+        {"settings": {"features": {"dashboard_revenue": False}}}
     ).eq("id", source_id).execute()
 
     flagged_demo["client"].rpc(
@@ -520,7 +525,7 @@ def test_reset_re_mirrors_flags(supabase_admin, flagged_demo):
         {"p_source_company_id": source_id, "p_user_id": flagged_demo["user"]["user_id"]},
     ).execute()
 
-    assert _settings(supabase_admin, demo_id)["features"] == {"machine_maintenance": True}
+    assert _settings(supabase_admin, demo_id)["features"] == {"dashboard_revenue": False}
 
 
 def test_sync_demo_features_is_not_reachable_from_the_browser(demo):

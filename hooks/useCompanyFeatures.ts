@@ -5,6 +5,7 @@ import { getCompany } from '@/utils/companyAccess';
 import {
   KNOWN_FEATURES,
   readCompanyFeatures,
+  type FeatureFlagDescriptor,
   type KnownFeatureKey,
 } from '@/lib/featureFlags';
 import { useLoad } from '@/hooks/useLoad';
@@ -14,18 +15,22 @@ import { useLoad } from '@/hooks/useLoad';
  * (Sidebar nav gating, feature-flag-aware buttons, etc.).
  *
  * Returns a dense map keyed by KNOWN_FEATURES entries. `loading` is true
- * until the company row has been fetched the first time — render-aware
- * call sites (notably the Sidebar) should hide flag-gated items behind a
- * Skeleton while `loading` is true, rather than flashing them in once the
- * data arrives.
+ * until the company row has been fetched the first time — a render-aware call site should hold
+ * whatever it gates behind a placeholder while `loading` is true, rather than flashing it in once
+ * the data arrives. (The Sidebar used to be the example here; it no longer reads this hook at all,
+ * since Storage was its only flag-gated item and that flag is gone.)
  *
  * The fallback (no companyId / fetch failure) is each flag's REGISTRY DEFAULT, not "every flag
  * false". It was the latter, justified as safer than leaking gated UI to a tenant that had not
  * opted in — true for opt-in flags, and wrong for opt-out ones: it renders a failed read as a
  * definitive "this tenant does not have the feature", which is the "'couldn't check' is never
  * 'denied'" rule in CLAUDE.md. Concretely, one failed `getCompany` used to bounce an operator off
- * /inventory and hide Storage — now the only route to counting — and did the same to `ai_insights`
- * long before that. Opt-in flags are unaffected: their default IS false.
+ * /inventory and hide Storage — then the only route to counting — and did the same to `ai_insights`
+ * long before that.
+ *
+ * **Every registered flag is opt-OUT today**, so the fallback is "everything on" across the board
+ * and the distinction above has no live counter-example. Keep it anyway: the opt-in path still
+ * exists in the registry type, and this is exactly the reasoning a future pilot flag will need.
  *
  * The no-companyId guard lives inside the loader (not a synchronous
  * setState in the effect body) so it doesn't trip set-state-in-effect.
@@ -92,7 +97,10 @@ interface CompanyFeaturesResult {
 
 function defaultFeatures(): Record<KnownFeatureKey, boolean> {
   const out = {} as Record<KnownFeatureKey, boolean>;
-  for (const f of KNOWN_FEATURES) out[f.key] = f.defaultEnabled ?? false;
+  // Widened to the descriptor interface to read the optional `defaultEnabled`: KNOWN_FEATURES is
+  // `as const`, so an entry that omits the property has no property to read. See lib/featureFlags.ts.
+  const descriptors: readonly FeatureFlagDescriptor[] = KNOWN_FEATURES;
+  for (const f of descriptors) out[f.key as KnownFeatureKey] = f.defaultEnabled ?? false;
   return out;
 }
 

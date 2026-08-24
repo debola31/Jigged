@@ -6,11 +6,17 @@ import DashboardMetrics from '@/components/dashboard/DashboardMetrics';
 /**
  * The scorecard row: what each role sees, and where the period control lives.
  *
- * The money line is admin-only. That is a DISPLAY choice, not a security
- * boundary — RLS is company-scoped, not column-scoped, so the figures stay
- * readable through the API by anyone who can reach the company. What it buys is
- * that a salesperson sees the deals they work on rather than the shop's whole
- * book totalled up on the landing page.
+ * The money line has TWO independent gates and they compose: the viewer must be a company admin,
+ * AND the tenant must have the `dashboard_revenue` flag (opt-out — on unless a system admin killed
+ * it). Both are DISPLAY choices, not security boundaries — RLS is company-scoped, not
+ * column-scoped, so the figures stay readable through the API by anyone who can reach the company.
+ * What they buy is that a salesperson sees the deals they work on rather than the shop's whole book
+ * totalled up on the landing page, and that a shop whose dashboard lives on a wall-mounted screen
+ * can turn the totals off for everyone.
+ *
+ * `revenueEnabled` is a prop rather than a hook read: the dashboard page already holds the resolved
+ * feature map, so reading it again here would be a second `getCompany` per load — and it would make
+ * every test below need a `useCompanyFeatures` mock rather than a boolean.
  */
 
 const mockUseUserRole = vi.fn();
@@ -54,7 +60,7 @@ describe('DashboardMetrics', () => {
   });
 
   it('renders four cards and no picker or pager', async () => {
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
 
@@ -67,7 +73,7 @@ describe('DashboardMetrics', () => {
   });
 
   it('shows an admin the money, labelled by which KIND of money it is', async () => {
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('$9,766')).toBeInTheDocument());
 
@@ -82,7 +88,7 @@ describe('DashboardMetrics', () => {
   it('hides every money figure from a non-admin', async () => {
     mockUseUserRole.mockReturnValue({ role: 'user', isAdmin: false, loading: false });
 
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
 
@@ -94,8 +100,42 @@ describe('DashboardMetrics', () => {
     expect(screen.queryByText('not yet shipped')).not.toBeInTheDocument();
   });
 
+  it('hides every money figure when the tenant turned dashboard revenue off, even for an admin', async () => {
+    // The flag is the outer gate: an admin of a flag-off shop sees exactly what a salesperson
+    // sees. That is the point of the switch — a dashboard on a screen the whole floor walks past
+    // should not total the book for anybody standing in front of it.
+    render(<DashboardMetrics companyId="c1" revenueEnabled={false} />);
+
+    await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
+
+    // Every count survives — the flag takes the money, not the metrics.
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('25')).toBeInTheDocument();
+    expect(screen.getByText('51 Not Started · 12 In Progress')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Today' })).toHaveLength(1);
+
+    // Not one dollar figure, label, or delta.
+    expect(screen.queryByText('$9,766')).not.toBeInTheDocument();
+    expect(screen.queryByText('$85,293')).not.toBeInTheDocument();
+    expect(screen.queryByText('$12,480')).not.toBeInTheDocument();
+    expect(screen.queryByText('not yet shipped')).not.toBeInTheDocument();
+    expect(screen.queryByText('shipped this week')).not.toBeInTheDocument();
+    expect(screen.queryByText('vs last week')).not.toBeInTheDocument();
+  });
+
+  it('keeps the money hidden for a non-admin even when the flag is on', async () => {
+    // The two gates are independent, so neither one alone is enough. This is the pair the
+    // admin-only test above cannot express on its own.
+    mockUseUserRole.mockReturnValue({ role: 'user', isAdmin: false, loading: false });
+
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
+
+    await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
+    expect(screen.queryByText('$85,293')).not.toBeInTheDocument();
+  });
+
   it('names the split with the same labels the jobs list uses', async () => {
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     // The one thing the old two-card split was good for: whether work is
     // flowing or piling up.
@@ -105,13 +145,13 @@ describe('DashboardMetrics', () => {
   it('shows the split to a non-admin too — it carries no money', async () => {
     mockUseUserRole.mockReturnValue({ role: 'user', isAdmin: false, loading: false });
 
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('51 Not Started · 12 In Progress')).toBeInTheDocument());
   });
 
   it('puts the period toggle on Completed and nowhere else', async () => {
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
 
@@ -122,7 +162,7 @@ describe('DashboardMetrics', () => {
   });
 
   it('gives Open Quotes a count and no money even for an admin', async () => {
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('25')).toBeInTheDocument());
 
@@ -140,7 +180,7 @@ describe('DashboardMetrics', () => {
       overdue_jobs: { count: 0, money: 0 },
     });
 
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
     // Open Jobs still has its label; Overdue's is gone with its money.
@@ -156,7 +196,7 @@ describe('DashboardMetrics', () => {
     // Splitting it into separate flex items fixed the baseline and introduced a
     // worse bug — the row could then break between "+12%" and "vs last week".
     // One inline element solves both, and this is the half a test can hold.
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText(/12%/)).toBeInTheDocument());
 
@@ -173,7 +213,7 @@ describe('DashboardMetrics', () => {
       completed_jobs: { count: 3, money: 15080, previousMoney: 0 },
     });
 
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('$15,080')).toBeInTheDocument());
     expect(screen.getAllByText('$15,080')).toHaveLength(1);
@@ -182,7 +222,7 @@ describe('DashboardMetrics', () => {
 
   it('refetches and persists when the period changes', async () => {
     const user = userEvent.setup();
-    render(<DashboardMetrics companyId="c1" />);
+    render(<DashboardMetrics companyId="c1" revenueEnabled />);
 
     await waitFor(() => expect(screen.getByText('63')).toBeInTheDocument());
     mockGetDashboardMetrics.mockClear();

@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLoad } from '@/hooks/useLoad';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Paper from '@mui/material/Paper';
@@ -81,24 +80,15 @@ export default function PartLocationInventory({
   const balances = inventoryData?.[0] ?? EMPTY_BALANCES;
   const locations = inventoryData?.[1] ?? EMPTY_LOCATIONS;
 
-  const { features } = useCompanyFeatures();
-
-  /**
-   * Whether this shop has been given places at all.
-   *
-   * Creating one is the flagged capability itself, so the picker's create-as-you-type is offered
-   * only to a shop that has the flag — not merely to one that happens to have more than one place.
-   */
-  const placesEnabled = Boolean(features.inventory_locations);
-
   /**
    * One-place mode: the shop has never built a place, so the auto-managed `Unassigned` bucket is
    * the only one there is.
    *
-   * This is the *normal* state for a shop without the `inventory_locations` flag — and since
-   * 20260802015837 every part has a place whether or not the shop has the flag, so this tab now
-   * renders for them too. What it must not do is show them a places UI they haven't been given:
-   * a "Move" button with nowhere to move to, and a dropdown containing exactly one option.
+   * This is a DATA condition, not a flag — since 20260802015837 every part has a place, and the
+   * `inventory_locations` flag that used to also gate this tab was retired Aug 2026. What it must
+   * not do is show a places UI with nothing behind it: a "Move" button with nowhere to move to,
+   * and a dropdown containing exactly one option. A shop that has never built a place still hits
+   * this branch, which is the case that matters.
    */
   const onePlace = locations.length === 1 && locations[0].kind === 'system';
 
@@ -272,7 +262,7 @@ export default function PartLocationInventory({
           unitOptions={unitOptions}
           locations={locationOptions}
           sourceBalances={sourceBalances}
-          onCreateLocation={placesEnabled ? createLocationFromPicker : undefined}
+          onCreateLocation={createLocationFromPicker}
           onClose={() => setAction(null)}
           onDone={onActionDone}
         />

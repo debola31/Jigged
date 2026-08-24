@@ -12,19 +12,22 @@
 > work-center subject but "nothing in the app writes one today" — true of the proposal, false of the build
 > (`addMachineNote`).
 
-> **As-built, verified 2026-08-03.** Phase 1 built, unreleased. One pilot shop, behind the opt-in
-> `machine_maintenance` flag — off by default, and it stays opt-in through the pilot so the module is on at
-> exactly the shops whose behaviour is being measured. A machine-scoped maintenance logbook, shipped with
-> the condition under which it gets parked stated in advance ([§2](#2-hypothesis-and-kill-criterion)) so
-> the result cannot be renegotiated once it arrives.
+> **As-built, verified 2026-08-03; release state re-verified 2026-08-24.** Phase 1 built and **released to
+> every tenant**: the opt-in `machine_maintenance` flag is **retired**, so there is no per-tenant switch and
+> no way to scope the module to the shops whose behaviour is being measured. Nothing changed for anyone on
+> the day — all three production companies already had the flag on, so retirement released the logbook to no
+> new shop — but it ended the pilot as a *measurable* thing; see the **Withdrawn** line in
+> [§9](#9-open-questions). A machine-scoped maintenance logbook, shipped with the condition under which it
+> gets parked stated in advance ([§2](#2-hypothesis-and-kill-criterion)) so the result cannot be renegotiated
+> once it arrives.
 
 **Two lessons from the revisions below.** (1) Several cut a control the proposal asked for, all for one
 reason: **a control whose answer changes nothing teaches operators this surface is decorative.** (2) The
 layout revisions only became visible once a machine carried real entries — an argument for **building the
 thin thing early rather than specifying harder.**
 
-**Dependencies:** [Work Centers](work-centers.md) — a machine *is* a `work_centers` row with
-`kind='internal'`; no separate machine entity. The notes system and its read-back loop
+**Dependencies:** [Work Centers](work-centers.md) — a machine *is* a `work_centers` row, any of them now that
+`kind` is dropped; no separate machine entity. The notes system and its read-back loop
 ([Operator View](operator-view.md#the-read-back-loop-attribution)). Station selection, the only entrance,
 and the defect in it named in [§6](#6-phases-and-gates).
 
@@ -77,6 +80,12 @@ tells them apart. **Near-zero page opens across the four weeks is recorded as *n
 and the clock restarts once the door is demonstrably reachable and in use. Not a hypothetical escape hatch —
 this launches into a surface not yet in daily use ([§6](#6-phases-and-gates)), so "not yet tested" is the
 likeliest first result, and must not be quietly upgraded to a pass or downgraded to a kill.
+
+**The clock stopped 2026-08-24**, with the bar not formally cleared: the flag was retired by product decision
+([§9](#9-open-questions)), and `machine_page_opened` can no longer tell a pilot shop's opens from anyone
+else's ([§8](#8-measurement)) — the exact reading the precondition above depends on. Whatever this section
+concludes must be read from data up to that date. **The bar itself stands as written**, because a bar
+rewritten after its result arrives is not a bar.
 
 **No seeded corpus, at all.** No backfill, no transcription of the veteran's texts, no entry written on
 anyone's behalf; anyone may write down knowledge they got from him, as themselves, but nobody writes as him.
@@ -266,8 +275,9 @@ to build. The cost of the alternative is that filing a noticed becomes an admiss
 
 ## 6. Phases and gates
 
-Phase 1 ships behind a per-tenant feature flag (flags live in `companies.settings.features`, registered in
-`lib/featureFlags.ts`; enabling a pilot tenant is a single update).
+Phase 1 shipped behind a per-tenant feature flag; **that flag was retired 2026-08-24 and the module is core
+for every tenant**. There is no per-tenant switch any more, so scoping Phase 2 or 3 to a pilot means adding
+one back.
 
 Station selection is the only entrance ([§4.1](#41-one-door)), so one live defect in it became a prerequisite:
 **the station picker leaked archived machines because it did not filter `deleted_at`.**
@@ -284,7 +294,7 @@ Station selection is the only entrance ([§4.1](#41-one-door)), so one live defe
 
 | Phase | Scope | Gate |
 |---|---|---|
-| **1 — the logbook** | Everything in [§4](#4-what-it-is-phase-1), at one pilot shop | The bar in [§2](#2-hypothesis-and-kill-criterion) |
+| **1 — the logbook** | Everything in [§4](#4-what-it-is-phase-1). ⚠ Planned "at one pilot shop"; **shipped to every tenant** once the flag was retired 2026-08-24, which is what stopped the clock rather than a result arriving ([§9](#9-open-questions)). | The bar in [§2](#2-hypothesis-and-kill-criterion) |
 | **2 — standing procedures** | Design level only. Any good entry can be promoted to a standing procedure, **preserving the original author** — the person who knew the thing is the point. Completing a procedure writes an entry on the machine's timeline, so procedures do not become a parallel history. | **≥10 entries, ≥3 of them a repeatable how-to.** The count alone is not the gate: a procedure library is a distillation, and there is nothing to distil until entries repeat themselves. |
 | **3 — schedules** | Two trigger kinds: calendar interval, plus **usage** = good pieces through the machine since the last entry satisfying the procedure. No sensor, meter reading or integration is needed, because the machine record and the job record are the same record: good pieces are already recorded against an operation, and that operation already names its work center ([§7](#7-competitive-position)). | Phase 2 procedures exist **and ≥3 shops have answered whether they run a separate CMMS or track maintenance in their ERP.** Only one shop is reachable today, so this gate is blocked on access rather than engineering — and should stay blocked rather than be reinterpreted downward. |
 
@@ -356,9 +366,9 @@ resolves in favour of the guardrail ([§5](#5-what-it-is-not)); the module is ca
 a picker, the ceremony [§4.5](#45-zero-required-setup) refuses. Visible consequence: an operator who notices
 something on a machine that is not their selected station **changes station first**. Acceptable at this machine
 count; if it proves to be friction the answer is revisiting this question, **not reviving a code on the
-machine**. Built that way — rendered only when the flag is on **and** a station is set, and deliberately *not*
-on the list of routes that keep the nav visible before a station exists (unlike Inventory and My work). It can
-flip mid-session when a station is picked or cleared, so the bar reflows mid-shift.
+machine**. Built that way — rendered only when a station is set, and deliberately *not* on the list of routes
+that keep the nav visible before a station exists (unlike Inventory and My work). A station can be picked or
+cleared mid-session, so the bar reflows mid-shift; that is now the only thing that changes its shape.
 
 **Do machine details and manuals belong in Phase 1 at all, given nothing gates on them? Decided: both ship, and
 nothing ever prompts for either.** A manual an operator can open on the floor is worth having on day one;
@@ -377,10 +387,17 @@ seat that would invalidate the result.
 
 | Question | Recommendation |
 |---|---|
-| Retire the flag after the pilot, or keep it? | Retire, on the precedent [Shipments](shipments.md) set (gated during rollout, then made core and the key removed) — but only after a **second** shop clears the §2 bar, not the first. |
 | A machine's timeline when the machine is archived? | Entries survive and stay readable; the page stays reachable by direct link while dropping out of lists. Archiving hides a machine from pickers, not its knowledge, and **knowledge must not be destroyable as a side effect of tidying a list.** (The by-id detail read deliberately does not filter `deleted_at`; the manuals FK is `ON DELETE RESTRICT` to state the same rule.) |
 | Can someone other than the filer resolve a noticed item? | Yes, and that is most of the point — the resolving entry carries its own author, so both names survive and neither is counted. **The open part is notification:** there is no operator notification path today, so the original author finds out by reading the timeline. State that limit rather than designing around it. |
 | Does Phase 2 promotion leave the original entry on the timeline? | Yes, and mark it promoted. A log that loses rows stops being a log, and an unexplained near-duplicate is what makes people stop trusting one. |
+
+- **Withdrawn:** retire the flag on the [Shipments](shipments.md) precedent (gated during rollout, then made
+  core and the key removed) but **"only after a second shop clears the §2 bar, not the first"** — **that is
+  not what happened.** The flag was retired 2026-08-24 by product decision, with no shop having formally
+  cleared the bar. Mitigating, and the reason it was accepted: all three production companies already had it
+  on, so removal exposed the module to nobody new. What it cost is measurement, not exposure —
+  `machine_page_opened` ([§8](#8-measurement)) can no longer separate pilot shops from everyone else, so the
+  §2 clock stops at that date and the pass/kill call has to be made on the data collected up to it.
 
 ---
 
@@ -393,7 +410,6 @@ seat that would invalidate the result.
 | UI — 8 components (log panel, composer, reply composer, entry, open items, details, manuals sheet/manager) | `components/maintenance/` |
 | Access layer · `deriveOpenItems` · manuals | `utils/machineMaintenanceAccess.ts`, `utils/workCenterAttachmentsAccess.ts` |
 | Station `deleted_at` filters · `updateNoteBody` | `utils/operatorAccess.ts` |
-| Flag registry | `lib/featureFlags.ts` |
 | Schema — `notes.maintenance_kind`/`resolves_note_id`, machine detail columns, `work_center_attachments`, two funnel event kinds | `supabase/migrations/20260730015344_machine_maintenance.sql` |
 | Editable body + immutability guard (#628) | `supabase/migrations/20260801012019_notes_editable_body.sql` |
 
@@ -404,6 +420,6 @@ seat that would invalidate the result.
 `__tests__/components/maintenance/MachineOpenItems.test.tsx` — `describe('MachineOpenItems')`. ·
 `__tests__/components/maintenance/MachineDetailsCard.test.tsx` — `describe('MachineDetailsCard')`. ·
 `e2e/machine-maintenance.spec.ts` — `test.describe('Machine Maintenance')`. · Database subject/kind
-constraints: `api/tests/integration/test_note_views_rls.py`. The tab's flag-and-station gate is
+constraints: `api/tests/integration/test_note_views_rls.py`. The tab's station gate is
 *automation-pending ([#367](https://github.com/debola31/Jigged/issues/367))* at the layout level; the e2e spec
 covers it from the operator entrance.

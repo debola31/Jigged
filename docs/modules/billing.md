@@ -107,8 +107,9 @@ seeder are unaffected.
 > walking past a policy that does.** That is how the five location-stock RPCs shipped
 > with no entitlement check (#645), which made billing depend on a feature flag: a
 > lapsed shop with `inventory_locations` OFF was blocked (direct browser insert, gate
-> applies) and the same shop with it ON wrote freely. The second guard exists only
-> because of that blind spot —
+> applies) and the same shop with it ON wrote freely. (That flag has since been
+> removed and Storage is core; nothing about the blind spot changed with it.) The
+> second guard exists only because of that blind spot —
 > [`20260801150944_inventory_rpc_billing_write_gate.sql`](../../supabase/migrations/20260801150944_inventory_rpc_billing_write_gate.sql).
 >
 > A genuinely-exempt table (identity/bootstrap, or service-role-only) goes on the exempt

@@ -16,10 +16,9 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   refreshQuickBooksPoField: (...args: unknown[]) => mockRefreshPoField(...args),
 }));
 
-const mockFeatures = vi.fn();
-vi.mock('@/hooks/useCompanyFeatures', () => ({
-  useCompanyFeatures: () => ({ features: mockFeatures(), loading: false }),
-}));
+// No useCompanyFeatures mock: the card stopped reading feature flags when `quickbooks_desktop`
+// was retired (Aug 2026). Leaving an inert one here would keep "working" against a component that
+// never calls it.
 
 const mockGetDesktopStatus = vi.fn();
 const mockStartDesktopConnect = vi.hoisted(() => vi.fn());
@@ -56,9 +55,6 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     resetRouterMocks();
     mockGetStatus.mockResolvedValue(CONNECTED);
     mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
-    // QuickBooks Desktop is opt-in, so the option only renders for a tenant with
-    // the flag on. Default it on here; the test below covers the off case.
-    mockFeatures.mockReturnValue({ quickbooks_desktop: true });
     mockRefreshPoField.mockResolvedValue(NOT_FOUND);
   });
 
@@ -135,6 +131,14 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     expect(screen.queryByText(/Customer PO number/i)).not.toBeInTheDocument();
   });
 
+  /**
+   * Both providers, for every tenant, with no feature state set up anywhere in this file.
+   *
+   * Desktop used to sit behind the `quickbooks_desktop` flag, which was backend-enforced because
+   * Conductor bills $49/month per connected company file. The flag was retired Aug 2026 and the
+   * backend gate with it, so this now also covers the case the deleted "hides Desktop without the
+   * flag" test used to own: there is no tenant for whom the button is absent.
+   */
   it('offers both providers when nothing is connected', async () => {
     mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
     render(<QuickBooksIntegrationCard companyId="c1" />);
@@ -145,22 +149,6 @@ describe('QuickBooksIntegrationCard — customer PO field', () => {
     expect(
       screen.getByRole('button', { name: /Connect QuickBooks Desktop/i }),
     ).toBeInTheDocument();
-  });
-
-  it('hides QuickBooks Desktop for a tenant without the flag', async () => {
-    // The backend refuses /connect for a flag-off tenant, so showing the button
-    // would offer an action that can only fail. Conductor bills per connected
-    // company file, which is why the flag exists at all.
-    mockFeatures.mockReturnValue({});
-    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
-    render(<QuickBooksIntegrationCard companyId="c1" />);
-
-    expect(
-      await screen.findByRole('button', { name: /Connect QuickBooks Online/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /Connect QuickBooks Desktop/i }),
-    ).not.toBeInTheDocument();
   });
 
   it('does not offer to connect when the status check itself failed', async () => {
@@ -209,7 +197,6 @@ describe('QuickBooksIntegrationCard — connecting', () => {
       connected_at: null,
     });
     mockGetDesktopStatus.mockResolvedValue({ connected: false, linked: false });
-    mockFeatures.mockReturnValue({ quickbooks_desktop: true });
   });
 
   it('says it is creating the setup link while Desktop connect is in flight', async () => {

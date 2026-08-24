@@ -307,8 +307,9 @@ column" back — that split is the whole point of the removal.
 **Where Count Inventory went.** It sat on this toolbar, unconditionally, precisely because
 gating it on `inventory_locations` had once *removed* the entry point most people look for — the
 founder looked here and concluded place-scoped counting did not exist. Dropping the stock columns
-took the button with it, so that lesson had to be paid for a second way: `inventory_locations` is
-now **on by default**, which makes the Storage board a place every tenant actually has. Counting is
+took the button with it, so that lesson had to be paid for a second way: the `inventory_locations`
+flag was **removed entirely** (Aug 2026), which makes the Storage board a place every tenant
+actually has, not one a toggle can take away. Counting is
 reached from Storage, and from a part's own Inventory tab. `/inventory/count` itself is unchanged
 and still accepts `?from=`.
 

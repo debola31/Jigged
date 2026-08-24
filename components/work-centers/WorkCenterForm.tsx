@@ -19,7 +19,6 @@ import {
   checkWorkCenterNameExists,
 } from '@/utils/workCentersAccess';
 import { parseOptionalNumber } from '@/lib/validators';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 
 interface WorkCenterFormProps {
   mode: 'create' | 'edit';
@@ -44,9 +43,6 @@ export default function WorkCenterForm({
   const router = useRouter();
   const params = useParams();
   const companyId = companyIdProp || (params.companyId as string);
-
-  const { features } = useCompanyFeatures();
-  const maintenanceEnabled = Boolean(features.machine_maintenance);
 
   const [formData, setFormData] = useState<WorkCenterFormData>(initialData);
   const [loading, setLoading] = useState(false);
@@ -220,8 +216,13 @@ export default function WorkCenterForm({
         </CardContent>
       </Card>
 
-      {/* Machine details, for internal work centers only — an outside vendor's
-          process has no serial number.
+      {/* Machine details.
+
+          Withdrawn: "for internal work centers only — an outside vendor's process has no serial
+          number." True as intent, never true as code: this card was gated on the
+          `machine_maintenance` flag alone and never on `work_centers.kind`, and that column was
+          dropped in the vendor-services split. An outside process is a `vendor_services` row now,
+          so it does not reach this form at all and needs no condition here.
 
           EVERY FIELD IS OPTIONAL AND NOTHING VALIDATES THEM. There is no "you
           should fill this in", no completeness indicator, and no consequence for
@@ -234,68 +235,66 @@ export default function WorkCenterForm({
 
           It lives here, in the office, rather than on the floor: somebody with a
           spec sheet in front of them is doing paperwork on purpose. */}
-      {maintenanceEnabled && (
-        <Card elevation={2} sx={{ mt: 3 }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ mb: 0.5 }}>
-              Machine details
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              All optional. Nothing depends on them.
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Make"
-                  value={formData.make}
-                  onChange={handleTextChange('make')}
-                  disabled={loading}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Model"
-                  value={formData.model}
-                  onChange={handleTextChange('model')}
-                  disabled={loading}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Serial number"
-                  value={formData.serial_number}
-                  onChange={handleTextChange('serial_number')}
-                  disabled={loading}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Year"
-                  type="number"
-                  value={formData.year_built}
-                  onChange={handleTextChange('year_built')}
-                  disabled={loading}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Purchased"
-                  type="date"
-                  value={formData.purchased_on}
-                  onChange={handleTextChange('purchased_on')}
-                  disabled={loading}
-                  slotProps={{ inputLabel: { shrink: true } }}
-                />
-              </Grid>
+      <Card elevation={2} sx={{ mt: 3 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 0.5 }}>
+            Machine details
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            All optional. Nothing depends on them.
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Make"
+                value={formData.make}
+                onChange={handleTextChange('make')}
+                disabled={loading}
+              />
             </Grid>
-          </CardContent>
-        </Card>
-      )}
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Model"
+                value={formData.model}
+                onChange={handleTextChange('model')}
+                disabled={loading}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                fullWidth
+                label="Serial number"
+                value={formData.serial_number}
+                onChange={handleTextChange('serial_number')}
+                disabled={loading}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField
+                fullWidth
+                label="Year"
+                type="number"
+                value={formData.year_built}
+                onChange={handleTextChange('year_built')}
+                disabled={loading}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField
+                fullWidth
+                label="Purchased"
+                type="date"
+                value={formData.purchased_on}
+                onChange={handleTextChange('purchased_on')}
+                disabled={loading}
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
       <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
         <Button variant="outlined" onClick={handleCancel} disabled={loading}>

@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { useStationContext } from '@/components/operator/OperatorStationContext';
 import StationSelector from '@/components/operator/StationSelector';
 import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
@@ -30,20 +28,11 @@ import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
  */
 export default function OperatorMaintenancePage() {
   const params = useParams();
-  const router = useRouter();
   const companyId = params.companyId as string;
 
-  const { features, loading: flagsLoading } = useCompanyFeatures();
   const { stationId, stationName, initializing } = useStationContext();
-  const enabled = features.machine_maintenance;
 
-  // Bounce a company that hasn't opted in, matching the inventory-locations
-  // precedent. The tab is already hidden for them; this covers a stale link.
-  useEffect(() => {
-    if (!flagsLoading && !enabled) router.replace(`/operator/${companyId}/jobs`);
-  }, [flagsLoading, enabled, router, companyId]);
-
-  if (flagsLoading || !enabled || initializing) {
+  if (initializing) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
         <CircularProgress />

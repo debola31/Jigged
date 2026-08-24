@@ -837,9 +837,9 @@ export default function AdminCompaniesPage() {
           )}
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Toggles flip <code>companies.settings.features</code> for this
-            tenant. UI gates (Create Shipment, Reorder, etc.) read these on
-            mount — refresh the company dashboard after saving to pick up
-            the new state.
+            tenant. Every flag here is on by default and this is the kill-switch —
+            an unticked box writes an explicit <code>false</code>. Gated UI reads
+            these on mount, so refresh the company dashboard after saving.
           </Typography>
           <Divider sx={{ mb: 2 }} />
           <Stack spacing={2}>
@@ -883,9 +883,6 @@ export default function AdminCompaniesPage() {
                 )}
               </Box>
             ))}
-            {KNOWN_FEATURES.length === 0 && (
-              <Alert severity="info">No feature flags registered yet.</Alert>
-            )}
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

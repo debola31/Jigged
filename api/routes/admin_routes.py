@@ -164,8 +164,13 @@ async def list_companies(request: Request):
             # off switch for a feature the tenant can see. Must stay in step with
             # `defaultEnabled` in lib/featureFlags.ts — these are the two places that each carry
             # the default, and only the TS side has a test pinning them together.
+            #
+            # EVERY registered flag is currently opt-out, so every one of them needs a line here.
+            # A new flag missing from this list shows as an off toggle for a feature the tenant
+            # can plainly see, and ticking it then writes an explicit `true` that was already the
+            # effective state — silent, and confusing to whoever looks next.
             features.setdefault("ai_insights", True)
-            features.setdefault("inventory_locations", True)
+            features.setdefault("dashboard_revenue", True)
 
             ai_limits = settings.get("ai_limits") or {}
             raw_limit = ai_limits.get("chat_per_hour")
@@ -423,9 +428,14 @@ async def delete_company(request: Request, company_id: str):
 def _normalize_features(raw) -> dict[str, bool]:
     """Coerce settings.features to a flat {key: bool} dict.
 
-    Tolerates legacy strings like "true"/"false" the way isShipmentsEnabled
+    Tolerates legacy strings like "true"/"false" the way `readFeatureFlag`
     in lib/featureFlags.ts does, so the admin UI doesn't double-write
     those legacy entries silently as `false`.
+
+    Unknown keys pass through: there is no server-side allowlist, and the only thing that makes a
+    retired key harmless is `readCompanyFeatures` dropping anything absent from KNOWN_FEATURES on
+    read. Because the save is replace-style and the client seeds its draft from the registry, the
+    next save on a company also strips its stale keys — self-heal on touch, not a backfill.
     """
     if not isinstance(raw, dict):
         return {}
@@ -506,14 +516,12 @@ async def update_company_features(
             f"Updated company {company_id} features: {new_settings['features']}"
         )
 
-        # No backfill on flag-flip any more.
-        #
-        # This used to call `enable_location_tracking_for_company` when `inventory_locations` went
-        # from off to on, because tracking was a per-part opt-in that existing parts hadn't taken.
-        # 20260802015837 removed the opt-in: every part in every company has a balance row at that
-        # company's `Unassigned` bucket, flag or no flag, and the trigger keeps new ones that way.
-        # There is nothing left for a flip to catch up — which is the point of doing it at rest
-        # rather than at the moment somebody happens to toggle a switch.
+        # NO BACKFILL ON FLAG-FLIP, and no flag here should ever need one. A flag governs what a
+        # tenant SEES; if flipping one would leave rows needing repair, the schema change owed a
+        # migration and did not get one. This block used to call
+        # `enable_location_tracking_for_company` when `inventory_locations` went from off to on,
+        # because tracking was a per-part opt-in existing parts hadn't taken; 20260802015837
+        # removed the opt-in and 20260824* retired the flag itself.
 
         return CompanyFeaturesUpdateResponse(
             success=True,

@@ -22,7 +22,6 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import { getWorkCenterWithRelations, deleteWorkCenter } from '@/utils/workCentersAccess';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import { getVendorService } from '@/utils/vendorServicesAccess';
 import MachineLogPanel from '@/components/maintenance/MachineLogPanel';
 import MachineManualsManager from '@/components/maintenance/MachineManualsManager';
@@ -36,9 +35,6 @@ export default function WorkCenterDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  const { features } = useCompanyFeatures();
-  const maintenanceEnabled = Boolean(features.machine_maintenance);
 
   // useLoad keeps every setState inside the async callback, so the load effect
   // can't trip set-state-in-effect.
@@ -248,30 +244,30 @@ export default function WorkCenterDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Maintenance, for internal machines only — an outside vendor's process is
-          not a machine anyone stands at. Read-only by design: there is no
-          composer here, because the pilot's bar counts NON-FOUNDER authors and
-          the most convenient place to write must not be the one seat that would
-          invalidate the result. Manuals and machine details are the office's job;
-          the log is the floor's. */}
-      {maintenanceEnabled && (
-        <Card elevation={2} sx={{ mt: 3 }}>
-          <CardContent>
-            <Typography variant="h6" sx={{ mb: 2 }}>
-              Maintenance log
-            </Typography>
-            {/* Sub-labelled, because the card is titled "Maintenance log" and an
-                upload button is not a log entry. Two named things beat one
-                heading that covers only half of what sits under it. */}
-            <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
-              Manuals
-            </Typography>
-            <MachineManualsManager companyId={companyId} workCenterId={workCenterId} />
-            <Divider sx={{ my: 2 }} />
-            <MachineLogPanel workCenterId={workCenterId} companyId={companyId} readOnly />
-          </CardContent>
-        </Card>
-      )}
+      {/* Read-only by design: there is no composer here. Manuals and machine details are the
+          office's job; the log is the floor's, written at the machine by whoever is standing at it.
+
+          Withdrawn: "for internal machines only" — `work_centers.kind` was dropped in the
+          vendor-services split, and this card never checked it in the first place. Withdrawn: the
+          composer was omitted because the pilot's bar counted NON-FOUNDER authors and the most
+          convenient place to write must not be the seat that invalidated the result. The pilot is
+          over (the flag was retired Aug 2026); the office/floor split is why it stays read-only. */}
+      <Card elevation={2} sx={{ mt: 3 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Maintenance log
+          </Typography>
+          {/* Sub-labelled, because the card is titled "Maintenance log" and an
+              upload button is not a log entry. Two named things beat one
+              heading that covers only half of what sits under it. */}
+          <Typography variant="overline" color="text.secondary" sx={{ display: 'block' }}>
+            Manuals
+          </Typography>
+          <MachineManualsManager companyId={companyId} workCenterId={workCenterId} />
+          <Divider sx={{ my: 2 }} />
+          <MachineLogPanel workCenterId={workCenterId} companyId={companyId} readOnly />
+        </CardContent>
+      </Card>
 
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
         <DialogTitle>Delete Work Center?</DialogTitle>

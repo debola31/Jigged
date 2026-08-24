@@ -91,18 +91,18 @@ insert into public.companies (
   ('22222222-2222-2222-2222-222222222222', 'Vanguard Precision Works',
    '1420 Rand Drive', 'Detroit', 'MI', '48211', 'USA',
    '(313) 555-0142', 'shop@vanguardprecision.test', 'vanguardprecision.test',
-   -- Opt-in features are ON in dev + preview branches. A flag-gated feature that
-   -- no preview deployment can display is a feature nobody can review — the
-   -- reviewer sees an unchanged app and has to take the diff's word for it.
-   -- Seed is local/preview-only, never prod, so this widens nothing real.
+   -- NO `features` block, deliberately. Every registered flag is opt-OUT, so an absent block
+   -- means every feature is on — which is both what a real new company gets and what a preview
+   -- reviewer needs: a flag-gated feature no preview deployment can display is a feature nobody
+   -- can review. Writing explicit `true`s here would seed a shape production never produces.
+   -- If a future opt-IN flag lands, seed THAT key on and say why.
    --
    -- default_payment_terms is the shop-wide fallback used when a customer has
    -- no terms of their own. Seeded so both branches of the resolution chain are
    -- reachable by hand: quote Northwind (has its own terms) and the field
    -- credits the customer; quote Sierra Pump & Valve (has none) and it credits
    -- the shop default instead.
-   '{"features": {"machine_maintenance": true, "quickbooks_desktop": true},
-     "default_payment_terms": "2/10 Net 30"}'::jsonb)
+   '{"default_payment_terms": "2/10 Net 30"}'::jsonb)
 on conflict (id) do nothing;
 
 -- Billing cache: the grandfather backfill in the stripe_billing_cache migration
@@ -1447,16 +1447,11 @@ begin
                       'role', 'authenticated')::text,
     true);
 
-  update public.companies
-     set settings = jsonb_set(coalesce(settings, '{}'::jsonb),
-                              '{features,inventory_locations}', 'true')
-   where id = v_company;
-
-  -- No backfill needed any more. `enable_location_tracking_for_company` was dropped in
+  -- No flag write, and no backfill. `enable_location_tracking_for_company` was dropped in
   -- 20260802015837: every part is seeded into Unassigned by `seed_new_part_balance` the
-  -- moment it is inserted, for every company, flag or no flag. All this block needs is the
-  -- bucket's id — and note the flag write above now governs only whether this shop MANAGES
-  -- places, not whether its stock has one.
+  -- moment it is inserted, for every company. The `inventory_locations` flag that used to be
+  -- set here governed only whether a shop MANAGES places, never whether its stock had one, and
+  -- it was retired in Aug 2026. All this block needs is the bucket's id.
   v_unassigned := public.inv_get_or_create_unassigned(v_company);
 
   -- No is_stockable / is_qr_anchor: both were dropped in

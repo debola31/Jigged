@@ -1240,7 +1240,6 @@ export type Database = {
           updated_at: string | null
           vendor_service_id: string | null
           work_center_id: string | null
-          work_center_kind_snapshot: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -1264,7 +1263,6 @@ export type Database = {
           updated_at?: string | null
           vendor_service_id?: string | null
           work_center_id?: string | null
-          work_center_kind_snapshot?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -1288,7 +1286,6 @@ export type Database = {
           updated_at?: string | null
           vendor_service_id?: string | null
           work_center_id?: string | null
-          work_center_kind_snapshot?: string | null
         }
         Relationships: [
           {

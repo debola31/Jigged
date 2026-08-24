@@ -58,6 +58,7 @@ export interface ReviewSummary {
 const ENTITY_LABEL: Record<EntityType, string> = {
   parts: 'Parts',
   vendors: 'Vendors',
+  vendor_services: 'Vendor services',
   work_centers: 'Work centers',
   routings: 'Routing steps',
   bom: 'BOM lines',

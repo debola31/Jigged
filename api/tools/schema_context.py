@@ -195,7 +195,6 @@ SCHEMA_CONTEXT = """
 - routing_operation_id: UUID (FK -> routing_operations.id, nullable; the source row)
 - estimated_setup_minutes: NUMERIC(8,2) (default 0) -- MINUTES, not hours
 - estimated_run_minutes_per_unit: NUMERIC(8,4) (default 0) -- MINUTES per unit
-- work_center_kind_snapshot: TEXT ('internal'|'external', nullable) -- the kind as of cloning
 - labor_rate_snapshot: NUMERIC(10,2) (nullable) -- internal ops: the per-hour rate FROZEN at
   cloning. Use this, not work_centers.labor_rate, for anything historical.
 - external_unit_price_snapshot: NUMERIC(12,4) (nullable) -- external ops: price per unit, frozen

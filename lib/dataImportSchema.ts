@@ -37,6 +37,7 @@ export function fieldLabel(entity: EntityType, key: string): string {
 export const ENTITY_LABELS: Record<EntityType, string> = {
   parts: 'Parts',
   vendors: 'Vendors',
+  vendor_services: 'Vendor services',
   work_centers: 'Work centers',
   routings: 'Routings',
   bom: 'Bill of materials',
@@ -49,6 +50,7 @@ export const ENTITY_LABELS: Record<EntityType, string> = {
 export const ENTITY_IDENTITY_FIELD: Partial<Record<EntityType, string>> = {
   parts: 'part_name',
   vendors: 'name',
+  vendor_services: 'service_name',
   work_centers: 'name',
   customers: 'name',
 };
@@ -57,6 +59,7 @@ export const ENTITY_IDENTITY_FIELD: Partial<Record<EntityType, string>> = {
 export const KNOWN_ENTITIES: EntityType[] = [
   'parts',
   'vendors',
+  'vendor_services',
   'work_centers',
   'routings',
   'bom',
@@ -73,13 +76,24 @@ export const ENTITY_FIELDS: Partial<Record<EntityType, CanonicalField[]>> = {
     { key: 'reorder_point', label: 'Reorder point', required: false },
   ],
   vendors: [{ key: 'name', label: 'Vendor name', required: true }],
-  work_centers: [
-    { key: 'name', label: 'Work center name', required: true },
-    { key: 'vendor_name', label: 'Outside vendor (if outsourced)', required: false },
+  // In-house only. The `vendor_name` column is GONE: a work centre has no
+  // vendor, and leaving the field here is what let the wizard keep minting the
+  // concept the split removed.
+  work_centers: [{ key: 'name', label: 'Work center name', required: true }],
+  vendor_services: [
+    { key: 'vendor_name', label: 'Vendor', required: true },
+    { key: 'service_name', label: 'Service (e.g. Anodize)', required: true },
+    { key: 'unit_price', label: 'Price per piece', required: false },
+    { key: 'description', label: 'Notes for whoever ships it', required: false },
   ],
   routings: [
     { key: 'part_name', label: 'Part number / name', required: true },
-    { key: 'work_center_name', label: 'Work center', required: false },
+    { key: 'work_center_name', label: 'Work center or outside service', required: false },
+    // Optional, and only meaningful for an outside step. Two vendors may both
+    // offer "Anodize", so a bare name can be ambiguous — this is what
+    // disambiguates it. Absent, the importer resolves an in-house station first
+    // and only falls back to a service when exactly one matches.
+    { key: 'vendor_name', label: 'Vendor (for an outside step)', required: false },
   ],
   bom: [
     { key: 'parent_part_name', label: 'Assembly (parent part)', required: true },

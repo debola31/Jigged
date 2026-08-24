@@ -388,7 +388,7 @@ def test_operation_rates_are_frozen_beside_the_minutes(admin: Client, env: JobEn
         admin.table("job_operations")
         .select(
             "estimated_setup_minutes, estimated_run_minutes_per_unit, "
-            "work_center_kind_snapshot, labor_rate_snapshot, external_unit_price_snapshot"
+            "vendor_service_id, labor_rate_snapshot, external_unit_price_snapshot"
         )
         .eq("job_part_id", env.job_part_id)
         .execute()
@@ -397,7 +397,8 @@ def test_operation_rates_are_frozen_beside_the_minutes(admin: Client, env: JobEn
 
     assert len(ops) == 1
     op = ops[0]
-    assert op["work_center_kind_snapshot"] == "internal"
+    # An in-house op targets a work centre, so it carries no service.
+    assert op["vendor_service_id"] is None
     assert _num(op["labor_rate_snapshot"]) == Decimal("60.00")
     assert op["external_unit_price_snapshot"] is None
 

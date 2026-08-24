@@ -221,12 +221,15 @@ them?"*):
   **Parts are excluded on purpose:** a part needs a unit and a cost, so a missing part is answered
   by uploading the parts file, never by fabricating a stub. (Customers is listed auto-creatable but
   no `REFERENTIAL_LINKS` entry names customers as a parent, so nothing triggers it today.)
-- **Internal vs outsourced is a labelled guess.** `guessKind()` reads company/process-shaped names
-  ("PerformCoat of Michigan LLC", "…Plating") as outside shops and the dialog *says* it's a guess,
-  with a one-tap toggle — rather than a confidence score, which this audience over-trusts.
-- **The outsourced cascade.** The work-centers importer rejects `kind=external` unless a vendor of
-  that name exists, so marking one "outside shop" also creates the vendor. Safe by construction:
-  `WRITE_TIERS` puts vendors before work centers in tier 0 and `runImportPlan` posts sequentially.
+- **⚠ Withdrawn 2026-08-23 — the outsourced guess and its cascade.** `guessKind()` read
+  company/process-shaped names ("PerformCoat of Michigan LLC", "…Plating") as outside shops, the
+  dialog offered a one-tap In-house / Outside toggle, and confirming "outside" *also* minted a vendor
+  of the same name to satisfy the old `kind=external requires a vendor` rule.
+  **That cascade is how production ended up with 32 of 38 outsourced rows named after their own
+  vendor, character for character.** It guessed an entity from a string and then materialised both
+  halves from it, so the process never got a name of its own. All of it is deleted: the regex, the
+  toggle, the `kindable` link flag and the vendor auto-creation. An outsourced process imports as a
+  **vendor service**, which names its vendor explicitly — there is nothing left to guess.
 - It is an `EditOp` like every other fix — undoes as one unit, re-analyzes.
 
 **Identity renames cascade — the invariant that stops an *optional* fix creating a *blocking*
@@ -278,10 +281,11 @@ caveats), which is also where an action is flagged irreversible / requires-confi
 ## Ingestion write
 
 **Reuse the per-entity importers — do NOT build a second writer.** The existing execute routes
-(`parts_import_routes`, `vendors_import_routes`, `work_centers_import_routes`, `bom_import_routes`,
-`routings_import_routes`, customers in `import_routes`) already own field validation, conflict
-detection, per-entity business rules (procurement tiers, UoM resolution, external-work-center
-vendor resolution), 500-row batching (Vercel body limit) and RLS via the service-role client.
+(`parts_import_routes`, `vendors_import_routes`, `work_centers_import_routes`,
+`vendor_services_import_routes`, `bom_import_routes`, `routings_import_routes`, customers in
+`import_routes`) already own field validation, conflict
+detection, per-entity business rules (procurement tiers, UoM resolution, vendor-service
+resolution), 500-row batching (Vercel body limit) and RLS via the service-role client.
 Rebuilding that would duplicate hundreds of lines and drift.
 
 **Dependency order** (`WRITE_TIERS`, [lib/dataImportIngest.ts](../../lib/dataImportIngest.ts);

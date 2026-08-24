@@ -1,7 +1,7 @@
 # Vendor Services Module
 
 A **vendor service** is a process an outside vendor performs on your parts — anodize, heat treat,
-wire EDM. It is owned by the vendor that performs it. **Built; Phase 1 shipped.**
+wire EDM. It is owned by the vendor that performs it. **Built; in production.**
 Depends on [Vendors](vendors.md). Consumed by [Routings](routings.md) and [Jobs](jobs.md).
 
 > **This replaces "external work centers."** Until 2026-08-23 an outsourced process was a
@@ -114,6 +114,13 @@ applied since.
 | `seed_demo_data` | routes `kind='external'` template entries into `vendor_services` |
 | `reset_demo_company` | deletes `vendor_services` between `work_centers` and `vendors` |
 
+A follow-up migration then **dropped `job_operations.work_center_kind_snapshot`**. It froze a copy of
+a discriminator that no longer exists and is derivable from `vendor_service_id`, so keeping it was
+the same vestigial state this module removed everywhere else. The migration asserts every snapshot
+agrees with its target before dropping — if that raises, the column is still load-bearing for those
+rows and the answer is to fix them, not to relax the check. The two RATE snapshots stay: they are
+not derivable, and a later price change must never move a shipped job.
+
 `get_priceable_part_ids` and `compute_part_cost_explain` must move in lockstep — that parity is what
 the 2026-08-19 incident was about, and
 [`test_priceability_agreement.py`](../../api/tests/integration/test_priceability_agreement.py) is
@@ -143,16 +150,28 @@ routing or job reference. Every list/picker/count filters `deleted_at IS NULL`; 
 - `createVendorService` revives an archived namesake **belonging to the same vendor** on a `23505`;
   a live collision re-throws as a genuine duplicate.
 
+## Import
+
+Vendor services import as themselves, through
+[`vendor_services_import_routes.py`](../../api/routes/vendor_services_import_routes.py) →
+`/api/vendor-services/import/execute`. The CSV names `vendor_name`, `service_name`, and optionally
+`unit_price` and `description`. The upsert targets `(vendor_id, name)` — the table's own constraint —
+so a re-import updates in place and reviving an archived service works the same way it does
+everywhere else.
+
+`WRITE_TIERS` gives services their own tier behind vendors, because every row names a vendor that
+must already exist.
+
+**Routing steps that target a service** resolve by name, in this order: an explicit `vendor_name`
+column wins; then an in-house station of that name; then a service, *only if exactly one matches*.
+Several matches is an **error naming the vendors**, never a guess — the old lookup was a last-wins
+dict that silently routed a cost-bearing step into whichever vendor PostgREST returned last.
+
 ## Known gaps
 
-- **The importers still speak the old language.** The guided importer's Work Centers template carries
-  `kind` / `vendor_name`, `lib/dataImportLinks.ts` auto-creates a vendor named after the work centre
-  (which is what produced the 32-of-38 shape above), and `CreateMissingDialog` renders a literal
-  "Outside shop" toggle. Until that lands, **the import wizard is the last place a user can create
-  the concept this module removed.**
 - **32 of 38 migrated services are named after their own vendor.** The migration moved names
   verbatim — inventing a process name would be fabricating data the shop never entered. Renaming them
-  is a data-quality pass for the office.
+  is a data-quality pass for the office, and the Services card is where it happens.
 - **No E2E spec**, inherited from [Vendors](vendors.md).
 
 ## See also

@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
@@ -11,11 +10,9 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { ENTITY_LABELS } from '@/lib/dataImportSchema';
-import type { AutoCreateLink, CreateEntry, MissingParent, WorkCenterKind } from '@/lib/dataImportLinks';
+import type { AutoCreateLink, CreateEntry, MissingParent } from '@/lib/dataImportLinks';
 
 interface CreateMissingDialogProps {
   /** Mounted only when there's something to create, keyed by finding — so the suggestions
@@ -38,14 +35,10 @@ interface CreateMissingDialogProps {
  */
 export default function CreateMissingDialog({ link, missing, onClose, onConfirm }: CreateMissingDialogProps) {
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
-  const [kinds, setKinds] = useState<Record<string, WorkCenterKind>>(() =>
-    Object.fromEntries(missing.filter((m) => m.kind).map((m) => [m.name, m.kind as WorkCenterKind])),
-  );
 
   const parentLabel = ENTITY_LABELS[link.parentEntity].toLowerCase();
   const childLabel = ENTITY_LABELS[link.childEntity].toLowerCase();
   const chosen = useMemo(() => missing.filter((m) => !excluded.has(m.name)), [missing, excluded]);
-  const outsideCount = link.kindable ? chosen.filter((m) => kinds[m.name] === 'external').length : 0;
 
   const toggle = (name: string) =>
     setExcluded((prev) => {
@@ -55,8 +48,7 @@ export default function CreateMissingDialog({ link, missing, onClose, onConfirm 
       return next;
     });
 
-  const confirm = () =>
-    onConfirm(chosen.map((m) => ({ name: m.name, kind: link.kindable ? (kinds[m.name] ?? 'internal') : undefined })));
+  const confirm = () => onConfirm(chosen.map((m) => ({ name: m.name })));
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
@@ -68,13 +60,6 @@ export default function CreateMissingDialog({ link, missing, onClose, onConfirm 
           Your {childLabel} mention these {parentLabel}, but they aren&apos;t in the files you uploaded. We can add them as
           part of the import so everything connects.
         </Typography>
-
-        {link.kindable && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            We&apos;ve guessed which ones are outside shops from their names — please correct any we got wrong. Outside{' '}
-            {parentLabel} also get added as vendors.
-          </Alert>
-        )}
 
         <Stack divider={<Divider flexItem />}>
           {missing.map((m) => {
@@ -88,17 +73,6 @@ export default function CreateMissingDialog({ link, missing, onClose, onConfirm 
                     used by {m.refCount.toLocaleString()} {childLabel} row{m.refCount === 1 ? '' : 's'}
                   </Typography>
                 </Box>
-                {link.kindable && included && (
-                  <ToggleButtonGroup
-                    exclusive
-                    size="small"
-                    value={kinds[m.name] ?? 'internal'}
-                    onChange={(_, v: WorkCenterKind | null) => v && setKinds((k) => ({ ...k, [m.name]: v }))}
-                  >
-                    <ToggleButton value="internal">In-house</ToggleButton>
-                    <ToggleButton value="external">Outside shop</ToggleButton>
-                  </ToggleButtonGroup>
-                )}
               </Box>
             );
           })}
@@ -108,7 +82,7 @@ export default function CreateMissingDialog({ link, missing, onClose, onConfirm 
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           {chosen.length === 0
             ? 'Nothing selected'
-            : `Adding ${chosen.length} ${parentLabel}${outsideCount ? ` + ${outsideCount} vendor${outsideCount === 1 ? '' : 's'}` : ''}`}
+            : `Adding ${chosen.length} ${parentLabel}`}
         </Typography>
         <Button onClick={onClose}>Not now</Button>
         <Button variant="contained" onClick={confirm} disabled={chosen.length === 0}>

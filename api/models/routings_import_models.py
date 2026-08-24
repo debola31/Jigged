@@ -6,7 +6,8 @@ One CSV row per operation, grouped by part_name. The importer creates a
 
 Field set differs by work_center.kind:
   - kind='internal': uses setup_minutes, cycle_minutes_per_unit, labor_rate_override
-  - kind='external': uses external_unit_price, external_setup_cost
+  - an OUTSIDE step (vendor_service_id): uses external_unit_price, which is an
+    override — omitted, the step inherits the service's own price
 """
 
 from typing import Optional
@@ -44,7 +45,8 @@ class RoutingValidationError(BaseModel):
     error_type values:
       - "missing_part_name"
       - "invalid_setup_minutes", "invalid_cycle_minutes", "invalid_labor_rate"
-      - "invalid_external_unit_price", "invalid_external_setup_cost"
+      - "invalid_external_unit_price"
+      - "ambiguous_work_center_name": two vendors offer a service of that name
       - "internal_field_on_external", "external_field_on_internal":
         cost field set doesn't match work_center.kind
     """
@@ -153,12 +155,12 @@ ROUTING_SCHEMA = {
     "external_unit_price": {
         "type": "number",
         "required": False,
-        "description": "Flat price per output unit (used when work_center.kind='external')",
+        "description": "Price per piece for an OUTSIDE step, overriding the service's own price. Omit to inherit what the vendor charges.",
     },
-    "external_setup_cost": {
-        "type": "number",
+    "vendor_name": {
+        "type": "string",
         "required": False,
-        "description": "One-time per-job setup cost (used when work_center.kind='external')",
+        "description": "Which vendor performs an outside step. Only needed when two vendors offer a service of the same name.",
     },
     "instructions": {
         "type": "string",

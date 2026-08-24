@@ -107,7 +107,7 @@ class TestWorkCentersValidate:
         request = {
             "company_id": "co1",
             "mappings": {"Name": "name", "Kind": "kind", "Labor Rate": "labor_rate"},
-            "rows": [{"Name": "Mazak Lathe", "Kind": "internal", "Labor Rate": "135"}],
+            "rows": [{"Name": "Mazak Lathe", "Labor Rate": "135"}],
         }
         app.dependency_overrides[get_supabase] = create_override()
         r = await call_validate(request)
@@ -118,7 +118,13 @@ class TestWorkCentersValidate:
         assert data["valid_rows_count"] == 1
 
     @pytest.mark.unit
-    async def test_external_requires_vendor(self, test_client):
+    async def test_a_kind_column_is_rejected_not_ignored(self, test_client):
+        """A file written for the old two-kind model must be REFUSED.
+
+        Silently dropping the column would import an outsourced process as an
+        in-house station with nobody's name on it — a wrong row that looks
+        right, which is worse than a rejected one.
+        """
         request = {
             "company_id": "co1",
             "mappings": {"Name": "name", "Kind": "kind"},
@@ -130,38 +136,17 @@ class TestWorkCentersValidate:
         data = r.json()
         errors = [
             e for e in data["validation_errors"]
-            if e["error_type"] == "vendor_required_for_external"
+            if e["error_type"] == "kind_no_longer_supported"
         ]
         assert len(errors) == 1
+        assert "vendor service" in errors[0]["message"]
 
     @pytest.mark.unit
-    async def test_external_unknown_vendor(self, test_client):
+    async def test_a_vendor_column_is_rejected_not_ignored(self, test_client):
         request = {
             "company_id": "co1",
-            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
-            "rows": [
-                {"Name": "PerformCoat", "Kind": "external", "Vendor": "Nonexistent"},
-            ],
-        }
-        app.dependency_overrides[get_supabase] = create_override(
-            existing_vendors=[{"id": "v1", "name": "Other Vendor"}]
-        )
-        r = await call_validate(request)
-        app.dependency_overrides.clear()
-        data = r.json()
-        unknown = [
-            c for c in data["conflicts"] if c["conflict_type"] == "unknown_vendor"
-        ]
-        assert len(unknown) == 1
-
-    @pytest.mark.unit
-    async def test_internal_with_vendor_rejected(self, test_client):
-        request = {
-            "company_id": "co1",
-            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
-            "rows": [
-                {"Name": "Mill", "Kind": "internal", "Vendor": "Acme"},
-            ],
+            "mappings": {"Name": "name", "Vendor": "vendor_name"},
+            "rows": [{"Name": "PerformCoat", "Vendor": "Acme"}],
         }
         app.dependency_overrides[get_supabase] = create_override(
             existing_vendors=[{"id": "v1", "name": "Acme"}]
@@ -171,7 +156,7 @@ class TestWorkCentersValidate:
         data = r.json()
         errors = [
             e for e in data["validation_errors"]
-            if e["error_type"] == "vendor_forbidden_for_internal"
+            if e["error_type"] == "vendor_no_longer_supported"
         ]
         assert len(errors) == 1
 
@@ -195,35 +180,8 @@ class TestWorkCentersExecute:
         wc_inserts = [x for x in insert_log if x["table"] == "work_centers"]
         assert len(wc_inserts) == 1
         row = wc_inserts[0]["data"][0]
-        assert row["kind"] == "internal"
         assert row["labor_rate"] == 120.0
-        assert row["vendor_id"] is None
-
-    @pytest.mark.unit
-    async def test_execute_external_resolves_vendor(self, test_client):
-        insert_log = []
-        request = {
-            "company_id": "co1",
-            "mappings": {"Name": "name", "Kind": "kind", "Vendor": "vendor_name"},
-            "rows": [
-                {
-                    "Name": "PerformCoat",
-                    "Kind": "external",
-                    "Vendor": "Acme Coatings",
-                }
-            ],
-            "skip_conflicts": False,
-        }
-        app.dependency_overrides[get_supabase] = create_override(
-            existing_vendors=[{"id": "vendor-x", "name": "Acme Coatings"}],
-            insert_log=insert_log,
-        )
-        r = await test_client.post(
-            "/api/work-centers/import/execute", json=request
-        )
-        app.dependency_overrides.clear()
-        assert r.status_code == 200
-        wc_inserts = [x for x in insert_log if x["table"] == "work_centers"]
-        row = wc_inserts[0]["data"][0]
-        assert row["kind"] == "external"
-        assert row["vendor_id"] == "vendor-x"
+        # Neither column exists on work_centers any more, so writing either
+        # would be writing a column that is not there.
+        assert "kind" not in row
+        assert "vendor_id" not in row

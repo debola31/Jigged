@@ -79,9 +79,18 @@ class MockSupabaseTable:
 
 
 class MockSupabase:
-    def __init__(self, parts=None, work_centers=None, routings=None, ops=None, insert_log=None):
+    def __init__(
+        self,
+        parts=None,
+        work_centers=None,
+        vendor_services=None,
+        routings=None,
+        ops=None,
+        insert_log=None,
+    ):
         self._parts = parts or []
         self._wcs = work_centers or []
+        self._services = vendor_services or []
         self._routings = routings or []
         self._ops = ops or []
         self._insert_log = insert_log if insert_log is not None else []
@@ -92,6 +101,8 @@ class MockSupabase:
             return MockSupabaseTable(data=self._parts, on_insert=cb)
         if name == "work_centers":
             return MockSupabaseTable(data=self._wcs, on_insert=cb)
+        if name == "vendor_services":
+            return MockSupabaseTable(data=self._services, on_insert=cb)
         if name == "routings":
             return MockSupabaseTable(data=self._routings, on_insert=cb)
         if name == "routing_operations":
@@ -117,13 +128,31 @@ PARTS = [
     {"id": "p-2", "part_name": "PART002"},
 ]
 WCS_INTERNAL = [
-    {"id": "wc-mill", "name": "HURCO Mill", "kind": "internal"},
-]
-WCS_EXTERNAL = [
-    {"id": "wc-perform", "name": "PerformCoat", "kind": "external"},
+    {"id": "wc-mill", "name": "HURCO Mill", "deleted_at": None},
 ]
 WCS_MISC = [
-    {"id": "wc-misc", "name": "MISCELLANEOUS", "kind": "internal"},
+    {"id": "wc-misc", "name": "MISCELLANEOUS", "deleted_at": None},
+]
+# An outside step targets a SERVICE now, and the service names its vendor.
+SERVICES = [
+    {
+        "id": "vs-anodize",
+        "name": "Anodize",
+        "unit_price": 4.5,
+        "deleted_at": None,
+        "vendors": {"name": "PerformCoat"},
+    },
+]
+# Two vendors offering a service of the same name — the case the old last-wins
+# name lookup resolved silently, and wrongly.
+SERVICES_AMBIGUOUS = SERVICES + [
+    {
+        "id": "vs-anodize-2",
+        "name": "Anodize",
+        "unit_price": 6.0,
+        "deleted_at": None,
+        "vendors": {"name": "Great Lakes"},
+    },
 ]
 
 
@@ -271,7 +300,7 @@ class TestRoutingsExecute:
         assert op["labor_rate_override"] == 150.0
 
     @pytest.mark.unit
-    async def test_execute_external_uses_external_fields(self, test_client):
+    async def test_execute_outside_step_targets_the_service(self, test_client):
         insert_log = []
         request = {
             "company_id": "co1",
@@ -279,31 +308,74 @@ class TestRoutingsExecute:
                 "Part": "part_name",
                 "WC": "work_center_name",
                 "Ext Unit": "external_unit_price",
-                "Ext Setup": "external_setup_cost",
             },
-            "rows": [
-                {
-                    "Part": "PART001",
-                    "WC": "PerformCoat",
-                    "Ext Unit": "12.50",
-                    "Ext Setup": "75.00",
-                }
-            ],
+            "rows": [{"Part": "PART001", "WC": "Anodize", "Ext Unit": "12.50"}],
             "skip_conflicts": False,
         }
         app.dependency_overrides[get_supabase] = create_override(
-            parts=PARTS, work_centers=WCS_EXTERNAL, insert_log=insert_log
+            parts=PARTS, vendor_services=SERVICES, insert_log=insert_log
         )
         r = await test_client.post("/api/routings/import/execute", json=request)
         app.dependency_overrides.clear()
         assert r.status_code == 200
         op_inserts = [x for x in insert_log if x["table"] == "routing_operations"]
         op = op_inserts[0]["data"][0]
-        assert op["work_center_id"] == "wc-perform"
+        # Exactly one target, per routing_operations_exactly_one_target.
+        assert op["vendor_service_id"] == "vs-anodize"
+        assert op["work_center_id"] is None
         assert op["external_unit_price"] == 12.5
-        assert op["external_setup_cost"] == 75.0
-        assert "setup_minutes" not in op
-        assert "cycle_minutes_per_unit" not in op
+        # external_setup_cost was dropped in June 2026; the importer wrote it
+        # for another fourteen months (#549). It must not come back.
+        assert "external_setup_cost" not in op
+
+    @pytest.mark.unit
+    async def test_two_vendors_offering_one_service_is_an_error_not_a_guess(
+        self, test_client
+    ):
+        """The bug this replaces: a last-wins dict picked whichever row came
+        back last, routing a cost-bearing step into the wrong vendor's price
+        with no warning."""
+        request = {
+            "company_id": "co1",
+            "mappings": {"Part": "part_name", "WC": "work_center_name"},
+            "rows": [{"Part": "PART001", "WC": "Anodize"}],
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS, vendor_services=SERVICES_AMBIGUOUS
+        )
+        r = await call_validate(request)
+        app.dependency_overrides.clear()
+        data = r.json()
+        ambiguous = [
+            c
+            for c in data["conflicts"]
+            if c["conflict_type"] == "ambiguous_work_center_name"
+        ]
+        assert len(ambiguous) == 1
+        assert "PerformCoat" in ambiguous[0]["existing_value"]
+        assert "Great Lakes" in ambiguous[0]["existing_value"]
+
+    @pytest.mark.unit
+    async def test_vendor_name_disambiguates(self, test_client):
+        insert_log = []
+        request = {
+            "company_id": "co1",
+            "mappings": {
+                "Part": "part_name",
+                "WC": "work_center_name",
+                "Vendor": "vendor_name",
+            },
+            "rows": [{"Part": "PART001", "WC": "Anodize", "Vendor": "Great Lakes"}],
+            "skip_conflicts": False,
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS, vendor_services=SERVICES_AMBIGUOUS, insert_log=insert_log
+        )
+        r = await test_client.post("/api/routings/import/execute", json=request)
+        app.dependency_overrides.clear()
+        assert r.status_code == 200
+        op_inserts = [x for x in insert_log if x["table"] == "routing_operations"]
+        assert op_inserts[0]["data"][0]["vendor_service_id"] == "vs-anodize-2"
 
     @pytest.mark.unit
     async def test_reimport_upserts_existing_operation_no_500(self, test_client):

@@ -42,6 +42,7 @@ import { getVendorServicesForCompany } from '@/utils/vendorServicesAccess';
 import ExportCsvButton from '@/components/common/ExportCsvButton';
 import DeleteImpactDialog from '@/components/common/DeleteImpactDialog';
 import type { VendorWithPrimaryContact } from '@/types/vendor';
+import { formatVendorLocation } from '@/types/vendor';
 
 /**
  * A vendor row plus the one read-only signal the grid shows beside it.
@@ -278,12 +279,10 @@ export default function VendorsPage() {
       headerName: 'Location',
       width: 180,
       sortable: false,
-      valueGetter: (params) => {
-        const r = params.data;
-        if (!r) return '';
-        const parts = [r.city, r.state].filter(Boolean);
-        return parts.length > 0 ? parts.join(', ') : '—';
-      },
+      // The vendor's DEFAULT address, not a column on the vendor row — a
+      // vendor can have several now, and this cell answers "where is it",
+      // which is the default one's job.
+      valueGetter: (params) => formatVendorLocation(params.data?.default_address),
     },
     {
       field: 'updated_at',

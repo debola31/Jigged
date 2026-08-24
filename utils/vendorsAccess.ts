@@ -9,18 +9,14 @@ import { orIlikeValue } from '@/utils/searchFilter';
 // at the boundary. Narrowing this avoids the Record<string, unknown>
 // spread that defeats typed-mode column-name validation.
 type VendorInsert = Database['public']['Tables']['vendors']['Insert'];
-import type {
-  Vendor,
-  VendorFormData,
-  VendorWithPrimaryContact,
-} from '@/types/vendor';
+import type { Vendor, VendorFormData, VendorWithPrimaryContact, VendorAddress } from '@/types/vendor';
 import type {
   VendorContact,
   VendorContactFormData,
 } from '@/types/vendorContact';
 
 const VENDOR_COLUMNS =
-  'id, company_id, name, address_line1, address_line2, city, state, postal_code, country, created_at, updated_at';
+  'id, company_id, name, created_at, updated_at';
 
 const VENDOR_CONTACT_COLUMNS =
   'id, vendor_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
@@ -108,22 +104,44 @@ export async function getAllVendorsWithPrimaryContact(
 
   const vendorIds = vendors.map((v) => v.id);
 
-  const { data: contactRows, error: contactError } = await supabase
-    .from('vendor_contacts')
-    .select(VENDOR_CONTACT_COLUMNS)
-    .in('vendor_id', vendorIds)
-    .eq('is_primary', true);
+  // Two batched lookups, not one per row: the primary contact and the default
+  // address. Both are `.in()` over the page's vendor ids, which is what keeps
+  // this a constant number of queries however many vendors a shop has.
+  const [
+    { data: contactRows, error: contactError },
+    { data: addressRows, error: addressError },
+  ] = await Promise.all([
+    supabase
+      .from('vendor_contacts')
+      .select(VENDOR_CONTACT_COLUMNS)
+      .in('vendor_id', vendorIds)
+      .eq('is_primary', true),
+    supabase
+      .from('vendor_addresses')
+      .select(
+        'id, vendor_id, address_line1, address_line2, city, state, postal_code, country, attention_to, is_default',
+      )
+      .in('vendor_id', vendorIds)
+      .eq('is_default', true),
+  ]);
 
   if (contactError) throw contactError;
+  if (addressError) throw addressError;
 
   const primaryByVendor = new Map<string, VendorContact>();
   for (const c of (contactRows || []) as VendorContact[]) {
     primaryByVendor.set(c.vendor_id, c);
   }
 
+  const addressByVendor = new Map<string, VendorAddress>();
+  for (const a of (addressRows || []) as VendorAddress[]) {
+    addressByVendor.set(a.vendor_id, a);
+  }
+
   return vendors.map((v) => ({
     ...v,
     primary_contact: primaryByVendor.get(v.id) || null,
+    default_address: addressByVendor.get(v.id) || null,
   }));
 }
 
@@ -195,16 +213,9 @@ export async function checkVendorNameExists(
 }
 
 function formDataToInsert(formData: VendorFormData): Omit<VendorInsert, 'company_id'> {
-  const trimmed = (s: string) => (s.trim() === '' ? null : s.trim());
-  return {
-    name: formData.name.trim(),
-    address_line1: trimmed(formData.address_line1),
-    address_line2: trimmed(formData.address_line2),
-    city: trimmed(formData.city),
-    state: trimmed(formData.state),
-    postal_code: trimmed(formData.postal_code),
-    country: trimmed(formData.country) || 'USA',
-  };
+  // Name only. A vendor row carries no address any more — those are
+  // vendor_addresses rows, added from the vendor page.
+  return { name: formData.name.trim() };
 }
 
 /**

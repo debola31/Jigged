@@ -31,9 +31,7 @@ import {
   updateVendor,
   checkVendorNameExists,
 } from '@/utils/vendorsAccess';
-import { isValidEmail, isValidPhone, isValidPostalCode } from '@/lib/validators';
-import CountrySelect from '@/components/common/CountrySelect';
-import StateSelect from '@/components/common/StateSelect';
+import { isValidEmail, isValidPhone } from '@/lib/validators';
 
 interface VendorFormProps {
   mode: 'create' | 'edit';
@@ -109,13 +107,6 @@ export default function VendorForm({
 
     if (!formData.name.trim()) {
       errors.name = 'Vendor name is required';
-    }
-
-    if (
-      formData.postal_code.trim() &&
-      !isValidPostalCode(formData.country, formData.postal_code)
-    ) {
-      errors.postal_code = 'Invalid postal code for this country';
     }
 
     if (formData.name.trim() && !errors.name) {
@@ -256,70 +247,10 @@ export default function VendorForm({
         </CardContent>
       </Card>
 
-      {/* Address */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
-            Address
-          </Typography>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                fullWidth
-                label="Address Line 1"
-                value={formData.address_line1}
-                onChange={handleChange('address_line1')}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                fullWidth
-                label="Address Line 2"
-                value={formData.address_line2}
-                onChange={handleChange('address_line2')}
-                disabled={loading}
-                placeholder="Suite, unit, etc."
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="City"
-                value={formData.city}
-                onChange={handleChange('city')}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <StateSelect
-                value={formData.state}
-                onChange={(v) => setFormData((prev) => ({ ...prev, state: v }))}
-                country={formData.country}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Postal Code"
-                value={formData.postal_code}
-                onChange={handleChange('postal_code')}
-                error={!!fieldErrors.postal_code}
-                helperText={fieldErrors.postal_code}
-                disabled={loading}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <CountrySelect
-                value={formData.country}
-                onChange={(v) => setFormData((prev) => ({ ...prev, country: v }))}
-                disabled={loading}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+      {/* The Address card is GONE. A vendor's addresses are vendor_addresses
+          rows now, added from the Addresses card on the vendor page — which is
+          also the only place a SECOND one could ever be added, so putting the
+          first one here would have taught the wrong shape. */}
 
       {/* Initial contact — create mode only. Defaults to expanded so the
           field is visible without a click; can be collapsed if the user

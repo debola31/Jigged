@@ -52,10 +52,21 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - name: TEXT (unique per company)
-- contact_name: TEXT, contact_email: TEXT, contact_phone: TEXT
+- deleted_at: TIMESTAMPTZ (archive marker -- filter `deleted_at IS NULL` on lists)
+- created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
+- NOTE: a vendor row is IDENTITY ONLY. There are no contact_* columns (dropped
+  20260504), no notes column, and no address columns (dropped 20260824).
+  Contacts are vendor_contacts, addresses are vendor_addresses, services are
+  vendor_services -- each 1-to-many, so a vendor is not limited to one of any.
+
+### vendor_addresses (a vendor's postal addresses, 1-to-many)
+- id: UUID (PK)
+- vendor_id: UUID (FK -> vendors.id) -- NO company_id; scope through the vendor
 - address_line1: TEXT, address_line2: TEXT
 - city: TEXT, state: TEXT, postal_code: TEXT, country: TEXT
-- notes: TEXT
+- attention_to: TEXT (the ATTN: line)
+- is_default: BOOLEAN -- at most one true per vendor. ONE flag, not the
+  default_billing/default_shipping pair customer_addresses carries.
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: vendors do NOT carry capability flags. Whether a vendor supplies
   materials vs. performs outside ops is derived from references:
@@ -332,6 +343,7 @@ SCHEMA_CONTEXT = """
 - routing_operations.routing_id -> routings.id
 - routing_operations.work_center_id -> work_centers.id
 - vendor_services.vendor_id -> vendors.id
+- vendor_addresses.vendor_id -> vendors.id
 - routing_operations.vendor_service_id -> vendor_services.id
 - job_operations.vendor_service_id -> vendor_services.id
 - parts.preferred_vendor_id -> vendors.id
@@ -450,6 +462,7 @@ ALLOWED_TABLES = frozenset({
     "job_materials",
     "work_centers",
     "vendor_services",
+    "vendor_addresses",
     "routings",
     "routing_operations",
     "inventory_transactions",

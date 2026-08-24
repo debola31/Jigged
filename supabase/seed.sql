@@ -186,14 +186,27 @@ insert into public.system_admins (id, user_id, created_by) values
    '11111111-1111-1111-1111-111111111117')
 on conflict do nothing;
 
--- ── Vendors (+ one contact each) ─────────────────────────────────────────────
-insert into public.vendors (id, company_id, name, city, state, country) values
-  ('30000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Atlas Metals Supply','Cleveland','OH','USA'),
-  ('30000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','FastenRight Hardware','Rockford','IL','USA'),
-  ('30000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','ProFinish Coatings','Detroit','MI','USA'),
-  ('30000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Precision Bearings Co','Charlotte','NC','USA'),
-  ('30000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','VoltEdge Electronics','Austin','TX','USA')
+-- ── Vendors (+ one address and one contact each) ─────────────────────────────
+insert into public.vendors (id, company_id, name) values
+  ('30000000-0000-0000-0000-000000000001','22222222-2222-2222-2222-222222222222','Atlas Metals Supply'),
+  ('30000000-0000-0000-0000-000000000002','22222222-2222-2222-2222-222222222222','FastenRight Hardware'),
+  ('30000000-0000-0000-0000-000000000003','22222222-2222-2222-2222-222222222222','ProFinish Coatings'),
+  ('30000000-0000-0000-0000-000000000004','22222222-2222-2222-2222-222222222222','Precision Bearings Co'),
+  ('30000000-0000-0000-0000-000000000005','22222222-2222-2222-2222-222222222222','VoltEdge Electronics')
 on conflict (id) do nothing;
+
+-- Addresses live in their own table now, so a vendor is not limited to one.
+-- ProFinish gets TWO on purpose: the multi-address case is the whole reason the
+-- table exists, and a seed where every vendor has exactly one would never
+-- exercise it.
+insert into public.vendor_addresses (vendor_id, address_line1, city, state, country, attention_to, is_default) values
+  ('30000000-0000-0000-0000-000000000001','1400 Foundry Rd','Cleveland','OH','USA',null,true),
+  ('30000000-0000-0000-0000-000000000002','88 Fastener Way','Rockford','IL','USA',null,true),
+  ('30000000-0000-0000-0000-000000000003','2200 Anodize Dr','Detroit','MI','USA','Receiving',true),
+  ('30000000-0000-0000-0000-000000000003','515 Remit Center','Southfield','MI','USA','Accounts Receivable',false),
+  ('30000000-0000-0000-0000-000000000004','9 Bearing Ct','Charlotte','NC','USA',null,true),
+  ('30000000-0000-0000-0000-000000000005','77 Voltage Blvd','Austin','TX','USA',null,true)
+on conflict do nothing;
 
 insert into public.vendor_contacts (vendor_id, name, role, email, phone, is_primary) values
   ('30000000-0000-0000-0000-000000000001','Atlas Sales','sales','sales@atlas.example','555-0100',true),

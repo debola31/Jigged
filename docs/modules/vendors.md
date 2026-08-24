@@ -10,7 +10,15 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 
 ## Data model
 
-**`vendors`** — `id` (uuid PK), `company_id`, `name` (required), `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` (defaults `'USA'`), `created_at`, `updated_at`, `deleted_at`. Unique `vendors_unique_per_company (company_id, name)`, kept FULL not partial — name is the identity the CSV importer upserts on, so re-import is idempotent and a re-create revives rather than duplicates.
+**`vendors`** — `id` (uuid PK), `company_id`, `name` (required), `created_at`, `updated_at`, `deleted_at`. Unique `vendors_unique_per_company (company_id, name)`, kept FULL not partial — name is the identity the CSV importer upserts on, so re-import is idempotent and a re-create revives rather than duplicates.
+
+> **⚠ The six address columns are gone (2026-08-24).** `address_line1`…`country` sat on this row, so a vendor had exactly one address and a plater with two plants had nowhere to say so. They moved to **`vendor_addresses`**, backfilled one row per vendor that had any address data, marked default. A vendor row is identity only now: contacts, addresses and services are each their own 1-to-many table.
+
+**`vendor_addresses`** — 1-to-many with `vendors`, `ON DELETE CASCADE`: `id`, `vendor_id`, `address_line1`, `address_line2`, `city`, `state`, `postal_code`, `country` (defaults `'USA'`), `attention_to`, `is_default`, timestamps. `idx_vendor_addresses_one_default` is a partial unique index on `vendor_id WHERE is_default`, so at most one default per vendor is **enforced** rather than promised — the lesson of [20260802013846](../../supabase/migrations/20260802013846_customer_address_default_uniqueness.sql), where `customer_addresses`' comments cited two indexes that had never existed.
+
+**One `is_default`, not the `default_billing` / `default_shipping` pair customers carry.** For a customer an invoice and a pallet genuinely go to different places; the vendor equivalent would be "where we send parts" vs "where we send payment", and nothing in the product distinguishes those today. Two flags nothing reads is two flags nobody keeps true.
+
+Addresses are **hard-deleted, not archived**, matching `customer_addresses` and `vendor_contacts`. That is the archive-vs-delete test in [architecture.md §16](../architecture.md) applied, not an exception to it: nothing stores a `vendor_address_id`, so there is no retained reference to keep resolving. Deleting the default promotes the oldest survivor — a vendor with addresses and no default is a state the UI has no reading of.
 
 **`vendor_contacts`** — 1-to-many with `vendors`, `ON DELETE CASCADE`: `id`, `vendor_id`, `name` (required), `role`, `role_label`, `email`, `phone`, `is_primary`, `created_at`, `updated_at`.
 

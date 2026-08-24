@@ -3507,6 +3507,59 @@ export type Database = {
           },
         ]
       }
+      vendor_addresses: {
+        Row: {
+          address_line1: string | null
+          address_line2: string | null
+          attention_to: string | null
+          city: string | null
+          country: string | null
+          created_at: string
+          id: string
+          is_default: boolean
+          postal_code: string | null
+          state: string | null
+          updated_at: string
+          vendor_id: string
+        }
+        Insert: {
+          address_line1?: string | null
+          address_line2?: string | null
+          attention_to?: string | null
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          postal_code?: string | null
+          state?: string | null
+          updated_at?: string
+          vendor_id: string
+        }
+        Update: {
+          address_line1?: string | null
+          address_line2?: string | null
+          attention_to?: string | null
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          postal_code?: string | null
+          state?: string | null
+          updated_at?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_addresses_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_contacts: {
         Row: {
           created_at: string
@@ -3607,45 +3660,27 @@ export type Database = {
       }
       vendors: {
         Row: {
-          address_line1: string | null
-          address_line2: string | null
-          city: string | null
           company_id: string
-          country: string | null
           created_at: string
           deleted_at: string | null
           id: string
           name: string
-          postal_code: string | null
-          state: string | null
           updated_at: string
         }
         Insert: {
-          address_line1?: string | null
-          address_line2?: string | null
-          city?: string | null
           company_id: string
-          country?: string | null
           created_at?: string
           deleted_at?: string | null
           id?: string
           name: string
-          postal_code?: string | null
-          state?: string | null
           updated_at?: string
         }
         Update: {
-          address_line1?: string | null
-          address_line2?: string | null
-          city?: string | null
           company_id?: string
-          country?: string | null
           created_at?: string
           deleted_at?: string | null
           id?: string
           name?: string
-          postal_code?: string | null
-          state?: string | null
           updated_at?: string
         }
         Relationships: [

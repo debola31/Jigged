@@ -30,11 +30,19 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
 import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import NextLink from 'next/link';
 import MuiLink from '@mui/material/Link';
 
 import { getVendorServicesForVendor } from '@/utils/vendorServicesAccess';
+import {
+  getAddressesForVendor,
+  deleteVendorAddress,
+  setDefaultVendorAddress,
+} from '@/utils/vendorAddressesAccess';
+import VendorAddressForm from '@/components/vendors/VendorAddressForm';
+import type { VendorAddress } from '@/types/vendor';
 import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import VendorServicesCard from '@/components/vendors/VendorServicesCard';
 import type { OutsideOperation } from '@/types/operator';
@@ -65,6 +73,7 @@ const EMPTY_CONTACTS: VendorContact[] = [];
 const EMPTY_PARTS: LinkedPart[] = [];
 const EMPTY_SERVICES: VendorService[] = [];
 const EMPTY_OUTSIDE: OutsideOperation[] = [];
+const EMPTY_ADDRESSES: VendorAddress[] = [];
 
 /**
  * One read-only row in the vendor's Open jobs card.
@@ -143,6 +152,18 @@ function OutsideJobRow({
   );
 }
 
+function formatAddressLines(a: VendorAddress): string {
+  const parts = [
+    a.address_line1,
+    a.address_line2,
+    [a.city, a.state, a.postal_code].filter(Boolean).join(', ').trim(),
+    // The country line is noise on a domestic address, and every row defaults
+    // to USA — so it prints only when it is NOT the default.
+    a.country && a.country.toUpperCase() !== 'USA' ? a.country : null,
+  ].filter((p) => p && p.toString().trim().length > 0);
+  return parts.length > 0 ? parts.join('\n') : '—';
+}
+
 export default function VendorDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -164,6 +185,12 @@ export default function VendorDetailPage() {
   // wording can include the contact's name without needing extra state.
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null);
 
+  // Address card: the inline form's open/edit state, and a per-row delete
+  // confirmation keyed by id so the prompt can name what it is removing.
+  const [addressFormOpen, setAddressFormOpen] = useState(false);
+  const [editingAddress, setEditingAddress] = useState<VendorAddress | undefined>(undefined);
+  const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null);
+
   // Load the vendor, then (only if it exists) its linked parts, work centers,
   // and contacts in parallel. useLoad keeps every setState inside the async
   // callback, so the load effect can't trip set-state-in-effect.
@@ -181,14 +208,16 @@ export default function VendorDetailPage() {
           parts: EMPTY_PARTS,
           services: EMPTY_SERVICES,
           contacts: EMPTY_CONTACTS,
+          addresses: EMPTY_ADDRESSES,
           outside: EMPTY_OUTSIDE,
           daysOut: [] as (readonly [string, number])[],
         };
       }
-      const [parts, services, contacts, allOutside] = await Promise.all([
+      const [parts, services, contacts, addresses, allOutside] = await Promise.all([
         getPartsByPreferredVendor(vendorId),
         getVendorServicesForVendor(vendorId),
         getContactsForVendor(vendorId),
+        getAddressesForVendor(vendorId),
         // One company-wide read, filtered here. It returns only OPEN outside ops
         // (pending + sent) — tens of rows for a shop, cheaper than a per-vendor
         // aggregate, and the same call the Jobs list already makes for its
@@ -206,7 +235,7 @@ export default function VendorDetailPage() {
           (o) =>
             [o.id, Math.floor((now - new Date(o.sent_at as string).getTime()) / 86_400_000)] as const,
         );
-      return { vendor: v, parts, services, contacts, outside, daysOut };
+      return { vendor: v, parts, services, contacts, addresses, outside, daysOut };
     },
     [vendorId],
     {
@@ -218,6 +247,7 @@ export default function VendorDetailPage() {
   const contacts = data?.contacts ?? EMPTY_CONTACTS;
   const linkedParts = data?.parts ?? EMPTY_PARTS;
   const services = data?.services ?? EMPTY_SERVICES;
+  const addresses = data?.addresses ?? EMPTY_ADDRESSES;
   const outsideOps = data?.outside ?? EMPTY_OUTSIDE;
   const daysOutById = useMemo(() => new Map(data?.daysOut ?? []), [data?.daysOut]);
 
@@ -269,6 +299,32 @@ export default function VendorDetailPage() {
     }
   };
 
+  const handleSetDefaultAddress = async (addressId: string) => {
+    setActionLoading(true);
+    try {
+      await setDefaultVendorAddress(addressId, vendorId);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set the default address');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAddress = async () => {
+    if (!deleteAddressId) return;
+    setActionLoading(true);
+    try {
+      await deleteVendorAddress(deleteAddressId, vendorId);
+      setDeleteAddressId(null);
+      await fetchAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete the address');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleSetPrimary = async (contactId: string) => {
     setActionLoading(true);
     try {
@@ -286,17 +342,6 @@ export default function VendorDetailPage() {
   const formatDate = (dateStr: string | null): string => {
     if (!dateStr) return '—';
     return new Date(dateStr).toLocaleString();
-  };
-
-  const formatAddress = (): string => {
-    if (!vendor) return '—';
-    const parts = [
-      vendor.address_line1,
-      vendor.address_line2,
-      [vendor.city, vendor.state, vendor.postal_code].filter(Boolean).join(', '),
-      vendor.country && vendor.country !== 'USA' ? vendor.country : null,
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join('\n') : '—';
   };
 
   if (loading) {
@@ -602,16 +647,136 @@ export default function VendorDetailPage() {
         </Grid>
 
         {/* Address card */}
+        {/* Addresses, plural. A vendor used to carry exactly one, in six
+            columns on its own row — so a plater with two plants, or a remit-to
+            that differs from the dock you ship parts to, had nowhere to say so.
+            Mirrors the Customers card, including the inline form. */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                Address
-              </Typography>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 2,
+                  flexWrap: 'wrap',
+                  mb: 1,
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                  Addresses ({addresses.length})
+                </Typography>
+                {!addressFormOpen && (
+                  <Button
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => {
+                      setEditingAddress(undefined);
+                      setAddressFormOpen(true);
+                    }}
+                  >
+                    Add Address
+                  </Button>
+                )}
+              </Box>
               <Divider sx={{ mb: 2 }} />
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                {formatAddress()}
-              </Typography>
+
+              {addressFormOpen ? (
+                <VendorAddressForm
+                  vendorId={vendorId}
+                  existing={editingAddress}
+                  isFirst={addresses.length === 0}
+                  onSaved={async () => {
+                    setAddressFormOpen(false);
+                    setEditingAddress(undefined);
+                    await fetchAll();
+                  }}
+                  onCancel={() => {
+                    setAddressFormOpen(false);
+                    setEditingAddress(undefined);
+                  }}
+                />
+              ) : addresses.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No addresses yet.
+                </Typography>
+              ) : (
+                <List dense disablePadding>
+                  {addresses.map((addr) => (
+                    <ListItem
+                      key={addr.id}
+                      disableGutters
+                      alignItems="flex-start"
+                      secondaryAction={
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                          {!addr.is_default && (
+                            <Tooltip title="Make default">
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleSetDefaultAddress(addr.id)}
+                                  disabled={actionLoading}
+                                >
+                                  <StarBorderIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
+                          <Tooltip title="Edit address">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={() => {
+                                  setEditingAddress(addr);
+                                  setAddressFormOpen(true);
+                                }}
+                                disabled={actionLoading}
+                              >
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip title="Delete address">
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => setDeleteAddressId(addr.id)}
+                                disabled={actionLoading}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Box>
+                      }
+                    >
+                      <ListItemText
+                        primary={
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {addr.is_default && (
+                              <StarIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                            )}
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {addr.attention_to || (addr.is_default ? 'Default' : 'Address')}
+                            </Typography>
+                          </Box>
+                        }
+                        secondary={
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ whiteSpace: 'pre-line' }}
+                          >
+                            {formatAddressLines(addr)}
+                          </Typography>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -733,6 +898,38 @@ export default function VendorDetailPage() {
       />
 
       {/* Per-contact delete confirmation */}
+      {/* Addresses are HARD-deleted, not archived, and the copy says "cannot be
+          undone" honestly. Nothing stores a vendor_address_id, so there is no
+          historical document to keep resolving — the same reasoning that has
+          customer_addresses and vendor_contacts deleted rather than archived. */}
+      <Dialog
+        open={deleteAddressId !== null}
+        onClose={() => !actionLoading && setDeleteAddressId(null)}
+      >
+        <DialogTitle>Delete Address?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            This address will be removed from {vendor.name}. This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAddressId(null)} disabled={actionLoading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteAddress}
+            color="error"
+            variant="contained"
+            disabled={actionLoading}
+            startIcon={
+              actionLoading ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />
+            }
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog
         open={deleteContactId !== null}
         onClose={() => !actionLoading && setDeleteContactId(null)}

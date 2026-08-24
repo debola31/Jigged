@@ -47,8 +47,12 @@ import { getOutsideOpsForCompany } from '@/utils/operatorAccess';
 import VendorServicesCard from '@/components/vendors/VendorServicesCard';
 import type { OutsideOperation } from '@/types/operator';
 import type { VendorService } from '@/types/vendorService';
+import InlineNameEditor from '@/components/common/InlineNameEditor';
+import type { SaveState } from '@/components/common/SaveStatus';
 import {
   getVendor,
+  updateVendor,
+  checkVendorNameExists,
   deleteVendor,
   getPartsByPreferredVendor,
 } from '@/utils/vendorsAccess';
@@ -191,6 +195,11 @@ export default function VendorDetailPage() {
   const [editingAddress, setEditingAddress] = useState<VendorAddress | undefined>(undefined);
   const [deleteAddressId, setDeleteAddressId] = useState<string | null>(null);
 
+  // Inline rename. The DRAFT lives in the editor, seeded from the saved name
+  // each time it opens — the page only needs the error and the save state.
+  const [nameError, setNameError] = useState<string | undefined>(undefined);
+  const [nameSaveState, setNameSaveState] = useState<SaveState>('idle');
+
   // Load the vendor, then (only if it exists) its linked parts, work centers,
   // and contacts in parallel. useLoad keeps every setState inside the async
   // callback, so the load effect can't trip set-state-in-effect.
@@ -299,6 +308,58 @@ export default function VendorDetailPage() {
     }
   };
 
+  /**
+   * Commit a rename.
+   *
+   * Uniqueness is checked BEFORE the write, and the three outcomes are
+   * deliberately different — matching the customer header:
+   *   unique      -> write
+   *   duplicate   -> field error, no write, the typed value stays put
+   *   check THREW -> "couldn't check", no write
+   * That last one is the CLAUDE.md rule: a failed check is never a definitive
+   * negative, so a dropped request must not be reported as "that name is taken".
+   */
+  const persistName = async (next: string): Promise<boolean> => {
+    if (!vendor) return false;
+
+    // Unchanged is a successful no-op: the editor should close, and writing
+    // would bump updated_at for nothing.
+    if (next === vendor.name) {
+      setNameSaveState('idle');
+      return true;
+    }
+    if (!next) {
+      setNameError('Vendor name is required');
+      setNameSaveState('error');
+      return false;
+    }
+
+    try {
+      if (await checkVendorNameExists(companyId, next, vendor.id)) {
+        setNameError('A vendor with this name already exists');
+        setNameSaveState('error');
+        return false;
+      }
+    } catch {
+      setNameError('Could not check the name — try again');
+      setNameSaveState('error');
+      return false;
+    }
+
+    setNameSaveState('saving');
+    try {
+      await updateVendor(vendor.id, { name: next });
+      setNameError(undefined);
+      setNameSaveState('saved');
+      await fetchAll();
+      return true;
+    } catch (err) {
+      setNameSaveState('error');
+      setError(err instanceof Error ? err.message : 'Failed to rename the vendor');
+      return false;
+    }
+  };
+
   const handleSetDefaultAddress = async (addressId: string) => {
     setActionLoading(true);
     try {
@@ -398,15 +459,10 @@ export default function VendorDetailPage() {
         </Button>
 
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Button
-            variant="outlined"
-            startIcon={<EditIcon />}
-            onClick={() => router.push(`/dashboard/${companyId}/vendors/${vendorId}/edit`)}
-            disabled={actionLoading}
-          >
-            Edit
-          </Button>
-
+          {/* The Edit button and the /edit route are gone. Once addresses moved
+              to their own table, VendorForm in edit mode held exactly one field
+              — the name — so the route was a whole page for a text box. The
+              header edits it in place instead. */}
           <Tooltip title="Delete Vendor">
             <span>
               <IconButton
@@ -442,9 +498,20 @@ export default function VendorDetailPage() {
               flexWrap: 'wrap',
             }}
           >
-            <Typography variant="h5" sx={{ fontWeight: 600 }}>
-              {vendor.name}
-            </Typography>
+            <Box sx={{ flex: 1, minWidth: 280 }}>
+              <InlineNameEditor
+                displayName={vendor.name}
+                label="Vendor name"
+                editTooltip="Rename this vendor"
+                error={nameError}
+                saveState={nameSaveState}
+                onChange={() => {
+                  if (nameError) setNameError(undefined);
+                }}
+                onCommit={persistName}
+                onCancel={() => setNameError(undefined)}
+              />
+            </Box>
             <Box sx={{ textAlign: 'right' }}>
               <Typography variant="caption" color="text.secondary" display="block">
                 Created {formatDate(vendor.created_at)}

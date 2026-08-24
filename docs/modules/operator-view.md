@@ -51,10 +51,16 @@ there was. What remains is adoption, not construction — see
 > **Written 2026-08-02**, replacing a screens-and-routes table that had drifted on five of its
 > nine rows. Verified against the code, row by row. Routes are relative to `/operator/{companyId}`.
 
-The app is five bottom-nav tabs — **Jobs · Inventory · Scan · Maintenance · Me**. Inventory and
-Maintenance are feature-gated (`inventory_locations`; `machine_maintenance` **and** a selected
-station), so most shops see three. Five is the Material Design ceiling of 3–5, which is why Scan
-took the old Profile tab's slot rather than being added beside it.
+The app is five bottom-nav tabs — **Jobs · Inventory · Scan · Maintenance · Me**. **No tab is
+feature-gated**: `inventory_locations` and `machine_maintenance` were retired 2026-08-24 and both
+surfaces are core for every tenant. Maintenance is gated on **a selected station alone** — a
+station *is* a machine, so before one is picked there is nothing for the tab to be about — giving
+the bar exactly two shapes: four tabs before a station, five after. Five is the Material Design
+ceiling of 3–5, which is why Scan took the old Profile tab's slot rather than being added beside
+it. **Keep Scan third**: dead centre at five slots, within half a slot of centre at four.
+
+**Withdrawn:** "most shops see three" — wrong from the day `inventory_locations` went default-on,
+and doubly so now; the bar's shape depends on the station, not on the tenant.
 
 | I want to… | Where | How |
 |---|---|---|
@@ -969,8 +975,10 @@ numbers.**
   which code they were pointing the phone at.
 - **Inventory location label** (`utils/locationLabelPdf.ts`,
   `components/inventory/locations/LocationQRModal.tsx`): **Avery 5163 adhesive stock**, ten to a
-  Letter page, so a shop peels and sticks instead of cutting. Feature-gated with the rest of
-  inventory locations — see [inventory.md](inventory.md).
+  Letter page, so a shop peels and sticks instead of cutting. Reached from the Storage board, and
+  **ungated** — the label printer never had a flag check of its own, and the surface it hangs off
+  is core for every tenant since `inventory_locations` was retired 2026-08-24 — see
+  [inventory.md](inventory.md).
 - **No backward compatibility, deliberately.** Nobody had printed a code that anyone kept, so the
   old payload shapes, the `operation=` deep link and their parser branches were deleted outright
   rather than carried. Anything printed before this ships is dead format — reprint it.
@@ -1167,17 +1175,16 @@ Convention (Given/When/Then + a checkable verification clause) is stated once in
 - [ ] **Given** the operator's OWN note, **then** no control is offered — RLS forbids self-reaction, so the tap would be a guaranteed `42501`; **given** a `confirmed` row, **then** it is excluded from the count and its reactor is not named; **given** any note, **then** no negative option exists on screen or in the schema — *verified by `__tests__/components/operator/NoteReactions.test.tsx`*.
 - [ ] **Given** a duplicate insert (two taps racing, or a second device), **then** it is treated as success; **given** an un-react, **then** it is scoped to the caller's own row — *verified by `__tests__/utils/operatorAccess.test.ts`*.
 
-**Inventory (feature-gated by `inventory_locations`)**
+**Inventory**
 
-- [ ] **Given** a company without the flag, **then** the Inventory tab is hidden — *automation-pending (`app/operator/[companyId]/layout.tsx`, `features.inventory_locations`)*.
 - [ ] **Given** the Inventory tab, **when** it loads, **then** it is **item-first** — a part lookup plus a shop-wide activity feed, not a location board — *verified by `__tests__/components/operator/OperatorWarehouseHome.test.tsx` > `OperatorWarehouseHomePage — item-first Inventory tab` and `__tests__/components/operator/OperatorPartLookup.test.tsx`*.
 - [ ] **Given** a bin with stock, **when** the operator **Removes** more than is on hand, **then** the depletion is graceful — clamped to zero, flagged as a discrepancy — and stamped with the operator id — *verified by `__tests__/components/operator/OperatorBinView.test.tsx`*.
 - [ ] **Given** a bin removal, **when** the operator tags it to an active job, **then** `depleteStockAtLocation` is called with that `jobId`; the tag is optional — *verified by `__tests__/components/operator/OperatorLocationActionModal.test.tsx`*.
 - [ ] **Given** a bin, **when** the operator taps **Stock a part**, **then** only tracked parts not already in that bin are offered — *verified by `__tests__/components/operator/OperatorReceivePartModal.test.tsx`*.
 
-**Maintenance (feature-gated by `machine_maintenance`)**
+**Maintenance**
 
-- [ ] **Given** the flag off **or** no station selected, **then** the Maintenance tab is hidden — a station *is* a machine, so there is deliberately no machine picker — *automation-pending (`app/operator/[companyId]/layout.tsx`)*; the logbook itself is covered by [machine-maintenance.md](machine-maintenance.md) and `e2e/machine-maintenance.spec.ts`.
+- [ ] **Given** no station selected, **then** the Maintenance tab is hidden — a station *is* a machine, so there is deliberately no machine picker — *automation-pending (`app/operator/[companyId]/layout.tsx`)*; the logbook itself is covered by [machine-maintenance.md](machine-maintenance.md) and `e2e/machine-maintenance.spec.ts`.
 
 **Admin: operators**
 

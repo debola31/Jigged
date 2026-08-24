@@ -1,31 +1,34 @@
 /**
  * Per-tenant feature flags stored in companies.settings (jsonb).
  *
- * A flag gates a not-yet-general feature to specific tenants by setting
- * `settings.features.<key> = true` on that company's row (UI + access-layer
- * gate; DB columns/triggers ship to everyone). Shipments + invoicing used to
- * be gated this way; they're now core (always on) and the flag was removed.
+ * A flag gates a feature to specific tenants by setting `settings.features.<key>` on that
+ * company's row (UI + access-layer gate; DB columns/triggers ship to everyone). Shipments and
+ * invoicing used to be gated this way; they're now core (always on) and their flags were removed.
  *
- * Most flags are opt-IN (default off): a company must be explicitly enabled.
- * A flag can instead be opt-OUT (default on) via `defaultEnabled: true` on its
- * descriptor — for a GA feature that ships enabled everywhere but needs a
- * per-tenant kill-switch (e.g. `ai_insights`). An opt-out flag stays on until
- * a company's row explicitly stores the key as `false`.
+ * A flag can be opt-IN (default off) for a pilot that must run at named shops only, or opt-OUT
+ * (default on) via `defaultEnabled: true` — a GA feature that ships enabled everywhere but needs
+ * a per-tenant kill-switch. An opt-out flag stays on until a company's row explicitly stores the
+ * key as `false`.
  *
- * Toggle for a pilot tenant (an opt-IN flag — `machine_maintenance` here):
+ * **Both flags in the registry are currently opt-OUT.** The opt-in form is still supported and
+ * still tested; there is simply no live instance since the `machine_maintenance` and
+ * `quickbooks_desktop` pilots were retired into core.
+ *
+ * Kill an opt-OUT flag for one tenant — note this stores an explicit `false`, it does not
+ * delete the key:
  *   UPDATE public.companies
  *      SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb),
- *                               '{features,machine_maintenance}', 'true')
- *    WHERE id = '<pilot-company-uuid>';
+ *                               '{features,dashboard_revenue}', 'false')
+ *    WHERE id = '<company-uuid>';
  *
- * Rollback:
+ * Restore it:
  *   UPDATE public.companies
- *      SET settings = settings #- '{features,machine_maintenance}'
- *    WHERE id = '<pilot-company-uuid>';
+ *      SET settings = settings #- '{features,dashboard_revenue}'
+ *    WHERE id = '<company-uuid>';
  *
- * Mind the direction on an opt-OUT flag: DELETING the key restores the default, which for
- * `inventory_locations` or `ai_insights` means turning the feature back ON. Killing one of those
- * for a tenant means storing an explicit `'false'`, not removing the key.
+ * Mind the direction: on an opt-OUT flag DELETING the key restores the default, which means
+ * turning the feature back ON. On an opt-IN flag the two statements swap meaning. Reach for the
+ * registry, not memory, before writing either.
  */
 
 import type { Company } from '@/utils/companyAccess';
@@ -54,20 +57,17 @@ export interface FeatureFlagDescriptor {
   defaultEnabled?: boolean;
 }
 
-export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
-  {
-    key: 'inventory_locations',
-    label: 'Inventory Locations',
-    description:
-      'Storage: QR-addressable locations with per-location stock — the Locations manager + visual builder, the operator Inventory tab, and bin scanning. On by default; turning it off hides Storage for this tenant but does not change where stock lives (every part has a place regardless).',
-    // GA with a kill-switch, as of the is_stocked removal. Two reasons it stopped being opt-in:
-    // the pilot gate had already lost its meaning (20260802015837 removed the flag check from
-    // the seeding trigger, so every company has an Unassigned bucket and balance rows whether
-    // or not this is on — the flag governs only whether a shop MANAGES places), and Parts gave
-    // up its On hand / Status columns and Count Inventory button in the same change. Leaving
-    // this off by default would have moved those workflows somewhere most tenants cannot reach.
-    defaultEnabled: true,
-  },
+/**
+ * `as const` — not a `readonly FeatureFlagDescriptor[]` annotation — so that `KnownFeatureKey`
+ * below resolves to a UNION of the literal keys rather than to plain `string`.
+ *
+ * That distinction is the difference between a compiler error and a silent bug. Under the old
+ * annotation, `useCompanyFeatures().features` was `Record<string, boolean>`, so a call site left
+ * behind after a flag was retired — `features.machine_maintenance` — kept compiling, evaluated to
+ * `undefined`, and PERMANENTLY HID the feature it was meant to release. Retiring three flags at
+ * once (Aug 2026) meant eleven such reads; none of them was type-checked. Now every one is.
+ */
+export const KNOWN_FEATURES = [
   {
     key: 'ai_insights',
     label: 'AI Insights',
@@ -77,18 +77,26 @@ export const KNOWN_FEATURES: readonly FeatureFlagDescriptor[] = [
     defaultEnabled: true,
   },
   {
-    key: 'machine_maintenance',
-    label: 'Machine Maintenance',
+    key: 'dashboard_revenue',
+    label: 'Dashboard Revenue',
     description:
-      'A maintenance logbook per machine, written by whoever is standing at it: a Maintenance tab on the operator view once a station is selected, with optional machine details and manuals, plus a read-only log on the work-center page. One pilot shop at a time — see docs/modules/machine-maintenance.md.',
-  },
-  {
-    key: 'quickbooks_desktop',
-    label: 'QuickBooks Desktop',
-    description:
-      'Connect a locally installed QuickBooks Desktop (via Conductor) instead of QuickBooks Online, and push invoices to it. A company connects one or the other, never both. Opt-in per tenant: Conductor bills per connected company file, so this flag gates the backend connect endpoint and not just the UI — see docs/modules/quickbooks-desktop.md.',
+      'The money lines on the dashboard scorecards — the amount under each count ("$18,006 not yet shipped", "$12,480 shipped this week") and the Completed card\'s period-over-period delta. Counts, the Open Jobs split and every drill-down stay visible whatever the flag says. On by default; turning it off leaves a shop with counts only, for an owner who does not want the whole book totalled on a screen other people walk past. Composes with the existing admin-only rule — a non-admin never sees the money either way.',
+    // Opt-OUT rather than opt-in, deliberately: these figures exist for every admin today, so
+    // shipping this opt-in would have silently removed a live feature from every tenant and
+    // needed a backfill to undo. A kill-switch changes nothing until someone asks for it.
+    defaultEnabled: true,
   },
 ] as const;
+
+/**
+ * Widened view of the registry, for the code that reads `defaultEnabled`.
+ *
+ * `as const` narrows each entry to its own literal shape, and a literal that OMITS the optional
+ * `defaultEnabled` has no such property to read — so `f.defaultEnabled` is an error on an opt-in
+ * entry. Assigning to the interface type (a checked widening, not a cast) restores the optional
+ * property without giving up the key union above.
+ */
+const DESCRIPTORS: readonly FeatureFlagDescriptor[] = KNOWN_FEATURES;
 
 export type KnownFeatureKey = (typeof KNOWN_FEATURES)[number]['key'];
 
@@ -112,46 +120,34 @@ function readFeatureFlag(
 }
 
 /**
- * Generic flag check. Honors the registry's `defaultEnabled`, so opt-out flags
- * read correctly. Prefer the named helpers below at call sites — they encode
- * the contract that the feature key is known to the registry.
+ * Generic flag check for a single key, honoring the registry's `defaultEnabled`.
+ *
+ * Server-side / one-off use. The live client path is `readCompanyFeatures` via
+ * `useCompanyFeatures()`, which resolves the whole map in one pass — a component asking about one
+ * flag through this function would still have had to fetch the company row itself.
+ *
+ * NOTE there is deliberately no named `isDashboardRevenueEnabled` beside `isAiInsightsEnabled`.
+ * A named helper hardcodes its own default (see the warning on that one), which is a divergence
+ * only a test can catch; the registry-driven path cannot diverge from the registry. The two
+ * helpers retired with their flags in Aug 2026 had no production caller at all.
  */
 export function isFeatureEnabled(
   company: SettingsLike | null | undefined,
   feature: string,
 ): boolean {
-  const descriptor = KNOWN_FEATURES.find((f) => f.key === feature);
+  const descriptor = DESCRIPTORS.find((f) => f.key === feature);
   return readFeatureFlag(company, feature, descriptor?.defaultEnabled ?? false);
-}
-
-/**
- * Storage is opt-OUT: enabled for every tenant unless their company row explicitly sets
- * settings.features.inventory_locations = false.
- *
- * The `true` here is not decoration — this helper takes its own default rather than reading
- * the descriptor, so adding `defaultEnabled: true` to KNOWN_FEATURES without changing this line
- * would leave `isFeatureEnabled()` and this function disagreeing about the same flag.
- */
-export function isInventoryLocationsEnabled(
-  company: Pick<Company, 'settings'> | null | undefined,
-): boolean {
-  return readFeatureFlag(company, 'inventory_locations', true);
-}
-
-/**
- * Machine Maintenance is opt-IN, and stays that way through the pilot: the
- * module is an experiment with a written kill criterion, so it must be on at
- * exactly the shops whose behaviour is being measured and nowhere else.
- */
-export function isMachineMaintenanceEnabled(
-  company: Pick<Company, 'settings'> | null | undefined,
-): boolean {
-  return readFeatureFlag(company, 'machine_maintenance');
 }
 
 /**
  * AI Insights is opt-OUT: enabled for every tenant unless their company row
  * explicitly sets settings.features.ai_insights = false.
+ *
+ * The `true` here is not decoration — this helper carries its OWN default rather than reading the
+ * descriptor, so flipping `defaultEnabled` in the registry without changing this line would leave
+ * `isFeatureEnabled()` and this function disagreeing about the same flag. The parity test in
+ * `__tests__/lib/featureFlags.test.ts` is what catches that. It is also why no second helper was
+ * written for `dashboard_revenue`.
  */
 export function isAiInsightsEnabled(
   company: Pick<Company, 'settings'> | null | undefined,
@@ -169,8 +165,8 @@ export function readCompanyFeatures(
   company: SettingsLike | null | undefined,
 ): Record<KnownFeatureKey, boolean> {
   const out = {} as Record<KnownFeatureKey, boolean>;
-  for (const f of KNOWN_FEATURES) {
-    out[f.key] = readFeatureFlag(company, f.key, f.defaultEnabled ?? false);
+  for (const f of DESCRIPTORS) {
+    out[f.key as KnownFeatureKey] = readFeatureFlag(company, f.key, f.defaultEnabled ?? false);
   }
   return out;
 }

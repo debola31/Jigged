@@ -9,7 +9,6 @@ import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
-import Skeleton from '@mui/material/Skeleton';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import DynamicFeedIcon from '@mui/icons-material/DynamicFeed';
 import WorkIcon from '@mui/icons-material/Work';
@@ -25,8 +24,6 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import FeedbackIcon from '@mui/icons-material/Feedback';
 import CompanySwitcher from './CompanySwitcher';
 import { useUserRole } from '@/hooks/useUserRole';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
-import type { KnownFeatureKey } from '@/lib/featureFlags';
 
 const SIDEBAR_WIDTH = 240;
 
@@ -35,13 +32,6 @@ interface MenuItem {
   path: string;
   icon: typeof DashboardIcon;
   adminOnly?: boolean;
-  /**
-   * When set, the item only renders if the named feature flag is on for
-   * the current company. While the company feature data is still loading,
-   * the renderer shows a Skeleton placeholder in this item's slot so the
-   * sidebar doesn't visibly grow when the flag resolves.
-   */
-  featureFlag?: KnownFeatureKey;
 }
 
 const menuItems: MenuItem[] = [
@@ -59,13 +49,9 @@ const menuItems: MenuItem[] = [
   // `parts WHERE is_stocked` with three extra columns — it's folded into Parts, which
   // means Parts now IS the inventory. Keeping the word here would have the two labels
   // swapped relative to their industry meanings: "inventory" is the items, "storage"
-  // is the places. Flag-gated, because a shop without the flag has no places at all.
-  {
-    name: 'Storage',
-    path: '/inventory/locations',
-    icon: WarehouseIcon,
-    featureFlag: 'inventory_locations',
-  },
+  // is the places. Unconditional since the `inventory_locations` flag was retired
+  // (Aug 2026) — every part has a place, so every shop has a Storage board.
+  { name: 'Storage', path: '/inventory/locations', icon: WarehouseIcon },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },
@@ -90,7 +76,6 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
   const companyId = params.companyId as string;
   const basePath = `/dashboard/${companyId}`;
   const { isAdmin } = useUserRole();
-  const { features, loading: featuresLoading } = useCompanyFeatures();
 
   const drawerContent = (
     <>
@@ -104,28 +89,8 @@ export default function Sidebar({ isMobile, open, onClose, onFeedbackClick }: Si
         <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           {menuItems
             .filter((item) => !item.adminOnly || isAdmin)
-            // For feature-flagged items: while loading we keep the slot in
-            // the list (rendered as a Skeleton below) so the sidebar doesn't
-            // visibly grow when the flag resolves. Once loaded, drop the
-            // item entirely when the flag is off.
-            .filter((item) => !item.featureFlag || featuresLoading || features[item.featureFlag])
             .map((item) => {
               const fullPath = `${basePath}${item.path}`;
-              // Hold the slot with a skeleton while features load; we don't
-              // know yet whether to show the live item.
-              if (item.featureFlag && featuresLoading) {
-                return (
-                  <ListItem key={`skeleton-${item.name}`} disablePadding>
-                    <Box sx={{ px: 2, py: 1.5, width: '100%' }}>
-                      <Skeleton
-                        variant="rectangular"
-                        height={24}
-                        sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', borderRadius: 1 }}
-                      />
-                    </Box>
-                  </ListItem>
-                );
-              }
               // For root path (Dashboard), check exact match; for others, check if pathname starts with the path
               const isActive = item.path === ''
                 ? pathname === fullPath

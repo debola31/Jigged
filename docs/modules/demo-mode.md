@@ -270,16 +270,22 @@ and the login redirect. Before mirroring, every demo sat at `settings = '{}'`, s
 flag read off regardless of what the real company had enabled**, with no way to change it.
 
 **Withdrawn — turning every flag on in demos.** It would make the demo a sales showcase, which is
-a different product from an onboarding sandbox presented as *your* company. Three concrete
-failures: entering and leaving preserves page context, so a feature on in demo and off in real is
-a page that vanishes on exit; `machine_maintenance` is a one-pilot-shop-at-a-time experiment with
-a written kill criterion, and all-on puts it in front of shops outside the pilot and pollutes the
-measurement; and `ai_insights` is opt-**out**, so all-on re-exposes to a tenant exactly the thing
-they turned off.
+a different product from an onboarding sandbox presented as *your* company. Concretely: entering
+and leaving preserves page context, so a feature on in demo and off in real is a page that
+vanishes on exit; and every registered flag is opt-**out**, so all-on re-exposes to a tenant
+exactly the thing they turned off. *(The third failure this block used to cite — all-on putting
+`machine_maintenance` in front of shops outside its pilot and polluting the measurement — went
+when that flag was retired into core.
+[`20260805041203`](../../supabase/migrations/20260805041203_demo_mirrors_source_feature_flags.sql)
+still argues it in those words, and stays as shipped.)*
 
 The block is copied **verbatim**, not key-by-key: an omitted key resolves to the descriptor's
 `defaultEnabled` while a stored `false` does not, and squashing that distinction is how an
-opt-out kill switch quietly stops killing.
+opt-out kill switch quietly stops killing. Being a whole-object copy also means a flag registered
+later mirrors itself with no change here: `dashboard_revenue` is the first one that shows up as
+money, and a shop that stored it `false` gets a demo whose scorecards carry counts and no dollar
+amounts, same as the real screen. The demo is the shop's own product surface, not the fullest one
+we can render ([feature-flags.md](feature-flags.md)).
 
 Two deliberate exclusions:
 

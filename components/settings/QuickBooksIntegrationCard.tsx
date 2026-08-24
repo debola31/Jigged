@@ -26,7 +26,6 @@ import {
   type QuickBooksPoField,
 } from '@/utils/quickbooksAccess';
 import SettingsSection from '@/components/settings/SettingsSection';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import DesktopAuthHandoff from '@/components/settings/quickbooks/DesktopAuthHandoff';
 import QuickBooksDesktopPanel from '@/components/settings/quickbooks/QuickBooksDesktopPanel';
 import BusyButton from '@/components/common/BusyButton';
@@ -47,13 +46,6 @@ interface QuickBooksIntegrationCardProps {
 export default function QuickBooksIntegrationCard({ companyId }: QuickBooksIntegrationCardProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  // QuickBooks Desktop is opt-in per tenant. The backend gates /connect too --
-  // Conductor bills per connected company file, so the flag protects a bill and
-  // not just an affordance -- but a button that always 403s is worse than no
-  // button, so the choice only appears where it can succeed.
-  const { features } = useCompanyFeatures();
-  const desktopEnabled = Boolean(features.quickbooks_desktop);
-
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<QuickBooksStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -322,7 +314,10 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 busy={busy}
                 pending={pending === 'qbo'}
               />
-              {desktopEnabled && (
+              {/* Both providers are offered to every shop. The `quickbooks_desktop` flag that
+                  used to hide this one was retired Aug 2026 along with the backend gate behind it;
+                  see docs/modules/quickbooks-desktop.md on what now stands between an admin and a
+                  billable Conductor connection. */}
               <ProviderOption
                 title="QuickBooks Desktop"
                 detail="QuickBooks is installed on a computer in the shop — Pro, Premier or Enterprise."
@@ -332,7 +327,6 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 busy={busy}
                 pending={pending === 'qbd'}
               />
-              )}
             </Stack>
           </Box>
         ) : (

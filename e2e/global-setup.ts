@@ -163,37 +163,6 @@ async function ensureCompanyBilling(
   if (error) throw new Error(`company_billing upsert failed: ${error.message}`);
 }
 
-/**
- * Turn on the pilot flags the specs exercise.
- *
- * Merges rather than replaces, and runs on every setup rather than only on
- * company creation: this seeder is find-or-insert, so a company created before a
- * flag existed would otherwise never get it, and a local stack keeps whatever
- * the first run made until someone does a db reset. CI always starts clean;
- * a developer's machine does not.
- */
-async function ensureFeatureFlags(
-  supabase: SupabaseClient,
-  companyId: string,
-  flags: Record<string, boolean>,
-): Promise<void> {
-  const { data, error: readErr } = await supabase
-    .from('companies')
-    .select('settings')
-    .eq('id', companyId)
-    .single();
-  if (readErr) throw new Error(`settings read failed: ${readErr.message}`);
-
-  const settings = (data?.settings ?? {}) as Record<string, unknown>;
-  const features = (settings.features ?? {}) as Record<string, unknown>;
-
-  const { error } = await supabase
-    .from('companies')
-    .update({ settings: { ...settings, features: { ...features, ...flags } } })
-    .eq('id', companyId);
-  if (error) throw new Error(`feature flag update failed: ${error.message}`);
-}
-
 async function ensureUserCompanyAccess(
   supabase: SupabaseClient,
   userId: string,
@@ -801,17 +770,17 @@ export default async function globalSetup(): Promise<void> {
   // After the jobs, so the note's provenance job resolves.
   await ensureDurableNote(supabase, companyId, mfgPartId, 'E2E-JS-DONE');
 
-  // The Maintenance tab is flag-gated. No maintenance ENTRIES are seeded: the
-  // spec writes its own through the UI, which is the only way to exercise the
-  // capture path the module is actually a bet on.
-  await ensureFeatureFlags(supabase, companyId, {
-    machine_maintenance: true,
-    // The count sheet and the Storage board are both behind this. Without it
-    // `inventory-count.spec.ts` lands on a redirect.
-    inventory_locations: true,
-    // The Parts page renders "Add from Drawings" only behind this flag, so
-    // `drawing-import.spec.ts` cannot find the button without it.
-  });
+  // NO FEATURE FLAGS ARE SEEDED, and nothing here needs them: every registered flag is opt-OUT,
+  // so an untouched company row has all of them on. The `ensureFeatureFlags` helper that used to
+  // turn on `machine_maintenance` (Maintenance tab) and `inventory_locations` (count sheet +
+  // Storage board) went with those flags in Aug 2026 — both features are core now.
+  //
+  // If a future opt-IN flag needs turning on for a spec, restore a merge-not-replace helper: this
+  // seeder is find-or-insert, so a company created before a flag existed would never get it, and
+  // a local stack keeps whatever the first run made until someone does a db reset.
+  //
+  // No maintenance ENTRIES are seeded either: the spec writes its own through the UI, which is
+  // the only way to exercise the capture path the module is a bet on.
 
   // A part in TWO places — the shape the count sheet exists to handle, and the one
   // no other fixture produces.

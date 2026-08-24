@@ -39,30 +39,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/quickbooks-desktop", tags=["quickbooks-desktop"])
 
-def _require_feature(db, company_id: str) -> None:
-    """QuickBooks Desktop is opt-in per tenant.
-
-    Gated on the BACKEND, not merely in the UI, because Conductor bills $49/month
-    per active company file connection -- this is the first flag in the repo with
-    a direct per-use cost behind it, so a flag-off tenant reaching the endpoint by
-    URL would spend real money. Every other flag gates an affordance; this one
-    gates a bill.
-
-    Mirrors lib/featureFlags.ts: the flag lives at companies.settings.features and
-    is opt-in, so absent means off.
-    """
-    rows = (
-        db.table("companies").select("settings").eq("id", company_id).limit(1).execute().data
-    )
-    settings = (rows[0].get("settings") if rows else None) or {}
-    features = settings.get("features") or {}
-    if features.get("quickbooks_desktop") is not True:
-        raise HTTPException(
-            status_code=403,
-            detail="QuickBooks Desktop is not enabled for this company.",
-        )
-
-
 def _conn_or_409(db, company_id: str) -> dict:
     conn = qbd.get_connection(db, company_id)
     if not conn or conn.get("environment") != qbd._environment():
@@ -87,11 +63,21 @@ async def connect(company_id: str, request: Request):
     not for us to redirect to. Nothing here marks the connection live; only a
     successful Web Connector call does, which /status reports.
     """
+    # ADMIN IS THE ONLY GATE, AND IT GUARDS A BILL. Conductor charges $49/month per active
+    # company file connection, and this endpoint mints a working auth-flow link -- the shop opens
+    # it on the Windows box, the Web Connector completes, and the connection is live and billable.
+    # Nothing downstream can refuse it.
+    #
+    # Until Aug 2026 a `quickbooks_desktop` feature flag stood in front of this, checked here on
+    # the backend precisely because the cost is real. It was retired with the rest of the flag
+    # registry cleanup, which was an explicit, accepted cost decision: Desktop is now self-serve
+    # for any company admin. Note also that this path uses `service_client()`, so it bypasses RLS
+    # and the billing write-gate does not apply -- a lapsed-Stripe tenant can still connect.
+    # See docs/modules/quickbooks-desktop.md.
     user_id, access = await company_auth.verify_company_access(
         request, company_id, require_admin=True
     )
     db = company_auth.service_client()
-    _require_feature(db, company_id)
 
     # A company connects EITHER provider. The database enforces this, but a 409
     # with a readable message beats a check_violation surfacing as a 500.

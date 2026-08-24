@@ -12,7 +12,7 @@
 > (2) The doc said the form loads the customer's "addresses only — there are no per-customer shipping
 > defaults". False since Aug 2026: `customer_carrier_accounts` is exactly such a default. (3) The doc
 > contradicted itself on the flag registry ("only `inventory_locations` left" vs "`inventory_locations` +
-> `ai_insights`"); `lib/featureFlags.ts` holds four. No count is restated here — the file is the enforcement.
+> `ai_insights`"). No count is restated here — [`lib/featureFlags.ts`](../../lib/featureFlags.ts) is the enforcement.
 > (4) Three items were tagged "Planned — see #550"; **#550 is CLOSED** (the #332 audit's finished checklist),
 > so they are now untracked gaps.)*
 

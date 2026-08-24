@@ -20,6 +20,16 @@ import {
 
 interface DashboardMetricsProps {
   companyId: string;
+  /**
+   * Whether this tenant has the `dashboard_revenue` flag (opt-out; on unless killed).
+   *
+   * Passed in rather than read here. The parent already holds the resolved feature map, and
+   * `useCompanyFeatures()` has no shared cache — a second consumer on the same screen is a second
+   * `getCompany` round trip per dashboard load, which is the duplication the operator "Me" tab was
+   * fixed for (see hooks/useCompanyFeatures.ts). It also keeps this component a pure function of
+   * its props, so the eleven existing tests need a prop rather than a hook mock.
+   */
+  revenueEnabled: boolean;
 }
 
 /**
@@ -68,7 +78,7 @@ function moneyLabel(key: MetricKey, period: MetricTimePeriod): string | null {
   }
 }
 
-export default function DashboardMetrics({ companyId }: DashboardMetricsProps) {
+export default function DashboardMetrics({ companyId, revenueEnabled }: DashboardMetricsProps) {
   const [period, setPeriod] = useState<MetricTimePeriod>('this_week');
   const [values, setValues] = useState<Partial<Record<MetricKey, MetricValue>>>({});
   const { isAdmin } = useUserRole();
@@ -134,17 +144,25 @@ export default function DashboardMetrics({ companyId }: DashboardMetricsProps) {
         const v = values[def.key];
         const label = moneyLabel(def.key, period);
 
-        // Money is admin-only. A `user` — a salesperson — still sees every
-        // price on the quotes and jobs they work; what they do not see is the
-        // shop's whole book totalled up. This is a DISPLAY choice, not a
-        // security boundary: RLS is company-scoped, not column-scoped, so the
-        // figures remain readable through the API.
-        // Nothing to show when the count is zero: the money is necessarily zero
-        // too, so the line adds no information the count did not already give.
-        // It also protects the reason the count leads in the first place —
-        // "0" is a cleaner all-clear on Overdue than "0" above "$0 past due".
+        // THREE independent reasons the money line is absent, and they compose — every one of
+        // them has to pass:
+        //
+        // (1) The tenant kept the figures. `dashboard_revenue` is on by default; a shop turns it
+        //     off when the dashboard lives on a screen other people walk past, and then nobody
+        //     there sees a total — not even the owner.
+        // (2) The viewer is a company admin. A `user` — a salesperson — still sees every price on
+        //     the quotes and jobs they work; what they do not see is the shop's whole book
+        //     totalled up.
+        // (3) The count is non-zero. The money is necessarily zero too, so the line adds nothing
+        //     the count did not already give, and it protects the reason the count leads: "0" is a
+        //     cleaner all-clear on Overdue than "0" above "$0 past due".
+        //
+        // NEITHER (1) NOR (2) IS A SECURITY BOUNDARY. RLS is company-scoped, not column-scoped, so
+        // job_parts prices stay readable through the API to anyone who can reach the company — by
+        // a salesperson, and by an admin of a flag-off shop. Both gates buy what is on the screen,
+        // which is the entire claim; do not cite either one as access control.
         const money =
-          isAdmin && v && v.count > 0 && v.money !== null && label
+          revenueEnabled && isAdmin && v && v.count > 0 && v.money !== null && label
             ? {
                 amount: v.money,
                 label,

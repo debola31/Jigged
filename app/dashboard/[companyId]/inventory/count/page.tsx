@@ -63,7 +63,6 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useCompanyFeatures } from '@/hooks/useCompanyFeatures';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -167,25 +166,25 @@ export default function InventoryCountPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = params.companyId as string;
-  const { features, loading: featuresLoading } = useCompanyFeatures();
 
   /**
-   * Where "back" goes depends on where counting is entered from, and that differs by flag.
+   * Where "back" goes depends on where counting is entered from.
    *
-   * With locations ON there are two entry points and both are the board — `Count everything` in its
-   * toolbar, and `Count what's here` on a tile's sheet. With locations OFF there is no board at all
-   * (the Storage nav item is hidden and `/inventory/locations` redirects), so the only entry point
-   * is `Count Inventory` on the **Parts** toolbar.
+   * Two entry points are the Storage board — `Count everything` in its toolbar, and `Count what's
+   * here` on a tile's sheet — and the rest arrive from a part page or another count.
    *
    * This used to be a single hardcoded push to `/dashboard/{id}/inventory`, which now redirects to
-   * Parts — so a user who arrived from Storage was silently dumped on a different page than the one
-   * they left. Labelling it "Back to storage" without this branch would just move the bug: it would
-   * send flag-off shops to a page that redirects them straight back out.
+   * Parts — so a user who arrived from Storage was silently dumped on a different page than the
+   * one they left.
    *
    * Used by all three exits from this flow — the Back button, the post-save redirect, and the
    * "everything already matches" redirect. They were three separate copies of the same wrong
    * literal; the post-save one mattered most, because it fires exactly when someone wants to go
    * count the next shelf and it was dropping them on Parts with the board gone.
+   *
+   * Withdrawn: a fourth branch sent shops without the `inventory_locations` flag to Parts instead,
+   * because for them the board did not exist. The flag was retired Aug 2026 and every shop has a
+   * board, so the Storage default is now correct for everyone.
    */
   /** `?location=<id>` switches the whole sheet to place-scoped. See the module comment. */
   const locationId = searchParams.get('location');
@@ -217,20 +216,18 @@ export default function InventoryCountPage() {
    * one-row sheet is reachable from a part page and from an excluded-part chip on another count,
    * and dumping someone on Storage from either is the bug this branch already exists to prevent.
    *
-   * Only the last branch depends on the feature flag, which is why the Back button's
-   * hide-until-resolved guard is scoped to it — the others are correct immediately, and hiding
-   * them too made the button disappear on a page that never needed to wait.
+   * Every arm resolves synchronously from the URL, so the Back button renders on first paint. It
+   * used to carry a `flagged` marker and a visibility guard for the one arm that had to wait on a
+   * feature flag; that flag is gone and so is the wait.
    */
   const from = searchParams.get('from');
   const returnTo = partFirst && partIdParam
-    ? { href: `/dashboard/${companyId}/parts/${partIdParam}?tab=inventory`, label: 'Back to part', flagged: false }
+    ? { href: `/dashboard/${companyId}/parts/${partIdParam}?tab=inventory`, label: 'Back to part' }
     : from === 'count'
-      ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count', flagged: false }
+      ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count' }
       : from === 'parts'
-        ? { href: `/dashboard/${companyId}/parts`, label: 'Back to parts', flagged: false }
-        : features.inventory_locations
-          ? { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage', flagged: true }
-          : { href: `/dashboard/${companyId}/parts`, label: 'Back to parts', flagged: true };
+        ? { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' }
+        : { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' };
 
   /**
    * Which page of this bin we are looking at.
@@ -1079,14 +1076,15 @@ export default function InventoryCountPage() {
 
   return (
     <Box sx={{ pb: step === 1 ? 12 : 4 }}>
-      {/* Hidden until the flag resolves rather than guessing a destination — an unresolved
-          `features` object reads as flag-off, so a default would render "Back to parts" and then
-          swap to "Back to storage", which is the same appear-then-change flicker the Parts toolbar
-          had to fix. A back button that changes where it goes is worse than one that arrives late. */}
+      {/* Renders immediately: every `returnTo` arm now resolves from the URL alone. It used to be
+          held hidden until the `inventory_locations` flag resolved, because an unresolved
+          `features` object reads as flag-off and the label would have swapped from "Back to parts"
+          to "Back to storage" — the appear-then-change flicker the Parts toolbar had to fix. With
+          the flag retired there is nothing left to wait for. */}
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => router.push(returnTo.href)}
-        sx={{ mb: 2, visibility: returnTo.flagged && featuresLoading ? 'hidden' : 'visible' }}
+        sx={{ mb: 2 }}
       >
         {returnTo.label}
       </Button>

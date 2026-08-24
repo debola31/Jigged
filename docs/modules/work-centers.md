@@ -35,7 +35,8 @@ centre or a vendor service, never both. Built, in production. **No longer depend
 **A "station" in the operator view is a `work_centers` row** — the two words name the same entity. Either kind
 qualifies — and since the split there is only one kind. [operator-view.md](operator-view.md#stations-work-centers)
 covers how one is selected and remembered. A *machine* in
-[Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` row, with `kind='internal'`.
+[Machine Maintenance](machine-maintenance.md) is likewise a `work_centers` row — every one of them, since
+`kind` is gone and maintenance is no longer gated on anything.
 
 > **Terminology.** This module supersedes what older docs called "Operations" (`operation_types`). The
 > two-axis design (internal vs external) unified machine and outsourced capabilities into one table; the
@@ -96,10 +97,17 @@ until that wizard was retired in favour of the one guided importer.)*
 ### Detail — `/dashboard/{companyId}/work-centers/{workCenterId}`
 
 Header card (name — the kind chip and the "via {vendor}" line are gone); Details card (labor rate; the vendor link and
-"Pricing per routing operation"; description; "Used in routing operations" count; timestamps); and — when
-`machine_maintenance` is enabled **and** `kind='internal'` — a **Maintenance log** card holding
-`MachineManualsManager` above a **read-only** `MachineLogPanel`. Read-only because the pilot's bar counts
-*non-founder* authors: manuals and machine details are the office's job, the log is the floor's.
+"Pricing per routing operation"; description; "Used in routing operations" count; timestamps); and — on **every**
+work centre, with no condition on it — a **Maintenance log** card holding `MachineManualsManager` above a
+**read-only** `MachineLogPanel`. Read-only because manuals and machine details are the office's job and the log
+is the floor's.
+
+**Withdrawn:** the card renders "when `machine_maintenance` is enabled **and** `kind='internal'`" — **both**
+halves wrong; `work_centers.kind` was dropped in the vendor-services split and this call site never read it
+anyway, and the flag was retired 2026-08-24. There is no condition left.
+
+**Withdrawn:** read-only because the pilot's bar counted *non-founder* authors — that bar went with the flag,
+and only the office/floor split still argues for read-only.
 
 **Nothing about a work centre is printed or posted at the machine.** An operator reaches their station by
 signing into the operator view on their own phone and picking it from the list — see FR-5 in
@@ -124,8 +132,9 @@ supplies `routing_operations_count`.
 - **Internal:** `labor_rate` **required** and ≥ 0 — an internal routing op with no rate and no per-op override
   cannot be priced. Switching to External hides and clears it.
 - **External:** `vendor_id` via `VendorAutocomplete`, required.
-- **Machine details** card (flag `machine_maintenance`, internal only): make, model, serial number, year,
-  purchased. Sited in the office, not on the floor — filling it is deliberate paperwork.
+- **Machine details** card (ungated — the flag and the internal-only claim are both dead, see the Withdrawn
+  lines above): make, model, serial number, year, purchased. Sited in the office, not on the floor — filling it
+  is deliberate paperwork.
 - **Description** — optional multiline.
 
 ### Import

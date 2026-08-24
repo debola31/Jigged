@@ -18,8 +18,8 @@ import { test, expect, type Page } from '@playwright/test';
  * suite if the fixture only ever has one row per part.
  *
  * Fixture: `E2E-COUNT-SPLIT`, 40 at `E2E Shelf A` and 12 at `E2E Shelf B`, seeded by
- * `ensureSplitStock` in global-setup. The `inventory_locations` flag is on for the test company —
- * without it this route redirects.
+ * `ensureSplitStock` in global-setup. Storage is core now, so the route needs no flag setup — the
+ * `ensureFeatureFlags` call that turned `inventory_locations` on for this run went with the flag.
  */
 
 const PART = 'E2E-COUNT-SPLIT';

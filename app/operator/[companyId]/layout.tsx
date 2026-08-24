@@ -440,32 +440,35 @@ function OperatorShell({
   // consumer. (The company NAME is read by `OperatorCompanyLabel`, which owns the
   // header slot; the shell only needs to know whether this is a demo company,
   // because that changes the content offset below.)
-  const { features, isDemo } = useOperatorCompany();
+  const { isDemo } = useOperatorCompany();
   const pathname = usePathname();
   const router = useRouter();
   /**
-   * ⚠️ Both of these hide a tab, which is a KNOWN DEVIATION from Apple's guidance: "Don't disable
-   * or hide tab bar buttons, even when their content is unavailable. Having tab bar buttons
-   * available in some cases but not others makes your app's interface appear unstable and
-   * unpredictable. If a section is empty, explain why its content is unavailable."
+   * A machine IS a station, so the logbook only exists once one is selected — deliberately NOT
+   * added to the navVisible escape list below, unlike inventory and my-work. Without a station
+   * there is no machine to have a tab for.
    *
-   * Taken deliberately: these are not empty sections but genuine entitlement boundaries — a shop
-   * without the locations flag has no places at all, and `/inventory/locations` redirects. Showing
-   * a tab that explains why it doesn't work would be worse than not showing it.
+   * ⚠️ Hiding a tab is a KNOWN DEVIATION from Apple's guidance: "Don't disable or hide tab bar
+   * buttons, even when their content is unavailable. Having tab bar buttons available in some
+   * cases but not others makes your app's interface appear unstable and unpredictable. If a
+   * section is empty, explain why its content is unavailable."
    *
-   * The cost is real, though, and it is why the tab ORDER is constrained: because MUI distributes
-   * slots evenly, changing the tab COUNT moves every tab's physical position. Keeping one optional
-   * tab on each side of Scan is what bounds that (see the note above the bar).
+   * Taken deliberately, and the reason is now narrower than it was: this is not an empty section
+   * but a question the operator has already been asked. Before a station is picked there is no
+   * machine the tab could be about, and the picker that answers it is the screen they are on.
+   *
+   * Unlike the two feature flags that used to gate this bar, this one can flip DURING a session,
+   * so the bar reflows mid-shift. The station is normally chosen once at login before real work,
+   * which is what makes that acceptable.
+   *
+   * Withdrawn: Inventory was gated on `inventory_locations` and Maintenance additionally on
+   * `machine_maintenance`, giving the bar four shapes and constraining tab ORDER so that one
+   * optional tab flanked Scan on each side. Both flags were retired Aug 2026. The bar now has two
+   * shapes — four slots without a station, five with — and Scan sits dead centre in the five-slot
+   * case. Keep it third: at four slots it is still within half a slot of centre, which is the
+   * property the old flanking rule existed to preserve.
    */
-  const showInventory = Boolean(features.inventory_locations);
-  // A machine IS a station, so the logbook only exists once one is selected —
-  // deliberately NOT added to the navVisible escape list below, unlike inventory
-  // and my-work. Without a station there is no machine to have a tab for.
-  //
-  // Note this one can flip DURING a session, when a station is picked or cleared — so the bar
-  // reflows mid-shift, unlike the flag-only gate above. The station is normally chosen once at
-  // login, before real work, which is what makes that acceptable.
-  const showMaintenance = Boolean(features.machine_maintenance) && Boolean(stationId);
+  const showMaintenance = Boolean(stationId);
   // The warehouse is station-independent, so keep the nav (and a way out) on
   // inventory routes even before a station is picked.
   const isInventoryRoute = pathname?.includes('/inventory') ?? false;
@@ -739,10 +742,11 @@ function OperatorShell({
           elevation={3}
         >
           {/*
-            ⚠️ This bar is FULL. At the full complement it carries five slots —
+            ⚠️ This bar is FULL. Once a station is selected it carries five slots —
             Jobs · Inventory · Scan · Maintenance · Me — which is the documented Material Design
-            ceiling for bottom navigation (3–5). Both Inventory and Maintenance are flag-gated, so
-            many shops see three or four.
+            ceiling for bottom navigation (3–5). Maintenance is the only conditional one, so every
+            shop sees four before a station is picked and five after. That used to be three or four
+            for most shops, when Inventory and Maintenance were both flag-gated; the flags are gone.
 
             A sixth needs something to leave, not another slot. Profile's contents already moved
             into Me for exactly this reason; the next candidate is whichever destination turns out
@@ -755,7 +759,7 @@ function OperatorShell({
                        also an ACTION rather than a destination, which is the conventional use of
                        a centre slot.
               Me     — rightmost, the near-universal home for account/self.
-              Inventory / Maintenance fill the remaining two, both flag-gated.
+              Inventory / Maintenance fill the remaining two; only Maintenance is conditional.
 
             ⚠️ minWidth: 0 on every action is LOAD-BEARING, not tidying. MUI defaults
             `BottomNavigationAction` to `minWidth: 80` with `flex: 1`, and `min-width` blocks
@@ -804,14 +808,12 @@ function OperatorShell({
               icon={<WorkIcon />}
               sx={{ minHeight: 56 }}
             />
-            {showInventory && (
-              <BottomNavigationAction
-                label="Inventory"
-                value="inventory"
-                icon={<WarehouseOutlinedIcon />}
-                sx={{ minHeight: 56 }}
-              />
-            )}
+            <BottomNavigationAction
+              label="Inventory"
+              value="inventory"
+              icon={<WarehouseOutlinedIcon />}
+              sx={{ minHeight: 56 }}
+            />
             {/*
               Scan is a tab, not a button buried on one screen.
 
@@ -834,10 +836,12 @@ function OperatorShell({
               confident toward the centre — partly device digitiser error, not thumb geometry. So
               the most frequent gesture goes in the middle.
 
-              **Keep one flag-gated tab on EACH side of Scan.** Both Inventory and Maintenance are
-              optional, so the bar has four shapes. Flanking holds Scan within half a slot of
-              centre in every one of them, and it is the only arrangement that does — grouping the
-              optional pair together would pin Scan at position 2, off-centre always.
+              **Keep the conditional tab to the RIGHT of Scan.** With Maintenance the only optional
+              slot the bar has two shapes, and third position puts Scan dead centre at five slots
+              and half a slot right of centre at four. Moving Maintenance left of Scan would pin
+              Scan at position 4 without a station — off-centre, and in the wrong direction. This
+              generalises the old flanking rule rather than replacing it: the property being
+              preserved is Scan within half a slot of centre in every shape.
 
               **Why it looks different from its neighbours.** Apple is explicit that "a tab bar
               [is] to support navigation, not to provide actions", and Scan is an action. Material 3

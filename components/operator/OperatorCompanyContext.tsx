@@ -20,9 +20,10 @@
  * hands the answer down — `OperatorShell` reads `features` from here instead of calling the hook
  * itself, so the shell gains nothing and the three new consumers cost nothing.
  *
- * (Operator pages outside the shell — the maintenance page, the inventory gate — still call
- * `useCompanyFeatures` directly. Converting them is a separate, larger change and not this one's
- * business.)
+ * (No operator page calls `useCompanyFeatures` directly any more. The two that did — the
+ * maintenance page and the inventory gate — stopped reading flags when `machine_maintenance` and
+ * `inventory_locations` were retired; the gate file is deleted. `useOperatorIdentity` still calls
+ * the hook for `companyName` alone, which is the same duplicate round trip in a different shape.)
  *
  * ## Demo mode costs a non-demo operator ZERO extra requests
  *

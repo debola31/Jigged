@@ -77,7 +77,7 @@ cross-tenant reads; one user can belong to many companies.
 
 | Table | Shape that matters |
 |---|---|
-| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_markup_made_percent, default_markup_bought_percent` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts)). The two markup columns are **real columns, not settings keys**, because a markup is `numeric(10,6)` and the `settings.defaults` registry is integer-only — see [parts.md](modules/parts.md#parts_bom). |
+| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_markup_made_percent, default_markup_bought_percent` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts) is the registry; [feature-flags.md](modules/feature-flags.md) is the standard). The two markup columns are **real columns, not settings keys**, because a markup is `numeric(10,6)` and the `settings.defaults` registry is integer-only — see [parts.md](modules/parts.md#parts_bom). |
 | `user_company_access` | `(user_id, company_id) UNIQUE`; `role` CHECK-constrained to **`admin` \| `user` \| `operator`** (default `operator`); also `name`, `email`, `pin_hash`, `excluded_from_metrics`. *(Previously listed an `owner` role; the constraint has never allowed it.)* |
 | `user_preferences` | `user_id UNIQUE`, `last_company_id`, `preferences jsonb`. |
 
@@ -115,7 +115,7 @@ and stamps `last_company_id` on success. Two invariants it holds (rationale:
 
 Header (company name, user menu) + Sidebar (`SIDEBAR_WIDTH = 240` px,
 [`Sidebar.tsx`](../components/layout/Sidebar.tsx)). Nav order: Dashboard, Activity,
-Jobs, Quotes, Parts, Storage (`/inventory/locations`, flag `inventory_locations`),
+Jobs, Quotes, Parts, Storage (`/inventory/locations`),
 Work Centers, Vendors, Customers, Import data, Team (admin),
 Settings (admin). *(Previously "Dashboard, Customers, Parts, Quotes, Jobs,
 Operations" — Operations became Work Centers, and six items were missing.)*

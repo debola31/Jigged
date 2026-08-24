@@ -231,6 +231,21 @@ SELECT id, company_id, vendor_id, name, description, created_at, updated_at, del
   FROM public.work_centers
  WHERE kind = 'external';
 
+-- The column has to become nullable BEFORE the repoint, not after it. Setting
+-- work_center_id = NULL is the repoint, so on a database that actually holds
+-- outside routing steps the UPDATE below is what trips the NOT NULL — the
+-- constraint is checked per row as the UPDATE runs, not at end of statement.
+--
+-- This ran green on every pre-merge gate and still failed on production, and
+-- the asymmetry is worth naming because nothing here will catch the next one:
+-- `supabase db reset`, the preview branch and the E2E stack all apply
+-- migrations to an EMPTY database and run `seed.sql` afterwards, so this UPDATE
+-- matched zero rows in every one of them. Production had 969 rows to move, so
+-- production is where it raised 23502. A backfill is only exercised by data
+-- that predates it; ordering it against an empty table proves nothing.
+ALTER TABLE public.routing_operations
+    ALTER COLUMN work_center_id DROP NOT NULL;
+
 UPDATE public.routing_operations ro
    SET vendor_service_id = ro.work_center_id,
        work_center_id    = NULL
@@ -248,8 +263,12 @@ UPDATE public.job_operations jo
 -- Only now can the CHECKs be added: they must be true of every row, and until
 -- the repoint above ran, an outside op had work_center_id pointing at a row that
 -- is about to stop being a work centre.
+--
+-- The DROP NOT NULL that used to sit in this statement moved above the repoint.
+-- It has to; the CHECK does not, and the two must stay apart. Nullability has to
+-- be relaxed before the rows go NULL, while the CHECK has to be added after, or
+-- it fails on the outside rows mid-flight.
 ALTER TABLE public.routing_operations
-    ALTER COLUMN work_center_id DROP NOT NULL,
     ADD CONSTRAINT routing_operations_exactly_one_target
         CHECK (num_nonnulls(work_center_id, vendor_service_id) = 1);
 

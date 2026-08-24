@@ -127,6 +127,52 @@ still be loud.
 first** (superuser-only objects: event triggers, some extensions). When the app says data is missing,
 check for a 400 + SQLSTATE in the Supabase logs before assuming the rows are gone.
 
+### The second asymmetry: every gate is empty, production is not
+
+Privilege level was the 2026-08-03 cause and it is the first thing to check, but it is **not the only
+way a green PR lies**, and the second way has nothing to do with permissions. Re-read the sentence
+that opens this section: every pre-merge gate *builds* its database by replaying migrations. It
+therefore replays them **against an empty database** — `seed.sql` runs *after* the migrations, not
+before. So:
+
+**A backfill matches zero rows on every gate in this repo.** `UPDATE`, `DELETE`, a `DO` block
+counting rows, an `ADD CONSTRAINT` that must hold over existing data — none of them are exercised by
+anything you can run before merge. They execute for the first time, against real rows, on production.
+
+That is how [#783](https://github.com/debola31/Jigged/pull/783) broke the deploy on 2026-08-24. The
+vendor-services split relaxed `routing_operations.work_center_id` to nullable **in the same
+`ALTER TABLE` that added the CHECK**, placed after the `UPDATE` that sets the column to `NULL`:
+
+```sql
+UPDATE public.routing_operations ro SET work_center_id = NULL …   -- statement 25
+ALTER TABLE public.routing_operations
+    ALTER COLUMN work_center_id DROP NOT NULL,                    -- too late
+    ADD CONSTRAINT routing_operations_exactly_one_target CHECK (…);
+```
+
+Locally, on the preview branch and in E2E the `UPDATE` matched **0 rows** and the ordering never
+mattered. Production had **969**, and it raised `23502` on the first one. NOT NULL is checked per row
+as the `UPDATE` runs — not at end of statement, and not at commit.
+
+**How to apply.** When you write a migration that touches existing rows, the gates cannot review it
+for you, so do it deliberately:
+
+- **Order the DDL against the DML by hand.** Relax nullability *before* the rows go `NULL`; add a
+  `CHECK` or a `NOT NULL` *after* the backfill that makes it true. The two halves of a column's
+  redefinition usually cannot live in the same `ALTER TABLE`.
+- **Ask production what it holds before you merge**, over the Supabase MCP — it is read-only and it
+  is the only honest answer. `SELECT count(*)` for the rows your backfill will move, and for the rows
+  each new constraint has to be true of. Ten seconds of `list_migrations` + a `count(*)` is the whole
+  technique.
+- **Watch for assertions that cannot see the rows they are about.** #783's own pre-flight `DO` block
+  inner-joined `work_centers`, so `job_operations` orphaned by an earlier `ON DELETE SET NULL` were
+  invisible to it while the *next* migration's check counted every row. That pairing — a narrow
+  assert followed by a broad one — is a second failure waiting a migration later. (Production held
+  zero such rows, so it stayed theoretical here.)
+- **A migration is atomic, so a failure is not a disaster** — the file rolls back whole and its
+  version is never recorded. Fix the file in place and merge again; see "The production gate". What
+  it *does* block is every migration behind it.
+
 **Never clear a stuck migration with `migration repair --status applied`.** It records the file as done
 without running it, so its contents never reach production and the next migration that depends on them
 fails the same way.
